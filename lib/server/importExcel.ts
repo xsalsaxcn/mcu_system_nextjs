@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import { PROGRAM_CAPASKA } from "@/lib/shared/constants";
-import { mapAllCapaskaPackages, seedDefaults } from "@/lib/server/defaults";
+import { PROGRAM_CAPASKA, PROGRAM_CORPORATE } from "@/lib/shared/constants";
+import { mapProgramPackages, seedDefaults } from "@/lib/server/defaults";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -32,19 +32,7 @@ function findColumn(headers: string[], candidates: string[]) {
 }
 
 function chooseHeaderRow(rows: any[][]) {
-  const known = [
-    "nama",
-    "nama peserta",
-    "nama lengkap",
-    "peserta",
-    "putra",
-    "putri",
-    "provinsi",
-    "asal provinsi",
-    "jenis kelamin",
-    "nik"
-  ];
-
+  const known = ["nama", "nama peserta", "nama lengkap", "peserta", "putra", "putri", "provinsi", "jenis kelamin", "nik"];
   let best = 0;
   let bestScore = -1;
 
@@ -76,9 +64,7 @@ function parseDateValue(value: any) {
   if (!asString) return "";
 
   const d = new Date(asString);
-  if (!Number.isNaN(d.getTime())) {
-    return d.toISOString().slice(0, 10);
-  }
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
 
   return asString;
 }
@@ -94,7 +80,6 @@ async function getOrCreateCompany(supabase: any, name: string) {
     .maybeSingle();
 
   if (selectError) throw selectError;
-
   if (existing) return existing.id as number;
 
   const { data, error } = await supabase
@@ -104,23 +89,21 @@ async function getOrCreateCompany(supabase: any, name: string) {
     .single();
 
   if (error) throw error;
-
   return data.id as number;
 }
 
-async function getOrCreatePackage(supabase: any, name: string, companyId: number) {
-  const cleanName = clean(name) || "CAPASKA 2025/2026";
+async function getOrCreatePackage(supabase: any, name: string, companyId: number, programType: string) {
+  const cleanName = clean(name) || (programType === PROGRAM_CORPORATE ? "MCU Corporate Basic" : "CAPASKA 2025/2026");
 
   const { data: existing, error: selectError } = await supabase
     .from("packages")
     .select("id")
     .ilike("name", cleanName)
-    .eq("program_type", PROGRAM_CAPASKA)
+    .eq("program_type", programType)
     .limit(1)
     .maybeSingle();
 
   if (selectError) throw selectError;
-
   if (existing) return existing.id as number;
 
   const { data, error } = await supabase
@@ -130,20 +113,20 @@ async function getOrCreatePackage(supabase: any, name: string, companyId: number
       description: "Auto created from import",
       company_id: companyId,
       is_active: 1,
-      program_type: PROGRAM_CAPASKA
+      program_type: programType
     })
     .select("id")
     .single();
 
   if (error) throw error;
 
-  await mapAllCapaskaPackages(supabase);
+  await mapProgramPackages(supabase, programType);
 
   return data.id as number;
 }
 
-async function nextMcuCounter(supabase: any, year: string) {
-  const prefix = `CAPASKA-${year}`;
+async function nextMcuCounter(supabase: any, year: string, prefixBase: string) {
+  const prefix = `${prefixBase}-${year}`;
 
   const { data, error } = await supabase
     .from("participants")
@@ -154,7 +137,6 @@ async function nextMcuCounter(supabase: any, year: string) {
     .maybeSingle();
 
   if (error) throw error;
-
   if (!data?.mcu_id) return 1;
 
   const last = Number(String(data.mcu_id).split("-").pop() || "0");
@@ -170,19 +152,24 @@ export async function importParticipantsFromExcel(
     company_name: string;
     package_name: string;
     description?: string;
+    program_type?: string;
   }
 ) {
   await seedDefaults(supabase);
 
+  const programType = options.program_type === PROGRAM_CORPORATE ? PROGRAM_CORPORATE : PROGRAM_CAPASKA;
+  const prefixBase = programType === PROGRAM_CORPORATE ? "MCU" : "CAPASKA";
+
   const companyId = await getOrCreateCompany(supabase, options.company_name || options.institution_name);
-  const packageId = await getOrCreatePackage(supabase, options.package_name, companyId);
+  const packageId = await getOrCreatePackage(supabase, options.package_name, companyId, programType);
+  await mapProgramPackages(supabase, programType);
 
   const { data: source, error: sourceError } = await supabase
     .from("participant_sources")
     .insert({
       name: options.database_name,
       institution_name: options.institution_name || options.company_name,
-      program_type: PROGRAM_CAPASKA,
+      program_type: programType,
       description: options.description || "",
       uploaded_filename: "upload.xlsx"
     })
@@ -196,6 +183,7 @@ export async function importParticipantsFromExcel(
 
   const stats: any = {
     source_id: sourceId,
+    program_type: programType,
     rows_read: 0,
     participants_created: 0,
     participants_skipped: 0,
@@ -220,12 +208,12 @@ export async function importParticipantsFromExcel(
     const headers = rows[headerRowIndex].map((v, i) => clean(v) || `Column_${i}`);
     const bodyRows = rows.slice(headerRowIndex + 1).filter((row) => row.some((v) => clean(v)));
 
-    const nameCol = findColumn(headers, ["Nama Peserta", "Nama Lengkap", "Nama", "Peserta"]);
+    const nameCol = findColumn(headers, ["Nama Peserta", "Nama Lengkap", "Nama", "Peserta", "Employee Name", "Nama Karyawan"]);
     const putraCol = findColumn(headers, ["Putra", "Nama Putra"]);
     const putriCol = findColumn(headers, ["Putri", "Nama Putri"]);
 
     const nikCol = findColumn(headers, ["NIK", "Nomor Induk Kependudukan"]);
-    const externalIdCol = findColumn(headers, ["ID Instansi", "No Peserta", "Nomor Peserta", "ID Peserta"]);
+    const externalIdCol = findColumn(headers, ["ID Instansi", "No Peserta", "Nomor Peserta", "ID Peserta", "NIP", "Employee ID"]);
     const genderCol = findColumn(headers, ["Jenis Kelamin", "Gender", "JK", "L/P"]);
     const provinceCol = findColumn(headers, ["Provinsi", "Asal Provinsi", "Provinsi Asal", "Asal Daerah"]);
     const provincePutraCol = findColumn(headers, ["Asal Provinsi Putra", "Provinsi Putra"]);
@@ -235,15 +223,7 @@ export async function importParticipantsFromExcel(
     const doctorCol = findColumn(headers, ["Dokter Bertugas", "Dokter", "Nama Dokter"]);
     const nurseCol = findColumn(headers, ["Perawat Bertugas", "Perawat", "Nama Perawat"]);
 
-    stats.detected_columns.push({
-      sheet: sheetName,
-      header_row: headerRowIndex + 1,
-      headers,
-      nameCol,
-      putraCol,
-      putriCol,
-      provinceCol
-    });
+    stats.detected_columns.push({ sheet: sheetName, header_row: headerRowIndex + 1, headers, nameCol, putraCol, putriCol, provinceCol });
 
     if (nameCol < 0 && putraCol < 0 && putriCol < 0) {
       stats.skipped_sheets.push({ sheet: sheetName, reason: "Tidak ada kolom nama peserta / putra / putri" });
@@ -257,13 +237,13 @@ export async function importParticipantsFromExcel(
       const year = serviceDate ? String(serviceDate).slice(0, 4) : String(new Date().getFullYear());
 
       if (!counterByYear.has(year)) {
-        counterByYear.set(year, await nextMcuCounter(supabase, year));
+        counterByYear.set(year, await nextMcuCounter(supabase, year, prefixBase));
       }
 
       const makeMcuId = () => {
         const n = counterByYear.get(year)!;
         counterByYear.set(year, n + 1);
-        return `CAPASKA-${year}-${String(n).padStart(4, "0")}`;
+        return `${prefixBase}-${year}-${String(n).padStart(4, "0")}`;
       };
 
       const base = {
@@ -278,7 +258,7 @@ export async function importParticipantsFromExcel(
 
       const candidates: { name: string; gender: string; province: string }[] = [];
 
-      if (putraCol >= 0 && clean(row[putraCol])) {
+      if (programType === PROGRAM_CAPASKA && putraCol >= 0 && clean(row[putraCol])) {
         candidates.push({
           name: clean(row[putraCol]),
           gender: "Laki-laki",
@@ -286,7 +266,7 @@ export async function importParticipantsFromExcel(
         });
       }
 
-      if (putriCol >= 0 && clean(row[putriCol])) {
+      if (programType === PROGRAM_CAPASKA && putriCol >= 0 && clean(row[putriCol])) {
         candidates.push({
           name: clean(row[putriCol]),
           gender: "Perempuan",
@@ -304,7 +284,7 @@ export async function importParticipantsFromExcel(
 
       if (!candidates.length) {
         stats.participants_skipped += 1;
-        if (stats.skipped_rows.length < 50) stats.skipped_rows.push({ sheet: sheetName, row: row });
+        if (stats.skipped_rows.length < 50) stats.skipped_rows.push({ sheet: sheetName, row });
         continue;
       }
 
@@ -322,7 +302,7 @@ export async function importParticipantsFromExcel(
           company_id: companyId,
           package_id: packageId,
           mcu_date: base.mcu_date,
-          program_type: PROGRAM_CAPASKA,
+          program_type: programType,
           source_id: sourceId,
           province: candidate.province,
           service_date: base.service_date,
