@@ -10,6 +10,8 @@ function menuFor(user: SessionUser) {
       ["Dashboard", "/dashboard"],
       ["Import Peserta", "/import"],
       ["Input CAPASKA", "/input"],
+      ["Input Corporate", "/input-corporate"],
+      ["Cetak Label", "/labels"],
       ["Review Hasil", "/review"],
       ["Master Users", "/master"]
     ];
@@ -19,6 +21,13 @@ function menuFor(user: SessionUser) {
     return [
       ["Dashboard", "/dashboard"],
       ["Review Hasil", "/review"]
+    ];
+  }
+
+  if (user.program_type === "corporate") {
+    return [
+      ["Dashboard", "/dashboard"],
+      ["Input Corporate", "/input-corporate"]
     ];
   }
 
