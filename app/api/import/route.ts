@@ -15,10 +15,11 @@ export async function POST(req: NextRequest) {
 
   if (!file) return fail("File Excel wajib diupload.");
 
+  const programType = String(form.get("program_type") || "capaska").trim();
   const databaseName = String(form.get("database_name") || "").trim();
-  const institutionName = String(form.get("institution_name") || "BPIP / CAPASKA").trim();
-  const companyName = String(form.get("company_name") || institutionName || "BPIP / CAPASKA").trim();
-  const packageName = String(form.get("package_name") || "CAPASKA 2025/2026").trim();
+  const institutionName = String(form.get("institution_name") || (programType === "corporate" ? "Corporate" : "BPIP / CAPASKA")).trim();
+  const companyName = String(form.get("company_name") || institutionName).trim();
+  const packageName = String(form.get("package_name") || (programType === "corporate" ? "MCU Corporate Basic" : "CAPASKA 2025/2026")).trim();
   const description = String(form.get("description") || "").trim();
 
   if (!databaseName) return fail("Nama Database wajib diisi.");
@@ -31,7 +32,8 @@ export async function POST(req: NextRequest) {
     institution_name: institutionName,
     company_name: companyName,
     package_name: packageName,
-    description
+    description,
+    program_type: programType
   });
 
   return ok({ stats });
