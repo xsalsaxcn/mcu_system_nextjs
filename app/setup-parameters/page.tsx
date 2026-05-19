@@ -82,8 +82,8 @@ function SetupParameters({ user }: { user: any }) {
   const [loading, setLoading] = useState(false);
 
   const activeParameters = useMemo(() => {
-    return parameters.filter((p) => p.is_active === 1 || p.is_active === true);
-  }, [parameters]);
+  return parameters.filter((p) => Number(p.is_active ?? 1) === 1);
+}, [parameters]);
 
   const groupedParameters = useMemo(() => {
     const groups: Record<string, Parameter[]> = {};
