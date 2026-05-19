@@ -22,10 +22,10 @@ function MasterUsers({ user }: { user: any }) {
   }
 
   async function seed() {
-    setMessage("Memproses seed defaults...");
+    setMessage("Memproses seed forms CAPASKA + Corporate...");
     const res = await fetch("/api/setup/seed-defaults", { method: "POST" });
     const json = await res.json();
-    setMessage(json.ok ? "Default operator/post/parameter berhasil dibuat." : json.message || "Gagal seed defaults.");
+    setMessage(json.ok ? "Default forms, operator, parameter, package mapping berhasil dibuat/di-refresh." : json.message || "Gagal seed defaults.");
     await load();
   }
 
@@ -38,9 +38,11 @@ function MasterUsers({ user }: { user: any }) {
   return (
     <div className="space-y-5">
       <section className="card p-5">
-        <div className="text-2xl font-black">Master Users</div>
-        <div className="mt-1 text-sm text-slate-500">Pastikan operator CAPASKA lengkap dan masing-masing terhubung ke post yang benar.</div>
-        <button className="btn-primary mt-4" onClick={seed}>Seed / Refresh Default CAPASKA</button>
+        <div className="text-2xl font-black">Master Users & Forms</div>
+        <div className="mt-1 text-sm text-slate-500">
+          Tombol ini membuat/refresh operator, post, parameter form CAPASKA, form Corporate, dan mapping paket.
+        </div>
+        <button className="btn-primary mt-4" onClick={seed}>Seed / Refresh Forms CAPASKA + Corporate</button>
         {message && <div className="mt-3 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">{message}</div>}
       </section>
 
