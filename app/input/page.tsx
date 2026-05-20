@@ -19,6 +19,23 @@ function parseOptions(config: any): string[] {
   }
 }
 
+function isChoiceField(param: any) {
+  return parseOptions(param.config_json).length > 0;
+}
+
+function isValueField(param: any) {
+  return String(param.name || "").toLowerCase().startsWith("value ");
+}
+
+function isScoreField(param: any) {
+  const name = String(param.name || "").toLowerCase();
+  return name.startsWith("score ") || name.startsWith("total score");
+}
+
+function isAutoField(param: any) {
+  return isValueField(param) || isScoreField(param);
+}
+
 function scoreByChoice(parameterName: string, selectedValue: string, category?: string): number {
   const key = `${norm(parameterName)}::${norm(selectedValue)}`;
 
@@ -95,7 +112,7 @@ function scoreByChoice(parameterName: string, selectedValue: string, category?: 
     [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Normal")}`]: 2,
     [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Tidak Normal")}`]: 0,
 
-    // Penyakit Dalam
+    // Penyakit Dalam + Jantung
     [`${norm("Berat Badan (Kg)")}::${norm("Sesuai juknis")}`]: 2,
     [`${norm("Berat Badan (Kg)")}::${norm("Tidak sesuai juknis")}`]: 0,
     [`${norm("TB. (Cm)")}::${norm("Sesuai juknis")}`]: 2,
@@ -111,7 +128,6 @@ function scoreByChoice(parameterName: string, selectedValue: string, category?: 
     [`${norm("Pemeriksaan Fisik Paru")}::${norm("Normal")}`]: 2,
     [`${norm("Pemeriksaan Fisik Paru")}::${norm("Tidak Normal")}`]: 0,
 
-    // Jantung
     [`${norm("Kelainan Anatomi Jantung")}::${norm("Tidak Ada")}`]: 2,
     [`${norm("Kelainan Anatomi Jantung")}::${norm("Ada")}`]: 0,
     [`${norm("Kelainan Irama Jantung")}::${norm("Tidak Ada")}`]: 2,
@@ -129,8 +145,6 @@ function scoreByChoice(parameterName: string, selectedValue: string, category?: 
   if (typeof exact[key] === "number") return exact[key];
 
   const selected = norm(selectedValue);
-  const cat = norm(category || "");
-
   if (selected === norm("Normal")) return 2;
   if (selected === norm("Tidak Normal")) return 0;
   if (selected === norm("Tidak Ada")) return 2;
@@ -141,17 +155,7 @@ function scoreByChoice(parameterName: string, selectedValue: string, category?: 
   if (selected === norm("Sesuai juknis")) return 2;
   if (selected === norm("Tidak sesuai juknis")) return 0;
 
-  if (cat.includes("ortopedi") || cat.includes("gerak") || cat.includes("vertebra")) {
-    if (selected === norm("Tidak Ada")) return 2;
-    if (selected === norm("Ada")) return 0;
-  }
-
   return 0;
-}
-
-function isAutoField(param: any) {
-  const name = String(param.name || "").toLowerCase();
-  return name.startsWith("value ") || name.startsWith("score ") || name.startsWith("total score");
 }
 
 const SPECIAL_VALUE_FIELD: Record<string, string> = {
@@ -164,56 +168,67 @@ const SPECIAL_VALUE_FIELD: Record<string, string> = {
   [norm("Tindik (selain anting) Wanita : hanya 1 / telinga")]: "Value (selain anting) Wanita : hanya 1 / telinga"
 };
 
-function valueFieldName(parameterName: string) {
-  return SPECIAL_VALUE_FIELD[norm(parameterName)] || `Value ${parameterName}`;
+function getValueFieldName(name: string) {
+  return SPECIAL_VALUE_FIELD[norm(name)] || `Value ${name}`;
 }
 
-function computeAutoValues(parameters: any[], values: Record<string, string>) {
-  const next = { ...values };
+function findParamByPossibleNames(byName: Map<string, any>, names: string[]) {
+  for (const name of names) {
+    const found = byName.get(norm(name));
+    if (found) return found;
+  }
+  return null;
+}
+
+function computeAutoValues(parameters: any[], inputValues: Record<string, string>) {
+  const next = { ...inputValues };
   const byName = new Map<string, any>();
 
-  parameters.forEach((p) => {
-    byName.set(norm(p.name), p);
-  });
+  parameters.forEach((p) => byName.set(norm(p.name), p));
 
-  parameters.forEach((p) => {
-    if (isAutoField(p)) return;
+  // Auto-fill tiap Value field berdasarkan field single choice sebelumnya.
+  parameters.forEach((param, index) => {
+    if (!isChoiceField(param)) return;
+    if (isAutoField(param)) return;
 
-    const options = parseOptions(p.config_json);
-    if (!options.length) return;
-
-    const selected = next[p.id];
+    const selected = next[param.id];
     if (!selected) return;
 
-    const valueParam = byName.get(norm(valueFieldName(p.name)));
-    if (!valueParam) return;
+    const score = scoreByChoice(param.name, selected, param.category);
+    let valueParam = byName.get(norm(getValueFieldName(param.name)));
 
-    next[valueParam.id] = String(scoreByChoice(p.name, selected, p.category));
+    // Fallback: kalau nama Value berbeda sedikit, cari field berikutnya yang diawali "Value".
+    if (!valueParam) {
+      const nextParam = parameters[index + 1];
+      if (nextParam && isValueField(nextParam)) valueParam = nextParam;
+    }
+
+    if (valueParam) {
+      next[valueParam.id] = String(score);
+    }
   });
 
   const scoreOf = (name: string) => {
     const p = byName.get(norm(name));
     if (!p) return 0;
-
     const selected = next[p.id];
     if (!selected) return 0;
-
     return scoreByChoice(p.name, selected, p.category);
   };
 
   const setTotal = (totalName: string, names: string[]) => {
     const totalParam = byName.get(norm(totalName));
     if (!totalParam) return;
-
-    const total = names.reduce((sum, name) => sum + scoreOf(name), 0);
-    next[totalParam.id] = String(total);
+    next[totalParam.id] = String(names.reduce((sum, name) => sum + scoreOf(name), 0));
   };
 
   setTotal("Total Score Kesehatan mata", [
     "Lensakontak/ kaca mata",
+    "Lensakontak / kaca mata",
     "Tes buta warna",
     "Strabismus / Juling",
-    "Pemeriksaan Visus OD  / OS"
+    "Pemeriksaan Visus OD  / OS",
+    "Pemeriksaan Visus OD / OS"
   ]);
 
   setTotal("Score total Pemeriksaan Kesehatan Gigi dan Mulut", [
@@ -368,6 +383,13 @@ function computeAutoValues(parameters: any[], values: Record<string, string>) {
   return next;
 }
 
+function shallowEqualRecord(a: Record<string, string>, b: Record<string, string>) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
 function ParameterInput({
   param,
   value,
@@ -383,27 +405,15 @@ function ParameterInput({
 
   if (options.length && (inputType === "radio" || inputType === "select")) {
     return (
-      <select
-        className="input"
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-      >
+      <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
         <option value="">-</option>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
+        {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
       </select>
     );
   }
 
   if (inputType === "textarea") {
-    return (
-      <textarea
-        className="input min-h-24"
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    );
+    return <textarea className="input min-h-24" value={value || ""} onChange={(e) => onChange(e.target.value)} />;
   }
 
   return (
@@ -460,6 +470,16 @@ function InputForm({ user }: { user: any }) {
       .then((r) => r.json())
       .then((d) => setSources(d.sources || []));
   }, [program]);
+
+  // Ini yang memastikan skor tetap muncul walau value awal berasal dari data lama/API.
+  useEffect(() => {
+    if (!parameters.length) return;
+
+    const computed = computeAutoValues(parameters, values);
+    if (!shallowEqualRecord(values, computed)) {
+      setValues(computed);
+    }
+  }, [parameters, values]);
 
   async function search(e: React.FormEvent) {
     e.preventDefault();
