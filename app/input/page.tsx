@@ -12,7 +12,9 @@ function norm(text: any) {
 
 function parseOptions(config: any): string[] {
   try {
-    const parsed = JSON.parse(config || "[]");
+    if (Array.isArray(config)) return config.map(String);
+    if (!config) return [];
+    const parsed = typeof config === "string" ? JSON.parse(config) : config;
     return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
@@ -161,61 +163,68 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
   return 0;
 }
 
-function computeDerivedValues(parameters: any[], inputValues: Record<string, string>) {
-  const derived = { ...inputValues };
-  const scoreByParamId: Record<string, number> = {};
+function computeValues(parameters: any[], rawValues: Record<string, string>) {
+  const computed: Record<string, string> = { ...rawValues };
+  const scores: Record<string, number> = {};
 
-  parameters.forEach((param) => {
-    if (!hasChoiceOptions(param) || isAutoField(param)) return;
-    const selected = derived[param.id];
+  // Hitung skor field pilihan.
+  parameters.forEach((p) => {
+    if (isAutoField(p)) return;
+    if (!hasChoiceOptions(p)) return;
+    const selected = computed[p.id];
     if (!selected) return;
-    scoreByParamId[String(param.id)] = scoreByChoice(param.name, selected);
+    scores[String(p.id)] = scoreByChoice(p.name, selected);
   });
 
-  // Field Value mengambil skor dari pilihan tepat sebelumnya.
-  parameters.forEach((param, index) => {
-    if (!isValueField(param)) return;
+  // Kosongkan semua auto field dulu, lalu isi ulang.
+  parameters.forEach((p) => {
+    if (isAutoField(p)) computed[p.id] = "";
+  });
 
-    for (let i = index - 1; i >= 0; i--) {
+  // Isi Value dari field pilihan tepat sebelumnya.
+  parameters.forEach((p, idx) => {
+    if (!isValueField(p)) return;
+
+    for (let i = idx - 1; i >= 0; i--) {
       const prev = parameters[i];
-
       if (isAutoField(prev)) continue;
+      if (!hasChoiceOptions(prev)) continue;
 
-      if (hasChoiceOptions(prev)) {
-        const score = scoreByParamId[String(prev.id)];
-        derived[param.id] = typeof score === "number" ? String(score) : "";
-        break;
-      }
+      const score = scores[String(prev.id)];
+      computed[p.id] = typeof score === "number" ? String(score) : "";
+      break;
     }
   });
 
-  // Field Score menjumlahkan skor pilihan sebelumnya dalam kategori yang sama.
-  // Jika field score total, jumlahkan semua pilihan sebelumnya.
-  parameters.forEach((param, index) => {
-    if (!isScoreField(param)) return;
+  // Isi Score/Total Score.
+  parameters.forEach((p, idx) => {
+    if (!isScoreField(p)) return;
 
-    const paramCategory = norm(param.category);
-    const name = String(param.name || "").toLowerCase();
-    const totalAll = name.includes("score total") || name.includes("total score");
+    const pName = String(p.name || "").toLowerCase();
+    const pCat = norm(p.category);
+    const totalAll = pName.includes("total");
 
     let total = 0;
+    let hasAny = false;
 
-    parameters.forEach((candidate, candidateIndex) => {
-      if (candidateIndex >= index) return;
-      if (!hasChoiceOptions(candidate) || isAutoField(candidate)) return;
+    parameters.forEach((candidate, candidateIdx) => {
+      if (candidateIdx >= idx) return;
+      if (isAutoField(candidate)) return;
+      if (!hasChoiceOptions(candidate)) return;
 
-      const score = scoreByParamId[String(candidate.id)];
+      const score = scores[String(candidate.id)];
       if (typeof score !== "number") return;
 
-      if (totalAll || norm(candidate.category) === paramCategory) {
+      if (totalAll || norm(candidate.category) === pCat) {
         total += score;
+        hasAny = true;
       }
     });
 
-    derived[param.id] = String(total);
+    computed[p.id] = hasAny ? String(total) : "";
   });
 
-  return derived;
+  return computed;
 }
 
 function ParameterInput({
@@ -283,10 +292,6 @@ function InputForm({ user }: { user: any }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
 
-  const derivedValues = useMemo(() => {
-    return computeDerivedValues(parameters, values);
-  }, [parameters, values]);
-
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
 
@@ -340,25 +345,23 @@ function InputForm({ user }: { user: any }) {
     const nextParameters = paramJson.parameters || [];
     setParameters(nextParameters);
 
-    // Sesuai requirement:
-    // Saat masuk form, semua pilihan kosong dulu. Tidak ada default selection.
-    // Data lama tidak dipakai sebagai default agar operator mulai dari blank form.
+    // Saat baru masuk form: semua pilihan kosong, tidak ada default selection.
     const blank: Record<string, string> = {};
     nextParameters.forEach((x: any) => {
       blank[x.id] = "";
     });
-    setValues(blank);
+    setValues(computeValues(nextParameters, blank));
   }
 
   function updateValue(parameterId: number | string, nextValue: string) {
-    setValues((prev) => ({ ...prev, [parameterId]: nextValue }));
+    setValues((prev) => computeValues(parameters, { ...prev, [parameterId]: nextValue }));
   }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setMessage("");
 
-    const finalValues = computeDerivedValues(parameters, values);
+    const finalValues = computeValues(parameters, values);
 
     const res = await fetch("/api/results/save", {
       method: "POST",
@@ -380,7 +383,9 @@ function InputForm({ user }: { user: any }) {
       <section className="card p-5">
         <div className="text-2xl font-black">Input CAPASKA</div>
         <div className="mt-1 text-sm text-slate-500">Login sebagai {user.post_name}. Operator hanya melihat parameter post masing-masing.</div>
-        <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">AutoScore v15 aktif · pilihan awal kosong</div>
+        <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+          AutoScore v16 aktif · force state update
+        </div>
       </section>
 
       <form onSubmit={search} className="card grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto]">
@@ -435,7 +440,7 @@ function InputForm({ user }: { user: any }) {
                   {param.reference_text && <div className="mb-2 text-xs text-slate-500">{param.reference_text}</div>}
                   <ParameterInput
                     param={param}
-                    value={derivedValues[param.id] || ""}
+                    value={values[param.id] || ""}
                     onChange={(nextValue) => updateValue(param.id, nextValue)}
                   />
                 </div>
