@@ -1,8 +1,8 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { computeStagesForParticipant } from "@/lib/server/progress";
-import { fail, ok } from "@/lib/server/response";
 
 function parseNumber(value: any): number | null {
   if (value === null || value === undefined) return null;
@@ -69,9 +69,7 @@ function computeParticipantScore(
     }
   }
 
-  if (count > 0) {
-    return Math.round(total * 100) / 100;
-  }
+  if (count > 0) return Math.round(total * 100) / 100;
 
   const valueScoreParams = paramsForPackage.filter(isValueScoreParameter);
 
@@ -83,11 +81,7 @@ function computeParticipantScore(
     }
   }
 
-  if (count > 0) {
-    return Math.round(total * 100) / 100;
-  }
-
-  return null;
+  return count > 0 ? Math.round(total * 100) / 100 : null;
 }
 
 function getRuleForPackage(packageId: number, program: string, rules: any[]) {
@@ -100,7 +94,7 @@ function getRuleForPackage(packageId: number, program: string, rules: any[]) {
   return {
     pass_min_score: 0,
     pass_max_score: 999999,
-    description: "Default: lulus jika score berada dalam range 0 - 999999"
+    description: "Default"
   };
 }
 
@@ -114,27 +108,31 @@ function evaluateGraduation(totalScore: number | null, isComplete: boolean, rule
   return totalScore >= min && totalScore <= max ? "Lulus" : "Tidak Lulus";
 }
 
+function safeSheetName(name: string) {
+  return name.replace(/[\\/?*[\]:]/g, " ").slice(0, 31);
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
-  if (!user) return fail("Unauthorized", 401);
+  if (!user) return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabaseAdmin();
   const program = req.nextUrl.searchParams.get("program") || user.program_type || "capaska";
-  const sourceId = req.nextUrl.searchParams.get("source_id");
+  const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
   const status = req.nextUrl.searchParams.get("status") || "Semua";
-  const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 300), 1), 1000);
+  const type = req.nextUrl.searchParams.get("type") || "progress";
 
   let query = supabase
     .from("participants")
     .select("*")
     .order("id", { ascending: false })
-    .limit(limit);
+    .limit(2000);
 
   if (program !== "all") query = query.eq("program_type", program);
   if (sourceId && sourceId !== "all") query = query.eq("source_id", Number(sourceId));
 
   const { data: participants, error } = await query;
-  if (error) return fail(error.message, 500);
+  if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
 
   const participantRows = participants || [];
   const participantIds = participantRows.map((p: any) => Number(p.id));
@@ -160,8 +158,10 @@ export async function GET(req: NextRequest) {
 
   const packageName = new Map((packages.data || []).map((p: any) => [Number(p.id), p.name]));
   const sourceMap = new Map((sources.data || []).map((s: any) => [Number(s.id), s]));
+  const postName = new Map((posts.data || []).map((p: any) => [Number(p.id), p.name]));
+  const paramById = new Map((parameters.data || []).map((p: any) => [Number(p.id), p]));
 
-  const rows = participantRows.map((p: any) => {
+  const progressRows = participantRows.map((p: any) => {
     const stages = computeStagesForParticipant(
       Number(p.id),
       Number(p.package_id),
@@ -186,60 +186,98 @@ export async function GET(req: NextRequest) {
     const source = sourceMap.get(Number(p.source_id));
 
     return {
-      participant_id: p.id,
-      name: p.name,
-      mcu_id: p.mcu_id,
-      external_id: p.external_id,
-      nik: p.nik,
-      employee_nik: p.employee_nik,
-      gender: p.gender,
-      birth_date: p.birth_date || p.date_of_birth,
-      province: p.province,
-      source_name: source?.name || "-",
-      institution_name: source?.institution_name || "-",
-      package_name: packageName.get(Number(p.package_id)) || "-",
-      package_id: p.package_id,
-      mcu_date: p.mcu_date || p.service_date || p.examination_date || p.exam_date || "-",
-      status_pemeriksaan: complete ? "Selesai" : "Belum Selesai",
-      done_stage: done,
-      total_stage: total,
-      progress_percent: total ? Math.round((done / total) * 1000) / 10 : 0,
-      total_score: totalScore,
-      kelulusan_status: kelulusan,
-      pass_min_score: Number(rule?.pass_min_score ?? 0),
-      pass_max_score: Number(rule?.pass_max_score ?? 999999),
-      stages
+      "Nama": p.name,
+      "No MCU": p.mcu_id || p.external_id || "-",
+      "NIK": p.nik || "-",
+      "NIK Karyawan": p.employee_nik || "-",
+      "Jenis Kelamin": p.gender || "-",
+      "Tanggal Lahir": p.birth_date || p.date_of_birth || "-",
+      "Tanggal MCU": p.mcu_date || p.service_date || p.examination_date || p.exam_date || "-",
+      "Database": source?.name || "-",
+      "Instansi": source?.institution_name || "-",
+      "Paket": packageName.get(Number(p.package_id)) || "-",
+      "Status Progress": complete ? "Selesai" : "Belum Selesai",
+      "Kelulusan": kelulusan,
+      "Total Score": totalScore ?? "",
+      "Range Lulus Min": Number(rule?.pass_min_score ?? 0),
+      "Range Lulus Max": Number(rule?.pass_max_score ?? 999999),
+      "Stage Selesai": done,
+      "Total Stage": total,
+      "Progress %": total ? Math.round((done / total) * 1000) / 10 : 0
     };
-  });
-
-  const filtered = rows.filter((r) => {
-    if (status === "Selesai") return r.status_pemeriksaan === "Selesai";
-    if (status === "Belum Selesai") return r.status_pemeriksaan !== "Selesai";
-    if (status === "Lulus") return r.kelulusan_status === "Lulus";
-    if (status === "Tidak Lulus") return r.kelulusan_status === "Tidak Lulus";
-    if (status === "Belum Dinilai") return r.kelulusan_status === "Belum Dinilai";
+  }).filter((r: any) => {
+    if (status === "Selesai") return r["Status Progress"] === "Selesai";
+    if (status === "Belum Selesai") return r["Status Progress"] !== "Selesai";
+    if (status === "Lulus") return r["Kelulusan"] === "Lulus";
+    if (status === "Tidak Lulus") return r["Kelulusan"] === "Tidak Lulus";
+    if (status === "Belum Dinilai") return r["Kelulusan"] === "Belum Dinilai";
     return true;
   });
 
-  const completedRows = rows.filter((r) => r.status_pemeriksaan === "Selesai");
-  const lulusRows = rows.filter((r) => r.kelulusan_status === "Lulus");
-  const tidakLulusRows = rows.filter((r) => r.kelulusan_status === "Tidak Lulus");
-  const belumDinilaiRows = rows.filter((r) => r.kelulusan_status === "Belum Dinilai");
+  const workbook = XLSX.utils.book_new();
 
-  return ok({
-    summary: {
-      total: rows.length,
-      selesai: completedRows.length,
-      belum_selesai: rows.filter((r) => r.status_pemeriksaan !== "Selesai").length,
-      lulus: lulusRows.length,
-      tidak_lulus: tidakLulusRows.length,
-      belum_dinilai: belumDinilaiRows.length,
-      rata_rata: rows.length ? Math.round((rows.reduce((a, b) => a + b.progress_percent, 0) / rows.length) * 10) / 10 : 0
-    },
-    rows: filtered,
-    lulus_rows: lulusRows.slice(0, 200),
-    tidak_lulus_rows: tidakLulusRows.slice(0, 200),
-    completed_rows: completedRows.slice(0, 200),
-    rule_count: graduationRules.data?.length || 0
+  const summaryRows = [
+    { Metric: "Total Peserta", Value: progressRows.length },
+    { Metric: "Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] === "Selesai").length },
+    { Metric: "Belum Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] !== "Selesai").length },
+    { Metric: "Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Lulus").length },
+    { Metric: "Tidak Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Lulus").length },
+    { Metric: "Belum Dinilai", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Belum Dinilai").length }
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), "Ringkasan");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(progressRows), "Progress Peserta");
+
+  if (type === "full") {
+    const resultRows = (results.data || []).map((r: any) => {
+      const parameter = paramById.get(Number(r.parameter_id));
+      const participant = participantRows.find((p: any) => Number(p.id) === Number(r.participant_id));
+      const source = sourceMap.get(Number(participant?.source_id));
+      const post = parameter ? postName.get(Number(parameter.post_id)) : "-";
+
+      return {
+        "Nama": participant?.name || "-",
+        "No MCU": participant?.mcu_id || participant?.external_id || "-",
+        "Database": source?.name || "-",
+        "Paket": packageName.get(Number(participant?.package_id)) || "-",
+        "Post/Station": post || "-",
+        "Parameter": parameter?.name || "-",
+        "Value": r.value ?? "",
+        "Updated At": r.updated_at || r.created_at || ""
+      };
+    });
+
+    const wideRows = participantRows.map((participant: any) => {
+      const row: any = {
+        "Nama": participant.name,
+        "No MCU": participant.mcu_id || participant.external_id || "-",
+        "Database": sourceMap.get(Number(participant.source_id))?.name || "-",
+        "Paket": packageName.get(Number(participant.package_id)) || "-"
+      };
+
+      (results.data || [])
+        .filter((r: any) => Number(r.participant_id) === Number(participant.id))
+        .forEach((r: any) => {
+          const parameter = paramById.get(Number(r.parameter_id));
+          const post = parameter ? postName.get(Number(parameter.post_id)) : "-";
+          const key = `${post || "-"} - ${parameter?.name || r.parameter_id}`;
+          row[key] = r.value ?? "";
+        });
+
+      return row;
+    });
+
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(resultRows), "Hasil Pemeriksaan");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(wideRows), safeSheetName("Hasil Wide"));
+  }
+
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  const filename = type === "full" ? "hasil-pemeriksaan-lengkap.xlsx" : "dashboard-progress-kelulusan.xlsx";
+
+  return new NextResponse(buffer, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`
+    }
   });
 }
