@@ -1,0 +1,15 @@
+# Local env
+.env
+.env.local
+
+# Next / Node
+.next/
+node_modules/
+
+# Local backup/debug
+components/AppShell_BACKUP.tsx
+components/AppShell backup.txt
+login_check.txt
+menu_check.txt
+menu_href_check.txt
+menu_location.txt
