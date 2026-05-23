@@ -5,7 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { SessionUser } from "@/lib/shared/types";
 
-function menuFor(user: SessionUser) {
+type MenuItem = [label: string, href: string];
+
+function menuFor(user: SessionUser): MenuItem[] {
   if (user.role === "admin") {
     return [
       ["Dashboard", "/dashboard"],
@@ -16,30 +18,32 @@ function menuFor(user: SessionUser) {
       ["Parameter Kelulusan", "/parameter-kelulusan"],
       ["Input CAPASKA", "/input"],
       ["Input Corporate", "/input-corporate"],
+      ["AI MCU Analyzer", "/ai-mcu"],
       ["Cetak Label", "/labels"],
       ["Review Hasil", "/review"],
       ["Hapus Database", "/cleanup"],
-      ["Master Users", "/master"]
+      ["Master Users", "/master"],
     ];
   }
 
   if (user.role === "doctor" || user.role === "supervisor") {
     return [
       ["Dashboard", "/dashboard"],
-      ["Review Hasil", "/review"]
+      ["Review Hasil", "/review"],
     ];
   }
 
   if (user.program_type === "corporate") {
     return [
       ["Dashboard", "/dashboard"],
-      ["Input Corporate", "/input-corporate"]
+      ["Input Corporate", "/input-corporate"],
+      ["AI MCU Analyzer", "/ai-mcu"],
     ];
   }
 
   return [
     ["Dashboard", "/dashboard"],
-    ["Input CAPASKA", "/input"]
+    ["Input CAPASKA", "/input"],
   ];
 }
 
@@ -47,10 +51,22 @@ function isMainToolbarItem(label: string) {
   return label === "Dashboard" || label === "Registrasi Ulang";
 }
 
-export default function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+function isActivePath(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export default function AppShell({
+  user,
+  children,
+}: {
+  user: SessionUser;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+
   const menu = menuFor(user);
   const mainMenu = menu.filter(([label]) => isMainToolbarItem(label));
   const drawerMenu = menu.filter(([label]) => !isMainToolbarItem(label));
@@ -79,7 +95,10 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
             >
               ☰ Menu
             </button>
-            <button className="btn-secondary" onClick={logout}>Logout</button>
+
+            <button className="btn-secondary" onClick={logout}>
+              Logout
+            </button>
           </div>
         </div>
 
@@ -90,7 +109,9 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
               href={href}
               onClick={() => setOpen(false)}
               className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-black ${
-                pathname === href ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"
+                isActivePath(pathname, href)
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700"
               }`}
             >
               {label}
@@ -107,7 +128,7 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
                   href={href}
                   onClick={() => setOpen(false)}
                   className={`rounded-2xl border px-4 py-3 text-sm font-black ${
-                    pathname === href
+                    isActivePath(pathname, href)
                       ? "border-blue-500 bg-blue-50 text-blue-700"
                       : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
