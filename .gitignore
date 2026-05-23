@@ -1,15 +1,12 @@
-# Local env
 .env
 .env.local
 
-# Next / Node
 .next/
 node_modules/
 
-# Local backup/debug
-components/AppShell_BACKUP.tsx
-components/AppShell backup.txt
-login_check.txt
-menu_check.txt
-menu_href_check.txt
-menu_location.txt
+services/mcu-engine/venv/
+services/mcu-engine/storage/
+services/mcu-engine/credentials.json
+services/mcu-engine/gdrive_token.json
+services/mcu-engine/core/__pycache__/
+services/mcu-engine/__pycache__/

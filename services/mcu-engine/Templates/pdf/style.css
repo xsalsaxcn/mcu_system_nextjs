@@ -1,0 +1,96 @@
+/* Templates/pdf/style.css
+   Style PDF MCU port dari pdf service.gs.
+   Taruh logo di Templates/pdf/assets/logo_header.png atau file lain yang mengandung kata logo.
+*/
+@page { size: A4 portrait; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0; background: #fff; color:#111; font-family: Arial, Helvetica, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { width:210mm; min-height:297mm; padding:5mm 7mm 10mm 7mm; page-break-after: always; position:relative; background:#fff; overflow:hidden; }
+.page:last-child { page-break-after:auto; }
+.top-brand { display:table; width:100%; margin-bottom:12px; }
+.brand-left,.brand-right{ display:table-cell; vertical-align:top; }
+.brand-left{ width:300px; }
+.brand-left img{ max-width:280px; max-height:80px; width:auto; height:auto; display:block; }
+.brand-right{ text-align:right; font-size:10.5px; color:#2f4f7f; font-weight:bold; line-height:1.35; }
+.header-box{ border:1px solid #777; margin-bottom:0; }
+.page-title{ background:#d9d9d9; border-bottom:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:13px; letter-spacing:.8px; padding:4px 6px; }
+.identity-grid{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.identity-grid td{ vertical-align:top; padding:6px 8px; }
+.identity-left-wrap{ width:49%; }
+.identity-right-wrap{ width:51%; }
+.identity-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.identity-table td{ font-size:10.4px; padding:2px 0; vertical-align:top; line-height:1.08; }
+.identity-label{ width:105px; white-space:nowrap; }
+.identity-colon{ width:12px; text-align:center; }
+.identity-value{ font-weight:bold; word-break:normal; overflow-wrap:break-word; padding-left:2px!important; }
+.section-strip{ background:#d9d9d9; border:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:12px; letter-spacing:.7px; padding:4px 6px; margin:6px 0; }
+.fit-box{ border:1px solid #777; margin:4px 0 8px 0; }
+.fit-title{ background:#d9d9d9; border-bottom:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:12px; padding:4px; }
+.fit-row{ width:100%; border-collapse:collapse; }
+.fit-row td{ font-size:11px; padding:9px 10px; text-align:center; font-weight:bold; }
+.summary-label,.support-label{ display:inline-block; min-width:105px; padding:4px 8px; border:1px solid #9d9d9d; border-radius:3px; background:#efefef; font-style:italic; font-weight:bold; font-size:10.5px; }
+.summary-line,.support-line{ border-top:1px solid #777; margin-top:-1px; margin-bottom:7px; }
+.summary-content{ font-size:11px; line-height:1.45; min-height:150px; padding-left:8px; white-space:pre-wrap; }
+.support-content{ font-size:11px; line-height:1.45; padding-left:8px; min-height:96px; white-space:pre-wrap; }
+.summary-sign{ position:absolute; right:12mm; bottom:16mm; width:175px; text-align:center; font-size:10px; }
+.summary-sign .title{ margin-bottom:20px; }
+.summary-sign .line{ border-top:1px solid #000; padding-top:4px; font-weight:bold; }
+.physical-head-table{ width:100%; border-collapse:collapse; table-layout:fixed; margin-bottom:0; }
+.physical-head-table td{ border:1px solid #777; background:#d9d9d9; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:11px; padding:5px 6px; }
+.physical-wrap{ width:100%; border-collapse:collapse; table-layout:fixed; margin-top:2px; }
+.physical-wrap td{ width:50%; vertical-align:top; padding:0 8px; }
+.physical-mini{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.physical-mini tr{ page-break-inside:avoid; break-inside:avoid; }
+.physical-mini td{ font-size:9.5px; line-height:1.12; padding:1px 0; vertical-align:top; }
+.physical-mini .heading{ font-weight:bold; padding-top:4px; padding-bottom:1px; font-size:10px; }
+.physical-mini .label{ width:45%; padding-right:6px; white-space:normal; word-break:break-word; }
+.physical-mini .value{ width:55%; border-bottom:1px solid #333; text-align:center; padding-bottom:1px; padding-left:3px; word-break:break-word; }
+.lab-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.lab-table tr{ page-break-inside:avoid; break-inside:avoid; }
+.lab-table th,.lab-table td{ border:0; border-bottom:1px solid #333; padding:2px 4px; font-size:8.8px; line-height:1.08; vertical-align:middle; word-break:break-word; }
+.lab-table th{ background:#d9d9d9; border:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:9.2px; }
+.lab-group-row td{ font-weight:bold; background:#fff; border-bottom:0; padding-top:4px; padding-bottom:2px; page-break-after:avoid; }
+.lab-subgroup-row td{ font-weight:bold; background:#fff; border-bottom:0; padding-left:14px; padding-top:3px; padding-bottom:2px; page-break-after:avoid; }
+.center{text-align:center;}
+.support-signature{ position:absolute; right:12mm; bottom:14mm; text-align:right; font-size:10px; font-style:italic; font-weight:bold; }
+.attached-title{ font-size:11px; font-style:italic; font-weight:bold; text-decoration:underline; margin:10px 0 10px 10px; }
+.xray-wrap{ text-align:center; margin-top:8px; }
+.xray-wrap img{ max-width:88%; max-height:225mm; border:1px solid #888; padding:2px; }
+.footer{ position:absolute; left:7mm; right:7mm; bottom:4mm; font-size:9px; color:#333; }
+.footer-table{ width:100%; border-collapse:collapse; }
+.footer-left{text-align:center; font-style:italic;}
+.footer-right{text-align:right;}
+.checkbox{font-size:16px; line-height:1; vertical-align:middle; margin-right:6px;}
+.cover-shell{ height:255mm; display:flex; flex-direction:column; justify-content:space-between; }
+.cover-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:12mm; margin-top:4mm; }
+.cover-top-left{ flex:0 0 34%; }
+.cover-top-right{ flex:0 0 62%; }
+.cover-logo-wrap img{ max-width:250px; max-height:90px; width:auto; height:auto; display:block; }
+.cover-contact-box{ border:1px solid #ececec; background:#fafafa; padding:10px 14px; color:#2f4f7f; font-weight:700; font-size:10.5px; line-height:1.9; }
+.cover-hero{ display:flex; align-items:center; justify-content:space-between; gap:18mm; margin:26mm 0 18mm 0; }
+.cover-photo-col{ flex:0 0 34%; display:flex; justify-content:center; }
+.cover-photo-box{ width:58mm; height:72mm; border:2px solid #333; border-radius:4px; overflow:hidden; background:#fff; display:flex; align-items:center; justify-content:center; }
+.cover-photo-box img{ width:100%; height:100%; object-fit:cover; display:block; }
+.cover-hero-right{ flex:0 0 56%; text-align:center; }
+.cover-patient-name{ font-size:28px; font-weight:700; margin-bottom:18px; }
+.cover-mini-label{ font-size:11px; font-style:italic; color:#333; margin-bottom:4px; }
+.cover-mini-value{ font-size:13px; font-weight:700; margin-bottom:12px; }
+.cover-main-title{ text-align:center; font-size:24px; font-weight:700; margin:10mm 0 14px 0; }
+.cover-section-bar{ width:100%; background:#cfcfcf; border:1px solid #888; border-radius:3px; text-align:center; font-family:"Courier New", monospace; font-size:13px; font-weight:bold; letter-spacing:1px; padding:5px 10px; margin:12px 0; }
+.cover-patient-table{ width:100%; max-width:560px; margin:0 auto; border-collapse:collapse; }
+.cover-patient-table td{ font-size:12px; padding:4px; vertical-align:top; }
+.cover-patient-table .c-label{ width:42%; text-align:right; white-space:nowrap; }
+.cover-patient-table .c-colon{ width:16px; text-align:center; }
+.cover-patient-table .c-value{ font-weight:700; }
+.cover-team-area{ margin-top:12px; }
+.cover-team-space{ height:72mm; }
+.cover-footer{ position:absolute; left:7mm; right:7mm; bottom:4mm; font-size:9px; color:#333; }
+.cover-footer-table{ width:100%; border-collapse:collapse; }
+.cover-footer-left{text-align:center; font-style:italic;}
+.cover-footer-right{text-align:right;}
+.cover-footer-line{ border-top:1px solid #777; margin-bottom:4px; }
+.page-lab{ padding-top:3mm; }
+.page-lab .top-brand{ margin-bottom:6px; }
+.page-lab .header-box{ margin-bottom:6px; }
+.page-lab .page-title{ padding:3px 6px; font-size:12px; }
+.page-lab .identity-grid td{ padding:6px 8px; }
