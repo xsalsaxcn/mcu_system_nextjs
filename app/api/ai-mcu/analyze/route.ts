@@ -60,6 +60,30 @@ async function fetchParticipantsByIds(supabase: any, ids: number[]) {
   return rows;
 }
 
+async function fetchImportRows(supabase: any, ids: number[]) {
+  try {
+    const { data, error } = await supabase
+      .from("ai_mcu_import_rows")
+      .select("participant_id,row_data,participant_name,mcu_id,nik,company_name,database_name")
+      .in("participant_id", ids)
+      .order("id", { ascending: true });
+
+    if (error) return new Map();
+
+    const map = new Map<number, any>();
+    for (const row of data || []) {
+      const pid = Number(row.participant_id);
+      if (Number.isFinite(pid) && !map.has(pid)) {
+        map.set(pid, row);
+      }
+    }
+
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 async function tryFetchResultRows(supabase: any, ids: number[]) {
   const allRows: any[] = [];
 
@@ -102,30 +126,37 @@ function normalizeResultRows(resultRows: any[]) {
   return byParticipant;
 }
 
-function mergeMedicalRows(participant: any, resultRows: any[]) {
+function mergeMedicalRows(participant: any, resultRows: any[], importRow: any) {
+  const uploadedRow = importRow?.row_data && typeof importRow.row_data === "object"
+    ? importRow.row_data
+    : {};
+
   const merged: Record<string, any> = {
+    ...uploadedRow,
     ...participant,
 
     participantId: participant.id,
     participant_id: participant.id,
 
-    NAMA: pick(participant.name, participant.nama),
-    Nama: pick(participant.name, participant.nama),
-    name: pick(participant.name, participant.nama),
+    NAMA: pick(uploadedRow.NAMA, uploadedRow.Nama, importRow?.participant_name, participant.name, participant.nama),
+    Nama: pick(uploadedRow.Nama, uploadedRow.NAMA, importRow?.participant_name, participant.name, participant.nama),
+    name: pick(uploadedRow.Nama, uploadedRow.NAMA, importRow?.participant_name, participant.name, participant.nama),
 
-    NOMCU: pick(participant.mcu_id, participant.no_mcu, participant.nomcu, participant.barcode_value, participant.external_id, participant.id),
-    "NO MCU": pick(participant.mcu_id, participant.no_mcu, participant.nomcu, participant.barcode_value, participant.external_id, participant.id),
+    NOMCU: pick(uploadedRow.NOMCU, uploadedRow["NO MCU"], importRow?.mcu_id, participant.mcu_id, participant.no_mcu, participant.nomcu, participant.barcode_value, participant.external_id, participant.id),
+    "NO MCU": pick(uploadedRow["NO MCU"], uploadedRow.NOMCU, importRow?.mcu_id, participant.mcu_id, participant.no_mcu, participant.nomcu, participant.barcode_value, participant.external_id, participant.id),
 
-    NIK: pick(participant.nik, participant.external_id, participant.employee_id),
-    "NIK/NRP/ID": pick(participant.nik, participant.external_id, participant.employee_id),
+    NIK: pick(uploadedRow.NIK, uploadedRow["NIK/NRP/ID"], importRow?.nik, participant.nik, participant.external_id, participant.employee_id),
+    "NIK/NRP/ID": pick(uploadedRow["NIK/NRP/ID"], uploadedRow.NIK, importRow?.nik, participant.nik, participant.external_id, participant.employee_id),
 
-    JK: pick(participant.gender, participant.sex, participant.jenis_kelamin),
-    TGLLAHIR: pick(participant.birth_date, participant.date_of_birth, participant.tanggal_lahir),
-    USIA: pick(participant.age, participant.usia),
+    JK: pick(uploadedRow.JK, uploadedRow.Gender, participant.gender, participant.sex, participant.jenis_kelamin),
+    TGLLAHIR: pick(uploadedRow.TGLLAHIR, uploadedRow["Tanggal Lahir"], participant.birth_date, participant.date_of_birth, participant.tanggal_lahir),
+    USIA: pick(uploadedRow.USIA, uploadedRow.Usia, participant.age, participant.usia),
+
+    "Nama PT": pick(uploadedRow["Nama PT"], uploadedRow.Perusahaan, importRow?.company_name),
+    DATABASE_NAME: pick(uploadedRow.DATABASE_NAME, importRow?.database_name),
   };
 
   for (const row of resultRows || []) {
-    // Format long: parameter/value
     const parameterName = pick(
       row.parameter_name,
       row.parameter_label,
@@ -150,7 +181,6 @@ function mergeMedicalRows(participant: any, resultRows: any[]) {
       merged[parameterName] = parameterValue;
     }
 
-    // Format wide: langsung merge semua kolom non-empty
     for (const [key, value] of Object.entries(row)) {
       if (["id", "participant_id", "created_at", "updated_at", "_result_table"].includes(key)) continue;
       if (merged[key] === undefined || merged[key] === null || merged[key] === "") {
@@ -189,12 +219,17 @@ export async function POST(req: NextRequest) {
       return fail("Data peserta tidak ditemukan.");
     }
 
-    const resultRows = await tryFetchResultRows(supabase, participantIds);
+    const [importRows, resultRows] = await Promise.all([
+      fetchImportRows(supabase, participantIds),
+      tryFetchResultRows(supabase, participantIds),
+    ]);
+
     const resultMap = normalizeResultRows(resultRows);
 
     const currentRows = participants.map((participant: any) => {
       const related = resultMap.get(Number(participant.id)) || [];
-      return mergeMedicalRows(participant, related);
+      const importRow = importRows.get(Number(participant.id));
+      return mergeMedicalRows(participant, related, importRow);
     });
 
     const res = await fetch(`${engineUrl}/analyze-mcu`, {
@@ -222,6 +257,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       ...json,
       selectedCount: participants.length,
+      importedRowsUsed: importRows.size,
       medicalRowsFound: resultRows.length,
       searchedResultTables: RESULT_TABLE_CANDIDATES,
     });
