@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -138,17 +139,6 @@ function detectPackage(row: Record<string, any>) {
 }
 
 async function readWorkbook(file: File) {
-  let XLSX: any;
-
-  try {
-    const requireFunc = eval("require");
-    XLSX = requireFunc("xlsx");
-  } catch (error: any) {
-    throw new Error(
-      "Package xlsx belum tersedia. Jalankan di project Next.js: npm install xlsx"
-    );
-  }
-
   const buffer = Buffer.from(await file.arrayBuffer());
   const workbook = XLSX.read(buffer, {
     type: "buffer",
@@ -160,13 +150,14 @@ async function readWorkbook(file: File) {
 
   for (const sheetName of workbook.SheetNames || []) {
     const sheet = workbook.Sheets[sheetName];
-    const sheetRows = XLSX.utils.sheet_to_json(sheet, {
+
+    const sheetRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
       defval: "",
       raw: false,
     });
 
     for (let index = 0; index < sheetRows.length; index += 1) {
-      const row = sheetRows[index] as Record<string, any>;
+      const row = sheetRows[index] || {};
 
       rows.push({
         ...row,
