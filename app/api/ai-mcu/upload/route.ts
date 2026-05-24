@@ -27,6 +27,12 @@ function cleanText(value: unknown) {
   return text;
 }
 
+function valueFromMapping(row: Record<string, any>, mapping: Record<string, string>, key: string) {
+  const header = mapping?.[key];
+  if (!header) return "";
+  return cleanText(row?.[header]);
+}
+
 function pickValue(row: Record<string, any>, aliases: string[]) {
   const keyMap = new Map<string, string>();
 
@@ -56,8 +62,8 @@ function pickValue(row: Record<string, any>, aliases: string[]) {
   return "";
 }
 
-function detectName(row: Record<string, any>) {
-  return pickValue(row, [
+function detectName(row: Record<string, any>, mapping: Record<string, string>) {
+  return valueFromMapping(row, mapping, "NAMA") || pickValue(row, [
     "NAMA",
     "Nama",
     "Nama Peserta",
@@ -69,8 +75,8 @@ function detectName(row: Record<string, any>) {
   ]);
 }
 
-function detectMcuId(row: Record<string, any>) {
-  return pickValue(row, [
+function detectMcuId(row: Record<string, any>, mapping: Record<string, string>) {
+  return valueFromMapping(row, mapping, "NOMCU") || pickValue(row, [
     "NOMCU",
     "NO MCU",
     "NO.MCU",
@@ -86,8 +92,8 @@ function detectMcuId(row: Record<string, any>) {
   ]);
 }
 
-function detectNik(row: Record<string, any>) {
-  return pickValue(row, [
+function detectNik(row: Record<string, any>, mapping: Record<string, string>) {
+  return valueFromMapping(row, mapping, "NIK") || pickValue(row, [
     "NIK",
     "KTP",
     "NIK/NRP/ID",
@@ -99,43 +105,48 @@ function detectNik(row: Record<string, any>) {
   ]);
 }
 
-function detectGender(row: Record<string, any>) {
-  return pickValue(row, [
-    "JK",
-    "Jenis Kelamin",
-    "Gender",
-    "Sex",
-  ]);
+function mapped(row: Record<string, any>, mapping: Record<string, string>, key: string, fallbackAliases: string[] = []) {
+  return valueFromMapping(row, mapping, key) || pickValue(row, fallbackAliases);
 }
 
-function detectBirthDate(row: Record<string, any>) {
-  return pickValue(row, [
-    "TGLLAHIR",
-    "Tanggal Lahir",
-    "Tgl Lahir",
-    "Birth Date",
-    "DOB",
-  ]);
-}
+function buildCanonicalRow(row: Record<string, any>, mapping: Record<string, string>, context: {
+  companyName: string;
+  databaseName: string;
+  programType: string;
+  detectedName: string;
+  detectedMcuId: string;
+  detectedNik: string;
+}) {
+  const canonical: Record<string, any> = {
+    ...row,
+  };
 
-function detectDepartment(row: Record<string, any>) {
-  return pickValue(row, [
-    "DEPARTEMEN",
-    "Department",
-    "Departemen",
-    "Bagian",
-    "Unit",
-    "Divisi",
-  ]);
-}
+  for (const [targetKey, sourceHeader] of Object.entries(mapping || {})) {
+    if (!targetKey || !sourceHeader) continue;
+    canonical[targetKey] = row[sourceHeader] ?? "";
+  }
 
-function detectPackage(row: Record<string, any>) {
-  return pickValue(row, [
-    "PAKET",
-    "Paket",
-    "Package",
-    "Paket Pemeriksaan",
-  ]);
+  canonical.NAMA = context.detectedName;
+  canonical.Nama = context.detectedName;
+  canonical.NOMCU = context.detectedMcuId;
+  canonical["NO MCU"] = context.detectedMcuId;
+  canonical["NO.MCU"] = context.detectedMcuId;
+  canonical.NIK = context.detectedNik;
+  canonical["NIK/NRP/ID"] = context.detectedNik;
+
+  canonical.JK = canonical.JK || mapped(row, mapping, "JK", ["JK", "Jenis Kelamin", "Gender", "Sex"]);
+  canonical.TGLLAHIR = canonical.TGLLAHIR || mapped(row, mapping, "TGLLAHIR", ["TGLLAHIR", "Tanggal Lahir", "Tgl Lahir", "Birth Date"]);
+  canonical.USIA = canonical.USIA || mapped(row, mapping, "USIA", ["USIA", "Usia", "Umur", "Age"]);
+  canonical.DEPARTEMEN = canonical.DEPARTEMEN || mapped(row, mapping, "DEPARTEMEN", ["DEPARTEMEN", "Department", "Departemen", "Bagian", "Unit"]);
+  canonical.PAKET = canonical.PAKET || mapped(row, mapping, "PAKET", ["PAKET", "Paket", "Package"]);
+
+  canonical["Nama PT"] = context.companyName;
+  canonical.Perusahaan = context.companyName;
+  canonical.DATABASE_NAME = context.databaseName;
+  canonical.PROGRAM_TYPE = context.programType;
+  canonical._AI_MCU_FIELD_MAPPING = mapping;
+
+  return canonical;
 }
 
 async function readWorkbook(file: File) {
@@ -232,9 +243,19 @@ export async function POST(req: NextRequest) {
     const databaseName = cleanText(form.get("databaseName"));
     const presetMapping = cleanText(form.get("presetMapping")) || "auto";
 
+    let fieldMapping: Record<string, string> = {};
+    try {
+      fieldMapping = JSON.parse(String(form.get("fieldMapping") || "{}"));
+    } catch {
+      fieldMapping = {};
+    }
+
     if (!(file instanceof File)) return fail("File Excel wajib diupload.");
     if (!databaseName) return fail("Nama database wajib diisi.");
     if (!companyName) return fail("Nama perusahaan / instansi wajib diisi.");
+    if (!fieldMapping.NAMA || !fieldMapping.NOMCU) {
+      return fail("Mapping wajib belum lengkap. Minimal mapping Nama Peserta dan No MCU harus dipilih.");
+    }
 
     const fileName = file.name || "upload.xlsx";
     const lowerName = fileName.toLowerCase();
@@ -258,36 +279,56 @@ export async function POST(req: NextRequest) {
       program_type: programType,
     });
 
-    const participantRows = excelRows
+    const preparedRows = excelRows
       .map((row, index) => {
-        const name = detectName(row);
-        if (!name) return null;
+        const detectedName = detectName(row, fieldMapping);
+        if (!detectedName) return null;
 
-        const mcuId = detectMcuId(row) || `${databaseName}-${index + 1}`;
-        const nik = detectNik(row);
+        const detectedMcuId = detectMcuId(row, fieldMapping) || `${databaseName}-${index + 1}`;
+        const detectedNik = detectNik(row, fieldMapping);
+
+        const canonicalRow = buildCanonicalRow(row, fieldMapping, {
+          companyName,
+          databaseName,
+          programType,
+          detectedName,
+          detectedMcuId,
+          detectedNik,
+        });
 
         return {
-          source_id: source.id,
-          company_id: company?.id || null,
-          program_type: programType,
-          name,
-          mcu_id: mcuId,
-          external_id: nik || mcuId,
-          nik: nik || null,
-          gender: detectGender(row) || null,
-          birth_date: detectBirthDate(row) || null,
-          department: detectDepartment(row) || null,
+          originalRow: row,
+          canonicalRow,
+          participant: {
+            source_id: source.id,
+            company_id: company?.id || null,
+            program_type: programType,
+            name: detectedName,
+            mcu_id: detectedMcuId,
+            external_id: detectedNik || detectedMcuId,
+            nik: detectedNik || null,
+            gender: canonicalRow.JK || null,
+            birth_date: canonicalRow.TGLLAHIR || null,
+            department: canonicalRow.DEPARTEMEN || null,
+          },
+          meta: {
+            detectedName,
+            detectedMcuId,
+            detectedNik,
+            sheetName: cleanText(row._SheetName),
+            rowIndex: Number(row._RowIndex || index + 2),
+          },
         };
       })
       .filter(Boolean) as any[];
 
-    if (!participantRows.length) {
-      return fail("Tidak ada baris peserta yang punya kolom nama. Pastikan header berisi Nama/NAMA.");
+    if (!preparedRows.length) {
+      return fail("Tidak ada baris peserta yang punya kolom nama. Periksa mapping Nama Peserta.");
     }
 
     const insertedParticipants = await supabase
       .from("participants")
-      .insert(participantRows)
+      .insert(preparedRows.map((row) => row.participant))
       .select("id,name,mcu_id,nik,external_id");
 
     if (insertedParticipants.error) {
@@ -299,10 +340,7 @@ export async function POST(req: NextRequest) {
     const participants = insertedParticipants.data || [];
 
     const importRows = participants.map((participant: any, index: number) => {
-      const row = excelRows[index] || {};
-      const detectedName = detectName(row) || participant.name;
-      const detectedMcuId = detectMcuId(row) || participant.mcu_id;
-      const detectedNik = detectNik(row) || participant.nik;
+      const prepared = preparedRows[index];
 
       return {
         source_id: source.id,
@@ -310,25 +348,12 @@ export async function POST(req: NextRequest) {
         program_type: programType,
         company_name: companyName,
         database_name: databaseName,
-        sheet_name: cleanText(row._SheetName),
-        row_index: Number(row._RowIndex || index + 2),
-        participant_name: detectedName,
-        mcu_id: detectedMcuId,
-        nik: detectedNik,
-        row_data: {
-          ...row,
-          NAMA: detectedName,
-          Nama: detectedName,
-          NOMCU: detectedMcuId,
-          "NO MCU": detectedMcuId,
-          NIK: detectedNik,
-          "NIK/NRP/ID": detectedNik,
-          "Nama PT": companyName,
-          Perusahaan: companyName,
-          DATABASE_NAME: databaseName,
-          PROGRAM_TYPE: programType,
-          PAKET: detectPackage(row),
-        },
+        sheet_name: prepared.meta.sheetName,
+        row_index: prepared.meta.rowIndex,
+        participant_name: prepared.meta.detectedName,
+        mcu_id: prepared.meta.detectedMcuId,
+        nik: prepared.meta.detectedNik,
+        row_data: prepared.canonicalRow,
       };
     });
 
@@ -344,11 +369,12 @@ export async function POST(req: NextRequest) {
     }
 
     return ok({
-      message: "Excel berhasil diupload dan masuk ke database AI MCU.",
+      message: "Excel berhasil diupload, mapping tersimpan, dan data masuk ke database AI MCU.",
       source,
       company,
       fileName,
       presetMapping,
+      fieldMapping,
       totalExcelRows: excelRows.length,
       totalParticipants: participants.length,
       totalStoredRows: savedRows.data?.length || 0,
