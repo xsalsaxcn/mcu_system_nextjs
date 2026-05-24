@@ -177,6 +177,9 @@ export async function POST(req: NextRequest) {
     const rekapRows = participants.map((p) => participantToRekapRow(p, maps));
     const names = participants.map((p) => pick(p.name, p.nama)).filter(Boolean);
 
+    const firstSource = maps.sourceMap.get(participants[0]?.source_id) as any;
+    const firstCompany = maps.companyMap.get(participants[0]?.company_id) as any;
+
     const effectiveMode = participants.length > 1 ? "batch" : modeRaw;
 
     const res = await fetch(`${engineUrl}/generate-pdf-async`, {
@@ -195,9 +198,9 @@ export async function POST(req: NextRequest) {
         abnRows: [],
         condRows: [],
         company: pick(
-          maps.companyMap.get(participants[0]?.company_id),
-          maps.sourceMap.get(participants[0]?.source_id)?.institution_name,
-          maps.sourceMap.get(participants[0]?.source_id)?.name,
+          firstCompany,
+          firstSource?.institution_name,
+          firstSource?.name,
           "AI MCU"
         ),
         year: new Date().getFullYear(),
