@@ -7,7 +7,6 @@ type SourceItem = {
   name: string;
   institution_name?: string | null;
   program_type?: string | null;
-  created_at?: string | null;
 };
 
 type Participant = {
@@ -17,12 +16,10 @@ type Participant = {
   external_id?: string | null;
   nik?: string | null;
   barcode_value?: string | null;
-  source_id?: number | null;
   source_name?: string | null;
   institution_name?: string | null;
   company_name?: string | null;
   package_name?: string | null;
-  program_type?: string | null;
 };
 
 type GeneratedFile = {
@@ -57,25 +54,27 @@ type StoredJob = {
   selectedCount?: number;
   sourceId?: string;
   sourceName?: string;
+  programType?: string;
 };
 
 const ACTIVE_JOB_KEY = "ai_mcu_pdf_active_job_v1";
+
+const PROGRAM_OPTIONS = [
+  { value: "all", label: "Semua Program" },
+  { value: "capaska", label: "CAPASKA" },
+  { value: "corporate", label: "Corporate" },
+];
 
 const menuItems = [
   ["Dashboard", "/dashboard"],
   ["AI MCU Analyzer", "/ai-mcu"],
   ["Corporate MCU AI", "/ai-mcu/corporate"],
-  ["Upload Excel", "/ai-mcu/upload"],
-  ["Mapping Header", "/ai-mcu/mapping"],
+  ["Analisis MCU", "/ai-mcu/analyze"],
   ["Preview Data", "/ai-mcu/preview"],
   ["Edit Data", "/ai-mcu/edit"],
   ["Generate PDF", "/ai-mcu/generate"],
   ["Google Drive", "/ai-mcu/drive"],
   ["Riwayat", "/ai-mcu/history"],
-  ["Import Peserta", "/import"],
-  ["Input Corporate", "/input-corporate"],
-  ["Cetak Label", "/labels"],
-  ["Review Hasil", "/review"],
 ];
 
 function formatBytes(bytes?: number) {
@@ -87,14 +86,11 @@ function formatBytes(bytes?: number) {
 
 function readStoredJob(): StoredJob | null {
   if (typeof window === "undefined") return null;
-
   try {
     const raw = window.localStorage.getItem(ACTIVE_JOB_KEY);
     if (!raw) return null;
-
     const parsed = JSON.parse(raw);
     if (!parsed?.jobId) return null;
-
     return parsed as StoredJob;
   } catch {
     return null;
@@ -112,6 +108,7 @@ function clearStoredJob() {
 }
 
 export default function AiMcuGeneratePage() {
+  const [programType, setProgramType] = useState("all");
   const [mode, setMode] = useState("single");
   const [uploadDrive, setUploadDrive] = useState(false);
   const [mergePdf, setMergePdf] = useState(true);
@@ -134,11 +131,6 @@ export default function AiMcuGeneratePage() {
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const selectedParticipants = useMemo(
-    () => participants.filter((p) => selectedIds.has(p.id)),
-    [participants, selectedIds]
-  );
-
   const selectedSource = useMemo(
     () => sources.find((source) => String(source.id) === sourceId),
     [sources, sourceId]
@@ -154,12 +146,19 @@ export default function AiMcuGeneratePage() {
     }
   }
 
-  async function loadSources() {
+  async function loadSources(nextProgram = programType) {
     setLoadingSources(true);
     setError("");
+    setSources([]);
+    setSourceId("");
+    setParticipants([]);
+    setSelectedIds(new Set());
 
     try {
-      const res = await fetch("/api/sources?program=all", { cache: "no-store" });
+      const params = new URLSearchParams();
+      params.set("program", nextProgram);
+
+      const res = await fetch(`/api/sources?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
       if (!res.ok || !json.ok) {
@@ -170,7 +169,7 @@ export default function AiMcuGeneratePage() {
       const list = json.sources || [];
       setSources(list);
 
-      if (!sourceId && list[0]?.id) {
+      if (list[0]?.id) {
         setSourceId(String(list[0].id));
       }
     } catch (err: any) {
@@ -180,7 +179,7 @@ export default function AiMcuGeneratePage() {
     }
   }
 
-  async function loadParticipants(nextSourceId = sourceId) {
+  async function loadParticipants(nextSourceId = sourceId, nextProgram = programType) {
     if (!nextSourceId) {
       setParticipants([]);
       setSelectedIds(new Set());
@@ -196,7 +195,7 @@ export default function AiMcuGeneratePage() {
     try {
       const params = new URLSearchParams();
       params.set("source_id", nextSourceId);
-      params.set("program", "all");
+      params.set("program", nextProgram);
       params.set("limit", "1000");
       if (keyword.trim()) params.set("keyword", keyword.trim());
 
@@ -272,7 +271,6 @@ export default function AiMcuGeneratePage() {
 
   function resumeStoredJob() {
     const stored = readStoredJob();
-
     if (!stored?.jobId) return;
 
     setResult({
@@ -287,9 +285,7 @@ export default function AiMcuGeneratePage() {
     });
 
     setBackgroundNotice(
-      `Ada job PDF yang masih berjalan di background sejak ${new Date(
-        stored.startedAt
-      ).toLocaleString("id-ID")}.`
+      `Ada job PDF yang masih berjalan di background sejak ${new Date(stored.startedAt).toLocaleString("id-ID")}.`
     );
 
     setPolling(true);
@@ -298,15 +294,19 @@ export default function AiMcuGeneratePage() {
   }
 
   useEffect(() => {
-    loadSources();
+    loadSources(programType);
     resumeStoredJob();
-
     return () => clearPollTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (sourceId) loadParticipants(sourceId);
+    loadSources(programType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programType]);
+
+  useEffect(() => {
+    if (sourceId) loadParticipants(sourceId, programType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 
@@ -345,7 +345,7 @@ export default function AiMcuGeneratePage() {
     const ids = Array.from(selectedIds);
 
     if (!sourceId) {
-      setError("Pilih database/source MCU terlebih dahulu.");
+      setError("Pilih program dan database/source MCU terlebih dahulu.");
       return;
     }
 
@@ -366,6 +366,8 @@ export default function AiMcuGeneratePage() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          programType,
+          sourceId,
           mode: effectiveMode,
           uploadDrive,
           mergePdf,
@@ -395,6 +397,7 @@ export default function AiMcuGeneratePage() {
         selectedCount: ids.length,
         sourceId,
         sourceName: selectedSource?.name || "",
+        programType,
       });
 
       setPolling(true);
@@ -432,9 +435,8 @@ export default function AiMcuGeneratePage() {
           <div>
             <h1 className="text-2xl font-bold">Generate PDF AI MCU</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Pilih database/source MCU, retrieve peserta, pilih single/multiple/select all,
-              lalu generate PDF memakai async job dengan progress. Proses tetap berjalan
-              di engine walaupun kamu pindah ke menu lain.
+              Pilih jenis program, database MCU, retrieve peserta, pilih single/multiple/select all,
+              lalu generate PDF memakai async job.
             </p>
           </div>
 
@@ -495,9 +497,22 @@ export default function AiMcuGeneratePage() {
         <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
           <section className="space-y-5">
             <div className="rounded-2xl border bg-slate-50 p-5">
-              <h2 className="text-lg font-bold">1. Pilih Database MCU</h2>
+              <h2 className="text-lg font-bold">1. Pilih Program & Database MCU</h2>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+              <div className="mt-4 grid gap-3 md:grid-cols-[0.55fr_1fr_auto]">
+                <select
+                  value={programType}
+                  onChange={(e) => setProgramType(e.target.value)}
+                  disabled={loadingSources}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm disabled:opacity-60"
+                >
+                  {PROGRAM_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+
                 <select
                   value={sourceId}
                   onChange={(e) => setSourceId(e.target.value)}
@@ -620,7 +635,7 @@ export default function AiMcuGeneratePage() {
                     ))
                   ) : (
                     <div className="p-5 text-sm text-slate-500">
-                      Belum ada peserta. Pilih database lalu klik Retrieve Data.
+                      Belum ada peserta. Pilih program dan database lalu klik Retrieve Data.
                     </div>
                   )}
                 </div>
