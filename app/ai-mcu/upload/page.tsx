@@ -2,52 +2,52 @@
 
 import { useState } from "react";
 
-type UploadResult = {
-  ok: boolean;
-  message?: string;
-  file?: {
-    name: string;
-    size: number;
-    type: string;
-  };
-  preset?: string;
-  nextStep?: string;
-};
+const PROGRAM_OPTIONS = [
+  { value: "corporate", label: "Corporate" },
+  { value: "capaska", label: "CAPASKA" },
+];
 
 export default function AiMcuUploadPage() {
+  const [programType, setProgramType] = useState("corporate");
+  const [companyName, setCompanyName] = useState("");
+  const [databaseName, setDatabaseName] = useState("");
+  const [presetMapping, setPresetMapping] = useState("auto");
   const [file, setFile] = useState<File | null>(null);
-  const [preset, setPreset] = useState("autodetect");
+
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<UploadResult | null>(null);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [result, setResult] = useState<any>(null);
 
-  async function submitUpload(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-
+  async function uploadExcel() {
+    setMessage("");
     setResult(null);
-    setError("");
 
-    if (!file) {
-      setError("Pilih file Excel terlebih dahulu.");
+    if (!companyName.trim()) {
+      setMessage("Nama perusahaan / instansi wajib diisi.");
       return;
     }
 
-    const allowed = [".xlsx", ".xls"];
-    const lowerName = file.name.toLowerCase();
-    const validExt = allowed.some((ext) => lowerName.endsWith(ext));
+    if (!databaseName.trim()) {
+      setMessage("Nama database wajib diisi.");
+      return;
+    }
 
-    if (!validExt) {
-      setError("Format file harus .xlsx atau .xls.");
+    if (!file) {
+      setMessage("Pilih file Excel terlebih dahulu.");
       return;
     }
 
     const form = new FormData();
+    form.append("programType", programType);
+    form.append("companyName", companyName.trim());
+    form.append("databaseName", databaseName.trim());
+    form.append("presetMapping", presetMapping);
     form.append("file", file);
-    form.append("preset", preset);
+
+    setLoading(true);
+    setMessage("Mengupload dan membaca Excel...");
 
     try {
-      setLoading(true);
-
       const res = await fetch("/api/ai-mcu/upload", {
         method: "POST",
         body: form,
@@ -56,13 +56,15 @@ export default function AiMcuUploadPage() {
       const json = await res.json();
 
       if (!res.ok || !json.ok) {
-        setError(json.message || "Upload gagal.");
+        setMessage(json.message || "Upload Excel gagal.");
+        setResult(json);
         return;
       }
 
       setResult(json);
+      setMessage(json.message || "Excel berhasil diupload.");
     } catch (err: any) {
-      setError(err?.message || "Upload gagal.");
+      setMessage(err?.message || "Upload Excel gagal.");
     } finally {
       setLoading(false);
     }
@@ -71,102 +73,199 @@ export default function AiMcuUploadPage() {
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Upload Excel AI MCU</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Upload file Excel hasil MCU untuk diproses oleh AI MCU Analyzer.
-              Tahap ini menyiapkan workflow upload dan pilihan mapping header.
+              Upload file Excel hasil MCU, isi nama perusahaan/instansi dan nama database.
+              Setelah upload, data peserta dan row hasil MCU akan masuk ke database AI MCU
+              dan bisa dipakai di Analisis MCU serta Generate PDF.
             </p>
           </div>
 
-          <a
-            href="/ai-mcu"
-            className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Kembali
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/ai-mcu"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              ☰ Menu AI MCU
+            </a>
+            <a
+              href="/ai-mcu"
+              className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Kembali
+            </a>
+          </div>
         </div>
 
-        <form onSubmit={submitUpload} className="mt-6 space-y-5">
-          <div>
-            <label className="mb-2 block text-sm font-bold text-slate-700">
-              File Excel
-            </label>
+        <div className="mt-6 grid gap-5 lg:grid-cols-2">
+          <section className="rounded-2xl border bg-slate-50 p-5">
+            <h2 className="text-lg font-bold">Informasi Database</h2>
 
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-            />
-
-            <p className="mt-2 text-xs text-slate-500">
-              Format yang didukung: .xlsx dan .xls.
-            </p>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-bold text-slate-700">
-              Preset Mapping
-            </label>
-
-            <select
-              value={preset}
-              onChange={(e) => setPreset(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-            >
-              <option value="autodetect">Auto Detect</option>
-              <option value="manual">Manual Mapping</option>
-            </select>
-
-            <p className="mt-2 text-xs text-slate-500">
-              Auto Detect mencoba membaca header otomatis. Manual Mapping akan
-              diarahkan ke halaman mapping seperti konsep mail merge / Autocrat.
-            </p>
-          </div>
-
-          {error ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-              {error}
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-bold text-slate-700">
+                Jenis Program
+              </label>
+              <select
+                value={programType}
+                onChange={(e) => setProgramType(e.target.value)}
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+              >
+                {PROGRAM_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : null}
 
-          {result?.ok ? (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              <div className="font-bold">{result.message}</div>
-              <div className="mt-2">
-                File: <b>{result.file?.name}</b>
-              </div>
-              <div>
-                Size: <b>{result.file?.size?.toLocaleString()} bytes</b>
-              </div>
-              <div>
-                Preset: <b>{result.preset}</b>
-              </div>
-              <div className="mt-2 text-xs">
-                Next step: {result.nextStep}
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-bold text-slate-700">
+                Nama Perusahaan / Instansi
+              </label>
+              <input
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                disabled={loading}
+                placeholder="Contoh: PT Sehat Sentosa / BPIP"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+              />
+            </div>
+
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-bold text-slate-700">
+                Nama Database
+              </label>
+              <input
+                value={databaseName}
+                onChange={(e) => setDatabaseName(e.target.value)}
+                disabled={loading}
+                placeholder="Contoh: MCU PT Sehat Mei 2026"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+              />
+              <div className="mt-2 text-xs text-slate-500">
+                Nama ini akan muncul di dropdown database pada Analisis MCU dan Generate PDF.
               </div>
             </div>
-          ) : null}
+          </section>
 
-          <div className="flex flex-wrap gap-3">
+          <section className="rounded-2xl border bg-white p-5">
+            <h2 className="text-lg font-bold">File & Mapping</h2>
+
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-bold text-slate-700">
+                File Excel
+              </label>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                disabled={loading}
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+              />
+              <div className="mt-2 text-xs text-slate-500">
+                Format yang didukung: .xlsx dan .xls.
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className="mb-2 block text-sm font-bold text-slate-700">
+                Preset Mapping
+              </label>
+              <select
+                value={presetMapping}
+                onChange={(e) => setPresetMapping(e.target.value)}
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+              >
+                <option value="auto">Auto Detect</option>
+                <option value="manual">Manual Mapping</option>
+              </select>
+              <div className="mt-2 text-xs text-slate-500">
+                Auto Detect akan mencari kolom Nama, NIK, No MCU, dan hasil pemeriksaan dari header Excel.
+              </div>
+            </div>
+
             <button
-              type="submit"
+              type="button"
+              onClick={uploadExcel}
               disabled={loading}
-              className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Uploading..." : "Upload Excel"}
             </button>
 
-            <a
-              href="/ai-mcu/mapping"
-              className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
-            >
-              Ke Mapping Header
-            </a>
-          </div>
-        </form>
+            {message ? (
+              <div
+                className={`mt-4 rounded-xl border p-4 text-sm font-semibold ${
+                  result?.ok
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                }`}
+              >
+                {message}
+              </div>
+            ) : null}
+          </section>
+        </div>
+
+        {result?.ok ? (
+          <section className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <h2 className="text-lg font-bold text-emerald-900">Upload Berhasil</h2>
+
+            <div className="mt-3 grid gap-2 text-sm text-emerald-800 md:grid-cols-2">
+              <div>
+                Database: <b>{result.source?.name}</b>
+              </div>
+              <div>
+                Program: <b>{result.source?.program_type}</b>
+              </div>
+              <div>
+                Perusahaan/Instansi: <b>{result.source?.institution_name}</b>
+              </div>
+              <div>
+                Peserta tersimpan: <b>{result.totalParticipants}</b>
+              </div>
+              <div>
+                Row Excel terbaca: <b>{result.totalExcelRows}</b>
+              </div>
+              <div>
+                Row data MCU tersimpan: <b>{result.totalStoredRows}</b>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <a
+                href="/ai-mcu/analyze"
+                className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-bold text-white hover:bg-purple-700"
+              >
+                Lanjut Analisis MCU
+              </a>
+
+              <a
+                href="/ai-mcu/generate"
+                className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700"
+              >
+                Lanjut Generate PDF
+              </a>
+
+              <a
+                href="/ai-mcu/preview"
+                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Preview Data
+              </a>
+            </div>
+          </section>
+        ) : null}
+
+        {result && !result.ok ? (
+          <pre className="mt-5 max-h-72 overflow-auto rounded-xl border bg-slate-50 p-4 text-xs text-slate-700">
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        ) : null}
       </div>
     </main>
   );

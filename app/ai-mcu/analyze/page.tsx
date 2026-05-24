@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type SourceItem = {
   id: number;
   name: string;
   institution_name?: string | null;
+  program_type?: string | null;
 };
 
 type Participant = {
@@ -33,7 +34,14 @@ type AnalysisItem = {
   fitStatus?: string;
 };
 
+const PROGRAM_OPTIONS = [
+  { value: "all", label: "Semua Program" },
+  { value: "capaska", label: "CAPASKA" },
+  { value: "corporate", label: "Corporate" },
+];
+
 export default function AiMcuAnalyzePage() {
+  const [programType, setProgramType] = useState("all");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -52,12 +60,20 @@ export default function AiMcuAnalyzePage() {
 
   const selectedCount = selectedIds.size;
 
-  async function loadSources() {
+  async function loadSources(nextProgram = programType) {
     setLoadingSources(true);
     setError("");
+    setSources([]);
+    setSourceId("");
+    setParticipants([]);
+    setSelectedIds(new Set());
+    setResult(null);
 
     try {
-      const res = await fetch("/api/sources?program=all", { cache: "no-store" });
+      const params = new URLSearchParams();
+      params.set("program", nextProgram);
+
+      const res = await fetch(`/api/sources?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
       if (!res.ok || !json.ok) {
@@ -68,7 +84,9 @@ export default function AiMcuAnalyzePage() {
       const list = json.sources || [];
       setSources(list);
 
-      if (!sourceId && list[0]?.id) setSourceId(String(list[0].id));
+      if (list[0]?.id) {
+        setSourceId(String(list[0].id));
+      }
     } catch (err: any) {
       setError(err?.message || "Gagal mengambil database.");
     } finally {
@@ -76,7 +94,7 @@ export default function AiMcuAnalyzePage() {
     }
   }
 
-  async function loadParticipants(nextSourceId = sourceId) {
+  async function loadParticipants(nextSourceId = sourceId, nextProgram = programType) {
     if (!nextSourceId) return;
 
     setLoadingParticipants(true);
@@ -88,7 +106,7 @@ export default function AiMcuAnalyzePage() {
     try {
       const params = new URLSearchParams();
       params.set("source_id", nextSourceId);
-      params.set("program", "all");
+      params.set("program", nextProgram);
       params.set("limit", "1000");
       if (keyword.trim()) params.set("keyword", keyword.trim());
 
@@ -112,12 +130,12 @@ export default function AiMcuAnalyzePage() {
   }
 
   useEffect(() => {
-    loadSources();
+    loadSources(programType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [programType]);
 
   useEffect(() => {
-    if (sourceId) loadParticipants(sourceId);
+    if (sourceId) loadParticipants(sourceId, programType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 
@@ -157,6 +175,8 @@ export default function AiMcuAnalyzePage() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          programType,
+          sourceId,
           participantIds: ids,
         }),
       });
@@ -185,8 +205,8 @@ export default function AiMcuAnalyzePage() {
           <div>
             <h1 className="text-2xl font-bold">Analisis MCU AI</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Deteksi nilai abnormal, interpretasi penyakit berbasis rule Streamlit lama,
-              status FIT/FIT WITH NOTE, kesimpulan, saran, dan perbandingan jika data lama tersedia.
+              Pilih jenis program, pilih database MCU, retrieve peserta, lalu jalankan
+              analisis abnormal, interpretasi penyakit, kesimpulan, saran, dan status FIT.
             </p>
           </div>
 
@@ -209,13 +229,26 @@ export default function AiMcuAnalyzePage() {
         <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_1fr]">
           <section className="space-y-5">
             <div className="rounded-2xl border bg-slate-50 p-5">
-              <h2 className="text-lg font-bold">1. Pilih Database MCU</h2>
+              <h2 className="text-lg font-bold">1. Pilih Program & Database MCU</h2>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+              <div className="mt-4 grid gap-3 md:grid-cols-[0.55fr_1fr_auto]">
+                <select
+                  value={programType}
+                  onChange={(e) => setProgramType(e.target.value)}
+                  disabled={loadingSources || analyzing}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                >
+                  {PROGRAM_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+
                 <select
                   value={sourceId}
                   onChange={(e) => setSourceId(e.target.value)}
-                  disabled={loadingSources}
+                  disabled={loadingSources || analyzing}
                   className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
                 >
                   <option value="">
@@ -232,7 +265,7 @@ export default function AiMcuAnalyzePage() {
                 <button
                   type="button"
                   onClick={() => loadParticipants()}
-                  disabled={!sourceId || loadingParticipants}
+                  disabled={!sourceId || loadingParticipants || analyzing}
                   className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                 >
                   Retrieve Data
@@ -253,11 +286,16 @@ export default function AiMcuAnalyzePage() {
                 <button
                   type="button"
                   onClick={() => loadParticipants()}
-                  disabled={!sourceId || loadingParticipants}
+                  disabled={!sourceId || loadingParticipants || analyzing}
                   className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
                 >
                   {loadingParticipants ? "Loading..." : "Search"}
                 </button>
+              </div>
+
+              <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-500">
+                Database yang tampil mengikuti pilihan program:{" "}
+                <b>{PROGRAM_OPTIONS.find((x) => x.value === programType)?.label}</b>.
               </div>
             </div>
 
@@ -274,7 +312,7 @@ export default function AiMcuAnalyzePage() {
                   <button
                     type="button"
                     onClick={selectAllLoaded}
-                    disabled={!participants.length}
+                    disabled={!participants.length || analyzing}
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Select All Loaded
@@ -283,7 +321,7 @@ export default function AiMcuAnalyzePage() {
                   <button
                     type="button"
                     onClick={clearSelection}
-                    disabled={!selectedCount}
+                    disabled={!selectedCount || analyzing}
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Clear
@@ -298,7 +336,7 @@ export default function AiMcuAnalyzePage() {
                       type="checkbox"
                       checked={allLoadedSelected}
                       onChange={(e) => e.target.checked ? selectAllLoaded() : clearSelection()}
-                      disabled={!participants.length}
+                      disabled={!participants.length || analyzing}
                     />
                   </div>
                   <div>Nama</div>
@@ -317,6 +355,7 @@ export default function AiMcuAnalyzePage() {
                           <input
                             type="checkbox"
                             checked={selectedIds.has(p.id)}
+                            disabled={analyzing}
                             onChange={() => toggleParticipant(p.id)}
                           />
                         </div>
@@ -332,7 +371,7 @@ export default function AiMcuAnalyzePage() {
                     ))
                   ) : (
                     <div className="p-5 text-sm text-slate-500">
-                      Belum ada peserta. Pilih database lalu klik Retrieve Data.
+                      Belum ada peserta. Pilih program dan database lalu klik Retrieve Data.
                     </div>
                   )}
                 </div>

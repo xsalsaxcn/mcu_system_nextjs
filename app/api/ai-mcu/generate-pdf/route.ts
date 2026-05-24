@@ -83,56 +83,83 @@ async function loadLookupMaps(supabase: any) {
   };
 }
 
+async function fetchImportRows(supabase: any, ids: number[]) {
+  try {
+    const { data, error } = await supabase
+      .from("ai_mcu_import_rows")
+      .select("participant_id,row_data,participant_name,mcu_id,nik,company_name,database_name")
+      .in("participant_id", ids)
+      .order("id", { ascending: true });
+
+    if (error) return new Map();
+
+    const map = new Map<number, any>();
+    for (const row of data || []) {
+      const pid = Number(row.participant_id);
+      if (Number.isFinite(pid) && !map.has(pid)) {
+        map.set(pid, row);
+      }
+    }
+
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 function participantToRekapRow(
   p: any,
+  importRow: any,
   maps: {
     packageMap: Map<any, any>;
     sourceMap: Map<any, any>;
     companyMap: Map<any, any>;
   }
 ) {
-  const source = maps.sourceMap.get(p.source_id);
-  const companyName = maps.companyMap.get(p.company_id);
-  const packageName = maps.packageMap.get(p.package_id);
+  const source = maps.sourceMap.get(p.source_id) as any;
+  const companyName = maps.companyMap.get(p.company_id) as any;
+  const packageName = maps.packageMap.get(p.package_id) as any;
 
-  const name = pick(p.name, p.nama);
-  const mcuId = pick(p.mcu_id, p.no_mcu, p.nomcu, p.barcode_value, p.external_id, p.id);
-  const nik = pick(p.nik, p.external_id, p.employee_id, p.id);
-  const birthDate = pick(p.birth_date, p.date_of_birth, p.tanggal_lahir, p.dob);
-  const gender = pick(p.gender, p.sex, p.jenis_kelamin, p.jk);
-  const department = pick(p.department, p.departement, p.division, p.unit, p.bagian);
-  const company = pick(companyName, source?.institution_name, source?.name, p.company_name, p.institution_name);
-  const packageText = pick(packageName, p.package_name, p.paket);
+  const uploadedRow = importRow?.row_data && typeof importRow.row_data === "object"
+    ? importRow.row_data
+    : {};
+
+  const name = pick(uploadedRow.NAMA, uploadedRow.Nama, importRow?.participant_name, p.name, p.nama);
+  const mcuId = pick(uploadedRow.NOMCU, uploadedRow["NO MCU"], importRow?.mcu_id, p.mcu_id, p.no_mcu, p.nomcu, p.barcode_value, p.external_id, p.id);
+  const nik = pick(uploadedRow.NIK, uploadedRow["NIK/NRP/ID"], importRow?.nik, p.nik, p.external_id, p.employee_id, p.id);
+  const company = pick(uploadedRow["Nama PT"], uploadedRow.Perusahaan, importRow?.company_name, companyName, source?.institution_name, source?.name, p.company_name, p.institution_name);
+  const packageText = pick(uploadedRow.PAKET, uploadedRow.Paket, packageName, p.package_name, p.paket);
 
   return {
-    "_SheetName": "FISIK",
+    ...uploadedRow,
 
+    "_SheetName": pick(uploadedRow._SheetName, "FISIK"),
     "Nama PT": company,
-    "Tanggal MCU": formatDateId(p.mcu_date || p.created_at || p.updated_at),
+    "Tanggal MCU": formatDateId(p.mcu_date || uploadedRow["Tanggal MCU"] || p.created_at || p.updated_at),
     "Issueddate": formatDateId(new Date().toISOString()),
 
     "NOMCU": mcuId,
     "NO MCU": mcuId,
     "NO.MCU": mcuId,
-    "NO.URUT": pick(p.no_urut, p.urut, p.sequence_no, p.barcode_value, mcuId),
+    "NO.URUT": pick(uploadedRow["NO.URUT"], uploadedRow["NO URUT"], p.no_urut, p.urut, p.sequence_no, p.barcode_value, mcuId),
 
     "NAMA": name,
     "Nama": name,
 
-    "JK": gender,
-    "TGLLAHIR": formatDateId(birthDate),
-    "USIA": pick(p.age, p.usia),
+    "JK": pick(uploadedRow.JK, uploadedRow.Gender, p.gender, p.sex, p.jenis_kelamin),
+    "TGLLAHIR": formatDateId(pick(uploadedRow.TGLLAHIR, uploadedRow["Tanggal Lahir"], p.birth_date, p.date_of_birth, p.tanggal_lahir)),
+    "USIA": pick(uploadedRow.USIA, uploadedRow.Usia, p.age, p.usia),
 
     "NIK": nik,
     "NIK/NRP/ID": nik,
 
-    "DEPARTEMEN": department,
+    "DEPARTEMEN": pick(uploadedRow.DEPARTEMEN, uploadedRow.Department, p.department, p.departement, p.division, p.unit, p.bagian),
     "PAKET": packageText,
-    "KATEGORI": pick(p.program_type, source?.program_type, "corporate"),
+    "KATEGORI": pick(uploadedRow.KATEGORI, p.program_type, source?.program_type, "corporate"),
 
-    "KESIMPULAN": pick(p.conclusion, p.kesimpulan),
-    "SARAN": pick(p.recommendation, p.saran),
-    "FIT_STATUS": pick(p.fit_status, p.status_fit),
+    "KESIMPULAN": pick(uploadedRow.KESIMPULAN, uploadedRow.Kesimpulan, p.conclusion, p.kesimpulan),
+    "SARAN": pick(uploadedRow.SARAN, uploadedRow.Saran, p.recommendation, p.saran),
+    "FIT_STATUS": pick(uploadedRow.FIT_STATUS, uploadedRow.fitStatus, p.fit_status, p.status_fit),
   };
 }
 
@@ -173,12 +200,14 @@ export async function POST(req: NextRequest) {
     }
 
     const maps = await loadLookupMaps(supabase);
+    const importRows = await fetchImportRows(supabase, participantIds);
 
-    const rekapRows = participants.map((p) => participantToRekapRow(p, maps));
-    const names = participants.map((p) => pick(p.name, p.nama)).filter(Boolean);
+    const rekapRows = participants.map((p) => participantToRekapRow(p, importRows.get(Number(p.id)), maps));
+    const names = rekapRows.map((row) => pick(row.NAMA, row.Nama)).filter(Boolean);
 
     const firstSource = maps.sourceMap.get(participants[0]?.source_id) as any;
     const firstCompany = maps.companyMap.get(participants[0]?.company_id) as any;
+    const firstImport = importRows.get(Number(participants[0]?.id)) as any;
 
     const effectiveMode = participants.length > 1 ? "batch" : modeRaw;
 
@@ -198,6 +227,7 @@ export async function POST(req: NextRequest) {
         abnRows: [],
         condRows: [],
         company: pick(
+          firstImport?.company_name,
           firstCompany,
           firstSource?.institution_name,
           firstSource?.name,
@@ -225,6 +255,7 @@ export async function POST(req: NextRequest) {
       current: Number(json.current || 0),
       total: Number(json.total || participants.length),
       selectedCount: participants.length,
+      importedRowsUsed: importRows.size,
       engineMode: json.engineMode || "python-engine-async",
     });
   } catch (error: any) {
