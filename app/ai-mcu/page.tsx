@@ -21,6 +21,11 @@ export default function AiMcuPage() {
       desc: "Review dan edit data sebelum generate PDF.",
     },
     {
+      title: "Analisis MCU",
+      href: "/ai-mcu/analyze",
+      desc: "Deteksi abnormal, interpretasi penyakit, compare data lama vs baru, kesimpulan dan saran.",
+    },
+    {
       title: "Generate PDF",
       href: "/ai-mcu/generate",
       desc: "Generate PDF per peserta dan merge untuk print.",
