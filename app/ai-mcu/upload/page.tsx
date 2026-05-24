@@ -16,8 +16,8 @@ const PROGRAM_OPTIONS = [
 ];
 
 const MAPPING_FIELDS: MappingField[] = [
-  { key: "NAMA", label: "Nama Peserta", required: true, group: "Identitas", aliases: ["nama", "nama peserta", "nama karyawan", "name", "patient name"] },
-  { key: "NOMCU", label: "No MCU", required: true, group: "Identitas", aliases: ["nomcu", "no mcu", "no.mcu", "nomor mcu", "mcu id", "barcode", "no peserta"] },
+  { key: "NAMA", label: "Nama Peserta", required: true, group: "Identitas", aliases: ["nama", "nama peserta", "nama karyawan", "nama lengkap", "name", "patient name", "employee name"] },
+  { key: "NOMCU", label: "No MCU", required: true, group: "Identitas", aliases: ["nomcu", "no mcu", "no.mcu", "nomor mcu", "mcu id", "barcode", "no peserta", "no urut"] },
   { key: "NIK", label: "NIK / NRP / ID", group: "Identitas", aliases: ["nik", "ktp", "nik/nrp/id", "nrp", "id karyawan", "employee id"] },
   { key: "JK", label: "Jenis Kelamin", group: "Identitas", aliases: ["jk", "jenis kelamin", "gender", "sex"] },
   { key: "TGLLAHIR", label: "Tanggal Lahir", group: "Identitas", aliases: ["tgllahir", "tanggal lahir", "tgl lahir", "birth date", "dob"] },
@@ -27,11 +27,11 @@ const MAPPING_FIELDS: MappingField[] = [
 
   { key: "FS:TB", label: "Tinggi Badan", group: "Fisik", aliases: ["tb", "tinggi badan", "height", "fs:tb"] },
   { key: "FS:BB", label: "Berat Badan", group: "Fisik", aliases: ["bb", "berat badan", "weight", "fs:bb"] },
-  { key: "FS:BMI", label: "BMI", group: "Fisik", aliases: ["bmi", "imt", "fs:bmi"] },
+  { key: "FS:BMI", label: "BMI / IMT", group: "Fisik", aliases: ["bmi", "imt", "fs:bmi"] },
   { key: "FS:Tensi", label: "Tekanan Darah / Tensi", group: "Fisik", aliases: ["tensi", "td", "tekanan darah", "blood pressure", "fs:tensi"] },
   { key: "FS:Nadi", label: "Nadi", group: "Fisik", aliases: ["nadi", "pulse", "fs:nadi"] },
   { key: "FS:Nafas", label: "Nafas", group: "Fisik", aliases: ["nafas", "respirasi", "respiration", "fs:nafas"] },
-  { key: "FS:ButaWarna", label: "Buta Warna", group: "Fisik", aliases: ["buta warna", "buta warna", "color blind", "fs:butawarna"] },
+  { key: "FS:ButaWarna", label: "Buta Warna", group: "Fisik", aliases: ["buta warna", "color blind", "fs:butawarna"] },
 
   { key: "DL:Hb", label: "Hemoglobin / Hb", group: "Laboratorium", aliases: ["hb", "hemoglobin", "dl:hb"] },
   { key: "DL:Leu", label: "Leukosit", group: "Laboratorium", aliases: ["leukosit", "leukocyte", "leu", "wbc", "dl:leu"] },
@@ -65,6 +65,8 @@ const MAPPING_FIELDS: MappingField[] = [
   { key: "FIT_STATUS", label: "Status Fit", group: "Output PDF", aliases: ["fit status", "fit_status", "status fit", "status"] },
 ];
 
+const GROUP_OPTIONS = ["Semua", "Identitas", "Fisik", "Laboratorium", "Penunjang", "Output PDF"] as const;
+
 function norm(value: unknown) {
   return String(value || "")
     .trim()
@@ -77,12 +79,10 @@ function autoDetect(headers: string[]) {
 
   for (const field of MAPPING_FIELDS) {
     const aliases = field.aliases.map(norm);
-
     let found = "";
 
     for (const header of headers) {
       const headerNorm = norm(header);
-
       if (aliases.includes(headerNorm)) {
         found = header;
         break;
@@ -92,7 +92,6 @@ function autoDetect(headers: string[]) {
     if (!found) {
       for (const header of headers) {
         const headerNorm = norm(header);
-
         if (aliases.some((alias) => alias && (headerNorm.includes(alias) || alias.includes(headerNorm)))) {
           found = header;
           break;
@@ -106,15 +105,23 @@ function autoDetect(headers: string[]) {
   return mapping;
 }
 
-function groupFields() {
-  return MAPPING_FIELDS.reduce<Record<string, MappingField[]>>((acc, field) => {
-    if (!acc[field.group]) acc[field.group] = [];
-    acc[field.group].push(field);
-    return acc;
-  }, {});
+function firstValue(rows: Record<string, any>[], header?: string) {
+  if (!header) return "";
+
+  for (const row of rows) {
+    const value = row?.[header];
+    const text = String(value ?? "").trim();
+    if (text && !["null", "undefined", "nan", "-"].includes(text.toLowerCase())) {
+      return text;
+    }
+  }
+
+  return "";
 }
 
 export default function AiMcuUploadPage() {
+  const [stage, setStage] = useState<"upload" | "mapping" | "done">("upload");
+
   const [programType, setProgramType] = useState("corporate");
   const [companyName, setCompanyName] = useState("");
   const [databaseName, setDatabaseName] = useState("");
@@ -124,31 +131,52 @@ export default function AiMcuUploadPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [sampleRows, setSampleRows] = useState<Record<string, any>[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
-  const [mappingReady, setMappingReady] = useState(false);
+  const [groupFilter, setGroupFilter] = useState<(typeof GROUP_OPTIONS)[number]>("Identitas");
 
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<any>(null);
 
-  const fieldsByGroup = useMemo(() => groupFields(), []);
+  const filteredFields = useMemo(() => {
+    if (groupFilter === "Semua") return MAPPING_FIELDS;
+    return MAPPING_FIELDS.filter((field) => field.group === groupFilter);
+  }, [groupFilter]);
 
-  async function parseExcel(nextFile: File | null) {
-    setFile(nextFile);
-    setHeaders([]);
-    setSampleRows([]);
-    setFieldMapping({});
-    setMappingReady(false);
+  const mappedCount = useMemo(() => {
+    return MAPPING_FIELDS.filter((field) => Boolean(fieldMapping[field.key])).length;
+  }, [fieldMapping]);
+
+  function missingRequiredFields() {
+    return MAPPING_FIELDS
+      .filter((field) => field.required)
+      .filter((field) => !fieldMapping[field.key]);
+  }
+
+  async function readExcelForMapping() {
     setMessage("");
     setResult(null);
 
-    if (!nextFile) return;
+    if (!companyName.trim()) {
+      setMessage("Nama perusahaan / instansi wajib diisi.");
+      return;
+    }
+
+    if (!databaseName.trim()) {
+      setMessage("Nama database wajib diisi.");
+      return;
+    }
+
+    if (!file) {
+      setMessage("Pilih file Excel terlebih dahulu.");
+      return;
+    }
 
     setLoadingPreview(true);
 
     try {
       const XLSX = await import("xlsx");
-      const buffer = await nextFile.arrayBuffer();
+      const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, {
         type: "array",
         cellDates: true,
@@ -176,10 +204,10 @@ export default function AiMcuUploadPage() {
       const detectedMapping = autoDetect(detectedHeaders);
 
       setHeaders(detectedHeaders);
-      setSampleRows(rows.slice(0, 5));
+      setSampleRows(rows.slice(0, 8));
       setFieldMapping(detectedMapping);
-      setMappingReady(true);
-      setMessage(`Header terbaca: ${detectedHeaders.length}. Mapping otomatis berhasil: ${Object.keys(detectedMapping).length} field.`);
+      setStage("mapping");
+      setMessage(`Header terbaca: ${detectedHeaders.length}. Auto mapping: ${Object.keys(detectedMapping).length} field.`);
     } catch (err: any) {
       setMessage(err?.message || "Gagal membaca Excel.");
     } finally {
@@ -198,34 +226,18 @@ export default function AiMcuUploadPage() {
     setFieldMapping(autoDetect(headers));
   }
 
-  function missingRequiredFields() {
-    return MAPPING_FIELDS
-      .filter((field) => field.required)
-      .filter((field) => !fieldMapping[field.key]);
-  }
-
-  async function uploadExcel() {
+  async function saveUpload() {
     setMessage("");
     setResult(null);
-
-    if (!companyName.trim()) {
-      setMessage("Nama perusahaan / instansi wajib diisi.");
-      return;
-    }
-
-    if (!databaseName.trim()) {
-      setMessage("Nama database wajib diisi.");
-      return;
-    }
-
-    if (!file) {
-      setMessage("Pilih file Excel terlebih dahulu.");
-      return;
-    }
 
     const missing = missingRequiredFields();
     if (missing.length) {
       setMessage(`Mapping wajib belum lengkap: ${missing.map((x) => x.label).join(", ")}.`);
+      return;
+    }
+
+    if (!file) {
+      setMessage("File Excel tidak ditemukan. Kembali ke step upload dan pilih file lagi.");
       return;
     }
 
@@ -238,7 +250,7 @@ export default function AiMcuUploadPage() {
     form.append("file", file);
 
     setLoading(true);
-    setMessage("Mengupload, menyimpan mapping, dan membaca Excel...");
+    setMessage("Menyimpan data Excel dan mapping ke database AI MCU...");
 
     try {
       const res = await fetch("/api/ai-mcu/upload", {
@@ -255,6 +267,7 @@ export default function AiMcuUploadPage() {
       }
 
       setResult(json);
+      setStage("done");
       setMessage(json.message || "Excel berhasil diupload.");
     } catch (err: any) {
       setMessage(err?.message || "Upload Excel gagal.");
@@ -272,8 +285,8 @@ export default function AiMcuUploadPage() {
           <div>
             <h1 className="text-2xl font-bold">Upload Excel AI MCU</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Upload Excel, isi nama perusahaan dan nama database, lalu mapping header ke parameter.
-              Mapping ini dipakai langsung untuk Analisis MCU dan Generate PDF.
+              Upload Excel dulu, lalu sistem membaca header dan membuka step mapping.
+              Mapping dipakai untuk Analisis MCU dan Generate PDF.
             </p>
           </div>
 
@@ -293,228 +306,302 @@ export default function AiMcuUploadPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-5 lg:grid-cols-2">
-          <section className="rounded-2xl border bg-slate-50 p-5">
-            <h2 className="text-lg font-bold">1. Informasi Database</h2>
-
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-bold text-slate-700">
-                Jenis Program
-              </label>
-              <select
-                value={programType}
-                onChange={(e) => setProgramType(e.target.value)}
-                disabled={loading}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-              >
-                {PROGRAM_OPTIONS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+        <div className="mt-6 grid gap-3 md:grid-cols-3">
+          {[
+            ["upload", "1. Upload Excel"],
+            ["mapping", "2. Mapping Header"],
+            ["done", "3. Selesai"],
+          ].map(([key, label]) => (
+            <div
+              key={key}
+              className={`rounded-xl border px-4 py-3 text-sm font-black ${
+                stage === key
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-slate-200 bg-slate-50 text-slate-500"
+              }`}
+            >
+              {label}
             </div>
-
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-bold text-slate-700">
-                Nama Perusahaan / Instansi
-              </label>
-              <input
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                disabled={loading}
-                placeholder="Contoh: PT Sehat Sentosa / BPIP"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-              />
-            </div>
-
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-bold text-slate-700">
-                Nama Database
-              </label>
-              <input
-                value={databaseName}
-                onChange={(e) => setDatabaseName(e.target.value)}
-                disabled={loading}
-                placeholder="Contoh: MCU PT Sehat Mei 2026"
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-              />
-              <div className="mt-2 text-xs text-slate-500">
-                Nama ini akan muncul di dropdown database pada Analisis MCU dan Generate PDF.
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border bg-white p-5">
-            <h2 className="text-lg font-bold">2. File Excel</h2>
-
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-bold text-slate-700">
-                File Excel
-              </label>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                disabled={loading || loadingPreview}
-                onChange={(e) => parseExcel(e.target.files?.[0] || null)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-              />
-              <div className="mt-2 text-xs text-slate-500">
-                Setelah file dipilih, header akan langsung dibaca dan mapping muncul di bawah.
-              </div>
-            </div>
-
-            <div className="mt-5">
-              <label className="mb-2 block text-sm font-bold text-slate-700">
-                Preset Mapping
-              </label>
-              <select
-                value={presetMapping}
-                onChange={(e) => setPresetMapping(e.target.value)}
-                disabled={loading}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-              >
-                <option value="auto">Auto Detect</option>
-                <option value="manual">Manual Mapping</option>
-              </select>
-            </div>
-
-            {message ? (
-              <div
-                className={`mt-4 rounded-xl border p-4 text-sm font-semibold ${
-                  result?.ok
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-amber-200 bg-amber-50 text-amber-800"
-                }`}
-              >
-                {message}
-              </div>
-            ) : null}
-          </section>
+          ))}
         </div>
 
-        <section className="mt-5 rounded-2xl border bg-white p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="text-lg font-bold">3. Mapping Header ke Parameter</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Cocokkan header Excel dengan parameter standar AI MCU. Field wajib: Nama Peserta dan No MCU.
-              </p>
+        {stage === "upload" ? (
+          <div className="mt-6 grid gap-5 lg:grid-cols-2">
+            <section className="rounded-2xl border bg-slate-50 p-5">
+              <h2 className="text-lg font-bold">Informasi Database</h2>
+
+              <div className="mt-4">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  Jenis Program
+                </label>
+                <select
+                  value={programType}
+                  onChange={(e) => setProgramType(e.target.value)}
+                  disabled={loadingPreview}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                >
+                  {PROGRAM_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  Nama Perusahaan / Instansi
+                </label>
+                <input
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  disabled={loadingPreview}
+                  placeholder="Contoh: PT Sehat Sentosa / BPIP"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                />
+              </div>
+
+              <div className="mt-4">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  Nama Database
+                </label>
+                <input
+                  value={databaseName}
+                  onChange={(e) => setDatabaseName(e.target.value)}
+                  disabled={loadingPreview}
+                  placeholder="Contoh: MCU PT Sehat Mei 2026"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                />
+                <div className="mt-2 text-xs text-slate-500">
+                  Nama ini akan muncul di dropdown database pada Analisis MCU dan Generate PDF.
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border bg-white p-5">
+              <h2 className="text-lg font-bold">File Excel</h2>
+
+              <div className="mt-4">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  File Excel
+                </label>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  disabled={loadingPreview}
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] || null);
+                    setHeaders([]);
+                    setSampleRows([]);
+                    setFieldMapping({});
+                    setMessage("");
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                />
+                <div className="mt-2 text-xs text-slate-500">
+                  Pilih file dulu, lalu klik tombol di bawah untuk membaca header dan masuk ke mapping.
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  Preset Mapping
+                </label>
+                <select
+                  value={presetMapping}
+                  onChange={(e) => setPresetMapping(e.target.value)}
+                  disabled={loadingPreview}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                >
+                  <option value="auto">Auto Detect</option>
+                  <option value="manual">Manual Mapping</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={readExcelForMapping}
+                disabled={loadingPreview}
+                className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingPreview ? "Membaca Header..." : "Upload Excel & Lanjut Mapping"}
+              </button>
+            </section>
+          </div>
+        ) : null}
+
+        {stage === "mapping" ? (
+          <section className="mt-6 rounded-2xl border bg-white p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Mapping Header ke Parameter</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Pilih header Excel untuk setiap parameter. Tampilan dibuat ringkas supaya mudah dicek.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStage("upload")}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Kembali Edit Upload
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetAutoMapping}
+                  disabled={!headers.length || loading}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Auto Detect Ulang
+                </button>
+              </div>
             </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+              <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
+                <div>
+                  File: <b>{file?.name || "-"}</b>
+                </div>
+                <div>
+                  Header terbaca: <b>{headers.length}</b> · Mapped: <b>{mappedCount}</b>/{MAPPING_FIELDS.length}
+                </div>
+                <div>
+                  Database: <b>{databaseName}</b> · Perusahaan: <b>{companyName}</b>
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-white p-3">
+                <label className="mb-2 block text-xs font-black uppercase text-slate-500">
+                  Filter Grup
+                </label>
+                <select
+                  value={groupFilter}
+                  onChange={(e) => setGroupFilter(e.target.value as any)}
+                  disabled={loading}
+                  className="min-w-[220px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  {GROUP_OPTIONS.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {requiredMissing.length ? (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+                Mapping wajib belum lengkap: {requiredMissing.map((x) => x.label).join(", ")}.
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+                Mapping wajib sudah lengkap. Data siap disimpan ke database AI MCU.
+              </div>
+            )}
+
+            <div className="mt-4 overflow-hidden rounded-2xl border">
+              <div className="grid grid-cols-[0.85fr_1.2fr_1fr_120px] bg-slate-100 px-3 py-3 text-xs font-black uppercase text-slate-600">
+                <div>Parameter AI MCU</div>
+                <div>Header Excel</div>
+                <div>Contoh Isi</div>
+                <div>Grup</div>
+              </div>
+
+              <div className="max-h-[520px] divide-y overflow-auto bg-white">
+                {filteredFields.map((field) => {
+                  const selectedHeader = fieldMapping[field.key] || "";
+                  const preview = firstValue(sampleRows, selectedHeader);
+
+                  return (
+                    <div
+                      key={field.key}
+                      className="grid grid-cols-[0.85fr_1.2fr_1fr_120px] items-center gap-3 px-3 py-3 text-sm"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          {field.label}
+                          {field.required ? <span className="text-red-600"> *</span> : null}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">{field.key}</div>
+                      </div>
+
+                      <select
+                        value={selectedHeader}
+                        onChange={(e) => updateMapping(field.key, e.target.value)}
+                        disabled={loading}
+                        className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
+                          field.required && !selectedHeader ? "border-red-300" : "border-slate-300"
+                        }`}
+                      >
+                        <option value="">-- Tidak dipakai --</option>
+                        {headers.map((header) => (
+                          <option key={`${field.key}-${header}`} value={header}>
+                            {header}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="truncate rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" title={preview}>
+                        {preview || "-"}
+                      </div>
+
+                      <div className="text-xs font-bold text-slate-500">{field.group}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {sampleRows.length ? (
+              <details className="mt-4 rounded-2xl border bg-slate-50">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-800">
+                  Preview 5 Baris Pertama
+                </summary>
+
+                <div className="overflow-auto border-t bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                      <tr>
+                        {headers.slice(0, 12).map((header) => (
+                          <th key={header} className="whitespace-nowrap p-2 text-left">
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {sampleRows.slice(0, 5).map((row, index) => (
+                        <tr key={index}>
+                          {headers.slice(0, 12).map((header) => (
+                            <td key={`${index}-${header}`} className="whitespace-nowrap p-2">
+                              {String(row[header] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
 
             <button
               type="button"
-              onClick={resetAutoMapping}
-              disabled={!headers.length || loading}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              onClick={saveUpload}
+              disabled={loading || !!requiredMissing.length}
+              className="mt-5 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Auto Detect Ulang
+              {loading ? "Menyimpan..." : "Simpan Mapping & Masukkan ke Database"}
             </button>
-          </div>
-
-          {!mappingReady ? (
-            <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-500">
-              Pilih file Excel terlebih dahulu untuk menampilkan mapping header.
-            </div>
-          ) : (
-            <div className="mt-5 space-y-5">
-              {requiredMissing.length ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-                  Mapping wajib belum lengkap: {requiredMissing.map((x) => x.label).join(", ")}.
-                </div>
-              ) : (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-                  Mapping wajib sudah lengkap. Data siap diupload ke database AI MCU.
-                </div>
-              )}
-
-              {Object.entries(fieldsByGroup).map(([group, fields]) => (
-                <div key={group} className="rounded-2xl border">
-                  <div className="border-b bg-slate-50 px-4 py-3 font-black text-slate-900">
-                    {group}
-                  </div>
-
-                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-                    {fields.map((field) => (
-                      <div key={field.key}>
-                        <label className="mb-2 block text-xs font-black uppercase text-slate-600">
-                          {field.label}
-                          {field.required ? <span className="text-red-600"> *</span> : null}
-                        </label>
-                        <select
-                          value={fieldMapping[field.key] || ""}
-                          onChange={(e) => updateMapping(field.key, e.target.value)}
-                          disabled={loading}
-                          className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
-                            field.required && !fieldMapping[field.key]
-                              ? "border-red-300"
-                              : "border-slate-300"
-                          }`}
-                        >
-                          <option value="">-- Tidak dipakai --</option>
-                          {headers.map((header) => (
-                            <option key={`${field.key}-${header}`} value={header}>
-                              {header}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {sampleRows.length ? (
-          <section className="mt-5 rounded-2xl border bg-white p-5">
-            <h2 className="text-lg font-bold">Preview 5 Baris Pertama</h2>
-
-            <div className="mt-4 overflow-auto rounded-xl border">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                  <tr>
-                    {headers.slice(0, 12).map((header) => (
-                      <th key={header} className="whitespace-nowrap p-2 text-left">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {sampleRows.map((row, index) => (
-                    <tr key={index}>
-                      {headers.slice(0, 12).map((header) => (
-                        <td key={`${index}-${header}`} className="whitespace-nowrap p-2">
-                          {String(row[header] ?? "")}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {headers.length > 12 ? (
-              <div className="mt-2 text-xs text-slate-500">
-                Preview hanya menampilkan 12 kolom pertama dari total {headers.length} kolom.
-              </div>
-            ) : null}
           </section>
         ) : null}
 
-        <button
-          type="button"
-          onClick={uploadExcel}
-          disabled={loading || loadingPreview || !mappingReady || !!requiredMissing.length}
-          className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? "Uploading..." : "Upload Excel & Simpan Mapping"}
-        </button>
-
-        {result?.ok ? (
-          <section className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+        {stage === "done" && result?.ok ? (
+          <section className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
             <h2 className="text-lg font-bold text-emerald-900">Upload Berhasil</h2>
 
             <div className="mt-3 grid gap-2 text-sm text-emerald-800 md:grid-cols-2">
@@ -561,6 +648,18 @@ export default function AiMcuUploadPage() {
               </a>
             </div>
           </section>
+        ) : null}
+
+        {message ? (
+          <div
+            className={`mt-5 rounded-xl border p-4 text-sm font-semibold ${
+              result?.ok
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}
+          >
+            {message}
+          </div>
         ) : null}
 
         {result && !result.ok ? (
