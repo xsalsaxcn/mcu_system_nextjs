@@ -51,11 +51,64 @@ type GenerateResult = {
   errors?: { name: string; message: string }[];
 };
 
+type StoredJob = {
+  jobId: string;
+  startedAt: string;
+  selectedCount?: number;
+  sourceId?: string;
+  sourceName?: string;
+};
+
+const ACTIVE_JOB_KEY = "ai_mcu_pdf_active_job_v1";
+
+const menuItems = [
+  ["Dashboard", "/dashboard"],
+  ["AI MCU Analyzer", "/ai-mcu"],
+  ["Corporate MCU AI", "/ai-mcu/corporate"],
+  ["Upload Excel", "/ai-mcu/upload"],
+  ["Mapping Header", "/ai-mcu/mapping"],
+  ["Preview Data", "/ai-mcu/preview"],
+  ["Edit Data", "/ai-mcu/edit"],
+  ["Generate PDF", "/ai-mcu/generate"],
+  ["Google Drive", "/ai-mcu/drive"],
+  ["Riwayat", "/ai-mcu/history"],
+  ["Import Peserta", "/import"],
+  ["Input Corporate", "/input-corporate"],
+  ["Cetak Label", "/labels"],
+  ["Review Hasil", "/review"],
+];
+
 function formatBytes(bytes?: number) {
   if (!bytes || bytes <= 0) return "-";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function readStoredJob(): StoredJob | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_JOB_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.jobId) return null;
+
+    return parsed as StoredJob;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredJob(job: StoredJob) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(job));
+}
+
+function clearStoredJob() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(ACTIVE_JOB_KEY);
 }
 
 export default function AiMcuGeneratePage() {
@@ -76,6 +129,8 @@ export default function AiMcuGeneratePage() {
 
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [backgroundNotice, setBackgroundNotice] = useState("");
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -84,7 +139,13 @@ export default function AiMcuGeneratePage() {
     [participants, selectedIds]
   );
 
-  const allLoadedSelected = participants.length > 0 && participants.every((p) => selectedIds.has(p.id));
+  const selectedSource = useMemo(
+    () => sources.find((source) => String(source.id) === sourceId),
+    [sources, sourceId]
+  );
+
+  const allLoadedSelected =
+    participants.length > 0 && participants.every((p) => selectedIds.has(p.id));
 
   function clearPollTimer() {
     if (pollTimerRef.current) {
@@ -158,8 +219,88 @@ export default function AiMcuGeneratePage() {
     }
   }
 
+  async function pollJob(jobId: string, options?: { silent?: boolean }) {
+    try {
+      const res = await fetch(`/api/ai-mcu/generate-pdf/status/${encodeURIComponent(jobId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const json: GenerateResult = await res.json();
+
+      if (!res.ok || !json.ok) {
+        setError(json.message || "Gagal membaca status job PDF.");
+        setPolling(false);
+        setLoading(false);
+        clearPollTimer();
+        return;
+      }
+
+      setResult(json);
+
+      if (json.status === "done") {
+        setPolling(false);
+        setLoading(false);
+        setBackgroundNotice("");
+        clearPollTimer();
+        clearStoredJob();
+        return;
+      }
+
+      if (json.status === "error") {
+        setError(json.message || "Generate PDF gagal di engine.");
+        setPolling(false);
+        setLoading(false);
+        clearPollTimer();
+        clearStoredJob();
+        return;
+      }
+
+      if (!options?.silent) {
+        setPolling(true);
+        setLoading(true);
+      }
+
+      pollTimerRef.current = setTimeout(() => pollJob(jobId), 3000);
+    } catch (err: any) {
+      setError(err?.message || "Gagal membaca status job PDF.");
+      setPolling(false);
+      setLoading(false);
+      clearPollTimer();
+    }
+  }
+
+  function resumeStoredJob() {
+    const stored = readStoredJob();
+
+    if (!stored?.jobId) return;
+
+    setResult({
+      ok: true,
+      status: "running",
+      jobId: stored.jobId,
+      message: "Melanjutkan pemantauan job PDF yang sedang berjalan...",
+      progress: 0,
+      current: 0,
+      total: stored.selectedCount || 0,
+      engineMode: "python-engine-async",
+    });
+
+    setBackgroundNotice(
+      `Ada job PDF yang masih berjalan di background sejak ${new Date(
+        stored.startedAt
+      ).toLocaleString("id-ID")}.`
+    );
+
+    setPolling(true);
+    setLoading(true);
+    pollJob(stored.jobId);
+  }
+
   useEffect(() => {
     loadSources();
+    resumeStoredJob();
+
     return () => clearPollTimer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -186,53 +327,20 @@ export default function AiMcuGeneratePage() {
     setSelectedIds(new Set());
   }
 
-  async function pollJob(jobId: string) {
-    try {
-      const res = await fetch(`/api/ai-mcu/generate-pdf/status/${encodeURIComponent(jobId)}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const json: GenerateResult = await res.json();
-
-      if (!res.ok || !json.ok) {
-        setError(json.message || "Gagal membaca status job PDF.");
-        setPolling(false);
-        setLoading(false);
-        clearPollTimer();
-        return;
-      }
-
-      setResult(json);
-
-      if (json.status === "done") {
-        setPolling(false);
-        setLoading(false);
-        clearPollTimer();
-        return;
-      }
-
-      if (json.status === "error") {
-        setError(json.message || "Generate PDF gagal di engine.");
-        setPolling(false);
-        setLoading(false);
-        clearPollTimer();
-        return;
-      }
-
-      pollTimerRef.current = setTimeout(() => pollJob(jobId), 3000);
-    } catch (err: any) {
-      setError(err?.message || "Gagal membaca status job PDF.");
-      setPolling(false);
-      setLoading(false);
-      clearPollTimer();
-    }
+  function sendToBackground() {
+    clearPollTimer();
+    setPolling(false);
+    setLoading(false);
+    setBackgroundNotice(
+      "Job PDF tetap berjalan di engine. Kamu bisa pindah menu lain. Saat kembali ke halaman ini, status job akan dicek ulang otomatis."
+    );
   }
 
   async function generatePdf() {
     clearPollTimer();
     setError("");
     setResult(null);
+    setBackgroundNotice("");
 
     const ids = Array.from(selectedIds);
 
@@ -281,6 +389,14 @@ export default function AiMcuGeneratePage() {
         return;
       }
 
+      saveStoredJob({
+        jobId: json.jobId,
+        startedAt: new Date().toISOString(),
+        selectedCount: ids.length,
+        sourceId,
+        sourceName: selectedSource?.name || "",
+      });
+
       setPolling(true);
       pollTimerRef.current = setTimeout(() => pollJob(json.jobId as string), 1500);
     } catch (err: any) {
@@ -301,24 +417,80 @@ export default function AiMcuGeneratePage() {
     Boolean(result?.mergedFiles?.length);
 
   return (
-    <main className="p-6">
+    <main className="relative p-6">
+      {menuOpen ? (
+        <button
+          type="button"
+          aria-label="Close menu overlay"
+          className="fixed inset-0 z-30 bg-black/10"
+          onClick={() => setMenuOpen(false)}
+        />
+      ) : null}
+
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Generate PDF AI MCU</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Pilih database/source MCU, retrieve peserta, pilih single/multiple/select all,
-              lalu generate PDF memakai async job dengan progress.
+              lalu generate PDF memakai async job dengan progress. Proses tetap berjalan
+              di engine walaupun kamu pindah ke menu lain.
             </p>
           </div>
 
-          <a
-            href="/ai-mcu"
-            className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Kembali
-          </a>
+          <div className="relative flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((value) => !value)}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              ☰ Menu
+            </button>
+
+            <a
+              href="/ai-mcu"
+              className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Kembali
+            </a>
+
+            {menuOpen ? (
+              <div className="absolute right-0 top-12 z-40 w-[320px] overflow-hidden rounded-2xl border bg-white shadow-xl">
+                <div className="border-b bg-slate-50 px-4 py-3">
+                  <div className="text-sm font-black text-slate-900">Navigasi MCU System</div>
+                  {result?.jobId && result?.status !== "done" ? (
+                    <div className="mt-1 text-xs text-emerald-700">
+                      Job PDF sedang berjalan: {result.jobId}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="grid max-h-[460px] gap-2 overflow-auto p-3">
+                  {menuItems.map(([label, href]) => (
+                    <a
+                      key={href}
+                      href={href}
+                      onClick={() => setMenuOpen(false)}
+                      className={`rounded-xl border px-3 py-2 text-sm font-bold hover:bg-slate-50 ${
+                        href === "/ai-mcu/generate"
+                          ? "border-blue-300 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
+
+        {backgroundNotice ? (
+          <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
+            {backgroundNotice}
+          </div>
+        ) : null}
 
         <div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
           <section className="space-y-5">
@@ -329,7 +501,7 @@ export default function AiMcuGeneratePage() {
                 <select
                   value={sourceId}
                   onChange={(e) => setSourceId(e.target.value)}
-                  disabled={loadingSources || loading || polling}
+                  disabled={loadingSources}
                   className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm disabled:opacity-60"
                 >
                   <option value="">
@@ -346,7 +518,7 @@ export default function AiMcuGeneratePage() {
                 <button
                   type="button"
                   onClick={() => loadParticipants()}
-                  disabled={!sourceId || loadingParticipants || loading || polling}
+                  disabled={!sourceId || loadingParticipants}
                   className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Retrieve Data
@@ -361,14 +533,13 @@ export default function AiMcuGeneratePage() {
                     if (e.key === "Enter") loadParticipants();
                   }}
                   placeholder="Cari nama / NIK / No MCU / barcode..."
-                  disabled={loading || polling}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
                 />
 
                 <button
                   type="button"
                   onClick={() => loadParticipants()}
-                  disabled={!sourceId || loadingParticipants || loading || polling}
+                  disabled={!sourceId || loadingParticipants}
                   className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loadingParticipants ? "Loading..." : "Search"}
@@ -389,7 +560,7 @@ export default function AiMcuGeneratePage() {
                   <button
                     type="button"
                     onClick={selectAllLoaded}
-                    disabled={!participants.length || loading || polling}
+                    disabled={!participants.length}
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Select All Loaded
@@ -398,7 +569,7 @@ export default function AiMcuGeneratePage() {
                   <button
                     type="button"
                     onClick={clearSelection}
-                    disabled={!selectedIds.size || loading || polling}
+                    disabled={!selectedIds.size}
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Clear
@@ -413,7 +584,7 @@ export default function AiMcuGeneratePage() {
                       type="checkbox"
                       checked={allLoadedSelected}
                       onChange={(e) => e.target.checked ? selectAllLoaded() : clearSelection()}
-                      disabled={!participants.length || loading || polling}
+                      disabled={!participants.length}
                     />
                   </div>
                   <div>Nama</div>
@@ -433,7 +604,6 @@ export default function AiMcuGeneratePage() {
                           <input
                             type="checkbox"
                             checked={selectedIds.has(p.id)}
-                            disabled={loading || polling}
                             onChange={() => toggleParticipant(p.id)}
                           />
                         </div>
@@ -511,6 +681,16 @@ export default function AiMcuGeneratePage() {
                   : `Generate PDF (${selectedIds.size} peserta)`}
               </button>
 
+              {result?.jobId && result.status !== "done" && result.status !== "error" ? (
+                <button
+                  type="button"
+                  onClick={sendToBackground}
+                  className="mt-3 w-full rounded-xl border border-blue-300 bg-blue-50 px-5 py-3 text-sm font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  Jalankan di Background & Tetap Bisa Pindah Menu
+                </button>
+              ) : null}
+
               {error ? (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
                   {error}
@@ -523,8 +703,8 @@ export default function AiMcuGeneratePage() {
             <h2 className="text-lg font-bold">Status & Hasil Generate</h2>
 
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              PDF final dibuat oleh Python AI MCU Engine. Untuk batch besar, progress
-              dipantau otomatis sampai selesai.
+              PDF final dibuat oleh Python AI MCU Engine. Kamu bisa klik menu hamburger
+              dan membuka fitur lain; job di engine tetap berjalan.
             </div>
 
             {(loading || polling || result) ? (
