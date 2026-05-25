@@ -14,17 +14,93 @@ function ok(payload: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: true, ...payload });
 }
 
-function normalizeKey(value: unknown) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
-
 function cleanText(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text || ["null", "undefined", "nan", "-"].includes(text.toLowerCase())) return "";
   return text;
+}
+
+function norm(value: unknown) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const HEADER_ALIASES = [
+  "nama", "nama peserta", "nama karyawan", "nomcu", "no mcu", "no.mcu", "nomor mcu",
+  "nik", "jk", "jenis kelamin", "usia", "umur", "departemen", "department", "paket",
+  "tb", "bb", "bmi", "imt", "tensi", "tekanan darah", "hb", "hemoglobin", "gdp", "gds",
+  "kolesterol", "hdl", "ldl", "trigliserida", "ureum", "kreatinin", "asam urat", "sgot",
+  "sgpt", "hbsag", "kesimpulan", "saran", "status"
+].map(norm);
+
+function headerScore(row: any[], nextRows: any[][] = []) {
+  const values = row.map(cleanText).filter(Boolean);
+  if (values.length < 3) return 0;
+
+  let score = Math.min(values.length, 25) * 0.5;
+  let exactMatches = 0;
+
+  for (const value of values) {
+    const normalized = norm(value);
+    if (!normalized) continue;
+
+    if (HEADER_ALIASES.includes(normalized)) {
+      score += 12;
+      exactMatches += 1;
+      continue;
+    }
+
+    if (HEADER_ALIASES.some((alias) => alias.length >= 3 && (normalized.includes(alias) || alias.includes(normalized)))) {
+      score += 3;
+    }
+
+    if (value.length > 40) score -= 6;
+  }
+
+  const nextDensity = nextRows
+    .slice(0, 5)
+    .map((r) => r.map(cleanText).filter(Boolean).length)
+    .filter((count) => count >= Math.min(values.length, 5)).length;
+
+  score += nextDensity * 2;
+  if (exactMatches >= 2) score += 25;
+  if (exactMatches >= 4) score += 25;
+
+  return score;
+}
+
+function detectHeaderRow(rows: any[][]) {
+  let bestIndex = 0;
+  let bestScore = -999;
+
+  for (let i = 0; i < Math.min(rows.length, 120); i += 1) {
+    const score = headerScore(rows[i] || [], rows.slice(i + 1, i + 8));
+    if (score > bestScore) {
+      bestIndex = i;
+      bestScore = score;
+    }
+  }
+
+  return bestIndex;
+}
+
+function uniqueHeaders(row: any[]) {
+  const used = new Map<string, number>();
+
+  return row.map((cell, index) => {
+    const raw = cleanText(cell) || `__EMPTY_${index + 1}`;
+    const base = raw.replace(/\s+/g, " ").trim();
+    const count = used.get(base) || 0;
+    used.set(base, count + 1);
+    return count ? `${base}__${count + 1}` : base;
+  });
+}
+
+function rowToObject(headers: string[], row: any[]) {
+  const out: Record<string, any> = {};
+  headers.forEach((header, index) => {
+    out[header] = row?.[index] ?? "";
+  });
+  return out;
 }
 
 function valueFromMapping(row: Record<string, any>, mapping: Record<string, string>, key: string) {
@@ -37,22 +113,22 @@ function pickValue(row: Record<string, any>, aliases: string[]) {
   const keyMap = new Map<string, string>();
 
   for (const key of Object.keys(row || {})) {
-    keyMap.set(normalizeKey(key), key);
+    keyMap.set(norm(key), key);
   }
 
   for (const alias of aliases) {
-    const key = keyMap.get(normalizeKey(alias));
-    if (key) {
-      const value = cleanText(row[key]);
+    const exactKey = keyMap.get(norm(alias));
+    if (exactKey) {
+      const value = cleanText(row[exactKey]);
       if (value) return value;
     }
   }
 
   for (const alias of aliases) {
-    const aliasNorm = normalizeKey(alias);
+    const aliasNorm = norm(alias);
 
     for (const [keyNorm, originalKey] of keyMap.entries()) {
-      if (aliasNorm && (keyNorm.includes(aliasNorm) || aliasNorm.includes(keyNorm))) {
+      if (aliasNorm && aliasNorm.length >= 2 && (keyNorm.includes(aliasNorm) || aliasNorm.includes(keyNorm))) {
         const value = cleanText(row[originalKey]);
         if (value) return value;
       }
@@ -64,44 +140,19 @@ function pickValue(row: Record<string, any>, aliases: string[]) {
 
 function detectName(row: Record<string, any>, mapping: Record<string, string>) {
   return valueFromMapping(row, mapping, "NAMA") || pickValue(row, [
-    "NAMA",
-    "Nama",
-    "Nama Peserta",
-    "Nama Karyawan",
-    "Nama Lengkap",
-    "Name",
-    "Patient Name",
-    "Employee Name",
+    "NAMA", "Nama", "Nama Peserta", "Nama Karyawan", "Nama Lengkap", "Name", "Patient Name", "Employee Name"
   ]);
 }
 
 function detectMcuId(row: Record<string, any>, mapping: Record<string, string>) {
   return valueFromMapping(row, mapping, "NOMCU") || pickValue(row, [
-    "NOMCU",
-    "NO MCU",
-    "NO.MCU",
-    "No MCU",
-    "Nomor MCU",
-    "MCU ID",
-    "mcu_id",
-    "Barcode",
-    "barcode_value",
-    "No Peserta",
-    "No Urut",
-    "NO.URUT",
+    "NOMCU", "NO MCU", "NO.MCU", "No MCU", "Nomor MCU", "MCU ID", "mcu_id", "Barcode", "barcode_value", "No Peserta", "No Urut", "NO.URUT", "NO"
   ]);
 }
 
 function detectNik(row: Record<string, any>, mapping: Record<string, string>) {
   return valueFromMapping(row, mapping, "NIK") || pickValue(row, [
-    "NIK",
-    "KTP",
-    "NIK/NRP/ID",
-    "NIK NRP ID",
-    "NRP",
-    "ID Karyawan",
-    "Employee ID",
-    "external_id",
+    "NIK", "KTP", "NIK/NRP/ID", "NIK NRP ID", "NRP", "ID Karyawan", "Employee ID", "external_id"
   ]);
 }
 
@@ -117,9 +168,7 @@ function buildCanonicalRow(row: Record<string, any>, mapping: Record<string, str
   detectedMcuId: string;
   detectedNik: string;
 }) {
-  const canonical: Record<string, any> = {
-    ...row,
-  };
+  const canonical: Record<string, any> = { ...row };
 
   for (const [targetKey, sourceHeader] of Object.entries(mapping || {})) {
     if (!targetKey || !sourceHeader) continue;
@@ -149,7 +198,7 @@ function buildCanonicalRow(row: Record<string, any>, mapping: Record<string, str
   return canonical;
 }
 
-async function readWorkbook(file: File) {
+async function readWorkbook(file: File, sheetName: string, headerRowIndexRaw: number) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const workbook = XLSX.read(buffer, {
     type: "buffer",
@@ -157,28 +206,42 @@ async function readWorkbook(file: File) {
     raw: false,
   });
 
-  const rows: Record<string, any>[] = [];
+  const selectedSheetName = sheetName && workbook.Sheets[sheetName]
+    ? sheetName
+    : workbook.SheetNames?.[0];
 
-  for (const sheetName of workbook.SheetNames || []) {
-    const sheet = workbook.Sheets[sheetName];
-
-    const sheetRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
-      defval: "",
-      raw: false,
-    });
-
-    for (let index = 0; index < sheetRows.length; index += 1) {
-      const row = sheetRows[index] || {};
-
-      rows.push({
-        ...row,
-        _SheetName: sheetName,
-        _RowIndex: index + 2,
-      });
-    }
+  if (!selectedSheetName) {
+    return { sheetName: "", headers: [], rows: [] as Record<string, any>[], headerRowIndex: 0 };
   }
 
-  return rows;
+  const sheet = workbook.Sheets[selectedSheetName];
+  const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+    blankrows: false,
+  });
+
+  if (!rawRows.length) {
+    return { sheetName: selectedSheetName, headers: [], rows: [] as Record<string, any>[], headerRowIndex: 0 };
+  }
+
+  const headerRowIndex = Number.isFinite(headerRowIndexRaw) && headerRowIndexRaw >= 0
+    ? Math.min(headerRowIndexRaw, rawRows.length - 1)
+    : detectHeaderRow(rawRows);
+
+  const headers = uniqueHeaders(rawRows[headerRowIndex] || []);
+  const rows = rawRows
+    .slice(headerRowIndex + 1)
+    .map((row) => rowToObject(headers, row || []))
+    .filter((row) => Object.values(row).some((value) => Boolean(cleanText(value))));
+
+  return {
+    sheetName: selectedSheetName,
+    headers,
+    rows,
+    headerRowIndex,
+  };
 }
 
 async function findOrCreateCompany(supabase: any, name: string) {
@@ -242,6 +305,8 @@ export async function POST(req: NextRequest) {
     const companyName = cleanText(form.get("companyName"));
     const databaseName = cleanText(form.get("databaseName"));
     const presetMapping = cleanText(form.get("presetMapping")) || "auto";
+    const sheetName = cleanText(form.get("sheetName"));
+    const headerRowIndex = Number(form.get("headerRowIndex"));
 
     let fieldMapping: Record<string, string> = {};
     try {
@@ -265,10 +330,10 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
-    const excelRows = await readWorkbook(file);
+    const workbook = await readWorkbook(file, sheetName, headerRowIndex);
 
-    if (!excelRows.length) {
-      return fail("File Excel kosong atau header tidak terbaca.");
+    if (!workbook.rows.length) {
+      return fail("File Excel kosong atau data setelah header tidak terbaca.");
     }
 
     const company = await findOrCreateCompany(supabase, companyName);
@@ -279,7 +344,7 @@ export async function POST(req: NextRequest) {
       program_type: programType,
     });
 
-    const preparedRows = excelRows
+    const preparedRows = workbook.rows
       .map((row, index) => {
         const detectedName = detectName(row, fieldMapping);
         if (!detectedName) return null;
@@ -297,7 +362,6 @@ export async function POST(req: NextRequest) {
         });
 
         return {
-          originalRow: row,
           canonicalRow,
           participant: {
             source_id: source.id,
@@ -315,15 +379,15 @@ export async function POST(req: NextRequest) {
             detectedName,
             detectedMcuId,
             detectedNik,
-            sheetName: cleanText(row._SheetName),
-            rowIndex: Number(row._RowIndex || index + 2),
+            sheetName: workbook.sheetName,
+            rowIndex: workbook.headerRowIndex + index + 2,
           },
         };
       })
       .filter(Boolean) as any[];
 
     if (!preparedRows.length) {
-      return fail("Tidak ada baris peserta yang punya kolom nama. Periksa mapping Nama Peserta.");
+      return fail("Tidak ada baris peserta yang punya kolom nama. Periksa pilihan baris header dan mapping Nama Peserta.");
     }
 
     const insertedParticipants = await supabase
@@ -375,7 +439,9 @@ export async function POST(req: NextRequest) {
       fileName,
       presetMapping,
       fieldMapping,
-      totalExcelRows: excelRows.length,
+      headerRowIndex: workbook.headerRowIndex,
+      sheetName: workbook.sheetName,
+      totalExcelRows: workbook.rows.length,
       totalParticipants: participants.length,
       totalStoredRows: savedRows.data?.length || 0,
       next: {
