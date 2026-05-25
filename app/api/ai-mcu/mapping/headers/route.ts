@@ -12,55 +12,14 @@ function ok(payload: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: true, ...payload });
 }
 
-function cleanText(value: unknown) {
+function clean(value: unknown) {
   const text = String(value ?? "").trim();
-  if (!text || ["null", "undefined", "nan", "-"].includes(text.toLowerCase())) return "";
+  if (!text || ["null", "undefined", "nan", "-", "—"].includes(text.toLowerCase())) return "";
   return text;
 }
 
-function valueFromMapping(row: Record<string, any>, mapping: Record<string, string>, key: string) {
-  const header = mapping?.[key];
-  if (!header) return "";
-  return cleanText(row?.[header]);
-}
-
-function applyMappingToRow(rowData: Record<string, any>, fieldMapping: Record<string, string>) {
-  const next: Record<string, any> = {
-    ...rowData,
-    _AI_MCU_FIELD_MAPPING: fieldMapping,
-  };
-
-  for (const [targetKey, sourceHeader] of Object.entries(fieldMapping || {})) {
-    if (!targetKey || !sourceHeader) continue;
-    next[targetKey] = rowData?.[sourceHeader] ?? next[targetKey] ?? "";
-  }
-
-  const detectedName = valueFromMapping(rowData, fieldMapping, "NAMA") || cleanText(next.NAMA || next.Nama);
-  const detectedMcuId = valueFromMapping(rowData, fieldMapping, "NOMCU") || cleanText(next.NOMCU || next["NO MCU"] || next["NO.MCU"]);
-  const detectedNik = valueFromMapping(rowData, fieldMapping, "NIK") || cleanText(next.NIK || next["NIK/NRP/ID"]);
-
-  if (detectedName) {
-    next.NAMA = detectedName;
-    next.Nama = detectedName;
-  }
-
-  if (detectedMcuId) {
-    next.NOMCU = detectedMcuId;
-    next["NO MCU"] = detectedMcuId;
-    next["NO.MCU"] = detectedMcuId;
-  }
-
-  if (detectedNik) {
-    next.NIK = detectedNik;
-    next["NIK/NRP/ID"] = detectedNik;
-  }
-
-  return {
-    rowData: next,
-    detectedName,
-    detectedMcuId,
-    detectedNik,
-  };
+function isObject(value: any) {
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
 function collectHeaders(rows: any[]) {
@@ -69,9 +28,8 @@ function collectHeaders(rows: any[]) {
 
   for (const item of rows || []) {
     const rowData = item?.row_data || {};
-
     for (const key of Object.keys(rowData)) {
-      if (key.startsWith("_AI_MCU")) continue;
+      if (!key || key.startsWith("_AI_MCU")) continue;
       if (!seen.has(key)) {
         seen.add(key);
         headers.push(key);
@@ -80,6 +38,18 @@ function collectHeaders(rows: any[]) {
   }
 
   return headers;
+}
+
+function firstNonEmptyMapping(rows: any[]) {
+  for (const row of rows || []) {
+    const direct = row?.field_mapping;
+    if (isObject(direct) && Object.keys(direct).length) return direct;
+
+    const fromRow = row?.row_data?._AI_MCU_FIELD_MAPPING;
+    if (isObject(fromRow) && Object.keys(fromRow).length) return fromRow;
+  }
+
+  return {};
 }
 
 export async function GET(req: NextRequest) {
@@ -105,29 +75,26 @@ export async function GET(req: NextRequest) {
 
     const rowsResult = await supabase
       .from("ai_mcu_import_rows")
-      .select("id,participant_id,row_data,participant_name,mcu_id,nik,company_name,database_name,sheet_name,row_index")
+      .select("id,participant_id,dataset_role,row_data,field_mapping,participant_name,mcu_id,nik,company_name,database_name,sheet_name,row_index")
       .eq("source_id", sourceId)
       .order("id", { ascending: true })
-      .limit(50);
+      .limit(80);
 
-    if (rowsResult.error) {
-      return fail(rowsResult.error.message, 500, {
-        hint: "Pastikan tabel ai_mcu_import_rows sudah dibuat dan database berasal dari Upload Excel AI MCU.",
-      });
-    }
+    if (rowsResult.error) return fail(rowsResult.error.message, 500);
 
     const rows = rowsResult.data || [];
     const headers = collectHeaders(rows);
-    const firstMapping = rows[0]?.row_data?._AI_MCU_FIELD_MAPPING || {};
+    const fieldMapping = firstNonEmptyMapping(rows);
 
     return ok({
       source: sourceResult.data,
       totalSampleRows: rows.length,
       headers,
-      fieldMapping: firstMapping,
+      fieldMapping,
       sampleRows: rows.slice(0, 8).map((row: any) => ({
         id: row.id,
         participant_id: row.participant_id,
+        dataset_role: row.dataset_role,
         participant_name: row.participant_name,
         mcu_id: row.mcu_id,
         nik: row.nik,
@@ -150,77 +117,46 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const sourceId = Number(body.sourceId || body.source_id || 0);
-    const fieldMapping = body.fieldMapping || {};
+    const fieldMapping = isObject(body.fieldMapping) ? body.fieldMapping : {};
 
     if (!Number.isFinite(sourceId) || sourceId <= 0) {
       return fail("sourceId wajib dipilih.");
     }
 
-    if (!fieldMapping.NAMA || !fieldMapping.NOMCU) {
-      return fail("Mapping wajib belum lengkap. Minimal Nama Peserta dan No MCU harus dipilih.");
+    const mappedKeys = Object.keys(fieldMapping).filter((key) => clean(fieldMapping[key]));
+
+    if (!mappedKeys.length) {
+      return fail("Belum ada field mapping yang dipilih.");
     }
 
     const supabase = getSupabaseAdmin();
 
-    const rowsResult = await supabase
+    const patch = {
+      field_mapping: fieldMapping,
+      analysis_meta: {
+        mapping_saved_at: new Date().toISOString(),
+        mapped_keys: mappedKeys,
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    const updated = await supabase
       .from("ai_mcu_import_rows")
-      .select("id,participant_id,row_data")
+      .update(patch)
       .eq("source_id", sourceId)
-      .order("id", { ascending: true });
+      .select("id");
 
-    if (rowsResult.error) return fail(rowsResult.error.message, 500);
-
-    const rows = rowsResult.data || [];
-    if (!rows.length) {
-      return fail("Belum ada row upload untuk database ini. Upload Excel terlebih dahulu.", 404);
-    }
-
-    let updatedRows = 0;
-    let updatedParticipants = 0;
-
-    for (const row of rows) {
-      const existingRowData = row.row_data || {};
-      const applied = applyMappingToRow(existingRowData, fieldMapping);
-
-      const updateImport = await supabase
-        .from("ai_mcu_import_rows")
-        .update({
-          row_data: applied.rowData,
-          participant_name: applied.detectedName || null,
-          mcu_id: applied.detectedMcuId || null,
-          nik: applied.detectedNik || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", row.id);
-
-      if (updateImport.error) return fail(updateImport.error.message, 500);
-      updatedRows += 1;
-
-      if (row.participant_id) {
-        const participantPatch: Record<string, any> = {};
-        if (applied.detectedName) participantPatch.name = applied.detectedName;
-        if (applied.detectedMcuId) {
-          participantPatch.mcu_id = applied.detectedMcuId;
-          participantPatch.external_id = applied.detectedNik || applied.detectedMcuId;
-        }
-        if (applied.detectedNik) participantPatch.nik = applied.detectedNik;
-
-        if (Object.keys(participantPatch).length) {
-          const updateParticipant = await supabase
-            .from("participants")
-            .update(participantPatch)
-            .eq("id", row.participant_id);
-
-          if (!updateParticipant.error) updatedParticipants += 1;
-        }
-      }
+    if (updated.error) {
+      return fail(updated.error.message, 500, {
+        hint: "Pastikan SQL patch sudah dijalankan sehingga tabel ai_mcu_import_rows punya kolom field_mapping dan analysis_meta.",
+      });
     }
 
     return ok({
-      message: "Mapping header berhasil disimpan ke database upload AI MCU.",
+      message: "Mapping berhasil disimpan cepat. Analisis akan memakai mapping ini saat Run Analisis.",
       sourceId,
-      updatedRows,
-      updatedParticipants,
+      updatedRows: updated.data?.length || 0,
+      mappedKeys,
       fieldMapping,
     });
   } catch (error: any) {

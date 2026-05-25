@@ -19,6 +19,10 @@ function norm(value: unknown) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function isObject(value: any) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
 function toNumber(value: any) {
   const raw = clean(value).replace(/,/g, ".");
   const match = raw.match(/-?\d+(\.\d+)?/);
@@ -62,10 +66,41 @@ function parseBloodPressure(value: any) {
   };
 }
 
-function normalizeRowForEngine(row: Record<string, any>) {
+function applyFieldMapping(row: Record<string, any>, fieldMapping: Record<string, string>) {
   const out: Record<string, any> = { ...(row || {}) };
 
-  const name = clean(out.NAMA || out.Nama) || getByAliases(out, [
+  if (!isObject(fieldMapping)) return out;
+
+  for (const [targetKey, sourceHeader] of Object.entries(fieldMapping)) {
+    if (!clean(targetKey) || !clean(sourceHeader)) continue;
+    const value = row?.[sourceHeader as string];
+    if (value !== undefined && value !== null && clean(value)) {
+      out[targetKey] = value;
+    }
+  }
+
+  if (fieldMapping.NAMA && clean(row[fieldMapping.NAMA])) {
+    out.NAMA = row[fieldMapping.NAMA];
+    out.Nama = row[fieldMapping.NAMA];
+  }
+
+  if (fieldMapping.NOMCU && clean(row[fieldMapping.NOMCU])) {
+    out.NOMCU = row[fieldMapping.NOMCU];
+    out.MCU_ID = row[fieldMapping.NOMCU];
+    out["NO MCU"] = row[fieldMapping.NOMCU];
+  }
+
+  if (fieldMapping.NIK && clean(row[fieldMapping.NIK])) {
+    out.NIK = row[fieldMapping.NIK];
+  }
+
+  return out;
+}
+
+function normalizeRowForEngine(row: Record<string, any>, fallback: Record<string, any> = {}) {
+  const out: Record<string, any> = { ...(row || {}) };
+
+  const name = clean(out.NAMA || out.Nama) || clean(fallback.participant_name) || getByAliases(out, [
     "NAMA",
     "Nama",
     "Nama Peserta",
@@ -74,7 +109,7 @@ function normalizeRowForEngine(row: Record<string, any>) {
     "Employee Name",
   ]);
 
-  const mcuId = clean(out.MCU_ID || out.NOMCU || out["NO MCU"] || out["NO.MCU"]) || getByAliases(out, [
+  const mcuId = clean(out.MCU_ID || out.NOMCU || out["NO MCU"] || out["NO.MCU"]) || clean(fallback.mcu_id) || getByAliases(out, [
     "MCU_ID",
     "NOMCU",
     "NO MCU",
@@ -84,7 +119,7 @@ function normalizeRowForEngine(row: Record<string, any>) {
     "Barcode",
   ]);
 
-  const nik = clean(out.NIK || out["NIK/NRP/ID"]) || getByAliases(out, [
+  const nik = clean(out.NIK || out["NIK/NRP/ID"]) || clean(fallback.nik) || getByAliases(out, [
     "NIK",
     "NIK/NRP/ID",
     "NRP",
@@ -105,6 +140,7 @@ function normalizeRowForEngine(row: Record<string, any>) {
     USIA: ["USIA", "Usia", "Umur", "Age"],
     TGLLAHIR: ["TGLLAHIR", "Tanggal Lahir", "Tgl Lahir", "DOB", "Birth Date"],
     DEPT: ["DEPT", "DEPARTEMEN", "Departemen", "Department", "Bagian", "Unit", "Divisi"],
+    DEPARTEMEN: ["DEPT", "DEPARTEMEN", "Departemen", "Department", "Bagian", "Unit", "Divisi"],
     PAKET: ["PAKET", "Paket", "Package", "Paket Pemeriksaan"],
 
     TD: ["TD", "Tensi", "Tekanan Darah", "Blood Pressure", "FS:Tensi", "FS Tensi"],
@@ -123,9 +159,11 @@ function normalizeRowForEngine(row: Record<string, any>) {
     GDP: ["GDP", "Gula Darah Puasa", "Glukosa Puasa", "GD:GDP", "GD GDP"],
     GDS: ["GDS", "Gula Darah Sewaktu", "Glukosa Sewaktu", "GD:Sewaktu", "GD Sewaktu"],
     CHOL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol"],
+    KOLESTEROL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol"],
     HDL: ["HDL", "LD:HDL", "LD HDL"],
     LDL: ["LDL", "LD:LDL", "LD LDL"],
     TRIG: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig"],
+    TRIGLISERIDA: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig"],
 
     UREUM: ["Ureum", "FK:Ureum", "FK Ureum"],
     KREATININ: ["Kreatinin", "Creatinine", "FK:Kreatinin", "FK Kreatinin"],
@@ -148,6 +186,10 @@ function normalizeRowForEngine(row: Record<string, any>) {
   if (!clean(out.IMT) && clean(out.BMI)) out.IMT = out.BMI;
   if (!clean(out.DEPT) && clean(out.DEPARTEMEN)) out.DEPT = out.DEPARTEMEN;
   if (!clean(out.DEPARTEMEN) && clean(out.DEPT)) out.DEPARTEMEN = out.DEPT;
+  if (!clean(out.CHOL) && clean(out.KOLESTEROL)) out.CHOL = out.KOLESTEROL;
+  if (!clean(out.KOLESTEROL) && clean(out.CHOL)) out.KOLESTEROL = out.CHOL;
+  if (!clean(out.TRIG) && clean(out.TRIGLISERIDA)) out.TRIG = out.TRIGLISERIDA;
+  if (!clean(out.TRIGLISERIDA) && clean(out.TRIG)) out.TRIGLISERIDA = out.TRIG;
 
   return out;
 }
@@ -471,7 +513,7 @@ function collectEngineRows(engineResult: any, keys: string[]) {
   return [];
 }
 
-function addAbnormal(rows: any[], output: any[], row: any, parameter: string, value: any, interpretation: string, normalRange: string) {
+function addAbnormal(output: any[], row: any, parameter: string, value: any, interpretation: string, normalRange: string) {
   output.push({
     Nama: rowName(row),
     MCU_ID: rowMcuId(row),
@@ -489,39 +531,39 @@ function localAbnormalRows(rows: any[]) {
   for (const row of rows) {
     const bmi = toNumber(row.BMI || row.IMT);
     if (Number.isFinite(bmi)) {
-      if (bmi >= 30) addAbnormal(rows, output, row, "BMI", bmi, "Obesitas", "< 25");
-      else if (bmi >= 25) addAbnormal(rows, output, row, "BMI", bmi, "Overweight", "< 25");
+      if (bmi >= 30) addAbnormal(output, row, "BMI", bmi, "Obesitas", "< 25");
+      else if (bmi >= 25) addAbnormal(output, row, "BMI", bmi, "Overweight", "< 25");
     }
 
     const bp = parseBloodPressure(row.TD || row.TENSI);
     if (Number.isFinite(bp.systolic) || Number.isFinite(bp.diastolic)) {
-      if (bp.systolic >= 140 || bp.diastolic >= 90) addAbnormal(rows, output, row, "TD", bp.display, "Hipertensi", "< 140/90");
-      else if (bp.systolic >= 120 || bp.diastolic >= 80) addAbnormal(rows, output, row, "TD", bp.display, "Prehipertensi", "< 120/80");
+      if (bp.systolic >= 140 || bp.diastolic >= 90) addAbnormal(output, row, "TD", bp.display, "Hipertensi", "< 140/90");
+      else if (bp.systolic >= 120 || bp.diastolic >= 80) addAbnormal(output, row, "TD", bp.display, "Prehipertensi", "< 120/80");
     }
 
     const ldl = toNumber(row.LDL);
-    if (Number.isFinite(ldl) && ldl >= 130) addAbnormal(rows, output, row, "LDL", ldl, "LDL tinggi", "< 130");
+    if (Number.isFinite(ldl) && ldl >= 130) addAbnormal(output, row, "LDL", ldl, "LDL tinggi", "< 130");
 
     const chol = toNumber(row.CHOL || row.KOLESTEROL);
-    if (Number.isFinite(chol) && chol >= 200) addAbnormal(rows, output, row, "Kolesterol", chol, "Kolesterol tinggi", "< 200");
+    if (Number.isFinite(chol) && chol >= 200) addAbnormal(output, row, "Kolesterol", chol, "Kolesterol tinggi", "< 200");
 
     const trig = toNumber(row.TRIG || row.TRIGLISERIDA);
-    if (Number.isFinite(trig) && trig >= 150) addAbnormal(rows, output, row, "Trigliserida", trig, "Trigliserida tinggi", "< 150");
+    if (Number.isFinite(trig) && trig >= 150) addAbnormal(output, row, "Trigliserida", trig, "Trigliserida tinggi", "< 150");
 
     const gdp = toNumber(row.GDP);
-    if (Number.isFinite(gdp) && gdp >= 126) addAbnormal(rows, output, row, "GDP", gdp, "Diabetes range", "< 126");
+    if (Number.isFinite(gdp) && gdp >= 126) addAbnormal(output, row, "GDP", gdp, "Diabetes range", "< 126");
 
     const gds = toNumber(row.GDS);
-    if (Number.isFinite(gds) && gds >= 200) addAbnormal(rows, output, row, "GDS", gds, "Diabetes range", "< 200");
+    if (Number.isFinite(gds) && gds >= 200) addAbnormal(output, row, "GDS", gds, "Diabetes range", "< 200");
 
     const sgot = toNumber(row.SGOT);
-    if (Number.isFinite(sgot) && sgot > 40) addAbnormal(rows, output, row, "SGOT", sgot, "SGOT tinggi", "≤ 40");
+    if (Number.isFinite(sgot) && sgot > 40) addAbnormal(output, row, "SGOT", sgot, "SGOT tinggi", "≤ 40");
 
     const sgpt = toNumber(row.SGPT);
-    if (Number.isFinite(sgpt) && sgpt > 40) addAbnormal(rows, output, row, "SGPT", sgpt, "SGPT tinggi", "≤ 40");
+    if (Number.isFinite(sgpt) && sgpt > 40) addAbnormal(output, row, "SGPT", sgpt, "SGPT tinggi", "≤ 40");
 
     const kreatinin = toNumber(row.KREATININ);
-    if (Number.isFinite(kreatinin) && kreatinin > 1.3) addAbnormal(rows, output, row, "Kreatinin", kreatinin, "Kreatinin tinggi", "≤ 1.3");
+    if (Number.isFinite(kreatinin) && kreatinin > 1.3) addAbnormal(output, row, "Kreatinin", kreatinin, "Kreatinin tinggi", "≤ 1.3");
   }
 
   return output;
@@ -604,6 +646,20 @@ function localDiseaseRows(rows: any[]) {
   return output;
 }
 
+function firstNonEmptyMapping(rows: any[]) {
+  for (const row of rows || []) {
+    if (isObject(row?.field_mapping) && Object.keys(row.field_mapping).length) return row.field_mapping;
+    if (isObject(row?.row_data?._AI_MCU_FIELD_MAPPING) && Object.keys(row.row_data._AI_MCU_FIELD_MAPPING).length) return row.row_data._AI_MCU_FIELD_MAPPING;
+  }
+
+  return {};
+}
+
+function mappedKeyCount(mapping: any) {
+  if (!isObject(mapping)) return 0;
+  return Object.entries(mapping).filter(([, v]) => clean(v)).length;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = getSessionUser(req);
@@ -630,13 +686,14 @@ export async function POST(req: NextRequest) {
 
     const rowsResult = await supabase
       .from("ai_mcu_import_rows")
-      .select("id,participant_id,dataset_role,row_data,participant_name,mcu_id,nik,company_name,database_name,source_file_name,sheet_name,row_index,analysis_meta")
+      .select("id,participant_id,dataset_role,row_data,field_mapping,participant_name,mcu_id,nik,company_name,database_name,source_file_name,sheet_name,row_index,analysis_meta")
       .eq("source_id", sourceId)
       .order("id", { ascending: true });
 
     if (rowsResult.error) return fail(rowsResult.error.message, 500);
 
     const rawRows = rowsResult.data || [];
+    const globalMapping = firstNonEmptyMapping(rawRows);
 
     const roleCounts = rawRows.reduce((acc: Record<string, number>, row: any) => {
       const role = clean(row.dataset_role) || "(empty)";
@@ -654,9 +711,6 @@ export async function POST(req: NextRequest) {
       return role === "old" || role === "previous" || role === "lama";
     });
 
-    // Important fallback:
-    // Many earlier uploads were saved before dataset_role existed.
-    // If no "new" rows exist, use all non-old rows. If still empty, use all rows.
     if (!currentDbRows.length) {
       currentDbRows = rawRows.filter((r: any) => {
         const role = clean(r.dataset_role).toLowerCase();
@@ -664,32 +718,27 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!currentDbRows.length && rawRows.length) {
-      currentDbRows = rawRows;
-    }
+    if (!currentDbRows.length && rawRows.length) currentDbRows = rawRows;
 
-    const currentRows = currentDbRows.map((r: any) =>
-      normalizeRowForEngine({
-        ...(r.row_data || {}),
-        NAMA: (r.row_data || {}).NAMA || r.participant_name,
-        NOMCU: (r.row_data || {}).NOMCU || r.mcu_id,
-        MCU_ID: (r.row_data || {}).MCU_ID || r.mcu_id,
-        NIK: (r.row_data || {}).NIK || r.nik,
-        _import_id: r.id,
-        _participant_id: r.participant_id,
-      })
-    );
+    const currentRows = currentDbRows.map((r: any) => {
+      const rowMapping = isObject(r.field_mapping) && Object.keys(r.field_mapping).length ? r.field_mapping : globalMapping;
+      const mapped = applyFieldMapping(r.row_data || {}, rowMapping);
+      return normalizeRowForEngine(mapped, {
+        participant_name: r.participant_name,
+        mcu_id: r.mcu_id,
+        nik: r.nik,
+      });
+    });
 
-    const previousRows = previousDbRows.map((r: any) =>
-      normalizeRowForEngine({
-        ...(r.row_data || {}),
-        NAMA: (r.row_data || {}).NAMA || r.participant_name,
-        NOMCU: (r.row_data || {}).NOMCU || r.mcu_id,
-        MCU_ID: (r.row_data || {}).MCU_ID || r.mcu_id,
-        NIK: (r.row_data || {}).NIK || r.nik,
-        _import_id: r.id,
-      })
-    );
+    const previousRows = previousDbRows.map((r: any) => {
+      const rowMapping = isObject(r.field_mapping) && Object.keys(r.field_mapping).length ? r.field_mapping : globalMapping;
+      const mapped = applyFieldMapping(r.row_data || {}, rowMapping);
+      return normalizeRowForEngine(mapped, {
+        participant_name: r.participant_name,
+        mcu_id: r.mcu_id,
+        nik: r.nik,
+      });
+    });
 
     if (!currentRows.length) {
       return fail("Database ini belum punya row MCU yang bisa dianalisis. Upload MCU Baru ulang atau pilih database lain.", 404, {
@@ -733,8 +782,6 @@ export async function POST(req: NextRequest) {
     let diseaseRows = normalizeDiseaseRows(engineResult);
     const priorityRows = collectEngineRows(engineResult, ["priorityRows", "priorities", "priority", "Prioritas"]);
 
-    // Safety fallback: if Python returns empty/missing due to response-shape mismatch,
-    // still show abnormalities and rule interpretation from the normalized MCU rows.
     if (!abnormalRows.length) abnormalRows = localAbnormalRows(currentRows);
     if (!diseaseRows.length || diseaseRows.every((r) => r.Status === "Data tidak ada" && !r.Nama && !r.MCU_ID)) {
       diseaseRows = localDiseaseRows(currentRows);
@@ -748,7 +795,8 @@ export async function POST(req: NextRequest) {
         roleCounts,
         currentRowsSent: currentRows.length,
         previousRowsSent: previousRows.length,
-        firstCurrentRowKeys: Object.keys(currentRows[0] || {}).slice(0, 80),
+        mappingKeysSaved: mappedKeyCount(globalMapping),
+        firstCurrentRowKeys: Object.keys(currentRows[0] || {}).slice(0, 120),
         firstCurrentRowSample: currentRows[0] || null,
         engineConfigured: Boolean(engineUrl),
         engineOk: Boolean(engineResult?.ok),
