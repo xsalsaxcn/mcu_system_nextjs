@@ -698,6 +698,42 @@ export async function POST(req: NextRequest) {
 
     const diseaseRows = [...ruleResult.disease, ...participantsWithNoFinding];
 
+    const prioritasRows = ruleResult.abnormal
+      .filter((r) => ["Tinggi", "Sedang"].includes(r.SEVERITY))
+      .map((r) => ({
+        NAMA: r.NAMA,
+        MCU_ID: r.MCU_ID,
+        PRIORITAS: r.SEVERITY,
+        PARAMETER: r.PARAMETER,
+        TEMUAN: r.INTERPRETASI,
+        SARAN: r.SARAN,
+      }));
+
+    const summaryPayload = {
+      totalCurrent: currentRows.length,
+      totalPrevious: previousRows.length,
+      parameterCount: comparison.parameterCount,
+      comparisonAll: comparison.comparisonAll.length,
+      comparisonChanged: comparison.comparisonChanged.length,
+      comparisonSignif: comparison.comparisonSignif.length,
+      changedParameters: comparison.changedLong.length,
+      thresholdPct,
+      abnormalRows: ruleResult.abnormal.length,
+      diseaseRows: diseaseRows.length,
+      diseaseDetected: diseaseRows.filter((r) => r.STATUS === "Terdeteksi").length,
+    };
+
+    const sheetsPayload = {
+      Rekap_Analisis: currentRows,
+      Abnormal_Summary: ruleResult.abnormal,
+      Perbandingan_All: comparison.comparisonAll,
+      Perbandingan_Changed: comparison.comparisonChanged,
+      Perbandingan_Signif: comparison.comparisonSignif,
+      Perbandingan_Long: comparison.changedLong,
+      Interpretasi_Penyakit: diseaseRows,
+      Prioritas: prioritasRows,
+    };
+
     return NextResponse.json({
       ok: true,
       source: sourceResult.data,
@@ -709,21 +745,11 @@ export async function POST(req: NextRequest) {
         mappingKeysSaved: mappedKeyCount(globalMapping),
         firstCurrentRowKeys: Object.keys(currentRows[0] || {}).slice(0, 120),
         firstCurrentRowSample: currentRows[0] || null,
-        ruleMode: "next-route-numeric-and-text-based-v1",
+        ruleMode: "next-route-numeric-and-text-based-v2-with-aliases",
       },
-      summary: {
-        totalCurrent: currentRows.length,
-        totalPrevious: previousRows.length,
-        parameterCount: comparison.parameterCount,
-        comparisonAll: comparison.comparisonAll.length,
-        comparisonChanged: comparison.comparisonChanged.length,
-        comparisonSignif: comparison.comparisonSignif.length,
-        changedParameters: comparison.changedLong.length,
-        thresholdPct,
-        abnormalRows: ruleResult.abnormal.length,
-        diseaseRows: diseaseRows.length,
-        diseaseDetected: diseaseRows.filter((r) => r.STATUS === "Terdeteksi").length,
-      },
+      summary: summaryPayload,
+
+      // Original workbook-style names
       Rekap_Analisis: currentRows,
       Abnormal_Summary: ruleResult.abnormal,
       Perbandingan_All: comparison.comparisonAll,
@@ -731,17 +757,25 @@ export async function POST(req: NextRequest) {
       Perbandingan_Signif: comparison.comparisonSignif,
       Perbandingan_Long: comparison.changedLong,
       Interpretasi_Penyakit: diseaseRows,
-      Prioritas: ruleResult.abnormal
-        .filter((r) => ["Tinggi", "Sedang"].includes(r.SEVERITY))
-        .map((r) => ({
-          NAMA: r.NAMA,
-          MCU_ID: r.MCU_ID,
-          PRIORITAS: r.SEVERITY,
-          PARAMETER: r.PARAMETER,
-          TEMUAN: r.INTERPRETASI,
-          SARAN: r.SARAN,
-        })),
+      Prioritas: prioritasRows,
       previousRows,
+
+      // Backward-compatible aliases for older/newer React pages
+      sheets: sheetsPayload,
+      data: sheetsPayload,
+      result: sheetsPayload,
+      rekapAnalisis: currentRows,
+      abnormalSummary: ruleResult.abnormal,
+      abnormalRows: ruleResult.abnormal,
+      comparisonAll: comparison.comparisonAll,
+      comparisonChanged: comparison.comparisonChanged,
+      comparisonSignif: comparison.comparisonSignif,
+      comparisonLong: comparison.changedLong,
+      interpretasiPenyakit: diseaseRows,
+      diseaseRows,
+      diseaseInterpretation: diseaseRows,
+      interpretationRows: diseaseRows,
+      priorityRows: prioritasRows,
     });
   } catch (error: any) {
     return fail(error?.message || "Analisis MCU gagal.", 500);
