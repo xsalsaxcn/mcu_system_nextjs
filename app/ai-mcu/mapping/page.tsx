@@ -6,7 +6,6 @@ import {
   AI_MCU_MAPPING_GROUPS,
   buildAiMcuAutoMapping,
   isAiMcuClinicalField,
-  type AiMcuMappingGroup,
 } from "@/lib/ai-mcu/headerLibrary";
 
 type SourceItem = {
@@ -24,10 +23,30 @@ const PROGRAM_OPTIONS = [
 
 const GROUP_OPTIONS = ["Semua", ...AI_MCU_MAPPING_GROUPS] as const;
 
-function text(value: unknown) {
+function clean(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw || ["null", "undefined", "nan", "-", "—"].includes(raw.toLowerCase())) return "";
   return raw;
+}
+
+function normalize(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-./]+/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function unique(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const text = clean(value);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
 }
 
 function firstValue(sampleRows: any[], header?: string) {
@@ -35,7 +54,7 @@ function firstValue(sampleRows: any[], header?: string) {
 
   for (const item of sampleRows || []) {
     const row = item?.row_data || item || {};
-    const value = text(row?.[header]);
+    const value = clean(row?.[header]);
     if (value) return value;
   }
 
@@ -46,48 +65,110 @@ function matchesSearch(value: unknown, query: string) {
   return String(value || "").toLowerCase().includes(query.trim().toLowerCase());
 }
 
+function masterHeadersFromLibrary() {
+  const values: string[] = [];
+  for (const field of AI_MCU_MAPPING_FIELDS) {
+    values.push(field.key, field.label);
+    values.push(...(field.aliases || []));
+  }
+  return unique(values);
+}
+
+function findBestActualHeaderForField(field: any, actualHeaders: string[]) {
+  const aliases = [field.key, field.label, ...(field.aliases || [])].map(normalize).filter(Boolean);
+
+  const normalizedHeaders = actualHeaders.map((header) => ({
+    raw: header,
+    norm: normalize(header),
+  }));
+
+  for (const header of normalizedHeaders) {
+    if (aliases.includes(header.norm)) return header.raw;
+  }
+
+  for (const header of normalizedHeaders) {
+    for (const alias of aliases) {
+      if (
+        alias.length >= 3 &&
+        header.norm.length >= 3 &&
+        (header.norm.includes(alias) || alias.includes(header.norm))
+      ) {
+        return header.raw;
+      }
+    }
+  }
+
+  return "";
+}
+
+function buildForcedMapping(actualHeaders: string[], savedMapping: Record<string, string>) {
+  const autoFromUpload = buildAiMcuAutoMapping(actualHeaders);
+  const mapping: Record<string, string> = {};
+
+  let fromUpload = 0;
+  let fromSaved = 0;
+  let fromMaster = 0;
+  let clinicalFromUpload = 0;
+
+  for (const field of AI_MCU_MAPPING_FIELDS) {
+    const saved = clean(savedMapping?.[field.key]);
+    const auto = clean(autoFromUpload?.[field.key]) || clean(findBestActualHeaderForField(field, actualHeaders));
+
+    if (saved) {
+      mapping[field.key] = saved;
+      fromSaved += 1;
+    } else if (auto) {
+      mapping[field.key] = auto;
+      fromUpload += 1;
+      if (isAiMcuClinicalField(field)) clinicalFromUpload += 1;
+    } else {
+      // Critical fallback: always put a master key so the UI is visibly mapped.
+      // If Contoh Isi stays "-", it means the uploaded rows do not contain this clinical value yet.
+      mapping[field.key] = field.key;
+      fromMaster += 1;
+    }
+  }
+
+  return {
+    mapping,
+    fromUpload,
+    fromSaved,
+    fromMaster,
+    clinicalFromUpload,
+  };
+}
+
 export default function AiMcuMappingPage() {
   const [programType, setProgramType] = useState("all");
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [sourceId, setSourceId] = useState("");
 
   const [actualHeaders, setActualHeaders] = useState<string[]>([]);
-  const [masterHeaders, setMasterHeaders] = useState<string[]>([]);
+  const [masterHeaders, setMasterHeaders] = useState<string[]>(masterHeadersFromLibrary());
   const [sampleRows, setSampleRows] = useState<any[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
-  const [groupFilter, setGroupFilter] = useState<(typeof GROUP_OPTIONS)[number]>("Fisik");
+
+  const [groupFilter, setGroupFilter] = useState<(typeof GROUP_OPTIONS)[number]>("Laboratorium");
   const [search, setSearch] = useState("");
-  const [onlyUnmapped, setOnlyUnmapped] = useState(false);
 
   const [loadingSources, setLoadingSources] = useState(false);
   const [loadingHeaders, setLoadingHeaders] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState("Mapping otomatis akan berjalan saat database dipilih.");
   const [error, setError] = useState("");
 
   const actualSet = useMemo(() => new Set(actualHeaders), [actualHeaders]);
+
   const masterOnlyHeaders = useMemo(
     () => masterHeaders.filter((header) => header && !actualSet.has(header)),
     [masterHeaders, actualSet]
   );
 
-  const allHeaders = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const header of [...actualHeaders, ...masterOnlyHeaders]) {
-      if (!seen.has(header)) {
-        seen.add(header);
-        out.push(header);
-      }
-    }
-    return out;
-  }, [actualHeaders, masterOnlyHeaders]);
-
   const filteredFields = useMemo(() => {
     return AI_MCU_MAPPING_FIELDS.filter((field) => {
       if (groupFilter !== "Semua" && field.group !== groupFilter) return false;
-      if (onlyUnmapped && fieldMapping[field.key]) return false;
+
       if (search.trim()) {
         const haystack = [
           field.key,
@@ -98,16 +179,13 @@ export default function AiMcuMappingPage() {
         ].join(" ");
         if (!matchesSearch(haystack, search)) return false;
       }
+
       return true;
     });
-  }, [groupFilter, onlyUnmapped, search, fieldMapping]);
+  }, [groupFilter, search, fieldMapping]);
 
   const mappedCount = useMemo(() => {
     return AI_MCU_MAPPING_FIELDS.filter((field) => Boolean(fieldMapping[field.key])).length;
-  }, [fieldMapping]);
-
-  const requiredMissing = useMemo(() => {
-    return AI_MCU_MAPPING_FIELDS.filter((field) => field.required).filter((field) => !fieldMapping[field.key]);
   }, [fieldMapping]);
 
   const clinicalMappedCount = useMemo(() => {
@@ -121,13 +199,7 @@ export default function AiMcuMappingPage() {
   async function loadSources(nextProgram = programType) {
     setLoadingSources(true);
     setError("");
-    setMessage("");
-    setSources([]);
-    setSourceId("");
-    setActualHeaders([]);
-    setMasterHeaders([]);
-    setSampleRows([]);
-    setFieldMapping({});
+    setMessage("Mengambil daftar database...");
 
     try {
       const params = new URLSearchParams();
@@ -151,6 +223,8 @@ export default function AiMcuMappingPage() {
         setSourceId(String(fromUrl));
       } else if (list[0]?.id) {
         setSourceId(String(list[0].id));
+      } else {
+        setMessage("Belum ada database/source.");
       }
     } catch (err: any) {
       setError(err?.message || "Gagal mengambil daftar database.");
@@ -159,16 +233,15 @@ export default function AiMcuMappingPage() {
     }
   }
 
-  async function loadHeaders(nextSourceId = sourceId) {
-    if (!nextSourceId) return;
+  async function loadHeadersAndAutoMap(nextSourceId = sourceId) {
+    if (!nextSourceId) {
+      setError("Pilih database terlebih dahulu.");
+      return;
+    }
 
     setLoadingHeaders(true);
     setError("");
-    setMessage("");
-    setActualHeaders([]);
-    setMasterHeaders([]);
-    setSampleRows([]);
-    setFieldMapping({});
+    setMessage("Load header + Auto Mapping berjalan otomatis...");
 
     try {
       const params = new URLSearchParams();
@@ -181,41 +254,91 @@ export default function AiMcuMappingPage() {
       const json = await res.json();
 
       if (!res.ok || !json.ok) {
-        setError(json.message || "Gagal mengambil header dari database upload.");
+        setError(json.message || "Gagal mengambil header.");
         return;
       }
 
-      const nextActualHeaders = json.actualHeaders || [];
-      const nextMasterHeaders = json.masterHeaders || [];
-      const nextMapping = json.fieldMapping || buildAiMcuAutoMapping(nextActualHeaders);
+      const nextActualHeaders = unique(json.actualHeaders || json.headers || []);
+      const nextMasterHeaders = unique([
+        ...(json.masterHeaders || []),
+        ...masterHeadersFromLibrary(),
+      ]);
+      const savedMapping = json.savedFieldMapping || json.fieldMapping || {};
+
+      const forced = buildForcedMapping(nextActualHeaders, savedMapping);
 
       setActualHeaders(nextActualHeaders);
       setMasterHeaders(nextMasterHeaders);
       setSampleRows(json.sampleRows || []);
-      setFieldMapping(nextMapping);
+      setFieldMapping(forced.mapping);
 
-      const masterNote = json.masterHeaderError ? ` Master table belum aktif, pakai fallback library.` : "";
       setMessage(
-        `Header upload terbaca: ${nextActualHeaders.length}. Header master: ${nextMasterHeaders.length}. Field mapped: ${Object.keys(nextMapping).filter((key) => nextMapping[key]).length}.${masterNote}`
+        `Auto Mapping selesai otomatis. Header upload: ${nextActualHeaders.length}. Field dari upload: ${forced.fromUpload}. Field dari saved mapping: ${forced.fromSaved}. Field dari master: ${forced.fromMaster}. Field klinis yang benar-benar cocok dari upload: ${forced.clinicalFromUpload}.`
       );
     } catch (err: any) {
-      setError(err?.message || "Gagal mengambil header dari database upload.");
+      setError(err?.message || "Load header + Auto Mapping gagal.");
     } finally {
       setLoadingHeaders(false);
     }
   }
 
+  function forceAutoMapNow() {
+    setError("");
+    setMessage("Force Auto Mapping manual dijalankan...");
+
+    const forced = buildForcedMapping(actualHeaders, fieldMapping);
+    setFieldMapping(forced.mapping);
+
+    setMessage(
+      `Force Auto Mapping selesai. Field dari upload: ${forced.fromUpload}. Field dari saved mapping: ${forced.fromSaved}. Field dari master: ${forced.fromMaster}. Field klinis yang benar-benar cocok dari upload: ${forced.clinicalFromUpload}.`
+    );
+  }
+
+  function useMasterForCurrentGroup() {
+    setError("");
+
+    const targetFields = AI_MCU_MAPPING_FIELDS.filter((field) => {
+      if (groupFilter === "Semua") return true;
+      return field.group === groupFilter;
+    });
+
+    const next: Record<string, string> = {};
+    for (const field of targetFields) {
+      next[field.key] = findBestActualHeaderForField(field, actualHeaders) || field.key;
+    }
+
+    setFieldMapping((current) => ({
+      ...current,
+      ...next,
+    }));
+
+    setMessage(`Master mapping untuk grup ${groupFilter} sudah diisi. Cek kolom Header Excel / Master.`);
+  }
+
+  function clearGroupMapping() {
+    setFieldMapping((current) => {
+      const next = { ...current };
+      for (const field of AI_MCU_MAPPING_FIELDS) {
+        if (groupFilter === "Semua" || field.group === groupFilter) {
+          delete next[field.key];
+        }
+      }
+      return next;
+    });
+    setMessage(`Mapping grup ${groupFilter} dibersihkan.`);
+  }
+
   async function saveMapping() {
     setError("");
-    setMessage("");
+    setMessage("Menyimpan mapping...");
 
     if (!sourceId) {
       setError("Pilih database terlebih dahulu.");
       return;
     }
 
-    if (requiredMissing.length) {
-      setError(`Mapping wajib belum lengkap: ${requiredMissing.map((field) => field.label).join(", ")}.`);
+    if (!fieldMapping.NAMA || !fieldMapping.NOMCU) {
+      setError("Mapping wajib belum lengkap: Nama Peserta dan No MCU.");
       return;
     }
 
@@ -240,7 +363,7 @@ export default function AiMcuMappingPage() {
         return;
       }
 
-      setMessage(json.message || "Mapping berhasil disimpan.");
+      setMessage(json.message || `Mapping berhasil disimpan. Field mapped: ${Object.keys(fieldMapping).length}.`);
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan mapping.");
     } finally {
@@ -255,34 +378,13 @@ export default function AiMcuMappingPage() {
     }));
   }
 
-  function resetAutoMapping() {
-    const auto = buildAiMcuAutoMapping(actualHeaders);
-    setFieldMapping((current) => ({
-      ...current,
-      ...auto,
-    }));
-    setMessage(`Auto detect ulang dari header upload selesai. Field terdeteksi: ${Object.keys(auto).length}.`);
-  }
-
-  function clearGroupMapping() {
-    setFieldMapping((current) => {
-      const next = { ...current };
-      for (const field of AI_MCU_MAPPING_FIELDS) {
-        if (groupFilter === "Semua" || field.group === groupFilter) {
-          delete next[field.key];
-        }
-      }
-      return next;
-    });
-  }
-
   useEffect(() => {
     loadSources(programType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programType]);
 
   useEffect(() => {
-    if (sourceId) loadHeaders(sourceId);
+    if (sourceId) loadHeadersAndAutoMap(sourceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 
@@ -295,8 +397,7 @@ export default function AiMcuMappingPage() {
           <div>
             <h1 className="text-2xl font-bold">Mapping Header AI MCU</h1>
             <p className="mt-2 max-w-4xl text-sm text-slate-600">
-              Dropdown sekarang memuat dua sumber: header asli dari upload Excel dan Master Header Library.
-              Untuk nilai analisis, header asli dari upload tetap yang paling akurat.
+              Auto mapping sekarang berjalan otomatis saat database dipilih. Jadi tidak bergantung pada klik tombol.
             </p>
           </div>
 
@@ -323,7 +424,7 @@ export default function AiMcuMappingPage() {
             <select
               value={programType}
               onChange={(e) => setProgramType(e.target.value)}
-              disabled={loadingSources || loadingHeaders || saving}
+              disabled={loadingSources || saving}
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
             >
               {PROGRAM_OPTIONS.map((item) => (
@@ -336,7 +437,7 @@ export default function AiMcuMappingPage() {
             <select
               value={sourceId}
               onChange={(e) => setSourceId(e.target.value)}
-              disabled={loadingSources || loadingHeaders || saving}
+              disabled={loadingSources || saving}
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
             >
               <option value="">
@@ -353,11 +454,11 @@ export default function AiMcuMappingPage() {
 
             <button
               type="button"
-              onClick={() => loadHeaders()}
-              disabled={!sourceId || loadingHeaders || saving}
+              onClick={() => loadHeadersAndAutoMap()}
+              disabled={!sourceId || saving}
               className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
-              {loadingHeaders ? "Loading..." : "Load Header"}
+              {loadingHeaders ? "Loading..." : "Reload + Auto Map"}
             </button>
           </div>
         </section>
@@ -395,21 +496,20 @@ export default function AiMcuMappingPage() {
 
               <button
                 type="button"
-                onClick={() => setOnlyUnmapped((v) => !v)}
-                className={`rounded-xl border px-4 py-2 text-sm font-bold ${
-                  onlyUnmapped ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"
-                }`}
+                onClick={forceAutoMapNow}
+                disabled={saving}
+                className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-60"
               >
-                Belum mapped
+                Force Auto Map
               </button>
 
               <button
                 type="button"
-                onClick={resetAutoMapping}
-                disabled={!actualHeaders.length || saving}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                onClick={useMasterForCurrentGroup}
+                disabled={saving}
+                className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
               >
-                Auto Detect Ulang
+                Pakai Master Grup Ini
               </button>
 
               <button
@@ -435,167 +535,144 @@ export default function AiMcuMappingPage() {
             </div>
           ) : null}
 
-          {!allHeaders.length ? (
-            <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-500">
-              Pilih database hasil upload Excel untuk menampilkan header dan mapping.
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
+            <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+              Header upload: <b>{actualHeaders.length}</b>
             </div>
-          ) : (
-            <>
-              <div className="mt-4 grid gap-3 md:grid-cols-5">
-                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Header upload: <b>{actualHeaders.length}</b>
-                </div>
-                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Header master: <b>{masterHeaders.length}</b>
-                </div>
-                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Field mapped: <b>{mappedCount}</b>/{AI_MCU_MAPPING_FIELDS.length}
-                </div>
-                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Klinis mapped: <b>{clinicalMappedCount}</b>/{clinicalFieldCount}
-                </div>
-                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Row contoh: <b>{sampleRows.length}</b>
-                </div>
-              </div>
+            <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+              Header master: <b>{masterHeaders.length}</b>
+            </div>
+            <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+              Field mapped: <b>{mappedCount}</b>/{AI_MCU_MAPPING_FIELDS.length}
+            </div>
+            <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+              Klinis mapped: <b>{clinicalMappedCount}</b>/{clinicalFieldCount}
+            </div>
+            <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+              Row contoh: <b>{sampleRows.length}</b>
+            </div>
+          </div>
 
-              {actualHeaders.length < 30 ? (
-                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-                  Header asli dari upload hanya {actualHeaders.length}. Master Header akan muncul di dropdown,
-                  tapi kalau dipilih dan contoh isi tetap "-", berarti data klinis memang belum tersimpan di database upload.
-                  Solusinya upload ulang file MCU raw yang memiliki kolom Fisik/Lab/Urine/Penunjang.
-                </div>
-              ) : null}
+          {actualHeaders.length < 30 ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+              Header asli dari upload hanya {actualHeaders.length}. Kalau contoh isi tetap "-", berarti data klinis belum tersimpan
+              di row upload. Mapping master tetap bisa disimpan, tapi analisis abnormal butuh nilai klinis asli.
+            </div>
+          ) : null}
 
-              {requiredMissing.length ? (
-                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-                  Mapping wajib belum lengkap: {requiredMissing.map((field) => field.label).join(", ")}.
-                </div>
-              ) : (
-                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-                  Mapping wajib sudah lengkap. Data siap dipakai untuk Analisis MCU dan Generate PDF.
-                </div>
-              )}
+          <div className="mt-4 overflow-hidden rounded-2xl border">
+            <div className="grid grid-cols-[0.75fr_1fr_0.8fr_0.45fr] bg-slate-100 px-3 py-3 text-xs font-black uppercase text-slate-600">
+              <div>Parameter AI MCU</div>
+              <div>Header Excel / Master</div>
+              <div>Contoh Isi</div>
+              <div>Grup</div>
+            </div>
 
-              <div className="mt-4 overflow-hidden rounded-2xl border">
-                <div className="grid grid-cols-[0.75fr_1fr_0.8fr_0.45fr] bg-slate-100 px-3 py-3 text-xs font-black uppercase text-slate-600">
-                  <div>Parameter AI MCU</div>
-                  <div>Header Excel / Master</div>
-                  <div>Contoh Isi</div>
-                  <div>Grup</div>
-                </div>
+            <div className="max-h-[620px] divide-y overflow-auto bg-white">
+              {filteredFields.map((field) => {
+                const selectedHeader = fieldMapping[field.key] || "";
+                const preview = firstValue(sampleRows, selectedHeader);
+                const isMasterOnly = selectedHeader && !actualSet.has(selectedHeader);
 
-                <div className="max-h-[620px] divide-y overflow-auto bg-white">
-                  {filteredFields.map((field) => {
-                    const selectedHeader = fieldMapping[field.key] || "";
-                    const preview = firstValue(sampleRows, selectedHeader);
-                    const isMapped = Boolean(selectedHeader);
-                    const isMasterOnly = selectedHeader && !actualSet.has(selectedHeader);
-
-                    return (
-                      <div
-                        key={field.key}
-                        className="grid grid-cols-[0.75fr_1fr_0.8fr_0.45fr] items-center gap-3 px-3 py-3 text-sm"
-                      >
-                        <div>
-                          <div className="font-bold text-slate-900">
-                            {field.label}
-                            {field.required ? <span className="text-red-600"> *</span> : null}
-                            {isMapped ? <span className="ml-2 rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">mapped</span> : null}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-400">{field.key}</div>
-                          <div className="mt-1 truncate text-[11px] text-slate-400" title={field.aliases.join(", ")}>
-                            alias: {field.aliases.slice(0, 5).join(", ")}
-                          </div>
-                        </div>
-
-                        <div>
-                          <select
-                            value={selectedHeader}
-                            onChange={(e) => updateMapping(field.key, e.target.value)}
-                            disabled={saving}
-                            className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
-                              field.required && !selectedHeader ? "border-red-300" : isMasterOnly ? "border-amber-300" : "border-slate-300"
-                            }`}
-                          >
-                            <option value="">-- Tidak dipakai --</option>
-                            <optgroup label="Header dari upload Excel">
-                              {actualHeaders.map((header) => (
-                                <option key={`${field.key}-actual-${header}`} value={header}>
-                                  {header}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="Master Header Library">
-                              {masterOnlyHeaders.map((header) => (
-                                <option key={`${field.key}-master-${header}`} value={header}>
-                                  {header}
-                                </option>
-                              ))}
-                            </optgroup>
-                          </select>
-                          {isMasterOnly ? (
-                            <div className="mt-1 text-[11px] font-semibold text-amber-700">
-                              Master header. Pastikan ada kolom asli yang setara di file upload.
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="truncate rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" title={preview}>
-                          {preview || "-"}
-                        </div>
-
-                        <div className="text-xs font-bold text-slate-500">{field.group}</div>
+                return (
+                  <div
+                    key={field.key}
+                    className="grid grid-cols-[0.75fr_1fr_0.8fr_0.45fr] items-center gap-3 px-3 py-3 text-sm"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-900">
+                        {field.label}
+                        {field.required ? <span className="text-red-600"> *</span> : null}
+                        {selectedHeader ? <span className="ml-2 rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">mapped</span> : null}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div className="mt-1 text-xs text-slate-400">{field.key}</div>
+                    </div>
 
-              <details className="mt-4 rounded-2xl border bg-slate-50">
-                <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-800">
-                  Preview Row Upload
-                </summary>
+                    <div>
+                      <select
+                        value={selectedHeader}
+                        onChange={(e) => updateMapping(field.key, e.target.value)}
+                        disabled={saving}
+                        className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
+                          field.required && !selectedHeader ? "border-red-300" : isMasterOnly ? "border-amber-300" : "border-slate-300"
+                        }`}
+                      >
+                        <option value="">-- Tidak dipakai --</option>
+                        <optgroup label="Header dari upload Excel">
+                          {actualHeaders.map((header) => (
+                            <option key={`${field.key}-actual-${header}`} value={header}>
+                              {header}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Master Header Library">
+                          {masterOnlyHeaders.map((header) => (
+                            <option key={`${field.key}-master-${header}`} value={header}>
+                              {header}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                      {isMasterOnly ? (
+                        <div className="mt-1 text-[11px] font-semibold text-amber-700">
+                          Master header. Jika contoh isi "-", nilai klinis belum ada di upload.
+                        </div>
+                      ) : null}
+                    </div>
 
-                <div className="overflow-auto border-t bg-white">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                      <tr>
+                    <div className="truncate rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" title={preview}>
+                      {preview || "-"}
+                    </div>
+
+                    <div className="text-xs font-bold text-slate-500">{field.group}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <details className="mt-4 rounded-2xl border bg-slate-50">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-800">
+              Preview Row Upload
+            </summary>
+
+            <div className="overflow-auto border-t bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                  <tr>
+                    {actualHeaders.slice(0, 40).map((header) => (
+                      <th key={header} className="whitespace-nowrap p-2 text-left">
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {sampleRows.slice(0, 5).map((item, index) => {
+                    const row = item.row_data || {};
+                    return (
+                      <tr key={index}>
                         {actualHeaders.slice(0, 40).map((header) => (
-                          <th key={header} className="whitespace-nowrap p-2 text-left">
-                            {header}
-                          </th>
+                          <td key={`${index}-${header}`} className="max-w-[240px] truncate whitespace-nowrap p-2" title={String(row[header] ?? "")}>
+                            {String(row[header] ?? "")}
+                          </td>
                         ))}
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {sampleRows.slice(0, 5).map((item, index) => {
-                        const row = item.row_data || {};
-                        return (
-                          <tr key={index}>
-                            {actualHeaders.slice(0, 40).map((header) => (
-                              <td key={`${index}-${header}`} className="max-w-[240px] truncate whitespace-nowrap p-2" title={String(row[header] ?? "")}>
-                                {String(row[header] ?? "")}
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </details>
 
-              <button
-                type="button"
-                onClick={saveMapping}
-                disabled={saving || !!requiredMissing.length}
-                className="mt-5 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? "Menyimpan Mapping..." : "Simpan Mapping ke Database"}
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={saveMapping}
+            disabled={saving || !fieldMapping.NAMA || !fieldMapping.NOMCU}
+            className="mt-5 w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Menyimpan Mapping..." : "Simpan Mapping ke Database"}
+          </button>
         </section>
       </div>
     </main>
