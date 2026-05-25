@@ -88,7 +88,9 @@ async function loadMasterHeaders(supabase: any) {
       .order("sort_order", { ascending: true })
       .order("id", { ascending: true });
 
-    if (result.error) return { rows: [], headers: fallbackMasterHeaders(), error: result.error.message };
+    if (result.error) {
+      return { rows: [], headers: fallbackMasterHeaders(), error: result.error.message };
+    }
 
     const seen = new Set<string>();
     const headers: string[] = [];
@@ -104,6 +106,15 @@ async function loadMasterHeaders(supabase: any) {
   } catch (error: any) {
     return { rows: [], headers: fallbackMasterHeaders(), error: error?.message || "" };
   }
+}
+
+async function getRowsForSource(supabase: any, sourceId: number, limit = 120) {
+  return await supabase
+    .from("ai_mcu_import_rows")
+    .select("id,participant_id,dataset_role,row_data,field_mapping,analysis_meta,participant_name,mcu_id,nik,company_name,database_name,sheet_name,row_index")
+    .eq("source_id", sourceId)
+    .order("id", { ascending: true })
+    .limit(limit);
 }
 
 export async function GET(req: NextRequest) {
@@ -127,13 +138,7 @@ export async function GET(req: NextRequest) {
     if (sourceResult.error) return fail(sourceResult.error.message, 500);
     if (!sourceResult.data) return fail("Database/source tidak ditemukan.", 404);
 
-    const rowsResult = await supabase
-      .from("ai_mcu_import_rows")
-      .select("id,participant_id,dataset_role,row_data,field_mapping,analysis_meta,participant_name,mcu_id,nik,company_name,database_name,sheet_name,row_index")
-      .eq("source_id", sourceId)
-      .order("id", { ascending: true })
-      .limit(120);
-
+    const rowsResult = await getRowsForSource(supabase, sourceId, 120);
     if (rowsResult.error) return fail(rowsResult.error.message, 500);
 
     const rows = rowsResult.data || [];
@@ -178,6 +183,129 @@ export async function GET(req: NextRequest) {
   }
 }
 
+async function updateWithColumns(supabase: any, sourceId: number, fieldMapping: Record<string, unknown>, mappedKeys: string[]) {
+  const payload = {
+    field_mapping: fieldMapping,
+    analysis_meta: {
+      mapping_saved_at: new Date().toISOString(),
+      mapped_keys: mappedKeys,
+      master_header_enabled: true,
+      library_version: "ai-mcu-save-status-v1",
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  const result = await supabase
+    .from("ai_mcu_import_rows")
+    .update(payload)
+    .eq("source_id", sourceId)
+    .select("id");
+
+  if (!result.error) {
+    return {
+      ok: true,
+      mode: "field_mapping+analysis_meta+updated_at",
+      rows: result.data || [],
+      error: null,
+    };
+  }
+
+  const msg = String(result.error.message || "").toLowerCase();
+
+  if (msg.includes("updated_at")) {
+    const retry = await supabase
+      .from("ai_mcu_import_rows")
+      .update({
+        field_mapping: fieldMapping,
+        analysis_meta: {
+          mapping_saved_at: new Date().toISOString(),
+          mapped_keys: mappedKeys,
+          master_header_enabled: true,
+          library_version: "ai-mcu-save-status-v1",
+        },
+      })
+      .eq("source_id", sourceId)
+      .select("id");
+
+    if (!retry.error) {
+      return {
+        ok: true,
+        mode: "field_mapping+analysis_meta",
+        rows: retry.data || [],
+        error: null,
+      };
+    }
+
+    return {
+      ok: false,
+      mode: "field_mapping+analysis_meta",
+      rows: [],
+      error: retry.error,
+    };
+  }
+
+  return {
+    ok: false,
+    mode: "field_mapping+analysis_meta+updated_at",
+    rows: [],
+    error: result.error,
+  };
+}
+
+async function updateInsideRowDataFallback(supabase: any, sourceId: number, fieldMapping: Record<string, unknown>, mappedKeys: string[]) {
+  const rowsResult = await supabase
+    .from("ai_mcu_import_rows")
+    .select("id,row_data")
+    .eq("source_id", sourceId);
+
+  if (rowsResult.error) {
+    return {
+      ok: false,
+      mode: "row_data_fallback_select",
+      rows: [],
+      error: rowsResult.error,
+    };
+  }
+
+  const rows = rowsResult.data || [];
+  const updatedIds: number[] = [];
+  const now = new Date().toISOString();
+
+  for (const row of rows) {
+    const nextRowData = {
+      ...(row.row_data || {}),
+      _AI_MCU_FIELD_MAPPING: fieldMapping,
+      _AI_MCU_MAPPING_SAVED_AT: now,
+      _AI_MCU_MAPPING_KEYS: mappedKeys,
+    };
+
+    const updateResult = await supabase
+      .from("ai_mcu_import_rows")
+      .update({ row_data: nextRowData })
+      .eq("id", row.id)
+      .select("id")
+      .maybeSingle();
+
+    if (updateResult.error) {
+      return {
+        ok: false,
+        mode: "row_data_fallback_update",
+        rows: updatedIds,
+        error: updateResult.error,
+      };
+    }
+
+    if (updateResult.data?.id) updatedIds.push(updateResult.data.id);
+  }
+
+  return {
+    ok: true,
+    mode: "row_data_fallback",
+    rows: updatedIds,
+    error: null,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = getSessionUser(req);
@@ -196,33 +324,39 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
-    const updated = await supabase
-      .from("ai_mcu_import_rows")
-      .update({
-        field_mapping: fieldMapping,
-        analysis_meta: {
-          mapping_saved_at: new Date().toISOString(),
-          mapped_keys: mappedKeys,
-          master_header_enabled: true,
-          library_version: "ai-mcu-master-header-v3",
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("source_id", sourceId)
-      .select("id");
+    const direct = await updateWithColumns(supabase, sourceId, fieldMapping, mappedKeys);
 
-    if (updated.error) {
-      return fail(updated.error.message, 500, {
-        hint: "Pastikan SQL patch sudah dijalankan sehingga ai_mcu_import_rows punya field_mapping dan analysis_meta.",
+    if (direct.ok) {
+      return ok({
+        message: `Mapping berhasil disimpan. Mode: ${direct.mode}. Rows updated: ${direct.rows.length}.`,
+        sourceId,
+        saveMode: direct.mode,
+        updatedRows: direct.rows.length,
+        mappedKeys,
+        fieldMapping,
       });
     }
 
-    return ok({
-      message: "Mapping berhasil disimpan cepat. Header master tersimpan sebagai referensi mapping.",
-      sourceId,
-      updatedRows: updated.data?.length || 0,
-      mappedKeys,
-      fieldMapping,
+    const fallback = await updateInsideRowDataFallback(supabase, sourceId, fieldMapping, mappedKeys);
+
+    if (fallback.ok) {
+      return ok({
+        message: `Mapping berhasil disimpan via fallback row_data. Rows updated: ${fallback.rows.length}.`,
+        sourceId,
+        saveMode: fallback.mode,
+        updatedRows: fallback.rows.length,
+        mappedKeys,
+        fieldMapping,
+        warning: "Kolom field_mapping/analysis_meta kemungkinan belum tersedia, mapping disimpan di row_data._AI_MCU_FIELD_MAPPING.",
+      });
+    }
+
+    return fail("Gagal menyimpan mapping.", 500, {
+      directMode: direct.mode,
+      directError: direct.error?.message || direct.error,
+      fallbackMode: fallback.mode,
+      fallbackError: fallback.error?.message || fallback.error,
+      hint: "Cek apakah tabel ai_mcu_import_rows punya kolom field_mapping, analysis_meta, row_data, dan source_id.",
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal menyimpan mapping header.", 500);

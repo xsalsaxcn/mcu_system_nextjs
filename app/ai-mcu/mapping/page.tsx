@@ -122,20 +122,12 @@ function buildForcedMapping(actualHeaders: string[], savedMapping: Record<string
       fromUpload += 1;
       if (isAiMcuClinicalField(field)) clinicalFromUpload += 1;
     } else {
-      // Critical fallback: always put a master key so the UI is visibly mapped.
-      // If Contoh Isi stays "-", it means the uploaded rows do not contain this clinical value yet.
       mapping[field.key] = field.key;
       fromMaster += 1;
     }
   }
 
-  return {
-    mapping,
-    fromUpload,
-    fromSaved,
-    fromMaster,
-    clinicalFromUpload,
-  };
+  return { mapping, fromUpload, fromSaved, fromMaster, clinicalFromUpload };
 }
 
 export default function AiMcuMappingPage() {
@@ -157,6 +149,8 @@ export default function AiMcuMappingPage() {
 
   const [message, setMessage] = useState("Mapping otomatis akan berjalan saat database dipilih.");
   const [error, setError] = useState("");
+  const [saveStatus, setSaveStatus] = useState("Belum disimpan.");
+  const [lastSaveJson, setLastSaveJson] = useState<any>(null);
 
   const actualSet = useMemo(() => new Set(actualHeaders), [actualHeaders]);
 
@@ -297,21 +291,13 @@ export default function AiMcuMappingPage() {
   function useMasterForCurrentGroup() {
     setError("");
 
-    const targetFields = AI_MCU_MAPPING_FIELDS.filter((field) => {
-      if (groupFilter === "Semua") return true;
-      return field.group === groupFilter;
-    });
-
     const next: Record<string, string> = {};
-    for (const field of targetFields) {
+    for (const field of AI_MCU_MAPPING_FIELDS) {
+      if (groupFilter !== "Semua" && field.group !== groupFilter) continue;
       next[field.key] = findBestActualHeaderForField(field, actualHeaders) || field.key;
     }
 
-    setFieldMapping((current) => ({
-      ...current,
-      ...next,
-    }));
-
+    setFieldMapping((current) => ({ ...current, ...next }));
     setMessage(`Master mapping untuk grup ${groupFilter} sudah diisi. Cek kolom Header Excel / Master.`);
   }
 
@@ -330,19 +316,23 @@ export default function AiMcuMappingPage() {
 
   async function saveMapping() {
     setError("");
-    setMessage("Menyimpan mapping...");
+    setLastSaveJson(null);
 
     if (!sourceId) {
       setError("Pilih database terlebih dahulu.");
+      setSaveStatus("Gagal: database belum dipilih.");
       return;
     }
 
     if (!fieldMapping.NAMA || !fieldMapping.NOMCU) {
       setError("Mapping wajib belum lengkap: Nama Peserta dan No MCU.");
+      setSaveStatus("Gagal: mapping wajib belum lengkap.");
       return;
     }
 
+    const mappedKeys = Object.keys(fieldMapping).filter((key) => clean(fieldMapping[key]));
     setSaving(true);
+    setSaveStatus(`Menyimpan mapping... (${mappedKeys.length} field)`);
 
     try {
       const res = await fetch("/api/ai-mcu/mapping/headers", {
@@ -356,26 +346,34 @@ export default function AiMcuMappingPage() {
         }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({
+        ok: false,
+        message: "Response server bukan JSON.",
+      }));
+
+      setLastSaveJson(json);
 
       if (!res.ok || !json.ok) {
-        setError(json.message || "Gagal menyimpan mapping.");
+        const msg = json.message || `Gagal menyimpan mapping. HTTP ${res.status}`;
+        setError(msg);
+        setSaveStatus(`GAGAL SAVE: ${msg}`);
         return;
       }
 
-      setMessage(json.message || `Mapping berhasil disimpan. Field mapped: ${Object.keys(fieldMapping).length}.`);
+      const msg = json.message || `Mapping berhasil disimpan. Rows updated: ${json.updatedRows ?? "-"}.`;
+      setMessage(msg);
+      setSaveStatus(`SAVED ✅ ${msg}`);
     } catch (err: any) {
-      setError(err?.message || "Gagal menyimpan mapping.");
+      const msg = err?.message || "Gagal menyimpan mapping.";
+      setError(msg);
+      setSaveStatus(`GAGAL SAVE: ${msg}`);
     } finally {
       setSaving(false);
     }
   }
 
   function updateMapping(key: string, value: string) {
-    setFieldMapping((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setFieldMapping((current) => ({ ...current, [key]: value }));
   }
 
   useEffect(() => {
@@ -391,13 +389,13 @@ export default function AiMcuMappingPage() {
   const selectedSource = sources.find((source) => String(source.id) === sourceId);
 
   return (
-    <main className="p-6">
+    <main className="p-6 pb-32">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Mapping Header AI MCU</h1>
             <p className="mt-2 max-w-4xl text-sm text-slate-600">
-              Auto mapping sekarang berjalan otomatis saat database dipilih. Jadi tidak bergantung pada klik tombol.
+              Save status sekarang tampil di bagian bawah dan di dekat tombol agar jelas apakah mapping tersimpan atau gagal.
             </p>
           </div>
 
@@ -535,6 +533,10 @@ export default function AiMcuMappingPage() {
             </div>
           ) : null}
 
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-bold text-blue-800">
+            Status Save: {saveStatus}
+          </div>
+
           <div className="mt-4 grid gap-3 md:grid-cols-5">
             <div className="rounded-xl border bg-slate-50 p-4 text-sm">
               Header upload: <b>{actualHeaders.length}</b>
@@ -631,39 +633,16 @@ export default function AiMcuMappingPage() {
             </div>
           </div>
 
-          <details className="mt-4 rounded-2xl border bg-slate-50">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-800">
-              Preview Row Upload
-            </summary>
-
-            <div className="overflow-auto border-t bg-white">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                  <tr>
-                    {actualHeaders.slice(0, 40).map((header) => (
-                      <th key={header} className="whitespace-nowrap p-2 text-left">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {sampleRows.slice(0, 5).map((item, index) => {
-                    const row = item.row_data || {};
-                    return (
-                      <tr key={index}>
-                        {actualHeaders.slice(0, 40).map((header) => (
-                          <td key={`${index}-${header}`} className="max-w-[240px] truncate whitespace-nowrap p-2" title={String(row[header] ?? "")}>
-                            {String(row[header] ?? "")}
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </details>
+          {lastSaveJson ? (
+            <details className="mt-4 rounded-2xl border bg-slate-50">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-800">
+                Debug Response Save
+              </summary>
+              <pre className="max-h-[260px] overflow-auto border-t bg-white p-4 text-xs">
+                {JSON.stringify(lastSaveJson, null, 2)}
+              </pre>
+            </details>
+          ) : null}
 
           <button
             type="button"
@@ -674,6 +653,22 @@ export default function AiMcuMappingPage() {
             {saving ? "Menyimpan Mapping..." : "Simpan Mapping ke Database"}
           </button>
         </section>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t bg-white/95 p-3 shadow-lg backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm">
+            <b>Status Save:</b> {saveStatus}
+          </div>
+          <button
+            type="button"
+            onClick={saveMapping}
+            disabled={saving || !fieldMapping.NAMA || !fieldMapping.NOMCU}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Menyimpan Mapping..." : "Simpan Mapping ke Database"}
+          </button>
+        </div>
       </div>
     </main>
   );
