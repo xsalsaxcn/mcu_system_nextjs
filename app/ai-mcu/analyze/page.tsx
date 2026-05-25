@@ -1,4 +1,4 @@
-''"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -454,3 +454,5 @@ export default function AiMcuAnalyzePage() {
     </main>
   );
 }
+
+
