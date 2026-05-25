@@ -51,7 +51,8 @@ export default function AiMcuMappingPage() {
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [sourceId, setSourceId] = useState("");
 
-  const [headers, setHeaders] = useState<string[]>([]);
+  const [actualHeaders, setActualHeaders] = useState<string[]>([]);
+  const [masterHeaders, setMasterHeaders] = useState<string[]>([]);
   const [sampleRows, setSampleRows] = useState<any[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = useState<(typeof GROUP_OPTIONS)[number]>("Fisik");
@@ -64,6 +65,24 @@ export default function AiMcuMappingPage() {
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const actualSet = useMemo(() => new Set(actualHeaders), [actualHeaders]);
+  const masterOnlyHeaders = useMemo(
+    () => masterHeaders.filter((header) => header && !actualSet.has(header)),
+    [masterHeaders, actualSet]
+  );
+
+  const allHeaders = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const header of [...actualHeaders, ...masterOnlyHeaders]) {
+      if (!seen.has(header)) {
+        seen.add(header);
+        out.push(header);
+      }
+    }
+    return out;
+  }, [actualHeaders, masterOnlyHeaders]);
 
   const filteredFields = useMemo(() => {
     return AI_MCU_MAPPING_FIELDS.filter((field) => {
@@ -105,7 +124,8 @@ export default function AiMcuMappingPage() {
     setMessage("");
     setSources([]);
     setSourceId("");
-    setHeaders([]);
+    setActualHeaders([]);
+    setMasterHeaders([]);
     setSampleRows([]);
     setFieldMapping({});
 
@@ -145,7 +165,8 @@ export default function AiMcuMappingPage() {
     setLoadingHeaders(true);
     setError("");
     setMessage("");
-    setHeaders([]);
+    setActualHeaders([]);
+    setMasterHeaders([]);
     setSampleRows([]);
     setFieldMapping({});
 
@@ -164,15 +185,18 @@ export default function AiMcuMappingPage() {
         return;
       }
 
-      const nextHeaders = json.headers || [];
-      const nextMapping = json.fieldMapping || buildAiMcuAutoMapping(nextHeaders);
+      const nextActualHeaders = json.actualHeaders || [];
+      const nextMasterHeaders = json.masterHeaders || [];
+      const nextMapping = json.fieldMapping || buildAiMcuAutoMapping(nextActualHeaders);
 
-      setHeaders(nextHeaders);
+      setActualHeaders(nextActualHeaders);
+      setMasterHeaders(nextMasterHeaders);
       setSampleRows(json.sampleRows || []);
       setFieldMapping(nextMapping);
 
+      const masterNote = json.masterHeaderError ? ` Master table belum aktif, pakai fallback library.` : "";
       setMessage(
-        `Header database terbaca: ${nextHeaders.length}. Library field: ${json.libraryFields || AI_MCU_MAPPING_FIELDS.length}. Field mapped: ${Object.keys(nextMapping).filter((key) => nextMapping[key]).length}.`
+        `Header upload terbaca: ${nextActualHeaders.length}. Header master: ${nextMasterHeaders.length}. Field mapped: ${Object.keys(nextMapping).filter((key) => nextMapping[key]).length}.${masterNote}`
       );
     } catch (err: any) {
       setError(err?.message || "Gagal mengambil header dari database upload.");
@@ -232,12 +256,12 @@ export default function AiMcuMappingPage() {
   }
 
   function resetAutoMapping() {
-    const auto = buildAiMcuAutoMapping(headers);
+    const auto = buildAiMcuAutoMapping(actualHeaders);
     setFieldMapping((current) => ({
       ...current,
       ...auto,
     }));
-    setMessage(`Auto detect ulang selesai. Field terdeteksi: ${Object.keys(auto).length}.`);
+    setMessage(`Auto detect ulang dari header upload selesai. Field terdeteksi: ${Object.keys(auto).length}.`);
   }
 
   function clearGroupMapping() {
@@ -271,8 +295,8 @@ export default function AiMcuMappingPage() {
           <div>
             <h1 className="text-2xl font-bold">Mapping Header AI MCU</h1>
             <p className="mt-2 max-w-4xl text-sm text-slate-600">
-              Mapping sekarang memakai library header lengkap untuk Identitas, Fisik, Laboratorium, Urine, Penunjang, dan Output PDF.
-              Pilih header Excel yang sesuai dengan setiap parameter.
+              Dropdown sekarang memuat dua sumber: header asli dari upload Excel dan Master Header Library.
+              Untuk nilai analisis, header asli dari upload tetap yang paling akurat.
             </p>
           </div>
 
@@ -382,7 +406,7 @@ export default function AiMcuMappingPage() {
               <button
                 type="button"
                 onClick={resetAutoMapping}
-                disabled={!headers.length || saving}
+                disabled={!actualHeaders.length || saving}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
                 Auto Detect Ulang
@@ -411,18 +435,18 @@ export default function AiMcuMappingPage() {
             </div>
           ) : null}
 
-          {!headers.length ? (
+          {!allHeaders.length ? (
             <div className="mt-4 rounded-xl border bg-slate-50 p-4 text-sm text-slate-500">
               Pilih database hasil upload Excel untuk menampilkan header dan mapping.
             </div>
           ) : (
             <>
-              <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="mt-4 grid gap-3 md:grid-cols-5">
                 <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Header terbaca: <b>{headers.length}</b>
+                  Header upload: <b>{actualHeaders.length}</b>
                 </div>
                 <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-                  Library field: <b>{AI_MCU_MAPPING_FIELDS.length}</b>
+                  Header master: <b>{masterHeaders.length}</b>
                 </div>
                 <div className="rounded-xl border bg-slate-50 p-4 text-sm">
                   Field mapped: <b>{mappedCount}</b>/{AI_MCU_MAPPING_FIELDS.length}
@@ -430,13 +454,16 @@ export default function AiMcuMappingPage() {
                 <div className="rounded-xl border bg-slate-50 p-4 text-sm">
                   Klinis mapped: <b>{clinicalMappedCount}</b>/{clinicalFieldCount}
                 </div>
+                <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+                  Row contoh: <b>{sampleRows.length}</b>
+                </div>
               </div>
 
-              {clinicalMappedCount < 4 ? (
+              {actualHeaders.length < 30 ? (
                 <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-                  Header klinis yang ter-map masih sedikit. Untuk Abnormal dan Interpretasi Penyakit, minimal mapping-kan Fisik
-                  seperti TD/Tensi dan BMI, lalu Laboratorium seperti GDP/GDS, LDL/Kolesterol/Trigliserida, SGOT/SGPT.
-                  Jika dropdown tidak memiliki header klinis sama sekali, berarti file upload/database ini belum menyimpan kolom hasil pemeriksaan klinis dan perlu upload file MCU raw ulang.
+                  Header asli dari upload hanya {actualHeaders.length}. Master Header akan muncul di dropdown,
+                  tapi kalau dipilih dan contoh isi tetap "-", berarti data klinis memang belum tersimpan di database upload.
+                  Solusinya upload ulang file MCU raw yang memiliki kolom Fisik/Lab/Urine/Penunjang.
                 </div>
               ) : null}
 
@@ -453,7 +480,7 @@ export default function AiMcuMappingPage() {
               <div className="mt-4 overflow-hidden rounded-2xl border">
                 <div className="grid grid-cols-[0.75fr_1fr_0.8fr_0.45fr] bg-slate-100 px-3 py-3 text-xs font-black uppercase text-slate-600">
                   <div>Parameter AI MCU</div>
-                  <div>Header Excel</div>
+                  <div>Header Excel / Master</div>
                   <div>Contoh Isi</div>
                   <div>Grup</div>
                 </div>
@@ -463,6 +490,7 @@ export default function AiMcuMappingPage() {
                     const selectedHeader = fieldMapping[field.key] || "";
                     const preview = firstValue(sampleRows, selectedHeader);
                     const isMapped = Boolean(selectedHeader);
+                    const isMasterOnly = selectedHeader && !actualSet.has(selectedHeader);
 
                     return (
                       <div
@@ -481,21 +509,37 @@ export default function AiMcuMappingPage() {
                           </div>
                         </div>
 
-                        <select
-                          value={selectedHeader}
-                          onChange={(e) => updateMapping(field.key, e.target.value)}
-                          disabled={saving}
-                          className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
-                            field.required && !selectedHeader ? "border-red-300" : "border-slate-300"
-                          }`}
-                        >
-                          <option value="">-- Tidak dipakai --</option>
-                          {headers.map((header) => (
-                            <option key={`${field.key}-${header}`} value={header}>
-                              {header}
-                            </option>
-                          ))}
-                        </select>
+                        <div>
+                          <select
+                            value={selectedHeader}
+                            onChange={(e) => updateMapping(field.key, e.target.value)}
+                            disabled={saving}
+                            className={`w-full rounded-xl border bg-white px-3 py-2 text-sm ${
+                              field.required && !selectedHeader ? "border-red-300" : isMasterOnly ? "border-amber-300" : "border-slate-300"
+                            }`}
+                          >
+                            <option value="">-- Tidak dipakai --</option>
+                            <optgroup label="Header dari upload Excel">
+                              {actualHeaders.map((header) => (
+                                <option key={`${field.key}-actual-${header}`} value={header}>
+                                  {header}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Master Header Library">
+                              {masterOnlyHeaders.map((header) => (
+                                <option key={`${field.key}-master-${header}`} value={header}>
+                                  {header}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          {isMasterOnly ? (
+                            <div className="mt-1 text-[11px] font-semibold text-amber-700">
+                              Master header. Pastikan ada kolom asli yang setara di file upload.
+                            </div>
+                          ) : null}
+                        </div>
 
                         <div className="truncate rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" title={preview}>
                           {preview || "-"}
@@ -517,7 +561,7 @@ export default function AiMcuMappingPage() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                       <tr>
-                        {headers.slice(0, 30).map((header) => (
+                        {actualHeaders.slice(0, 40).map((header) => (
                           <th key={header} className="whitespace-nowrap p-2 text-left">
                             {header}
                           </th>
@@ -529,7 +573,7 @@ export default function AiMcuMappingPage() {
                         const row = item.row_data || {};
                         return (
                           <tr key={index}>
-                            {headers.slice(0, 30).map((header) => (
+                            {actualHeaders.slice(0, 40).map((header) => (
                               <td key={`${index}-${header}`} className="max-w-[240px] truncate whitespace-nowrap p-2" title={String(row[header] ?? "")}>
                                 {String(row[header] ?? "")}
                               </td>
