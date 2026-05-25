@@ -1,195 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-
 export const dynamic = "force-dynamic";
-
-function fail(message: string, status = 400, extra: Record<string, unknown> = {}) {
-  return NextResponse.json({ ok: false, message, ...extra }, { status });
-}
-
-function norm(value: unknown) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-function cleanValue(value: any) {
-  if (value === null || value === undefined) return "";
-  const text = String(value).trim();
-  if (["null", "undefined", "nan"].includes(text.toLowerCase())) return "";
-  return text;
-}
-
-function compareValue(value: any) {
-  const text = cleanValue(value);
-  if (!text) return "";
-  const normalizedNumber = Number(text.replace(/,/g, "."));
-  if (Number.isFinite(normalizedNumber)) {
-    return normalizedNumber.toString();
-  }
-  return text.replace(/\s+/g, " ").toLowerCase();
-}
-
-function toNum(value: any) {
-  const raw = cleanValue(value).replace(/,/g, ".");
-  const match = raw.match(/-?\d+(\.\d+)?/);
-  if (!match) return NaN;
-  return Number(match[0]);
-}
-
-function rowKey(row: Record<string, any>) {
-  return norm(row.NOMCU || row["NO MCU"] || row["NO.MCU"] || row.MCU_ID || row.NIK || row["NIK/NRP/ID"] || row.NAMA || row.Nama);
-}
-
-function rowName(row: Record<string, any>) {
-  return cleanValue(row.NAMA || row.Nama || row.name || row.participant_name);
-}
-
-const IGNORE_COMPARE_KEYS = new Set([
-  "NO", "NOMCU", "NO MCU", "NO.MCU", "MCU_ID", "NAMA", "Nama", "name", "NIK", "NIK/NRP/ID",
-  "JK", "USIA", "TGLLAHIR", "Tanggal Lahir", "DEPARTEMEN", "PAKET", "DATABASE_NAME", "PROGRAM_TYPE",
-  "Nama PT", "Perusahaan", "_AI_MCU_FIELD_MAPPING", "_SheetName", "_RowIndex",
-]);
-
-function buildComparison(previousRows: any[], currentRows: any[], thresholdPct = 10) {
-  const oldMap = new Map<string, Record<string, any>>();
-  for (const row of previousRows || []) {
-    const key = rowKey(row);
-    if (key && !oldMap.has(key)) oldMap.set(key, row);
-  }
-
-  const comparisonRows: any[] = [];
-  const changedRows: any[] = [];
-
-  for (const current of currentRows || []) {
-    const key = rowKey(current);
-    const prev = key ? oldMap.get(key) : undefined;
-    const name = rowName(current) || rowName(prev || {});
-    const mcuId = cleanValue(current.NOMCU || current["NO MCU"] || current.MCU_ID || prev?.NOMCU || prev?.["NO MCU"]);
-
-    const allKeys = new Set<string>([...Object.keys(prev || {}), ...Object.keys(current || {})]);
-    const rowSummary: any = { Nama: name, MCU_ID: mcuId, changedCount: 0, significantCount: 0 };
-
-    for (const keyName of allKeys) {
-      if (!keyName || keyName.startsWith("_") || IGNORE_COMPARE_KEYS.has(keyName)) continue;
-
-      const oldValue = prev ? prev[keyName] : "";
-      const newValue = current[keyName];
-      const oldCompare = compareValue(oldValue);
-      const newCompare = compareValue(newValue);
-      const changed = oldCompare !== newCompare;
-
-      const oldNum = toNum(oldValue);
-      const newNum = toNum(newValue);
-      const numeric = Number.isFinite(oldNum) && Number.isFinite(newNum);
-      const delta = numeric ? newNum - oldNum : null;
-      const pct = numeric && oldNum !== 0 ? (delta! / oldNum) * 100 : null;
-      const significant = changed && (pct === null ? true : Math.abs(pct) >= thresholdPct);
-
-      if (changed) {
-        rowSummary.changedCount += 1;
-        if (significant) rowSummary.significantCount += 1;
-        changedRows.push({
-          Nama: name,
-          MCU_ID: mcuId,
-          Parameter: keyName,
-          NilaiLama: cleanValue(oldValue),
-          NilaiBaru: cleanValue(newValue),
-          Delta: delta === null ? "" : Number(delta.toFixed(4)),
-          PercentDelta: pct === null ? "" : Number(pct.toFixed(2)),
-          Signifikan: significant ? "YES" : "NO",
-          Status: numeric ? (delta! > 0 ? "Naik" : delta! < 0 ? "Turun" : "Stabil") : "Berubah",
-        });
-      }
-    }
-
-    comparisonRows.push(rowSummary);
-  }
-
-  changedRows.sort((a, b) => String(a.Nama).localeCompare(String(b.Nama)) || String(a.Parameter).localeCompare(String(b.Parameter)));
-  return { comparisonRows, changedRows };
-}
-
-function normalizeEngineUrl() {
-  return String(process.env.AI_MCU_ENGINE_URL || "").replace(/\/$/, "");
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const user = getSessionUser(req);
-    if (!user) return fail("Unauthorized", 401);
-
-    const body = await req.json().catch(() => ({}));
-    const sourceId = Number(body.sourceId || body.source_id || 0);
-    const thresholdPct = Number(body.thresholdPct || 10);
-
-    if (!Number.isFinite(sourceId) || sourceId <= 0) {
-      return fail("sourceId wajib dipilih.");
-    }
-
-    const supabase = getSupabaseAdmin();
-    const sourceResult = await supabase
-      .from("participant_sources")
-      .select("id,name,institution_name,program_type")
-      .eq("id", sourceId)
-      .maybeSingle();
-
-    if (sourceResult.error) return fail(sourceResult.error.message, 500);
-    if (!sourceResult.data) return fail("Database/source tidak ditemukan.", 404);
-
-    const rowsResult = await supabase
-      .from("ai_mcu_import_rows")
-      .select("id,participant_id,dataset_role,row_data,participant_name,mcu_id,nik,company_name,database_name,source_file_name,sheet_name,row_index,analysis_meta")
-      .eq("source_id", sourceId)
-      .order("id", { ascending: true });
-
-    if (rowsResult.error) return fail(rowsResult.error.message, 500);
-
-    const rows = rowsResult.data || [];
-    const currentRows = rows
-      .filter((r: any) => String(r.dataset_role || "new") === "new")
-      .map((r: any) => ({ ...(r.row_data || {}), _import_id: r.id, _participant_id: r.participant_id }));
-    const previousRows = rows
-      .filter((r: any) => String(r.dataset_role || "") === "old")
-      .map((r: any) => ({ ...(r.row_data || {}), _import_id: r.id }));
-
-    const localCompare = buildComparison(previousRows, currentRows, thresholdPct);
-
-    let engineResult: any = null;
-    const engineUrl = normalizeEngineUrl();
-    if (engineUrl) {
-      try {
-        const res = await fetch(`${engineUrl}/analyze-mcu`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ currentRows, previousRows }),
-        });
-        engineResult = await res.json().catch(() => null);
-      } catch (error: any) {
-        engineResult = { ok: false, message: error?.message || "Python engine tidak bisa dihubungi." };
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      source: sourceResult.data,
-      summary: {
-        totalCurrent: currentRows.length,
-        totalPrevious: previousRows.length,
-        changedParameters: localCompare.changedRows.length,
-        participantsWithChanges: localCompare.comparisonRows.filter((r) => r.changedCount > 0).length,
-        thresholdPct,
-      },
-      currentRows,
-      previousRows,
-      comparisonRows: localCompare.comparisonRows,
-      changedRows: localCompare.changedRows,
-      engineResult,
-      diseaseRows: engineResult?.diseaseRows || engineResult?.conditions || engineResult?.conditionRows || engineResult?.data?.conditions || [],
-      abnormalRows: engineResult?.abnormalRows || engineResult?.abnormal || engineResult?.data?.abnormalRows || [],
-      priorityRows: engineResult?.priorityRows || engineResult?.priorities || engineResult?.data?.priorityRows || [],
-    });
-  } catch (error: any) {
-    return fail(error?.message || "Analisis MCU gagal.", 500);
-  }
-}
+function fail(message:string,status=400,extra:Record<string,unknown>={}){return NextResponse.json({ok:false,message,...extra},{status});}
+function clean(v:any){if(v===null||v===undefined)return"";const s=String(v).trim();if(!s||["null","undefined","nan"].includes(s.toLowerCase()))return"";return s;}
+function norm(v:any){return clean(v).toLowerCase().replace(/[^a-z0-9]+/g,"");}
+function toNum(v:any){const m=clean(v).replace(/,/g,".").match(/-?\d+(\.\d+)?/);return m?Number(m[0]):NaN;}
+function cmp(v:any){const s=clean(v);if(!s)return"";const n=Number(s.replace(/,/g,"."));return Number.isFinite(n)?String(n):s.replace(/\s+/g," ").toLowerCase();}
+function rowKey(r:any){return norm(r.MCU_ID||r.NOMCU||r["NO MCU"]||r["NO.MCU"]||r.NIK||r["NIK/NRP/ID"]||r.NAMA||r.Nama);}
+function rowName(r:any){return clean(r.NAMA||r.Nama||r.name||r.participant_name);}
+function rowMcu(r:any){return clean(r.MCU_ID||r.NOMCU||r["NO MCU"]||r["NO.MCU"]||r.mcu_id);}
+const IGNORE=new Set(["NO","NOMCU","NO MCU","NO.MCU","MCU_ID","NAMA","Nama","name","NIK","NIK/NRP/ID","DATABASE_NAME","PROGRAM_TYPE","Nama PT","Perusahaan","_AI_MCU_FIELD_MAPPING","_import_id","_participant_id"]);
+function keys(oldRows:any[],newRows:any[]){const s=new Set<string>();[...oldRows,...newRows].forEach(r=>Object.keys(r||{}).forEach(k=>{if(k&&!k.startsWith("_")&&!IGNORE.has(k))s.add(k)}));const pref=["DEPT","DEPARTEMEN","PAKET","KATEGORI","KESIMPULAN","SARAN","JK","TGLLAHIR","USIA"];return Array.from(s).sort((a,b)=>{const ia=pref.indexOf(a),ib=pref.indexOf(b);if(ia>=0||ib>=0)return(ia>=0?ia:999)-(ib>=0?ib:999);return a.localeCompare(b);});}
+function buildCompare(oldRows:any[],newRows:any[],threshold=10){const oldMap=new Map<string,any>();oldRows.forEach(r=>{const k=rowKey(r);if(k&&!oldMap.has(k))oldMap.set(k,r)});const ps=keys(oldRows,newRows);const all:any[]=[],changed:any[]=[],signif:any[]=[],long:any[]=[];for(const cur of newRows){const old=oldMap.get(rowKey(cur));const wide:any={Nama:rowName(cur)||rowName(old||{}),MCU_ID:rowMcu(cur)||rowMcu(old||{})};let cc=0,sc=0;for(const p of ps){const ov=old?old[p]:"",nv=cur[p];const oc=clean(ov),nc=clean(nv);const ch=cmp(ov)!==cmp(nv);const on=toNum(ov),nn=toNum(nv);const numeric=Number.isFinite(on)&&Number.isFinite(nn);const d=numeric?nn-on:null;const pct=numeric&&on!==0?(d!/on)*100:null;const sig=ch&&(pct===null?true:Math.abs(pct)>=threshold);const status=!ch?"Stabil":numeric?(d!>0?"Naik":d!<0?"Turun":"Stabil"):"Berubah";wide[`${p} (Lalu)`]=oc;wide[`${p} (Ini)`]=nc;wide[`${p} Δ`]=d===null?(ch?"Berubah":"Stabil"):Number(d.toFixed(4));wide[`${p} %Δ`]=pct===null?"":Number(pct.toFixed(2));wide[`${p} Status`]=status;wide[`${p} Signifikan`]=sig?"YES":"NO";if(ch){cc++;if(sig)sc++;long.push({Nama:wide.Nama,MCU_ID:wide.MCU_ID,Parameter:p,"Nilai Lalu":oc,"Nilai Ini":nc,"Δ":wide[`${p} Δ`],"%Δ":wide[`${p} %Δ`],Status:status,Signifikan:sig?"YES":"NO"});}}
+wide.__changedCount=cc;wide.__significantCount=sc;all.push(wide);if(cc>0)changed.push(wide);if(sc>0)signif.push(wide);}return{all,changed,signif,long,parameterCount:ps.length};}
+function engineUrl(){return String(process.env.AI_MCU_ENGINE_URL||"").replace(/\/$/,"");}
+function rowsFromEngine(e:any,names:string[]){for(const n of names){const v=e?.[n]||e?.data?.[n];if(Array.isArray(v))return v;}return[];}
+export async function POST(req:NextRequest){try{const user=getSessionUser(req);if(!user)return fail("Unauthorized",401);const body=await req.json().catch(()=>({}));const sourceId=Number(body.sourceId||body.source_id||0),thresholdPct=Number(body.thresholdPct||10);if(!sourceId)return fail("sourceId wajib dipilih.");const supabase=getSupabaseAdmin();const src=await supabase.from("participant_sources").select("id,name,institution_name,program_type").eq("id",sourceId).maybeSingle();if(src.error)return fail(src.error.message,500);if(!src.data)return fail("Database/source tidak ditemukan.",404);const rr=await supabase.from("ai_mcu_import_rows").select("id,participant_id,dataset_role,row_data,participant_name,mcu_id,nik,company_name,database_name,source_file_name,sheet_name,row_index,analysis_meta").eq("source_id",sourceId).order("id",{ascending:true});if(rr.error)return fail(rr.error.message,500);const rows=rr.data||[];const current=rows.filter((r:any)=>String(r.dataset_role||"new")==="new").map((r:any)=>({...(r.row_data||{}),_import_id:r.id,_participant_id:r.participant_id}));const previous=rows.filter((r:any)=>String(r.dataset_role||"")==="old").map((r:any)=>({...(r.row_data||{}),_import_id:r.id}));const c=buildCompare(previous,current,thresholdPct);let er:any=null;const url=engineUrl();if(url){try{const res=await fetch(`${url}/analyze-mcu`,{method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",body:JSON.stringify({currentRows:current,previousRows:previous})});er=await res.json().catch(()=>null);}catch(e:any){er={ok:false,message:e?.message||"Python engine tidak bisa dihubungi."};}}
+const abnormal=rowsFromEngine(er,["abnormalRows","abnormal","abnormal_summary"]),disease=rowsFromEngine(er,["diseaseRows","conditions","conditionRows","analyses"]),priority=rowsFromEngine(er,["priorityRows","priorities"]);
+return NextResponse.json({ok:true,source:src.data,summary:{totalCurrent:current.length,totalPrevious:previous.length,parameterCount:c.parameterCount,comparisonAll:c.all.length,comparisonChanged:c.changed.length,comparisonSignif:c.signif.length,changedParameters:c.long.length,thresholdPct,engineOk:Boolean(er?.ok)},Rekap_Analisis:current,Abnormal_Summary:abnormal,Perbandingan_All:c.all,Perbandingan_Changed:c.changed,Perbandingan_Signif:c.signif,Perbandingan_Long:c.long,Interpretasi_Penyakit:disease,Prioritas:priority,previousRows:previous,engineResult:er});}catch(error:any){return fail(error?.message||"Analisis MCU gagal.",500);}}

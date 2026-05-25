@@ -6,457 +6,68 @@ import * as XLSX from "xlsx";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type ParsedRow = {
-  rowData: Record<string, any>;
-  sheetName: string;
-  rowIndex: number;
-  headerRowIndex: number;
-  fieldMapping: Record<string, string>;
-  name: string;
-  mcuId: string;
-  nik: string;
-};
-
 function fail(message: string, status = 400, extra: Record<string, unknown> = {}) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
-
-function ok(payload: Record<string, unknown> = {}) {
-  return NextResponse.json({ ok: true, ...payload });
+function clean(v: any) {
+  const s = String(v ?? "").trim();
+  if (!s || ["null", "undefined", "nan", "-"].includes(s.toLowerCase())) return "";
+  return s;
 }
-
-function cleanText(value: unknown) {
-  const text = String(value ?? "").trim();
-  if (!text || ["null", "undefined", "nan", "-"].includes(text.toLowerCase())) return "";
-  return text;
-}
-
-function norm(value: unknown) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
-
-const HEADER_ALIASES = [
-  "nama", "nama peserta", "nama karyawan", "nomcu", "no mcu", "no.mcu", "nomor mcu",
-  "nik", "jk", "jenis kelamin", "usia", "umur", "departemen", "department", "paket",
-  "tb", "bb", "bmi", "imt", "tensi", "tekanan darah", "hb", "hemoglobin", "gdp", "gds",
-  "kolesterol", "hdl", "ldl", "trigliserida", "ureum", "kreatinin", "asam urat", "sgot",
-  "sgpt", "hbsag", "kesimpulan", "saran", "status",
-].map(norm);
-
-const FIELD_ALIASES: Record<string, string[]> = {
-  NAMA: ["NAMA", "Nama", "Nama Peserta", "Nama Karyawan", "Nama Lengkap", "Name", "Patient Name", "Employee Name"],
-  NOMCU: ["NOMCU", "NO MCU", "NO.MCU", "No MCU", "Nomor MCU", "MCU ID", "mcu_id", "Barcode", "barcode_value", "No Peserta", "No Urut", "NO.URUT", "NO"],
-  NIK: ["NIK", "KTP", "NIK/NRP/ID", "NIK NRP ID", "NRP", "ID Karyawan", "Employee ID", "external_id"],
-  JK: ["JK", "Jenis Kelamin", "Gender", "Sex"],
-  TGLLAHIR: ["TGLLAHIR", "Tanggal Lahir", "Tgl Lahir", "Birth Date", "DOB"],
-  USIA: ["USIA", "Usia", "Umur", "Age"],
-  DEPARTEMEN: ["DEPARTEMEN", "Department", "Departemen", "Bagian", "Unit", "Divisi"],
-  PAKET: ["PAKET", "Paket", "Package", "Paket Pemeriksaan"],
-  "FS:TB": ["TB", "Tinggi Badan", "Height", "FS:TB"],
-  "FS:BB": ["BB", "Berat Badan", "Weight", "FS:BB"],
-  "FS:BMI": ["BMI", "IMT", "FS:BMI"],
-  "FS:Tensi": ["Tensi", "TD", "Tekanan Darah", "Blood Pressure", "FS:Tensi"],
-  "DL:Hb": ["Hb", "HB", "Hemoglobin", "DL:Hb"],
-  "DL:Leu": ["Leukosit", "Leu", "WBC", "DL:Leu"],
-  "DL:Ht": ["Hematokrit", "Ht", "HCT", "DL:Ht"],
-  "DL:Trom": ["Trombosit", "Platelet", "Trom", "PLT", "DL:Trom"],
-  "DL:Eri": ["Eritrosit", "Eri", "RBC", "DL:Eri"],
-  "GD:GDP": ["GDP", "Gula Darah Puasa", "Glukosa Puasa", "GD:GDP"],
-  "GD:Sewaktu": ["GDS", "Gula Darah Sewaktu", "Glukosa Sewaktu", "GD:Sewaktu"],
-  "LD:Chol": ["Chol", "Kolesterol", "Kolesterol Total", "LD:Chol"],
-  "LD:HDL": ["HDL", "LD:HDL"],
-  "LD:LDL": ["LDL", "LD:LDL"],
-  "LD:Trig": ["Trigliserida", "Trig", "TG", "LD:Trig"],
-  "FK:Ureum": ["Ureum", "FK:Ureum"],
-  "FK:Kreatinin": ["Kreatinin", "Creatinine", "Creat", "FK:Kreatinin"],
-  "FK:AsamUrat": ["Asam Urat", "Uric Acid", "FK:AsamUrat"],
-  "FH:SGOT": ["SGOT", "AST", "FH:SGOT"],
-  "FH:SGPT": ["SGPT", "ALT", "FH:SGPT"],
-  "HP:HBsAg": ["HBsAg", "HP:HBsAg"],
-  KESIMPULAN: ["Kesimpulan", "Conclusion"],
-  SARAN: ["Saran", "Recommendation", "Rekomendasi"],
-  FIT_STATUS: ["Fit Status", "FIT_STATUS", "Status Fit", "Status"],
+function norm(v: any) { return clean(v).toLowerCase().replace(/[^a-z0-9]+/g, ""); }
+const ALIASES: Record<string,string[]> = {
+  MCU_ID:["mcu id","nomcu","no mcu","no.mcu","nomor mcu","barcode","no peserta","no"],
+  NOMCU:["mcu id","nomcu","no mcu","no.mcu","nomor mcu","barcode","no peserta","no"],
+  NAMA:["nama","nama peserta","nama karyawan","nama lengkap","name","patient name"],
+  NIK:["nik","nik/nrp/id","ktp","nrp","id karyawan","employee id"],
+  JK:["jk","jenis kelamin","gender","sex"], TGLLAHIR:["tgllahir","tanggal lahir","tgl lahir","birth date","dob"],
+  USIA:["usia","umur","age"], DEPT:["dept","departemen","department","bagian","unit","divisi"],
+  PAKET:["paket","package"], KATEGORI:["kategori","status fit","fit status","status"],
+  KESIMPULAN:["kesimpulan","conclusion"], SARAN:["saran","recommendation","rekomendasi"]
 };
-
-function headerScore(row: any[], nextRows: any[][] = []) {
-  const values = row.map(cleanText).filter(Boolean);
-  if (values.length < 3) return 0;
-
-  let score = 0;
-  let exactMatches = 0;
-
-  for (const value of values) {
-    const normalized = norm(value);
-    if (!normalized) continue;
-
-    if (HEADER_ALIASES.includes(normalized)) {
-      score += 12;
-      exactMatches += 1;
-      continue;
-    }
-
-    if (HEADER_ALIASES.some((alias) => alias.length >= 3 && (normalized.includes(alias) || alias.includes(normalized)))) {
-      score += 3;
-    }
-  }
-
-  const nextDensity = nextRows
-    .slice(0, 5)
-    .map((r) => r.map(cleanText).filter(Boolean).length)
-    .filter((count) => count >= Math.min(values.length, 5)).length;
-
-  score += Math.min(values.length, 20) * 0.5;
-  score += nextDensity * 2;
-  if (exactMatches >= 2) score += 25;
-  if (exactMatches >= 4) score += 25;
-  score -= values.filter((v) => v.length > 40).length * 6;
+const HEADER_WORDS = Object.entries(ALIASES).flatMap(([k,a])=>[k,...a]).map(norm).filter(Boolean);
+function scoreHeader(row:any[], next:any[][]=[]) {
+  const vals=row.map(clean).filter(Boolean); if(vals.length<3) return 0;
+  let score=0, exact=0;
+  for(const val of vals){ const n=norm(val); if(HEADER_WORDS.includes(n)){score+=14; exact++} else if(HEADER_WORDS.some(a=>a.length>=3&&(n.includes(a)||a.includes(n)))) score+=4; }
+  const density=next.slice(0,6).map(r=>r.map(clean).filter(Boolean).length).filter(c=>c>=Math.min(vals.length,5)).length;
+  score += Math.min(vals.length,30)*0.5 + density*2 + (exact>=2?30:0) + (exact>=4?40:0);
+  score -= vals.filter(v=>v.length>45).length*8;
   return score;
 }
-
-function detectHeaderRow(rows: any[][]) {
-  let bestIndex = 0;
-  let bestScore = -999;
-  const maxRows = Math.min(rows.length, 120);
-  for (let i = 0; i < maxRows; i += 1) {
-    const score = headerScore(rows[i] || [], rows.slice(i + 1, i + 8));
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = i;
-    }
-  }
-  return bestIndex;
+function detectHeader(raw:any[][]){ let bi=0, bs=-999; for(let i=0;i<Math.min(raw.length,160);i++){ const s=scoreHeader(raw[i]||[], raw.slice(i+1,i+8)); if(s>bs){bs=s;bi=i;} } return bi; }
+function uniqueHeaders(row:any[]){ const used=new Map<string,number>(); return row.map((c,i)=>{ const b=(clean(c)||`__EMPTY_${i+1}`).replace(/\s+/g," "); const n=used.get(b)||0; used.set(b,n+1); return n?`${b}__${n+1}`:b; }); }
+function rowObj(headers:string[], row:any[]){ const o:Record<string,any>={}; headers.forEach((h,i)=>o[h]=row?.[i]??""); return o; }
+function autoMap(headers:string[]){ const m:Record<string,string>={}; for(const [target,aliases] of Object.entries(ALIASES)){ const all=[target,...aliases].map(norm); let found=""; for(const h of headers){ if(all.includes(norm(h))){found=h;break;} } if(!found){ for(const h of headers){ const nh=norm(h); if(all.some(a=>a.length>=3&&(nh.includes(a)||a.includes(nh)))){found=h;break;} } } if(found)m[target]=found; } return m; }
+function val(row:Record<string,any>, mapping:Record<string,string>, key:string){ const h=mapping[key]; return h?clean(row[h]):""; }
+function canonical(row:Record<string,any>, mapping:Record<string,string>, ctx:any, index:number){
+  const out:Record<string,any>={...row}; Object.entries(mapping).forEach(([k,h])=>out[k]=row[h]??"");
+  const name=val(row,mapping,"NAMA")||clean(out.NAMA)||clean(out.Nama); const mcu=val(row,mapping,"MCU_ID")||val(row,mapping,"NOMCU")||clean(out.MCU_ID)||clean(out.NOMCU)||clean(out["NO MCU"])||`${ctx.databaseName}-${index+1}`; const nik=val(row,mapping,"NIK")||clean(out.NIK)||clean(out["NIK/NRP/ID"]);
+  out.MCU_ID=mcu; out.NOMCU=mcu; out["NO MCU"]=mcu; out.NAMA=name; out.Nama=name; out.NIK=nik; out.DEPT=out.DEPT||out.DEPARTEMEN||val(row,mapping,"DEPT"); out.DEPARTEMEN=out.DEPARTEMEN||out.DEPT; out["Nama PT"]=ctx.companyName; out.DATABASE_NAME=ctx.databaseName; out.PROGRAM_TYPE=ctx.programType; out._AI_MCU_FIELD_MAPPING=mapping;
+  return {row:out,name,mcu,nik};
 }
-
-function uniqueHeaders(row: any[]) {
-  const used = new Map<string, number>();
-  return row.map((cell, index) => {
-    const raw = cleanText(cell) || `__EMPTY_${index + 1}`;
-    const base = raw.replace(/\s+/g, " ").trim();
-    const count = used.get(base) || 0;
-    used.set(base, count + 1);
-    return count ? `${base}__${count + 1}` : base;
-  });
+async function parseExcel(file:File, ctx:any){
+  const wb=XLSX.read(Buffer.from(await file.arrayBuffer()),{type:"buffer",cellDates:true,raw:false}); const sheetName=wb.SheetNames?.[0]; if(!sheetName) return {sheetName:"",headerRowIndex:0,mapping:{},headers:[],rows:[] as any[]};
+  const raw=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName],{header:1,defval:"",raw:false,blankrows:false}); if(!raw.length) return {sheetName,headerRowIndex:0,mapping:{},headers:[],rows:[] as any[]};
+  const headerRowIndex=detectHeader(raw); const headers=uniqueHeaders(raw[headerRowIndex]||[]); const mapping=autoMap(headers);
+  const rows=raw.slice(headerRowIndex+1).map((r,i)=>({raw:rowObj(headers,r||[]),rowIndex:headerRowIndex+i+2})).filter(x=>Object.values(x.raw).some(v=>clean(v))).map((x,i)=>({...canonical(x.raw,mapping,ctx,i),rowIndex:x.rowIndex})).filter(x=>x.name||x.mcu);
+  return {sheetName,headerRowIndex,mapping,headers,rows};
 }
-
-function rowToObject(headers: string[], row: any[]) {
-  const out: Record<string, any> = {};
-  headers.forEach((header, index) => {
-    out[header] = row?.[index] ?? "";
-  });
-  return out;
-}
-
-function autoDetect(headers: string[]) {
-  const mapping: Record<string, string> = {};
-  for (const [targetKey, aliasesRaw] of Object.entries(FIELD_ALIASES)) {
-    const aliases = aliasesRaw.map(norm);
-    let found = "";
-    for (const header of headers) {
-      const headerNorm = norm(header);
-      if (aliases.includes(headerNorm) || headerNorm === norm(targetKey)) {
-        found = header;
-        break;
-      }
-    }
-    if (!found) {
-      for (const header of headers) {
-        const headerNorm = norm(header);
-        if (aliases.some((alias) => alias && alias.length >= 3 && (headerNorm.includes(alias) || alias.includes(headerNorm)))) {
-          found = header;
-          break;
-        }
-      }
-    }
-    if (found) mapping[targetKey] = found;
-  }
-  return mapping;
-}
-
-function mapped(row: Record<string, any>, mapping: Record<string, string>, key: string) {
-  const header = mapping[key];
-  return header ? cleanText(row[header]) : "";
-}
-
-function pickMapped(row: Record<string, any>, mapping: Record<string, string>, key: string, aliases: string[] = []) {
-  const v = mapped(row, mapping, key);
-  if (v) return v;
-  const normMap = new Map<string, string>();
-  for (const col of Object.keys(row || {})) normMap.set(norm(col), col);
-  for (const alias of aliases) {
-    const col = normMap.get(norm(alias));
-    if (col) {
-      const text = cleanText(row[col]);
-      if (text) return text;
-    }
-  }
-  return "";
-}
-
-function canonicalize(row: Record<string, any>, mapping: Record<string, string>, ctx: { companyName: string; databaseName: string; programType: string }) {
-  const rowData: Record<string, any> = { ...row };
-  for (const [targetKey, sourceHeader] of Object.entries(mapping || {})) {
-    if (!targetKey || !sourceHeader) continue;
-    rowData[targetKey] = row[sourceHeader] ?? "";
-  }
-
-  const name = pickMapped(row, mapping, "NAMA", FIELD_ALIASES.NAMA);
-  const mcuId = pickMapped(row, mapping, "NOMCU", FIELD_ALIASES.NOMCU);
-  const nik = pickMapped(row, mapping, "NIK", FIELD_ALIASES.NIK);
-
-  rowData.NAMA = name;
-  rowData.Nama = name;
-  rowData.NOMCU = mcuId;
-  rowData["NO MCU"] = mcuId;
-  rowData["NO.MCU"] = mcuId;
-  rowData.NIK = nik;
-  rowData["NIK/NRP/ID"] = nik;
-  rowData.JK = rowData.JK || pickMapped(row, mapping, "JK", FIELD_ALIASES.JK);
-  rowData.TGLLAHIR = rowData.TGLLAHIR || pickMapped(row, mapping, "TGLLAHIR", FIELD_ALIASES.TGLLAHIR);
-  rowData.USIA = rowData.USIA || pickMapped(row, mapping, "USIA", FIELD_ALIASES.USIA);
-  rowData.DEPARTEMEN = rowData.DEPARTEMEN || pickMapped(row, mapping, "DEPARTEMEN", FIELD_ALIASES.DEPARTEMEN);
-  rowData.PAKET = rowData.PAKET || pickMapped(row, mapping, "PAKET", FIELD_ALIASES.PAKET);
-  rowData["Nama PT"] = ctx.companyName;
-  rowData.Perusahaan = ctx.companyName;
-  rowData.DATABASE_NAME = ctx.databaseName;
-  rowData.PROGRAM_TYPE = ctx.programType;
-  rowData._AI_MCU_FIELD_MAPPING = mapping;
-
-  return { rowData, name, mcuId, nik };
-}
-
-function mergeRows(rows: ParsedRow[]) {
-  const merged = new Map<string, ParsedRow>();
-  for (const row of rows) {
-    const key = norm(row.mcuId) || norm(row.name);
-    if (!key) continue;
-    const prev = merged.get(key);
-    if (!prev) {
-      merged.set(key, row);
-    } else {
-      merged.set(key, {
-        ...prev,
-        rowData: { ...prev.rowData, ...row.rowData },
-        fieldMapping: { ...prev.fieldMapping, ...row.fieldMapping },
-        name: prev.name || row.name,
-        mcuId: prev.mcuId || row.mcuId,
-        nik: prev.nik || row.nik,
-      });
-    }
-  }
-  return Array.from(merged.values());
-}
-
-async function parseWorkbook(file: File, ctx: { companyName: string; databaseName: string; programType: string }) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, raw: false });
-  const parsedRows: ParsedRow[] = [];
-
-  for (const sheetName of workbook.SheetNames || []) {
-    const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, {
-      header: 1,
-      defval: "",
-      raw: false,
-      blankrows: false,
-    });
-    if (!rawRows.length) continue;
-
-    const headerRowIndex = detectHeaderRow(rawRows);
-    const headers = uniqueHeaders(rawRows[headerRowIndex] || []);
-    const mapping = autoDetect(headers);
-
-    const dataRows = rawRows.slice(headerRowIndex + 1).map((row, i) => ({
-      object: rowToObject(headers, row || []),
-      rowIndex: headerRowIndex + i + 2,
-    }));
-
-    for (const item of dataRows) {
-      if (!Object.values(item.object).some((v) => cleanText(v))) continue;
-      const canonical = canonicalize(item.object, mapping, ctx);
-      if (!canonical.name && !canonical.mcuId) continue;
-
-      parsedRows.push({
-        rowData: canonical.rowData,
-        sheetName,
-        rowIndex: item.rowIndex,
-        headerRowIndex,
-        fieldMapping: mapping,
-        name: canonical.name,
-        mcuId: canonical.mcuId || `${ctx.databaseName}-${parsedRows.length + 1}`,
-        nik: canonical.nik,
-      });
-    }
-  }
-
-  return mergeRows(parsedRows);
-}
-
-async function findOrCreateCompany(supabase: any, name: string) {
-  const cleanName = cleanText(name);
-  if (!cleanName) return null;
-  const existing = await supabase.from("companies").select("id,name").eq("name", cleanName).maybeSingle();
-  if (existing.data?.id) return existing.data;
-  const inserted = await supabase.from("companies").insert({ name: cleanName }).select("id,name").single();
-  if (inserted.error) return null;
-  return inserted.data;
-}
-
-async function findOrCreateSource(supabase: any, payload: { name: string; institution_name: string; program_type: string }) {
-  const existing = await supabase
-    .from("participant_sources")
-    .select("id,name,institution_name,program_type")
-    .eq("name", payload.name)
-    .eq("program_type", payload.program_type)
-    .maybeSingle();
-  if (existing.data?.id) return existing.data;
-  const inserted = await supabase.from("participant_sources").insert(payload).select("id,name,institution_name,program_type").single();
-  if (inserted.error) throw new Error(inserted.error.message);
-  return inserted.data;
-}
-
-function validateExcel(file: File | null, label: string) {
-  if (!file) return;
-  const lowerName = (file.name || "").toLowerCase();
-  if (!lowerName.endsWith(".xlsx") && !lowerName.endsWith(".xls")) {
-    throw new Error(`${label} harus berformat .xlsx atau .xls.`);
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const user = getSessionUser(req);
-    if (!user) return fail("Unauthorized", 401);
-
-    const form = await req.formData();
-    const programType = cleanText(form.get("programType")) || "corporate";
-    const companyName = cleanText(form.get("companyName"));
-    const databaseName = cleanText(form.get("databaseName"));
-    const thresholdPct = Number(form.get("thresholdPct") || 10);
-    const newFile = form.get("newFile") instanceof File ? (form.get("newFile") as File) : null;
-    const oldFile = form.get("oldFile") instanceof File ? (form.get("oldFile") as File) : null;
-
-    if (!companyName) return fail("Nama perusahaan / instansi wajib diisi.");
-    if (!databaseName) return fail("Nama database wajib diisi.");
-    if (!newFile) return fail("MCU Baru wajib diupload.");
-    validateExcel(newFile, "MCU Baru");
-    validateExcel(oldFile, "MCU Lama");
-
-    const supabase = getSupabaseAdmin();
-    const company = await findOrCreateCompany(supabase, companyName);
-    const source = await findOrCreateSource(supabase, {
-      name: databaseName,
-      institution_name: companyName,
-      program_type: programType,
-    });
-
-    const uploadBatchId = `batch-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${Date.now()}`;
-    const ctx = { companyName, databaseName, programType };
-
-    const newRows = await parseWorkbook(newFile, ctx);
-    const oldRows = oldFile ? await parseWorkbook(oldFile, ctx) : [];
-
-    if (!newRows.length) {
-      return fail("MCU Baru tidak menghasilkan data peserta. Pastikan file punya kolom Nama atau No MCU.");
-    }
-
-    const participantRows = newRows.map((row) => ({
-      source_id: source.id,
-      company_id: company?.id || null,
-      program_type: programType,
-      name: row.name || row.mcuId,
-      mcu_id: row.mcuId,
-      external_id: row.nik || row.mcuId,
-      nik: row.nik || null,
-      gender: row.rowData.JK || null,
-      birth_date: row.rowData.TGLLAHIR || null,
-      department: row.rowData.DEPARTEMEN || null,
-    }));
-
-    const insertedParticipants = await supabase
-      .from("participants")
-      .insert(participantRows)
-      .select("id,name,mcu_id,nik,external_id");
-
-    if (insertedParticipants.error) {
-      return fail(insertedParticipants.error.message, 500, {
-        hint: "Cek struktur tabel participants.",
-      });
-    }
-
-    const participants = insertedParticipants.data || [];
-    const importRows: any[] = [];
-
-    newRows.forEach((row, index) => {
-      const participant = participants[index];
-      importRows.push({
-        source_id: source.id,
-        participant_id: participant?.id || null,
-        program_type: programType,
-        company_name: companyName,
-        database_name: databaseName,
-        sheet_name: row.sheetName,
-        row_index: row.rowIndex,
-        participant_name: row.name || participant?.name || "",
-        mcu_id: row.mcuId || participant?.mcu_id || "",
-        nik: row.nik || participant?.nik || "",
-        row_data: row.rowData,
-        upload_batch_id: uploadBatchId,
-        dataset_role: "new",
-        source_file_name: newFile.name,
-        header_row_index: row.headerRowIndex,
-        field_mapping: row.fieldMapping,
-        analysis_meta: { thresholdPct },
-      });
-    });
-
-    oldRows.forEach((row) => {
-      importRows.push({
-        source_id: source.id,
-        participant_id: null,
-        program_type: programType,
-        company_name: companyName,
-        database_name: databaseName,
-        sheet_name: row.sheetName,
-        row_index: row.rowIndex,
-        participant_name: row.name,
-        mcu_id: row.mcuId,
-        nik: row.nik,
-        row_data: row.rowData,
-        upload_batch_id: uploadBatchId,
-        dataset_role: "old",
-        source_file_name: oldFile?.name || null,
-        header_row_index: row.headerRowIndex,
-        field_mapping: row.fieldMapping,
-        analysis_meta: { thresholdPct },
-      });
-    });
-
-    const savedRows = await supabase.from("ai_mcu_import_rows").insert(importRows).select("id,dataset_role");
-    if (savedRows.error) {
-      return fail(savedRows.error.message, 500, {
-        hint: "Jalankan SQL patch ai_mcu_import_rows terlebih dahulu.",
-      });
-    }
-
-    return ok({
-      message: "MCU lama/baru berhasil diupload dan siap dianalisis.",
-      source,
-      company,
-      uploadBatchId,
-      newRows: newRows.length,
-      oldRows: oldRows.length,
-      totalParticipants: participants.length,
-      totalStoredRows: savedRows.data?.length || 0,
-      thresholdPct,
-      next: {
-        analyzeUrl: `/ai-mcu/analyze?source_id=${source.id}`,
-        generateUrl: `/ai-mcu/generate?source_id=${source.id}`,
-      },
-    });
-  } catch (error: any) {
-    return fail(error?.message || "Upload Excel gagal.", 500);
-  }
+async function findOrCreateCompany(supabase:any,name:string){ const e=await supabase.from("companies").select("id,name").eq("name",name).maybeSingle(); if(e.data?.id)return e.data; const i=await supabase.from("companies").insert({name}).select("id,name").single(); return i.data||null; }
+async function findOrCreateSource(supabase:any,p:any){ const e=await supabase.from("participant_sources").select("id,name,institution_name,program_type").eq("name",p.name).eq("program_type",p.program_type).maybeSingle(); if(e.data?.id)return e.data; const i=await supabase.from("participant_sources").insert(p).select("id,name,institution_name,program_type").single(); if(i.error)throw new Error(i.error.message); return i.data; }
+export async function POST(req: NextRequest){
+  try{
+    const user=getSessionUser(req); if(!user)return fail("Unauthorized",401);
+    const form=await req.formData(); const programType=clean(form.get("programType"))||"corporate"; const companyName=clean(form.get("companyName")); const databaseName=clean(form.get("databaseName")); const oldFile=form.get("oldFile"); const newFile=form.get("newFile");
+    if(!companyName)return fail("Nama perusahaan / instansi wajib diisi."); if(!databaseName)return fail("Nama database wajib diisi."); if(!(newFile instanceof File))return fail("Upload MCU Baru wajib diisi.");
+    const supabase=getSupabaseAdmin(); const company=await findOrCreateCompany(supabase,companyName); const source=await findOrCreateSource(supabase,{name:databaseName,institution_name:companyName,program_type:programType}); const batchId=`ai-mcu-${Date.now()}`; const ctx={companyName,databaseName,programType};
+    const parsedNew=await parseExcel(newFile,ctx); const parsedOld=oldFile instanceof File ? await parseExcel(oldFile,ctx) : null; if(!parsedNew.rows.length)return fail("MCU Baru tidak memiliki data peserta. Pastikan ada kolom Nama / No MCU.");
+    const participants=parsedNew.rows.map((r:any,i:number)=>({source_id:source.id,company_id:company?.id||null,program_type:programType,name:r.name||`Peserta ${i+1}`,mcu_id:r.mcu,external_id:r.nik||r.mcu,nik:r.nik||null,gender:r.row.JK||null,birth_date:r.row.TGLLAHIR||null,department:r.row.DEPT||r.row.DEPARTEMEN||null}));
+    const insP=await supabase.from("participants").insert(participants).select("id,name,mcu_id,nik,external_id"); if(insP.error)return fail(insP.error.message,500);
+    const pRows=insP.data||[];
+    const newRows=parsedNew.rows.map((r:any,i:number)=>({source_id:source.id,participant_id:pRows[i]?.id||null,program_type:programType,company_name:companyName,database_name:databaseName,dataset_role:"new",upload_batch_id:batchId,source_file_name:newFile.name,sheet_name:parsedNew.sheetName,row_index:r.rowIndex,header_row_index:parsedNew.headerRowIndex,field_mapping:parsedNew.mapping,participant_name:r.name,mcu_id:r.mcu,nik:r.nik,row_data:r.row,analysis_meta:{headers:parsedNew.headers}}));
+    const oldRows=(parsedOld?.rows||[]).map((r:any)=>({source_id:source.id,participant_id:null,program_type:programType,company_name:companyName,database_name:databaseName,dataset_role:"old",upload_batch_id:batchId,source_file_name:oldFile instanceof File ? oldFile.name : "",sheet_name:parsedOld?.sheetName||"",row_index:r.rowIndex,header_row_index:parsedOld?.headerRowIndex||0,field_mapping:parsedOld?.mapping||{},participant_name:r.name,mcu_id:r.mcu,nik:r.nik,row_data:r.row,analysis_meta:{headers:parsedOld?.headers||[]}}));
+    const ins=await supabase.from("ai_mcu_import_rows").insert([...oldRows,...newRows]).select("id"); if(ins.error)return fail(ins.error.message,500,{hint:"Jalankan SQL patch ai_mcu_import_rows terlebih dahulu."});
+    return NextResponse.json({ok:true,message:"Upload MCU lama/baru berhasil. Data siap dianalisis seperti workbook Perbandingan.",source,uploadBatchId:batchId,newRows:parsedNew.rows.length,oldRows:parsedOld?.rows.length||0,totalParticipants:pRows.length,headerInfo:{new:{sheetName:parsedNew.sheetName,headerRowIndex:parsedNew.headerRowIndex,mapped:Object.keys(parsedNew.mapping).length},old:parsedOld?{sheetName:parsedOld.sheetName,headerRowIndex:parsedOld.headerRowIndex,mapped:Object.keys(parsedOld.mapping).length}:null}});
+  }catch(error:any){ return fail(error?.message||"Upload AI MCU gagal.",500); }
 }
