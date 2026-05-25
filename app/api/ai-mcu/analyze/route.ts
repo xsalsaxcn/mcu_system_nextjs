@@ -4,7 +4,9 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
-function fail(message: string, status = 400, extra: Record<string, unknown> = {}) {
+type Dict = Record<string, any>;
+
+function fail(message: string, status = 400, extra: Dict = {}) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });
 }
 
@@ -15,7 +17,7 @@ function clean(value: any) {
   return text;
 }
 
-function norm(value: unknown) {
+function norm(value: any) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
@@ -30,7 +32,33 @@ function toNumber(value: any) {
   return Number(match[0]);
 }
 
-function getByAliases(row: Record<string, any>, aliases: string[]) {
+function extractNumberFromText(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const value = Number(String(match[1]).replace(",", "."));
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return NaN;
+}
+
+function parseBloodPressure(value: any) {
+  const text = clean(value);
+  const nums = text.match(/\d+(\.\d+)?/g)?.map(Number) || [];
+  return {
+    systolic: nums[0] || NaN,
+    diastolic: nums[1] || NaN,
+    display: text,
+  };
+}
+
+function contains(text: string, terms: string[]) {
+  const t = text.toLowerCase();
+  return terms.some((term) => t.includes(term.toLowerCase()));
+}
+
+function getByAliases(row: Dict, aliases: string[]) {
   const normalizedAliases = aliases.map(norm).filter(Boolean);
 
   for (const key of Object.keys(row || {})) {
@@ -56,96 +84,52 @@ function getByAliases(row: Record<string, any>, aliases: string[]) {
   return "";
 }
 
-function parseBloodPressure(value: any) {
-  const text = clean(value);
-  const nums = text.match(/\d+(\.\d+)?/g)?.map(Number) || [];
-  return {
-    systolic: nums[0] || NaN,
-    diastolic: nums[1] || NaN,
-    display: text,
-  };
-}
-
-function applyFieldMapping(row: Record<string, any>, fieldMapping: Record<string, string>) {
-  const out: Record<string, any> = { ...(row || {}) };
+function applyFieldMapping(rowData: Dict, fieldMapping: Dict) {
+  const out: Dict = { ...(rowData || {}) };
 
   if (!isObject(fieldMapping)) return out;
 
   for (const [targetKey, sourceHeader] of Object.entries(fieldMapping)) {
-    if (!clean(targetKey) || !clean(sourceHeader)) continue;
-    const value = row?.[sourceHeader as string];
-    if (value !== undefined && value !== null && clean(value)) {
-      out[targetKey] = value;
+    const target = clean(targetKey);
+    const source = clean(sourceHeader);
+
+    if (!target || !source) continue;
+
+    // If source is only a master header and not present in uploaded row_data,
+    // do not inject an empty value. This prevents false "Data tidak ada" mappings.
+    if (Object.prototype.hasOwnProperty.call(rowData || {}, source)) {
+      const value = rowData[source];
+      if (clean(value)) out[target] = value;
     }
-  }
-
-  if (fieldMapping.NAMA && clean(row[fieldMapping.NAMA])) {
-    out.NAMA = row[fieldMapping.NAMA];
-    out.Nama = row[fieldMapping.NAMA];
-  }
-
-  if (fieldMapping.NOMCU && clean(row[fieldMapping.NOMCU])) {
-    out.NOMCU = row[fieldMapping.NOMCU];
-    out.MCU_ID = row[fieldMapping.NOMCU];
-    out["NO MCU"] = row[fieldMapping.NOMCU];
-  }
-
-  if (fieldMapping.NIK && clean(row[fieldMapping.NIK])) {
-    out.NIK = row[fieldMapping.NIK];
   }
 
   return out;
 }
 
-function normalizeRowForEngine(row: Record<string, any>, fallback: Record<string, any> = {}) {
-  const out: Record<string, any> = { ...(row || {}) };
-
-  const name = clean(out.NAMA || out.Nama) || clean(fallback.participant_name) || getByAliases(out, [
-    "NAMA",
-    "Nama",
-    "Nama Peserta",
-    "Nama Karyawan",
-    "Patient Name",
-    "Employee Name",
-  ]);
-
-  const mcuId = clean(out.MCU_ID || out.NOMCU || out["NO MCU"] || out["NO.MCU"]) || clean(fallback.mcu_id) || getByAliases(out, [
-    "MCU_ID",
-    "NOMCU",
-    "NO MCU",
-    "NO.MCU",
-    "Nomor MCU",
-    "No Peserta",
-    "Barcode",
-  ]);
-
-  const nik = clean(out.NIK || out["NIK/NRP/ID"]) || clean(fallback.nik) || getByAliases(out, [
-    "NIK",
-    "NIK/NRP/ID",
-    "NRP",
-    "KTP",
-    "Employee ID",
-    "ID Karyawan",
-  ]);
-
-  out.NAMA = name;
-  out.Nama = name;
-  out.MCU_ID = mcuId;
-  out.NOMCU = mcuId;
-  out["NO MCU"] = mcuId;
-  out.NIK = nik;
+function normalizeRow(row: Dict, fallback: Dict = {}) {
+  const out: Dict = { ...(row || {}) };
 
   const aliasMap: Record<string, string[]> = {
+    NAMA: ["NAMA", "Nama", "Nama Peserta", "Nama Karyawan", "Patient Name", "Employee Name", "name", "participant_name"],
+    MCU_ID: ["MCU_ID", "NOMCU", "NO MCU", "NO.MCU", "Nomor MCU", "No Peserta", "Barcode", "NO", "mcu_id"],
+    NOMCU: ["NOMCU", "NO MCU", "NO.MCU", "MCU_ID", "NO", "Barcode"],
+    NIK: ["NIK", "NIK/NRP/ID", "NRP", "KTP", "Employee ID", "ID Karyawan", "nik"],
     JK: ["JK", "Jenis Kelamin", "Gender", "Sex"],
     USIA: ["USIA", "Usia", "Umur", "Age"],
     TGLLAHIR: ["TGLLAHIR", "Tanggal Lahir", "Tgl Lahir", "DOB", "Birth Date"],
-    DEPT: ["DEPT", "DEPARTEMEN", "Departemen", "Department", "Bagian", "Unit", "Divisi"],
-    DEPARTEMEN: ["DEPT", "DEPARTEMEN", "Departemen", "Department", "Bagian", "Unit", "Divisi"],
-    PAKET: ["PAKET", "Paket", "Package", "Paket Pemeriksaan"],
+    DEPARTEMEN: ["DEPARTEMEN", "Departemen", "DEPT", "Dept/Bagian", "Bagian", "Unit", "Department"],
+    DEPT: ["DEPT", "Departemen", "DEPARTEMEN", "Dept/Bagian", "Bagian", "Unit", "Department"],
+    PAKET: ["PAKET", "Paket", "Paket MCU", "Package"],
+
+    KATEGORI: ["KATEGORI", "Kategori", "Category", "Fit Status", "Status Fit", "Status"],
+    KESIMPULAN: ["KESIMPULAN", "Kesimpulan", "Conclusion", "Resume", "Summary"],
+    SARAN: ["SARAN", "Saran", "Recommendation", "Rekomendasi", "Next Step", "Anjuran"],
 
     TD: ["TD", "Tensi", "Tekanan Darah", "Blood Pressure", "FS:Tensi", "FS Tensi"],
     TENSI: ["TD", "Tensi", "Tekanan Darah", "Blood Pressure", "FS:Tensi", "FS Tensi"],
-    BMI: ["BMI", "IMT", "FS:BMI", "FS BMI"],
+    SISTOLIK: ["SISTOLIK", "Sistole", "Sistolik", "Systolic"],
+    DIASTOLIK: ["DIASTOLIK", "Diastole", "Diastolik", "Diastolic"],
+    BMI: ["BMI", "IMT", "FS:BMI", "FS BMI", "Indeks Massa Tubuh", "Index Massa Tubuh"],
     IMT: ["BMI", "IMT", "FS:BMI", "FS BMI"],
     TB: ["TB", "Tinggi Badan", "Height", "FS:TB", "FS TB"],
     BB: ["BB", "Berat Badan", "Weight", "FS:BB", "FS BB"],
@@ -156,21 +140,30 @@ function normalizeRowForEngine(row: Record<string, any>, fallback: Record<string
     TROMBOSIT: ["Trombosit", "Platelet", "PLT", "DL:Trom", "DL Trom"],
     ERITROSIT: ["Eritrosit", "RBC", "DL:Eri", "DL Eri"],
 
-    GDP: ["GDP", "Gula Darah Puasa", "Glukosa Puasa", "GD:GDP", "GD GDP"],
-    GDS: ["GDS", "Gula Darah Sewaktu", "Glukosa Sewaktu", "GD:Sewaktu", "GD Sewaktu"],
-    CHOL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol"],
-    KOLESTEROL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol"],
+    GDP: ["GDP", "Gula Darah Puasa", "Glukosa Puasa", "GD:GDP", "GD GDP", "FBS"],
+    GDS: ["GDS", "Gula Darah Sewaktu", "Glukosa Sewaktu", "GD:Sewaktu", "GD Sewaktu", "RBS"],
+    HBA1C: ["HBA1C", "HbA1c", "Hb A1c", "A1C"],
+    CHOL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol", "Cholesterol"],
+    KOLESTEROL: ["CHOL", "Kolesterol", "Kolesterol Total", "LD:Chol", "LD Chol", "Cholesterol"],
     HDL: ["HDL", "LD:HDL", "LD HDL"],
     LDL: ["LDL", "LD:LDL", "LD LDL"],
-    TRIG: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig"],
-    TRIGLISERIDA: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig"],
+    TRIG: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig", "TG"],
+    TRIGLISERIDA: ["TRIG", "Trigliserida", "Triglyceride", "LD:Trig", "LD Trig", "TG"],
 
-    UREUM: ["Ureum", "FK:Ureum", "FK Ureum"],
-    KREATININ: ["Kreatinin", "Creatinine", "FK:Kreatinin", "FK Kreatinin"],
+    UREUM: ["Ureum", "Urea", "BUN", "FK:Ureum", "FK Ureum"],
+    KREATININ: ["Kreatinin", "Creatinine", "Creat", "FK:Kreatinin", "FK Kreatinin"],
     ASAM_URAT: ["Asam Urat", "Uric Acid", "FK:AsamUrat", "FK AsamUrat"],
     SGOT: ["SGOT", "AST", "FH:SGOT", "FH SGOT"],
     SGPT: ["SGPT", "ALT", "FH:SGPT", "FH SGPT"],
     HBSAG: ["HBsAg", "HBSAG", "HP:HBsAg", "HP HBsAg"],
+
+    UR_PROTEIN: ["UR:Prot", "Urine Protein", "Protein Urine", "Protein"],
+    UR_GLU: ["UR:Glu", "Urine Glukosa", "Glukosa Urine", "Glucose Urine"],
+    UR_LEUKOSIT: ["UR:Leukosit", "Leukosit Urine", "WBC Urine"],
+    UR_ERITROSIT: ["UR:Eritrosit", "Eritrosit Urine", "RBC Urine"],
+    UR_BAKTERI: ["UR:Bakteri", "Bakteri Urine", "Bacteria"],
+    THORAX: ["Thorax Foto", "Hasilthorax", "Hasil Thorax", "Foto Thorax", "Rontgen Thorax", "Thorax"],
+    EKG: ["EKG", "HasilEKG", "Hasil EKG", "ECG"],
   };
 
   for (const [target, aliases] of Object.entries(aliasMap)) {
@@ -180,68 +173,343 @@ function normalizeRowForEngine(row: Record<string, any>, fallback: Record<string
     }
   }
 
+  out.NAMA = clean(out.NAMA) || clean(fallback.participant_name) || clean(fallback.name);
+  out.MCU_ID = clean(out.MCU_ID) || clean(out.NOMCU) || clean(fallback.mcu_id) || clean(fallback.id);
+  out.NOMCU = clean(out.NOMCU) || clean(out.MCU_ID);
+  out.NIK = clean(out.NIK) || clean(fallback.nik);
+
   if (!clean(out.TD) && clean(out.TENSI)) out.TD = out.TENSI;
-  if (!clean(out.TENSI) && clean(out.TD)) out.TENSI = out.TD;
+  if (!clean(out.TD) && clean(out.SISTOLIK) && clean(out.DIASTOLIK)) out.TD = `${out.SISTOLIK}/${out.DIASTOLIK}`;
   if (!clean(out.BMI) && clean(out.IMT)) out.BMI = out.IMT;
   if (!clean(out.IMT) && clean(out.BMI)) out.IMT = out.BMI;
-  if (!clean(out.DEPT) && clean(out.DEPARTEMEN)) out.DEPT = out.DEPARTEMEN;
-  if (!clean(out.DEPARTEMEN) && clean(out.DEPT)) out.DEPARTEMEN = out.DEPT;
   if (!clean(out.CHOL) && clean(out.KOLESTEROL)) out.CHOL = out.KOLESTEROL;
   if (!clean(out.KOLESTEROL) && clean(out.CHOL)) out.KOLESTEROL = out.CHOL;
   if (!clean(out.TRIG) && clean(out.TRIGLISERIDA)) out.TRIG = out.TRIGLISERIDA;
-  if (!clean(out.TRIGLISERIDA) && clean(out.TRIG)) out.TRIGLISERIDA = out.TRIG;
 
   return out;
 }
 
-function rowKey(row: Record<string, any>) {
-  return norm(row.MCU_ID || row.NOMCU || row["NO MCU"] || row["NO.MCU"] || row.NIK || row["NIK/NRP/ID"] || row.NAMA || row.Nama);
+function rowName(row: Dict) {
+  return clean(row.NAMA || row.Nama || row.name || row.participant_name) || "-";
 }
 
-function rowName(row: Record<string, any>) {
-  return clean(row.NAMA || row.Nama || row.name || row.participant_name);
+function rowMcuId(row: Dict) {
+  return clean(row.MCU_ID || row.NOMCU || row["NO MCU"] || row["NO.MCU"] || row.NO || row.mcu_id) || "-";
 }
 
-function rowMcuId(row: Record<string, any>) {
-  return clean(row.MCU_ID || row.NOMCU || row["NO MCU"] || row["NO.MCU"] || row.mcu_id);
+function evidenceText(row: Dict) {
+  return [
+    row.KATEGORI,
+    row.KESIMPULAN,
+    row.SARAN,
+    row.THORAX,
+    row.EKG,
+    row["Thorax Foto"],
+    row.Hasilthorax,
+    row.HasilEKG,
+  ]
+    .map(clean)
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function pushAbnormal(target: any[], row: Dict, parameter: string, value: any, interpretation: string, severity = "Rendah", source = "rule-based", saran = "") {
+  const key = `${rowName(row)}|${rowMcuId(row)}|${parameter}|${interpretation}|${clean(value)}`;
+  if ((target as any)._seen?.has(key)) return;
+  (target as any)._seen?.add(key);
+
+  target.push({
+    NAMA: rowName(row),
+    MCU_ID: rowMcuId(row),
+    PARAMETER: parameter,
+    HASIL: clean(value) || "-",
+    INTERPRETASI: interpretation,
+    SEVERITY: severity,
+    SARAN: clean(saran || row.SARAN) || "-",
+    SOURCE: source,
+  });
+}
+
+function pushDisease(target: any[], row: Dict, condition: string, status: string, severity: string, score: number | "", evidence: string, nextStep: string, source = "rule-based") {
+  const key = `${rowName(row)}|${rowMcuId(row)}|${condition}|${status}|${evidence}`;
+  if ((target as any)._seen?.has(key)) return;
+  (target as any)._seen?.add(key);
+
+  target.push({
+    NAMA: rowName(row),
+    MCU_ID: rowMcuId(row),
+    CONDITION: condition,
+    STATUS: status,
+    SEVERITY: severity || "-",
+    SCORE: score === "" ? "-" : score,
+    EVIDENCE: clean(evidence) || "-",
+    NEXTSTEP: clean(nextStep) || "-",
+    SOURCE: source,
+  });
+}
+
+function positiveUrine(value: any) {
+  const t = clean(value).toLowerCase();
+  if (!t) return false;
+  if (["negatif", "negative", "normal", "0", "none", "tidak ada"].includes(t)) return false;
+  return contains(t, ["+", "positif", "positive", "trace", "sedikit", "banyak", "abnormal"]);
+}
+
+function numericAndTextRules(rows: Dict[]) {
+  const abnormal: any[] = [];
+  const disease: any[] = [];
+  (abnormal as any)._seen = new Set<string>();
+  (disease as any)._seen = new Set<string>();
+
+  for (const row of rows) {
+    const name = rowName(row);
+    const mcu = rowMcuId(row);
+    const combined = evidenceText(row);
+    const combinedLower = combined.toLowerCase();
+
+    const kategori = clean(row.KATEGORI);
+    const kesimpulan = clean(row.KESIMPULAN);
+    const saran = clean(row.SARAN);
+
+    // BMI can come from numeric column or from text like "Underweight (BMI: 18.22)".
+    let bmi = toNumber(row.BMI || row.IMT);
+    if (!Number.isFinite(bmi)) {
+      bmi = extractNumberFromText(combinedLower, [
+        /bmi\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/i,
+        /imt\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)/i,
+      ]);
+    }
+
+    if (Number.isFinite(bmi)) {
+      if (bmi < 18.5) {
+        pushAbnormal(abnormal, row, "BMI / IMT", bmi, "Underweight", "Rendah", "rule-bmi", "Konsultasi gizi, evaluasi asupan dan faktor penyebab.");
+        pushDisease(disease, row, "Underweight", "Terdeteksi", "Rendah", 45, `BMI ${bmi}`, "Konsultasi gizi dan monitoring berat badan.", "rule-bmi");
+      } else if (bmi >= 35) {
+        pushAbnormal(abnormal, row, "BMI / IMT", bmi, "Obesitas tingkat 2", "Sedang", "rule-bmi", "Program penurunan berat badan terstruktur.");
+        pushDisease(disease, row, "Obesitas Tingkat 2", "Terdeteksi", "Sedang", 70, `BMI ${bmi}`, "Evaluasi risiko metabolik, diet dan aktivitas terstruktur.", "rule-bmi");
+      } else if (bmi >= 30) {
+        pushAbnormal(abnormal, row, "BMI / IMT", bmi, "Obesitas tingkat 1", "Rendah", "rule-bmi", "Target penurunan berat badan 5-10%.");
+        pushDisease(disease, row, "Obesitas Tingkat 1", "Terdeteksi", "Rendah", 55, `BMI ${bmi}`, "Edukasi nutrisi dan aktivitas fisik.", "rule-bmi");
+      } else if (bmi >= 25) {
+        pushAbnormal(abnormal, row, "BMI / IMT", bmi, "Overweight", "Rendah", "rule-bmi", "Modifikasi gaya hidup dan monitoring.");
+        pushDisease(disease, row, "Overweight", "Terdeteksi", "Rendah", 40, `BMI ${bmi}`, "Edukasi nutrisi dan aktivitas fisik.", "rule-bmi");
+      }
+    }
+
+    const bp = parseBloodPressure(row.TD || row.TENSI);
+    if (Number.isFinite(bp.systolic) || Number.isFinite(bp.diastolic)) {
+      if (bp.systolic >= 160 || bp.diastolic >= 100) {
+        pushAbnormal(abnormal, row, "Tekanan Darah", bp.display, "Hipertensi grade 2", "Tinggi", "rule-bp", "Ulang TD dan evaluasi dokter.");
+        pushDisease(disease, row, "Hipertensi", "Terdeteksi", "Tinggi", 85, `TD ${bp.display} (grade 2)`, "Ulang TD, evaluasi dokter, pertimbangkan terapi dan monitoring.", "rule-bp");
+      } else if (bp.systolic >= 140 || bp.diastolic >= 90) {
+        pushAbnormal(abnormal, row, "Tekanan Darah", bp.display, "Hipertensi grade 1", "Sedang", "rule-bp", "Ulang TD terjadwal dan konsultasi dokter.");
+        pushDisease(disease, row, "Hipertensi", "Terdeteksi", "Sedang", 70, `TD ${bp.display} (grade 1)`, "Modifikasi gaya hidup, ulang TD terjadwal, konsultasi dokter.", "rule-bp");
+      } else if (bp.systolic >= 120 || bp.diastolic >= 80) {
+        pushAbnormal(abnormal, row, "Tekanan Darah", bp.display, "Prehipertensi", "Rendah", "rule-bp", "Monitoring tekanan darah.");
+        pushDisease(disease, row, "Prehipertensi", "Terdeteksi", "Rendah", 45, `TD ${bp.display}`, "Monitoring tekanan darah dan modifikasi gaya hidup.", "rule-bp");
+      }
+    }
+
+    const gdp = toNumber(row.GDP);
+    const gds = toNumber(row.GDS);
+    const hba1c = toNumber(row.HBA1C);
+
+    if ((Number.isFinite(gdp) && gdp >= 126) || (Number.isFinite(gds) && gds >= 200) || (Number.isFinite(hba1c) && hba1c >= 6.5)) {
+      pushAbnormal(abnormal, row, "Gula Darah", `GDP ${clean(row.GDP) || "-"}; GDS ${clean(row.GDS) || "-"}; HbA1c ${clean(row.HBA1C) || "-"}`, "Diabetes range", "Sedang", "rule-glucose", "Konfirmasi ulang gula darah/HbA1c dan konsultasi dokter.");
+      pushDisease(disease, row, "Diabetes", "Terdeteksi", "Sedang", 75, `GDP ${clean(row.GDP) || "-"}, GDS ${clean(row.GDS) || "-"}, HbA1c ${clean(row.HBA1C) || "-"}`, "Konfirmasi HbA1c/gula darah dan konsultasi dokter.", "rule-glucose");
+    } else if ((Number.isFinite(gdp) && gdp >= 100) || (Number.isFinite(hba1c) && hba1c >= 5.7)) {
+      pushAbnormal(abnormal, row, "Gula Darah", `GDP ${clean(row.GDP) || "-"}; HbA1c ${clean(row.HBA1C) || "-"}`, "Prediabetes range", "Rendah", "rule-glucose", "Modifikasi gaya hidup dan monitoring.");
+      pushDisease(disease, row, "Prediabetes", "Terdeteksi", "Rendah", 50, `GDP ${clean(row.GDP) || "-"}, HbA1c ${clean(row.HBA1C) || "-"}`, "Diet, aktivitas fisik, dan monitoring berkala.", "rule-glucose");
+    }
+
+    const ldl = toNumber(row.LDL);
+    const chol = toNumber(row.CHOL || row.KOLESTEROL);
+    const trig = toNumber(row.TRIG || row.TRIGLISERIDA);
+    const hdl = toNumber(row.HDL);
+
+    if ((Number.isFinite(ldl) && ldl >= 130) || (Number.isFinite(chol) && chol >= 200) || (Number.isFinite(trig) && trig >= 150) || (Number.isFinite(hdl) && hdl < 40)) {
+      pushAbnormal(abnormal, row, "Profil Lipid", `Chol ${clean(row.CHOL || row.KOLESTEROL) || "-"}; HDL ${clean(row.HDL) || "-"}; LDL ${clean(row.LDL) || "-"}; TG ${clean(row.TRIG || row.TRIGLISERIDA) || "-"}`, "Dislipidemia", "Sedang", "rule-lipid", "Diet rendah lemak, aktivitas fisik, evaluasi risiko kardiovaskular.");
+      pushDisease(disease, row, "Dislipidemia", "Terdeteksi", "Sedang", 60, `LDL ${clean(row.LDL) || "-"}, Chol ${clean(row.CHOL || row.KOLESTEROL) || "-"}, TG ${clean(row.TRIG || row.TRIGLISERIDA) || "-"}`, "Diet rendah lemak, aktivitas fisik, evaluasi risiko kardiovaskular.", "rule-lipid");
+    }
+
+    const sgot = toNumber(row.SGOT);
+    const sgpt = toNumber(row.SGPT);
+    if ((Number.isFinite(sgot) && sgot > 40) || (Number.isFinite(sgpt) && sgpt > 40)) {
+      pushAbnormal(abnormal, row, "Fungsi Hati", `SGOT ${clean(row.SGOT) || "-"}; SGPT ${clean(row.SGPT) || "-"}`, "Enzim hati meningkat", "Sedang", "rule-liver", "Evaluasi dokter dan pertimbangkan ulang fungsi hati.");
+      pushDisease(disease, row, "Gangguan fungsi hati", "Terdeteksi", "Sedang", 55, `SGOT ${clean(row.SGOT) || "-"}, SGPT ${clean(row.SGPT) || "-"}`, "Evaluasi dokter; pertimbangkan ulang fungsi hati dan faktor risiko.", "rule-liver");
+    }
+
+    const kreatinin = toNumber(row.KREATININ);
+    const ureum = toNumber(row.UREUM);
+    if ((Number.isFinite(kreatinin) && kreatinin > 1.3) || (Number.isFinite(ureum) && ureum > 50)) {
+      pushAbnormal(abnormal, row, "Fungsi Ginjal", `Ureum ${clean(row.UREUM) || "-"}; Kreatinin ${clean(row.KREATININ) || "-"}`, "Gangguan fungsi ginjal / nilai ginjal meningkat", "Sedang", "rule-kidney", "Evaluasi dokter dan hidrasi cukup.");
+      pushDisease(disease, row, "Gangguan fungsi ginjal", "Terdeteksi", "Sedang", 60, `Ureum ${clean(row.UREUM) || "-"}, Kreatinin ${clean(row.KREATININ) || "-"}`, "Evaluasi dokter dan monitoring fungsi ginjal.", "rule-kidney");
+    }
+
+    const hb = toNumber(row.HB);
+    if (Number.isFinite(hb) && hb < 12) {
+      pushAbnormal(abnormal, row, "Hemoglobin", hb, "Anemia / Hb rendah", "Sedang", "rule-hb", "Evaluasi dokter, pertimbangkan pemeriksaan lanjutan.");
+      pushDisease(disease, row, "Anemia", "Terdeteksi", "Sedang", 55, `Hb ${hb}`, "Evaluasi penyebab anemia dan konsultasi dokter.", "rule-hb");
+    }
+
+    if (positiveUrine(row.UR_PROTEIN)) {
+      pushAbnormal(abnormal, row, "Urine Protein", row.UR_PROTEIN, "Proteinuria", "Sedang", "rule-urine", "Ulang urinalisis dan evaluasi dokter.");
+      pushDisease(disease, row, "Kelainan urine", "Terdeteksi", "Sedang", 50, `Protein urine ${row.UR_PROTEIN}`, "Ulang urinalisis dan evaluasi dokter.", "rule-urine");
+    }
+
+    if (positiveUrine(row.UR_GLU)) {
+      pushAbnormal(abnormal, row, "Urine Glukosa", row.UR_GLU, "Glukosuria", "Sedang", "rule-urine", "Evaluasi gula darah.");
+      pushDisease(disease, row, "Kelainan urine", "Terdeteksi", "Sedang", 50, `Glukosa urine ${row.UR_GLU}`, "Evaluasi gula darah dan ulang urinalisis.", "rule-urine");
+    }
+
+    if (positiveUrine(row.UR_LEUKOSIT) || positiveUrine(row.UR_BAKTERI)) {
+      pushAbnormal(abnormal, row, "Urine Leukosit/Bakteri", `${clean(row.UR_LEUKOSIT) || "-"} / ${clean(row.UR_BAKTERI) || "-"}`, "Kemungkinan infeksi saluran kemih", "Sedang", "rule-urine", "Ulang urinalisis dan evaluasi gejala.");
+      pushDisease(disease, row, "Kemungkinan ISK", "Terdeteksi", "Sedang", 50, `Leukosit ${clean(row.UR_LEUKOSIT) || "-"}, Bakteri ${clean(row.UR_BAKTERI) || "-"}`, "Ulang urinalisis dan evaluasi dokter bila bergejala.", "rule-urine");
+    }
+
+    if (contains(clean(row.HBSAG), ["reaktif", "reactive", "positif", "positive", "+"])) {
+      pushAbnormal(abnormal, row, "HBsAg", row.HBSAG, "HBsAg reaktif", "Tinggi", "rule-hepatitis", "Konsultasi dokter dan pemeriksaan lanjutan hepatitis B.");
+      pushDisease(disease, row, "HBsAg reaktif", "Terdeteksi", "Tinggi", 80, `HBsAg ${row.HBSAG}`, "Konsultasi dokter dan pemeriksaan lanjutan hepatitis B.", "rule-hepatitis");
+    }
+
+    // Text-based rules from KESIMPULAN/SARAN/KATEGORI.
+    // This is essential for uploaded Excel that only stores summary columns.
+    if (contains(combinedLower, ["underweight", "berat badan kurang", "kurus"])) {
+      const ev = Number.isFinite(bmi) ? `BMI ${bmi}` : kesimpulan || combined;
+      pushAbnormal(abnormal, row, "Kesimpulan", ev, "Underweight", "Rendah", "rule-text", "Konsultasi gizi dan evaluasi asupan.");
+      pushDisease(disease, row, "Underweight", "Terdeteksi", "Rendah", 45, ev, "Konsultasi gizi dan monitoring berat badan.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["overweight", "berat badan lebih"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Overweight", "Rendah", "rule-text", "Modifikasi gaya hidup.");
+      pushDisease(disease, row, "Overweight", "Terdeteksi", "Rendah", 40, kesimpulan || combined, "Edukasi nutrisi dan aktivitas fisik.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["obesitas", "obese"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Obesitas", "Sedang", "rule-text", "Program penurunan berat badan.");
+      pushDisease(disease, row, "Obesitas", "Terdeteksi", "Sedang", 60, kesimpulan || combined, "Edukasi nutrisi, aktivitas fisik, dan monitoring metabolik.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["hipertensi", "tekanan darah tinggi", "tensi tinggi"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Hipertensi", "Sedang", "rule-text", "Ulang TD dan konsultasi dokter.");
+      pushDisease(disease, row, "Hipertensi", "Terdeteksi", "Sedang", 70, kesimpulan || combined, "Ulang TD dan konsultasi dokter.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["diabetes", "gula darah tinggi", "hiperglikemi", "hiperglikemia"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Gangguan gula darah / diabetes", "Sedang", "rule-text", "Konfirmasi gula darah/HbA1c.");
+      pushDisease(disease, row, "Diabetes", "Terdeteksi", "Sedang", 70, kesimpulan || combined, "Konfirmasi gula darah/HbA1c dan konsultasi dokter.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["dislipidemia", "kolesterol", "ldl", "trigliserida", "lipid"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Dislipidemia / profil lipid abnormal", "Sedang", "rule-text", "Diet rendah lemak dan evaluasi risiko kardiovaskular.");
+      pushDisease(disease, row, "Dislipidemia", "Terdeteksi", "Sedang", 60, kesimpulan || combined, "Diet rendah lemak, aktivitas fisik, evaluasi risiko kardiovaskular.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["asam urat", "uric acid", "hiperurisemia"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Asam urat tinggi", "Rendah", "rule-text", "Diet rendah purin dan evaluasi dokter bila bergejala.");
+      pushDisease(disease, row, "Hiperurisemia", "Terdeteksi", "Rendah", 45, kesimpulan || combined, "Diet rendah purin dan monitoring.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["sgot", "sgpt", "fungsi hati", "enzim hati", "fatty liver"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Gangguan fungsi hati", "Sedang", "rule-text", "Evaluasi dokter dan fungsi hati ulang.");
+      pushDisease(disease, row, "Gangguan fungsi hati", "Terdeteksi", "Sedang", 55, kesimpulan || combined, "Evaluasi dokter dan fungsi hati ulang.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["kreatinin", "ureum", "fungsi ginjal", "ginjal"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Gangguan fungsi ginjal", "Sedang", "rule-text", "Evaluasi dokter dan fungsi ginjal ulang.");
+      pushDisease(disease, row, "Gangguan fungsi ginjal", "Terdeteksi", "Sedang", 55, kesimpulan || combined, "Evaluasi dokter dan monitoring fungsi ginjal.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["anemia", "hb rendah", "hemoglobin rendah"])) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan || combined, "Anemia", "Sedang", "rule-text", "Evaluasi dokter dan pemeriksaan lanjutan.");
+      pushDisease(disease, row, "Anemia", "Terdeteksi", "Sedang", 55, kesimpulan || combined, "Evaluasi penyebab anemia.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["myopia", "miopia", "mata kanan", "mata kiri", "visus", "refraksi"])) {
+      pushAbnormal(abnormal, row, "Mata / Visus", kesimpulan || combined, "Gangguan refraksi / visus", "Rendah", "rule-text", "Konsultasi mata/optometri bila diperlukan.");
+      pushDisease(disease, row, "Gangguan refraksi / visus", "Terdeteksi", "Rendah", 35, kesimpulan || combined, "Konsultasi mata/optometri bila diperlukan.", "rule-text");
+    }
+
+    if (contains(combinedLower, ["thorax", "rontgen", "x-ray", "xray", "paru"])) {
+      const hasNormalThorax = contains(combinedLower, ["thorax normal", "foto thorax normal", "paru normal"]);
+      if (!hasNormalThorax && !contains(combinedLower, ["tidak ditemukan kelainan"])) {
+        pushAbnormal(abnormal, row, "Thorax", kesimpulan || combined, "Temuan thorax perlu evaluasi", "Sedang", "rule-text", "Konsultasi dokter sesuai temuan.");
+        pushDisease(disease, row, "Temuan thorax", "Terdeteksi", "Sedang", 50, kesimpulan || combined, "Konsultasi dokter sesuai temuan.", "rule-text");
+      }
+    }
+
+    if (contains(combinedLower, ["ekg", "ecg", "sinus", "aritmia", "bradikardi", "takikardi"])) {
+      const hasNormalEkg = contains(combinedLower, ["ekg normal", "ecg normal", "normal sinus"]);
+      if (!hasNormalEkg && !contains(combinedLower, ["tidak ditemukan kelainan"])) {
+        pushAbnormal(abnormal, row, "EKG", kesimpulan || combined, "Temuan EKG perlu evaluasi", "Sedang", "rule-text", "Konsultasi dokter sesuai temuan EKG.");
+        pushDisease(disease, row, "Temuan EKG", "Terdeteksi", "Sedang", 50, kesimpulan || combined, "Konsultasi dokter sesuai temuan EKG.", "rule-text");
+      }
+    }
+
+    const kategoriLower = kategori.toLowerCase();
+    if (kategori && !["fit", "normal", "sehat"].includes(kategoriLower) && !contains(kategoriLower, ["fit"])) {
+      pushAbnormal(abnormal, row, "Kategori", kategori, kategori, contains(kategoriLower, ["unfit"]) ? "Tinggi" : "Sedang", "rule-category", saran);
+    }
+
+    // If there is an explicit not-normal conclusion but no keyword matched, keep it visible.
+    if (
+      kesimpulan &&
+      !contains(kesimpulan.toLowerCase(), ["tidak ditemukan kelainan", "dalam batas normal", "normal"]) &&
+      !abnormal.some((x) => x.NAMA === name && x.MCU_ID === mcu)
+    ) {
+      pushAbnormal(abnormal, row, "Kesimpulan", kesimpulan, "Perlu perhatian berdasarkan kesimpulan MCU", "Rendah", "rule-summary", saran);
+      pushDisease(disease, row, "Perlu perhatian", "Terdeteksi", "Rendah", 30, kesimpulan, saran || "Review oleh dokter pemeriksa.", "rule-summary");
+    }
+  }
+
+  delete (abnormal as any)._seen;
+  delete (disease as any)._seen;
+
+  return { abnormal, disease };
+}
+
+const IGNORE_COMPARE = new Set([
+  "NAMA",
+  "Nama",
+  "name",
+  "participant_name",
+  "MCU_ID",
+  "NOMCU",
+  "NO MCU",
+  "NO.MCU",
+  "NO",
+  "NIK",
+  "JK",
+  "TGLLAHIR",
+  "USIA",
+  "DEPT",
+  "DEPARTEMEN",
+  "PAKET",
+  "Nama PT",
+  "PROGRAM_TYPE",
+  "_AI_MCU_FIELD_MAPPING",
+  "_AI_MCU_MAPPING_KEYS",
+  "_AI_MCU_MAPPING_SAVED_AT",
+]);
+
+function rowKey(row: Dict) {
+  return norm(row.MCU_ID || row.NOMCU || row["NO MCU"] || row["NO.MCU"] || row.NO || row.NIK || row.NAMA);
 }
 
 function compareText(value: any) {
   const text = clean(value);
   if (!text) return "";
-  const n = Number(text.replace(/,/g, "."));
-  if (Number.isFinite(n)) return String(n);
+  const number = Number(text.replace(/,/g, "."));
+  if (Number.isFinite(number)) return String(number);
   return text.replace(/\s+/g, " ").toLowerCase();
 }
 
-const IGNORE_KEYS = new Set([
-  "NO",
-  "NOMCU",
-  "NO MCU",
-  "NO.MCU",
-  "MCU_ID",
-  "NAMA",
-  "Nama",
-  "name",
-  "NIK",
-  "NIK/NRP/ID",
-  "DATABASE_NAME",
-  "PROGRAM_TYPE",
-  "Nama PT",
-  "Perusahaan",
-  "_AI_MCU_FIELD_MAPPING",
-  "_import_id",
-  "_participant_id",
-  "_SheetName",
-  "_RowIndex",
-]);
-
-function comparableKeys(previousRows: any[], currentRows: any[]) {
+function comparableKeys(previousRows: Dict[], currentRows: Dict[]) {
   const keys = new Set<string>();
 
-  for (const row of [...(previousRows || []), ...(currentRows || [])]) {
+  for (const row of [...previousRows, ...currentRows]) {
     for (const key of Object.keys(row || {})) {
-      if (!key || key.startsWith("_") || IGNORE_KEYS.has(key)) continue;
+      if (!key || key.startsWith("_") || IGNORE_COMPARE.has(key)) continue;
       keys.add(key);
     }
   }
@@ -249,10 +517,9 @@ function comparableKeys(previousRows: any[], currentRows: any[]) {
   return Array.from(keys).sort();
 }
 
-function buildComparison(previousRows: any[], currentRows: any[], thresholdPct = 10) {
-  const oldMap = new Map<string, Record<string, any>>();
-
-  for (const oldRow of previousRows || []) {
+function buildComparison(previousRows: Dict[], currentRows: Dict[], thresholdPct = 10) {
+  const oldMap = new Map<string, Dict>();
+  for (const oldRow of previousRows) {
     const key = rowKey(oldRow);
     if (key && !oldMap.has(key)) oldMap.set(key, oldRow);
   }
@@ -263,16 +530,12 @@ function buildComparison(previousRows: any[], currentRows: any[], thresholdPct =
   const comparisonSignif: any[] = [];
   const changedLong: any[] = [];
 
-  for (const current of currentRows || []) {
+  for (const current of currentRows) {
     const key = rowKey(current);
     const oldRow = key ? oldMap.get(key) : undefined;
-
-    const name = rowName(current) || rowName(oldRow || {});
-    const mcuId = rowMcuId(current) || rowMcuId(oldRow || {});
-
-    const wide: any = {
-      Nama: name,
-      MCU_ID: mcuId,
+    const wide: Dict = {
+      NAMA: rowName(current),
+      MCU_ID: rowMcuId(current),
     };
 
     let changedCount = 0;
@@ -281,9 +544,6 @@ function buildComparison(previousRows: any[], currentRows: any[], thresholdPct =
     for (const param of keys) {
       const oldValue = oldRow ? oldRow[param] : "";
       const newValue = current[param];
-
-      const oldClean = clean(oldValue);
-      const newClean = clean(newValue);
 
       const oldCompare = compareText(oldValue);
       const newCompare = compareText(newValue);
@@ -295,369 +555,53 @@ function buildComparison(previousRows: any[], currentRows: any[], thresholdPct =
 
       const delta = numeric ? newNum - oldNum : null;
       const pct = numeric && oldNum !== 0 ? (delta! / oldNum) * 100 : null;
-
       const significant = changed && (pct === null ? true : Math.abs(pct) >= thresholdPct);
       const status = !changed ? "Stabil" : numeric ? (delta! > 0 ? "Naik" : delta! < 0 ? "Turun" : "Stabil") : "Berubah";
 
-      wide[`${param} (Lalu)`] = oldClean;
-      wide[`${param} (Ini)`] = newClean;
-      wide[`${param} Δ`] = delta === null ? (changed ? "Berubah" : "Stabil") : Number(delta.toFixed(4));
-      wide[`${param} %Δ`] = pct === null ? "" : Number(pct.toFixed(2));
+      wide[`${param} (Lalu)`] = clean(oldValue);
+      wide[`${param} (Ini)`] = clean(newValue);
+      wide[`${param} Delta`] = delta === null ? (changed ? "Berubah" : "Stabil") : Number(delta.toFixed(4));
+      wide[`${param} DeltaPct`] = pct === null ? "" : Number(pct.toFixed(2));
       wide[`${param} Status`] = status;
-      wide[`${param} Signifikan`] = significant ? "YES" : "NO";
 
       if (changed) {
         changedCount += 1;
         if (significant) significantCount += 1;
-
         changedLong.push({
-          Nama: name,
-          MCU_ID: mcuId,
-          Parameter: param,
-          "Nilai Lalu": oldClean,
-          "Nilai Ini": newClean,
-          "Δ": wide[`${param} Δ`],
-          "%Δ": wide[`${param} %Δ`],
-          Status: status,
-          Signifikan: significant ? "YES" : "NO",
+          NAMA: rowName(current),
+          MCU_ID: rowMcuId(current),
+          PARAMETER: param,
+          NILAI_LALU: clean(oldValue),
+          NILAI_BARU: clean(newValue),
+          DELTA: wide[`${param} Delta`],
+          DELTA_PCT: wide[`${param} DeltaPct`],
+          STATUS: status,
+          SIGNIFIKAN: significant ? "YES" : "NO",
         });
       }
     }
 
     wide.__changedCount = changedCount;
     wide.__significantCount = significantCount;
-
     comparisonAll.push(wide);
     if (changedCount > 0) comparisonChanged.push(wide);
     if (significantCount > 0) comparisonSignif.push(wide);
   }
 
-  return {
-    comparisonAll,
-    comparisonChanged,
-    comparisonSignif,
-    changedLong,
-    parameterCount: keys.length,
-  };
+  return { comparisonAll, comparisonChanged, comparisonSignif, changedLong, parameterCount: keys.length };
 }
 
-function normalizeEngineUrl() {
-  return String(process.env.AI_MCU_ENGINE_URL || "").replace(/\/$/, "");
-}
-
-function asArray(value: any) {
-  return Array.isArray(value) ? value : [];
-}
-
-function collectArrays(obj: any, names: string[], out: any[] = [], depth = 0) {
-  if (!obj || depth > 6) return out;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) collectArrays(item, names, out, depth + 1);
-    return out;
-  }
-
-  if (typeof obj !== "object") return out;
-
-  for (const name of names) {
-    const value = obj[name];
-    if (Array.isArray(value)) out.push(value);
-  }
-
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") collectArrays(value, names, out, depth + 1);
-  }
-
-  return out;
-}
-
-function getAny(obj: any, keys: string[]) {
-  for (const key of keys) {
-    if (obj && obj[key] !== undefined && obj[key] !== null) return obj[key];
-  }
-  return "";
-}
-
-function normalizeStatus(value: any, fallback = "") {
-  const raw = clean(value || fallback);
-  const lower = raw.toLowerCase();
-
-  if (lower.includes("data") && (lower.includes("tidak") || lower.includes("no") || lower.includes("missing"))) {
-    return "Data tidak ada";
-  }
-
-  if (lower.includes("tidak") || lower.includes("not detected") || lower === "false" || lower === "normal") {
-    return "Tidak terdeteksi";
-  }
-
-  if (lower.includes("terdeteksi") || lower.includes("detected") || lower === "true" || lower === "abnormal") {
-    return "Terdeteksi";
-  }
-
-  return raw || "Data tidak ada";
-}
-
-function normalizeSeverity(value: any) {
-  const raw = clean(value);
-  if (!raw) return "";
-  const lower = raw.toLowerCase();
-
-  if (lower.includes("tinggi") || lower.includes("high") || lower.includes("berat")) return "Tinggi";
-  if (lower.includes("sedang") || lower.includes("medium") || lower.includes("moderate")) return "Sedang";
-  if (lower.includes("rendah") || lower.includes("low") || lower.includes("ringan")) return "Rendah";
-
-  return raw;
-}
-
-function normalizeDiseaseRow(row: any, parent: any = {}) {
-  const name = clean(
-    getAny(row, ["Nama", "NAMA", "name", "participantName", "participant_name"]) ||
-      getAny(parent, ["Nama", "NAMA", "name", "participantName", "participant_name"])
-  );
-
-  const mcuId = clean(
-    getAny(row, ["MCU_ID", "NOMCU", "No MCU", "mcu_id", "participantId", "participant_id"]) ||
-      getAny(parent, ["MCU_ID", "NOMCU", "No MCU", "mcu_id", "participantId", "participant_id"])
-  );
-
-  const condition = clean(
-    getAny(row, ["Condition", "condition", "Penyakit", "penyakit", "disease", "diagnosis", "rule_name", "title"])
-  );
-
-  const detectedRaw = getAny(row, ["Status", "status", "detected", "isDetected", "hasil", "result", "rule_status"]);
-  const status = normalizeStatus(detectedRaw, condition ? "Terdeteksi" : "Data tidak ada");
-
-  const severity = normalizeSeverity(getAny(row, ["Severity", "severity", "Level", "level", "risk", "Kategori", "kategori"]));
-  const score = getAny(row, ["Score", "score", "nilai", "points"]);
-  const evidence = clean(getAny(row, ["Evidence", "evidence", "Alasan", "alasan", "detail", "details", "temuan", "reason"]));
-  const nextStep = clean(getAny(row, ["NextStep", "nextStep", "next_step", "Saran", "saran", "recommendation", "rekomendasi", "action"]));
-
-  return {
-    Nama: name,
-    MCU_ID: mcuId,
-    Condition: condition || "-",
-    Status: status,
-    Severity: severity || "-",
-    Score: score === undefined || score === null ? "" : score,
-    Evidence: evidence || "-",
-    NextStep: nextStep || "-",
-    _raw: row,
-  };
-}
-
-function normalizeDiseaseRows(engineResult: any) {
-  const candidateNames = [
-    "Interpretasi_Penyakit",
-    "interpretasiPenyakit",
-    "diseaseRows",
-    "diseases",
-    "conditionRows",
-    "conditions",
-    "allConditions",
-    "all_conditions",
-    "ruleBasedRows",
-    "rule_based_rows",
-    "ruleResults",
-    "interpretationRows",
-    "diseaseInterpretation",
-    "disease_interpretation",
-  ];
-
-  const directArrays = collectArrays(engineResult, candidateNames);
-  let rows: any[] = [];
-
-  for (const arr of directArrays) {
-    for (const item of arr) {
-      if (!item || typeof item !== "object") continue;
-
-      const nested = candidateNames.map((key) => item[key]).find((value) => Array.isArray(value));
-      if (Array.isArray(nested)) {
-        rows.push(...nested.map((child) => normalizeDiseaseRow(child, item)));
-      } else {
-        rows.push(normalizeDiseaseRow(item));
-      }
-    }
-  }
-
-  if (!rows.length) {
-    const analyses = [
-      ...asArray(engineResult?.analyses),
-      ...asArray(engineResult?.analysis),
-      ...asArray(engineResult?.data?.analyses),
-      ...asArray(engineResult?.results),
-      ...asArray(engineResult?.data?.results),
-    ];
-
-    for (const item of analyses) {
-      const nested = candidateNames.map((key) => item?.[key]).find((value) => Array.isArray(value));
-      if (Array.isArray(nested)) {
-        rows.push(...nested.map((child) => normalizeDiseaseRow(child, item)));
-      } else if (item && typeof item === "object" && (item.condition || item.Condition || item.disease || item.Penyakit)) {
-        rows.push(normalizeDiseaseRow(item));
-      }
-    }
-  }
-
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = `${row.Nama}|${row.MCU_ID}|${row.Condition}|${row.Status}|${row.Evidence}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return row.Condition && row.Condition !== "-";
-  });
-}
-
-function collectEngineRows(engineResult: any, keys: string[]) {
-  const arrays = collectArrays(engineResult, keys);
-  if (arrays.length) return arrays[0];
-  return [];
-}
-
-function addAbnormal(output: any[], row: any, parameter: string, value: any, interpretation: string, normalRange: string) {
-  output.push({
-    Nama: rowName(row),
-    MCU_ID: rowMcuId(row),
-    Parameter: parameter,
-    Hasil: clean(value),
-    "Normal Range": normalRange,
-    Interpretasi: interpretation,
-    Source: "next-fallback",
-  });
-}
-
-function localAbnormalRows(rows: any[]) {
-  const output: any[] = [];
-
-  for (const row of rows) {
-    const bmi = toNumber(row.BMI || row.IMT);
-    if (Number.isFinite(bmi)) {
-      if (bmi >= 30) addAbnormal(output, row, "BMI", bmi, "Obesitas", "< 25");
-      else if (bmi >= 25) addAbnormal(output, row, "BMI", bmi, "Overweight", "< 25");
-    }
-
-    const bp = parseBloodPressure(row.TD || row.TENSI);
-    if (Number.isFinite(bp.systolic) || Number.isFinite(bp.diastolic)) {
-      if (bp.systolic >= 140 || bp.diastolic >= 90) addAbnormal(output, row, "TD", bp.display, "Hipertensi", "< 140/90");
-      else if (bp.systolic >= 120 || bp.diastolic >= 80) addAbnormal(output, row, "TD", bp.display, "Prehipertensi", "< 120/80");
-    }
-
-    const ldl = toNumber(row.LDL);
-    if (Number.isFinite(ldl) && ldl >= 130) addAbnormal(output, row, "LDL", ldl, "LDL tinggi", "< 130");
-
-    const chol = toNumber(row.CHOL || row.KOLESTEROL);
-    if (Number.isFinite(chol) && chol >= 200) addAbnormal(output, row, "Kolesterol", chol, "Kolesterol tinggi", "< 200");
-
-    const trig = toNumber(row.TRIG || row.TRIGLISERIDA);
-    if (Number.isFinite(trig) && trig >= 150) addAbnormal(output, row, "Trigliserida", trig, "Trigliserida tinggi", "< 150");
-
-    const gdp = toNumber(row.GDP);
-    if (Number.isFinite(gdp) && gdp >= 126) addAbnormal(output, row, "GDP", gdp, "Diabetes range", "< 126");
-
-    const gds = toNumber(row.GDS);
-    if (Number.isFinite(gds) && gds >= 200) addAbnormal(output, row, "GDS", gds, "Diabetes range", "< 200");
-
-    const sgot = toNumber(row.SGOT);
-    if (Number.isFinite(sgot) && sgot > 40) addAbnormal(output, row, "SGOT", sgot, "SGOT tinggi", "≤ 40");
-
-    const sgpt = toNumber(row.SGPT);
-    if (Number.isFinite(sgpt) && sgpt > 40) addAbnormal(output, row, "SGPT", sgpt, "SGPT tinggi", "≤ 40");
-
-    const kreatinin = toNumber(row.KREATININ);
-    if (Number.isFinite(kreatinin) && kreatinin > 1.3) addAbnormal(output, row, "Kreatinin", kreatinin, "Kreatinin tinggi", "≤ 1.3");
-  }
-
-  return output;
-}
-
-function localDiseaseRows(rows: any[]) {
-  const output: any[] = [];
-
-  function push(row: any, condition: string, status: string, severity: string, score: number | "", evidence: string, nextStep: string) {
-    output.push({
-      Nama: rowName(row),
-      MCU_ID: rowMcuId(row),
-      Condition: condition,
-      Status: status,
-      Severity: severity || "-",
-      Score: score,
-      Evidence: evidence || "-",
-      NextStep: nextStep || "-",
-      Source: "next-fallback",
-    });
-  }
-
-  for (const row of rows) {
-    const bp = parseBloodPressure(row.TD || row.TENSI);
-    if (Number.isFinite(bp.systolic) || Number.isFinite(bp.diastolic)) {
-      if (bp.systolic >= 160 || bp.diastolic >= 100) {
-        push(row, "Hipertensi", "Terdeteksi", "Tinggi", 85, `TD ${bp.display} (grade 2)`, "Ulang TD, evaluasi dokter, pertimbangkan terapi & monitoring.");
-      } else if (bp.systolic >= 140 || bp.diastolic >= 90) {
-        push(row, "Hipertensi", "Terdeteksi", "Sedang", 70, `TD ${bp.display} (grade 1)`, "Modifikasi gaya hidup, ulang TD terjadwal, konsultasi dokter.");
-      } else if (bp.systolic >= 120 || bp.diastolic >= 80) {
-        push(row, "Prehipertensi", "Terdeteksi", "Rendah", 45, `TD ${bp.display}`, "Monitoring tekanan darah dan modifikasi gaya hidup.");
-      } else {
-        push(row, "Hipertensi", "Tidak terdeteksi", "-", "", `TD ${bp.display}`, "-");
-      }
-    } else {
-      push(row, "Hipertensi", "Data tidak ada", "-", "", "Kolom TD tidak tersedia.", "-");
-    }
-
-    const bmi = toNumber(row.BMI || row.IMT);
-    if (Number.isFinite(bmi)) {
-      if (bmi >= 30) push(row, "Obesitas Tingkat 1", "Terdeteksi", bmi >= 35 ? "Sedang" : "Rendah", bmi >= 35 ? 65 : 50, `BMI ${bmi}`, "Edukasi nutrisi & aktivitas; target BB turun 5–10%.");
-      else if (bmi >= 25) push(row, "Overweight", "Terdeteksi", "Rendah", 35, `BMI ${bmi}`, "Edukasi diet, aktivitas fisik, pantau gula/lemak darah.");
-      else push(row, "Obesitas Tingkat 1", "Tidak terdeteksi", "-", "", `BMI ${bmi}`, "-");
-    } else {
-      push(row, "Obesitas Tingkat 1", "Data tidak ada", "-", "", "BMI tidak tersedia.", "-");
-    }
-
-    const gdp = toNumber(row.GDP);
-    const gds = toNumber(row.GDS);
-    if ((Number.isFinite(gdp) && gdp >= 126) || (Number.isFinite(gds) && gds >= 200)) {
-      push(row, "Diabetes", "Terdeteksi", "Sedang", 70, `GDP ${clean(row.GDP) || "-"}, GDS ${clean(row.GDS) || "-"}`, "Konfirmasi gula darah/HbA1c dan konsultasi dokter.");
-    } else if (Number.isFinite(gdp) || Number.isFinite(gds)) {
-      push(row, "Diabetes", "Tidak terdeteksi", "-", "", `GDP ${clean(row.GDP) || "-"}, GDS ${clean(row.GDS) || "-"}`, "-");
-    } else {
-      push(row, "Diabetes", "Data tidak ada", "-", "", "Kolom GDP/GDS tidak tersedia.", "-");
-    }
-
-    const ldl = toNumber(row.LDL);
-    const chol = toNumber(row.CHOL || row.KOLESTEROL);
-    const trig = toNumber(row.TRIG || row.TRIGLISERIDA);
-    if ((Number.isFinite(ldl) && ldl >= 130) || (Number.isFinite(chol) && chol >= 200) || (Number.isFinite(trig) && trig >= 150)) {
-      push(row, "Dislipidemia", "Terdeteksi", "Sedang", 60, `LDL ${clean(row.LDL) || "-"}, Chol ${clean(row.CHOL || row.KOLESTEROL) || "-"}, TG ${clean(row.TRIG || row.TRIGLISERIDA) || "-"}`, "Diet rendah lemak, aktivitas fisik, evaluasi risiko kardiovaskular.");
-    } else if (Number.isFinite(ldl) || Number.isFinite(chol) || Number.isFinite(trig)) {
-      push(row, "Dislipidemia", "Tidak terdeteksi", "-", "", `LDL ${clean(row.LDL) || "-"}, Chol ${clean(row.CHOL || row.KOLESTEROL) || "-"}, TG ${clean(row.TRIG || row.TRIGLISERIDA) || "-"}`, "-");
-    } else {
-      push(row, "Dislipidemia", "Data tidak ada", "-", "", "Kolom lipid tidak tersedia.", "-");
-    }
-
-    const sgot = toNumber(row.SGOT);
-    const sgpt = toNumber(row.SGPT);
-    if ((Number.isFinite(sgot) && sgot > 40) || (Number.isFinite(sgpt) && sgpt > 40)) {
-      push(row, "Gangguan fungsi hati", "Terdeteksi", "Sedang", 55, `SGOT ${clean(row.SGOT) || "-"}, SGPT ${clean(row.SGPT) || "-"}`, "Evaluasi dokter; pertimbangkan ulang fungsi hati dan faktor risiko.");
-    } else if (Number.isFinite(sgot) || Number.isFinite(sgpt)) {
-      push(row, "Gangguan fungsi hati", "Tidak terdeteksi", "-", "", `SGOT ${clean(row.SGOT) || "-"}, SGPT ${clean(row.SGPT) || "-"}`, "-");
-    } else {
-      push(row, "Gangguan fungsi hati", "Data tidak ada", "-", "", "Kolom SGOT/SGPT tidak tersedia.", "-");
-    }
-  }
-
-  return output;
-}
-
-function firstNonEmptyMapping(rows: any[]) {
+function firstMapping(rows: any[]) {
   for (const row of rows || []) {
     if (isObject(row?.field_mapping) && Object.keys(row.field_mapping).length) return row.field_mapping;
     if (isObject(row?.row_data?._AI_MCU_FIELD_MAPPING) && Object.keys(row.row_data._AI_MCU_FIELD_MAPPING).length) return row.row_data._AI_MCU_FIELD_MAPPING;
   }
-
   return {};
 }
 
 function mappedKeyCount(mapping: any) {
   if (!isObject(mapping)) return 0;
-  return Object.entries(mapping).filter(([, v]) => clean(v)).length;
+  return Object.entries(mapping).filter(([, value]) => clean(value)).length;
 }
 
 export async function POST(req: NextRequest) {
@@ -693,99 +637,66 @@ export async function POST(req: NextRequest) {
     if (rowsResult.error) return fail(rowsResult.error.message, 500);
 
     const rawRows = rowsResult.data || [];
-    const globalMapping = firstNonEmptyMapping(rawRows);
+    const globalMapping = firstMapping(rawRows);
 
-    const roleCounts = rawRows.reduce((acc: Record<string, number>, row: any) => {
+    const roleCounts = rawRows.reduce((acc: Dict, row: any) => {
       const role = clean(row.dataset_role) || "(empty)";
       acc[role] = (acc[role] || 0) + 1;
       return acc;
     }, {});
 
-    let currentDbRows = rawRows.filter((r: any) => {
-      const role = clean(r.dataset_role).toLowerCase();
-      return role === "new" || role === "current";
-    });
-
-    const previousDbRows = rawRows.filter((r: any) => {
-      const role = clean(r.dataset_role).toLowerCase();
-      return role === "old" || role === "previous" || role === "lama";
-    });
+    let currentDbRows = rawRows.filter((r: any) => ["new", "current", "baru"].includes(clean(r.dataset_role).toLowerCase()));
+    const previousDbRows = rawRows.filter((r: any) => ["old", "previous", "lama"].includes(clean(r.dataset_role).toLowerCase()));
 
     if (!currentDbRows.length) {
-      currentDbRows = rawRows.filter((r: any) => {
-        const role = clean(r.dataset_role).toLowerCase();
-        return !["old", "previous", "lama"].includes(role);
-      });
+      currentDbRows = rawRows.filter((r: any) => !["old", "previous", "lama"].includes(clean(r.dataset_role).toLowerCase()));
     }
 
     if (!currentDbRows.length && rawRows.length) currentDbRows = rawRows;
 
-    const currentRows = currentDbRows.map((r: any) => {
+    const toNormalized = (r: any) => {
       const rowMapping = isObject(r.field_mapping) && Object.keys(r.field_mapping).length ? r.field_mapping : globalMapping;
       const mapped = applyFieldMapping(r.row_data || {}, rowMapping);
-      return normalizeRowForEngine(mapped, {
+      return normalizeRow(mapped, {
         participant_name: r.participant_name,
         mcu_id: r.mcu_id,
         nik: r.nik,
+        id: r.id,
       });
-    });
+    };
 
-    const previousRows = previousDbRows.map((r: any) => {
-      const rowMapping = isObject(r.field_mapping) && Object.keys(r.field_mapping).length ? r.field_mapping : globalMapping;
-      const mapped = applyFieldMapping(r.row_data || {}, rowMapping);
-      return normalizeRowForEngine(mapped, {
-        participant_name: r.participant_name,
-        mcu_id: r.mcu_id,
-        nik: r.nik,
-      });
-    });
+    const currentRows = currentDbRows.map(toNormalized);
+    const previousRows = previousDbRows.map(toNormalized);
 
     if (!currentRows.length) {
-      return fail("Database ini belum punya row MCU yang bisa dianalisis. Upload MCU Baru ulang atau pilih database lain.", 404, {
-        debug: {
-          sourceId,
-          rawRowCount: rawRows.length,
-          roleCounts,
-        },
+      return fail("Database ini belum punya row MCU yang bisa dianalisis.", 404, {
+        debug: { sourceId, rawRowCount: rawRows.length, roleCounts },
       });
     }
 
+    const ruleResult = numericAndTextRules(currentRows);
     const comparison = buildComparison(previousRows, currentRows, thresholdPct);
 
-    let engineResult: any = null;
-    const engineUrl = normalizeEngineUrl();
+    const participantsWithDetected = new Set(ruleResult.disease.map((r) => `${r.NAMA}|${r.MCU_ID}`));
+    const participantsWithNoFinding = currentRows
+      .filter((row) => {
+        const key = `${rowName(row)}|${rowMcuId(row)}`;
+        const combined = evidenceText(row).toLowerCase();
+        return !participantsWithDetected.has(key) && contains(combined, ["tidak ditemukan kelainan", "dalam batas normal", "hasil pemeriksaan tidak ditemukan kelainan"]);
+      })
+      .map((row) => ({
+        NAMA: rowName(row),
+        MCU_ID: rowMcuId(row),
+        CONDITION: "Tidak ditemukan kelainan bermakna",
+        STATUS: "Tidak terdeteksi",
+        SEVERITY: "-",
+        SCORE: "-",
+        EVIDENCE: clean(row.KESIMPULAN) || "Hasil pemeriksaan tidak ditemukan kelainan.",
+        NEXTSTEP: clean(row.SARAN) || "Pemeriksaan kesehatan berkala.",
+        SOURCE: "rule-normal-summary",
+      }));
 
-    if (engineUrl) {
-      try {
-        const res = await fetch(`${engineUrl}/analyze-mcu`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            currentRows,
-            previousRows,
-            includeAllRuleStatuses: true,
-            outputMode: "streamlit_rule_based",
-          }),
-        });
-
-        engineResult = await res.json().catch(() => null);
-      } catch (error: any) {
-        engineResult = {
-          ok: false,
-          message: error?.message || "Python engine tidak bisa dihubungi.",
-        };
-      }
-    }
-
-    let abnormalRows = collectEngineRows(engineResult, ["abnormalRows", "abnormal", "abnormal_summary", "Abnormal_Summary"]);
-    let diseaseRows = normalizeDiseaseRows(engineResult);
-    const priorityRows = collectEngineRows(engineResult, ["priorityRows", "priorities", "priority", "Prioritas"]);
-
-    if (!abnormalRows.length) abnormalRows = localAbnormalRows(currentRows);
-    if (!diseaseRows.length || diseaseRows.every((r) => r.Status === "Data tidak ada" && !r.Nama && !r.MCU_ID)) {
-      diseaseRows = localDiseaseRows(currentRows);
-    }
+    const diseaseRows = [...ruleResult.disease, ...participantsWithNoFinding];
 
     return NextResponse.json({
       ok: true,
@@ -798,9 +709,7 @@ export async function POST(req: NextRequest) {
         mappingKeysSaved: mappedKeyCount(globalMapping),
         firstCurrentRowKeys: Object.keys(currentRows[0] || {}).slice(0, 120),
         firstCurrentRowSample: currentRows[0] || null,
-        engineConfigured: Boolean(engineUrl),
-        engineOk: Boolean(engineResult?.ok),
-        engineTopLevelKeys: engineResult && typeof engineResult === "object" ? Object.keys(engineResult).slice(0, 50) : [],
+        ruleMode: "next-route-numeric-and-text-based-v1",
       },
       summary: {
         totalCurrent: currentRows.length,
@@ -811,21 +720,28 @@ export async function POST(req: NextRequest) {
         comparisonSignif: comparison.comparisonSignif.length,
         changedParameters: comparison.changedLong.length,
         thresholdPct,
-        engineOk: Boolean(engineResult?.ok),
-        abnormalRows: abnormalRows.length,
+        abnormalRows: ruleResult.abnormal.length,
         diseaseRows: diseaseRows.length,
-        diseaseDetected: diseaseRows.filter((r) => r.Status === "Terdeteksi").length,
+        diseaseDetected: diseaseRows.filter((r) => r.STATUS === "Terdeteksi").length,
       },
       Rekap_Analisis: currentRows,
-      Abnormal_Summary: abnormalRows,
+      Abnormal_Summary: ruleResult.abnormal,
       Perbandingan_All: comparison.comparisonAll,
       Perbandingan_Changed: comparison.comparisonChanged,
       Perbandingan_Signif: comparison.comparisonSignif,
       Perbandingan_Long: comparison.changedLong,
       Interpretasi_Penyakit: diseaseRows,
-      Prioritas: priorityRows,
+      Prioritas: ruleResult.abnormal
+        .filter((r) => ["Tinggi", "Sedang"].includes(r.SEVERITY))
+        .map((r) => ({
+          NAMA: r.NAMA,
+          MCU_ID: r.MCU_ID,
+          PRIORITAS: r.SEVERITY,
+          PARAMETER: r.PARAMETER,
+          TEMUAN: r.INTERPRETASI,
+          SARAN: r.SARAN,
+        })),
       previousRows,
-      engineResult,
     });
   } catch (error: any) {
     return fail(error?.message || "Analisis MCU gagal.", 500);
