@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+storage/
+credentials.json
+gdrive_token.json
+*.log
+.env
+.env.local
