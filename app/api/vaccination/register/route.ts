@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       department: clean(body.department) || null,
       queue_number: queueNumber,
       queue_status: "WAITING",
-      registered_by: user.email || user.name || null,
+      registered_by: ((user as any).email || (user as any).name || (user as any).id || "system"),
     })
     .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token), vaccine:vaccination_vaccines(id,name,brand)")
     .single();

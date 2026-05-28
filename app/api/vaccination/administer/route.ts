@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { addDays, clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       lot_number: lot.lot_number,
       dose_number: doseNumber,
       administered_at: administeredAt.toISOString(),
-      administered_by: user.email || user.name || null,
+      administered_by: ((user as any).email || (user as any).name || (user as any).id || "system"),
       next_due_date: nextDueDate,
       notes: clean(body.notes) || null,
       status: "ADMINISTERED",
