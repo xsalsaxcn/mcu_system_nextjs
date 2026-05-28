@@ -41,6 +41,11 @@ const menuItems = [
     href: "/ai-mcu/history",
     desc: "Lihat riwayat file dan hasil generate.",
   },
+  {
+  title: "Latih AI",
+  href: "/ai-mcu/train",
+  desc: "Training machine learning lokal pakai scikit-learn dari data MCU dan feedback dokter.",
+},
 ];
 
 const drawerItems = [
