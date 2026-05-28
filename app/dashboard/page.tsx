@@ -59,6 +59,37 @@ function StatusBadge({ value }: { value: string }) {
   return <span className={`rounded-full px-2.5 py-1 text-xs font-black ${className}`}>{value}</span>;
 }
 
+function ModuleShortcut({
+  title,
+  desc,
+  href,
+  badge
+}: {
+  title: string;
+  desc: string;
+  href: string;
+  badge?: string;
+}) {
+  return (
+    <a
+      href={href}
+      className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-lg font-black text-slate-800 group-hover:text-blue-700">{title}</div>
+          <div className="mt-1 text-sm font-medium text-slate-500">{desc}</div>
+        </div>
+        {badge ? (
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+            {badge}
+          </span>
+        ) : null}
+      </div>
+    </a>
+  );
+}
+
 function CompactTable({ title, rows, emptyText }: { title: string; rows: any[]; emptyText: string }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -217,12 +248,23 @@ function Dashboard({ user }: { user: any }) {
     <div className="space-y-5">
       <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-900 p-6 text-white">
-          <div className="text-3xl font-black">Dashboard Progress & Kelulusan</div>
-          <div className="mt-2 max-w-3xl text-sm font-medium text-blue-100">
-            Supervisor melihat progress stage, data selesai/belum selesai, kelulusan berdasarkan parameter kelulusan, dan export hasil pemeriksaan.
-          </div>
-          <div className="mt-3 w-fit rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
-            Dashboard v38 · stage detail + registrasi ulang fix
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-3xl font-black">Dashboard Progress & Kelulusan</div>
+              <div className="mt-2 max-w-3xl text-sm font-medium text-blue-100">
+                Supervisor melihat progress stage, data selesai/belum selesai, kelulusan berdasarkan parameter kelulusan, dan export hasil pemeriksaan.
+              </div>
+              <div className="mt-3 w-fit rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
+                Dashboard v39 · vaccination module shortcut
+              </div>
+            </div>
+
+            <a
+              href="/vaccination"
+              className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-50"
+            >
+              Vaksinasi Perusahaan
+            </a>
           </div>
         </div>
 
@@ -258,6 +300,33 @@ function Dashboard({ user }: { user: any }) {
             Export Semua Hasil
           </button>
         </div>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <ModuleShortcut
+          title="Vaksinasi Perusahaan"
+          desc="Master vaksin, lot number, registrasi, antrian QR, administered, dan print sticker."
+          href="/vaccination"
+          badge="Baru"
+        />
+
+        <ModuleShortcut
+          title="Master Vaksin & Lot"
+          desc="Input daftar vaksin, aturan next dose, stok, dan lot number."
+          href="/vaccination/master"
+        />
+
+        <ModuleShortcut
+          title="Antrian Vaksin"
+          desc="Panggil nomor berjalan dan tampilkan halaman publik untuk pasien."
+          href="/vaccination/queue"
+        />
+
+        <ModuleShortcut
+          title="Administered / Medis"
+          desc="Pilih vaksin dan lot number, klik Done, lalu print sticker."
+          href="/vaccination/administer"
+        />
       </section>
 
       {data?.ok && (
@@ -476,8 +545,6 @@ function Dashboard({ user }: { user: any }) {
             <CompactTable title="LULUS" rows={data.lulus_rows || []} emptyText="Belum ada peserta selesai yang masuk kriteria lulus." />
             <CompactTable title="TIDAK LULUS" rows={data.tidak_lulus_rows || []} emptyText="Belum ada peserta selesai yang di luar range kelulusan." />
           </section>
-
-
         </>
       )}
     </div>
