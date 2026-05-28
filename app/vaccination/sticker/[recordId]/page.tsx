@@ -15,9 +15,12 @@ export default function VaccinationStickerPage({ params }: { params: { recordId:
 
   async function load() {
     const json = await fetch(`/api/vaccination/sticker?record_id=${params.recordId}`, { cache: "no-store" }).then((r) => r.json());
-    if (!json.ok) { setError(json.message || "Sticker tidak ditemukan."); return; }
+    if (!json.ok) {
+      setError(json.message || "Sticker tidak ditemukan.");
+      return;
+    }
     setRecord(json.record);
-    setTimeout(() => window.print(), 700);
+    setTimeout(() => window.print(), 600);
   }
 
   useEffect(() => { load(); }, [params.recordId]);
@@ -26,20 +29,35 @@ export default function VaccinationStickerPage({ params }: { params: { recordId:
   if (!record) return <main className="p-6">Loading sticker...</main>;
 
   return (
-    <main className="min-h-screen bg-white p-6">
-      <style jsx global>{`@media print { body { margin: 0; } .no-print { display: none !important; } .sticker { page-break-after: always; } }`}</style>
-      <button className="no-print mb-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white" onClick={() => window.print()}>Print Sticker</button>
-      <div className="sticker w-[360px] rounded-xl border-2 border-black bg-white p-4 text-black">
-        <div className="text-center text-xs font-bold uppercase tracking-wide">Vaccination Label</div>
-        <div className="mt-2 text-center text-lg font-black">{record.participant_name}</div>
-        <div className="mt-3 border-t border-black pt-3 text-sm">
-          <div><b>Vaksin:</b> {record.vaccine_name}</div>
-          <div><b>Lot:</b> {record.lot_number}</div>
-          <div><b>Tanggal:</b> {fmtDate(record.administered_at)}</div>
-          <div><b>Next Dose:</b> {fmtDate(record.next_due_date)}</div>
+    <main className="label-page bg-white text-black">
+      <style jsx global>{`
+        @page { size: 70mm 35mm; margin: 0; }
+        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+        .label-page { width: 70mm; min-height: 35mm; margin: 0; padding: 0; background: #fff; }
+        .label-card { width: 70mm; height: 35mm; box-sizing: border-box; padding: 3mm 4mm; overflow: hidden; font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; }
+        .label-title { font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #000; padding-bottom: 1mm; margin-bottom: 1.5mm; }
+        .label-name { font-size: 12pt; line-height: 1.1; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .label-row { font-size: 8.5pt; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .label-footer { margin-top: 1.5mm; display: flex; justify-content: space-between; gap: 2mm; font-size: 7pt; border-top: 1px solid #000; padding-top: 1mm; }
+        .no-print { margin: 12px; }
+        @media print { .no-print { display: none !important; } .label-page, .label-card { margin: 0 !important; } }
+      `}</style>
+
+      <button className="no-print rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white" onClick={() => window.print()}>
+        Print Sticker
+      </button>
+
+      <section className="label-card">
+        <div className="label-title">Vaccination Label</div>
+        <div className="label-name">{record.participant_name}</div>
+        <div className="mt-[2mm]">
+          <div className="label-row"><b>Vaksin:</b> {record.vaccine_name}</div>
+          <div className="label-row"><b>Lot:</b> {record.lot_number}</div>
+          <div className="label-row"><b>Tgl:</b> {fmtDate(record.administered_at)}</div>
+          <div className="label-row"><b>Next:</b> {fmtDate(record.next_due_date)}</div>
         </div>
-        <div className="mt-3 text-center text-[11px]">Record #{record.id}</div>
-      </div>
+        <div className="label-footer"><span>Record #{record.id}</span><span>{record.registration?.queue_number || ""}</span></div>
+      </section>
     </main>
   );
 }
