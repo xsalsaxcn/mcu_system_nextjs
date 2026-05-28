@@ -30,8 +30,9 @@ export async function GET(req: NextRequest) {
     .from("vaccination_registrations")
     .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days)")
     .in("queue_status", ["CALLED", "IN_PROGRESS", "WAITING"])
+    .not("queue_number", "is", null)
     .order("id", { ascending: true })
-    .limit(300);
+    .limit(500);
 
   if (sessionId) regQuery = regQuery.eq("session_id", sessionId);
 
@@ -54,13 +55,29 @@ export async function GET(req: NextRequest) {
 
   if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
+  let recordsQuery = supabase
+    .from("vaccination_records")
+    .select("*, registration:vaccination_registrations(id,queue_number,participant_name,mcu_id,employee_id,department,company_name), session:vaccination_sessions(id,session_name,company_name)")
+    .order("administered_at", { ascending: false })
+    .limit(1000);
+
+  if (sessionId) recordsQuery = recordsQuery.eq("session_id", sessionId);
+
+  const recordsResult = await recordsQuery;
+  if (recordsResult.error) return fail(recordsResult.error.message, 500);
+
   const sessionVaccines = sessionId ? await getSessionVaccines(supabase, sessionId) : [];
+  const doctorNames = Array.from(
+    new Set((recordsResult.data || []).map((record: any) => clean(record.administered_by)).filter(Boolean))
+  ).sort();
 
   return ok({
     registrations: regsResult.data || [],
     vaccines: vaccinesResult.data || [],
     lots: lotsResult.data || [],
     sessionVaccines,
+    completedRecords: recordsResult.data || [],
+    doctorNames,
   });
 }
 
@@ -73,6 +90,7 @@ export async function POST(req: NextRequest) {
   const doseNumber = Math.max(1, toInt(body.doseNumber, 1));
   const administeredAtRaw = clean(body.administeredAt);
   const administeredAt = administeredAtRaw ? new Date(administeredAtRaw) : new Date();
+  const administeredBy = clean(body.administeredByName) || clean(body.doctorName) || ((user as any).email || (user as any).name || (user as any).id || "system");
 
   if (!registrationId) return fail("Peserta/antrian wajib dipilih.");
 
@@ -138,7 +156,7 @@ export async function POST(req: NextRequest) {
       lot_number: lot.lot_number,
       dose_number: item.doseNumber,
       administered_at: administeredAt.toISOString(),
-      administered_by: ((user as any).email || (user as any).name || (user as any).id || "system"),
+      administered_by: administeredBy,
       next_due_date: nextDueDate,
       notes: clean(body.notes) || null,
       status: "ADMINISTERED",

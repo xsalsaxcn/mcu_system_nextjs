@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { clean, fail, formatQueueNumber, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
+import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,7 @@ function firstNonEmpty(...values: any[]) {
 
 function normalizeRowFromParticipant(row: any) {
   return {
+    source_row_id: row.id,
     participant_id: row.id,
     participant_name: firstNonEmpty(row.name, row.participant_name, row.nama, row.full_name),
     employee_id: firstNonEmpty(row.employee_id, row.external_id, row.employee_nik, row.nrp),
@@ -28,6 +29,7 @@ function normalizeRowFromParticipant(row: any) {
 function normalizeRowFromImport(row: any) {
   const data = row.row_data || {};
   return {
+    source_row_id: row.id,
     participant_id: row.participant_id || row.id,
     participant_name: firstNonEmpty(row.participant_name, data.NAMA, data.Nama, data["Nama Peserta"], data.name),
     employee_id: firstNonEmpty(data.NRP, data.ID, data.employee_id, data.external_id),
@@ -50,39 +52,44 @@ function makeKey(row: any) {
 }
 
 async function fetchCorporateParticipants(supabase: any, sourceId: number) {
-  const participants = await supabase
-    .from("participants")
-    .select("id,name,participant_name,full_name,external_id,mcu_id,nik,employee_nik,employee_id,email,phone,phone_number,mobile,department,department_name,dept,unit,source_id,company_name,institution_name")
-    .eq("source_id", sourceId)
-    .limit(5000);
+  const attempts = [
+    {
+      table: "participants",
+      query: () => supabase
+        .from("participants")
+        .select("id,name,participant_name,full_name,external_id,mcu_id,nik,employee_nik,employee_id,email,phone,phone_number,mobile,department,department_name,dept,unit,source_id,company_name,institution_name")
+        .eq("source_id", sourceId)
+        .limit(5000),
+      mapper: normalizeRowFromParticipant,
+    },
+    {
+      table: "ai_mcu_import_rows",
+      query: () => supabase
+        .from("ai_mcu_import_rows")
+        .select("id,source_id,participant_id,participant_name,mcu_id,nik,row_data")
+        .eq("source_id", sourceId)
+        .limit(5000),
+      mapper: normalizeRowFromImport,
+    },
+  ];
 
-  if (!participants.error && Array.isArray(participants.data) && participants.data.length) {
-    return {
-      rows: participants.data.map(normalizeRowFromParticipant).filter((row: any) => clean(row.participant_name)),
-      sourceTable: "participants",
-      errors: [],
-    };
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    const result = await attempt.query();
+
+    if (!result.error && Array.isArray(result.data) && result.data.length) {
+      const rows = result.data
+        .map(attempt.mapper)
+        .filter((row: any) => clean(row.participant_name));
+
+      return { rows, sourceTable: attempt.table, errors };
+    }
+
+    if (result.error) errors.push(`${attempt.table}: ${result.error.message}`);
   }
 
-  const importRows = await supabase
-    .from("ai_mcu_import_rows")
-    .select("id,source_id,participant_id,participant_name,mcu_id,nik,row_data")
-    .eq("source_id", sourceId)
-    .limit(5000);
-
-  if (!importRows.error && Array.isArray(importRows.data) && importRows.data.length) {
-    return {
-      rows: importRows.data.map(normalizeRowFromImport).filter((row: any) => clean(row.participant_name)),
-      sourceTable: "ai_mcu_import_rows",
-      errors: participants.error ? [participants.error.message] : [],
-    };
-  }
-
-  return {
-    rows: [],
-    sourceTable: "",
-    errors: [participants.error?.message, importRows.error?.message].filter(Boolean),
-  };
+  return { rows: [], sourceTable: "", errors };
 }
 
 export async function POST(req: NextRequest) {
@@ -121,16 +128,14 @@ export async function POST(req: NextRequest) {
   if (existingResult.error) return fail(existingResult.error.message, 500);
 
   const existingKeys = new Set((existingResult.data || []).map(makeKey));
-  const startingNumber = Number(existingResult.data?.length || 0) + 1;
   const defaultVaccineId = toInt(session.default_vaccine_id, 0) || null;
+
   const rowsToInsert: any[] = [];
 
-  let counter = 0;
   for (const participant of imported.rows) {
     const key = makeKey(participant);
     if (key && existingKeys.has(key)) continue;
 
-    counter += 1;
     rowsToInsert.push({
       session_id: sessionId,
       source_id: sourceId,
@@ -144,8 +149,8 @@ export async function POST(req: NextRequest) {
       phone: clean(participant.phone) || null,
       company_name: clean(participant.company_name) || clean(session.company_name) || clean(session.source_name) || null,
       department: clean(participant.department) || null,
-      queue_number: formatQueueNumber(startingNumber + counter - 1),
-      queue_status: "WAITING",
+      queue_number: null,
+      queue_status: "IMPORTED",
       registered_by: ((user as any).email || (user as any).name || (user as any).id || "system"),
     });
 
@@ -161,11 +166,15 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const insertResult = await supabase.from("vaccination_registrations").insert(rowsToInsert).select("*");
+  const insertResult = await supabase
+    .from("vaccination_registrations")
+    .insert(rowsToInsert)
+    .select("*");
+
   if (insertResult.error) return fail(insertResult.error.message, 500);
 
   return ok({
-    message: `Import corporate selesai. Peserta masuk: ${insertResult.data?.length || 0}.`,
+    message: `Import corporate selesai. Peserta masuk: ${insertResult.data?.length || 0}. Nomor antrian belum dirilis sampai registrasi ulang/kedatangan.`,
     inserted: insertResult.data?.length || 0,
     skipped: imported.rows.length - rowsToInsert.length,
     sourceTable: imported.sourceTable,

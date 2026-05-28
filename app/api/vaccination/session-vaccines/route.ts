@@ -47,19 +47,11 @@ export async function POST(req: NextRequest) {
 
     const lotResult = await supabase.from("vaccination_vaccine_lots").select("*").eq("id", lotId).single();
     if (lotResult.error) return fail(lotResult.error.message, 500);
-    if (Number(lotResult.data.vaccine_id) !== Number(vaccineId)) {
-      return fail("Lot number tidak sesuai dengan vaksin.");
-    }
+    if (Number(lotResult.data.vaccine_id) !== Number(vaccineId)) return fail("Lot number tidak sesuai dengan vaksin.");
 
     const insertResult = await supabase
       .from("vaccination_session_vaccines")
-      .insert({
-        session_id: sessionId,
-        vaccine_id: vaccineId,
-        lot_id: lotId,
-        dose_number: doseNumber,
-        active: true,
-      })
+      .insert({ session_id: sessionId, vaccine_id: vaccineId, lot_id: lotId, dose_number: doseNumber, active: true })
       .select("*")
       .single();
 

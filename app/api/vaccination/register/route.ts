@@ -3,6 +3,28 @@ import { clean, fail, formatQueueNumber, ok, requireUser, supabaseAdmin, toInt }
 
 export const dynamic = "force-dynamic";
 
+async function getNextQueueNumber(supabase: any, sessionId: number) {
+  const result = await supabase
+    .from("vaccination_registrations")
+    .select("queue_number")
+    .eq("session_id", sessionId)
+    .not("queue_number", "is", null);
+
+  if (result.error) throw new Error(result.error.message);
+
+  let maxNumber = 0;
+
+  for (const row of result.data || []) {
+    const text = String(row.queue_number || "");
+    const match = text.match(/(\d+)$/);
+    if (!match) continue;
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n > maxNumber) maxNumber = n;
+  }
+
+  return formatQueueNumber(maxNumber + 1);
+}
+
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -31,13 +53,49 @@ export async function POST(req: NextRequest) {
   if (!user) return fail("Unauthorized", 401);
 
   const body = await req.json().catch(() => ({}));
+  const action = clean(body.action);
+  const supabase = supabaseAdmin();
+
+  if (action === "release-queue") {
+    const registrationId = toInt(body.registrationId || body.registration_id, 0);
+    if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
+
+    const regResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", registrationId)
+      .single();
+
+    if (regResult.error) return fail(regResult.error.message, 500);
+
+    const reg = regResult.data;
+    if (clean(reg.queue_number)) {
+      return ok({ message: `Nomor antrian sudah dirilis: ${reg.queue_number}`, registration: reg });
+    }
+
+    const queueNumber = await getNextQueueNumber(supabase, Number(reg.session_id));
+
+    const updateResult = await supabase
+      .from("vaccination_registrations")
+      .update({
+        queue_number: queueNumber,
+        queue_status: "WAITING",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", registrationId)
+      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,source_id,source_name,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand)")
+      .single();
+
+    if (updateResult.error) return fail(updateResult.error.message, 500);
+
+    return ok({ message: `Nomor antrian berhasil dirilis: ${queueNumber}`, registration: updateResult.data });
+  }
+
   const sessionId = toInt(body.sessionId || body.session_id, 0);
   const participantName = clean(body.participantName || body.participant_name);
 
   if (!sessionId) return fail("Session wajib dipilih.");
   if (!participantName) return fail("Nama peserta wajib diisi.");
-
-  const supabase = supabaseAdmin();
 
   const sessionResult = await supabase.from("vaccination_sessions").select("*").eq("id", sessionId).single();
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
@@ -46,15 +104,7 @@ export async function POST(req: NextRequest) {
   const vaccineIdInput = toInt(body.vaccineId, 0);
   const vaccineId = vaccineIdInput || toInt(session.default_vaccine_id, 0) || null;
 
-  const countResult = await supabase
-    .from("vaccination_registrations")
-    .select("id", { count: "exact", head: true })
-    .eq("session_id", sessionId);
-
-  if (countResult.error) return fail(countResult.error.message, 500);
-
-  const nextNumber = Number(countResult.count || 0) + 1;
-  const queueNumber = clean(body.queueNumber) || formatQueueNumber(nextNumber);
+  const queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
 
   const payload: Record<string, any> = {
     session_id: sessionId,
@@ -83,7 +133,7 @@ export async function POST(req: NextRequest) {
   if (result.error) return fail(result.error.message, 500);
 
   return ok({
-    message: `Registrasi berhasil. Nomor antrian: ${queueNumber}`,
+    message: `Registrasi ulang berhasil. Nomor antrian: ${queueNumber}`,
     registration: result.data,
   });
 }

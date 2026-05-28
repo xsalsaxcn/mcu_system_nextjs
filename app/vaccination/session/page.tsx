@@ -92,6 +92,34 @@ export default function VaccinationSessionPage() {
     setSessionVaccines((prev) => prev.filter((_, idx) => idx !== index));
   }
 
+  async function deleteSession(session: any) {
+    const confirmed = window.confirm(
+      `Hapus session "${session.session_name}"?\n\nData registrasi, antrian, dan record vaksinasi di session ini juga bisa ikut terhapus karena relasi database.`
+    );
+
+    if (!confirmed) return;
+
+    setError("");
+    setMessage("Menghapus session...");
+
+    const res = await fetch("/api/vaccination/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete-session", id: session.id }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok || !json.ok) {
+      setError(json.message || "Gagal menghapus session.");
+      setMessage("Hapus session gagal.");
+      return;
+    }
+
+    setMessage(json.message || "Session berhasil dihapus.");
+    loadSessions();
+  }
+
   async function loadSources() {
     const res = await fetch("/api/sources?program=corporate", { cache: "no-store" });
     const json = await res.json();
@@ -339,6 +367,7 @@ export default function VaccinationSessionPage() {
                 <th className="p-3 text-left">Vaksin Session</th>
                 <th className="p-3 text-left">Tanggal</th>
                 <th className="p-3 text-left">Public</th>
+                <th className="p-3 text-left">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -365,11 +394,21 @@ export default function VaccinationSessionPage() {
                       Public Queue
                     </a>
                   </td>
+                  <td className="p-3">
+                    <button
+                      type="button"
+                      onClick={() => deleteSession(session)}
+                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+                      title="Hapus session"
+                    >
+                      🗑 Hapus
+                    </button>
+                  </td>
                 </tr>
               ))}
               {!sessions.length ? (
                 <tr>
-                  <td colSpan={5} className="p-5 text-center text-slate-500">Belum ada session.</td>
+                  <td colSpan={6} className="p-5 text-center text-slate-500">Belum ada session.</td>
                 </tr>
               ) : null}
             </tbody>

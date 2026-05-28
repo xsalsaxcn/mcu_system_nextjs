@@ -8,6 +8,13 @@ type SelectedVaccineItem = {
   doseNumber: number;
 };
 
+function fmtDate(value: any) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+}
+
 export default function VaccinationAdministerPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
@@ -16,12 +23,17 @@ export default function VaccinationAdministerPage() {
   const [lots, setLots] = useState<any[]>([]);
   const [sessionVaccines, setSessionVaccines] = useState<any[]>([]);
   const [selectedVaccines, setSelectedVaccines] = useState<SelectedVaccineItem[]>([]);
+  const [completedRecords, setCompletedRecords] = useState<any[]>([]);
+  const [doctorNames, setDoctorNames] = useState<string[]>([]);
+  const [doctorFilter, setDoctorFilter] = useState("all");
+  const [searchDone, setSearchDone] = useState("");
   const [message, setMessage] = useState("Pilih antrian. Daftar vaksin session otomatis menjadi daftar sticker.");
   const [error, setError] = useState("");
 
   const [form, setForm] = useState({
     registrationId: "",
     administeredAt: "",
+    administeredByName: "",
     notes: "",
   });
 
@@ -45,6 +57,8 @@ export default function VaccinationAdministerPage() {
     setVaccines(json.vaccines || []);
     setLots(json.lots || []);
     setSessionVaccines(json.sessionVaccines || []);
+    setCompletedRecords(json.completedRecords || []);
+    setDoctorNames(json.doctorNames || []);
 
     const nextSelected = (json.sessionVaccines || []).map((item: any) => ({
       vaccineId: String(item.vaccine_id),
@@ -53,12 +67,6 @@ export default function VaccinationAdministerPage() {
     }));
 
     setSelectedVaccines(nextSelected);
-  }
-
-  function vaccineName(vaccineId: string) {
-    const vaccine = vaccines.find((item) => String(item.id) === String(vaccineId));
-    if (!vaccine) return "Vaksin";
-    return `${vaccine.name}${vaccine.brand ? ` · ${vaccine.brand}` : ""}`;
   }
 
   function lotOptions(vaccineId: string) {
@@ -85,6 +93,11 @@ export default function VaccinationAdministerPage() {
       return;
     }
 
+    if (!form.administeredByName.trim()) {
+      setError("Nama dokter/petugas wajib diisi agar laporan bisa difilter per dokter.");
+      return;
+    }
+
     const vaccinesPayload = selectedVaccines
       .map((item) => ({
         vaccineId: Number(item.vaccineId),
@@ -104,6 +117,7 @@ export default function VaccinationAdministerPage() {
       body: JSON.stringify({
         registrationId: form.registrationId,
         administeredAt: form.administeredAt,
+        administeredByName: form.administeredByName,
         notes: form.notes,
         vaccines: vaccinesPayload,
       }),
@@ -132,6 +146,44 @@ export default function VaccinationAdministerPage() {
 
   const selectedRegistration = registrations.find((r) => String(r.id) === String(form.registrationId));
 
+  const groupedCompleted = useMemo(() => {
+    const keyword = searchDone.trim().toLowerCase();
+
+    const filtered = completedRecords.filter((record) => {
+      const doctorOk = doctorFilter === "all" || String(record.administered_by || "") === doctorFilter;
+
+      const haystack = [
+        record.participant_name,
+        record.vaccine_name,
+        record.lot_number,
+        record.registration?.queue_number,
+        record.registration?.mcu_id,
+        record.administered_by,
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      return doctorOk && (!keyword || haystack.includes(keyword));
+    });
+
+    const map = new Map<string, any>();
+    for (const record of filtered) {
+      const key = `${record.registration_id || record.participant_name}-${record.administered_at}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          participant_name: record.participant_name,
+          queue_number: record.registration?.queue_number || "-",
+          mcu_id: record.registration?.mcu_id || record.registration?.employee_id || "-",
+          administered_by: record.administered_by || "-",
+          administered_at: record.administered_at,
+          vaccines: [],
+        });
+      }
+      map.get(key).vaccines.push(record);
+    }
+
+    return Array.from(map.values());
+  }, [completedRecords, doctorFilter, searchDone]);
+
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -139,7 +191,7 @@ export default function VaccinationAdministerPage() {
           <div>
             <h1 className="text-2xl font-bold">Administered / Medis</h1>
             <p className="mt-2 text-sm text-slate-600">
-              Jika session memiliki 2 vaksin, Done akan membuat 2 record dan membuka 2 sticker label.
+              Input dokter/petugas saat Done. Peserta selesai bisa difilter berdasarkan dokter.
             </p>
           </div>
           <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
@@ -151,7 +203,7 @@ export default function VaccinationAdministerPage() {
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <h2 className="font-bold">1. Pilih Peserta</h2>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <select className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
               <option value="">Pilih session</option>
               {sessions.map((session) => (
@@ -175,6 +227,13 @@ export default function VaccinationAdministerPage() {
               className="rounded-xl border px-3 py-2.5"
               value={form.administeredAt}
               onChange={(e) => setForm({ ...form, administeredAt: e.target.value })}
+            />
+
+            <input
+              className="rounded-xl border px-3 py-2.5"
+              placeholder="Nama dokter / petugas *"
+              value={form.administeredByName}
+              onChange={(e) => setForm({ ...form, administeredByName: e.target.value })}
             />
           </div>
 
@@ -266,6 +325,74 @@ export default function VaccinationAdministerPage() {
           <button onClick={donePrint} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">
             Done + Print Semua Sticker
           </button>
+        </section>
+
+        <section className="mt-6 rounded-2xl border bg-white">
+          <div className="border-b bg-slate-50 p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Peserta Sudah Selesai</h2>
+                <p className="text-sm text-slate-500">Filter berdasarkan nama dokter/petugas dan cari nama peserta.</p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <select className="rounded-xl border px-3 py-2.5" value={doctorFilter} onChange={(e) => setDoctorFilter(e.target.value)}>
+                  <option value="all">Semua dokter/petugas</option>
+                  {doctorNames.map((doctor) => (
+                    <option key={doctor} value={doctor}>{doctor}</option>
+                  ))}
+                </select>
+
+                <input
+                  className="rounded-xl border px-3 py-2.5"
+                  placeholder="Cari nama / no antrian / vaksin..."
+                  value={searchDone}
+                  onChange={(e) => setSearchDone(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="max-h-[560px] overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
+                <tr>
+                  <th className="p-3 text-left">Antrian</th>
+                  <th className="p-3 text-left">Nama</th>
+                  <th className="p-3 text-left">MCU ID</th>
+                  <th className="p-3 text-left">Dokter/Petugas</th>
+                  <th className="p-3 text-left">Waktu</th>
+                  <th className="p-3 text-left">Vaksin</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {groupedCompleted.map((row) => (
+                  <tr key={row.key}>
+                    <td className="p-3 text-lg font-black">{row.queue_number}</td>
+                    <td className="p-3 font-bold">{row.participant_name}</td>
+                    <td className="p-3">{row.mcu_id}</td>
+                    <td className="p-3">{row.administered_by}</td>
+                    <td className="p-3">{fmtDate(row.administered_at)}</td>
+                    <td className="p-3">
+                      <div className="space-y-1">
+                        {row.vaccines.map((record: any) => (
+                          <div key={record.id} className="rounded-lg bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
+                            {record.vaccine_name} · Lot {record.lot_number}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+
+                {!groupedCompleted.length ? (
+                  <tr>
+                    <td colSpan={6} className="p-5 text-center text-slate-500">Belum ada data selesai untuk filter ini.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
     </main>

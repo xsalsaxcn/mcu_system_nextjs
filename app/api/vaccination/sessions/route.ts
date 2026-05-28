@@ -58,6 +58,25 @@ export async function POST(req: NextRequest) {
   if (!user) return fail("Unauthorized", 401);
 
   const body = await req.json().catch(() => ({}));
+  const action = clean(body.action);
+  const supabase = supabaseAdmin();
+
+  if (action === "delete-session") {
+    const id = toInt(body.id || body.sessionId, 0);
+    if (!id) return fail("ID session tidak valid.");
+
+    const result = await supabase
+      .from("vaccination_sessions")
+      .delete()
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    return ok({ message: "Session vaksinasi berhasil dihapus.", session: result.data });
+  }
+
   const sessionName = clean(body.sessionName);
   if (!sessionName) return fail("Nama session wajib diisi.");
 
@@ -80,7 +99,6 @@ export async function POST(req: NextRequest) {
     default_lot_id: defaultLotId || null,
   };
 
-  const supabase = supabaseAdmin();
   const result = await supabase.from("vaccination_sessions").insert(payload).select("*").single();
   if (result.error) return fail(result.error.message, 500);
 
