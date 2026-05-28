@@ -39,25 +39,28 @@ function Label({ record }: { record: any }) {
   );
 }
 
-export default function VaccinationStickerPage({ params }: { params: { recordId: string } }) {
+export default function VaccinationBulkStickerPage() {
   const [records, setRecords] = useState<any[]>([]);
   const [error, setError] = useState("");
 
   async function load() {
-    const json = await fetch(`/api/vaccination/sticker?record_id=${params.recordId}`, { cache: "no-store" }).then((r) => r.json());
+    const params = new URLSearchParams(window.location.search);
+    const ids = params.get("ids") || "";
+
+    const json = await fetch(`/api/vaccination/sticker?ids=${encodeURIComponent(ids)}`, { cache: "no-store" }).then((r) => r.json());
 
     if (!json.ok) {
       setError(json.message || "Sticker tidak ditemukan.");
       return;
     }
 
-    setRecords(json.records || (json.record ? [json.record] : []));
+    setRecords(json.records || []);
     setTimeout(() => window.print(), 600);
   }
 
   useEffect(() => {
     load();
-  }, [params.recordId]);
+  }, []);
 
   if (error) return <main className="p-6 text-red-700">{error}</main>;
   if (!records.length) return <main className="p-6">Loading sticker...</main>;
@@ -151,7 +154,7 @@ export default function VaccinationStickerPage({ params }: { params: { recordId:
       `}</style>
 
       <button className="no-print rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white" onClick={() => window.print()}>
-        Print Sticker
+        Print Semua Sticker
       </button>
 
       {records.map((record) => (
