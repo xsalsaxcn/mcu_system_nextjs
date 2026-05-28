@@ -55,6 +55,8 @@ except Exception as e:
 app = FastAPI(title="AI MCU PDF Engine", version="1.0.0")
 app.mount("/files", StaticFiles(directory=str(OUTPUT_DIR)), name="files")
 
+from core.ml_routes import router as ml_router
+app.include_router(ml_router)
 
 def _safe_filename(name: str) -> str:
     s = re.sub(r'[\\/:*?"<>|]+', "_", str(name or "")).strip()
