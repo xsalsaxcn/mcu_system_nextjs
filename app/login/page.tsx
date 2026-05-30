@@ -3,69 +3,227 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+type DemoUser = {
+  label: string;
+  username: string;
+  password: string;
+};
+
+const demoUsers: DemoUser[] = [
+  { label: "Admin", username: "admin", password: "admin123" },
+  { label: "Operator Mata", username: "capaska_mata", password: "mata123" },
+  { label: "Operator THT", username: "capaska_tht", password: "tht123" },
+  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123" },
+];
+
 export default function LoginPage() {
   const router = useRouter();
+
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setError("");
 
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    });
-
-    const data = await res.json();
-
-    setLoading(false);
-
-    if (!data.ok) {
-      setError(data.message || "Login gagal.");
+    if (!username.trim()) {
+      setError("Username wajib diisi.");
       return;
     }
 
-    router.replace("/dashboard");
+    if (!password.trim()) {
+      setError("Password wajib diisi.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.ok) {
+        setError(data.message || "Login gagal. Periksa username dan password.");
+        return;
+      }
+
+      router.replace("/dashboard");
+    } catch {
+      setError("Tidak dapat terhubung ke server. Coba lagi.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function useDemoUser(user: DemoUser) {
+    setUsername(user.username);
+    setPassword(user.password);
+    setError("");
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 via-white to-slate-100 p-4">
-      <div className="card w-full max-w-md p-6">
-        <div className="mb-6">
-          <div className="text-2xl font-black text-slate-900">MCU System</div>
-          <div className="mt-1 text-sm text-slate-500">Login sesuai role petugas</div>
-        </div>
+    <main className="min-h-screen bg-slate-950">
+      <div className="grid min-h-screen lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="relative hidden overflow-hidden bg-gradient-to-br from-blue-600 via-indigo-700 to-slate-950 p-10 text-white lg:flex lg:flex-col lg:justify-between">
+          <div className="absolute -right-28 -top-28 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute -bottom-32 left-20 h-96 w-96 rounded-full bg-blue-300/10 blur-3xl" />
 
-        <form onSubmit={login} className="space-y-4">
-          <div>
-            <label className="label">Username</label>
-            <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <div className="relative">
+            <div className="inline-flex rounded-2xl bg-white/15 px-4 py-2 text-sm font-black backdrop-blur">
+              Harmony Health App
+            </div>
+            <div className="mt-3 text-sm font-semibold text-blue-100">
+              Occupational Health · MCU · Corporate Vaccination
+            </div>
           </div>
 
-          <div>
-            <label className="label">Password</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <div className="relative max-w-2xl">
+            <div className="text-5xl font-black leading-tight tracking-tight">
+              Satu platform untuk operasional kesehatan perusahaan.
+            </div>
+
+            <p className="mt-5 max-w-xl text-base font-medium leading-8 text-blue-100">
+              Kelola MCU CAPASKA, MCU Corporate, vaksinasi perusahaan, antrian, hasil pemeriksaan, sticker label, dan dashboard export dalam alur kerja yang lebih rapi.
+            </p>
+
+            <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                <div className="text-2xl font-black">MCU</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">CAPASKA & Corporate</div>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                <div className="text-2xl font-black">QR</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">Antrian pasien</div>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                <div className="text-2xl font-black">PDF</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">Report & label</div>
+              </div>
+            </div>
           </div>
 
-          {error && <div className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+          <div className="relative text-xs font-semibold text-blue-100">
+            © Harmony Health App
+          </div>
+        </section>
 
-          <button className="btn-primary w-full" disabled={loading}>
-            {loading ? "Memproses..." : "Login"}
-          </button>
-        </form>
+        <section className="flex items-center justify-center bg-slate-50 p-6">
+          <div className="w-full max-w-md">
+            <div className="mb-6 lg:hidden">
+              <div className="text-3xl font-black text-slate-900">Harmony Health App</div>
+              <div className="mt-1 text-sm font-medium text-slate-500">
+                MCU · Corporate Health · Vaccination
+              </div>
+            </div>
 
-        <div className="mt-5 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-          <div className="font-bold text-slate-700">User awal</div>
-          <div>admin / admin123</div>
-          <div className="mt-2 font-bold text-slate-700">Operator CAPASKA</div>
-          <div>capaska_mata / mata123, capaska_tht / tht123, capaska_radiologi / radiologi123</div>
-        </div>
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-xl">
+              <div>
+                <div className="text-3xl font-black tracking-tight text-slate-900">
+                  Masuk
+                </div>
+                <div className="mt-2 text-sm font-medium text-slate-500">
+                  Login sesuai role petugas untuk mengakses dashboard operasional.
+                </div>
+              </div>
+
+              {error ? (
+                <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <form onSubmit={login} className="mt-6 space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-black text-slate-700">
+                    Username
+                  </label>
+                  <input
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Masukkan username"
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="block text-sm font-black text-slate-700">
+                      Password
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((value) => !value)}
+                      className="text-xs font-black text-blue-600 hover:text-blue-700"
+                    >
+                      {showPassword ? "Sembunyikan" : "Tampilkan"}
+                    </button>
+                  </div>
+
+                  <input
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Masukkan password"
+                    autoComplete="current-password"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? "Memproses..." : "Login"}
+                </button>
+              </form>
+
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-wide text-slate-500">
+                  Quick access demo
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {demoUsers.map((user) => (
+                    <button
+                      key={user.username}
+                      type="button"
+                      onClick={() => useDemoUser(user)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    >
+                      <div>{user.label}</div>
+                      <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-400">
+                        {user.username}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 text-center text-xs font-semibold text-slate-400">
+              Harmony Health App · Secure role-based access
+            </div>
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

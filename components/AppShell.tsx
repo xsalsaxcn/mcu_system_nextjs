@@ -53,7 +53,7 @@ function HarmonyMenu() {
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen((value) => !value)}
         className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
       >
         <span className="text-lg leading-none">☰</span>
@@ -116,34 +116,16 @@ export default function AppShell({
         method: "POST",
       });
     } catch {
-      // ignore
+      // ignore logout network error
     }
 
     window.location.href = "/login";
   }
 
-  const displayName =
-    (user as any)?.name ||
-    (user as any)?.username ||
-    (user as {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-      });
-    } catch {
-      // ignore
-    }
+  const rawUser = user as unknown as Record<string, unknown>;
 
-    window.location.href = "/login";
-  }
-
-  const displayName =
-    (user any)?.email ||
-    "Administrator";
-
-  const role =
-    (user as any)?.role ||
-    (user as any)?.role_name ||
-    "Admin";
+  const displayName = String(rawUser.name || rawUser.username || rawUser.email || "Administrator");
+  const role = String(rawUser.role || rawUser.role_name || "Admin");
 
   return (
     <div className="min-h-screen bg-slate-50">
