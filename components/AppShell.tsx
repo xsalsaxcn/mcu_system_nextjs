@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { SessionUser } from "@/lib/shared/types";
 
-const menuGroups = [
+const adminMenuGroups = [
   {
     title: "Dashboard",
     items: [
@@ -46,7 +46,88 @@ const menuGroups = [
   },
 ];
 
-function MenuDrawer() {
+function valueOf(rawUser: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = rawUser[key];
+    if (value !== undefined && value !== null && String(value).trim()) {
+      return String(value);
+    }
+  }
+
+  return "";
+}
+
+function getRole(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["role", "role_name", "user_role"]).toLowerCase();
+}
+
+function getProgram(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["program_type", "program", "program_status"]).toLowerCase();
+}
+
+function getPost(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["post", "post_name", "post_label", "assigned_post", "station", "parameter"]).toLowerCase();
+}
+
+function getUsername(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["username", "email", "name"]).toLowerCase();
+}
+
+function getOperatorFormRoute(rawUser: Record<string, unknown>) {
+  const program = getProgram(rawUser);
+  const post = getPost(rawUser);
+  const username = getUsername(rawUser);
+
+  if (post.includes("registrasi")) {
+    return "/registrasi-ulang";
+  }
+
+  const corporateTokens = [
+    "corporate",
+    "corp",
+    "antropometri",
+    "vital",
+    "laboratorium",
+    "lab",
+    "ekg",
+    "audiometri",
+    "spirometri",
+    "treadmill",
+  ];
+
+  const isCorporate =
+    program.includes("corporate") ||
+    corporateTokens.some((token) => post.includes(token) || username.includes(token));
+
+  return isCorporate ? "/input-corporate" : "/input";
+}
+
+function getOperatorFormLabel(rawUser: Record<string, unknown>) {
+  const post = getPost(rawUser);
+  const program = getProgram(rawUser);
+
+  if (post.includes("registrasi")) return "Registrasi Ulang";
+  if (program.includes("corporate")) return "Form Corporate";
+
+  return "Form CAPASKA";
+}
+
+function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
+  const formRoute = getOperatorFormRoute(rawUser);
+  const formLabel = getOperatorFormLabel(rawUser);
+
+  return [
+    {
+      title: "Operator",
+      items: [
+        { label: "Dashboard Operator", href: "/dashboard" },
+        { label: formLabel, href: formRoute },
+      ],
+    },
+  ];
+}
+
+function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -82,7 +163,7 @@ function MenuDrawer() {
             </div>
 
             <div className="max-h-[72vh] overflow-auto bg-slate-50 p-3">
-              {menuGroups.map((group) => (
+              {groups.map((group) => (
                 <section
                   key={group.title}
                   className="mb-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm"
@@ -133,6 +214,8 @@ export default function AppShell({
   }
 
   const rawUser = user as unknown as Record<string, unknown>;
+  const role = getRole(rawUser);
+  const isOperator = role === "operator";
 
   const displayName = String(
     rawUser.name ||
@@ -141,11 +224,15 @@ export default function AppShell({
       "Administrator"
   );
 
-  const role = String(
+  const roleLabel = String(
     rawUser.role ||
       rawUser.role_name ||
       "Admin"
   );
+
+  const menuGroups = isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
+  const operatorFormRoute = getOperatorFormRoute(rawUser);
+  const operatorFormLabel = getOperatorFormLabel(rawUser);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -166,7 +253,7 @@ export default function AppShell({
                 </div>
               </a>
               <div className="mt-0.5 text-sm font-semibold text-slate-500">
-                {displayName} - {role}
+                {displayName} - {roleLabel}
               </div>
             </div>
           </div>
@@ -175,21 +262,30 @@ export default function AppShell({
             <a href="/dashboard" className="top-nav-link">
               Dashboard
             </a>
-            <a href="/registrasi-ulang" className="top-nav-link">
-              Registrasi Ulang
-            </a>
 
-            <div className="ml-0 flex items-center gap-2 md:ml-3">
-              <MenuDrawer />
+            {isOperator ? (
+              <a href={operatorFormRoute} className="top-nav-link">
+                {operatorFormLabel}
+              </a>
+            ) : (
+              <a href="/registrasi-ulang" className="top-nav-link">
+                Registrasi Ulang
+              </a>
+            )}
 
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-2xl px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-              >
-                Logout
-              </button>
-            </div>
+            {!isOperator ? (
+              <div className="ml-0 flex items-center gap-2 md:ml-3">
+                <MenuDrawer groups={menuGroups} />
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-2xl px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              Logout
+            </button>
           </div>
         </div>
       </header>

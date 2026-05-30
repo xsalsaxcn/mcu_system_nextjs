@@ -42,9 +42,75 @@ const VACCINATION_STATUS = [
 export default function DashboardPage() {
   return (
     <AuthGate>
-      {() => <Dashboard />}
+      {(user) => <Dashboard user={user as unknown as Record<string, unknown>} />}
     </AuthGate>
   );
+}
+
+function valueOf(rawUser: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = rawUser[key];
+    if (value !== undefined && value !== null && String(value).trim()) {
+      return String(value);
+    }
+  }
+
+  return "";
+}
+
+function getRole(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["role", "role_name", "user_role"]).toLowerCase();
+}
+
+function getProgram(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["program_type", "program", "program_status"]).toLowerCase();
+}
+
+function getPost(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["post", "post_name", "post_label", "assigned_post", "station", "parameter"]).toLowerCase();
+}
+
+function getUsername(rawUser: Record<string, unknown>) {
+  return valueOf(rawUser, ["username", "email", "name"]).toLowerCase();
+}
+
+function getOperatorFormRoute(rawUser: Record<string, unknown>) {
+  const program = getProgram(rawUser);
+  const post = getPost(rawUser);
+  const username = getUsername(rawUser);
+
+  if (post.includes("registrasi")) {
+    return "/registrasi-ulang";
+  }
+
+  const corporateTokens = [
+    "corporate",
+    "corp",
+    "antropometri",
+    "vital",
+    "laboratorium",
+    "lab",
+    "ekg",
+    "audiometri",
+    "spirometri",
+    "treadmill",
+  ];
+
+  const isCorporate =
+    program.includes("corporate") ||
+    corporateTokens.some((token) => post.includes(token) || username.includes(token));
+
+  return isCorporate ? "/input-corporate" : "/input";
+}
+
+function getOperatorFormLabel(rawUser: Record<string, unknown>) {
+  const post = getPost(rawUser);
+  const program = getProgram(rawUser);
+
+  if (post.includes("registrasi")) return "Registrasi Ulang";
+  if (program.includes("corporate")) return "Form Corporate";
+
+  return "Form CAPASKA";
 }
 
 function MetricCard({
@@ -93,7 +159,69 @@ function StatusPill({ children, tone = "slate" }: { children: any; tone?: "slate
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${cls}`}>{children}</span>;
 }
 
-function Dashboard() {
+function OperatorDashboard({ user }: { user: Record<string, unknown> }) {
+  const formRoute = getOperatorFormRoute(user);
+  const formLabel = getOperatorFormLabel(user);
+  const displayName = valueOf(user, ["name", "username", "email"]) || "Operator";
+  const postName = valueOf(user, ["post", "post_name", "post_label", "assigned_post", "station", "parameter"]) || "-";
+  const program = valueOf(user, ["program_type", "program", "program_status"]) || "-";
+
+  return (
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-950 shadow-sm">
+        <div className="p-7 text-white">
+          <div className="text-3xl font-black">Dashboard Operator</div>
+          <div className="mt-2 max-w-3xl text-sm font-medium text-blue-100">
+            Akses dibatasi sesuai akun operator. Gunakan form pemeriksaan untuk input, edit, melihat score, dan menyelesaikan peserta sesuai parameter/post kamu.
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs font-black uppercase tracking-wide text-slate-400">Nama</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{displayName}</div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs font-black uppercase tracking-wide text-slate-400">Post / Parameter</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{postName}</div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-xs font-black uppercase tracking-wide text-slate-400">Program</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{program}</div>
+        </div>
+      </section>
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-2xl font-black text-slate-900">{formLabel}</div>
+            <div className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-500">
+              Halaman form lama tetap dipakai, jadi fitur cari peserta, edit hasil, lihat score, status belum/selesai, dan QR tetap berada di halaman tersebut.
+            </div>
+          </div>
+
+          <a
+            href={formRoute}
+            className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-700"
+          >
+            Buka {formLabel}
+          </a>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Dashboard({ user }: { user: Record<string, unknown> }) {
+  const role = getRole(user);
+
+  if (role === "operator") {
+    return <OperatorDashboard user={user} />;
+  }
+
   const [moduleKey, setModuleKey] = useState<ModuleKey>("mcu_corporate");
   const [sources, setSources] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
@@ -319,7 +447,7 @@ function Dashboard() {
               <option value="">Semua Session Vaksinasi</option>
               {sessions.map((session) => (
                 <option key={session.id} value={session.id}>
-                  {session.session_name} · {session.company_name || "-"}
+                  {session.session_name} - {session.company_name || "-"}
                 </option>
               ))}
             </select>
@@ -332,7 +460,7 @@ function Dashboard() {
               <option value="all">Semua Database</option>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>
-                  {source.name} · {source.institution_name || "-"}
+                  {source.name} - {source.institution_name || "-"}
                 </option>
               ))}
             </select>
@@ -489,7 +617,7 @@ function Dashboard() {
                         <td className="px-4 py-3 font-black">{row.total_score ?? "-"}</td>
                         <td className="px-4 py-3">
                           <div className="min-w-[140px]">
-                            <div className="mb-1 text-xs font-bold text-slate-500">{row.done_stage}/{row.total_stage} · {row.progress_percent}%</div>
+                            <div className="mb-1 text-xs font-bold text-slate-500">{row.done_stage}/{row.total_stage} - {row.progress_percent}%</div>
                             <div className="h-2 rounded-full bg-slate-100">
                               <div className="h-2 rounded-full bg-blue-600" style={{ width: `${row.progress_percent || 0}%` }} />
                             </div>
