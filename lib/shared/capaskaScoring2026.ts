@@ -1,4 +1,4 @@
-export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_V1";
+export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_V3_REFERENCE_RULES";
 
 export type CapaskaDomainKey =
   | "mata"
@@ -30,72 +30,218 @@ type DomainRule = {
 };
 
 const SCORE_RULES: Record<string, number> = {
-  "Lensakontak/ kaca mata::Tidak menggunakan": 2,
-  "Lensakontak/ kaca mata::Menggunakan": 1,
-  "Tes buta warna::Tidak buta warna": 2,
-  "Tes buta warna::Buta warna parsial": 1,
+  // MATA
+  "Lensakontak/ kaca mata::Tidak menggunakan": 3,
+  "Lensakontak/ kaca mata::Tidak Menggunakan": 3,
+  "Lensakontak/ kaca mata::Tidak menggunakan /": 3,
+  "Lensakontak/ kaca mata::Menggunakan": -1,
+  "Lensakontak/ kaca mata::Menggunakan /": -1,
+
+  "Tes buta warna::Tidak buta warna": 3,
+  "Tes buta warna::Tidak buta warna /": 3,
+  "Tes buta warna::Buta warna parsial": 0,
   "Tes buta warna::Buta warna total": 0,
-  "Strabismus / Juling::(-) / (-)": 2,
-  "Strabismus / Juling::(+) / (-)": 1,
-  "Strabismus / Juling::(-) / (+)": 1,
-  "Strabismus / Juling::(+) / (+)": 0,
-  "Pemeriksaan Visus OD  / OS::Normal 6/6": 2,
-  "Pemeriksaan Visus OD  / OS::<6/6 - 6/12": 1,
+
+  "Strabismus / Juling::(-)": 3,
+  "Strabismus / Juling::(-) / (-)": 3,
+  "Strabismus / Juling::(+) / (-)": -5,
+  "Strabismus / Juling::(-) / (+)": -5,
+  "Strabismus / Juling::(+) / (+)": -5,
+
+  "Pemeriksaan Visus OD  / OS::Normal ≥6/6": 3,
+  "Pemeriksaan Visus OD  / OS::Normal >=6/6": 3,
+  "Pemeriksaan Visus OD  / OS::Normal 6/6": 3,
+  "Pemeriksaan Visus OD  / OS::<6/6 - 6/12": 2,
   "Pemeriksaan Visus OD  / OS::<6/12": 0,
 
+  // GIGI
+  "Karang Gigi::(-)": 2,
+  "Karang Gigi::(-) / (-)": 2,
   "Karang Gigi::Negative": 2,
-  "Karang Gigi::Positive": 0,
-  "Caries Dentis::0 caries": 2,
-  "Caries Dentis::1 caries": 1,
-  "Caries Dentis::2 caries": 1,
-  "Caries Dentis::3 caries": 0,
+  "Karang Gigi::Tidak ada": 2,
+  "Karang Gigi::(+)": -1,
+  "Karang Gigi::(+) / (-)": -1,
+  "Karang Gigi::(-) / (+)": -1,
+  "Karang Gigi::(+) / (+)": -1,
+  "Karang Gigi::Positive": -1,
+  "Karang Gigi::Ada": -1,
+
+  "Caries Dentis::0 caries": 3,
+  "Caries Dentis::1 caries": -1,
+  "Caries Dentis::2 caries": -2,
+  "Caries Dentis::3 caries": -3,
   "Caries Dentis::>3 caries": 0,
+
   "Tumpatan Gigi::0 tumpatan": 2,
+  "Tumpatan Gigi::<5 tumpatan": 1,
+  "Tumpatan Gigi::≤5 tumpatan": 1,
+  "Tumpatan Gigi::<=5 tumpatan": 1,
   "Tumpatan Gigi::<3 tumpatan": 1,
-  "Tumpatan Gigi::>3 tumpatan": 0,
-  "Impaksi gigi::0 gigi": 2,
-  "Impaksi gigi::1 gigi": 1,
-  "Impaksi gigi::2 gigi": 0,
-  "Impaksi gigi::>2 gigi": 0,
+  "Tumpatan Gigi::>5 tumpatan": -5,
+  "Tumpatan Gigi::>3 tumpatan": -5,
+
+  "Impaksi gigi::0 gigi": 3,
+  "Impaksi gigi::1 gigi": 2,
+  "Impaksi gigi::2 gigi impaksi / impaksi 1 gigi depan": 1,
+  "Impaksi gigi::2 gigi": 1,
+  "Impaksi gigi::impaksi 1 gigi depan": 1,
+  "Impaksi gigi::>2 gigi impaksi atau 2 gigi depan impaksi": -5,
+  "Impaksi gigi::>2 gigi": -5,
+  "Impaksi gigi::>=4 gigi": 0,
+  "Impaksi gigi::≥4 gigi": 0,
+  "Impaksi gigi::>4 gigi": 0,
+
+  "Kehilangan Gigi bagian depan::0 gigi": 2,
+  "Kehilangan Gigi bagian depan::1 gigi": 1,
+  "Kehilangan Gigi bagian depan::2 gigi": 0,
+  "Kehilangan Gigi bagian depan::>2 gigi": 0,
   "Kehilangan Gigi (Baik depan maupun belakang)::0 gigi": 2,
   "Kehilangan Gigi (Baik depan maupun belakang)::1 gigi": 1,
   "Kehilangan Gigi (Baik depan maupun belakang)::2 gigi": 0,
   "Kehilangan Gigi (Baik depan maupun belakang)::>2 gigi": 0,
-  "Infeksi Gusi::Negative": 2,
-  "Infeksi Gusi::Positive": 0,
-  "Dental panoramic::Normal": 2,
-  "Dental panoramic::ditemukan kelainan": 0,
 
+  "Infeksi Gusi::(-)": 1,
+  "Infeksi Gusi::Negative": 1,
+  "Infeksi Gusi::(+) / (-)": 1,
+  "Infeksi Gusi::(-) / (+)": 1,
+  "Infeksi Gusi::(+)": 1,
+  "Infeksi Gusi::Positive": 1,
+  "Infeksi Gusi::(+) / (+)": 0,
+
+  "Dental panoramic::Normal": 3,
+  "Dental panoramic::ditemukan kelainan": -1,
+  "Dental panoramic::Ditemukan kelainan": -1,
+
+  // THT
   "Membran timpani::Intak": 2,
+  "Membran timpani::Tidak intak": 0,
   "Membran timpani::Tidak Intak": 0,
+
   "Serumen::Tidak ada": 2,
-  "Serumen::Ada serumen": 0,
+  "Serumen::Tidak Ada": 2,
+  "Serumen::Ada serumen": 1,
+  "Serumen::Ada": 1,
+
+  "Tonsil::Sudah tonsilektomi": 2,
+  "Tonsil::T0 : T1 – T1": 2,
+  "Tonsil::T0 : T1 - T1": 2,
   "Tonsil::T0 - T1": 2,
+  "Tonsil::T0:T1-T1": 2,
+  "Tonsil::T0 : T2a- T2a": 1,
+  "Tonsil::T0 : T2a - T2a": 1,
   "Tonsil::T0 - T2a": 1,
-  "Tonsil::T0 - T2b": 1,
+  "Tonsil::T2a - T2a": 1,
+  "Tonsil::T0 : T2b- T2b": -1,
+  "Tonsil::T0 : T2b - T2b": -1,
+  "Tonsil::T0 - T2b": -1,
+  "Tonsil::T2b - T2b": -1,
+  "Tonsil::T0 : T3 – T3": 0,
+  "Tonsil::T0 : T3 - T3": 0,
   "Tonsil::T2 - T3": 0,
+  "Tonsil::T3 - T3": 0,
+
+  "Rhinitis Alergi (divide)::(-)": 2,
   "Rhinitis Alergi (divide)::Negative": 2,
-  "Rhinitis Alergi (divide)::Positive": 0,
-  "Epistaksis 1 tahun terakhir::Tidak Ada": 2,
-  "Epistaksis 1 tahun terakhir::Ada": 0,
-  "Tes Garputala (Weber) 512 Hz::Normal": 2,
+  "Rhinitis Alergi (lividae)::(-)": 2,
+  "Rhinitis Alergi (lividae)::Negative": 2,
+  "Rhinitis Alergi (divide)::(+)": 1,
+  "Rhinitis Alergi (divide)::Positive": 1,
+  "Rhinitis Alergi (lividae)::(+)": 1,
+  "Rhinitis Alergi (lividae)::Positive": 1,
+
+  "Epistaksis 1 tahun terakhir::Tidak Ada": 1,
+  "Epistaksis 1 tahun terakhir::Tidak ada": 1,
+  "Epistaksis 1 tahun terakhir::Ada": -1,
+
+  "Tes Garputala (Weber) 512 Hz::Normal": 1,
   "Tes Garputala (Weber) 512 Hz::Tidak Normal": 0,
 
-  "Berat Badan (Kg)::Sesuai juknis": 2,
+  // PENYAKIT DALAM
+  "Berat Badan (Kg)::Sesuai juknis": 1,
   "Berat Badan (Kg)::Tidak sesuai juknis": 0,
-  "TB. (Cm)::Sesuai juknis": 2,
+  "TB. (Cm)::Sesuai juknis": 1,
   "TB. (Cm)::Tidak sesuai juknis": 0,
   "Tanda Vital::Normal": 2,
-  "Tanda Vital::Tidak Normal": 0,
-  "Tato kulit::Tidak ada tato": 2,
+  "Tanda Vital::Tidak Normal": 1,
+  "Tato kulit::Tidak ada tato": 1,
   "Tato kulit::Ada tato": 0,
-  "Tindik (selain anting) Wanita : hanya 1 / telinga::Tidak ada": 2,
+  "Tindik (selain anting) Wanita : hanya 1 / telinga::Tidak ada": 1,
   "Tindik (selain anting) Wanita : hanya 1 / telinga::Ada (pria) Wanita >1)": 0,
   "Pemeriksaan Fisik Jantung::Normal": 2,
   "Pemeriksaan Fisik Jantung::Tidak Normal": 0,
   "Pemeriksaan Fisik Paru::Normal": 2,
   "Pemeriksaan Fisik Paru::Tidak Normal": 0,
 
+  "NT Epigastrum::Normal": 1,
+  "NT Epigastrum::Tidak Normal": -2,
+  "Hernia::Tidak ada": 1,
+  "Hernia::Tidak Ada": 1,
+  "Hernia::Ada": 0,
+  "Benjolan::Tidak ada": 1,
+  "Benjolan::Tidak Ada": 1,
+  "Benjolan::Ada": 0,
+  "Liver::Normal": 1,
+  "Liver::Tidak Normal": -2,
+  "Bising Usus::Normal": 1,
+  "Bising Usus::Tidak Normal": -2,
+  "Bekas Operasi (>6Bulan)::Normal": 1,
+  "Bekas Operasi (>6Bulan)::Tidak Normal": -2,
+
+  "Hemoroid eksterna::(-)": 1,
+  "Hemoroid eksterna::Tidak Ada": 1,
+  "Hemoroid eksterna::(+)": -1,
+  "Hemoroid eksterna::Ada": -1,
+  "Hemoroid interna::(-)": 1,
+  "Hemoroid interna::Tidak Ada": 1,
+  "Hemoroid interna::(+)": -1,
+  "Hemoroid interna::Ada": -1,
+  "Fisura ani::(-)": 1,
+  "Fisura ani::Tidak Ada": 1,
+  "Fisura ani::(+)": -1,
+  "Fisura ani::Ada": -1,
+  "Struktur/Prolaps recti::(-)": 1,
+  "Struktur/Prolaps recti::Tidak Ada": 1,
+  "Struktur/Prolaps recti::(+)": 0,
+  "Struktur/Prolaps recti::Ada": 0,
+
+  "Hidronefrosis::Normal": 1,
+  "Hidronefrosis::Tidak Normal": 0,
+  "Hidronefrosis::(-)": 1,
+  "Hidronefrosis::(+)": 0,
+  "Kelainan kongenital::Normal": 1,
+  "Kelainan kongenital::Tidak Normal": 0,
+  "Kelainan kongenital::(-)": 1,
+  "Kelainan kongenital::(+)": 0,
+  "Hipospadia::Normal": 1,
+  "Hipospadia::Tidak Normal": 0,
+  "Hipospadia::(-)": 1,
+  "Hipospadia::(+)": 0,
+  "Hidrokel::Normal": 1,
+  "Hidrokel::Tidak Normal": 0,
+  "Hidrokel::(-)": 1,
+  "Hidrokel::(+)": 0,
+  "Undescensus testis::Normal": 1,
+  "Undescensus testis::Tidak Normal": 0,
+  "Undescensus testis::(-)": 1,
+  "Undescensus testis::(+)": 0,
+  "Batu sal kemih::Normal": 1,
+  "Batu sal kemih::Tidak Normal": 0,
+  "Batu sal kemih::(-)": 1,
+  "Batu sal kemih::(+)": 0,
+  "Cystitis akut / kronis::Normal": 1,
+  "Cystitis akut / kronis::Tidak Normal": 0,
+  "Cystitis akut / kronis::(-)": 1,
+  "Cystitis akut / kronis::(+)": 0,
+  "Post operasi varikokel::Normal": 1,
+  "Post operasi varikokel::Tidak Normal": 0,
+  "Post operasi varikokel::(-)": 1,
+  "Post operasi varikokel::(+)": 0,
+  "Phimosis::Normal": 1,
+  "Phimosis::Tidak Normal": 0,
+  "Phimosis::(-)": 1,
+  "Phimosis::(+)": 0,
+
+  // JANTUNG DAN PEMBULUH DARAH
   "Kelainan Anatomi Jantung::Tidak Ada": 2,
   "Kelainan Anatomi Jantung::Ada": 0,
   "Kelainan Irama Jantung::Tidak Ada": 2,
@@ -108,30 +254,131 @@ const SCORE_RULES: Record<string, number> = {
   "Varises Tungkai (insufisiensi vena)::Ada": 0,
   "Kelainan Arteri pada ekstremitas::Tidak Ada": 2,
   "Kelainan Arteri pada ekstremitas::Ada": 0,
+
+  // ORTOPEDI
+  "sindaktili::Tidak ada": 1,
+  "sindaktili::Tidak Ada": 1,
+  "sindaktili::Ada": 0,
+  "polidaktili::Tidak ada": 1,
+  "polidaktili::Tidak Ada": 1,
+  "polidaktili::Ada": 0,
+  "spina bifida::Tidak ada": 1,
+  "spina bifida::Tidak Ada": 1,
+  "spina bifida::Ada": 0,
+  "mallet finger::Tidak ada": 1,
+  "mallet finger::Tidak Ada": 1,
+  "mallet finger::Ada": 0,
+  "Hiperekstensi lengan::Tidak ada": 1,
+  "Hiperekstensi lengan::Tidak Ada": 1,
+  "Hiperekstensi lengan::Ada": 0,
+
+  "Hammer toe::Tidak ada": 1,
+  "Hammer toe::Tidak Ada": 1,
+  "Hammer toe::Ada": 0,
+  "Hallux valgus::Tidak ada": 1,
+  "Hallux valgus::Tidak Ada": 1,
+  "Hallux valgus::Ada": 0,
+  "Webbed toe::Tidak ada": 1,
+  "Webbed toe::Tidak Ada": 1,
+  "Webbed toe::Ada": 0,
+  "O/X bean::Tidak ada": 1,
+  "O/X bean::Tidak Ada": 1,
+  "O/X bean::O/X been toleransi": 1,
+  "O/X bean::Ada": 0,
+  "Pes planus / kaki datar::Tidak ada": 1,
+  "Pes planus / kaki datar::Tidak Ada": 1,
+  "Pes planus / kaki datar::<5cm": 1,
+  "Pes planus / kaki datar::Ada": 0,
+  "Polidactily::Tidak ada": 1,
+  "Polidactily::Tidak Ada": 1,
+  "Polidactily::Ada": 0,
+  "Hiperekstensi kaki::Tidak ada": 1,
+  "Hiperekstensi kaki::Tidak Ada": 1,
+  "Hiperekstensi kaki::Ada": 0,
+  "General Laxity::Tidak ada": 1,
+  "General Laxity::Tidak Ada": 1,
+  "General Laxity::Ada": 0,
+
+  "Skoliosis::Tidak ada": 2,
+  "Skoliosis::Tidak Ada": 2,
+  "Skoliosis::Ringan": -1,
+  "Skoliosis::Sedang / Berat": 0,
+  "Skoliosis::Sedang/Berat": 0,
+  "Kifosis::Tidak ada": 2,
+  "Kifosis::Tidak Ada": 2,
+  "Kifosis::Ringan": -1,
+  "Kifosis::Sedang / Berat": 0,
+  "Kifosis::Sedang/Berat": 0,
+  "Lordosis::Tidak ada": 2,
+  "Lordosis::Tidak Ada": 2,
+  "Lordosis::Ringan": -1,
+  "Lordosis::Sedang / Berat": 0,
+  "Lordosis::Sedang/Berat": 0,
+
+  // RADIOLOGI
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Tidak ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Tidak Ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::TA": 2,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Ringan": -1,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Sedang": 0,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Sedang / Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Skoliosis::Sedang/Berat": 0,
+
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Tidak ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Tidak Ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::TA": 2,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Ringan": -1,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Sedang": 0,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Sedang / Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Kifosis::Sedang/Berat": 0,
+
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Tidak ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Tidak Ada": 2,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::TA": 2,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Ringan": -1,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Sedang": 0,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Sedang / Berat": 0,
+  "Rontgen Whole Spine AP Lateral >> Lordosis::Sedang/Berat": 0,
 };
+
 
 const GENERIC_SCORE_RULES: Record<string, Record<string, number>> = {
   penyakit_dalam: {
-    "Normal": 2,
+    "Normal": 1,
     "Tidak Normal": 0,
-    "Sesuai juknis": 2,
+    "Sesuai juknis": 1,
     "Tidak sesuai juknis": 0,
-    "Tidak ada tato": 2,
+    "Tidak ada tato": 1,
     "Ada tato": 0,
-    "Tidak ada": 2,
+    "Tidak ada": 1,
+    "Tidak Ada": 1,
     "Ada": 0,
+    "(-)": 1,
+    "(+)": 0,
     "Ada (pria) Wanita >1)": 0,
   },
   ortopedi: {
-    "Tidak Ada": 2,
+    "Tidak ada": 1,
+    "Tidak Ada": 1,
     "Ada": 0,
-    "Ringan": 1,
-  },
-  radiologi: {
-    "Tidak Ada": 2,
-    "Ringan": 1,
+    "Ringan": -1,
     "Sedang": 0,
     "Berat": 0,
+    "Sedang / Berat": 0,
+    "Sedang/Berat": 0,
+  },
+  radiologi: {
+    "Tidak ada": 2,
+    "Tidak Ada": 2,
+    "TA": 2,
+    "Ringan": -1,
+    "Sedang": 0,
+    "Berat": 0,
+    "Sedang / Berat": 0,
+    "Sedang/Berat": 0,
   },
 };
 
@@ -158,6 +405,7 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Caries Dentis",
       "Tumpatan Gigi",
       "Impaksi gigi",
+      "Kehilangan Gigi bagian depan",
       "Kehilangan Gigi (Baik depan maupun belakang)",
       "Infeksi Gusi",
       "Dental panoramic",
@@ -173,6 +421,7 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Serumen",
       "Tonsil",
       "Rhinitis Alergi (divide)",
+      "Rhinitis Alergi (lividae)",
       "Epistaksis 1 tahun terakhir",
       "Tes Garputala (Weber) 512 Hz",
     ],
@@ -295,8 +544,6 @@ export function normalizeCapaskaKey(text: any) {
 }
 
 export function parseCapaskaOptions(config: any) {
-  if (Array.isArray(config)) return config;
-
   try {
     const parsed = JSON.parse(config || "[]");
     return Array.isArray(parsed) ? parsed : [];
@@ -341,33 +588,74 @@ export function isCapaskaValueOrScoreParameter(param: any) {
   return name.startsWith("value ") || name.startsWith("score ") || name.startsWith("total score");
 }
 
-function normalizeDomainScore(rawScore: number, rawMax: number, targetMax: number) {
-  if (!rawMax || rawMax <= 0) return 0;
-  return roundScore(Math.max(0, Math.min(targetMax, (rawScore / rawMax) * targetMax)));
+function clampDomainScore(rawScore: number, targetMax: number) {
+  return roundScore(Math.max(0, Math.min(targetMax, rawScore)));
+}
+
+const NOT_RECOMMENDED_RULES: Array<{ parameter: string; values: string[] }> = [
+  // MATA
+  { parameter: "Tes buta warna", values: ["Buta warna parsial", "Buta warna total"] },
+  { parameter: "Pemeriksaan Visus OD  / OS", values: ["<6/12"] },
+
+  // GIGI
+  { parameter: "Caries Dentis", values: [">3 caries"] },
+  { parameter: "Impaksi gigi", values: [">=4 gigi", "≥4 gigi", ">4 gigi"] },
+  { parameter: "Kehilangan Gigi bagian depan", values: [">2 gigi"] },
+  { parameter: "Kehilangan Gigi (Baik depan maupun belakang)", values: [">2 gigi"] },
+
+  // THT
+  { parameter: "Membran timpani", values: ["Tidak intak", "Tidak Intak"] },
+  { parameter: "Tonsil", values: ["T0 : T3 – T3", "T0 : T3 - T3", "T2 - T3", "T3 - T3"] },
+  { parameter: "Tes Garputala (Weber) 512 Hz", values: ["Tidak Normal"] },
+
+  // PENYAKIT DALAM
+  { parameter: "Berat Badan (Kg)", values: ["Tidak sesuai juknis"] },
+  { parameter: "TB. (Cm)", values: ["Tidak sesuai juknis"] },
+  { parameter: "Tato kulit", values: ["Ada tato"] },
+  { parameter: "Tindik (selain anting) Wanita : hanya 1 / telinga", values: ["Ada (pria) Wanita >1)"] },
+  { parameter: "Hernia", values: ["Ada"] },
+  { parameter: "Benjolan", values: ["Ada"] },
+  { parameter: "Struktur/Prolaps recti", values: ["Ada", "(+)"] },
+  { parameter: "Undescensus testis", values: ["Tidak Normal", "(+)"] },
+
+  // JANTUNG DAN PEMBULUH DARAH
+  { parameter: "Kelainan Anatomi Jantung", values: ["Ada"] },
+  { parameter: "Kelainan Irama Jantung", values: ["Ada"] },
+  { parameter: "Iskemik Miocardial", values: ["Ada"] },
+  { parameter: "Kelainan kongenital jantung", values: ["Ada"] },
+  { parameter: "Kelainan Arteri pada ekstremitas", values: ["Ada"] },
+
+  // ORTOPEDI
+  { parameter: "polidaktili", values: ["Ada"] },
+  { parameter: "Hiperekstensi lengan", values: ["Ada"] },
+  { parameter: "Hallux valgus", values: ["Ada"] },
+  { parameter: "Polidactily", values: ["Ada"] },
+  { parameter: "Skoliosis", values: ["Sedang / Berat", "Sedang/Berat"] },
+  { parameter: "Kifosis", values: ["Sedang / Berat", "Sedang/Berat"] },
+  { parameter: "Lordosis", values: ["Sedang / Berat", "Sedang/Berat"] },
+
+  // RADIOLOGI
+  { parameter: "Rontgen Whole Spine AP Lateral >> Skoliosis", values: ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"] },
+  { parameter: "Rontgen Whole Spine AP Lateral >> Kifosis", values: ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"] },
+  { parameter: "Rontgen Whole Spine AP Lateral >> Lordosis", values: ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"] },
+];
+
+function normalizeChoiceForCompare(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isPotentialRedFlag(param: any, selectedValue: string, score: number) {
-  if (score > 0) return false;
+  const parameterKey = normalizeCapaskaKey(param?.name || "");
+  const selected = normalizeChoiceForCompare(selectedValue);
 
-  const text = `${String(param?.name || "")} ${String(selectedValue || "")}`.toLowerCase();
+  return NOT_RECOMMENDED_RULES.some((rule) => {
+    if (normalizeCapaskaKey(rule.parameter) !== parameterKey) return false;
 
-  return [
-    "buta warna total",
-    "<6/12",
-    "(+) / (+)",
-    ">3",
-    "3 caries",
-    "positive",
-    "ditemukan kelainan",
-    "tidak intak",
-    "t2 - t3",
-    "tidak sesuai juknis",
-    "tidak normal",
-    "ada tato",
-    "ada (pria",
-    "sedang",
-    "berat",
-  ].some((token) => text.includes(token));
+    return rule.values.some((value) => normalizeChoiceForCompare(value) === selected);
+  });
 }
 
 export function computeCapaskaDerivedValues(parameters: any[], inputValues: Record<string, string>) {
@@ -474,7 +762,7 @@ export function computeCapaskaDerivedValues(parameters: any[], inputValues: Reco
 
     const rawMax = domain.components.length * 2;
     const rawTotal = domain.components.reduce((sum, name) => sum + scoreOf(name), 0);
-    const normalized = normalizeDomainScore(rawTotal, rawMax, domain.maxScore);
+    const normalized = clampDomainScore(rawTotal, domain.maxScore);
     next[totalParam.id] = String(normalized);
   }
 
@@ -633,7 +921,7 @@ export function computeMcuParticipantScoring2026(args: {
 
     if (rawCount > 0) {
       result.rawDomainScores[domain.key] = rawTotal;
-      result.domainScores[domain.key] = normalizeDomainScore(rawTotal, rawMax, domain.maxScore);
+      result.domainScores[domain.key] = clampDomainScore(rawTotal, domain.maxScore);
       continue;
     }
 
@@ -644,7 +932,7 @@ export function computeMcuParticipantScoring2026(args: {
       result.rawDomainScores[domain.key] = totalValue;
 
       if (rawMax !== domain.maxScore && totalValue <= rawMax) {
-        result.domainScores[domain.key] = normalizeDomainScore(totalValue, rawMax, domain.maxScore);
+        result.domainScores[domain.key] = clampDomainScore(totalValue, domain.maxScore);
       } else {
         result.domainScores[domain.key] = roundScore(Math.max(0, Math.min(domain.maxScore, totalValue)));
       }
