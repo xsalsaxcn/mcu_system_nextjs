@@ -3,85 +3,10 @@ import * as XLSX from "xlsx";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { computeStagesForParticipant } from "@/lib/server/progress";
-
-function parseNumber(value: any): number | null {
-  if (value === null || value === undefined) return null;
-
-  const cleaned = String(value)
-    .replace(",", ".")
-    .replace(/[^0-9.\-]/g, "")
-    .trim();
-
-  if (!cleaned) return null;
-
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
-}
+import { computeMcuParticipantScoring2026, evaluateMcuGraduation2026 } from "@/lib/shared/capaskaScoring2026";
 
 function isActive(value: any) {
   return value === 1 || value === true || value === "1" || value === null || value === undefined;
-}
-
-function isTotalScoreParameter(parameter: any) {
-  const name = String(parameter?.name || "").toLowerCase();
-  return (
-    name.includes("total score") ||
-    name.includes("score total") ||
-    name.includes("skor total") ||
-    name.includes("total skor")
-  );
-}
-
-function isValueScoreParameter(parameter: any) {
-  const name = String(parameter?.name || "").toLowerCase().trim();
-  return name.startsWith("value ") || name.startsWith("nilai ");
-}
-
-function computeParticipantScore(
-  participantId: number,
-  packageId: number,
-  packageParameters: any[],
-  parameters: any[],
-  results: any[]
-) {
-  const parameterIds = new Set(
-    packageParameters
-      .filter((pp) => Number(pp.package_id) === Number(packageId))
-      .map((pp) => Number(pp.parameter_id))
-  );
-
-  const paramsForPackage = parameters.filter((p) => parameterIds.has(Number(p.id)));
-  const resultMap = new Map<number, string>();
-
-  results
-    .filter((r) => Number(r.participant_id) === Number(participantId))
-    .forEach((r) => resultMap.set(Number(r.parameter_id), String(r.value ?? "").trim()));
-
-  const totalScoreParams = paramsForPackage.filter(isTotalScoreParameter);
-  let total = 0;
-  let count = 0;
-
-  for (const parameter of totalScoreParams) {
-    const n = parseNumber(resultMap.get(Number(parameter.id)));
-    if (n !== null) {
-      total += n;
-      count += 1;
-    }
-  }
-
-  if (count > 0) return Math.round(total * 100) / 100;
-
-  const valueScoreParams = paramsForPackage.filter(isValueScoreParameter);
-
-  for (const parameter of valueScoreParams) {
-    const n = parseNumber(resultMap.get(Number(parameter.id)));
-    if (n !== null) {
-      total += n;
-      count += 1;
-    }
-  }
-
-  return count > 0 ? Math.round(total * 100) / 100 : null;
 }
 
 function getRuleForPackage(packageId: number, program: string, rules: any[]) {
@@ -96,16 +21,6 @@ function getRuleForPackage(packageId: number, program: string, rules: any[]) {
     pass_max_score: 999999,
     description: "Default"
   };
-}
-
-function evaluateGraduation(totalScore: number | null, isComplete: boolean, rule: any) {
-  if (!isComplete) return "Belum Selesai";
-  if (totalScore === null) return "Belum Dinilai";
-
-  const min = Number(rule?.pass_min_score ?? 0);
-  const max = Number(rule?.pass_max_score ?? 999999);
-
-  return totalScore >= min && totalScore <= max ? "Lulus" : "Tidak Lulus";
 }
 
 
@@ -208,15 +123,17 @@ export async function GET(req: NextRequest) {
     const done = stages.filter((s) => s.is_done).length;
     const total = stages.length;
     const complete = total > 0 && done >= total;
-    const totalScore = computeParticipantScore(
-      Number(p.id),
-      Number(p.package_id),
-      packageParameters.data || [],
-      parameters.data || [],
-      results.data || []
-    );
+    const scoreResult = computeMcuParticipantScoring2026({
+      participantId: Number(p.id),
+      packageId: Number(p.package_id),
+      packageParameters: packageParameters.data || [],
+      parameters: parameters.data || [],
+      results: results.data || [],
+      program,
+    });
+    const totalScore = scoreResult.totalScore;
     const rule = getRuleForPackage(Number(p.package_id), program, graduationRules.data || []);
-    const kelulusan = evaluateGraduation(totalScore, complete, rule);
+    const kelulusan = evaluateMcuGraduation2026(totalScore, complete, rule, scoreResult);
     const source = sourceMap.get(Number(p.source_id));
 
     return {
@@ -233,6 +150,17 @@ export async function GET(req: NextRequest) {
       "Status Progress": complete ? "Selesai" : "Belum Selesai",
       "Kelulusan": kelulusan,
       "Total Score": totalScore ?? "",
+      "Score Sebelum Penalti": scoreResult.totalBeforePenalty ?? "",
+      "Penalti Red Flag": scoreResult.penalty || 0,
+      "Mata": scoreResult.domainScores.mata ?? "",
+      "Gigi Mulut": scoreResult.domainScores.gigi_mulut ?? "",
+      "THT": scoreResult.domainScores.tht ?? "",
+      "Penyakit Dalam": scoreResult.domainScores.penyakit_dalam ?? "",
+      "Jantung Pembuluh Darah": scoreResult.domainScores.jantung_pembuluh_darah ?? "",
+      "Ortopedi": scoreResult.domainScores.ortopedi ?? "",
+      "Radiologi": scoreResult.domainScores.radiologi ?? "",
+      "Red Flag": scoreResult.redFlags.join(" | "),
+      "Scoring Version": scoreResult.version,
       "Range Lulus Min": Number(rule?.pass_min_score ?? 0),
       "Range Lulus Max": Number(rule?.pass_max_score ?? 999999),
       "Stage Selesai": done,
@@ -243,7 +171,7 @@ export async function GET(req: NextRequest) {
     if (status === "Selesai") return r["Status Progress"] === "Selesai";
     if (status === "Belum Selesai") return r["Status Progress"] !== "Selesai";
     if (status === "Lulus") return r["Kelulusan"] === "Lulus";
-    if (status === "Tidak Lulus") return r["Kelulusan"] === "Tidak Lulus";
+    if (status === "Tidak Lulus") return r["Kelulusan"] === "Tidak Lulus" || r["Kelulusan"] === "Tidak Direkomendasikan";
     if (status === "Belum Dinilai") return r["Kelulusan"] === "Belum Dinilai";
     return true;
   });
@@ -255,7 +183,8 @@ export async function GET(req: NextRequest) {
     { Metric: "Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] === "Selesai").length },
     { Metric: "Belum Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] !== "Selesai").length },
     { Metric: "Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Lulus").length },
-    { Metric: "Tidak Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Lulus").length },
+    { Metric: "Tidak Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Lulus" || r["Kelulusan"] === "Tidak Direkomendasikan").length },
+    { Metric: "Tidak Direkomendasikan", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Direkomendasikan").length },
     { Metric: "Belum Dinilai", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Belum Dinilai").length }
   ];
 
@@ -304,6 +233,17 @@ export async function GET(req: NextRequest) {
           "Status Progress": progressInfo?.["Status Progress"] || "Selesai",
           "Kelulusan": progressInfo?.["Kelulusan"] || "",
           "Total Score": progressInfo?.["Total Score"] ?? "",
+          "Score Sebelum Penalti": progressInfo?.["Score Sebelum Penalti"] ?? "",
+          "Penalti Red Flag": progressInfo?.["Penalti Red Flag"] ?? "",
+          "Mata": progressInfo?.["Mata"] ?? "",
+          "Gigi Mulut": progressInfo?.["Gigi Mulut"] ?? "",
+          "THT": progressInfo?.["THT"] ?? "",
+          "Penyakit Dalam": progressInfo?.["Penyakit Dalam"] ?? "",
+          "Jantung Pembuluh Darah": progressInfo?.["Jantung Pembuluh Darah"] ?? "",
+          "Ortopedi": progressInfo?.["Ortopedi"] ?? "",
+          "Radiologi": progressInfo?.["Radiologi"] ?? "",
+          "Red Flag": progressInfo?.["Red Flag"] ?? "",
+          "Scoring Version": progressInfo?.["Scoring Version"] ?? "",
           "Progress %": progressInfo?.["Progress %"] ?? 100
         };
 
