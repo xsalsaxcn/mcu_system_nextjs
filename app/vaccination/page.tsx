@@ -1,36 +1,65 @@
 "use client";
 
+import HarmonyMenu from "@/components/HarmonyMenu";
+
 const menuItems = [
-  { title: "Dashboard Vaksinasi", href: "/vaccination/dashboard", desc: "Filter sudah/belum vaksin, dokter/petugas, dan export data." },
-  { title: "Master Vaksin", href: "/vaccination/master", desc: "Input daftar vaksin, aturan next dose, dan lot number." },
-  { title: "Session Vaksinasi", href: "/vaccination/session", desc: "Buat event vaksinasi perusahaan dan QR antrian publik." },
-  { title: "Registrasi Vaksin", href: "/vaccination/register", desc: "Import corporate, registrasi ulang, dan rilis nomor antrian." },
-  { title: "Antrian Vaksin", href: "/vaccination/queue", desc: "Panggil nomor antrian berjalan untuk operator." },
-  { title: "Administered / Medis", href: "/vaccination/administer", desc: "Pilih vaksin + lot number, klik Done, lalu print sticker." },
+  { title: "Dashboard Vaksinasi", href: "/vaccination/dashboard", desc: "Filter sudah/belum vaksin, dokter/petugas, dan export data.", tag: "Report" },
+  { title: "Master Vaksin & Lot", href: "/vaccination/master", desc: "Input master vaksin, aturan next dose, stok, dan lot number.", tag: "Master" },
+  { title: "Session Vaksinasi", href: "/vaccination/session", desc: "Buat event perusahaan, pilih database corporate, dan set multi-vaksin.", tag: "Setup" },
+  { title: "Registrasi Vaksin", href: "/vaccination/register", desc: "Import peserta corporate, registrasi ulang, dan rilis nomor antrian.", tag: "Frontdesk" },
+  { title: "Antrian Vaksin", href: "/vaccination/queue", desc: "Panggil nomor antrian berjalan dan tampilkan halaman publik untuk pasien.", tag: "Queue" },
+  { title: "Administered / Medis", href: "/vaccination/administer", desc: "Input dokter, vaksin, lot number, Done, dan print sticker label.", tag: "Medis" },
 ];
 
 export default function VaccinationPage() {
   return (
-    <main className="p-6">
-      <div className="rounded-2xl border bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+    <main className="min-h-screen bg-slate-50">
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-5">
           <div>
-            <h1 className="text-2xl font-bold">Vaksinasi Perusahaan</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Modul registrasi vaksin, antrian QR, input administered, lot number, next dose, print sticker label, dan dashboard export.
-            </p>
+            <div className="text-2xl font-black tracking-tight text-slate-900">Harmony Health App</div>
+            <div className="text-sm font-medium text-slate-500">Vaksinasi Perusahaan</div>
           </div>
-          <a href="/" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">Dashboard Utama</a>
+          <HarmonyMenu />
         </div>
+      </section>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-slate-900 p-8 text-white">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="text-3xl font-black">Vaksinasi Perusahaan</div>
+                <p className="mt-2 max-w-3xl text-sm font-medium text-emerald-50">
+                  Modul registrasi vaksin, antrian QR, administered, lot number, next dose, sticker label, dan dashboard export.
+                </p>
+                <div className="mt-4 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
+                  Corporate Vaccination Workflow
+                </div>
+              </div>
+
+              <a href="/dashboard" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-50">
+                Dashboard Operasional
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {menuItems.map((item) => (
-            <a key={item.href} href={item.href} className="rounded-xl border bg-slate-50 p-4 transition hover:bg-slate-100">
-              <div className="font-semibold text-slate-900">{item.title}</div>
-              <div className="mt-1 text-sm text-slate-600">{item.desc}</div>
+            <a key={item.href} href={item.href} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black text-slate-900 group-hover:text-emerald-700">{item.title}</div>
+                  <div className="mt-2 text-sm font-medium leading-6 text-slate-500">{item.desc}</div>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                  {item.tag}
+                </span>
+              </div>
             </a>
           ))}
-        </div>
+        </section>
       </div>
     </main>
   );

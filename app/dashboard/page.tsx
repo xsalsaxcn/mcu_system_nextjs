@@ -1,552 +1,465 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
-import StageProgress from "@/components/StageProgress";
+import HarmonyMenu from "@/components/HarmonyMenu";
 
-const FILTERS = ["Semua", "Belum Selesai", "Selesai", "Lulus", "Tidak Lulus", "Belum Dinilai"];
+type ModuleKey = "mcu_capaska" | "mcu_corporate" | "vaccination";
+
+const MODULES: Array<{ key: ModuleKey; title: string; subtitle: string; accent: string }> = [
+  {
+    key: "mcu_capaska",
+    title: "MCU CAPASKA",
+    subtitle: "Progress, kelulusan, dan pemeriksaan CAPASKA.",
+    accent: "from-blue-600 to-indigo-700",
+  },
+  {
+    key: "mcu_corporate",
+    title: "MCU Corporate",
+    subtitle: "Progress dan hasil medical check-up corporate.",
+    accent: "from-slate-700 to-slate-950",
+  },
+  {
+    key: "vaccination",
+    title: "Vaksinasi Perusahaan",
+    subtitle: "Vaksin, antrian, administered, dokter, dan export.",
+    accent: "from-emerald-600 to-teal-700",
+  },
+];
+
+const VACCINATION_STATUS = [
+  { value: "all", label: "Semua" },
+  { value: "done", label: "Sudah" },
+  { value: "not_done", label: "Belum" },
+  { value: "no_queue", label: "Belum Rilis Antrian" },
+  { value: "waiting", label: "Sudah Antrian Belum Selesai" },
+];
 
 export default function DashboardPage() {
-  return (
-    <AuthGate>
-      {(user) => <Dashboard user={user} />}
-    </AuthGate>
-  );
+  return <AuthGate>{(user) => <Dashboard user={user} />}</AuthGate>;
 }
 
-function StatCard({
+function MetricCard({
   label,
   value,
-  hint,
   active,
-  onClick
+  tone = "slate",
+  onClick,
 }: {
   label: string;
   value: any;
-  hint?: string;
   active?: boolean;
+  tone?: "slate" | "blue" | "emerald" | "amber" | "red" | "indigo";
   onClick?: () => void;
 }) {
+  const toneClass = {
+    slate: active ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-900",
+    blue: active ? "border-blue-600 bg-blue-600 text-white" : "border-blue-100 bg-blue-50 text-blue-900",
+    emerald: active ? "border-emerald-600 bg-emerald-600 text-white" : "border-emerald-100 bg-emerald-50 text-emerald-900",
+    amber: active ? "border-amber-500 bg-amber-500 text-white" : "border-amber-100 bg-amber-50 text-amber-900",
+    red: active ? "border-red-600 bg-red-600 text-white" : "border-red-100 bg-red-50 text-red-900",
+    indigo: active ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-100 bg-indigo-50 text-indigo-900",
+  }[tone];
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-3xl border p-5 text-left shadow-sm transition ${
-        active
-          ? "border-blue-400 bg-blue-600 text-white"
-          : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50"
-      }`}
+      className={`rounded-3xl border p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneClass}`}
     >
-      <div className={`text-xs font-black uppercase tracking-wide ${active ? "text-blue-100" : "text-slate-500"}`}>
-        {label}
-      </div>
-      <div className="mt-2 text-3xl font-black">{value}</div>
-      {hint && <div className={`mt-1 text-xs font-semibold ${active ? "text-blue-100" : "text-slate-500"}`}>{hint}</div>}
+      <div className="text-xs font-black uppercase tracking-wide opacity-70">{label}</div>
+      <div className="mt-2 text-3xl font-black">{value ?? 0}</div>
     </button>
   );
 }
 
-function StatusBadge({ value }: { value: string }) {
-  const className =
-    value === "Lulus"
-      ? "bg-emerald-100 text-emerald-700"
-      : value === "Tidak Lulus"
-        ? "bg-red-100 text-red-700"
-        : value === "Selesai"
-          ? "bg-blue-100 text-blue-700"
-          : "bg-slate-100 text-slate-600";
+function StatusPill({ children, tone = "slate" }: { children: any; tone?: "slate" | "blue" | "emerald" | "amber" | "red" }) {
+  const cls = {
+    slate: "bg-slate-100 text-slate-700",
+    blue: "bg-blue-100 text-blue-700",
+    emerald: "bg-emerald-100 text-emerald-700",
+    amber: "bg-amber-100 text-amber-800",
+    red: "bg-red-100 text-red-700",
+  }[tone];
 
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-black ${className}`}>{value}</span>;
-}
-
-function ModuleShortcut({
-  title,
-  desc,
-  href,
-  badge
-}: {
-  title: string;
-  desc: string;
-  href: string;
-  badge?: string;
-}) {
-  return (
-    <a
-      href={href}
-      className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-lg font-black text-slate-800 group-hover:text-blue-700">{title}</div>
-          <div className="mt-1 text-sm font-medium text-slate-500">{desc}</div>
-        </div>
-        {badge ? (
-          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
-            {badge}
-          </span>
-        ) : null}
-      </div>
-    </a>
-  );
-}
-
-function CompactTable({ title, rows, emptyText }: { title: string; rows: any[]; emptyText: string }) {
-  return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="text-lg font-black">{title}</div>
-        <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{rows.length}</div>
-      </div>
-
-      {!rows.length ? (
-        <div className="rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">{emptyText}</div>
-      ) : (
-        <div className="max-h-80 overflow-auto rounded-2xl border border-slate-100">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-slate-50">
-              <tr>
-                <th className="p-3 text-left">Nama</th>
-                <th className="p-3 text-left">No. MCU</th>
-                <th className="p-3 text-left">Paket</th>
-                <th className="p-3 text-left">Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row: any) => (
-                <tr key={row.participant_id} className="border-t border-slate-100">
-                  <td className="p-3 font-bold">{row.name}</td>
-                  <td className="p-3">{row.mcu_id || row.external_id || "-"}</td>
-                  <td className="p-3">{row.package_name || "-"}</td>
-                  <td className="p-3 font-black">{row.total_score ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${cls}`}>{children}</span>;
 }
 
 function Dashboard({ user }: { user: any }) {
+  const [moduleKey, setModuleKey] = useState<ModuleKey>("mcu_corporate");
   const [sources, setSources] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
-  const [status, setStatus] = useState("Semua");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortBy, setSortBy] = useState("name_asc");
-  const [rowsPerPage, setRowsPerPage] = useState(25);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [data, setData] = useState<any>(null);
-  const [selected, setSelected] = useState<any>(null);
+  const [sessionId, setSessionId] = useState("");
+  const [vaccStatus, setVaccStatus] = useState("all");
+  const [mcuStatus, setMcuStatus] = useState("Semua");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [summary, setSummary] = useState<any>({});
+  const [rows, setRows] = useState<any[]>([]);
+  const [message, setMessage] = useState("Pilih modul dan database, lalu klik Tampilkan Dashboard.");
 
-  const program = user.program_type === "all" ? "capaska" : user.program_type;
+  const activeModule = MODULES.find((m) => m.key === moduleKey) || MODULES[0];
+  const isVaccination = moduleKey === "vaccination";
+  const mcuProgram = moduleKey === "mcu_capaska" ? "capaska" : "corporate";
 
-  useEffect(() => {
-    fetch(`/api/sources?program=${program}`)
+  async function loadOptions(nextModule = moduleKey) {
+    setRows([]);
+    setSummary({});
+    setLoaded(false);
+    setSearch("");
+
+    if (nextModule === "vaccination") {
+      setSourceId("");
+      const [sessionJson, sourceJson] = await Promise.all([
+        fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/sources?program=corporate", { cache: "no-store" }).then((r) => r.json()).catch(() => ({})),
+      ]);
+      setSessions(sessionJson.sessions || []);
+      setSources(sourceJson.sources || []);
+      if (sessionJson.sessions?.[0]?.id) setSessionId(String(sessionJson.sessions[0].id));
+      return;
+    }
+
+    setSessionId("");
+    setSourceId("all");
+    const json = await fetch(`/api/sources?program=${nextModule === "mcu_capaska" ? "capaska" : "corporate"}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setSources(d.sources || []));
-  }, [program]);
+      .catch(() => ({}));
+    setSources(json.sources || []);
+  }
 
-  async function loadDashboard(nextStatus = status) {
+  async function loadDashboard() {
     setLoading(true);
-    setSelected(null);
+    setMessage("Memuat dashboard...");
 
-    const res = await fetch(
-      `/api/dashboard?program=${program}&source_id=${sourceId}&status=${encodeURIComponent(nextStatus)}&limit=500`,
-      { cache: "no-store" }
-    );
+    try {
+      if (isVaccination) {
+        const params = new URLSearchParams();
+        params.set("status", vaccStatus);
+        if (sessionId) params.set("session_id", sessionId);
+        if (sourceId && sourceId !== "all") params.set("source_id", sourceId);
 
-    const json = await res.json();
-    setData(json);
-    setLoading(false);
+        const json = await fetch(`/api/vaccination/dashboard?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
+        if (!json.ok) {
+          setMessage(json.message || "Gagal memuat dashboard vaksinasi.");
+          setRows([]);
+          setSummary({});
+          setLoaded(true);
+          return;
+        }
+
+        setSummary(json.summary || {});
+        setRows(json.rows || []);
+        setMessage("Dashboard vaksinasi berhasil dimuat.");
+        setLoaded(true);
+        return;
+      }
+
+      const params = new URLSearchParams({
+        program: mcuProgram,
+        source_id: sourceId || "all",
+        status: mcuStatus,
+        limit: "1000",
+      });
+
+      const json = await fetch(`/api/dashboard?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
+      if (!json.ok) {
+        setMessage(json.message || "Gagal memuat dashboard MCU.");
+        setRows([]);
+        setSummary({});
+        setLoaded(true);
+        return;
+      }
+
+      setSummary(json.summary || {});
+      setRows(json.rows || []);
+      setMessage("Dashboard MCU berhasil dimuat.");
+      setLoaded(true);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function chooseStatus(nextStatus: string) {
-    setStatus(nextStatus);
-    loadDashboard(nextStatus);
-  }
+  function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full") {
+    if (isVaccination) {
+      const params = new URLSearchParams();
+      params.set("format", "csv");
+      params.set("status", type === "active" ? vaccStatus : type);
+      if (sessionId) params.set("session_id", sessionId);
+      if (sourceId && sourceId !== "all") params.set("source_id", sourceId);
+      window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
+      return;
+    }
 
-  function exportExcel(type: "progress" | "full") {
     const params = new URLSearchParams({
-      program,
-      source_id: sourceId,
-      status,
-      type
+      program: mcuProgram,
+      source_id: sourceId || "all",
+      status: mcuStatus,
+      type: type === "full" ? "full" : "progress",
     });
-
     window.open(`/api/dashboard/export?${params.toString()}`, "_blank");
   }
 
-  const rows = data?.rows || [];
-
-  const rowsToShow = useMemo(() => {
-    const keyword = searchTerm.trim().toLowerCase();
-
-    let filtered = rows.filter((row: any) => {
-      if (!keyword) return true;
-
-      const haystack = [
-        row.name,
-        row.mcu_id,
-        row.external_id,
-        row.nik,
-        row.employee_nik
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(keyword);
-    });
-
-    const scoreValue = (row: any) => {
-      const n = Number(row.total_score);
-      return Number.isFinite(n) ? n : -999999;
-    };
-
-    const progressValue = (row: any) => {
-      const n = Number(row.progress_percent);
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    filtered = [...filtered].sort((a: any, b: any) => {
-      if (sortBy === "name_desc") return String(b.name || "").localeCompare(String(a.name || ""));
-      if (sortBy === "progress_desc") return progressValue(b) - progressValue(a);
-      if (sortBy === "progress_asc") return progressValue(a) - progressValue(b);
-      if (sortBy === "score_desc") return scoreValue(b) - scoreValue(a);
-      if (sortBy === "score_asc") return scoreValue(a) - scoreValue(b);
-
-      return String(a.name || "").localeCompare(String(b.name || ""));
-    });
-
-    return filtered;
-  }, [rows, searchTerm, sortBy]);
-
   useEffect(() => {
-    setCurrentPage(1);
-  }, [status, searchTerm, sortBy, rowsPerPage, sourceId]);
+    loadOptions(moduleKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleKey]);
 
-  const pageCount = useMemo(() => {
-    if (rowsPerPage === 0) return 1;
-    return Math.max(1, Math.ceil(rowsToShow.length / rowsPerPage));
-  }, [rowsToShow.length, rowsPerPage]);
+  const filteredRows = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return rows;
 
-  const effectivePage = Math.min(currentPage, pageCount);
+    return rows.filter((row: any) => {
+      const haystack = isVaccination
+        ? [
+            row.queue_number,
+            row.participant_name,
+            row.mcu_id,
+            row.employee_id,
+            row.company_name,
+            row.department,
+            row.dashboard_status,
+            row.vaccine_names,
+            row.lot_numbers,
+            row.administered_by,
+          ]
+        : [
+            row.name,
+            row.mcu_id,
+            row.external_id,
+            row.source_name,
+            row.package_name,
+            row.status_pemeriksaan,
+            row.kelulusan_status,
+          ];
 
-  const pagedRows = useMemo(() => {
-    if (rowsPerPage === 0) return rowsToShow;
-
-    const start = (effectivePage - 1) * rowsPerPage;
-    return rowsToShow.slice(start, start + rowsPerPage);
-  }, [rowsToShow, rowsPerPage, effectivePage]);
-
-  const firstRowNumber = rowsToShow.length ? (rowsPerPage === 0 ? 1 : (effectivePage - 1) * rowsPerPage + 1) : 0;
-  const lastRowNumber = rowsPerPage === 0 ? rowsToShow.length : Math.min(effectivePage * rowsPerPage, rowsToShow.length);
+      return haystack.filter(Boolean).join(" ").toLowerCase().includes(keyword);
+    });
+  }, [rows, search, isVaccination]);
 
   return (
-    <div className="space-y-5">
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-900 p-6 text-white">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="text-3xl font-black">Dashboard Progress & Kelulusan</div>
-              <div className="mt-2 max-w-3xl text-sm font-medium text-blue-100">
-                Supervisor melihat progress stage, data selesai/belum selesai, kelulusan berdasarkan parameter kelulusan, dan export hasil pemeriksaan.
-              </div>
-              <div className="mt-3 w-fit rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
-                Dashboard v39 · vaccination module shortcut
-              </div>
+    <main className="min-h-screen bg-slate-50">
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-5">
+          <div>
+            <div className="text-2xl font-black tracking-tight text-slate-900">Harmony Health App</div>
+            <div className="text-sm font-medium text-slate-500">
+              {user?.name || "Administrator"} · {user?.role || "Admin"}
             </div>
+          </div>
 
-            <a
-              href="/vaccination"
-              className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-50"
-            >
-              Vaksinasi Perusahaan
+          <div className="flex items-center gap-3">
+            <HarmonyMenu />
+            <a href="/logout" className="rounded-2xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100">
+              Logout
             </a>
           </div>
         </div>
-
-        <div className="grid gap-3 p-5 lg:grid-cols-[1fr_auto_auto_auto]">
-          <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
-            <option value="all">Semua Database Instansi</option>
-            {sources.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} - {s.institution_name || "-"}
-              </option>
-            ))}
-          </select>
-
-          <button className="btn-primary" onClick={() => loadDashboard()} disabled={loading}>
-            {loading ? "Memuat..." : "Refresh Dashboard"}
-          </button>
-
-          <button
-            type="button"
-            className="rounded-xl border border-slate-300 px-4 py-2.5 font-black text-slate-700 hover:bg-slate-50"
-            onClick={() => exportExcel("progress")}
-            disabled={!data?.ok}
-          >
-            Export Progress Excel
-          </button>
-
-          <button
-            type="button"
-            className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 font-black text-emerald-700 hover:bg-emerald-100"
-            onClick={() => exportExcel("full")}
-            disabled={!data?.ok}
-          >
-            Export Semua Hasil
-          </button>
-        </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <ModuleShortcut
-          title="Vaksinasi Perusahaan"
-          desc="Master vaksin, lot number, registrasi, antrian QR, administered, dan print sticker."
-          href="/vaccination"
-          badge="Baru"
-        />
-
-        <ModuleShortcut
-          title="Master Vaksin & Lot"
-          desc="Input daftar vaksin, aturan next dose, stok, dan lot number."
-          href="/vaccination/master"
-        />
-
-        <ModuleShortcut
-          title="Antrian Vaksin"
-          desc="Panggil nomor berjalan dan tampilkan halaman publik untuk pasien."
-          href="/vaccination/queue"
-        />
-
-        <ModuleShortcut
-          title="Administered / Medis"
-          desc="Pilih vaksin dan lot number, klik Done, lalu print sticker."
-          href="/vaccination/administer"
-        />
-      </section>
-
-      {data?.ok && (
-        <>
-          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-            <StatCard label="Total" value={data.summary.total} active={status === "Semua"} onClick={() => chooseStatus("Semua")} />
-            <StatCard label="Belum Selesai" value={data.summary.belum_selesai} active={status === "Belum Selesai"} onClick={() => chooseStatus("Belum Selesai")} />
-            <StatCard label="Selesai" value={data.summary.selesai} active={status === "Selesai"} onClick={() => chooseStatus("Selesai")} />
-            <StatCard label="Lulus" value={data.summary.lulus} hint="hanya yang selesai" active={status === "Lulus"} onClick={() => chooseStatus("Lulus")} />
-            <StatCard label="Tidak Lulus" value={data.summary.tidak_lulus} hint="hanya yang selesai" active={status === "Tidak Lulus"} onClick={() => chooseStatus("Tidak Lulus")} />
-            <StatCard label="Belum Dinilai" value={data.summary.belum_dinilai} active={status === "Belum Dinilai"} onClick={() => chooseStatus("Belum Dinilai")} />
-            <StatCard label="Rata-rata" value={`${data.summary.rata_rata}%`} />
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+        <section className={`overflow-hidden rounded-[2rem] bg-gradient-to-r ${activeModule.accent} shadow-sm`}>
+          <div className="p-7 text-white">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <div className="text-xl font-black">Daftar Peserta: {status}</div>
-                <div className="text-sm text-slate-500">
-                  Kelulusan hanya dihitung untuk peserta yang sudah menyelesaikan seluruh stage parameter. Klik baris peserta untuk melihat detail stage.
+                <div className="text-3xl font-black">Dashboard Operasional</div>
+                <div className="mt-2 max-w-3xl text-sm font-medium opacity-90">
+                  Pilih layanan yang ingin ditampilkan, pilih database/session, lalu retrieve dashboard card dan tabel.
+                </div>
+              </div>
+              <div className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black backdrop-blur">{activeModule.title}</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          {MODULES.map((item) => (
+            <button
+              type="button"
+              key={item.key}
+              onClick={() => setModuleKey(item.key)}
+              className={`rounded-3xl border p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                moduleKey === item.key ? "border-blue-500 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-900 hover:border-blue-200"
+              }`}
+            >
+              <div className="text-lg font-black">{item.title}</div>
+              <div className={`mt-2 text-sm leading-6 ${moduleKey === item.key ? "text-blue-50" : "text-slate-500"}`}>{item.subtitle}</div>
+            </button>
+          ))}
+        </section>
+
+        <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-3 lg:grid-cols-[220px_1fr_1fr_auto]">
+            <select className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={moduleKey} onChange={(e) => setModuleKey(e.target.value as ModuleKey)}>
+              {MODULES.map((item) => <option key={item.key} value={item.key}>{item.title}</option>)}
+            </select>
+
+            {isVaccination ? (
+              <select className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
+                <option value="">Semua Session Vaksinasi</option>
+                {sessions.map((session) => <option key={session.id} value={session.id}>{session.session_name} · {session.company_name || "-"}</option>)}
+              </select>
+            ) : (
+              <select className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+                <option value="all">Semua Database</option>
+                {sources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.institution_name || "-"}</option>)}
+              </select>
+            )}
+
+            {isVaccination ? (
+              <select className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={vaccStatus} onChange={(e) => setVaccStatus(e.target.value)}>
+                {VACCINATION_STATUS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            ) : (
+              <select className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={mcuStatus} onChange={(e) => setMcuStatus(e.target.value)}>
+                <option value="Semua">Semua</option>
+                <option value="Belum Selesai">Belum Selesai</option>
+                <option value="Selesai">Selesai</option>
+                <option value="Lulus">Lulus</option>
+                <option value="Tidak Lulus">Tidak Lulus</option>
+                <option value="Belum Dinilai">Belum Dinilai</option>
+              </select>
+            )}
+
+            <button type="button" onClick={loadDashboard} disabled={loading} className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60">
+              {loading ? "Memuat..." : "Tampilkan Dashboard"}
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">{message}</div>
+        </section>
+
+        {loaded ? (
+          <>
+            {isVaccination ? (
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <MetricCard label="Total" value={summary.total} tone="slate" onClick={() => setVaccStatus("all")} active={vaccStatus === "all"} />
+                <MetricCard label="Sudah" value={summary.done} tone="emerald" onClick={() => setVaccStatus("done")} active={vaccStatus === "done"} />
+                <MetricCard label="Belum" value={summary.not_done} tone="amber" onClick={() => setVaccStatus("not_done")} active={vaccStatus === "not_done"} />
+                <MetricCard label="Belum Antrian" value={summary.no_queue} tone="indigo" onClick={() => setVaccStatus("no_queue")} active={vaccStatus === "no_queue"} />
+                <MetricCard label="Antri Belum Selesai" value={summary.waiting} tone="blue" onClick={() => setVaccStatus("waiting")} active={vaccStatus === "waiting"} />
+              </section>
+            ) : (
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                <MetricCard label="Total" value={summary.total} tone="slate" />
+                <MetricCard label="Belum Selesai" value={summary.belum_selesai} tone="amber" />
+                <MetricCard label="Selesai" value={summary.selesai} tone="blue" />
+                <MetricCard label="Lulus" value={summary.lulus} tone="emerald" />
+                <MetricCard label="Tidak Lulus" value={summary.tidak_lulus} tone="red" />
+                <MetricCard label="Rata-rata" value={`${summary.rata_rata || 0}%`} tone="indigo" />
+              </section>
+            )}
+
+            <section className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="text-xl font-black text-slate-900">Data {activeModule.title}</div>
+                  <div className="text-sm font-medium text-slate-500">{filteredRows.length} baris ditampilkan</div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <input className="min-w-[260px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Cari nama, nomor, status..." value={search} onChange={(e) => setSearch(e.target.value)} />
+
+                  {isVaccination ? (
+                    <>
+                      <button className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" onClick={() => exportData("done")}>Export Sudah</button>
+                      <button className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-700" onClick={() => exportData("not_done")}>Export Belum</button>
+                      <button className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => exportData("active")}>Export Filter</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700" onClick={() => exportData("progress")}>Export Progress</button>
+                      <button className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" onClick={() => exportData("full")}>Export Semua</button>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {FILTERS.map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    onClick={() => chooseStatus(filter)}
-                    className={`rounded-xl px-3 py-2 text-sm font-black ${
-                      status === filter ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_240px_180px_190px]">
-              <div>
-                <label className="label">Search Nama / No MCU</label>
-                <input
-                  className="input"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Ketik nama, No MCU, NIK..."
-                />
-              </div>
-
-              <div>
-                <label className="label">Sort</label>
-                <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                  <option value="name_asc">Alphabet A-Z</option>
-                  <option value="name_desc">Alphabet Z-A</option>
-                  <option value="progress_desc">Progress tertinggi</option>
-                  <option value="progress_asc">Progress terendah</option>
-                  <option value="score_desc">Score tertinggi</option>
-                  <option value="score_asc">Score terendah</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="label">Rows per page</label>
-                <select
-                  className="input"
-                  value={rowsPerPage}
-                  onChange={(e) => setRowsPerPage(Number(e.target.value))}
-                >
-                  <option value={25}>25 rows</option>
-                  <option value={50}>50 rows</option>
-                  <option value={100}>100 rows</option>
-                  <option value={150}>150 rows</option>
-                  <option value={0}>Semua rows</option>
-                </select>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-3">
-                <div className="text-xs font-black uppercase text-slate-500">Data Cocok</div>
-                <div className="text-2xl font-black text-slate-900">{rowsToShow.length}</div>
-              </div>
-            </div>
-
-            <div className="mobile-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nama</th>
-                    <th>No. MCU</th>
-                    <th>Database</th>
-                    <th>Paket</th>
-                    <th>Status</th>
-                    <th>Kelulusan</th>
-                    <th>Score</th>
-                    <th>Progress</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedRows.map((row: any) => {
-                    const isOpen = Number(selected?.participant_id) === Number(row.participant_id);
-
-                    return (
-                      <Fragment key={row.participant_id}>
-                        <tr
-                          className={`cursor-pointer hover:bg-blue-50 ${isOpen ? "bg-blue-50" : ""}`}
-                          onClick={() => setSelected(isOpen ? null : row)}
-                        >
-                          <td className="font-bold">
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${isOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"}`}>
-                                {isOpen ? "−" : "+"}
-                              </span>
-                              {row.name}
-                            </div>
-                          </td>
-                          <td>{row.mcu_id || row.external_id || "-"}</td>
-                          <td>{row.source_name}</td>
-                          <td>{row.package_name}</td>
-                          <td><StatusBadge value={row.status_pemeriksaan} /></td>
-                          <td><StatusBadge value={row.kelulusan_status} /></td>
-                          <td className="font-black">{row.total_score ?? "-"}</td>
-                          <td>
-                            <div className="min-w-32">
-                              <div className="mb-1 text-xs font-bold">{row.done_stage}/{row.total_stage} · {row.progress_percent}%</div>
+              <div className="overflow-x-auto">
+                {isVaccination ? (
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Antrian</th>
+                        <th className="px-4 py-3 text-left">Nama</th>
+                        <th className="px-4 py-3 text-left">MCU / ID</th>
+                        <th className="px-4 py-3 text-left">Perusahaan</th>
+                        <th className="px-4 py-3 text-left">Status</th>
+                        <th className="px-4 py-3 text-left">Vaksin</th>
+                        <th className="px-4 py-3 text-left">Dokter</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredRows.map((row: any) => (
+                        <tr key={row.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-black">{row.queue_number || "-"}</td>
+                          <td className="px-4 py-3 font-bold text-slate-900">{row.participant_name}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.mcu_id || row.employee_id || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.company_name || row.session?.company_name || "-"}</td>
+                          <td className="px-4 py-3"><StatusPill tone={row.is_done ? "emerald" : row.queue_number ? "blue" : "amber"}>{row.dashboard_status}</StatusPill></td>
+                          <td className="px-4 py-3 text-slate-600">{row.vaccine_names || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.administered_by || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Nama</th>
+                        <th className="px-4 py-3 text-left">No. MCU</th>
+                        <th className="px-4 py-3 text-left">Database</th>
+                        <th className="px-4 py-3 text-left">Paket</th>
+                        <th className="px-4 py-3 text-left">Status</th>
+                        <th className="px-4 py-3 text-left">Kelulusan</th>
+                        <th className="px-4 py-3 text-left">Score</th>
+                        <th className="px-4 py-3 text-left">Progress</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredRows.map((row: any) => (
+                        <tr key={`${row.participant_id}-${row.mcu_id || row.external_id}`} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-bold text-slate-900">{row.name}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.mcu_id || row.external_id || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.source_name || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.package_name || "-"}</td>
+                          <td className="px-4 py-3"><StatusPill tone={row.status_pemeriksaan === "Selesai" ? "blue" : "slate"}>{row.status_pemeriksaan}</StatusPill></td>
+                          <td className="px-4 py-3"><StatusPill tone={row.kelulusan_status === "Lulus" ? "emerald" : row.kelulusan_status === "Tidak Lulus" ? "red" : "slate"}>{row.kelulusan_status}</StatusPill></td>
+                          <td className="px-4 py-3 font-black">{row.total_score ?? "-"}</td>
+                          <td className="px-4 py-3">
+                            <div className="min-w-[140px]">
+                              <div className="mb-1 text-xs font-bold text-slate-500">{row.done_stage}/{row.total_stage} · {row.progress_percent}%</div>
                               <div className="h-2 rounded-full bg-slate-100">
-                                <div className="h-2 rounded-full bg-blue-600" style={{ width: `${row.progress_percent}%` }} />
+                                <div className="h-2 rounded-full bg-blue-600" style={{ width: `${row.progress_percent || 0}%` }} />
                               </div>
                             </div>
                           </td>
                         </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
 
-                        {isOpen && (
-                          <tr>
-                            <td colSpan={8} className="bg-blue-50/60 p-4">
-                              <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-sm">
-                                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                  <div>
-                                    <div className="text-lg font-black">Detail Stage: {row.name}</div>
-                                    <div className="text-sm text-slate-500">
-                                      No. MCU {row.mcu_id || row.external_id || "-"} · Score {row.total_score ?? "-"} · Kelulusan {row.kelulusan_status} · Range {row.pass_min_score} - {row.pass_max_score}
-                                    </div>
-                                  </div>
-                                  <button type="button" className="btn-secondary" onClick={(event) => {
-                                    event.stopPropagation();
-                                    setSelected(null);
-                                  }}>
-                                    Tutup
-                                  </button>
-                                </div>
-
-                                <StageProgress stages={row.stages || []} />
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                  {!rowsToShow.length && (
-                    <tr>
-                      <td colSpan={8} className="p-5 text-center text-slate-500">Belum ada data untuk filter ini.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3 rounded-2xl bg-slate-50 p-3 md:flex-row md:items-center md:justify-between">
-              <div className="text-sm font-semibold text-slate-600">
-                Menampilkan <b>{firstRowNumber}</b> - <b>{lastRowNumber}</b> dari <b>{rowsToShow.length}</b> data
+                {!filteredRows.length ? (
+                  <div className="p-8 text-center text-sm font-semibold text-slate-500">
+                    Belum ada data untuk pilihan ini.
+                  </div>
+                ) : null}
               </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-black disabled:opacity-40"
-                  disabled={effectivePage <= 1}
-                  onClick={() => setCurrentPage(1)}
-                >
-                  First
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-black disabled:opacity-40"
-                  disabled={effectivePage <= 1}
-                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                >
-                  Prev
-                </button>
-
-                <div className="rounded-xl bg-white px-3 py-2 text-sm font-black text-slate-700">
-                  Page {effectivePage} / {pageCount}
-                </div>
-
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-black disabled:opacity-40"
-                  disabled={effectivePage >= pageCount}
-                  onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}
-                >
-                  Next
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-black disabled:opacity-40"
-                  disabled={effectivePage >= pageCount}
-                  onClick={() => setCurrentPage(pageCount)}
-                >
-                  Last
-                </button>
-              </div>
-            </div>
+            </section>
+          </>
+        ) : (
+          <section className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center">
+            <div className="text-xl font-black text-slate-900">Belum ada dashboard ditampilkan</div>
+            <p className="mt-2 text-sm font-medium text-slate-500">
+              Pilih salah satu layanan, tentukan database/session, lalu klik Tampilkan Dashboard.
+            </p>
           </section>
-
-          <section className="grid gap-4 lg:grid-cols-2">
-            <CompactTable title="LULUS" rows={data.lulus_rows || []} emptyText="Belum ada peserta selesai yang masuk kriteria lulus." />
-            <CompactTable title="TIDAK LULUS" rows={data.tidak_lulus_rows || []} emptyText="Belum ada peserta selesai yang di luar range kelulusan." />
-          </section>
-        </>
-      )}
-    </div>
+        )}
+      </div>
+    </main>
   );
 }
