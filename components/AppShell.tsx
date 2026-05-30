@@ -9,22 +9,22 @@ const menuGroups = [
     items: [
       { label: "Dashboard Operasional", href: "/dashboard" },
       { label: "Registrasi Ulang MCU", href: "/registrasi-ulang" },
-      { label: "Review Hasil", href: "/review" },
+      { label: "Review Hasil", href: "/review-hasil" },
     ],
   },
   {
     title: "MCU",
     items: [
-      { label: "Import Peserta", href: "/import" },
-      { label: "Setup Parameter", href: "/parameters" },
-      { label: "Setup Label Paket", href: "/package-labels" },
-      { label: "Parameter Kelulusan", href: "/pass-criteria" },
-      { label: "Input CAPASKA", href: "/input/capaska" },
-      { label: "Input Corporate", href: "/input/corporate" },
-      { label: "AI MCU Analyzer", href: "/ai-mcu/analyze" },
+      { label: "Import Peserta", href: "/import-peserta" },
+      { label: "Setup Parameter", href: "/setup-parameter" },
+      { label: "Setup Label Paket", href: "/setup-label-paket" },
+      { label: "Parameter Kelulusan", href: "/parameter-kelulusan" },
+      { label: "Input CAPASKA", href: "/input-capaska" },
+      { label: "Input Corporate", href: "/input-corporate" },
+      { label: "AI MCU Analyzer", href: "/ai-mcu" },
       { label: "Training AI MCU", href: "/ai-mcu/train" },
-      { label: "Cetak Label", href: "/print-label" },
-      { label: "Hapus Database", href: "/delete-database" },
+      { label: "Cetak Label", href: "/cetak-label" },
+      { label: "Hapus Database", href: "/hapus-database" },
     ],
   },
   {
@@ -41,7 +41,7 @@ const menuGroups = [
   {
     title: "Admin",
     items: [
-      { label: "Master Users", href: "/users" },
+      { label: "Master Users", href: "/master-users" },
     ],
   },
 ];
