@@ -67,9 +67,9 @@ async function enrichParticipants(args: {
       : Promise.resolve({ data: [] }),
   ]);
 
-  const packageMap = new Map((packages.data || []).map((x: any) => [Number(x.id), x.name]));
-  const sourceMap = new Map((sources.data || []).map((x: any) => [Number(x.id), x]));
-  const companyMap = new Map((companies.data || []).map((x: any) => [Number(x.id), x.name]));
+  const packageMap = new Map<number, string>((packages.data || []).map((x: any) => [Number(x.id), String(x.name || "-")]));
+  const sourceMap = new Map<number, { name?: string; institution_name?: string }>((sources.data || []).map((x: any) => [Number(x.id), { name: x.name, institution_name: x.institution_name }]));
+  const companyMap = new Map<number, string>((companies.data || []).map((x: any) => [Number(x.id), String(x.name || "-")]));
 
   return participants.map((p: any) => ({
     ...p,

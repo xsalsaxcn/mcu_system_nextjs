@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
-
 type SelectedVaccineItem = {
   itemId?: string;
   vaccineId: string;
@@ -43,7 +41,6 @@ function vaccineLabel(vaccine: any) {
 export default function VaccinationAdministerPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
-  const [contextLocked, setContextLocked] = useState(false);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
@@ -79,15 +76,8 @@ export default function VaccinationAdministerPage() {
   async function loadSessions() {
     const json = await fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json());
     if (json.ok) {
-      const loadedSessions = json.sessions || [];
-      setSessions(loadedSessions);
-      let saved: any = null;
-      if (typeof window !== "undefined") {
-        try { saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null"); } catch { saved = null; }
-      }
-      const savedSession = saved?.locked ? loadedSessions.find((item: any) => String(item.id) === String(saved.sessionId)) : null;
-      setContextLocked(Boolean(saved?.locked && savedSession));
-      if (!sessionId && (savedSession?.id || loadedSessions?.[0]?.id)) setSessionId(String(savedSession?.id || loadedSessions[0].id));
+      setSessions(json.sessions || []);
+      if (!sessionId && json.sessions?.[0]?.id) setSessionId(String(json.sessions[0].id));
     }
   }
 
@@ -307,8 +297,7 @@ export default function VaccinationAdministerPage() {
           <h2 className="font-bold">1. Pilih Peserta</h2>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div>
-            <select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
+            <select className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
               <option value="">Pilih session</option>
               {sessions.map((session) => (
                 <option key={session.id} value={session.id}>
