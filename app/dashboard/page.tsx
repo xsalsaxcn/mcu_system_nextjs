@@ -388,7 +388,6 @@ function OperatorDashboard({ user }: { user: Record<string, unknown> }) {
 
   return (
     <div className="space-y-6">
-      {selectedMcuRow && <CapaskaParticipantDetailModal row={selectedMcuRow} onClose={() => setSelectedMcuRow(null)} />}
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-950 shadow-sm">
         <div className="p-7 text-white">
           <div className="text-3xl font-black">Dashboard Operator</div>
@@ -443,6 +442,10 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
     return <OperatorDashboard user={user} />;
   }
 
+  return <AdminDashboard />;
+}
+
+function AdminDashboard() {
   const [moduleKey, setModuleKey] = useState<ModuleKey>("mcu_corporate");
   const [sources, setSources] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
@@ -585,6 +588,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
 
   useEffect(() => {
     loadOptions(moduleKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleKey]);
 
   useEffect(() => {
@@ -632,6 +636,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
   return (
     <div className="space-y-6">
       {selectedMcuRow && <CapaskaParticipantDetailModal row={selectedMcuRow} onClose={() => setSelectedMcuRow(null)} />}
+
       <section className={`overflow-hidden rounded-[2rem] bg-gradient-to-r ${activeModule.accent} shadow-sm`}>
         <div className="p-7 text-white">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
