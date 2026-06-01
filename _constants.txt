@@ -1,0 +1,1673 @@
+export const PROGRAM_CAPASKA = "capaska";
+export const PROGRAM_CORPORATE = "corporate";
+export const PROGRAM_ALL = "all";
+
+export type ParameterSeed = {
+  name: string;
+  category?: string;
+  unit?: string;
+  input_type?: "text" | "number" | "select" | "radio" | "textarea" | "date";
+  normal_value?: string;
+  reference_text?: string;
+  config_json?: string[];
+  is_required?: number;
+  sort_order?: number;
+};
+
+export type StageSeed = {
+  post_name: string;
+  description: string;
+  username: string;
+  password: string;
+  operator_name: string;
+  sort_order: number;
+  parameters: ParameterSeed[];
+};
+
+export const CAPASKA_STAGES: StageSeed[] = [
+  {
+    "post_name": "Registrasi CAPASKA",
+    "description": "Registrasi dan verifikasi identitas peserta CAPASKA",
+    "username": "capaska_registrasi",
+    "password": "registrasi123",
+    "operator_name": "Operator CAPASKA Registrasi",
+    "sort_order": 10,
+    "parameters": [
+      {
+        "name": "Status Registrasi CAPASKA",
+        "category": "Registrasi CAPASKA",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Done",
+          "Belum",
+          "Perlu Verifikasi"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Identitas Terverifikasi",
+        "category": "Registrasi CAPASKA",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Ya",
+          "Tidak"
+        ],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Barcode / Label Terpasang",
+        "category": "Registrasi CAPASKA",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Ya",
+          "Tidak"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Catatan Registrasi",
+        "category": "Registrasi CAPASKA",
+        "unit": "",
+        "input_type": "textarea",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      }
+    ]
+  },
+  {
+    "post_name": "Kesehatan Mata",
+    "description": "Pemeriksaan mata CAPASKA sesuai reference",
+    "username": "capaska_mata",
+    "password": "mata123",
+    "operator_name": "Operator CAPASKA Mata",
+    "sort_order": 20,
+    "parameters": [
+      {
+        "name": "Lensakontak/ kaca mata",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Menggunakan",
+          "Tidak menggunakan"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Value Lensakontak/ kaca mata",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Tes buta warna",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak buta warna",
+          "Buta warna parsial",
+          "Buta warna total"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Value buta warna",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Strabismus / Juling",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "(+) / (-)",
+          "(-) / (+)",
+          "(+) / (+)",
+          "(-) / (-)"
+        ],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Value Strabismus / Juling",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Pemeriksaan Visus OD  / OS",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal 6/6",
+          "<6/6 - 6/12",
+          "<6/12"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Value Pemeriksaan Visus OD  / OS",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Total Score Kesehatan mata",
+        "category": "Pemeriksaan Mata",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 90
+      }
+    ]
+  },
+  {
+    "post_name": "Kesehatan Gigi & Mulut + Dental panoramik",
+    "description": "Pemeriksaan kesehatan gigi, mulut, dan dental panoramic sesuai reference",
+    "username": "capaska_gigi",
+    "password": "gigi123",
+    "operator_name": "Operator CAPASKA Gigi",
+    "sort_order": 40,
+    "parameters": [
+      {
+        "name": "Karang Gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Positive",
+          "Negative"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Value Karang Gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Caries Dentis",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "0 caries",
+          "1 caries",
+          "2 caries",
+          "3 caries",
+          ">3 caries"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Value Caries Dentis",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Tumpatan Gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "0 tumpatan",
+          "<3 tumpatan",
+          ">3 tumpatan"
+        ],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Value Tumpatan Gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Impaksi gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "0 gigi",
+          "1 gigi",
+          "2 gigi",
+          ">2 gigi"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Value Impaksi gigi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Kehilangan Gigi (Baik depan maupun belakang)",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "0 gigi",
+          "1 gigi",
+          "2 gigi",
+          ">2 gigi"
+        ],
+        "is_required": 0,
+        "sort_order": 90
+      },
+      {
+        "name": "Value Kehilangan Gigi (Baik depan maupun belakang)",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 100
+      },
+      {
+        "name": "Infeksi Gusi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Positive",
+          "Negative"
+        ],
+        "is_required": 0,
+        "sort_order": 110
+      },
+      {
+        "name": "Value Infeksi Gusi",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 120
+      },
+      {
+        "name": "Dental panoramic",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "ditemukan kelainan"
+        ],
+        "is_required": 0,
+        "sort_order": 130
+      },
+      {
+        "name": "Value Dental panoramic",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 140
+      },
+      {
+        "name": "bentuk kelainan Dental Panoramik",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "text",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 150
+      },
+      {
+        "name": "Score total Pemeriksaan Kesehatan Gigi dan Mulut",
+        "category": "Pemeriksaan Kesehatan Gigi dan Mulut",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 160
+      }
+    ]
+  },
+  {
+    "post_name": "Kesehatan THT",
+    "description": "Pemeriksaan THT sesuai reference",
+    "username": "capaska_tht",
+    "password": "tht123",
+    "operator_name": "Operator CAPASKA THT",
+    "sort_order": 50,
+    "parameters": [
+      {
+        "name": "Membran timpani",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Intak",
+          "Tidak Intak"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Value Membran timpani",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Serumen",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak ada",
+          "Ada serumen"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Value Serumen",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Tonsil",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "T0 - T1",
+          "T0 - T2a",
+          "T0 - T2b",
+          "T2 - T3"
+        ],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Value Tonsil",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Rhinitis Alergi (divide)",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Positive",
+          "Negative"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Value Rhinitis Alergi (divide)",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Epistaksis 1 tahun terakhir",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Ada",
+          "Tidak Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 90
+      },
+      {
+        "name": "Value Epistaksis 1 tahun terakhir",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 100
+      },
+      {
+        "name": "Tes Garputala (Weber) 512 Hz",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 110
+      },
+      {
+        "name": "Value Garputala (Weber) 512 Hz",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 120
+      },
+      {
+        "name": "Score total Pemeriksaan Kesehatan THT",
+        "category": "Pemeriksaan Kesehatan THT",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 130
+      }
+    ]
+  },
+  {
+    "post_name": "Penyakit Dalam",
+    "description": "Pemeriksaan penyakit dalam sesuai reference",
+    "username": "capaska_pd",
+    "password": "pd123",
+    "operator_name": "Operator CAPASKA Penyakit Dalam",
+    "sort_order": 30,
+    "parameters": [
+      {
+        "name": "Berat Badan (Kg)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Sesuai juknis",
+          "Tidak sesuai juknis"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "BB (Kg)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "Kg",
+        "input_type": "text",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Value Berat Badan (Kg)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "TB. (Cm)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Sesuai juknis",
+          "Tidak sesuai juknis"
+        ],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Tb (Cm)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "Cm",
+        "input_type": "text",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Value TB. (Cm)",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Tanda Vital",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Suhu/Nadi/Napas/tekanan darah",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "text",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Value Tanda Vital",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 90
+      },
+      {
+        "name": "Tato kulit",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak ada tato",
+          "Ada tato"
+        ],
+        "is_required": 0,
+        "sort_order": 100
+      },
+      {
+        "name": "Value Tato kulit",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 110
+      },
+      {
+        "name": "Tindik (selain anting) Wanita : hanya 1 / telinga",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak ada",
+          "Ada (pria) Wanita >1)"
+        ],
+        "is_required": 0,
+        "sort_order": 120
+      },
+      {
+        "name": "Value (selain anting) Wanita : hanya 1 / telinga",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 130
+      },
+      {
+        "name": "Pemeriksaan Fisik Jantung",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 140
+      },
+      {
+        "name": "Value Pemeriksaan Fisik Jantung",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 150
+      },
+      {
+        "name": "Pemeriksaan Fisik Paru",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 160
+      },
+      {
+        "name": "Value Pemeriksaan Fisik Paru",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 170
+      },
+      {
+        "name": "Hernia",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 180
+      },
+      {
+        "name": "NT Epigastrum",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 190
+      },
+      {
+        "name": "Benjolan",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 200
+      },
+      {
+        "name": "Liver",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 210
+      },
+      {
+        "name": "Bising Usus",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 220
+      },
+      {
+        "name": "Bekas Operasi (>6Bulan)",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 230
+      },
+      {
+        "name": "Score Abdomen",
+        "category": "Pemeriksaan Abdomen",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 240
+      },
+      {
+        "name": "Hemoroid eksterna",
+        "category": "Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 250
+      },
+      {
+        "name": "Hemoroid interna",
+        "category": "Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 260
+      },
+      {
+        "name": "Fisura ani",
+        "category": "Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 270
+      },
+      {
+        "name": "Struktur/Prolaps recti",
+        "category": "Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 280
+      },
+      {
+        "name": "Score Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "category": "Pemeriksaan Anus & Rektum (Colok Dubur)",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 290
+      },
+      {
+        "name": "Hidronefrosis",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 300
+      },
+      {
+        "name": "Kelainan kongenital",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 310
+      },
+      {
+        "name": "Hipospadia",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 320
+      },
+      {
+        "name": "Hidrokel",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 330
+      },
+      {
+        "name": "Undescensus testis",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 340
+      },
+      {
+        "name": "Batu sal kemih",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 350
+      },
+      {
+        "name": "Cystitis akut / kronis",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 360
+      },
+      {
+        "name": "Post operasi varikokel",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 370
+      },
+      {
+        "name": "Phimosis",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Normal",
+          "Tidak Normal"
+        ],
+        "is_required": 0,
+        "sort_order": 380
+      },
+      {
+        "name": "Score Urogenitalia",
+        "category": "Pemeriksaan Urogenitalia",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 390
+      },
+      {
+        "name": "Score total Pemeriksaan Penyakit Dalam",
+        "category": "Pemeriksaan Penyakit Dalam",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 400
+      }
+    ]
+  },
+  {
+    "post_name": "Kesehatan Jantung dan Pembuluh Darah",
+    "description": "Pemeriksaan kesehatan jantung dan pembuluh darah sesuai reference",
+    "username": "capaska_jantung",
+    "password": "jantung123",
+    "operator_name": "Operator CAPASKA Jantung",
+    "sort_order": 60,
+    "parameters": [
+      {
+        "name": "Kelainan Anatomi Jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Value Kelainan Anatomi Jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Kelainan Irama Jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Value Kelainan Irama Jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Iskemik Miocardial",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Value Iskemik Miocardial",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Kelainan kongenital jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Value Kelainan kongenital jantung",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Varises Tungkai (insufisiensi vena)",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 90
+      },
+      {
+        "name": "Value Varises Tungkai (insufisiensi vena)",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 100
+      },
+      {
+        "name": "Kelainan Arteri pada ekstremitas",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 110
+      },
+      {
+        "name": "Value Kelainan Arteri pada ekstremitas",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 120
+      },
+      {
+        "name": "Score total Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "category": "Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 130
+      }
+    ]
+  },
+  {
+    "post_name": "Ortopedi",
+    "description": "Pemeriksaan ortopedi sesuai reference",
+    "username": "capaska_ortopedi",
+    "password": "ortopedi123",
+    "operator_name": "Operator CAPASKA Ortopedi",
+    "sort_order": 70,
+    "parameters": [
+      {
+        "name": "sindaktili",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "polidaktili",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "spina bifida",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "mallet finger",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Hiperekstensi lengan",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 50
+      },
+      {
+        "name": "Score Anggota Gerak Atas",
+        "category": "Pemeriksaan Anggota Gerak Atas",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 60
+      },
+      {
+        "name": "Hammer toe",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 70
+      },
+      {
+        "name": "Hallux valgus",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 80
+      },
+      {
+        "name": "Webbed toe",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 90
+      },
+      {
+        "name": "O/X bean",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 100
+      },
+      {
+        "name": "Pes planus / kaki datar",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 110
+      },
+      {
+        "name": "Polidactily",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 120
+      },
+      {
+        "name": "Hiperekstensi kaki",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 130
+      },
+      {
+        "name": "General Laxity",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada"
+        ],
+        "is_required": 0,
+        "sort_order": 140
+      },
+      {
+        "name": "Score Anggota Gerak Bawah",
+        "category": "Pemeriksaan Anggota Gerak Bawah",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 150
+      },
+      {
+        "name": "Skoliosis",
+        "category": "Pemeriksaan Vertebra / Tulang Belakang",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada",
+          "Ringan"
+        ],
+        "is_required": 0,
+        "sort_order": 160
+      },
+      {
+        "name": "Kifosis",
+        "category": "Pemeriksaan Vertebra / Tulang Belakang",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada",
+          "Ringan"
+        ],
+        "is_required": 0,
+        "sort_order": 170
+      },
+      {
+        "name": "Lordosis",
+        "category": "Pemeriksaan Vertebra / Tulang Belakang",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ada",
+          "Ringan"
+        ],
+        "is_required": 0,
+        "sort_order": 180
+      },
+      {
+        "name": "Score Vertebra / Tulang Belakang",
+        "category": "Pemeriksaan Vertebra / Tulang Belakang",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 190
+      },
+      {
+        "name": "Score total Pemeriksaan Ortopedi",
+        "category": "Pemeriksaan Ortopedi",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 200
+      }
+    ]
+  },
+  {
+    "post_name": "Radiologi",
+    "description": "Pemeriksaan radiologi sesuai reference",
+    "username": "capaska_radiologi",
+    "password": "radiologi123",
+    "operator_name": "Operator CAPASKA Radiologi",
+    "sort_order": 80,
+    "parameters": [
+      {
+        "name": "Rontgen Whole Spine AP Lateral >> Skoliosis",
+        "category": "Rontgen Whole Spine AP Lateral",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ringan",
+          "Sedang",
+          "Berat"
+        ],
+        "is_required": 0,
+        "sort_order": 10
+      },
+      {
+        "name": "Rontgen Whole Spine AP Lateral >> Kifosis",
+        "category": "Rontgen Whole Spine AP Lateral",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ringan",
+          "Sedang",
+          "Berat"
+        ],
+        "is_required": 0,
+        "sort_order": 20
+      },
+      {
+        "name": "Rontgen Whole Spine AP Lateral >> Lordosis",
+        "category": "Rontgen Whole Spine AP Lateral",
+        "unit": "",
+        "input_type": "radio",
+        "normal_value": "",
+        "reference_text": "",
+        "config_json": [
+          "Tidak Ada",
+          "Ringan",
+          "Sedang",
+          "Berat"
+        ],
+        "is_required": 0,
+        "sort_order": 30
+      },
+      {
+        "name": "Score Rontgen Whole Spine AP Lateral",
+        "category": "Rontgen Whole Spine AP Lateral",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 40
+      },
+      {
+        "name": "Score total Pemeriksaan Penunjang Radiologi",
+        "category": "Pemeriksaan Radiologi",
+        "unit": "",
+        "input_type": "number",
+        "normal_value": "0",
+        "reference_text": "",
+        "config_json": [],
+        "is_required": 0,
+        "sort_order": 50
+      }
+    ]
+  }
+];
+
+export const CORPORATE_STAGES: StageSeed[] = [];
+
+export function stageOrder(postName: string) {
+  const allStages = [...CAPASKA_STAGES, ...CORPORATE_STAGES];
+  const found = allStages.find((x) => x.post_name.toLowerCase() === String(postName || "").toLowerCase());
+  return found?.sort_order ?? 500;
+}

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AuthGate from "@/components/AuthGate";
 import StageProgress from "@/components/StageProgress";
 
 type LoadMode = "blank" | "edit";
-type ListTab = "belum" | "selesai";
+type ListTab = "selesai";
 
 function norm(text: any) {
   return String(text || "")
@@ -13,19 +14,114 @@ function norm(text: any) {
     .replace(/[\s\n\r\t.,\-_\/\\><:;()]/g, "");
 }
 
-function parseOptions(config: any): string[] {
+type ChoiceOption = {
+  label: string;
+  value: string;
+  score?: number | null;
+  is_critical?: boolean;
+  note?: string;
+};
+
+function normalizeChoiceOption(option: any): ChoiceOption | null {
+  if (typeof option === "string") {
+    const label = option.trim();
+    return label ? { label, value: label, score: null, is_critical: false, note: "" } : null;
+  }
+
+  if (!option || typeof option !== "object") return null;
+
+  const label = String(option.label ?? option.option_label ?? option.text ?? option.value ?? "").trim();
+  if (!label) return null;
+
+  const value = String(option.value ?? option.option_value ?? label).trim() || label;
+  const rawScore = option.score ?? option.skor ?? option.value_score;
+  const numericScore = rawScore === null || rawScore === undefined || rawScore === "" ? null : Number(rawScore);
+
+  return {
+    label,
+    value,
+    score: Number.isFinite(numericScore) ? numericScore : null,
+    is_critical: Boolean(option.is_critical ?? option.critical ?? option.tidak_direkomendasikan ?? false),
+    note: String(option.note ?? option.recommendation_text ?? "").trim(),
+  };
+}
+
+function parseChoiceOptions(config: any): ChoiceOption[] {
   try {
-    if (Array.isArray(config)) return config.map(String);
     if (!config) return [];
     const parsed = typeof config === "string" ? JSON.parse(config) : config;
-    return Array.isArray(parsed) ? parsed.map(String) : [];
+    const rawOptions = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.options) ? parsed.options : [];
+    return rawOptions.map(normalizeChoiceOption).filter(Boolean) as ChoiceOption[];
   } catch {
     return [];
   }
 }
 
+function getForcedThtOptions(param: any): ChoiceOption[] {
+  const name = norm(param?.name);
+
+  const optionMap: Record<string, ChoiceOption[]> = {
+    [norm("Membran timpani")]: [
+      { label: "Intak", value: "Intak", score: 2, is_critical: false },
+      { label: "Tidak intak", value: "Tidak intak", score: -10, is_critical: true },
+    ],
+    [norm("Serumen")]: [
+      { label: "Tidak ada", value: "Tidak ada", score: 2, is_critical: false },
+      { label: "Ada serumen", value: "Ada serumen", score: 1, is_critical: false },
+    ],
+    [norm("Tonsil")]: [
+      { label: "T0 / T1-T1", value: "T0 / T1-T1", score: 2, is_critical: false },
+      { label: "Sudah tonsilektomi", value: "Sudah tonsilektomi", score: 2, is_critical: false },
+      { label: "T2a-T2a", value: "T2a-T2a", score: 1, is_critical: false },
+      { label: "T2b-T2b", value: "T2b-T2b", score: -1, is_critical: false },
+      { label: "T3-T3", value: "T3-T3", score: -10, is_critical: true },
+    ],
+    [norm("Rhinitis Alergi (divide)")]: [
+      { label: "Negatif / (-)", value: "Negatif", score: 2, is_critical: false },
+      { label: "Positif / (+)", value: "Positif", score: 1, is_critical: false },
+    ],
+    [norm("Rhinitis Alergi (lividae)")]: [
+      { label: "Negatif / (-)", value: "Negatif", score: 2, is_critical: false },
+      { label: "Positif / (+)", value: "Positif", score: 1, is_critical: false },
+    ],
+    [norm("Rhinitis Alergi (Bividas)")]: [
+      { label: "Negatif / (-)", value: "Negatif", score: 2, is_critical: false },
+      { label: "Positif / (+)", value: "Positif", score: 1, is_critical: false },
+    ],
+    [norm("Epistaksis 1 tahun terakhir")]: [
+      { label: "Tidak ada", value: "Tidak Ada", score: 1, is_critical: false },
+      { label: "Ada", value: "Ada", score: -1, is_critical: false },
+    ],
+    [norm("Tes Garputala (Weber) 512 Hz")]: [
+      { label: "Normal", value: "Normal", score: 1, is_critical: false },
+      { label: "Tidak normal", value: "Tidak Normal", score: -10, is_critical: true },
+    ],
+  };
+
+  return optionMap[name] || [];
+}
+
+function getChoiceOptions(param: any): ChoiceOption[] {
+  const forcedTht = getForcedThtOptions(param);
+  if (forcedTht.length) return forcedTht;
+  return parseChoiceOptions(param?.config_json);
+}
+
+function parseOptions(config: any): string[] {
+  return parseChoiceOptions(config).map((option) => option.label);
+}
+
 function hasChoiceOptions(param: any) {
-  return parseOptions(param.config_json).length > 0;
+  return getChoiceOptions(param).length > 0;
+}
+
+function getSelectedChoiceOption(param: any, selectedValue: string) {
+  const selectedKey = norm(selectedValue);
+  if (!selectedKey) return null;
+
+  return getChoiceOptions(param).find((option) => (
+    norm(option.label) === selectedKey || norm(option.value) === selectedKey
+  )) || null;
 }
 
 function extractBarcodeKeyword(rawCode: string) {
@@ -126,23 +222,39 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
     [`${norm("Dental panoramik")}::${norm("Normal")}`]: 2,
     [`${norm("Dental panoramik")}::${norm("ditemukan kelainan")}`]: 0,
 
-    // THT
+    // THT - direct CAPASKA 2026 scoring.
     [`${norm("Membran timpani")}::${norm("Intak")}`]: 2,
-    [`${norm("Membran timpani")}::${norm("Tidak Intak")}`]: 0,
+    [`${norm("Membran timpani")}::${norm("Tidak Intak")}`]: -10,
+    [`${norm("Membran timpani")}::${norm("Tidak intak")}`]: -10,
     [`${norm("Serumen")}::${norm("Tidak ada")}`]: 2,
-    [`${norm("Serumen")}::${norm("Ada serumen")}`]: 0,
+    [`${norm("Serumen")}::${norm("Ada serumen")}`]: 1,
     [`${norm("Tonsil")}::${norm("T0 - T1")}`]: 2,
+    [`${norm("Tonsil")}::${norm("T0 / T1-T1")}`]: 2,
+    [`${norm("Tonsil")}::${norm("Sudah tonsilektomi")}`]: 2,
     [`${norm("Tonsil")}::${norm("T0 - T2a")}`]: 1,
-    [`${norm("Tonsil")}::${norm("T0 - T2b")}`]: 1,
-    [`${norm("Tonsil")}::${norm("T2 - T3")}`]: 0,
+    [`${norm("Tonsil")}::${norm("T2a-T2a")}`]: 1,
+    [`${norm("Tonsil")}::${norm("T0 - T2b")}`]: -1,
+    [`${norm("Tonsil")}::${norm("T2b-T2b")}`]: -1,
+    [`${norm("Tonsil")}::${norm("T2 - T3")}`]: -10,
+    [`${norm("Tonsil")}::${norm("T3-T3")}`]: -10,
     [`${norm("Rhinitis Alergi (divide)")}::${norm("Negative")}`]: 2,
-    [`${norm("Rhinitis Alergi (divide)")}::${norm("Positive")}`]: 0,
+    [`${norm("Rhinitis Alergi (divide)")}::${norm("Negatif")}`]: 2,
+    [`${norm("Rhinitis Alergi (divide)")}::${norm("Positive")}`]: 1,
+    [`${norm("Rhinitis Alergi (divide)")}::${norm("Positif")}`]: 1,
+    [`${norm("Rhinitis Alergi (lividae)")}::${norm("Negative")}`]: 2,
+    [`${norm("Rhinitis Alergi (lividae)")}::${norm("Negatif")}`]: 2,
+    [`${norm("Rhinitis Alergi (lividae)")}::${norm("Positive")}`]: 1,
+    [`${norm("Rhinitis Alergi (lividae)")}::${norm("Positif")}`]: 1,
     [`${norm("Rhinitis Alergi (Bividas)")}::${norm("Negative")}`]: 2,
-    [`${norm("Rhinitis Alergi (Bividas)")}::${norm("Positive")}`]: 0,
-    [`${norm("Epistaksis 1 tahun terakhir")}::${norm("Tidak Ada")}`]: 2,
-    [`${norm("Epistaksis 1 tahun terakhir")}::${norm("Ada")}`]: 0,
-    [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Normal")}`]: 2,
-    [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Tidak Normal")}`]: 0,
+    [`${norm("Rhinitis Alergi (Bividas)")}::${norm("Negatif")}`]: 2,
+    [`${norm("Rhinitis Alergi (Bividas)")}::${norm("Positive")}`]: 1,
+    [`${norm("Rhinitis Alergi (Bividas)")}::${norm("Positif")}`]: 1,
+    [`${norm("Epistaksis 1 tahun terakhir")}::${norm("Tidak Ada")}`]: 1,
+    [`${norm("Epistaksis 1 tahun terakhir")}::${norm("Tidak ada")}`]: 1,
+    [`${norm("Epistaksis 1 tahun terakhir")}::${norm("Ada")}`]: -1,
+    [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Normal")}`]: 1,
+    [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Tidak Normal")}`]: -10,
+    [`${norm("Tes Garputala (Weber) 512 Hz")}::${norm("Tidak normal")}`]: -10,
 
     // PENYAKIT DALAM
     [`${norm("Berat Badan (Kg)")}::${norm("Sesuai juknis")}`]: 2,
@@ -193,6 +305,18 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
   return 0;
 }
 
+function scoreForParam(param: any, selectedValue: string): number {
+  const selectedOption = getSelectedChoiceOption(param, selectedValue);
+  if (selectedOption && typeof selectedOption.score === "number") return selectedOption.score;
+  return scoreByChoice(String(param?.name || ""), selectedValue);
+}
+
+function isCriticalChoice(param: any, selectedValue: string): boolean {
+  const selectedOption = getSelectedChoiceOption(param, selectedValue);
+  if (selectedOption?.is_critical) return true;
+  return scoreForParam(param, selectedValue) <= -10;
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -202,7 +326,7 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     if (!hasChoiceOptions(p)) return;
     const selected = computed[p.id];
     if (!selected) return;
-    scores[String(p.id)] = scoreByChoice(p.name, selected);
+    scores[String(p.id)] = scoreForParam(p, selected);
   });
 
   parameters.forEach((p) => {
@@ -285,23 +409,70 @@ function ParameterInput({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const options = parseOptions(param.config_json);
+  const options = getChoiceOptions(param);
   const inputType = String(param.input_type || "text").toLowerCase();
   const auto = isAutoField(param);
+  const usesSingleChoice = options.length > 0 && !["textarea", "number", "date"].includes(inputType);
 
-  if (options.length && (inputType === "radio" || inputType === "select")) {
+  if (usesSingleChoice && inputType === "select" && getForcedThtOptions(param).length === 0) {
     return (
       <>
         <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">-- Pilih --</option>
-          {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+          {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
         {value && (
-          <div className="mt-1 text-xs font-semibold text-blue-700">
-            Skor pilihan: {scoreByChoice(param.name, value)}
+          <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
+            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
           </div>
         )}
       </>
+    );
+  }
+
+  if (usesSingleChoice) {
+    return (
+      <div className="grid gap-2">
+        <div className="grid gap-2 sm:grid-cols-2">
+          {options.map((opt) => {
+            const checked = norm(value) === norm(opt.value) || norm(value) === norm(opt.label);
+            const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
+
+            return (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 text-sm transition ${
+                  checked ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-blue-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="mt-1"
+                  name={`param-${param.id}`}
+                  value={opt.value}
+                  checked={checked}
+                  onChange={() => onChange(opt.value)}
+                />
+                <span className="flex-1">
+                  <span className="block font-bold text-slate-900">{opt.label}</span>
+                  {typeof opt.score === "number" && (
+                    <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
+                      Skor {opt.score}{critical ? " · Tidak Direkomendasikan" : ""}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+
+        {value && (
+          <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
+            Terpilih: {getSelectedChoiceOption(param, value)?.label || value} · Skor: {scoreForParam(param, value)}
+            {isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -559,7 +730,15 @@ export default function InputPage() {
 }
 
 function InputForm({ user }: { user: any }) {
+  const searchParams = useSearchParams();
   const program = user.program_type === "all" ? "capaska" : user.program_type;
+  const adminParticipantId = Number(searchParams.get("participant_id") || 0);
+  const adminPostId = Number(searchParams.get("post_id") || 0);
+  const adminPostName = String(searchParams.get("post_name") || "").trim();
+  const isAdminStageAssist = String(user.role || "").toLowerCase() === "admin" && adminParticipantId > 0 && adminPostId > 0;
+  const effectivePostId = isAdminStageAssist ? adminPostId : Number(user.post_id);
+  const effectivePostName = isAdminStageAssist ? (adminPostName || `Post ${adminPostId}`) : user.post_name;
+  const autoLoadRef = useRef(false);
   const [sources, setSources] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
   const [keyword, setKeyword] = useState("");
@@ -570,16 +749,17 @@ function InputForm({ user }: { user: any }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [listTab, setListTab] = useState<ListTab>("belum");
+  const [listTab, setListTab] = useState<ListTab>("selesai");
   const [loadingList, setLoadingList] = useState(false);
+  const [hasLoadedList, setHasLoadedList] = useState(false);
   const [doneParticipants, setDoneParticipants] = useState<any[]>([]);
-  const [pendingParticipants, setPendingParticipants] = useState<any[]>([]);
+  const [hasMoreDoneParticipants, setHasMoreDoneParticipants] = useState(false);
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
 
-    parameters.forEach((param) => {
-      const category = param.category || user.post_name || "Pemeriksaan";
+    parameters.filter((param) => !isAutoField(param)).forEach((param) => {
+      const category = param.category || effectivePostName || "Pemeriksaan";
       const last = groups[groups.length - 1];
 
       if (!last || last.category !== category) {
@@ -590,13 +770,51 @@ function InputForm({ user }: { user: any }) {
     });
 
     return groups;
-  }, [parameters, user.post_name]);
+  }, [parameters, effectivePostName]);
+
+  const questionIndexByParamId = useMemo(() => {
+    const indexMap: Record<string, number> = {};
+    let index = 0;
+
+    groupedParameters.forEach((group) => {
+      group.params.forEach((param) => {
+        indexMap[String(param.id)] = index;
+        index += 1;
+      });
+    });
+
+    return indexMap;
+  }, [groupedParameters]);
 
   useEffect(() => {
     fetch(`/api/sources?program=${program}`)
       .then((r) => r.json())
       .then((d) => setSources(d.sources || []));
   }, [program]);
+
+
+  useEffect(() => {
+    if (!isAdminStageAssist || !adminParticipantId || autoLoadRef.current) return;
+
+    autoLoadRef.current = true;
+    setMessage(`Membuka ${effectivePostName} untuk peserta...`);
+
+    fetch(`/api/participant?id=${adminParticipantId}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((json) => {
+        if (!json.ok || !json.participant) {
+          setMessage(json.message || "Peserta tidak ditemukan.");
+          return;
+        }
+
+        const nextParticipant = json.participant;
+        if (nextParticipant.source_id) setSourceId(String(nextParticipant.source_id));
+        setKeyword(nextParticipant.name || nextParticipant.mcu_id || "");
+        loadParticipant(nextParticipant, "edit");
+      })
+      .catch((error) => setMessage(error?.message || "Gagal membuka peserta."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdminStageAssist, adminParticipantId, effectivePostId]);
 
   async function search(e?: React.FormEvent, overrideKeyword?: string) {
     e?.preventDefault();
@@ -625,7 +843,7 @@ function InputForm({ user }: { user: any }) {
     const detailJson = await detailRes.json();
     setDetail(detailJson);
 
-    const paramRes = await fetch(`/api/parameters?participant_id=${p.id}&package_id=${p.package_id}&post_id=${user.post_id}`);
+    const paramRes = await fetch(`/api/parameters?participant_id=${p.id}&package_id=${p.package_id}&post_id=${effectivePostId}`);
     const paramJson = await paramRes.json();
     const nextParameters = paramJson.parameters || [];
     setParameters(nextParameters);
@@ -657,7 +875,7 @@ function InputForm({ user }: { user: any }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         participant_id: participant.id,
-        post_id: user.post_id,
+        post_id: effectivePostId,
         values: finalValues
       })
     });
@@ -666,45 +884,57 @@ function InputForm({ user }: { user: any }) {
     setMessage(json.ok ? "Hasil berhasil disimpan." : json.message || "Gagal menyimpan.");
     if (json.ok) {
       setValues(finalValues);
+      setListTab("selesai");
       await refreshLists(false);
     }
   }
 
   async function refreshLists(showMessage = true) {
     setLoadingList(true);
-    if (showMessage) setMessage("Memuat daftar selesai/belum selesai...");
+    if (showMessage) setMessage("Memuat daftar peserta selesai...");
 
     try {
-      const res = await fetch(`/api/search/participants?program=${program}&source_id=${sourceId}&keyword=&limit=200`);
+      // Optimized backend list: hanya ambil peserta yang sudah selesai untuk post operator ini.
+      // Tidak lagi melakukan request /api/participant satu per satu karena itu berat saat data banyak.
+      const params = new URLSearchParams({
+        program,
+        source_id: sourceId,
+        keyword: "",
+        limit: "80",
+        list: "1",
+        status: "done",
+        done: "1",
+      });
+
+      const res = await fetch(`/api/search/participants?${params.toString()}`);
       const json = await res.json();
-      const list = json.participants || [];
+      const doneList = json.participants || [];
 
-      const loaded = await Promise.all(
-        list.map(async (p: any) => {
-          try {
-            const d = await fetch(`/api/participant?id=${p.id}`).then((r) => r.json());
-            const stage = findCurrentStage(d, user.post_name);
-            return { ...p, stage, is_done_for_operator: stageIsDone(stage) };
-          } catch {
-            return { ...p, stage: null, is_done_for_operator: false };
-          }
-        })
-      );
-
-      setDoneParticipants(loaded.filter((x: any) => x.is_done_for_operator));
-      setPendingParticipants(loaded.filter((x: any) => !x.is_done_for_operator));
+      setDoneParticipants(doneList);
+      setHasMoreDoneParticipants(Boolean(json.has_more));
+      setHasLoadedList(true);
 
       if (showMessage) {
-        setMessage(`Daftar dimuat. Selesai: ${loaded.filter((x: any) => x.is_done_for_operator).length}, Belum: ${loaded.filter((x: any) => !x.is_done_for_operator).length}.`);
+        setMessage(`Daftar selesai dimuat: ${doneList.length} peserta${json.has_more ? " teratas. Gunakan cari peserta untuk data lama lainnya." : "."}`);
       }
     } catch {
-      setMessage("Gagal memuat daftar peserta.");
+      setHasLoadedList(true);
+      setMessage("Gagal memuat daftar peserta selesai.");
     } finally {
       setLoadingList(false);
     }
   }
 
-  const displayedList = listTab === "selesai" ? doneParticipants : pendingParticipants;
+  useEffect(() => {
+    refreshLists(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [program, sourceId, effectivePostId]);
+
+  const displayedList = doneParticipants;
+
+  function openFromOperatorList(p: any) {
+    loadParticipant(p, "edit");
+  }
 
   return (
     <div className="space-y-5">
@@ -720,10 +950,15 @@ function InputForm({ user }: { user: any }) {
 
       <section className="card p-5">
         <div className="text-2xl font-black">Input CAPASKA</div>
-        <div className="mt-1 text-sm text-slate-500">Login sebagai {user.post_name}. Operator hanya melihat parameter post masing-masing.</div>
+        <div className="mt-1 text-sm text-slate-500">Login sebagai {effectivePostName}. Operator hanya melihat parameter post masing-masing.</div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          AutoScore v22 aktif · hasil pencarian di atas · QR MCU saja
+          AutoScore backend CAPASKA aktif · pertanyaan selang-seling · value/score tersembunyi
         </div>
+        {isAdminStageAssist && (
+          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+            Mode bantuan admin aktif: membuka peserta langsung pada stage {effectivePostName}. Simpan akan masuk ke backend post/stage ini.
+          </div>
+        )}
       </section>
 
       <form onSubmit={(e) => search(e)} className="card grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto_auto]">
@@ -780,54 +1015,78 @@ function InputForm({ user }: { user: any }) {
         </section>
       )}
 
+      {!isAdminStageAssist && (
       <section className="card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="font-black">Daftar Peserta Operator Ini</div>
-            <div className="text-sm text-slate-500">Filter status berdasarkan progress stage {user.post_name}.</div>
+            <div className="font-black">Daftar Peserta Selesai Operator Ini</div>
+            <div className="text-sm text-slate-500">Hanya peserta yang sudah submit di stage {effectivePostName}. Klik peserta untuk lihat/edit hasil.</div>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setListTab("belum")}
-              className={`rounded-2xl px-4 py-2 font-black ${listTab === "belum" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}
-            >
-              Belum ({pendingParticipants.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setListTab("selesai")}
-              className={`rounded-2xl px-4 py-2 font-black ${listTab === "selesai" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}
-            >
-              Selesai ({doneParticipants.length})
-            </button>
+          <div className="rounded-2xl bg-blue-600 px-4 py-2 font-black text-white">
+            Selesai ({doneParticipants.length})
           </div>
         </div>
 
         <div className="mt-4 grid gap-2">
           {!displayedList.length && (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
-              Belum ada daftar. Klik <b>Muat Daftar</b> dulu.
+              {loadingList
+                ? "Memuat daftar peserta selesai..."
+                : hasLoadedList
+                  ? "Belum ada peserta selesai untuk operator ini."
+                  : "Daftar belum dimuat."}
             </div>
           )}
 
           {displayedList.map((p: any) => (
-            <div key={`${listTab}-${p.id}`} className="rounded-2xl border border-slate-200 bg-white p-3">
-              <div className="font-black">{p.name}</div>
-              <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+            <div
+              key={`${listTab}-${p.id}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => openFromOperatorList(p)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") openFromOperatorList(p);
+              }}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="font-black">{p.name}</div>
+                  <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                    Skor akhir: {p.operator_final_score_label ?? p.operator_final_score ?? "-"}
+                  </div>
+                  <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                    Sudah submit · klik untuk edit
+                  </div>
+                </div>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white" onClick={() => loadParticipant(p, "blank")}>
-                  Input Baru
-                </button>
-                <button type="button" className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white" onClick={() => loadParticipant(p, "edit")}>
-                  Edit Hasil
+                <button
+                  type="button"
+                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    loadParticipant(p, "edit");
+                  }}
+                >
+                  Lihat / Edit Hasil
                 </button>
               </div>
             </div>
           ))}
+
+          {hasMoreDoneParticipants && (
+            <div className="rounded-2xl bg-amber-50 p-3 text-sm font-semibold text-amber-700">
+              Data selesai dibatasi 80 peserta terbaru supaya halaman tetap ringan. Gunakan kolom pencarian untuk membuka peserta tertentu yang tidak tampil di daftar.
+            </div>
+          )}
         </div>
       </section>
+      )}
 
 
 
@@ -843,7 +1102,7 @@ function InputForm({ user }: { user: any }) {
 
       {participant && (
         <form onSubmit={save} className="card space-y-6 p-5">
-          <div className="text-lg font-black">Form {user.post_name}</div>
+          <div className="text-lg font-black">Form {effectivePostName}</div>
           {!parameters.length && <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">Tidak ada parameter untuk post ini. Jalankan SQL reference dan cek mapping package.</div>}
 
           {groupedParameters.map((group) => (
@@ -852,17 +1111,29 @@ function InputForm({ user }: { user: any }) {
                 {group.category}
               </div>
 
-              {group.params.map((param) => (
-                <div key={param.id}>
-                  <label className="label">{param.name}{param.unit ? ` (${param.unit})` : ""}</label>
-                  {param.reference_text && <div className="mb-2 text-xs text-slate-500">{param.reference_text}</div>}
-                  <ParameterInput
-                    param={param}
-                    value={values[param.id] || ""}
-                    onChange={(nextValue) => updateValue(param.id, nextValue)}
-                  />
-                </div>
-              ))}
+              {group.params.map((param) => {
+                const questionIndex = questionIndexByParamId[String(param.id)] ?? 0;
+                const isCreamRow = questionIndex % 2 === 0;
+
+                return (
+                  <div
+                    key={param.id}
+                    className={`rounded-2xl border p-4 shadow-sm transition ${
+                      isCreamRow
+                        ? "border-amber-100 bg-amber-50/70"
+                        : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <label className="label">{param.name}{param.unit ? ` (${param.unit})` : ""}</label>
+                    {param.reference_text && <div className="mb-2 text-xs text-slate-500">{param.reference_text}</div>}
+                    <ParameterInput
+                      param={param}
+                      value={values[param.id] || ""}
+                      onChange={(nextValue) => updateValue(param.id, nextValue)}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ))}
 

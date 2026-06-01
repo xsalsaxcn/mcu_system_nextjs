@@ -14,6 +14,37 @@ function normalizeOptions(value: any) {
     .filter(Boolean);
 }
 
+
+function parseNumber(value: any) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(String(value).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeScoringOptions(value: any, fallbackText: any) {
+  const source = Array.isArray(value)
+    ? value
+    : normalizeOptions(fallbackText).map((label) => ({ label, value: label, score: 0, is_critical: false, note: "" }));
+
+  return source
+    .map((item: any) => {
+      const label = String(item?.label ?? item?.option_label ?? item?.text ?? item?.value ?? "").trim();
+      if (!label) return null;
+
+      const optionValue = String(item?.value ?? item?.option_value ?? label).trim() || label;
+      const score = parseNumber(item?.score);
+
+      return {
+        label,
+        value: optionValue,
+        score: score ?? 0,
+        is_critical: Boolean(item?.is_critical ?? item?.critical ?? false),
+        note: String(item?.note ?? item?.recommendation_text ?? "").trim()
+      };
+    })
+    .filter(Boolean);
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
 
@@ -150,7 +181,19 @@ export async function POST(req: NextRequest) {
   if (!postId) return fail("Post pemeriksaan wajib dipilih.");
   if (!name) return fail("Nama parameter wajib diisi.");
 
-  const options = normalizeOptions(body.options_text);
+  const plainOptions = normalizeOptions(body.options_text);
+  const scoringOptions = normalizeScoringOptions(body.scoring_options, body.options_text);
+  const maxScore = parseNumber(body.max_score);
+  const scoringType = String(body.scoring_type || "by_option").trim() || "by_option";
+
+  const configJson = programType === "capaska"
+    ? {
+        options: scoringOptions,
+        max_score: maxScore,
+        scoring_type: scoringType,
+        include_in_total_score: body.include_in_total_score === false ? false : true
+      }
+    : plainOptions;
 
   const payload = {
     name,
@@ -161,7 +204,7 @@ export async function POST(req: NextRequest) {
     normal_value: String(body.normal_value || "").trim(),
     reference_text: String(body.reference_text || "").trim(),
     reference_image_path: "",
-    config_json: JSON.stringify(options),
+    config_json: JSON.stringify(configJson),
     is_required: body.is_required ? 1 : 0,
     is_active: body.is_active === false ? 0 : 1,
     sort_order: Number(body.sort_order || 0),

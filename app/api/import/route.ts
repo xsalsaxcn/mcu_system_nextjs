@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { importParticipantsFromExcel } from "@/lib/server/importExcel";
 import { fail, ok } from "@/lib/server/response";
+import { PROGRAM_CAPASKA, PROGRAM_CORPORATE, PROGRAM_VACCINATION } from "@/lib/shared/constants";
 
 export const runtime = "nodejs";
 
@@ -15,11 +16,29 @@ export async function POST(req: NextRequest) {
 
   if (!file) return fail("File Excel wajib diupload.");
 
-  const programType = String(form.get("program_type") || "capaska").trim();
+  const rawProgramType = String(form.get("program_type") || PROGRAM_CAPASKA).trim().toLowerCase();
+  const programType = [PROGRAM_CAPASKA, PROGRAM_CORPORATE, PROGRAM_VACCINATION].includes(rawProgramType)
+    ? rawProgramType
+    : PROGRAM_CAPASKA;
+
+  const defaultInstitution =
+    programType === PROGRAM_CORPORATE
+      ? "Corporate"
+      : programType === PROGRAM_VACCINATION
+        ? "Vaksinasi Perusahaan"
+        : "BPIP / CAPASKA";
+
+  const defaultPackage =
+    programType === PROGRAM_CORPORATE
+      ? "MCU Corporate Basic"
+      : programType === PROGRAM_VACCINATION
+        ? "Vaksinasi Perusahaan"
+        : "CAPASKA 2025/2026";
+
   const databaseName = String(form.get("database_name") || "").trim();
-  const institutionName = String(form.get("institution_name") || (programType === "corporate" ? "Corporate" : "BPIP / CAPASKA")).trim();
-  const companyName = String(form.get("company_name") || institutionName).trim();
-  const packageName = String(form.get("package_name") || (programType === "corporate" ? "MCU Corporate Basic" : "CAPASKA 2025/2026")).trim();
+  const institutionName = String(form.get("institution_name") || defaultInstitution).trim();
+  const companyName = String(form.get("company_name") || institutionName || defaultInstitution).trim();
+  const packageName = String(form.get("package_name") || defaultPackage).trim();
   const description = String(form.get("description") || "").trim();
 
   if (!databaseName) return fail("Nama Database wajib diisi.");

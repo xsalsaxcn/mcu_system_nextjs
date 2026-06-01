@@ -1,5 +1,6 @@
 export const PROGRAM_CAPASKA = "capaska";
 export const PROGRAM_CORPORATE = "corporate";
+export const PROGRAM_VACCINATION = "vaccination";
 export const PROGRAM_ALL = "all";
 
 export type ParameterSeed = {

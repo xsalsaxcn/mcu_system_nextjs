@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 export default function CleanupPage() {
@@ -15,6 +15,7 @@ function Cleanup({ user }: { user: any }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<any>(null);
+  const formRef = useRef<HTMLDivElement | null>(null);
 
   const selectedSource = sources.find((s) => String(s.id) === String(selectedSourceId));
 
@@ -43,6 +44,15 @@ function Cleanup({ user }: { user: any }) {
     if (user?.role === "admin") loadSources();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [program]);
+
+
+
+  function quickSelectSource(sourceId: number | string) {
+    setSelectedSourceId(String(sourceId));
+    setMessage("");
+    setResult(null);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   async function deleteSource() {
     if (!selectedSourceId) {
@@ -97,7 +107,7 @@ function Cleanup({ user }: { user: any }) {
         </div>
       </section>
 
-      <section className="card space-y-4 p-5">
+      <section ref={formRef} className="card space-y-4 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
           <div>
             <label className="label">Filter Program</label>
@@ -166,6 +176,7 @@ function Cleanup({ user }: { user: any }) {
               <th>Program</th>
               <th>Peserta</th>
               <th>Created</th>
+              <th className="text-center">Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -177,6 +188,22 @@ function Cleanup({ user }: { user: any }) {
                 <td>{s.program_type || "-"}</td>
                 <td>{s.participants_count || 0}</td>
                 <td>{s.created_at ? new Date(s.created_at).toLocaleString("id-ID") : "-"}</td>
+                <td className="text-center">
+                  <button
+                    type="button"
+                    title={`Pilih ${s.name} untuk dihapus`}
+                    onClick={() => quickSelectSource(s.id)}
+                    className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border transition ${String(selectedSourceId) === String(s.id) ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"}`}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -2,10 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
+
 type SelectedVaccineItem = {
+  itemId?: string;
   vaccineId: string;
   lotId: string;
   doseNumber: number;
+  status?: string;
+  itemNote?: string;
 };
 
 function fmtDate(value: any) {
@@ -15,9 +20,30 @@ function fmtDate(value: any) {
   return d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
 }
 
+function isDoneStatus(status: any) {
+  return ["ADMINISTERED", "DONE"].includes(String(status || "").toUpperCase());
+}
+
+function itemStatusLabel(status: any) {
+  return isDoneStatus(status) ? "Done" : "Not Done";
+}
+
+function sessionLabel(session: any) {
+  const eventName = session?.source_name || String(session?.session_name || "").split(" - ")[0] || "Session";
+  return [eventName, session?.location, session?.session_date]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function vaccineLabel(vaccine: any) {
+  if (!vaccine) return "Vaksin";
+  return `${vaccine.name || "Vaksin"}${vaccine.brand ? ` · ${vaccine.brand}` : ""}`;
+}
+
 export default function VaccinationAdministerPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
+  const [contextLocked, setContextLocked] = useState(false);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
@@ -29,6 +55,7 @@ export default function VaccinationAdministerPage() {
   const [searchDone, setSearchDone] = useState("");
   const [message, setMessage] = useState("Pilih antrian. Daftar vaksin session otomatis menjadi daftar sticker.");
   const [error, setError] = useState("");
+  const [processingIndex, setProcessingIndex] = useState<number | "all" | null>(null);
 
   const [form, setForm] = useState({
     registrationId: "",
@@ -37,11 +64,30 @@ export default function VaccinationAdministerPage() {
     notes: "",
   });
 
+  const selectedSession = sessions.find((session) => String(session.id) === String(sessionId));
+
+  const availableVaccines = useMemo(() => {
+    if (!sessionVaccines.length) return vaccines;
+    const byId = new Map<string, any>();
+    for (const item of sessionVaccines) {
+      const vaccine = item?.vaccine || vaccines.find((v) => String(v.id) === String(item.vaccine_id));
+      if (vaccine?.id) byId.set(String(vaccine.id), vaccine);
+    }
+    return Array.from(byId.values());
+  }, [sessionVaccines, vaccines]);
+
   async function loadSessions() {
     const json = await fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json());
     if (json.ok) {
-      setSessions(json.sessions || []);
-      if (!sessionId && json.sessions?.[0]?.id) setSessionId(String(json.sessions[0].id));
+      const loadedSessions = json.sessions || [];
+      setSessions(loadedSessions);
+      let saved: any = null;
+      if (typeof window !== "undefined") {
+        try { saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null"); } catch { saved = null; }
+      }
+      const savedSession = saved?.locked ? loadedSessions.find((item: any) => String(item.id) === String(saved.sessionId)) : null;
+      setContextLocked(Boolean(saved?.locked && savedSession));
+      if (!sessionId && (savedSession?.id || loadedSessions?.[0]?.id)) setSessionId(String(savedSession?.id || loadedSessions[0].id));
     }
   }
 
@@ -64,76 +110,107 @@ export default function VaccinationAdministerPage() {
       vaccineId: String(item.vaccine_id),
       lotId: String(item.lot_id),
       doseNumber: Number(item.dose_number || 1),
+      status: "WAITING",
     }));
 
     setSelectedVaccines(nextSelected);
   }
 
   function lotOptions(vaccineId: string) {
+    const sessionLots = sessionVaccines
+      .filter((item: any) => String(item.vaccine_id) === String(vaccineId) && item.lot_id)
+      .map((item: any) => item.lot || lots.find((lot) => String(lot.id) === String(item.lot_id)))
+      .filter(Boolean);
+    if (sessionLots.length) {
+      const byId = new Map<string, any>();
+      for (const lot of sessionLots) byId.set(String(lot.id), lot);
+      return Array.from(byId.values());
+    }
     return lots.filter((lot) => String(lot.vaccine_id) === String(vaccineId));
   }
 
   function updateSelectedVaccine(index: number, patch: Partial<SelectedVaccineItem>) {
-    setSelectedVaccines((prev) => prev.map((item, idx) => idx === index ? { ...item, ...patch } : item));
+    setSelectedVaccines((prev) => prev.map((item, idx) => {
+      if (idx !== index) return item;
+      if (isDoneStatus(item.status)) return item;
+      return { ...item, ...patch };
+    }));
   }
 
   function removeSelectedVaccine(index: number) {
-    setSelectedVaccines((prev) => prev.filter((_, idx) => idx !== index));
+    setSelectedVaccines((prev) => prev.filter((item, idx) => idx !== index || isDoneStatus(item.status)));
   }
 
   function addManualVaccine() {
-    setSelectedVaccines((prev) => [...prev, { vaccineId: "", lotId: "", doseNumber: 1 }]);
+    setSelectedVaccines((prev) => [...prev, { vaccineId: "", lotId: "", doseNumber: 1, status: "WAITING" }]);
   }
 
-  async function donePrint() {
+  async function donePrint(targetIndex?: number) {
     setError("");
+    setProcessingIndex(typeof targetIndex === "number" ? targetIndex : "all");
 
-    if (!form.registrationId) {
-      setError("Pilih peserta/antrian terlebih dahulu.");
-      return;
+    try {
+      if (!form.registrationId) {
+        setError("Pilih peserta/antrian terlebih dahulu.");
+        return;
+      }
+
+
+      const sourceVaccines: SelectedVaccineItem[] = typeof targetIndex === "number"
+        ? (selectedVaccines[targetIndex] ? [selectedVaccines[targetIndex]] : [])
+        : selectedVaccines.filter((item) => !isDoneStatus(item.status));
+
+      const vaccinesPayload = sourceVaccines
+        .map((item) => ({
+          itemId: item.itemId ? Number(item.itemId) : undefined,
+          vaccineId: Number(item.vaccineId),
+          lotId: Number(item.lotId),
+          doseNumber: Number(item.doseNumber || 1),
+        }))
+        .filter((item) => item.itemId || (item.vaccineId && item.lotId));
+
+      if (!vaccinesPayload.length) {
+        setError("Minimal satu vaksin dan lot number wajib dipilih.");
+        return;
+      }
+
+      const printWindow = window.open("about:blank", "_blank", "width=520,height=720");
+      if (printWindow) {
+        printWindow.document.write("<p style='font-family:Arial;padding:16px'>Menyiapkan sticker...</p>");
+      }
+
+      const res = await fetch("/api/vaccination/administer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registrationId: form.registrationId,
+          administeredAt: form.administeredAt,
+          administeredByName: form.administeredByName,
+          notes: form.notes,
+          vaccines: vaccinesPayload,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok || !json.ok) {
+        if (printWindow) printWindow.close();
+        setError(json.message || "Done gagal.");
+        return;
+      }
+
+      setMessage(json.message);
+      setForm((f) => ({ ...f, notes: "" }));
+      await loadData();
+      if (json.stickerUrl) {
+        if (printWindow) printWindow.location.href = json.stickerUrl;
+        else window.open(json.stickerUrl, "_blank", "width=520,height=720");
+      } else if (printWindow) {
+        printWindow.close();
+      }
+    } finally {
+      setProcessingIndex(null);
     }
-
-    if (!form.administeredByName.trim()) {
-      setError("Nama dokter/petugas wajib diisi agar laporan bisa difilter per dokter.");
-      return;
-    }
-
-    const vaccinesPayload = selectedVaccines
-      .map((item) => ({
-        vaccineId: Number(item.vaccineId),
-        lotId: Number(item.lotId),
-        doseNumber: Number(item.doseNumber || 1),
-      }))
-      .filter((item) => item.vaccineId && item.lotId);
-
-    if (!vaccinesPayload.length) {
-      setError("Minimal satu vaksin dan lot number wajib dipilih.");
-      return;
-    }
-
-    const res = await fetch("/api/vaccination/administer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        registrationId: form.registrationId,
-        administeredAt: form.administeredAt,
-        administeredByName: form.administeredByName,
-        notes: form.notes,
-        vaccines: vaccinesPayload,
-      }),
-    });
-
-    const json = await res.json();
-
-    if (!res.ok || !json.ok) {
-      setError(json.message || "Done gagal.");
-      return;
-    }
-
-    setMessage(json.message);
-    setForm((f) => ({ ...f, registrationId: "", notes: "" }));
-    loadData();
-    window.open(json.stickerUrl, "_blank", "width=520,height=720");
   }
 
   useEffect(() => {
@@ -145,6 +222,32 @@ export default function VaccinationAdministerPage() {
   }, [sessionId]);
 
   const selectedRegistration = registrations.find((r) => String(r.id) === String(form.registrationId));
+
+  useEffect(() => {
+    if (!selectedRegistration) return;
+    const itemRows = Array.isArray(selectedRegistration.items) ? selectedRegistration.items : [];
+    if (itemRows.length) {
+      setSelectedVaccines(itemRows.map((item: any) => ({
+        itemId: item.id ? String(item.id) : undefined,
+        vaccineId: item.vaccine_id ? String(item.vaccine_id) : "",
+        lotId: item.lot_id ? String(item.lot_id) : "",
+        doseNumber: Number(item.dose_number || 1),
+        status: item.status || "WAITING",
+        itemNote: item.item_note || item.payment_note || "",
+      })));
+    } else if (sessionVaccines.length) {
+      setSelectedVaccines(sessionVaccines.map((item: any) => ({
+        vaccineId: String(item.vaccine_id),
+        lotId: String(item.lot_id),
+        doseNumber: Number(item.dose_number || 1),
+        status: "WAITING",
+      })));
+    }
+    if (selectedRegistration.status_note && !form.notes) {
+      setForm((current) => ({ ...current, notes: selectedRegistration.status_note || current.notes }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRegistration?.id, selectedRegistration?.updated_at]);
 
   const groupedCompleted = useMemo(() => {
     const keyword = searchDone.trim().toLowerCase();
@@ -204,11 +307,12 @@ export default function VaccinationAdministerPage() {
           <h2 className="font-bold">1. Pilih Peserta</h2>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <select className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
+            <div>
+            <select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
               <option value="">Pilih session</option>
               {sessions.map((session) => (
                 <option key={session.id} value={session.id}>
-                  {session.session_name} · {session.company_name || "-"}
+                  {sessionLabel(session)}
                 </option>
               ))}
             </select>
@@ -231,7 +335,7 @@ export default function VaccinationAdministerPage() {
 
             <input
               className="rounded-xl border px-3 py-2.5"
-              placeholder="Nama dokter / petugas *"
+              placeholder="Nama dokter / petugas"
               value={form.administeredByName}
               onChange={(e) => setForm({ ...form, administeredByName: e.target.value })}
             />
@@ -239,7 +343,17 @@ export default function VaccinationAdministerPage() {
 
           {selectedRegistration ? (
             <div className="mt-4 rounded-xl border bg-white p-4 text-sm">
-              <b>{selectedRegistration.queue_number}</b> · {selectedRegistration.participant_name} · {selectedRegistration.company_name || "-"} · {selectedRegistration.department || "-"}
+              <div><b>{selectedRegistration.queue_number}</b> · {selectedRegistration.participant_name} · {selectedRegistration.company_name || "-"} · {selectedRegistration.department || "-"}</div>
+              {selectedRegistration.status_note ? <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">Note registrasi: {selectedRegistration.status_note}</div> : null}
+              {Array.isArray(selectedRegistration.items) && selectedRegistration.items.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedRegistration.items.map((item: any) => (
+                    <span key={item.id} className={`rounded-full px-3 py-1 text-xs font-black ${isDoneStatus(item.status) ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
+                      {item.vaccine?.name || "Produk"} · Lot {item.lot?.lot_number || "-"} · {itemStatusLabel(item.status)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -264,29 +378,30 @@ export default function VaccinationAdministerPage() {
 
           <div className="mt-4 space-y-3">
             {selectedVaccines.map((item, index) => (
-              <div key={index} className="grid gap-3 rounded-2xl border bg-white p-3 md:grid-cols-[1fr_1fr_100px_auto]">
+              <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-3 md:grid-cols-[1fr_1fr_100px_220px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
                 <select
-                  className="rounded-xl border px-3 py-2.5"
+                  disabled={isDoneStatus(item.status)}
+                  className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100"
                   value={item.vaccineId}
                   onChange={(e) => updateSelectedVaccine(index, { vaccineId: e.target.value, lotId: "" })}
                 >
                   <option value="">Pilih vaksin</option>
-                  {vaccines.map((vaccine) => (
+                  {availableVaccines.map((vaccine) => (
                     <option key={vaccine.id} value={vaccine.id}>
-                      {vaccine.name}
-                      {vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                      {vaccineLabel(vaccine)}
                     </option>
                   ))}
                 </select>
 
                 <select
-                  className="rounded-xl border px-3 py-2.5"
+                  disabled={isDoneStatus(item.status)}
+                  className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100"
                   value={item.lotId}
                   onChange={(e) => updateSelectedVaccine(index, { lotId: e.target.value })}
                 >
                   <option value="">Pilih lot</option>
                   {lotOptions(item.vaccineId).map((lot) => {
-                    const stock = Number(lot.stock_initial || 0) - Number(lot.stock_used || 0);
+                    const stock = Number(lot.stock_initial || 0) + Number(lot.stock_added || 0) - Number(lot.stock_used || 0);
                     return (
                       <option key={lot.id} value={lot.id}>
                         Lot {lot.lot_number} · stok {stock} · exp {lot.expiry_date || "-"}
@@ -296,20 +411,37 @@ export default function VaccinationAdministerPage() {
                 </select>
 
                 <input
+                  disabled={isDoneStatus(item.status)}
                   type="number"
                   min={1}
-                  className="rounded-xl border px-3 py-2.5"
+                  className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100"
                   value={item.doseNumber}
                   onChange={(e) => updateSelectedVaccine(index, { doseNumber: Number(e.target.value || 1) })}
                 />
 
-                <button
-                  type="button"
-                  onClick={() => removeSelectedVaccine(index)}
-                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700"
-                >
-                  Hapus
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {isDoneStatus(item.status) ? (
+                    <button type="button" disabled className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-500">Done</button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={processingIndex !== null}
+                      onClick={() => donePrint(index)}
+                      className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {processingIndex === index ? "Proses..." : "Done"}
+                    </button>
+                  )}
+                  <button
+                    disabled={isDoneStatus(item.status)}
+                    type="button"
+                    onClick={() => removeSelectedVaccine(index)}
+                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 disabled:opacity-40"
+                  >
+                    Hapus
+                  </button>
+                  {!isDoneStatus(item.status) ? <span className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Not Done</span> : null}
+                </div>
               </div>
             ))}
 
@@ -322,8 +454,8 @@ export default function VaccinationAdministerPage() {
 
           <textarea className="mt-3 w-full rounded-xl border px-3 py-2.5" placeholder="Catatan opsional" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
 
-          <button onClick={donePrint} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">
-            Done + Print Semua Sticker
+          <button disabled={processingIndex !== null} onClick={() => donePrint()} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+            {processingIndex === "all" ? "Memproses..." : "Done + Print Semua Vaksin Not Done"}
           </button>
         </section>
 

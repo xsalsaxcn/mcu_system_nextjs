@@ -17,12 +17,16 @@ function toCsv(rows: any[]) {
     "EMPLOYEE_ID",
     "PERUSAHAAN",
     "DEPARTEMEN",
+    "NIK",
     "STATUS",
     "VAKSIN",
     "LOT_NUMBER",
     "TANGGAL_PEMBERIAN",
     "NEXT_DOSE",
     "DOKTER_PETUGAS",
+    "PAYMENT_METHOD",
+    "PAYMENT_NOTE",
+    "STATUS_NOTE",
   ];
 
   const lines = [headers.join(",")];
@@ -35,12 +39,16 @@ function toCsv(rows: any[]) {
       row.employee_id || "",
       row.company_name || "",
       row.department || "",
+      row.nik || "",
       row.dashboard_status || row.queue_status || "",
       row.vaccine_names || "",
       row.lot_numbers || "",
       row.administered_at || "",
       row.next_due_date || "",
       row.administered_by || "",
+      row.payment_method || "",
+      row.payment_note || "",
+      row.status_note || "",
     ].map(csvEscape).join(","));
   }
 
@@ -51,7 +59,8 @@ function applyStatus(rows: any[], status: string) {
   if (status === "done") return rows.filter((row) => row.is_done);
   if (status === "not_done") return rows.filter((row) => !row.is_done);
   if (status === "no_queue") return rows.filter((row) => !row.queue_number && !row.is_done);
-  if (status === "waiting") return rows.filter((row) => row.queue_number && !row.is_done);
+  if (status === "waiting") return rows.filter((row) => row.queue_number && !row.is_done && ["WAITING", "WAITING_WITH_NOTE"].includes(String(row.queue_status || "").toUpperCase()));
+  if (status === "doctor") return rows.filter((row) => ["CALLED", "IN_PROGRESS"].includes(String(row.queue_status || "").toUpperCase()));
   return rows;
 }
 

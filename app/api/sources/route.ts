@@ -16,7 +16,11 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (program !== "all") {
-    query = query.or(`program_type.eq.${program},program_type.eq.all,program_type.is.null`);
+    if (program === "vaccination") {
+      query = query.or("program_type.eq.vaccination,program_type.eq.corporate,program_type.eq.all,program_type.is.null");
+    } else {
+      query = query.or(`program_type.eq.${program},program_type.eq.all,program_type.is.null`);
+    }
   }
 
   const { data, error } = await query;

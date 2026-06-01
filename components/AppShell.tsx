@@ -15,7 +15,6 @@ const adminMenuGroups = [
   {
     title: "MCU",
     items: [
-      { label: "Import Peserta", href: "/import" },
       { label: "Setup Parameter", href: "/setup-parameters" },
       { label: "Setup Label Paket", href: "/setup-label-paket" },
       { label: "Parameter Kelulusan", href: "/parameter-kelulusan" },
@@ -24,7 +23,6 @@ const adminMenuGroups = [
       { label: "AI MCU Analyzer", href: "/ai-mcu/analyze" },
       { label: "Training AI MCU", href: "/ai-mcu/train" },
       { label: "Cetak Label", href: "/labels" },
-      { label: "Hapus Database", href: "/cleanup" },
     ],
   },
   {
@@ -36,11 +34,15 @@ const adminMenuGroups = [
       { label: "Registrasi Vaksin", href: "/vaccination/register" },
       { label: "Antrian Vaksin", href: "/vaccination/queue" },
       { label: "Administered / Medis", href: "/vaccination/administer" },
+      { label: "Inventory Vaksin", href: "/vaccination/inventory" },
+      { label: "Reminder Vaksin", href: "/vaccination/reminder" },
     ],
   },
   {
     title: "Admin",
     items: [
+      { label: "Import Data", href: "/import" },
+      { label: "Hapus Database", href: "/cleanup" },
       { label: "Master Users", href: "/master" },
     ],
   },

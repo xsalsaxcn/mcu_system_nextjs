@@ -19,13 +19,14 @@ export async function GET(req: NextRequest) {
     .from("vaccination_registrations")
     .select("id,queue_number,queue_status,participant_name")
     .eq("session_id", session.id)
-    .order("id", { ascending: true });
+    .not("queue_number", "is", null)
+    .order("queue_number", { ascending: true });
 
   if (regsResult.error) return fail(regsResult.error.message, 500);
 
   const registrations = regsResult.data || [];
-  const waiting = registrations.filter((r: any) => ["WAITING", "REGISTERED"].includes(r.queue_status)).length;
-  const done = registrations.filter((r: any) => ["ADMINISTERED", "DONE"].includes(r.queue_status)).length;
+  const waiting = registrations.filter((r: any) => ["WAITING", "WAITING_WITH_NOTE", "REGISTERED"].includes(String(r.queue_status || "").toUpperCase())).length;
+  const done = registrations.filter((r: any) => ["ADMINISTERED", "DONE"].includes(String(r.queue_status || "").toUpperCase())).length;
 
   return ok({
     session: {

@@ -8,14 +8,53 @@ async function getSessionVaccines(supabase: any, sessionId: number) {
     .from("vaccination_session_vaccines")
     .select(`
       *,
-      vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,reminder_days_before),
-      lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_used)
+      vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,reminder_days_before,price,price_category),
+      lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_added,stock_used)
     `)
     .eq("session_id", sessionId)
     .eq("active", true)
     .order("id", { ascending: true });
 
   if (result.error) return [];
+  return result.data || [];
+}
+
+
+async function attachRegistrationItems(supabase: any, registrations: any[]) {
+  const ids = (registrations || []).map((row: any) => Number(row.id)).filter(Boolean);
+  if (!ids.length) return registrations || [];
+
+  const itemsResult = await supabase
+    .from("vaccination_registration_items")
+    .select("*, vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,price,price_category), lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_added,stock_used)")
+    .in("registration_id", ids)
+    .eq("active", true)
+    .order("id", { ascending: true });
+
+  if (itemsResult.error) throw new Error(itemsResult.error.message);
+
+  const byReg = new Map<number, any[]>();
+  for (const item of itemsResult.data || []) {
+    const key = Number(item.registration_id);
+    if (!byReg.has(key)) byReg.set(key, []);
+    byReg.get(key)!.push(item);
+  }
+
+  return (registrations || []).map((registration: any) => ({
+    ...registration,
+    items: byReg.get(Number(registration.id)) || [],
+  }));
+}
+
+async function getRegistrationItems(supabase: any, registrationId: number) {
+  const result = await supabase
+    .from("vaccination_registration_items")
+    .select("*, vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,reminder_days_before), lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_added,stock_used)")
+    .eq("registration_id", registrationId)
+    .eq("active", true)
+    .order("id", { ascending: true });
+
+  if (result.error) throw new Error(result.error.message);
   return result.data || [];
 }
 
@@ -29,9 +68,9 @@ export async function GET(req: NextRequest) {
   let regQuery = supabase
     .from("vaccination_registrations")
     .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days)")
-    .in("queue_status", ["CALLED", "IN_PROGRESS", "WAITING"])
+    .in("queue_status", ["CALLED", "IN_PROGRESS", "WAITING", "WAITING_WITH_NOTE"])
     .not("queue_number", "is", null)
-    .order("id", { ascending: true })
+    .order("queue_number", { ascending: true, nullsFirst: false })
     .limit(500);
 
   if (sessionId) regQuery = regQuery.eq("session_id", sessionId);
@@ -71,8 +110,15 @@ export async function GET(req: NextRequest) {
     new Set((recordsResult.data || []).map((record: any) => clean(record.administered_by)).filter(Boolean))
   ).sort();
 
+  let registrationsWithItems: any[] = [];
+  try {
+    registrationsWithItems = await attachRegistrationItems(supabase, regsResult.data || []);
+  } catch (error: any) {
+    return fail(error?.message || "Gagal mengambil item produk peserta.", 500);
+  }
+
   return ok({
-    registrations: regsResult.data || [],
+    registrations: registrationsWithItems,
     vaccines: vaccinesResult.data || [],
     lots: lotsResult.data || [],
     sessionVaccines,
@@ -112,6 +158,7 @@ export async function POST(req: NextRequest) {
 
   let vaccineItems = requestedVaccines
     .map((item: any) => ({
+      itemId: toInt(item.itemId || item.item_id || item.id, 0) || null,
       vaccineId: toInt(item.vaccineId || item.vaccine_id, 0),
       lotId: toInt(item.lotId || item.lot_id, 0),
       doseNumber: Math.max(1, toInt(item.doseNumber || item.dose_number, doseNumber)),
@@ -119,8 +166,19 @@ export async function POST(req: NextRequest) {
     .filter((item: any) => item.vaccineId && item.lotId);
 
   if (!vaccineItems.length) {
+    const regItems = await getRegistrationItems(supabase, registrationId);
+    vaccineItems = regItems.map((item: any) => ({
+      itemId: toInt(item.id, 0) || null,
+      vaccineId: toInt(item.vaccine_id, 0),
+      lotId: toInt(item.lot_id, 0),
+      doseNumber: Math.max(1, toInt(item.dose_number, 1)),
+    })).filter((item: any) => item.vaccineId && item.lotId);
+  }
+
+  if (!vaccineItems.length) {
     const sessionVaccines = await getSessionVaccines(supabase, toInt(reg.session_id, 0));
     vaccineItems = sessionVaccines.map((item: any) => ({
+      itemId: null,
       vaccineId: toInt(item.vaccine_id, 0),
       lotId: toInt(item.lot_id, 0),
       doseNumber: Math.max(1, toInt(item.dose_number, 1)),
@@ -128,6 +186,41 @@ export async function POST(req: NextRequest) {
   }
 
   if (!vaccineItems.length) return fail("Minimal satu vaksin dan lot number wajib dipilih.");
+
+  const activeItemsBefore = await getRegistrationItems(supabase, registrationId);
+  const itemById = new Map<number, any>((activeItemsBefore || []).map((item: any) => [Number(item.id), item]));
+
+  // Jika UI mengirim itemId, pakai data item dari database sebagai sumber kebenaran.
+  // Ini membuat vaksin tambahan dari Registrasi tetap bisa di-Done meskipun produk/lot sama
+  // dengan vaksin sebelumnya atau state UI belum refresh sempurna.
+  vaccineItems = vaccineItems.map((item: any) => {
+    if (!item.itemId) return item;
+    const existing = itemById.get(Number(item.itemId));
+    if (!existing) return item;
+    return {
+      ...item,
+      vaccineId: toInt(existing.vaccine_id, item.vaccineId),
+      lotId: toInt(existing.lot_id, item.lotId),
+      doseNumber: Math.max(1, toInt(existing.dose_number, item.doseNumber || 1)),
+      status: existing.status,
+    };
+  });
+
+  const doneItemKeys = new Set(
+    (activeItemsBefore || [])
+      .filter((item: any) => ["ADMINISTERED", "DONE"].includes(String(item.status || "").toUpperCase()))
+      .map((item: any) => `${Number(item.vaccine_id)}:${Number(item.lot_id)}`)
+  );
+
+  vaccineItems = vaccineItems.filter((item: any) => {
+    if (item.itemId) {
+      const existing = itemById.get(Number(item.itemId));
+      return existing && !["ADMINISTERED", "DONE"].includes(String(existing?.status || "").toUpperCase());
+    }
+    return !doneItemKeys.has(`${Number(item.vaccineId)}:${Number(item.lotId)}`);
+  });
+
+  if (!vaccineItems.length) return fail("Semua vaksin yang dipilih sudah berstatus Done.");
 
   const records: any[] = [];
 
@@ -167,11 +260,48 @@ export async function POST(req: NextRequest) {
 
     records.push(recordResult.data);
 
+    if ((item as any).itemId) {
+      await supabase
+        .from("vaccination_registration_items")
+        .update({
+          status: "ADMINISTERED",
+          administered_record_id: recordResult.data.id,
+          administered_at: administeredAt.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", (item as any).itemId)
+        .eq("registration_id", registrationId);
+    } else {
+      await supabase
+        .from("vaccination_registration_items")
+        .update({
+          status: "ADMINISTERED",
+          administered_record_id: recordResult.data.id,
+          administered_at: administeredAt.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("registration_id", registrationId)
+        .eq("vaccine_id", item.vaccineId)
+        .eq("lot_id", item.lotId)
+        .eq("active", true);
+    }
+
     const newUsed = Number(lot.stock_used || 0) + 1;
     await supabase
       .from("vaccination_vaccine_lots")
       .update({ stock_used: newUsed, updated_at: new Date().toISOString() })
       .eq("id", item.lotId);
+
+    await supabase.from("vaccination_inventory_movements").insert({
+      vaccine_id: item.vaccineId,
+      lot_id: item.lotId,
+      movement_type: "administered",
+      qty: -1,
+      reference_type: "vaccination_record",
+      reference_id: recordResult.data.id,
+      notes: `${reg.participant_name || "Peserta"} · ${vaccine.name} · Lot ${lot.lot_number}`,
+      created_by: administeredBy,
+    });
 
     if (nextDueDate && clean(reg.email)) {
       const reminderDays = Array.isArray(vaccine.reminder_days_before) ? vaccine.reminder_days_before : [7, 3, 1];
@@ -193,10 +323,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (!records.length) return fail("Tidak ada vaksin Not Done yang diproses.");
+
+  const remainingItemsResult = await supabase
+    .from("vaccination_registration_items")
+    .select("id,status")
+    .eq("registration_id", registrationId)
+    .eq("active", true);
+
+  if (remainingItemsResult.error) return fail(remainingItemsResult.error.message, 500);
+
+  const hasRemainingNotDone = (remainingItemsResult.data || []).some((item: any) => !["ADMINISTERED", "DONE"].includes(String(item.status || "").toUpperCase()));
+
   await supabase
     .from("vaccination_registrations")
     .update({
-      queue_status: "ADMINISTERED",
+      queue_status: hasRemainingNotDone ? "IN_PROGRESS" : "ADMINISTERED",
+      status_note: hasRemainingNotDone ? (reg.status_note || "Masih ada produk/vaksin Not Done.") : reg.status_note,
       updated_at: new Date().toISOString(),
     })
     .eq("id", registrationId);

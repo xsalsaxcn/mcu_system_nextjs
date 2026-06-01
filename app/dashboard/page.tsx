@@ -39,6 +39,99 @@ const VACCINATION_STATUS = [
   { value: "waiting", label: "Sudah Antrian Belum Selesai" },
 ];
 
+type SortDirection = "asc" | "desc";
+
+type SortConfig = {
+  key: string;
+  direction: SortDirection;
+};
+
+function SortIcon({ active, direction }: { active: boolean; direction: SortDirection }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={`h-3.5 w-3.5 shrink-0 ${active ? "text-blue-700" : "text-slate-400 group-hover:text-slate-600"}`}
+      viewBox="0 0 12 12"
+      fill="none"
+    >
+      {!active ? (
+        <>
+          <path d="M6 1.8 2.8 5.1h6.4L6 1.8Z" fill="currentColor" opacity="0.75" />
+          <path d="M6 10.2 2.8 6.9h6.4L6 10.2Z" fill="currentColor" opacity="0.75" />
+        </>
+      ) : direction === "asc" ? (
+        <path d="M6 1.8 2.8 5.8h6.4L6 1.8Z" fill="currentColor" />
+      ) : (
+        <path d="M6 10.2 2.8 6.2h6.4L6 10.2Z" fill="currentColor" />
+      )}
+    </svg>
+  );
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  sortConfig,
+  onSort,
+}: {
+  label: string;
+  sortKey: string;
+  sortConfig: SortConfig;
+  onSort: (key: string) => void;
+}) {
+  const active = sortConfig.key === sortKey;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`group inline-flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-left font-black uppercase tracking-wide transition hover:bg-white hover:text-slate-900 ${
+        active ? "text-blue-700" : "text-slate-500"
+      }`}
+      title={`Urutkan berdasarkan ${label}`}
+    >
+      <span>{label}</span>
+      <SortIcon active={active} direction={sortConfig.direction} />
+    </button>
+  );
+}
+
+function getSortValue(row: any, key: string, isVaccination: boolean) {
+  if (isVaccination) {
+    if (key === "mcu_or_id") return row.mcu_id || row.employee_id || "";
+    if (key === "company") return row.company_name || row.session?.company_name || "";
+    return row[key];
+  }
+
+  if (key === "mcu_or_id") return row.mcu_id || row.external_id || "";
+  if (key === "progress_percent") return Number(row.progress_percent || 0);
+  if (key === "total_score") return row.total_score === null || row.total_score === undefined ? null : Number(row.total_score);
+  return row[key];
+}
+
+function compareSortValues(a: any, b: any, sortConfig: SortConfig, isVaccination: boolean) {
+  const direction = sortConfig.direction === "asc" ? 1 : -1;
+  const aValue = getSortValue(a, sortConfig.key, isVaccination);
+  const bValue = getSortValue(b, sortConfig.key, isVaccination);
+
+  const aEmpty = aValue === null || aValue === undefined || String(aValue).trim() === "" || String(aValue).trim() === "-";
+  const bEmpty = bValue === null || bValue === undefined || String(bValue).trim() === "" || String(bValue).trim() === "-";
+
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+
+  const aNumber = typeof aValue === "number" ? aValue : Number(String(aValue).replace(/[^0-9.-]/g, ""));
+  const bNumber = typeof bValue === "number" ? bValue : Number(String(bValue).replace(/[^0-9.-]/g, ""));
+  const numericKeys = ["queue_number", "total_score", "progress_percent", "done_stage", "total_stage"];
+
+  if (numericKeys.includes(sortConfig.key) && Number.isFinite(aNumber) && Number.isFinite(bNumber)) {
+    return (aNumber - bNumber) * direction;
+  }
+
+  return String(aValue).localeCompare(String(bValue), "id-ID", { numeric: true, sensitivity: "base" }) * direction;
+}
+
 export default function DashboardPage() {
   return (
     <AuthGate>
@@ -159,6 +252,133 @@ function StatusPill({ children, tone = "slate" }: { children: any; tone?: "slate
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${cls}`}>{children}</span>;
 }
 
+function buildCapaskaAdminFormUrl(row: any, stage: any) {
+  const params = new URLSearchParams();
+  params.set("participant_id", String(row.participant_id || ""));
+  params.set("post_id", String(stage.post_id || ""));
+  params.set("post_name", String(stage.post_name || ""));
+  params.set("admin_help", "1");
+  return `/input?${params.toString()}`;
+}
+
+function CapaskaParticipantDetailModal({ row, onClose }: { row: any; onClose: () => void }) {
+  if (!row) return null;
+
+  const stages = Array.isArray(row.stages) ? row.stages : [];
+  const domainScores = row.capaska_domain_scores || {};
+  const redFlags = Array.isArray(row.capaska_red_flags) ? row.capaska_red_flags : [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-5 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-2xl font-black text-slate-950">{row.name}</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">
+              {row.mcu_id || row.external_id || "-"} · {row.source_name || "-"} · {row.package_name || "-"}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
+            Tutup
+          </button>
+        </div>
+
+        <div className="max-h-[calc(90vh-90px)] overflow-auto p-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-slate-400">Progress</div>
+              <div className="mt-2 text-2xl font-black text-slate-950">{row.done_stage}/{row.total_stage}</div>
+              <div className="text-sm font-bold text-slate-500">{row.progress_percent}%</div>
+            </div>
+            <div className="rounded-2xl bg-blue-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-blue-400">Total Score</div>
+              <div className="mt-2 text-2xl font-black text-blue-950">{row.total_score ?? "-"}</div>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-emerald-500">Kelulusan</div>
+              <div className="mt-2 text-lg font-black text-emerald-900">{row.kelulusan_status || "-"}</div>
+            </div>
+            <div className="rounded-2xl bg-red-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-red-400">Red Flag</div>
+              <div className="mt-2 text-2xl font-black text-red-900">{redFlags.length}</div>
+            </div>
+          </div>
+
+          {!!Object.keys(domainScores).length && (
+            <div className="mt-5 rounded-3xl border border-slate-200 p-4">
+              <div className="text-sm font-black uppercase tracking-wide text-slate-500">Skor per Pemeriksaan</div>
+              <div className="mt-3 grid gap-2 md:grid-cols-4">
+                {Object.entries(domainScores).map(([name, score]) => (
+                  <div key={name} className="rounded-2xl bg-slate-50 p-3">
+                    <div className="text-xs font-bold text-slate-500">{name}</div>
+                    <div className="text-lg font-black text-slate-950">{String(score ?? "-")}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 rounded-3xl border border-slate-200 p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <div>
+                <div className="text-sm font-black uppercase tracking-wide text-slate-500">Detail Progress Stage</div>
+                <div className="mt-1 text-sm font-semibold text-slate-500">
+                  Admin bisa klik tombol stage untuk langsung membuka form CAPASKA peserta ini pada post tersebut.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              {stages.map((stage: any) => (
+                <div key={stage.post_id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="font-black text-slate-950">{stage.post_name}</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-500">{stage.filled_parameters}/{stage.total_parameters} parameter · {stage.status_text || stage.progress_text}</div>
+                      <div className="mt-2 h-2 max-w-md rounded-full bg-slate-100">
+                        <div
+                          className={`h-2 rounded-full ${stage.is_done ? "bg-emerald-500" : "bg-blue-600"}`}
+                          style={{ width: `${stage.total_parameters ? Math.min(100, Math.round((Number(stage.filled_parameters || 0) / Number(stage.total_parameters || 1)) * 100)) : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-black ${stage.is_done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                        {stage.is_done ? "Selesai" : "Belum"}
+                      </span>
+                      {stage.post_id ? (
+                        <a
+                          href={buildCapaskaAdminFormUrl(row, stage)}
+                          className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white hover:bg-blue-700"
+                        >
+                          Buka / Edit Stage
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {!!redFlags.length && (
+            <div className="mt-5 rounded-3xl border border-red-100 bg-red-50 p-4">
+              <div className="text-sm font-black uppercase tracking-wide text-red-600">Red Flag / Tidak Direkomendasikan</div>
+              <div className="mt-3 grid gap-2">
+                {redFlags.map((flag: any, index: number) => (
+                  <div key={`${flag?.parameter || index}-${index}`} className="rounded-2xl bg-white p-3 text-sm font-bold text-red-700">
+                    {String(flag?.parameter || flag?.name || "Temuan")} {flag?.value ? `· ${flag.value}` : ""} {flag?.score !== undefined ? `· skor ${flag.score}` : ""}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OperatorDashboard({ user }: { user: Record<string, unknown> }) {
   const formRoute = getOperatorFormRoute(user);
   const formLabel = getOperatorFormLabel(user);
@@ -168,6 +388,7 @@ function OperatorDashboard({ user }: { user: Record<string, unknown> }) {
 
   return (
     <div className="space-y-6">
+      {selectedMcuRow && <CapaskaParticipantDetailModal row={selectedMcuRow} onClose={() => setSelectedMcuRow(null)} />}
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-950 shadow-sm">
         <div className="p-7 text-white">
           <div className="text-3xl font-black">Dashboard Operator</div>
@@ -229,11 +450,13 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
   const [sessionId, setSessionId] = useState("");
   const [vaccStatus, setVaccStatus] = useState("all");
   const [mcuStatus, setMcuStatus] = useState("Semua");
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "name", direction: "asc" });
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [summary, setSummary] = useState<any>({});
   const [rows, setRows] = useState<any[]>([]);
+  const [selectedMcuRow, setSelectedMcuRow] = useState<any>(null);
   const [message, setMessage] = useState("Pilih modul dan database, lalu klik Tampilkan Dashboard.");
 
   const activeModule = MODULES.find((m) => m.key === moduleKey) || MODULES[0];
@@ -242,6 +465,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
 
   async function loadOptions(nextModule = moduleKey) {
     setRows([]);
+    setSelectedMcuRow(null);
     setSummary({});
     setLoaded(false);
     setSearch("");
@@ -270,7 +494,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
     setSources(json.sources || []);
   }
 
-  async function loadDashboard() {
+  async function loadDashboard(nextMcuStatus = mcuStatus) {
     setLoading(true);
     setMessage("Memuat dashboard...");
 
@@ -301,7 +525,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
       const params = new URLSearchParams({
         program: mcuProgram,
         source_id: sourceId || "all",
-        status: mcuStatus,
+        status: nextMcuStatus,
         limit: "1000",
       });
 
@@ -322,6 +546,19 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleMcuMetricClick(nextStatus: string) {
+    setMcuStatus(nextStatus);
+    setSearch("");
+    loadDashboard(nextStatus);
+  }
+
+  function handleSort(key: string) {
+    setSortConfig((previous) => ({
+      key,
+      direction: previous.key === key && previous.direction === "asc" ? "desc" : "asc",
+    }));
   }
 
   function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full") {
@@ -350,40 +587,51 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
     loadOptions(moduleKey);
   }, [moduleKey]);
 
+  useEffect(() => {
+    setSortConfig(isVaccination ? { key: "queue_number", direction: "asc" } : { key: "name", direction: "asc" });
+  }, [isVaccination]);
+
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return rows;
+    const searchedRows = keyword
+      ? rows.filter((row: any) => {
+          const haystack = isVaccination
+            ? [
+                row.queue_number,
+                row.participant_name,
+                row.mcu_id,
+                row.employee_id,
+                row.company_name,
+                row.department,
+                row.dashboard_status,
+                row.vaccine_names,
+                row.lot_numbers,
+                row.administered_by,
+              ]
+            : [
+                row.name,
+                row.mcu_id,
+                row.external_id,
+                row.source_name,
+                row.package_name,
+                row.status_pemeriksaan,
+                row.kelulusan_status,
+                row.total_score,
+                row.progress_percent,
+              ];
 
-    return rows.filter((row: any) => {
-      const haystack = isVaccination
-        ? [
-            row.queue_number,
-            row.participant_name,
-            row.mcu_id,
-            row.employee_id,
-            row.company_name,
-            row.department,
-            row.dashboard_status,
-            row.vaccine_names,
-            row.lot_numbers,
-            row.administered_by,
-          ]
-        : [
-            row.name,
-            row.mcu_id,
-            row.external_id,
-            row.source_name,
-            row.package_name,
-            row.status_pemeriksaan,
-            row.kelulusan_status,
-          ];
+          return haystack.filter(Boolean).join(" ").toLowerCase().includes(keyword);
+        })
+      : rows;
 
-      return haystack.filter(Boolean).join(" ").toLowerCase().includes(keyword);
-    });
-  }, [rows, search, isVaccination]);
+    return [...searchedRows].sort((a: any, b: any) => compareSortValues(a, b, sortConfig, isVaccination));
+  }, [rows, search, isVaccination, sortConfig]);
+
+  const canClickMcuMetric = mcuProgram === "capaska";
 
   return (
     <div className="space-y-6">
+      {selectedMcuRow && <CapaskaParticipantDetailModal row={selectedMcuRow} onClose={() => setSelectedMcuRow(null)} />}
       <section className={`overflow-hidden rounded-[2rem] bg-gradient-to-r ${activeModule.accent} shadow-sm`}>
         <div className="p-7 text-white">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
@@ -495,7 +743,7 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
 
           <button
             type="button"
-            onClick={loadDashboard}
+            onClick={() => loadDashboard()}
             disabled={loading}
             className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
           >
@@ -520,12 +768,48 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
             </section>
           ) : (
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-              <MetricCard label="Total" value={summary.total} tone="slate" />
-              <MetricCard label="Belum Selesai" value={summary.belum_selesai} tone="amber" />
-              <MetricCard label="Selesai" value={summary.selesai} tone="blue" />
-              <MetricCard label="Lulus" value={summary.lulus} tone="emerald" />
-              <MetricCard label="Tidak Lulus" value={summary.tidak_lulus} tone="red" />
-              <MetricCard label="Rata-rata" value={`${summary.rata_rata || 0}%`} tone="indigo" />
+              <MetricCard
+                label="Total"
+                value={summary.total}
+                tone="slate"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Semua") : undefined}
+                active={canClickMcuMetric && mcuStatus === "Semua"}
+              />
+              <MetricCard
+                label="Belum Selesai"
+                value={summary.belum_selesai}
+                tone="amber"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Belum Selesai") : undefined}
+                active={canClickMcuMetric && mcuStatus === "Belum Selesai"}
+              />
+              <MetricCard
+                label="Selesai"
+                value={summary.selesai}
+                tone="blue"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Selesai") : undefined}
+                active={canClickMcuMetric && mcuStatus === "Selesai"}
+              />
+              <MetricCard
+                label="Lulus"
+                value={summary.lulus}
+                tone="emerald"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Lulus") : undefined}
+                active={canClickMcuMetric && mcuStatus === "Lulus"}
+              />
+              <MetricCard
+                label="Tidak Lulus"
+                value={summary.tidak_lulus}
+                tone="red"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Tidak Lulus") : undefined}
+                active={canClickMcuMetric && mcuStatus === "Tidak Lulus"}
+              />
+              <MetricCard
+                label="Rata-rata"
+                value={`${summary.rata_rata || 0}%`}
+                tone="indigo"
+                onClick={canClickMcuMetric ? () => handleMcuMetricClick("Semua") : undefined}
+                active={false}
+              />
             </section>
           )}
 
@@ -564,13 +848,13 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3 text-left">Antrian</th>
-                      <th className="px-4 py-3 text-left">Nama</th>
-                      <th className="px-4 py-3 text-left">MCU / ID</th>
-                      <th className="px-4 py-3 text-left">Perusahaan</th>
-                      <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Vaksin</th>
-                      <th className="px-4 py-3 text-left">Dokter</th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Antrian" sortKey="queue_number" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Nama" sortKey="participant_name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="MCU / ID" sortKey="mcu_or_id" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Perusahaan" sortKey="company" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Status" sortKey="dashboard_status" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Vaksin" sortKey="vaccine_names" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Dokter" sortKey="administered_by" sortConfig={sortConfig} onSort={handleSort} /></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -595,20 +879,33 @@ function Dashboard({ user }: { user: Record<string, unknown> }) {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3 text-left">Nama</th>
-                      <th className="px-4 py-3 text-left">No. MCU</th>
-                      <th className="px-4 py-3 text-left">Database</th>
-                      <th className="px-4 py-3 text-left">Paket</th>
-                      <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Kelulusan</th>
-                      <th className="px-4 py-3 text-left">Score</th>
-                      <th className="px-4 py-3 text-left">Progress</th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Nama" sortKey="name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="No. MCU" sortKey="mcu_or_id" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Database" sortKey="source_name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Paket" sortKey="package_name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Status" sortKey="status_pemeriksaan" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Kelulusan" sortKey="kelulusan_status" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Score" sortKey="total_score" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Progress" sortKey="progress_percent" sortConfig={sortConfig} onSort={handleSort} /></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRows.map((row: any) => (
                       <tr key={`${row.participant_id}-${row.mcu_id || row.external_id}`} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-bold text-slate-900">{row.name}</td>
+                        <td className="px-4 py-3 font-bold text-slate-900">
+                          {mcuProgram === "capaska" ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMcuRow(row)}
+                              className="text-left font-black text-slate-950 underline-offset-4 hover:text-blue-700 hover:underline"
+                              title="Lihat detail progress peserta"
+                            >
+                              {row.name}
+                            </button>
+                          ) : (
+                            row.name
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-slate-600">{row.mcu_id || row.external_id || "-"}</td>
                         <td className="px-4 py-3 text-slate-600">{row.source_name || "-"}</td>
                         <td className="px-4 py-3 text-slate-600">{row.package_name || "-"}</td>

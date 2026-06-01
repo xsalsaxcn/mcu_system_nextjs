@@ -32,7 +32,7 @@ export default function VaccinationDashboardPage() {
   async function loadBase() {
     const [sessionsJson, sourcesJson] = await Promise.all([
       fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/api/sources?program=corporate", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/sources?program=vaccination", { cache: "no-store" }).then((r) => r.json()),
     ]);
 
     if (sessionsJson.ok) setSessions(sessionsJson.sessions || []);
@@ -126,7 +126,7 @@ export default function VaccinationDashboardPage() {
             </select>
 
             <select className="rounded-xl border px-3 py-2.5" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
-              <option value="">Semua database corporate</option>
+              <option value="">Semua database corporate/vaksinasi</option>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>
                   {source.name}

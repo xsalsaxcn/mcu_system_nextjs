@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { computeStagesForParticipant } from "@/lib/server/progress";
 import { fail, ok } from "@/lib/server/response";
-import { computeMcuParticipantScoring2026, evaluateMcuGraduation2026 } from "@/lib/shared/capaskaScoring2026";
+import { computeMcuParticipantScoring2026, evaluateMcuGraduation2026 } from "@/lib/shared/capaskaDirectScoring2026";
 
 function isActive(value: any) {
   return value === 1 || value === true || value === "1" || value === null || value === undefined;
@@ -123,7 +123,7 @@ export async function GET(req: NextRequest) {
       packageParameters: packageParameters.data || [],
       parameters: parameters.data || [],
       results: results.data || [],
-      program,
+      program: String(p.program_type || program || ""),
     });
     const totalScore = scoreResult.totalScore;
     const rule = getRuleForPackage(Number(p.package_id), program, graduationRules.data || []);
@@ -140,6 +140,7 @@ export async function GET(req: NextRequest) {
       gender: p.gender,
       birth_date: p.birth_date || p.date_of_birth,
       province: p.province,
+      source_id: p.source_id,
       source_name: source?.name || "-",
       institution_name: source?.institution_name || "-",
       package_name: packageName.get(Number(p.package_id)) || "-",

@@ -3,6 +3,32 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
+async function attachRegistrationItems(supabase: any, registrations: any[]) {
+  const ids = (registrations || []).map((row: any) => Number(row.id)).filter(Boolean);
+  if (!ids.length) return registrations || [];
+
+  const itemsResult = await supabase
+    .from("vaccination_registration_items")
+    .select("*, vaccine:vaccination_vaccines(id,name,brand,price,price_category), lot:vaccination_vaccine_lots(id,lot_number,expiry_date)")
+    .in("registration_id", ids)
+    .eq("active", true)
+    .order("id", { ascending: true });
+
+  if (itemsResult.error) throw new Error(itemsResult.error.message);
+
+  const byReg = new Map<number, any[]>();
+  for (const item of itemsResult.data || []) {
+    const key = Number(item.registration_id);
+    if (!byReg.has(key)) byReg.set(key, []);
+    byReg.get(key)!.push(item);
+  }
+
+  return (registrations || []).map((registration: any) => ({
+    ...registration,
+    items: byReg.get(Number(registration.id)) || [],
+  }));
+}
+
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -19,10 +45,16 @@ export async function GET(req: NextRequest) {
     .from("vaccination_registrations")
     .select("*, vaccine:vaccination_vaccines(id,name,brand)")
     .eq("session_id", sessionId)
-    .order("id", { ascending: true });
+    .order("queue_number", { ascending: true, nullsFirst: false });
 
   if (regsResult.error) return fail(regsResult.error.message, 500);
-  return ok({ session: sessionResult.data, registrations: regsResult.data || [] });
+
+  try {
+    const registrations = await attachRegistrationItems(supabase, regsResult.data || []);
+    return ok({ session: sessionResult.data, registrations });
+  } catch (error: any) {
+    return fail(error?.message || "Gagal mengambil item produk antrian.", 500);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -42,8 +74,9 @@ export async function POST(req: NextRequest) {
       .from("vaccination_registrations")
       .select("*")
       .eq("session_id", sessionId)
-      .in("queue_status", ["WAITING", "REGISTERED"])
-      .order("id", { ascending: true })
+      .in("queue_status", ["WAITING", "WAITING_WITH_NOTE", "REGISTERED"])
+      .not("queue_number", "is", null)
+      .order("queue_number", { ascending: true })
       .limit(1)
       .maybeSingle();
 

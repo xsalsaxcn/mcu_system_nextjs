@@ -1,0 +1,820 @@
+export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_BACKEND_DIRECT_OPTION_V45";
+
+export type CapaskaDomainKey =
+  | "mata"
+  | "gigi_mulut"
+  | "tht"
+  | "penyakit_dalam"
+  | "jantung_pembuluh_darah"
+  | "ortopedi"
+  | "radiologi";
+
+export type CapaskaScoringResult = {
+  version: string;
+  totalScore: number | null;
+  totalBeforePenalty: number | null;
+  penalty: number;
+  notRecommended: boolean;
+  redFlags: string[];
+  domainScores: Record<string, number>;
+  rawDomainScores: Record<string, number>;
+  domainMaxScores: Record<string, number>;
+};
+
+export type CapaskaScoringOption = {
+  label: string;
+  value: string;
+  score?: number | null;
+  is_critical?: boolean;
+  note?: string;
+};
+
+export type CapaskaScoringConfig = {
+  options: CapaskaScoringOption[];
+  max_score?: number | null;
+  scoring_type?: string;
+  include_in_total_score?: boolean;
+};
+
+type DomainRule = {
+  key: CapaskaDomainKey;
+  label: string;
+  maxScore: number;
+  totalParameterName: string;
+  components: string[];
+};
+
+type ScoreRule = {
+  score: number;
+  critical?: boolean;
+  note?: string;
+};
+
+function roundScore(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function parseNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+
+  const cleaned = String(value)
+    .replace(",", ".")
+    .replace(/[^0-9.\-]/g, "")
+    .trim();
+
+  if (!cleaned) return null;
+
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function normalizeCapaskaKey(text: any) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/\(\s*\+\s*\)/g, "positif")
+    .replace(/\(\s*-\s*\)/g, "negatif")
+    .replace(/≥/g, "gte")
+    .replace(/≤/g, "lte")
+    .replace(/>=/g, "gte")
+    .replace(/<=/g, "lte")
+    .replace(/>/g, "gt")
+    .replace(/</g, "lt")
+    .replace(/[\s\n\r\t.,\-_\/\\:;()\[\]+]/g, "");
+}
+
+function scoreKey(parameterName: string, selectedValue: string) {
+  return `${normalizeCapaskaKey(parameterName)}::${normalizeCapaskaKey(selectedValue)}`;
+}
+
+function addRule(
+  target: Record<string, ScoreRule>,
+  parameterNames: string | string[],
+  selectedValues: string | string[],
+  score: number,
+  critical = false,
+  note = ""
+) {
+  const names = Array.isArray(parameterNames) ? parameterNames : [parameterNames];
+  const values = Array.isArray(selectedValues) ? selectedValues : [selectedValues];
+
+  for (const name of names) {
+    for (const value of values) {
+      target[scoreKey(name, value)] = { score, critical, note };
+    }
+  }
+}
+
+function buildBuiltinScoreRules() {
+  const rules: Record<string, ScoreRule> = {};
+
+  // MATA, max 12.
+  addRule(rules, ["Lensakontak/ kaca mata", "Lensakontak / kaca mata"], "Tidak menggunakan", 3);
+  addRule(rules, ["Lensakontak/ kaca mata", "Lensakontak / kaca mata"], "Menggunakan", -1);
+  addRule(rules, "Tes buta warna", "Tidak buta warna", 3);
+  addRule(rules, "Tes buta warna", ["Buta warna parsial", "Buta warna total"], -10, true);
+  addRule(rules, "Strabismus / Juling", ["(-) / (-)", "(-)/(-)", "Negatif", "Tidak ada"], 3);
+  addRule(rules, "Strabismus / Juling", ["(+) / (-)", "(-) / (+)", "(+) / (+)", "(+)/(-)", "(-)/(+)", "(+)/(+)", "Positif", "Ada"], -5);
+  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["Normal 6/6", "Normal >= 6/6", "Normal ≥ 6/6"], 3);
+  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["<6/6 - 6/12", "<6/6-6/12", "<6/6 sampai 6/12"], 2);
+  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], "<6/12", -10, true);
+
+  // GIGI, max 16.
+  addRule(rules, "Karang Gigi", ["Negative", "Negatif", "(-)", "Tidak ada"], 2);
+  addRule(rules, "Karang Gigi", ["Positive", "Positif", "(+)", "Ada"], -1);
+  addRule(rules, "Caries Dentis", "0 caries", 3);
+  addRule(rules, "Caries Dentis", "1 caries", -1);
+  addRule(rules, "Caries Dentis", "2 caries", -2);
+  addRule(rules, "Caries Dentis", "3 caries", -3);
+  addRule(rules, "Caries Dentis", ">3 caries", -10, true);
+  addRule(rules, "Tumpatan Gigi", "0 tumpatan", 2);
+  addRule(rules, "Tumpatan Gigi", ["<=5 tumpatan", "≤5 tumpatan", "<5 tumpatan", "<3 tumpatan"], 1);
+  addRule(rules, "Tumpatan Gigi", [">5 tumpatan", ">3 tumpatan"], -5);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "0 gigi", 3);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "1 gigi", 2);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], ["2 gigi", "2 gigi impaksi / impaksi 1 gigi depan"], 1);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">2 gigi", ">2 gigi impaksi", ">2 gigi impaksi atau 2 gigi depan impaksi"], -5);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">=4 gigi", "≥4 gigi"], -10, true);
+  addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "0 gigi", 2);
+  addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "1 gigi", 1);
+  addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "2 gigi", 0);
+  addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], ">2 gigi", -10, true);
+  addRule(rules, "Infeksi Gusi", ["Negative", "Negatif", "(-)", "Tidak ada"], 1);
+  addRule(rules, "Infeksi Gusi", ["Positive", "Positif", "(+)", "Ada"], -1);
+  addRule(rules, ["Dental panoramic", "Dental panoramik"], "Normal", 3);
+  addRule(rules, ["Dental panoramic", "Dental panoramik"], "ditemukan kelainan", -1);
+
+  // THT, max 10.
+  addRule(rules, "Membran timpani", "Intak", 2);
+  addRule(rules, "Membran timpani", ["Tidak Intak", "Tidak intak"], -10, true);
+  addRule(rules, "Serumen", "Tidak ada", 2);
+  addRule(rules, "Serumen", "Ada serumen", 1);
+  addRule(rules, "Tonsil", ["T0 - T1", "T0-T1", "T0 / T1-T1", "T0: T1-T1"], 2);
+  addRule(rules, "Tonsil", ["Sudah tonsilektomi", "tonsilektomi"], 2);
+  addRule(rules, "Tonsil", ["T0 - T2a", "T2a-T2a", "T0: T2a-T2a"], 1);
+  addRule(rules, "Tonsil", ["T0 - T2b", "T2b-T2b", "T0: T2b-T2b"], -1);
+  addRule(rules, "Tonsil", ["T2 - T3", "T3-T3", "T0: T3-T3"], -10, true);
+  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (Bividas)"], ["Negative", "Negatif", "(-)"], 2);
+  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (Bividas)"], ["Positive", "Positif", "(+)"], 1);
+  addRule(rules, "Epistaksis 1 tahun terakhir", "Tidak Ada", 1);
+  addRule(rules, "Epistaksis 1 tahun terakhir", "Ada", -1);
+  addRule(rules, "Tes Garputala (Weber) 512 Hz", "Normal", 1);
+  addRule(rules, "Tes Garputala (Weber) 512 Hz", "Tidak Normal", -10, true);
+
+  // PENYAKIT DALAM, max 28.
+  addRule(rules, ["Berat Badan (Kg)", "BB. (Kg)", "BB (Kg)"], "Sesuai juknis", 1);
+  addRule(rules, ["Berat Badan (Kg)", "BB. (Kg)", "BB (Kg)"], "Tidak sesuai juknis", -10, true);
+  addRule(rules, ["TB. (Cm)", "Tb (Cm)", "TB (Cm)"], "Sesuai juknis", 1);
+  addRule(rules, ["TB. (Cm)", "Tb (Cm)", "TB (Cm)"], "Tidak sesuai juknis", -10, true);
+  addRule(rules, "Tanda Vital", "Normal", 2);
+  addRule(rules, "Tanda Vital", "Tidak Normal", 1);
+  addRule(rules, "Tato kulit", "Tidak ada tato", 1);
+  addRule(rules, "Tato kulit", "Ada tato", -10, true);
+  addRule(rules, "Tindik (selain anting) Wanita : hanya 1 / telinga", ["Tidak ada", "Wanita hanya 1 / telinga", "Wanita hanya 1/telinga"], 1);
+  addRule(rules, "Tindik (selain anting) Wanita : hanya 1 / telinga", ["Ada (pria) Wanita >1)", "Ada (pria)", "Wanita >1"], -10, true);
+  addRule(rules, ["Pemeriksaan Fisik Jantung", "Pemeriksaan Fisik Paru"], "Normal", 2);
+  addRule(rules, ["Pemeriksaan Fisik Jantung", "Pemeriksaan Fisik Paru"], "Tidak Normal", 1);
+
+  addRule(rules, "Hernia", ["Tidak ada", "Tidak Ada", "Normal"], 1);
+  addRule(rules, "Hernia", ["Ada", "Tidak Normal"], -10, true);
+  addRule(rules, ["NT Epigastrum", "NT Epigastrium", "Liver", "Bising Usus", "Bekas Operasi (>6Bulan)", "Bekas operasi (>3bulan)", "Bekas operasi (>6bulan)"], "Normal", 1);
+  addRule(rules, ["NT Epigastrum", "NT Epigastrium", "Liver", "Bising Usus", "Bekas Operasi (>6Bulan)", "Bekas operasi (>3bulan)", "Bekas operasi (>6bulan)"], "Tidak Normal", -2);
+  addRule(rules, ["Benjolan", "Benjolan / Tumor", "Benjolan/Tumor"], ["Tidak ada", "Tidak Ada", "Normal"], 1);
+  addRule(rules, ["Benjolan", "Benjolan / Tumor", "Benjolan/Tumor"], ["Ada", "Tidak Normal"], -10, true);
+
+  addRule(rules, ["Hemoroid eksterna", "Hemoroid interna", "Fisura ani"], ["Tidak ada", "Tidak Ada", "Normal", "(-)"], 1);
+  addRule(rules, ["Hemoroid eksterna", "Hemoroid interna", "Fisura ani"], ["Ada", "Tidak Normal", "(+)"], 0);
+  addRule(rules, ["Struktur/Prolaps recti", "Striktur/Prolaps recti", "Striktur / Prolaps recti"], ["Tidak ada", "Tidak Ada", "Normal", "(-)"], 1);
+  addRule(rules, ["Struktur/Prolaps recti", "Striktur/Prolaps recti", "Striktur / Prolaps recti"], ["Ada", "Tidak Normal", "(+)"], -10, true);
+
+  addRule(rules, ["Hidronefrosis", "Kelainan kongenital", "Hipospadia", "Hidrokel", "Undescensus testis", "Undecensus testis", "Batu sal kemih", "Batu saluran kemih", "Cystitis akut / kronis", "Post operasi varikokel", "Phimosis"], ["Normal", "Tidak ada", "Tidak Ada", "(-)"], 1);
+  addRule(rules, ["Hidronefrosis", "Kelainan kongenital", "Hipospadia", "Hidrokel", "Undescensus testis", "Undecensus testis", "Batu sal kemih", "Batu saluran kemih", "Cystitis akut / kronis", "Post operasi varikokel", "Phimosis"], ["Tidak Normal", "Ada", "(+)"], -10, true);
+
+  // JANTUNG DAN PEMBULUH DARAH, max 12.
+  addRule(rules, ["Kelainan Anatomi Jantung", "Kelainan Irama Jantung", "Kelainan Irama Jantung yang mengganggu latihan fisik sedang", "Iskemik Miocardial", "Iskemik Miokardial", "Kelainan kongenital jantung", "Kelainan Arteri pada ekstremitas"], "Tidak Ada", 2);
+  addRule(rules, ["Kelainan Anatomi Jantung", "Kelainan Irama Jantung", "Kelainan Irama Jantung yang mengganggu latihan fisik sedang", "Iskemik Miocardial", "Iskemik Miokardial", "Kelainan kongenital jantung", "Kelainan Arteri pada ekstremitas"], "Ada", -10, true);
+  addRule(rules, "Varises Tungkai (insufisiensi vena)", "Tidak Ada", 2);
+  addRule(rules, "Varises Tungkai (insufisiensi vena)", "Ada", -1);
+
+  // ORTOPEDI, max 16 mengikuti rekap 100. Vertebra klinis dibuat 1 poin per normal.
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi kaki", "General Laxity"], "Tidak Ada", 1);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi kaki", "General Laxity"], "Ada", -10, true);
+  addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Tidak Ada", "Tidak ada"], 2);
+  addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], "Ringan", -1);
+  addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
+
+  // RADIOLOGI / WHOLE SPINE, max 6.
+  addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], ["Tidak Ada", "Tidak ada", "TA", "Tidak ada (TA)"], 2);
+  addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], "Ringan", -1);
+  addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
+
+  return rules;
+}
+
+const BUILTIN_SCORE_RULES = buildBuiltinScoreRules();
+
+export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
+  {
+    key: "mata",
+    label: "Mata",
+    maxScore: 12,
+    totalParameterName: "Total Score Kesehatan mata",
+    components: [
+      "Lensakontak/ kaca mata",
+      "Tes buta warna",
+      "Strabismus / Juling",
+      "Pemeriksaan Visus OD  / OS",
+    ],
+  },
+  {
+    key: "gigi_mulut",
+    label: "Gigi & Mulut + Dental Panoramik",
+    maxScore: 16,
+    totalParameterName: "Score total Pemeriksaan Kesehatan Gigi dan Mulut",
+    components: [
+      "Karang Gigi",
+      "Caries Dentis",
+      "Tumpatan Gigi",
+      "Impaksi gigi",
+      "Kehilangan Gigi (Baik depan maupun belakang)",
+      "Infeksi Gusi",
+      "Dental panoramic",
+    ],
+  },
+  {
+    key: "tht",
+    label: "THT",
+    maxScore: 10,
+    totalParameterName: "Score total Pemeriksaan Kesehatan THT",
+    components: [
+      "Membran timpani",
+      "Serumen",
+      "Tonsil",
+      "Rhinitis Alergi (divide)",
+      "Epistaksis 1 tahun terakhir",
+      "Tes Garputala (Weber) 512 Hz",
+    ],
+  },
+  {
+    key: "penyakit_dalam",
+    label: "Penyakit Dalam",
+    maxScore: 28,
+    totalParameterName: "Score total Pemeriksaan Penyakit Dalam",
+    components: [
+      "Berat Badan (Kg)",
+      "TB. (Cm)",
+      "Tanda Vital",
+      "Tato kulit",
+      "Tindik (selain anting) Wanita : hanya 1 / telinga",
+      "Pemeriksaan Fisik Jantung",
+      "Pemeriksaan Fisik Paru",
+      "Hernia",
+      "NT Epigastrum",
+      "Benjolan",
+      "Liver",
+      "Bising Usus",
+      "Bekas Operasi (>6Bulan)",
+      "Hemoroid eksterna",
+      "Hemoroid interna",
+      "Fisura ani",
+      "Struktur/Prolaps recti",
+      "Hidronefrosis",
+      "Kelainan kongenital",
+      "Hipospadia",
+      "Undescensus testis",
+      "Batu sal kemih",
+      "Cystitis akut / kronis",
+      "Post operasi varikokel",
+      "Phimosis",
+    ],
+  },
+  {
+    key: "jantung_pembuluh_darah",
+    label: "Jantung & Pembuluh Darah",
+    maxScore: 12,
+    totalParameterName: "Score total Pemeriksaan Kesehatan Jantung dan Pembuluh Darah",
+    components: [
+      "Kelainan Anatomi Jantung",
+      "Kelainan Irama Jantung",
+      "Iskemik Miocardial",
+      "Kelainan kongenital jantung",
+      "Varises Tungkai (insufisiensi vena)",
+      "Kelainan Arteri pada ekstremitas",
+    ],
+  },
+  {
+    key: "ortopedi",
+    label: "Ortopedi",
+    maxScore: 16,
+    totalParameterName: "Score total Pemeriksaan Ortopedi",
+    components: [
+      "sindaktili",
+      "polidaktili",
+      "spina bifida",
+      "mallet finger",
+      "Hiperekstensi lengan",
+      "Hammer toe",
+      "Hallux valgus",
+      "Webbed toe",
+      "O/X bean",
+      "Pes planus / kaki datar",
+      "Polidactily",
+      "Hiperekstensi kaki",
+      "General Laxity",
+      "Skoliosis",
+      "Kifosis",
+      "Lordosis",
+    ],
+  },
+  {
+    key: "radiologi",
+    label: "Radiologi / Whole Spine",
+    maxScore: 6,
+    totalParameterName: "Score total Pemeriksaan Penunjang Radiologi",
+    components: [
+      "Rontgen Whole Spine AP Lateral >> Skoliosis",
+      "Rontgen Whole Spine AP Lateral >> Kifosis",
+      "Rontgen Whole Spine AP Lateral >> Lordosis",
+    ],
+  },
+];
+
+const PARAMETER_ALIASES: Record<string, string[]> = {
+  [normalizeCapaskaKey("Lensakontak/ kaca mata")]: ["Lensakontak / kaca mata"],
+  [normalizeCapaskaKey("Pemeriksaan Visus OD  / OS")]: ["Pemeriksaan Visus OD / OS"],
+  [normalizeCapaskaKey("Berat Badan (Kg)")]: ["BB (Kg)", "BB. (Kg)"],
+  [normalizeCapaskaKey("TB. (Cm)")]: ["TB (Cm)", "Tb (Cm)"],
+  [normalizeCapaskaKey("NT Epigastrum")]: ["NT Epigastrium"],
+  [normalizeCapaskaKey("Benjolan")]: ["Benjolan / Tumor", "Benjolan/Tumor"],
+  [normalizeCapaskaKey("Bekas Operasi (>6Bulan)")]: ["Bekas operasi (>3bulan)", "Bekas operasi (>6bulan)"],
+  [normalizeCapaskaKey("Struktur/Prolaps recti")]: ["Striktur/Prolaps recti", "Striktur / Prolaps recti"],
+  [normalizeCapaskaKey("Undescensus testis")]: ["Undecensus testis"],
+  [normalizeCapaskaKey("Batu sal kemih")]: ["Batu saluran kemih"],
+  [normalizeCapaskaKey("O/X bean")]: ["O/X been"],
+  [normalizeCapaskaKey("Polidactily")]: ["Polidactyly"],
+};
+
+const VALUE_FIELD_BY_PARAMETER: Record<string, string> = {
+  [normalizeCapaskaKey("Lensakontak/ kaca mata")]: "Value Lensakontak/ kaca mata",
+  [normalizeCapaskaKey("Tes buta warna")]: "Value buta warna",
+  [normalizeCapaskaKey("Strabismus / Juling")]: "Value Strabismus / Juling",
+  [normalizeCapaskaKey("Pemeriksaan Visus OD  / OS")]: "Value Pemeriksaan Visus OD  / OS",
+  [normalizeCapaskaKey("Tindik (selain anting) Wanita : hanya 1 / telinga")]: "Value (selain anting) Wanita : hanya 1 / telinga",
+};
+
+function normalizeScoringOption(option: any): CapaskaScoringOption | null {
+  if (typeof option === "string") {
+    const label = option.trim();
+    return label ? { label, value: label, score: null, is_critical: false, note: "" } : null;
+  }
+
+  if (!option || typeof option !== "object") return null;
+
+  const label = String(option.label ?? option.option_label ?? option.text ?? option.value ?? "").trim();
+  if (!label) return null;
+
+  const value = String(option.value ?? option.option_value ?? label).trim() || label;
+  const score = parseNumber(option.score);
+
+  return {
+    label,
+    value,
+    score,
+    is_critical: Boolean(option.is_critical ?? option.critical ?? false),
+    note: String(option.note ?? option.recommendation_text ?? "").trim(),
+  };
+}
+
+export function parseCapaskaScoringConfig(config: any): CapaskaScoringConfig {
+  let parsed = config;
+
+  try {
+    if (typeof config === "string") parsed = JSON.parse(config || "[]");
+  } catch {
+    parsed = [];
+  }
+
+  if (Array.isArray(parsed)) {
+    return {
+      options: parsed.map(normalizeScoringOption).filter(Boolean) as CapaskaScoringOption[],
+      max_score: null,
+      scoring_type: "by_option",
+      include_in_total_score: true,
+    };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
+    return {
+      options: rawOptions.map(normalizeScoringOption).filter(Boolean) as CapaskaScoringOption[],
+      max_score: parseNumber(parsed.max_score),
+      scoring_type: String(parsed.scoring_type || "by_option"),
+      include_in_total_score: parsed.include_in_total_score === false ? false : true,
+    };
+  }
+
+  return { options: [], max_score: null, scoring_type: "by_option", include_in_total_score: true };
+}
+
+export function parseCapaskaOptions(config: any) {
+  return parseCapaskaScoringConfig(config).options.map((option) => option.label);
+}
+
+function findConfigOption(param: any, selectedValue: string) {
+  const options = parseCapaskaScoringConfig(param?.config_json).options;
+  const selectedKey = normalizeCapaskaKey(selectedValue);
+
+  return options.find((option) => (
+    normalizeCapaskaKey(option.label) === selectedKey || normalizeCapaskaKey(option.value) === selectedKey
+  )) || null;
+}
+
+function getBuiltinRule(parameterName: string, selectedValue: string) {
+  return BUILTIN_SCORE_RULES[scoreKey(parameterName, selectedValue)] || null;
+}
+
+export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
+  const selected = String(selectedValue || "").trim();
+  if (!selected) return 0;
+
+  const configOption = findConfigOption(param, selected);
+  if (configOption && typeof configOption.score === "number") return configOption.score;
+
+  const name = String(param?.name || "");
+  const category = String(param?.category || "").toLowerCase();
+  const exact = getBuiltinRule(name, selected);
+  if (exact) return exact.score;
+
+  const selectedKey = normalizeCapaskaKey(selected);
+
+  if (
+    category.includes("penyakit dalam") ||
+    category.includes("abdomen") ||
+    category.includes("rektum") ||
+    category.includes("urogenitalia")
+  ) {
+    if (["normal", "tidakada", "negative", "negatif"].includes(selectedKey)) return 1;
+    if (selectedKey === "tidaknormal") return -2;
+    if (selectedKey === "ada") return -10;
+  }
+
+  if (category.includes("ortopedi") || category.includes("gerak") || category.includes("vertebra")) {
+    if (selectedKey === "tidakada") return 1;
+    if (selectedKey === "ringan") return -1;
+    if (["ada", "sedang", "berat", "sedangberat"].includes(selectedKey)) return -10;
+  }
+
+  if (category.includes("radiologi") || category.includes("rontgen")) {
+    if (["tidakada", "ta"].includes(selectedKey)) return 2;
+    if (selectedKey === "ringan") return -1;
+    if (["sedang", "berat", "sedangberat"].includes(selectedKey)) return -10;
+  }
+
+  return 0;
+}
+
+export function isCapaskaCriticalChoice(param: any, selectedValue: string) {
+  const configOption = findConfigOption(param, selectedValue);
+  if (configOption?.is_critical) return true;
+
+  const exact = getBuiltinRule(String(param?.name || ""), String(selectedValue || ""));
+  if (exact?.critical) return true;
+
+  const score = scoreCapaskaDirectChoice(param, selectedValue);
+  return score <= -10;
+}
+
+export function getCapaskaValueFieldName(parameterName: string) {
+  return VALUE_FIELD_BY_PARAMETER[normalizeCapaskaKey(parameterName)] || `Value ${parameterName}`;
+}
+
+export function isCapaskaValueOrScoreParameter(param: any) {
+  const name = String(param?.name || "").toLowerCase();
+  return name.startsWith("value ") || name.startsWith("score ") || name.startsWith("total score");
+}
+
+function getParameterByName(byName: Map<string, any>, name: string) {
+  const key = normalizeCapaskaKey(name);
+  const direct = byName.get(key);
+  if (direct) return direct;
+
+  const aliases = PARAMETER_ALIASES[key] || [];
+  for (const alias of aliases) {
+    const found = byName.get(normalizeCapaskaKey(alias));
+    if (found) return found;
+  }
+
+  return null;
+}
+
+export function computeCapaskaDerivedValues(parameters: any[], inputValues: Record<string, string>) {
+  const next = { ...inputValues };
+  const byName = new Map<string, any>();
+
+  parameters.forEach((p) => {
+    byName.set(normalizeCapaskaKey(p.name), p);
+    if (isCapaskaValueOrScoreParameter(p)) {
+      next[p.id] = "";
+    }
+  });
+
+  parameters.forEach((p) => {
+    if (isCapaskaValueOrScoreParameter(p)) return;
+
+    const selected = next[p.id];
+    if (!selected) return;
+
+    // Some legacy CAPASKA parameters are still stored as text inputs in the DB,
+    // but their values are actually fixed choices. Score them when either a
+    // config option exists or a built-in CAPASKA rule recognizes the selection.
+    const hasConfiguredOptions = parseCapaskaScoringConfig(p.config_json).options.length > 0;
+    const hasBuiltinRule = Boolean(getBuiltinRule(String(p.name || ""), selected));
+    if (!hasConfiguredOptions && !hasBuiltinRule) return;
+
+    const score = scoreCapaskaDirectChoice(p, selected);
+    const valueFieldName = getCapaskaValueFieldName(String(p.name || ""));
+    const valueParam = getParameterByName(byName, valueFieldName);
+
+    if (valueParam) {
+      next[valueParam.id] = String(score);
+    }
+  });
+
+  const scoreOf = (name: string) => {
+    const p = getParameterByName(byName, name);
+    if (!p) return 0;
+    const selected = next[p.id];
+    if (!selected) return 0;
+    return scoreCapaskaDirectChoice(p, selected);
+  };
+
+  const setRawTotal = (totalName: string, names: string[]) => {
+    const totalParam = getParameterByName(byName, totalName);
+    if (!totalParam) return;
+
+    const total = names.reduce((sum, name) => sum + scoreOf(name), 0);
+    next[totalParam.id] = String(roundScore(total));
+  };
+
+  setRawTotal("Score Abdomen", [
+    "Hernia",
+    "NT Epigastrum",
+    "Benjolan",
+    "Liver",
+    "Bising Usus",
+    "Bekas Operasi (>6Bulan)",
+  ]);
+
+  setRawTotal("Score Pemeriksaan Anus & Rektum (Colok Dubur)", [
+    "Hemoroid eksterna",
+    "Hemoroid interna",
+    "Fisura ani",
+    "Struktur/Prolaps recti",
+  ]);
+
+  setRawTotal("Score Urogenitalia", [
+    "Hidronefrosis",
+    "Kelainan kongenital",
+    "Hipospadia",
+    "Undescensus testis",
+    "Batu sal kemih",
+    "Cystitis akut / kronis",
+    "Post operasi varikokel",
+    "Phimosis",
+  ]);
+
+  setRawTotal("Score Anggota Gerak Atas", [
+    "sindaktili",
+    "polidaktili",
+    "spina bifida",
+    "mallet finger",
+    "Hiperekstensi lengan",
+  ]);
+
+  setRawTotal("Score Anggota Gerak Bawah", [
+    "Hammer toe",
+    "Hallux valgus",
+    "Webbed toe",
+    "O/X bean",
+    "Pes planus / kaki datar",
+    "Polidactily",
+    "Hiperekstensi kaki",
+    "General Laxity",
+  ]);
+
+  setRawTotal("Score Vertebra / Tulang Belakang", [
+    "Skoliosis",
+    "Kifosis",
+    "Lordosis",
+  ]);
+
+  setRawTotal("Score Rontgen Whole Spine AP Lateral", [
+    "Rontgen Whole Spine AP Lateral >> Skoliosis",
+    "Rontgen Whole Spine AP Lateral >> Kifosis",
+    "Rontgen Whole Spine AP Lateral >> Lordosis",
+  ]);
+
+  for (const domain of CAPASKA_DOMAIN_RULES) {
+    const totalParam = getParameterByName(byName, domain.totalParameterName);
+    if (!totalParam) continue;
+
+    const total = domain.components.reduce((sum, name) => sum + scoreOf(name), 0);
+    next[totalParam.id] = String(roundScore(Math.min(domain.maxScore, total)));
+  }
+
+  return next;
+}
+
+function emptyScoring(): CapaskaScoringResult {
+  const domainScores: Record<string, number> = {};
+  const rawDomainScores: Record<string, number> = {};
+  const domainMaxScores: Record<string, number> = {};
+
+  for (const domain of CAPASKA_DOMAIN_RULES) {
+    domainScores[domain.key] = 0;
+    rawDomainScores[domain.key] = 0;
+    domainMaxScores[domain.key] = domain.maxScore;
+  }
+
+  return {
+    version: CAPASKA_SCORING_VERSION,
+    totalScore: null,
+    totalBeforePenalty: null,
+    penalty: 0,
+    notRecommended: false,
+    redFlags: [],
+    domainScores,
+    rawDomainScores,
+    domainMaxScores,
+  };
+}
+
+function computeGenericParticipantScore(
+  participantId: number,
+  packageId: number,
+  packageParameters: any[],
+  parameters: any[],
+  results: any[]
+) {
+  const parameterIds = new Set(
+    packageParameters
+      .filter((pp) => Number(pp.package_id) === Number(packageId))
+      .map((pp) => Number(pp.parameter_id))
+  );
+
+  const paramsForPackage = parameters.filter((p) => parameterIds.has(Number(p.id)));
+  const resultMap = new Map<number, string>();
+
+  results
+    .filter((r) => Number(r.participant_id) === Number(participantId))
+    .forEach((r) => resultMap.set(Number(r.parameter_id), String(r.value ?? "").trim()));
+
+  const isTotalScoreParameter = (parameter: any) => {
+    const name = String(parameter?.name || "").toLowerCase();
+    return (
+      name.includes("total score") ||
+      name.includes("score total") ||
+      name.includes("skor total") ||
+      name.includes("total skor")
+    );
+  };
+
+  const isValueScoreParameter = (parameter: any) => {
+    const name = String(parameter?.name || "").toLowerCase().trim();
+    return name.startsWith("value ") || name.startsWith("nilai ");
+  };
+
+  const scoreParams = paramsForPackage.filter(isTotalScoreParameter);
+  const fallbackParams = paramsForPackage.filter(isValueScoreParameter);
+  const selectedParams = scoreParams.length ? scoreParams : fallbackParams;
+
+  let total = 0;
+  let count = 0;
+
+  for (const parameter of selectedParams) {
+    const n = parseNumber(resultMap.get(Number(parameter.id)));
+    if (n !== null) {
+      total += n;
+      count += 1;
+    }
+  }
+
+  return count > 0 ? roundScore(total) : null;
+}
+
+export function computeMcuParticipantScoring2026(args: {
+  participantId: number;
+  packageId: number;
+  packageParameters: any[];
+  parameters: any[];
+  results: any[];
+  program?: string;
+}) {
+  const program = String(args.program || "").toLowerCase();
+
+  if (program !== "capaska") {
+    const totalScore = computeGenericParticipantScore(
+      args.participantId,
+      args.packageId,
+      args.packageParameters,
+      args.parameters,
+      args.results
+    );
+
+    return {
+      ...emptyScoring(),
+      version: "GENERIC_SCORE_SUM",
+      totalScore,
+      totalBeforePenalty: totalScore,
+    };
+  }
+
+  const parameterIds = new Set(
+    args.packageParameters
+      .filter((pp) => Number(pp.package_id) === Number(args.packageId))
+      .map((pp) => Number(pp.parameter_id))
+  );
+
+  const paramsForPackage = args.parameters.filter((p) => parameterIds.has(Number(p.id)));
+  const resultMap = new Map<number, string>();
+
+  args.results
+    .filter((r) => Number(r.participant_id) === Number(args.participantId))
+    .forEach((r) => resultMap.set(Number(r.parameter_id), String(r.value ?? "").trim()));
+
+  const byName = new Map<string, any>();
+  paramsForPackage.forEach((p) => byName.set(normalizeCapaskaKey(p.name), p));
+
+  const result = emptyScoring();
+  let touched = false;
+
+  const getSelected = (name: string) => {
+    const param = getParameterByName(byName, name);
+    if (!param) return { param: null, value: "" };
+
+    const value = String(resultMap.get(Number(param.id)) || "").trim();
+    return { param, value };
+  };
+
+  for (const domain of CAPASKA_DOMAIN_RULES) {
+    let domainTotal = 0;
+    let answeredCount = 0;
+
+    for (const componentName of domain.components) {
+      const { param, value } = getSelected(componentName);
+      if (!param || !value) continue;
+
+      const score = scoreCapaskaDirectChoice(param, value);
+      domainTotal += score;
+      answeredCount += 1;
+      touched = true;
+
+      if (isCapaskaCriticalChoice(param, value)) {
+        result.redFlags.push(`${domain.label}: ${String(param.name || componentName)} = ${value}`);
+      }
+    }
+
+    if (answeredCount > 0) {
+      result.rawDomainScores[domain.key] = roundScore(domainTotal);
+      result.domainScores[domain.key] = roundScore(Math.min(domain.maxScore, domainTotal));
+      continue;
+    }
+
+    const totalParam = getParameterByName(byName, domain.totalParameterName);
+    const totalValue = totalParam ? parseNumber(resultMap.get(Number(totalParam.id))) : null;
+
+    if (totalValue !== null) {
+      result.rawDomainScores[domain.key] = roundScore(totalValue);
+      result.domainScores[domain.key] = roundScore(Math.min(domain.maxScore, totalValue));
+      touched = true;
+    }
+  }
+
+  if (!touched) return result;
+
+  const total = roundScore(
+    CAPASKA_DOMAIN_RULES.reduce((sum, domain) => sum + (result.domainScores[domain.key] || 0), 0)
+  );
+
+  result.notRecommended = result.redFlags.length > 0;
+  result.totalBeforePenalty = total;
+  result.penalty = 0;
+  result.totalScore = total;
+
+  return result;
+}
+
+export function evaluateMcuGraduation2026(
+  totalScore: number | null,
+  isComplete: boolean,
+  rule: any,
+  scoring?: Pick<CapaskaScoringResult, "notRecommended">
+) {
+  if (!isComplete) return "Belum Selesai";
+  if (totalScore === null) return "Belum Dinilai";
+  if (scoring?.notRecommended) return "Tidak Direkomendasikan";
+
+  const min = Number(rule?.pass_min_score ?? 0);
+  const max = Number(rule?.pass_max_score ?? 999999);
+
+  return totalScore >= min && totalScore <= max ? "Lulus" : "Tidak Lulus";
+}

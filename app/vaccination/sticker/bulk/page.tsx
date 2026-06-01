@@ -12,32 +12,32 @@ function fmtDate(value: any) {
 function Label({ record }: { record: any }) {
   return (
     <section className="label-card">
-      <div className="label-title">Vaccination Label</div>
+      <div className="label-title">Harmony Health App · Vaccination</div>
 
       <div className="label-name">{record.participant_name}</div>
+      <div className="label-vaccine">{record.vaccine_name}</div>
 
-      <div className="mt-[2mm]">
-        <div className="label-row">
-          <b>Vaksin:</b> {record.vaccine_name}
+      <div className="label-date-row">
+        <div>
+          <div className="label-caption">Tanggal Tindakan</div>
+          <div className="label-date">{fmtDate(record.administered_at)}</div>
         </div>
-        <div className="label-row">
-          <b>Lot:</b> {record.lot_number}
-        </div>
-        <div className="label-row">
-          <b>Tgl:</b> {fmtDate(record.administered_at)}
-        </div>
-        <div className="label-row">
-          <b>Next:</b> {fmtDate(record.next_due_date)}
+        <div className="text-right">
+          <div className="label-caption">Next Dose</div>
+          <div className="label-date">{fmtDate(record.next_due_date)}</div>
         </div>
       </div>
 
+      <div className="label-lot">Lot Number: <b>{record.lot_number || "-"}</b></div>
+
       <div className="label-footer">
-        <span>Record #{record.id}</span>
-        <span>{record.registration?.queue_number || ""}</span>
+        <span>{record.registration?.queue_number || `Record #${record.id}`}</span>
+        <span>{record.session?.location || record.session?.company_name || ""}</span>
       </div>
     </section>
   );
 }
+
 
 export default function VaccinationBulkStickerPage() {
   const [records, setRecords] = useState<any[]>([]);
@@ -101,8 +101,8 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-title {
-          font-size: 8pt;
-          font-weight: 800;
+          font-size: 8.5pt;
+          font-weight: 900;
           text-transform: uppercase;
           letter-spacing: 0.04em;
           border-bottom: 1px solid #000;
@@ -111,28 +111,62 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-name {
-          font-size: 12pt;
-          line-height: 1.1;
+          font-size: 15.5pt;
+          line-height: 1.02;
           font-weight: 900;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
-        .label-row {
-          font-size: 8.5pt;
-          line-height: 1.25;
+        .label-vaccine {
+          margin-top: 0.8mm;
+          font-size: 13pt;
+          line-height: 1.05;
+          font-weight: 900;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .label-date-row {
+          margin-top: 2mm;
+          display: flex;
+          justify-content: space-between;
+          gap: 2mm;
+        }
+
+        .label-caption {
+          font-size: 7pt;
+          line-height: 1;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .label-date {
+          margin-top: 0.5mm;
+          font-size: 10pt;
+          line-height: 1;
+          font-weight: 900;
+        }
+
+        .label-lot {
+          margin-top: 1.5mm;
+          font-size: 10pt;
+          line-height: 1.1;
+          font-weight: 800;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
         .label-footer {
-          margin-top: 1.5mm;
+          margin-top: 1.3mm;
           display: flex;
           justify-content: space-between;
           gap: 2mm;
           font-size: 7pt;
+          font-weight: 800;
           border-top: 1px solid #000;
           padding-top: 1mm;
         }

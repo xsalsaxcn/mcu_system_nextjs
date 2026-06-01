@@ -11,6 +11,40 @@ export default function ImportPage() {
   );
 }
 
+const IMPORT_TARGETS = [
+  {
+    value: "capaska",
+    label: "CAPASKA / BPIP",
+    helper: "Data masuk ke modul MCU CAPASKA.",
+    institution: "BPIP / CAPASKA",
+    company: "BPIP / CAPASKA",
+    packageName: "CAPASKA 2025/2026",
+    databasePlaceholder: "CAPASKA BPIP 2026 Batch 1",
+  },
+  {
+    value: "corporate",
+    label: "MCU Corporate",
+    helper: "Data masuk ke modul MCU Corporate.",
+    institution: "Corporate",
+    company: "Corporate",
+    packageName: "MCU Corporate Basic",
+    databasePlaceholder: "MCU Corporate Batch 1",
+  },
+  {
+    value: "vaccination",
+    label: "Vaksinasi Perusahaan",
+    helper: "Data masuk sebagai database peserta vaksinasi dan bisa dipilih saat membuat session vaksinasi.",
+    institution: "Vaksinasi Perusahaan",
+    company: "Vaksinasi Perusahaan",
+    packageName: "Vaksinasi Perusahaan",
+    databasePlaceholder: "Vaksinasi PT ABC Batch 1",
+  },
+];
+
+function getImportTarget(programType: string) {
+  return IMPORT_TARGETS.find((target) => target.value === programType) || IMPORT_TARGETS[0];
+}
+
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
   const [databaseName, setDatabaseName] = useState("");
@@ -26,18 +60,15 @@ function ImportForm({ user }: { user: any }) {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat import database peserta.</div>;
   }
 
-  function changeProgram(nextProgram: string) {
-    setProgramType(nextProgram);
+  const selectedTarget = getImportTarget(programType);
 
-    if (nextProgram === "corporate") {
-      setInstitutionName("Corporate");
-      setCompanyName("Corporate");
-      setPackageName("MCU Corporate Basic");
-    } else {
-      setInstitutionName("BPIP / CAPASKA");
-      setCompanyName("BPIP / CAPASKA");
-      setPackageName("CAPASKA 2025/2026");
-    }
+  function changeProgram(nextProgram: string) {
+    const target = getImportTarget(nextProgram);
+
+    setProgramType(target.value);
+    setInstitutionName(target.institution);
+    setCompanyName(target.company);
+    setPackageName(target.packageName);
   }
 
   async function submit(e: React.FormEvent) {
@@ -68,23 +99,29 @@ function ImportForm({ user }: { user: any }) {
       <section className="card p-5">
         <div className="text-2xl font-black">Import Database Peserta</div>
         <div className="mt-1 text-sm text-slate-500">
-          Bisa import CAPASKA atau Corporate. Template tidak wajib, sistem auto-detect header nama peserta.
+          Import peserta dipusatkan di Admin. Pilih tujuan data: MCU Corporate, CAPASKA, atau Vaksinasi. Template tidak wajib, sistem auto-detect header nama peserta.
         </div>
       </section>
 
       <form onSubmit={submit} className="card space-y-4 p-5">
         <div>
-          <label className="label">Program</label>
+          <label className="label">Tujuan Import</label>
           <select className="input" value={programType} onChange={(e) => changeProgram(e.target.value)}>
-            <option value="capaska">CAPASKA / BPIP</option>
-            <option value="corporate">Corporate MCU</option>
+            {IMPORT_TARGETS.map((target) => (
+              <option key={target.value} value={target.value}>
+                {target.label}
+              </option>
+            ))}
           </select>
+          <div className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+            {selectedTarget.helper}
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="label">Nama Database</label>
-            <input className="input" value={databaseName} onChange={(e) => setDatabaseName(e.target.value)} placeholder={programType === "corporate" ? "MCU Corporate Batch 1" : "CAPASKA BPIP 2026 Batch 1"} required />
+            <input className="input" value={databaseName} onChange={(e) => setDatabaseName(e.target.value)} placeholder={selectedTarget.databasePlaceholder} required />
           </div>
           <div>
             <label className="label">Nama Instansi / Source</label>
@@ -109,7 +146,7 @@ function ImportForm({ user }: { user: any }) {
           <label className="label">Upload Excel</label>
           <input className="input" type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
           <div className="mt-2 text-xs text-slate-500">
-            Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Provinsi, Jenis Kelamin.
+            Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP, Departemen.
           </div>
         </div>
 

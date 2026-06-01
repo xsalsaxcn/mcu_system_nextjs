@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
+import { parseCapaskaScoringConfig, scoreCapaskaDirectChoice } from "@/lib/shared/capaskaDirectScoring2026";
 
 type Parameter = {
   id: number;
@@ -32,6 +33,14 @@ type Package = {
   program_type?: string;
 };
 
+type ScoringOptionForm = {
+  label: string;
+  value: string;
+  score: string;
+  is_critical: boolean;
+  note: string;
+};
+
 const emptyForm = {
   id: "",
   post_id: "",
@@ -42,6 +51,10 @@ const emptyForm = {
   normal_value: "",
   reference_text: "",
   options_text: "",
+  max_score: "",
+  scoring_type: "by_option",
+  include_in_total_score: true,
+  scoring_options: [] as ScoringOptionForm[],
   is_required: false,
   is_active: true,
   sort_order: 0
@@ -55,7 +68,35 @@ export default function SetupParametersPage() {
   );
 }
 
-function parseOptions(configJson?: string) {
+function getParameterScoringForm(param: Parameter) {
+  const config = parseCapaskaScoringConfig(param.config_json);
+  const options = config.options.map((option) => {
+    const fallbackScore = scoreCapaskaDirectChoice(param, option.label);
+    const score = typeof option.score === "number" ? option.score : fallbackScore;
+
+    return {
+      label: option.label,
+      value: option.value || option.label,
+      score: Number.isFinite(score) ? String(score) : "0",
+      is_critical: !!option.is_critical,
+      note: option.note || "",
+    };
+  });
+
+  const maxScore = typeof config.max_score === "number"
+    ? config.max_score
+    : Math.max(0, ...options.map((option) => Number(option.score || 0)).filter((score) => Number.isFinite(score)));
+
+  return {
+    options_text: options.map((option) => option.label).join("\n"),
+    max_score: maxScore ? String(maxScore) : "",
+    scoring_type: config.scoring_type || "by_option",
+    include_in_total_score: config.include_in_total_score !== false,
+    scoring_options: options,
+  };
+}
+
+function parsePlainOptions(configJson?: string) {
   try {
     const parsed = JSON.parse(configJson || "[]");
     return Array.isArray(parsed) ? parsed.join("\n") : "";
@@ -63,6 +104,37 @@ function parseOptions(configJson?: string) {
     return "";
   }
 }
+
+function createBlankOption(): ScoringOptionForm {
+  return {
+    label: "",
+    value: "",
+    score: "0",
+    is_critical: false,
+    note: "",
+  };
+}
+
+function normalizeFormScoringOptions(options: ScoringOptionForm[]) {
+  return options
+    .map((option) => {
+      const label = String(option.label || "").trim();
+      if (!label) return null;
+
+      const value = String(option.value || label).trim() || label;
+      const score = Number(String(option.score ?? "0").replace(",", "."));
+
+      return {
+        label,
+        value,
+        score: Number.isFinite(score) ? score : 0,
+        is_critical: !!option.is_critical,
+        note: String(option.note || "").trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
 
 function SetupParameters({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
@@ -177,7 +249,15 @@ function SetupParameters({ user }: { user: any }) {
       input_type: param.input_type || "text",
       normal_value: param.normal_value || "",
       reference_text: param.reference_text || "",
-      options_text: parseOptions(param.config_json),
+      ...(programType === "capaska"
+        ? getParameterScoringForm(param)
+        : {
+            options_text: parsePlainOptions(param.config_json),
+            max_score: "",
+            scoring_type: "by_option",
+            include_in_total_score: true,
+            scoring_options: [],
+          }),
       is_required: !!param.is_required,
       is_active: param.is_active !== 0,
       sort_order: param.sort_order || 0
@@ -192,6 +272,8 @@ function SetupParameters({ user }: { user: any }) {
     setMessage("");
 
     try {
+      const scoringOptions = normalizeFormScoringOptions(form.scoring_options || []);
+
       const res = await fetch("/api/setup/parameters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -199,7 +281,11 @@ function SetupParameters({ user }: { user: any }) {
           ...form,
           program_type: programType,
           post_id: Number(form.post_id),
-          id: form.id ? Number(form.id) : null
+          id: form.id ? Number(form.id) : null,
+          scoring_options: scoringOptions,
+          max_score: form.max_score,
+          scoring_type: form.scoring_type,
+          include_in_total_score: form.include_in_total_score
         })
       });
 
@@ -325,6 +411,39 @@ function SetupParameters({ user }: { user: any }) {
     });
 
     setSelectedParamIds(next);
+  }
+
+  function addScoringOption() {
+    setForm({
+      ...form,
+      scoring_options: [...(form.scoring_options || []), createBlankOption()]
+    });
+  }
+
+  function updateScoringOption(index: number, field: keyof ScoringOptionForm, value: string | boolean) {
+    const options = [...(form.scoring_options || [])];
+    options[index] = { ...options[index], [field]: value };
+
+    if (field === "label" && !options[index].value) {
+      options[index].value = String(value || "");
+    }
+
+    setForm({
+      ...form,
+      scoring_options: options,
+      options_text: options.map((option) => option.label).filter(Boolean).join("\n")
+    });
+  }
+
+  function removeScoringOption(index: number) {
+    const options = [...(form.scoring_options || [])];
+    options.splice(index, 1);
+
+    setForm({
+      ...form,
+      scoring_options: options,
+      options_text: options.map((option) => option.label).filter(Boolean).join("\n")
+    });
   }
 
   return (
@@ -455,15 +574,140 @@ function SetupParameters({ user }: { user: any }) {
             </div>
           </div>
 
-          <div>
-            <label className="label">Opsi Dropdown</label>
-            <textarea
-              className="input min-h-24"
-              value={form.options_text}
-              onChange={(e) => setForm({ ...form, options_text: e.target.value })}
-              placeholder={"Isi satu opsi per baris, contoh:\nNormal\nAbnormal\nPerlu Review"}
-            />
+          {programType === "capaska" ? (
+            <>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="label">Skor Maksimal</label>
+              <input
+                type="number"
+                step="any"
+                className="input"
+                value={form.max_score}
+                onChange={(e) => setForm({ ...form, max_score: e.target.value })}
+                placeholder="Contoh: 1, 2, 3"
+              />
+            </div>
+
+            <div>
+              <label className="label">Tipe Skoring</label>
+              <select className="input" value={form.scoring_type} onChange={(e) => setForm({ ...form, scoring_type: e.target.value })}>
+                <option value="by_option">By Option</option>
+                <option value="manual">Manual</option>
+                <option value="none">No Score</option>
+              </select>
+            </div>
+
+            <label className="mt-7 flex items-center gap-2 text-sm font-semibold">
+              <input
+                type="checkbox"
+                checked={form.include_in_total_score}
+                onChange={(e) => setForm({ ...form, include_in_total_score: e.target.checked })}
+              />
+              Hitung ke total skor
+            </label>
           </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <label className="label">Opsi Jawaban & Skoring</label>
+                <div className="text-xs text-slate-500">
+                  Isi skor per opsi. Centang Tidak Direkomendasikan untuk temuan merah seperti hernia ada, tidak sesuai juknis, atau buta warna.
+                </div>
+              </div>
+              <button type="button" className="btn-secondary" onClick={addScoringOption}>
+                + Tambah Opsi
+              </button>
+            </div>
+
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-500">
+                    <th className="p-2">Opsi Jawaban</th>
+                    <th className="p-2">Value</th>
+                    <th className="p-2">Skor</th>
+                    <th className="p-2">Tidak Direkomendasikan</th>
+                    <th className="p-2">Catatan</th>
+                    <th className="p-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.scoring_options || []).map((option: ScoringOptionForm, index: number) => (
+                    <tr key={index} className="border-t border-slate-200">
+                      <td className="p-2">
+                        <input
+                          className="input"
+                          value={option.label}
+                          onChange={(e) => updateScoringOption(index, "label", e.target.value)}
+                          placeholder="Tidak ada / Ada"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="input"
+                          value={option.value}
+                          onChange={(e) => updateScoringOption(index, "value", e.target.value)}
+                          placeholder="auto sama dengan opsi"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          step="any"
+                          className="input"
+                          value={option.score}
+                          onChange={(e) => updateScoringOption(index, "score", e.target.value)}
+                          placeholder="1 / -10"
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={option.is_critical}
+                          onChange={(e) => updateScoringOption(index, "is_critical", e.target.checked)}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="input"
+                          value={option.note}
+                          onChange={(e) => updateScoringOption(index, "note", e.target.value)}
+                          placeholder="Opsional"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <button type="button" className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white" onClick={() => removeScoringOption(index)}>
+                          Hapus
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!(form.scoring_options || []).length && (
+                    <tr>
+                      <td colSpan={6} className="p-4 text-center text-xs text-slate-500">
+                        Belum ada opsi. Klik Tambah Opsi untuk parameter radio/dropdown.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+            </>
+          ) : (
+            <div>
+              <label className="label">Opsi Dropdown</label>
+              <textarea
+                className="input min-h-24"
+                value={form.options_text}
+                onChange={(e) => setForm({ ...form, options_text: e.target.value })}
+                placeholder={"Isi satu opsi per baris, contoh:\nNormal\nAbnormal\nPerlu Review"}
+              />
+            </div>
+          )}
 
           <div>
             <label className="label">Reference / Catatan Panduan</label>
@@ -520,7 +764,7 @@ function SetupParameters({ user }: { user: any }) {
             <div key={postName} className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="mb-3 font-black">{postName}</div>
               <div className="space-y-2">
-                {params.map((param) => (
+                {(params as Parameter[]).map((param) => (
                   <label key={param.id} className="flex items-start gap-2 rounded-xl bg-slate-50 p-2 text-sm">
                     <input
                       type="checkbox"
