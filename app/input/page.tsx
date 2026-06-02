@@ -932,7 +932,7 @@ function InputForm({ user }: { user: any }) {
     setDonePreviewParticipant(null);
   }, [program, sourceId, effectivePostId]);
 
-  const displayedList = hasLoadedList ? doneParticipants : [];
+  const displayedList = showDoneList ? doneParticipants : [];
 
   function openFromOperatorList(p: any) {
     setDonePreviewParticipant(p);
@@ -1045,8 +1045,10 @@ function InputForm({ user }: { user: any }) {
           >
             
             
+            
             <span aria-hidden="true">{String.fromCodePoint(0x1F4F7)}</span>
             <span className="sr-only">Scan barcode</span>
+          
           
           
           </button>
@@ -1258,6 +1260,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
