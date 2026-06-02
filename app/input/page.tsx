@@ -420,7 +420,7 @@ function ParameterInput({
         <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">-- Pilih --</option>
                     {options.map((opt) => {
-            const optionChoiceValue = String(opt.label ?? opt.option_label ?? opt.name ?? opt.text ?? opt.value ?? "");
+            const optionChoiceValue = String(opt.label ?? opt.value ?? "");
             return <option key={opt.value ?? opt.label} value={optionChoiceValue}>{opt.label}</option>;
           })}
         </select>
@@ -438,7 +438,7 @@ function ParameterInput({
       <div className="grid gap-2">
         <div className="grid gap-2 sm:grid-cols-2">
           {options.map((opt) => {
-                        const choiceValue = String(opt.label ?? opt.option_label ?? opt.name ?? opt.text ?? opt.value ?? "");
+                        const choiceValue = String(opt.label ?? opt.value ?? "");
             const checked = norm(value) === norm(choiceValue);
             const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
 
@@ -1338,6 +1338,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
