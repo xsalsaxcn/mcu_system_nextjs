@@ -493,7 +493,6 @@ function ParameterInput({
 }
 
 
-
 function ScannerModal({
   open,
   onClose,
@@ -1029,21 +1028,21 @@ function InputForm({ user }: { user: any }) {
         )}
       </section>
 
-      <form onSubmit={(e) => search(e)} className="card grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto_auto]">
+      <form onSubmit={(e) => search(e)} className="card grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_minmax(280px,1fr)_auto_auto] xl:items-stretch">
         <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
           <option value="all">Semua Database Instansi</option>
           {sources.map((s) => <option key={s.id} value={s.id}>{s.name} - {s.institution_name || "-"}</option>)}
         </select>
 
-        <div className="flex gap-2">
+        <div className="flex min-w-0 gap-2">
           <input className="input flex-1" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="Cari nama / scan barcode / ID" />
           <button
             type="button"
             onClick={() => setScannerOpen(true)}
-            className="rounded-2xl border border-slate-300 px-4 py-3 text-xl font-black shadow-sm"
+            className="shrink-0 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black shadow-sm"
             title="Scan barcode"
           >
-            ðŸ“·
+            Scan
           </button>
         </div>
 
@@ -1051,11 +1050,11 @@ function InputForm({ user }: { user: any }) {
 
         <button
           type="button"
-          className="rounded-2xl border border-slate-300 px-5 py-3 font-black text-slate-700"
+          className="rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
           onClick={() => refreshLists(true)}
           disabled={loadingList}
         >
-          {loadingList ? "Memuat..." : "Muat Daftar"}
+          {loadingList ? "Memuat..." : "Selesai"}
         </button>
       </form>
 
@@ -1115,7 +1114,7 @@ function InputForm({ user }: { user: any }) {
                 ? "Memuat daftar peserta selesai..."
                 : hasLoadedList
                   ? "Belum ada peserta selesai untuk operator ini."
-                  : "Daftar belum dimuat."}
+                  : "Klik tombol Selesai untuk menampilkan daftar peserta yang sudah submit."}
             </div>
           )}
 
@@ -1167,7 +1166,6 @@ function InputForm({ user }: { user: any }) {
         </div>
       </section>
       )}
-
 
 
       {participant && detail?.ok && (
@@ -1224,4 +1222,5 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
