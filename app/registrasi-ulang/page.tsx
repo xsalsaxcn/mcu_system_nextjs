@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -650,7 +650,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v38 · auto close hasil retrieve
+          Registrasi Ulang v38 Â· auto close hasil retrieve
         </div>
       </section>
 
@@ -710,7 +710,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               >
                 <div className="font-black">{p.name}</div>
                 <div className="text-sm text-slate-500">
-                  {p.mcu_id || p.external_id || "-"} · NIK {p.employee_nik || p.nik || "-"} · MCU {formatDate(p.examination_date || p.exam_date)} · Lahir {formatDate(p.birth_date || p.date_of_birth)} · {p.source_name || "-"}
+                  {p.mcu_id || p.external_id || "-"} Â· NIK {p.employee_nik || p.nik || "-"} Â· MCU {formatDate(p.examination_date || p.exam_date)} Â· Lahir {formatDate(p.birth_date || p.date_of_birth)} Â· {p.source_name || "-"}
                 </div>
               </button>
             ))}
@@ -961,170 +961,149 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 
 function StationPrintLabel({
-  participant,
   station,
+  form,
   fontSize,
   showBorder,
   showQr,
   showBarcodeText
 }: {
-  participant: Participant;
   station: StationPrintOption;
+  form: any;
   fontSize: number;
   showBorder: boolean;
   showQr: boolean;
   showBarcodeText: boolean;
 }) {
-  const idText = safeText(participant.mcu_id || participant.external_id || String(participant.id));
-  const nameText = safeText(participant.name);
-  const nikKaryawanText = safeText(participant.employee_nik || participant.nik);
-  const genderText = getGenderShort(participant.gender);
-  const birthText = formatDate(participant.birth_date || participant.date_of_birth);
-  const ageText = participant.age || calcAge(participant.birth_date || participant.date_of_birth) || "-";
-  const examDate = formatDate(participant.examination_date || participant.exam_date || todayISO());
-  const departmentText = safeText(participant.department, "");
-  const packageText = safeText(participant.package_name || participant.company_name || participant.source_name || "MCU");
-
-  const shortStation =
+  const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
+  const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
+  const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
+  const location = String(form?.province || form?.provinsi || form?.location || form?.lokasi || form?.department || "").trim();
+  const stationText =
     station.label === "PENYAKIT DALAM"
-      ? "P. DALAM"
+      ? "PENYAKIT DALAM"
       : station.label === "PEMERIKSAAN FISIK"
         ? "FISIK"
         : station.label.replace(" - ", " ");
 
-  const metaFont = Math.max(fontSize - 2, 7);
-  const headerFont = Math.max(fontSize - 2, 7);
-  const nameFont = Math.max(fontSize + 1, 10);
-  const footerFont = Math.max(fontSize - 2, 7);
+  const safeFont = Number(fontSize || 10);
+  const nameFont =
+    nameText.length > 34 ? Math.max(12, safeFont + 5) :
+    nameText.length > 24 ? Math.max(14, safeFont + 7) :
+    Math.max(16, safeFont + 9);
+
+  const qrValue = idText || nameText;
 
   return (
-    <div
+    <section
       className="label-page bg-white text-black"
       style={{
-        width: "40mm",
-        height: "30mm",
-        padding: "0.7mm 0.8mm 0.6mm 0.8mm",
+        position: "relative",
+        width: "58mm",
+        minHeight: "38mm",
+        padding: "4.5mm 4.5mm 3.8mm 4.5mm",
         boxSizing: "border-box",
-        border: showBorder ? "0.18mm solid #111" : "none",
         overflow: "hidden",
-        fontFamily: "Arial, Helvetica, sans-serif",
+        border: showBorder ? "0.45mm solid #d4d4d8" : "0.35mm solid #d4d4d8",
+        borderRadius: "5mm",
+        background: "#ffffff",
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact"
       }}
     >
       <div
-        className="grid h-full w-full"
         style={{
-          gridTemplateRows: "3.6mm 4.3mm 1fr 3.5mm",
-          rowGap: "0.25mm"
+          width: "100%",
+          paddingRight: "0",
+          fontSize: `${nameFont}px`,
+          lineHeight: 1.02,
+          fontWeight: 900,
+          color: "#000000",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+          letterSpacing: "-0.03em"
         }}
       >
+        {nameText}
+      </div>
+
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          maxWidth: showQr ? "calc(100% - 22mm)" : "100%",
+          marginTop: "1.8mm",
+          marginBottom: "1.8mm",
+          padding: "1mm 2.2mm",
+          borderRadius: "999px",
+          background: "#dbeafe",
+          color: "#1e3a8a",
+          fontSize: "10px",
+          lineHeight: 1,
+          fontWeight: 900,
+          whiteSpace: "normal",
+          overflowWrap: "anywhere"
+        }}
+      >
+        {stationText}
+      </div>
+
+      <div
+        style={{
+          width: showQr ? "calc(100% - 22mm)" : "100%",
+          fontSize: `${Math.max(10, safeFont + 2)}px`,
+          lineHeight: 1.18,
+          fontWeight: 700,
+          color: "#111827",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere"
+        }}
+      >
+        <div>MCU: {idText || "-"}</div>
+        <div style={{ marginTop: "1.2mm" }}>{institution || "-"}</div>
+        {location ? <div style={{ marginTop: "1.2mm", color: "#4b5563" }}>{location}</div> : null}
+      </div>
+
+      {showQr && (
         <div
-          className="grid items-center"
           style={{
-            gridTemplateColumns: "1fr auto auto",
-            columnGap: "1mm",
-            fontSize: `${headerFont}px`,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-            overflow: "hidden"
+            position: "absolute",
+            right: "4mm",
+            bottom: showBarcodeText ? "5.5mm" : "4mm",
+            width: "20mm",
+            height: "20mm",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#ffffff"
           }}
         >
-          <div className="truncate font-black tracking-wide">{shortStation}</div>
-          <div className="font-black">{genderText} / {ageText}</div>
-          <div className="font-black">{examDate}</div>
+          <QRCodeImage value={qrValue} size={76} />
         </div>
+      )}
 
+      {showQr && showBarcodeText && (
         <div
-          className="truncate font-black uppercase"
           style={{
-            fontSize: `${nameFont}px`,
+            position: "absolute",
+            right: "3.2mm",
+            bottom: "2mm",
+            width: "21.5mm",
+            textAlign: "center",
+            fontSize: "7.5px",
             lineHeight: 1,
+            fontWeight: 800,
+            color: "#111827",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis"
           }}
         >
-          {nameText}
+          {idText || "-"}
         </div>
-
-        <div
-          className="grid min-h-0"
-          style={{
-            gridTemplateColumns: showQr ? "1fr 9.6mm" : "1fr",
-            columnGap: "0.8mm"
-          }}
-        >
-          <div
-            className="grid min-w-0"
-            style={{
-              gridTemplateRows: "repeat(5, 1fr)",
-              rowGap: "0.1mm",
-              fontSize: `${metaFont}px`,
-              lineHeight: 1,
-              overflow: "hidden"
-            }}
-          >
-            {[
-              ["No MCU", idText],
-              ["NIK K", nikKaryawanText],
-              ["Lahir", birthText],
-              ["Paket", packageText],
-              ["Dept", departmentText || "-"]
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="grid min-w-0 items-center"
-                style={{
-                  gridTemplateColumns: "7.6mm 1mm 1fr",
-                  columnGap: "0.3mm",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden"
-                }}
-              >
-                <div className="truncate font-bold">{label}</div>
-                <div className="font-bold">:</div>
-                <div className="truncate font-bold">{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {showQr && (
-            <div className="flex items-start justify-end overflow-hidden">
-              <QRCodeImage value={idText} size={34} />
-            </div>
-          )}
-        </div>
-
-        <div
-          className="grid min-w-0 items-end"
-          style={{
-            gridTemplateColumns: "1fr auto",
-            columnGap: "1mm",
-            fontSize: `${footerFont}px`,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-            overflow: "hidden"
-          }}
-        >
-          <div
-            className="truncate font-mono font-black tracking-[0.06em]"
-            style={{ visibility: showBarcodeText ? "visible" : "visible" }}
-          >
-            {idText}
-          </div>
-
-          <div
-            className="font-black"
-            style={{
-              fontSize: `${Math.max(fontSize + 2, 11)}px`,
-              lineHeight: 1
-            }}
-          >
-            {station.shortCode}
-          </div>
-        </div>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }
