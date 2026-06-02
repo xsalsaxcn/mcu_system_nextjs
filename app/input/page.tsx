@@ -455,7 +455,7 @@ function ParameterInput({
                   name={`param-${param.id}`}
                   value={choiceValue}
                   checked={checked}
-                  onChange={() => onChange(opt.value)}
+                  onChange={() => onChange(choiceValue)}
                 />
                 <span className="flex-1">
                   <span className="block font-bold text-slate-900">{opt.label}</span>
@@ -472,7 +472,7 @@ function ParameterInput({
 
         {value && (
           <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Terpilih: {getSelectedChoiceOption(param, value)?.label || value} · Skor: {scoreForParam(param, value)}
+            Terpilih: {value || getSelectedChoiceOption(param, value)?.label || "-"} · Skor: {scoreForParam(param, value)}
             {isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
           </div>
         )}
@@ -1338,6 +1338,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
