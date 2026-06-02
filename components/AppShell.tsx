@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { SessionUser } from "@/lib/shared/types";
 
 const adminMenuGroups = [
@@ -131,6 +132,11 @@ function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
 
 function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -150,43 +156,62 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
     };
   }, [open]);
 
-  return (
-    <div className="relative z-[100]">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="nav-menu-button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        <span className="nav-menu-lines" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-        Menu
-      </button>
-
-      {open ? (
+  const drawer = open && mounted
+    ? createPortal(
         <div
-          className="fixed inset-0 z-[99999] md:z-[9999]"
-          role="presentation"
-          style={{ position: "fixed", inset: 0, zIndex: 99999 }}
+          aria-label="Menu navigasi"
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: 2147483000,
+            pointerEvents: "auto",
+          }}
         >
           <button
             type="button"
             aria-label="Tutup menu"
-            className="absolute inset-0 cursor-default bg-slate-950/65 md:bg-slate-950/35"
             onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              left: 0,
+              zIndex: 2147483001,
+              border: 0,
+              padding: 0,
+              margin: 0,
+              cursor: "default",
+              background: "rgba(15, 23, 42, 0.56)",
+            }}
           />
 
-          <aside
-            data-harmony-menu="true"
-            role="dialog"
+          <div
             aria-modal="true"
             aria-label="Menu navigasi Harmony Health App"
-            className="fixed inset-y-0 left-0 z-[100000] flex h-dvh w-screen flex-col overflow-hidden bg-white text-slate-900 shadow-2xl md:inset-y-auto md:left-auto md:right-5 md:top-20 md:h-auto md:max-h-[calc(100dvh-96px)] md:w-[420px] md:max-w-[calc(100vw-40px)] md:rounded-[28px] md:border md:border-slate-200"
-            style={{ position: "fixed", zIndex: 100000 }}
+            style={{
+              position: "fixed",
+              top: "84px",
+              right: "12px",
+              bottom: "12px",
+              zIndex: 2147483002,
+              width: "min(420px, calc(100vw - 24px))",
+              maxWidth: "calc(100vw - 24px)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              borderRadius: "28px",
+              border: "1px solid rgb(226 232 240)",
+              background: "#ffffff",
+              color: "#0f172a",
+              boxShadow: "0 25px 50px -12px rgba(15, 23, 42, 0.45)",
+              opacity: 1,
+              filter: "none",
+              backdropFilter: "none",
+            }}
           >
             <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
               <div>
@@ -199,13 +224,13 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-2xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-black text-white backdrop-blur transition hover:bg-white/25"
+                className="rounded-2xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-black text-white transition hover:bg-white/25"
               >
                 Tutup
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3 pb-8 md:max-h-[72vh]">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3 pb-8">
               {groups.map((group) => (
                 <section
                   key={group.title}
@@ -230,9 +255,30 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
                 </section>
               ))}
             </div>
-          </aside>
-        </div>
-      ) : null}
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className="relative z-[100]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="nav-menu-button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <span className="nav-menu-lines" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        Menu
+      </button>
+
+      {drawer}
     </div>
   );
 }
