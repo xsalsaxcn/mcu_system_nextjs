@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, type ReactNode } from "react";
 import type { SessionUser } from "@/lib/shared/types";
@@ -132,7 +132,8 @@ function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
 function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
 
-  return (`n    <div className="relative z-[9999]">
+  return (
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -151,28 +152,19 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
           <button
             type="button"
             aria-label="Close menu"
-            className="fixed inset-0 z-[9998] cursor-default bg-slate-950/55"
+            className="fixed inset-0 z-40 cursor-default bg-slate-950/20 backdrop-blur-[1px]"
             onClick={() => setOpen(false)}
           />
 
-          <aside className="fixed left-3 top-3 bottom-3 z-[9999] flex w-[min(88vw,380px)] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl md:left-auto md:right-6 md:top-24 md:bottom-auto md:max-h-[calc(100vh-120px)]">
-            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
-              <div>
-                <div className="text-base font-black">Harmony Health App</div>
-                <div className="mt-1 text-xs font-semibold text-blue-100">
-                  Navigasi layanan
-                </div>
+          <aside className="absolute right-0 z-50 mt-3 w-[390px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+            <div className="bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
+              <div className="text-base font-black">Harmony Health App</div>
+              <div className="mt-1 text-xs font-semibold text-blue-100">
+                Navigasi layanan
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-xl bg-white/15 px-3 py-2 text-xs font-black text-white transition hover:bg-white/25"
-              >
-                Tutup
-              </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 p-3">
+            <div className="max-h-[72vh] overflow-auto bg-slate-50 p-3">
               {groups.map((group) => (
                 <section
                   key={group.title}
@@ -188,7 +180,7 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
                         key={`${group.title}-${item.href}`}
                         href={item.href}
                         onClick={() => setOpen(false)}
-                        className="block rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                        className="rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                       >
                         {item.label}
                       </a>
@@ -306,4 +298,3 @@ export default function AppShell({
     </div>
   );
 }
-
