@@ -934,6 +934,20 @@ function InputForm({ user }: { user: any }) {
   }, [program, sourceId, effectivePostId]);
 
   const displayedList = showDoneList ? doneParticipants : [];
+  function getChoiceValue(option: any) {
+    return String(
+      option?.value ??
+      option?.label ??
+      option?.name ??
+      option?.option_label ??
+      option?.text ??
+      ""
+    );
+  }
+
+  function isChoiceSelected(param: any, option: any) {
+    return String(values[param.id] || "") === getChoiceValue(option);
+  }
 
   function openFromOperatorList(p: any) {
     setDonePreviewParticipant(p);
@@ -1281,6 +1295,8 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
+
 
 
 
