@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -421,69 +421,59 @@ function LabelCard({
 
   const safeFont = Number(fontSize || 10);
   const nameFont =
-    nameText.length > 34 ? Math.max(13, safeFont + 5) :
-    nameText.length > 24 ? Math.max(15, safeFont + 7) :
-    Math.max(18, safeFont + 10);
+    nameText.length > 34 ? Math.max(12, safeFont + 2) :
+    nameText.length > 24 ? Math.max(14, safeFont + 4) :
+    Math.max(16, safeFont + 6);
+
+  const qrPx = Math.max(38, Number(qrSize || 46));
 
   return (
     <section
       className={`${printMode ? "label-page" : ""} bg-white`}
       style={{
         position: "relative",
-        width: "58mm",
-        minHeight: "38mm",
-        padding: "4.5mm 4.5mm 3.8mm 4.5mm",
-        boxSizing: "border-box",
         overflow: "hidden",
-        border: showBorder ? "0.45mm solid #d4d4d8" : "0.35mm solid #d4d4d8",
-        borderRadius: "5mm",
-        background: "#ffffff",
+        border: showBorder ? "1px solid #d4d4d8" : undefined,
+        borderRadius: showBorder ? "18px" : undefined,
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact"
       }}
     >
       <div
         style={{
-          width: "100%",
-          paddingRight: 0,
-          fontSize: `${nameFont}px`,
-          lineHeight: 1.02,
-          fontWeight: 900,
-          color: "#000",
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          overflowWrap: "anywhere",
-          letterSpacing: "-0.03em"
+          position: "absolute",
+          left: "8%",
+          top: "9%",
+          right: "8%",
+          zIndex: 2
         }}
       >
-        {nameText || "-"}
+        <div
+          style={{
+            fontSize: `${nameFont}px`,
+            lineHeight: 1.03,
+            fontWeight: 900,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            letterSpacing: "-0.03em",
+            maxHeight: "38%",
+            overflow: "hidden"
+          }}
+        >
+          {nameText || "-"}
+        </div>
       </div>
 
       <div
         style={{
-          display: "inline-flex",
-          alignItems: "center",
-          maxWidth: showQr ? "calc(100% - 23mm)" : "100%",
-          marginTop: "1.6mm",
-          marginBottom: "1.8mm",
-          padding: "1mm 2.2mm",
-          borderRadius: "999px",
-          background: "#dbeafe",
-          color: "#1e3a8a",
-          fontSize: "9.5px",
-          lineHeight: 1,
-          fontWeight: 900,
-          whiteSpace: "normal",
-          overflowWrap: "anywhere"
-        }}
-      >
-        LABEL PESERTA
-      </div>
-
-      <div
-        style={{
-          width: showQr ? "calc(100% - 23mm)" : "100%",
-          fontSize: `${Math.max(10, safeFont + 2)}px`,
+          position: "absolute",
+          left: "8%",
+          top: "42%",
+          right: showQr ? "40%" : "8%",
+          zIndex: 2,
+          fontSize: `${Math.max(10, safeFont + 1)}px`,
           lineHeight: 1.18,
           fontWeight: 700,
           color: "#111827",
@@ -493,25 +483,26 @@ function LabelCard({
         }}
       >
         <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "1.2mm" }}>{institution || "-"}</div>
-        {location ? <div style={{ marginTop: "1.2mm", color: "#4b5563" }}>{location}</div> : null}
+        <div style={{ marginTop: "6px" }}>{institution || "-"}</div>
+        {location ? <div style={{ marginTop: "6px", color: "#4b5563" }}>{location}</div> : null}
       </div>
 
       {showQr && (
         <div
           style={{
             position: "absolute",
-            right: "4mm",
-            bottom: showBarcodeText ? "5.5mm" : "4mm",
-            width: "20mm",
-            height: "20mm",
+            right: "8%",
+            bottom: showBarcodeText ? "15%" : "9%",
+            width: `${qrPx}px`,
+            height: `${qrPx}px`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "#fff"
+            background: "#ffffff",
+            zIndex: 1
           }}
         >
-          <QRCodeImage value={qrValue} size={76} />
+          <QRCodeImage value={qrValue} size={qrPx} />
         </div>
       )}
 
@@ -519,11 +510,11 @@ function LabelCard({
         <div
           style={{
             position: "absolute",
-            right: "3.2mm",
-            bottom: "2mm",
-            width: "21.5mm",
+            right: "6%",
+            bottom: "7%",
+            width: "34%",
             textAlign: "center",
-            fontSize: "7.5px",
+            fontSize: "10px",
             lineHeight: 1,
             fontWeight: 800,
             color: "#111827",
@@ -538,6 +529,3 @@ function LabelCard({
     </section>
   );
 }
-
-
-

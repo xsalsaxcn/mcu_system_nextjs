@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -962,7 +962,6 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 function StationPrintLabel({
   station,
-  participant,
   form,
   fontSize,
   showBorder,
@@ -970,18 +969,16 @@ function StationPrintLabel({
   showBarcodeText
 }: {
   station: StationPrintOption;
-  participant?: any;
-  form?: any;
+  form: any;
   fontSize: number;
   showBorder: boolean;
   showQr: boolean;
   showBarcodeText: boolean;
 }) {
-  const data = form || participant || {};
-  const idText = String(data?.mcu_id || data?.external_id || data?.nomor_mcu || data?.id || "").trim();
-  const nameText = String(data?.name || data?.nama || data?.full_name || "-").trim().toUpperCase();
-  const institution = String(data?.company_name || data?.institution_name || data?.company || "BPIP / CAPASKA").trim();
-  const location = String(data?.province || data?.provinsi || data?.location || data?.lokasi || data?.department || "").trim();
+  const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
+  const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
+  const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
+  const location = String(form?.province || form?.provinsi || form?.location || form?.lokasi || form?.department || "").trim();
   const stationText =
     station.label === "PENYAKIT DALAM"
       ? "PENYAKIT DALAM"
@@ -991,10 +988,11 @@ function StationPrintLabel({
 
   const safeFont = Number(fontSize || 10);
   const nameFont =
-    nameText.length > 34 ? Math.max(13, safeFont + 5) :
-    nameText.length > 24 ? Math.max(15, safeFont + 7) :
-    Math.max(18, safeFont + 10);
+    nameText.length > 34 ? Math.max(12, safeFont + 2) :
+    nameText.length > 24 ? Math.max(14, safeFont + 4) :
+    Math.max(16, safeFont + 6);
 
+  const qrPx = 54;
   const qrValue = idText || nameText;
 
   return (
@@ -1002,60 +1000,64 @@ function StationPrintLabel({
       className="label-page bg-white text-black"
       style={{
         position: "relative",
-        width: "58mm",
-        minHeight: "38mm",
-        padding: "4.5mm 4.5mm 3.8mm 4.5mm",
-        boxSizing: "border-box",
         overflow: "hidden",
-        border: showBorder ? "0.45mm solid #d4d4d8" : "0.35mm solid #d4d4d8",
-        borderRadius: "5mm",
-        background: "#ffffff",
+        border: showBorder ? "1px solid #d4d4d8" : undefined,
+        borderRadius: showBorder ? "18px" : undefined,
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact"
       }}
     >
       <div
         style={{
-          width: "100%",
-          paddingRight: "0",
-          fontSize: `${nameFont}px`,
-          lineHeight: 1.02,
-          fontWeight: 900,
-          color: "#000000",
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          overflowWrap: "anywhere",
-          letterSpacing: "-0.03em"
+          position: "absolute",
+          left: "8%",
+          top: "8%",
+          right: "8%",
+          zIndex: 2
         }}
       >
-        {nameText}
+        <div
+          style={{
+            fontSize: `${nameFont}px`,
+            lineHeight: 1.03,
+            fontWeight: 900,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            letterSpacing: "-0.03em",
+            maxHeight: "34%",
+            overflow: "hidden"
+          }}
+        >
+          {nameText || "-"}
+        </div>
+
+        <div
+          style={{
+            display: "inline-flex",
+            marginTop: "5px",
+            padding: "3px 8px",
+            borderRadius: "999px",
+            background: "#dbeafe",
+            color: "#1e3a8a",
+            fontSize: "10px",
+            lineHeight: 1,
+            fontWeight: 900
+          }}
+        >
+          {stationText}
+        </div>
       </div>
 
       <div
         style={{
-          display: "inline-flex",
-          alignItems: "center",
-          maxWidth: showQr ? "calc(100% - 23mm)" : "100%",
-          marginTop: "1.6mm",
-          marginBottom: "1.8mm",
-          padding: "1mm 2.2mm",
-          borderRadius: "999px",
-          background: "#dbeafe",
-          color: "#1e3a8a",
-          fontSize: "9.5px",
-          lineHeight: 1,
-          fontWeight: 900,
-          whiteSpace: "normal",
-          overflowWrap: "anywhere"
-        }}
-      >
-        {stationText}
-      </div>
-
-      <div
-        style={{
-          width: showQr ? "calc(100% - 23mm)" : "100%",
-          fontSize: `${Math.max(10, safeFont + 2)}px`,
+          position: "absolute",
+          left: "8%",
+          top: "46%",
+          right: showQr ? "40%" : "8%",
+          zIndex: 2,
+          fontSize: `${Math.max(10, safeFont + 1)}px`,
           lineHeight: 1.18,
           fontWeight: 700,
           color: "#111827",
@@ -1065,25 +1067,26 @@ function StationPrintLabel({
         }}
       >
         <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "1.2mm" }}>{institution || "-"}</div>
-        {location ? <div style={{ marginTop: "1.2mm", color: "#4b5563" }}>{location}</div> : null}
+        <div style={{ marginTop: "6px" }}>{institution || "-"}</div>
+        {location ? <div style={{ marginTop: "6px", color: "#4b5563" }}>{location}</div> : null}
       </div>
 
       {showQr && (
         <div
           style={{
             position: "absolute",
-            right: "4mm",
-            bottom: showBarcodeText ? "5.5mm" : "4mm",
-            width: "20mm",
-            height: "20mm",
+            right: "8%",
+            bottom: showBarcodeText ? "15%" : "9%",
+            width: `${qrPx}px`,
+            height: `${qrPx}px`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "#ffffff"
+            background: "#ffffff",
+            zIndex: 1
           }}
         >
-          <QRCodeImage value={qrValue} size={76} />
+          <QRCodeImage value={qrValue} size={qrPx} />
         </div>
       )}
 
@@ -1091,11 +1094,11 @@ function StationPrintLabel({
         <div
           style={{
             position: "absolute",
-            right: "3.2mm",
-            bottom: "2mm",
-            width: "21.5mm",
+            right: "6%",
+            bottom: "7%",
+            width: "34%",
             textAlign: "center",
-            fontSize: "7.5px",
+            fontSize: "10px",
             lineHeight: 1,
             fontWeight: 800,
             color: "#111827",
