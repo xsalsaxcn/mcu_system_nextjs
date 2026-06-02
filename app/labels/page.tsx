@@ -400,16 +400,16 @@ function LabelCard({
   qrSize,
   fontSize,
   showBorder,
-  showQr,
-  showBarcodeText,
+  showQr = true,
+  showBarcodeText = false,
   printMode = false
 }: {
   participant: Participant;
   qrSize: number;
   fontSize: number;
   showBorder: boolean;
-  showQr: boolean;
-  showBarcodeText: boolean;
+  showQr?: boolean;
+  showBarcodeText?: boolean;
   printMode?: boolean;
 }) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
