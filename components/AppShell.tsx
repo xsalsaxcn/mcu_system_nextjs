@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { SessionUser } from "@/lib/shared/types";
 
 const adminMenuGroups = [
@@ -132,12 +132,32 @@ function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
 function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div className="relative z-[100]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         className="nav-menu-button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
       >
         <span className="nav-menu-lines" aria-hidden="true">
           <span />
@@ -148,23 +168,44 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
       </button>
 
       {open ? (
-        <>
+        <div
+          className="fixed inset-0 z-[99999] md:z-[9999]"
+          role="presentation"
+          style={{ position: "fixed", inset: 0, zIndex: 99999 }}
+        >
           <button
             type="button"
-            aria-label="Close menu"
-            className="fixed inset-0 z-40 cursor-default bg-slate-950/20 backdrop-blur-[1px]"
+            aria-label="Tutup menu"
+            className="absolute inset-0 cursor-default bg-slate-950/65 md:bg-slate-950/35"
             onClick={() => setOpen(false)}
           />
 
-          <aside className="absolute right-0 z-50 mt-3 w-[390px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
-            <div className="bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
-              <div className="text-base font-black">Harmony Health App</div>
-              <div className="mt-1 text-xs font-semibold text-blue-100">
-                Navigasi layanan
+          <aside
+            data-harmony-menu="true"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu navigasi Harmony Health App"
+            className="fixed inset-y-0 left-0 z-[100000] flex h-dvh w-screen flex-col overflow-hidden bg-white text-slate-900 shadow-2xl md:inset-y-auto md:left-auto md:right-5 md:top-20 md:h-auto md:max-h-[calc(100dvh-96px)] md:w-[420px] md:max-w-[calc(100vw-40px)] md:rounded-[28px] md:border md:border-slate-200"
+            style={{ position: "fixed", zIndex: 100000 }}
+          >
+            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
+              <div>
+                <div className="text-base font-black">Harmony Health App</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">
+                  Navigasi layanan
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-2xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-black text-white backdrop-blur transition hover:bg-white/25"
+              >
+                Tutup
+              </button>
             </div>
 
-            <div className="max-h-[72vh] overflow-auto bg-slate-50 p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3 pb-8 md:max-h-[72vh]">
               {groups.map((group) => (
                 <section
                   key={group.title}
@@ -180,7 +221,7 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
                         key={`${group.title}-${item.href}`}
                         href={item.href}
                         onClick={() => setOpen(false)}
-                        className="rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                        className="block rounded-2xl px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                       >
                         {item.label}
                       </a>
@@ -190,7 +231,7 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
               ))}
             </div>
           </aside>
-        </>
+        </div>
       ) : null}
     </div>
   );
@@ -238,29 +279,29 @@ export default function AppShell({
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
+          <div className="flex min-w-0 items-center gap-3 md:gap-4">
             <a
               href="/dashboard"
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-sm font-black text-white shadow-sm"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-sm font-black text-white shadow-sm md:h-12 md:w-12"
             >
               HHA
             </a>
 
-            <div>
+            <div className="min-w-0">
               <a href="/dashboard" className="group block">
-                <div className="text-2xl font-black tracking-tight text-slate-900 group-hover:text-blue-700">
+                <div className="truncate text-xl font-black tracking-tight text-slate-900 group-hover:text-blue-700 md:text-2xl">
                   Harmony Health App
                 </div>
               </a>
-              <div className="mt-0.5 text-sm font-semibold text-slate-500">
+              <div className="mt-0.5 truncate text-xs font-semibold text-slate-500 md:text-sm">
                 {displayName} - {roleLabel}
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <a href="/dashboard" className="top-nav-link">
               Dashboard
             </a>
@@ -275,16 +316,14 @@ export default function AppShell({
               </a>
             )}
 
-            {!isOperator ? (
-              <div className="ml-0 flex items-center gap-2 md:ml-3">
-                <MenuDrawer groups={menuGroups} />
-              </div>
-            ) : null}
+            <div className="ml-0 flex items-center gap-2 md:ml-3">
+              <MenuDrawer groups={menuGroups} />
+            </div>
 
             <button
               type="button"
               onClick={logout}
-              className="rounded-2xl px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              className="rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:px-4"
             >
               Logout
             </button>
@@ -292,7 +331,7 @@ export default function AppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-5 py-8">
+      <main className="mx-auto max-w-7xl px-4 py-6 md:px-5 md:py-8">
         {children}
       </main>
     </div>
