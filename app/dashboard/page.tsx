@@ -896,17 +896,29 @@ function AdminDashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRows.map((row: any) => (
-                      <tr key={`${row.participant_id}-${row.mcu_id || row.external_id}`} className="hover:bg-slate-50">
+                      <tr
+  key={`${row.participant_id}-${row.mcu_id || row.external_id}`}
+  onClick={() => {
+    if (mcuProgram === "capaska") setSelectedMcuRow(row);
+  }}
+  className={`hover:bg-slate-50 ${mcuProgram === "capaska" ? "cursor-pointer" : ""}`}
+>
                         <td className="px-4 py-3 font-bold text-slate-900">
                           {mcuProgram === "capaska" ? (
                             <button
-                              type="button"
-                              onClick={() => setSelectedMcuRow(row)}
-                              className="text-left font-black text-slate-950 underline-offset-4 hover:text-blue-700 hover:underline"
-                              title="Lihat detail progress peserta"
-                            >
-                              {row.name}
-                            </button>
+  type="button"
+  onClick={(event) => {
+    event.stopPropagation();
+    setSelectedMcuRow(row);
+  }}
+  className="inline-flex items-center gap-2 text-left font-black text-blue-700 underline-offset-4 hover:underline"
+  title="Lihat detail progress peserta"
+>
+  <span>{row.name}</span>
+  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">
+    Detail
+  </span>
+</button>
                           ) : (
                             row.name
                           )}
