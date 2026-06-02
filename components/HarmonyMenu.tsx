@@ -13,14 +13,14 @@ const menuGroups = [
   {
     title: "MCU",
     items: [
-      { label: "Setup Parameter", href: "/parameters" },
-      { label: "Setup Label Paket", href: "/package-labels" },
-      { label: "Parameter Kelulusan", href: "/pass-criteria" },
-      { label: "Input CAPASKA", href: "/input/capaska" },
-      { label: "Input Corporate", href: "/input/corporate" },
+      { label: "Setup Parameter", href: "/setup-parameters" },
+      { label: "Setup Label Paket", href: "/setup-label-paket" },
+      { label: "Parameter Kelulusan", href: "/parameter-kelulusan" },
+      { label: "Input CAPASKA", href: "/input" },
+      { label: "Input Corporate", href: "/input-corporate" },
       { label: "AI MCU Analyzer", href: "/ai-mcu/analyze" },
       { label: "Training AI MCU", href: "/ai-mcu/train" },
-      { label: "Cetak Label", href: "/print-label" },
+      { label: "Cetak Label", href: "/labels" },
     ],
   },
   {
@@ -40,8 +40,8 @@ const menuGroups = [
     title: "Admin",
     items: [
       { label: "Import Data", href: "/import" },
-      { label: "Hapus Database", href: "/delete-database" },
-      { label: "Master Users", href: "/users" },
+      { label: "Hapus Database", href: "/cleanup" },
+      { label: "Master Users", href: "/master" },
     ],
   },
 ];
@@ -64,20 +64,29 @@ export default function HarmonyMenu() {
           <button
             type="button"
             aria-label="Close menu"
-            className="fixed inset-0 z-40 cursor-default bg-black/10"
+            className="fixed inset-0 z-[9998] cursor-default bg-slate-950/55"
             onClick={() => setOpen(false)}
           />
 
-          <div className="absolute right-0 z-50 mt-3 w-[360px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
-            <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
-              <div className="text-sm font-black text-slate-900">Harmony Health App</div>
-              <div className="text-xs font-semibold text-slate-500">Navigasi layanan</div>
+          <aside className="fixed left-3 top-3 bottom-3 z-[9999] flex w-[min(88vw,380px)] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl md:left-auto md:right-6 md:top-24 md:bottom-auto md:max-h-[calc(100vh-120px)]">
+            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
+              <div>
+                <div className="text-base font-black">Harmony Health App</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">Navigasi layanan</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-xl bg-white/15 px-3 py-2 text-xs font-black text-white transition hover:bg-white/25"
+              >
+                Tutup
+              </button>
             </div>
 
-            <div className="max-h-[70vh] overflow-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 p-3">
               {menuGroups.map((group) => (
-                <div key={group.title} className="mb-3 rounded-2xl border border-slate-100 bg-white p-3">
-                  <div className="mb-2 px-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                <div key={group.title} className="mb-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="mb-2 px-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
                     {group.title}
                   </div>
 
@@ -86,7 +95,8 @@ export default function HarmonyMenu() {
                       <a
                         key={`${group.title}-${item.href}`}
                         href={item.href}
-                        className="rounded-xl px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                        onClick={() => setOpen(false)}
+                        className="block rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                       >
                         {item.label}
                       </a>
@@ -95,7 +105,7 @@ export default function HarmonyMenu() {
                 </div>
               ))}
             </div>
-          </div>
+          </aside>
         </>
       ) : null}
     </div>

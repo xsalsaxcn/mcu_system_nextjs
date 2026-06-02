@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState, type ReactNode } from "react";
 import type { SessionUser } from "@/lib/shared/types";
 
 const adminMenuGroups = [
@@ -132,120 +131,13 @@ function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
 
 function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, [open]);
-
-  const drawer = open ? (
-    <div
-      data-harmony-menu="portal-overlay"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2147483647,
-        width: "100vw",
-        height: "100dvh",
-        overflow: "hidden",
-      }}
-    >
-      <button
-        type="button"
-        aria-label="Close menu"
-        onClick={() => setOpen(false)}
-        style={{
-          position: "fixed",
-          inset: 0,
-          width: "100vw",
-          height: "100dvh",
-          background: "rgba(2, 6, 23, 0.72)",
-          backdropFilter: "blur(6px)",
-          border: 0,
-          padding: 0,
-          margin: 0,
-          zIndex: 2147483646,
-        }}
-      />
-
-      <aside
-        data-harmony-menu="portal-drawer"
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          zIndex: 2147483647,
-          width: "min(88vw, 380px)",
-          height: "100dvh",
-          overflowY: "auto",
-          overflowX: "hidden",
-          background: "#ffffff",
-          borderRight: "1px solid #e2e8f0",
-          borderTopRightRadius: "28px",
-          borderBottomRightRadius: "28px",
-          boxShadow: "0 25px 80px rgba(15, 23, 42, 0.35)",
-          padding: "16px",
-        }}
-      >
-        <div className="mb-4 flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
-          <div>
-            <div className="text-sm font-black text-slate-950">Harmony Health App</div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">Navigasi layanan</div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 shadow-sm"
-          >
-            Tutup
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <div key={group.title} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="mb-2 px-1 text-[11px] font-black uppercase tracking-wide text-slate-400">
-                {group.title}
-              </div>
-
-              <div className="space-y-1">
-                {group.items.map((item) => (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setOpen(false)}
-                    className="block rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
-                  >
-                    {item.label}
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </aside>
-    </div>
-  ) : null;
 
   return (
-    <>
+    <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((value) => !value)}
         className="nav-menu-button"
-        aria-label="Open menu"
       >
         <span className="nav-menu-lines" aria-hidden="true">
           <span />
@@ -255,54 +147,161 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
         Menu
       </button>
 
-      {mounted && drawer ? createPortal(drawer, document.body) : null}
-    </>
+      {open ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            className="fixed inset-0 z-[9998] cursor-default bg-slate-950/55"
+            onClick={() => setOpen(false)}
+          />
+
+          <aside className="fixed left-3 top-3 bottom-3 z-[9999] flex w-[min(88vw,380px)] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl md:left-auto md:right-6 md:top-24 md:bottom-auto md:max-h-[calc(100vh-120px)]">
+            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
+              <div>
+                <div className="text-base font-black">Harmony Health App</div>
+                <div className="mt-1 text-xs font-semibold text-blue-100">
+                  Navigasi layanan
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-xl bg-white/15 px-3 py-2 text-xs font-black text-white transition hover:bg-white/25"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 p-3">
+              {groups.map((group) => (
+                <section
+                  key={group.title}
+                  className="mb-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm"
+                >
+                  <div className="mb-2 px-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                    {group.title}
+                  </div>
+
+                  <div className="grid gap-1">
+                    {group.items.map((item) => (
+                      <a
+                        key={`${group.title}-${item.href}`}
+                        href={item.href}
+                        onClick={() => setOpen(false)}
+                        className="block rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </aside>
+        </>
+      ) : null}
+    </div>
   );
 }
 
 export default function AppShell({
-  children,
   user,
+  children,
 }: {
-  children: React.ReactNode;
-  user?: SessionUser | null;
+  user: SessionUser;
+  children: ReactNode;
 }) {
-  const rawUser = (user || {}) as unknown as Record<string, unknown>;
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+    } catch {
+      // Ignore logout network error.
+    }
+
+    window.location.href = "/login";
+  }
+
+  const rawUser = user as unknown as Record<string, unknown>;
   const role = getRole(rawUser);
   const isOperator = role === "operator";
+
+  const displayName = String(
+    rawUser.name ||
+      rawUser.username ||
+      rawUser.email ||
+      "Administrator"
+  );
+
+  const roleLabel = String(
+    rawUser.role ||
+      rawUser.role_name ||
+      "Admin"
+  );
+
   const menuGroups = isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
-  const displayName = valueOf(rawUser, ["name", "username", "email"]) || "User";
-  const roleLabel = valueOf(rawUser, ["role", "role_name", "user_role"]) || "-";
+  const operatorFormRoute = getOperatorFormRoute(rawUser);
+  const operatorFormLabel = getOperatorFormLabel(rawUser);
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <MenuDrawer groups={menuGroups} />
-
-            <a href="/dashboard" className="min-w-0">
-              <div className="truncate text-sm font-black text-slate-950 md:text-base">
-                Harmony Health App
-              </div>
-              <div className="truncate text-[11px] font-semibold text-slate-500 md:text-xs">
-                MCU Corporate · CAPASKA · Vaksinasi
-              </div>
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <a
+              href="/dashboard"
+              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-sm font-black text-white shadow-sm"
+            >
+              HHA
             </a>
+
+            <div>
+              <a href="/dashboard" className="group block">
+                <div className="text-2xl font-black tracking-tight text-slate-900 group-hover:text-blue-700">
+                  Harmony Health App
+                </div>
+              </a>
+              <div className="mt-0.5 text-sm font-semibold text-slate-500">
+                {displayName} - {roleLabel}
+              </div>
+            </div>
           </div>
 
-          <div className="min-w-0 text-right">
-            <div className="truncate text-xs font-black text-slate-800 md:text-sm">
-              {displayName}
-            </div>
-            <div className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-400">
-              {roleLabel}
-            </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a href="/dashboard" className="top-nav-link">
+              Dashboard
+            </a>
+
+            {isOperator ? (
+              <a href={operatorFormRoute} className="top-nav-link">
+                {operatorFormLabel}
+              </a>
+            ) : (
+              <a href="/registrasi-ulang" className="top-nav-link">
+                Registrasi Ulang
+              </a>
+            )}
+
+            {!isOperator ? (
+              <div className="ml-0 flex items-center gap-2 md:ml-3">
+                <MenuDrawer groups={menuGroups} />
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-2xl px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              Logout
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-5 md:px-6">
+      <main className="mx-auto max-w-7xl px-5 py-8">
         {children}
       </main>
     </div>
