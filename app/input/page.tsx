@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -423,7 +423,7 @@ function ParameterInput({
         </select>
         {value && (
           <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
+            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
           </div>
         )}
       </>
@@ -457,7 +457,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{opt.label}</span>
                   {typeof opt.score === "number" && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {opt.score}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {opt.score}{critical ? " Â· Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -468,8 +468,8 @@ function ParameterInput({
 
         {value && (
           <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Terpilih: {getSelectedChoiceOption(param, value)?.label || value} · Skor: {scoreForParam(param, value)}
-            {isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
+            Terpilih: {getSelectedChoiceOption(param, value)?.label || value} Â· Skor: {scoreForParam(param, value)}
+            {isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
           </div>
         )}
       </div>
@@ -754,6 +754,7 @@ function InputForm({ user }: { user: any }) {
   const [hasLoadedList, setHasLoadedList] = useState(false);
   const [doneParticipants, setDoneParticipants] = useState<any[]>([]);
   const [hasMoreDoneParticipants, setHasMoreDoneParticipants] = useState(false);
+  const [donePreviewParticipant, setDonePreviewParticipant] = useState<any>(null);
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
@@ -836,7 +837,6 @@ function InputForm({ user }: { user: any }) {
 
   async function loadParticipant(p: any, mode: LoadMode) {
     setParticipant(p);
-    setResults([]);
     setMessage("");
 
     const detailRes = await fetch(`/api/participant?id=${p.id}`);
@@ -926,14 +926,16 @@ function InputForm({ user }: { user: any }) {
   }
 
   useEffect(() => {
-    refreshLists(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDoneParticipants([]);
+    setHasMoreDoneParticipants(false);
+    setHasLoadedList(false);
+    setDonePreviewParticipant(null);
   }, [program, sourceId, effectivePostId]);
 
-  const displayedList = doneParticipants;
+  const displayedList = hasLoadedList ? doneParticipants : [];
 
   function openFromOperatorList(p: any) {
-    loadParticipant(p, "edit");
+    setDonePreviewParticipant(p);
   }
 
   return (
@@ -948,11 +950,77 @@ function InputForm({ user }: { user: any }) {
         }}
       />
 
-      <section className="card p-5">
+      
+      {donePreviewParticipant && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <button
+            type="button"
+            aria-label="Tutup detail peserta selesai"
+            className="absolute inset-0"
+            onClick={() => setDonePreviewParticipant(null)}
+          />
+          <div className="relative z-10 w-full max-w-xl rounded-[2rem] border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wide text-emerald-600">Preview peserta selesai</div>
+                <div className="mt-1 text-2xl font-black text-slate-950">{donePreviewParticipant.name}</div>
+                <div className="mt-1 text-sm font-semibold leading-6 text-slate-500">
+                  {donePreviewParticipant.mcu_id || "-"} Â· {donePreviewParticipant.province || "-"} Â· {donePreviewParticipant.source_name || "-"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDonePreviewParticipant(null)}
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl bg-blue-50 p-4">
+                <div className="text-xs font-black uppercase tracking-wide text-blue-500">Stage Operator</div>
+                <div className="mt-1 text-lg font-black text-blue-950">{effectivePostName}</div>
+              </div>
+              <div className="rounded-2xl bg-emerald-50 p-4">
+                <div className="text-xs font-black uppercase tracking-wide text-emerald-600">Skor Akhir</div>
+                <div className="mt-1 text-lg font-black text-emerald-950">
+                  {donePreviewParticipant.operator_final_score_label ?? donePreviewParticipant.operator_final_score ?? "-"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-600">
+              Data ini sudah submit di stage {effectivePostName}. Klik tombol di bawah untuk membuka form edit. Form tidak akan otomatis scroll turun sampai tombol edit diklik.
+            </div>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700 hover:bg-slate-50"
+                onClick={() => setDonePreviewParticipant(null)}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="rounded-2xl bg-amber-500 px-5 py-3 text-sm font-black text-white hover:bg-amber-600"
+                onClick={() => {
+                  const selected = donePreviewParticipant;
+                  setDonePreviewParticipant(null);
+                  loadParticipant(selected, "edit");
+                }}
+              >
+                Lihat / Edit Hasil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}<section className="card p-5">
         <div className="text-2xl font-black">Input CAPASKA</div>
         <div className="mt-1 text-sm text-slate-500">Login sebagai {effectivePostName}. Operator hanya melihat parameter post masing-masing.</div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          AutoScore backend CAPASKA aktif · pertanyaan selang-seling · value/score tersembunyi
+          AutoScore backend CAPASKA aktif Â· pertanyaan selang-seling Â· value/score tersembunyi
         </div>
         {isAdminStageAssist && (
           <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
@@ -975,7 +1043,7 @@ function InputForm({ user }: { user: any }) {
             className="rounded-2xl border border-slate-300 px-4 py-3 text-xl font-black shadow-sm"
             title="Scan barcode"
           >
-            📷
+            ðŸ“·
           </button>
         </div>
 
@@ -998,9 +1066,16 @@ function InputForm({ user }: { user: any }) {
           <div className="mb-3 font-black">Hasil Pencarian</div>
           <div className="grid gap-2">
             {results.map((p) => (
-              <div key={p.id} className="rounded-xl border border-slate-200 bg-white p-3">
+              <div
+                key={p.id}
+                className={`rounded-xl border p-3 transition ${
+                  participant?.id === p.id
+                    ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
                 <div className="font-bold">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+                <div className="text-sm text-slate-500">{p.mcu_id || "-"} Â· {p.province || "-"} Â· {p.source_name || "-"}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => loadParticipant(p, "blank")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white">
                     Input Baru
@@ -1023,9 +1098,14 @@ function InputForm({ user }: { user: any }) {
             <div className="text-sm text-slate-500">Hanya peserta yang sudah submit di stage {effectivePostName}. Klik peserta untuk lihat/edit hasil.</div>
           </div>
 
-          <div className="rounded-2xl bg-blue-600 px-4 py-2 font-black text-white">
-            Selesai ({doneParticipants.length})
-          </div>
+          <button
+            type="button"
+            className="rounded-2xl bg-blue-600 px-4 py-2 font-black text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+            onClick={() => refreshLists(true)}
+            disabled={loadingList}
+          >
+            {loadingList ? "Memuat..." : `Selesai (${doneParticipants.length})`}
+          </button>
         </div>
 
         <div className="mt-4 grid gap-2">
@@ -1048,19 +1128,19 @@ function InputForm({ user }: { user: any }) {
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") openFromOperatorList(p);
               }}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50/40"
+              className={`cursor-pointer rounded-2xl border p-3 transition ${donePreviewParticipant?.id === p.id || participant?.id === p.id ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="font-black">{p.name}</div>
-                  <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+                  <div className="text-sm text-slate-500">{p.mcu_id || "-"} Â· {p.province || "-"} Â· {p.source_name || "-"}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
                     Skor akhir: {p.operator_final_score_label ?? p.operator_final_score ?? "-"}
                   </div>
                   <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-                    Sudah submit · klik untuk edit
+                    Sudah submit Â· klik untuk edit
                   </div>
                 </div>
               </div>
@@ -1070,7 +1150,7 @@ function InputForm({ user }: { user: any }) {
                   className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white"
                   onClick={(e) => {
                     e.stopPropagation();
-                    loadParticipant(p, "edit");
+                    openFromOperatorList(p);
                   }}
                 >
                   Lihat / Edit Hasil
@@ -1094,7 +1174,7 @@ function InputForm({ user }: { user: any }) {
         <section className="card space-y-4 p-5">
           <div>
             <div className="text-xl font-black">{participant.name}</div>
-            <div className="text-sm text-slate-500">{participant.mcu_id} · {participant.province || "-"} · {detail.participant.source_name || "-"}</div>
+            <div className="text-sm text-slate-500">{participant.mcu_id} Â· {participant.province || "-"} Â· {detail.participant.source_name || "-"}</div>
           </div>
           <StageProgress stages={detail.stages} />
         </section>
@@ -1144,3 +1224,4 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
