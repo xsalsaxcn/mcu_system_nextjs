@@ -259,3 +259,52 @@ function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
     </>
   );
 }
+
+export default function AppShell({
+  children,
+  user,
+}: {
+  children: React.ReactNode;
+  user?: SessionUser | null;
+}) {
+  const rawUser = (user || {}) as unknown as Record<string, unknown>;
+  const role = getRole(rawUser);
+  const isOperator = role === "operator";
+  const menuGroups = isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
+  const displayName = valueOf(rawUser, ["name", "username", "email"]) || "User";
+  const roleLabel = valueOf(rawUser, ["role", "role_name", "user_role"]) || "-";
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <MenuDrawer groups={menuGroups} />
+
+            <a href="/dashboard" className="min-w-0">
+              <div className="truncate text-sm font-black text-slate-950 md:text-base">
+                Harmony Health App
+              </div>
+              <div className="truncate text-[11px] font-semibold text-slate-500 md:text-xs">
+                MCU Corporate · CAPASKA · Vaksinasi
+              </div>
+            </a>
+          </div>
+
+          <div className="min-w-0 text-right">
+            <div className="truncate text-xs font-black text-slate-800 md:text-sm">
+              {displayName}
+            </div>
+            <div className="truncate text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              {roleLabel}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-7xl px-4 py-5 md:px-6">
+        {children}
+      </main>
+    </div>
+  );
+}
