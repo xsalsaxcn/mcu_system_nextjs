@@ -419,7 +419,7 @@ function ParameterInput({
       <>
         <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">-- Pilih --</option>
-          {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          {options.map((opt) => <option key={opt.value} value={choiceValue}>{opt.label}</option>)}
         </select>
         {value && (
           <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
@@ -435,7 +435,8 @@ function ParameterInput({
       <div className="grid gap-2">
         <div className="grid gap-2 sm:grid-cols-2">
           {options.map((opt) => {
-            const checked = norm(value) === norm(opt.value) || norm(value) === norm(opt.label);
+                        const choiceValue = String(opt.label ?? opt.option_label ?? opt.name ?? opt.text ?? opt.value ?? "");
+            const checked = norm(value) === norm(choiceValue);
             const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
 
             return (
@@ -449,7 +450,7 @@ function ParameterInput({
                   type="radio"
                   className="mt-1"
                   name={`param-${param.id}`}
-                  value={opt.value}
+                  value={choiceValue}
                   checked={checked}
                   onChange={() => onChange(opt.value)}
                 />
@@ -1334,6 +1335,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
