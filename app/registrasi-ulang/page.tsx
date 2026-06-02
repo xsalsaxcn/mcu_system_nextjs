@@ -944,7 +944,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           {printJobs.map((job) => (
             <StationPrintLabel
               key={`${job.station.key}-${job.copyIndex}`}
-              participant={form}
+              form={form}
               station={job.station}
               fontSize={labelFontSize}
               showBorder={showLabelBorder}
@@ -1107,3 +1107,4 @@ function StationPrintLabel({
     </section>
   );
 }
+
