@@ -751,6 +751,7 @@ function InputForm({ user }: { user: any }) {
   const [listTab, setListTab] = useState<ListTab>("selesai");
   const [loadingList, setLoadingList] = useState(false);
   const [hasLoadedList, setHasLoadedList] = useState(false);
+  const [showDoneList, setShowDoneList] = useState(false);
   const [doneParticipants, setDoneParticipants] = useState<any[]>([]);
   const [hasMoreDoneParticipants, setHasMoreDoneParticipants] = useState(false);
   const [donePreviewParticipant, setDonePreviewParticipant] = useState<any>(null);
@@ -1042,7 +1043,10 @@ function InputForm({ user }: { user: any }) {
             className="shrink-0 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-black shadow-sm"
             title="Scan barcode"
           >
-            Scan
+            
+            <span aria-hidden="true">{String.fromCodePoint(0x1F4F7)}</span>
+            <span className="sr-only">Scan barcode</span>
+          
           </button>
         </div>
 
@@ -1108,7 +1112,7 @@ function InputForm({ user }: { user: any }) {
         </div>
 
         <div className="mt-4 grid gap-2">
-          {!displayedList.length && (
+          {showDoneList && !displayedList.length && (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
               {loadingList
                 ? "Memuat daftar peserta selesai..."
@@ -1252,6 +1256,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
