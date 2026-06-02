@@ -754,6 +754,7 @@ function InputForm({ user }: { user: any }) {
   const [showDoneList, setShowDoneList] = useState(false);
   const [doneParticipants, setDoneParticipants] = useState<any[]>([]);
   const [hasMoreDoneParticipants, setHasMoreDoneParticipants] = useState(false);
+  const [doneSearch, setDoneSearch] = useState("");
   const [donePreviewParticipant, setDonePreviewParticipant] = useState<any>(null);
 
   const groupedParameters = useMemo(() => {
@@ -933,7 +934,31 @@ function InputForm({ user }: { user: any }) {
     setDonePreviewParticipant(null);
   }, [program, sourceId, effectivePostId]);
 
-  const displayedList = showDoneList ? doneParticipants : [];
+  const displayedList = useMemo(() => {
+    if (!showDoneList) return [];
+
+    const q = doneSearch.trim().toLowerCase();
+    const list = doneParticipants || [];
+
+    if (!q) return list;
+
+    return list.filter((p: any) => {
+      const haystack = [
+        p.name,
+        p.mcu_id,
+        p.external_id,
+        p.province,
+        p.source_name,
+        p.operator_final_score_label,
+        p.operator_final_score
+      ]
+        .filter((x) => x !== undefined && x !== null)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [showDoneList, doneParticipants, doneSearch]);
   function getChoiceValue(option: any) {
     return String(
       option?.value ??
@@ -1145,13 +1170,26 @@ function InputForm({ user }: { user: any }) {
         </div>
 
         {showDoneList && (
-          <div className="mt-4 grid gap-2">
+          <>
+            <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <input
+                className="input w-full md:max-w-md"
+                value={doneSearch}
+                onChange={(e) => setDoneSearch(e.target.value)}
+                placeholder="Cari peserta selesai: nama / No MCU / provinsi"
+              />
+              <div className="text-sm font-semibold text-slate-500">
+                Menampilkan {displayedList.length} dari {doneParticipants.length} peserta
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-2">
             {!displayedList.length && (
               <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
                 {loadingList
                   ? "Memuat daftar peserta selesai..."
                   : hasLoadedList
-                    ? "Belum ada peserta selesai untuk operator ini."
+                    ? (doneSearch.trim() ? "Tidak ada peserta selesai yang cocok dengan pencarian." : "Belum ada peserta selesai untuk operator ini.")
                     : "Klik tombol Selesai untuk menampilkan daftar."}
               </div>
             )}
@@ -1206,6 +1244,7 @@ function InputForm({ user }: { user: any }) {
               </div>
             )}
           </div>
+        </>
         )}
       </section>
       )}
@@ -1295,6 +1334,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
