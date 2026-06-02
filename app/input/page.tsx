@@ -419,7 +419,10 @@ function ParameterInput({
       <>
         <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">-- Pilih --</option>
-          {options.map((opt) => <option key={opt.value} value={choiceValue}>{opt.label}</option>)}
+                    {options.map((opt) => {
+            const optionChoiceValue = String(opt.label ?? opt.option_label ?? opt.name ?? opt.text ?? opt.value ?? "");
+            return <option key={opt.value ?? opt.label} value={optionChoiceValue}>{opt.label}</option>;
+          })}
         </select>
         {value && (
           <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
@@ -1335,6 +1338,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
