@@ -416,7 +416,8 @@ function LabelCard({
   const qrValue = idText;
   const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
-  const location = participant.province || participant.location || participant.department || "";
+  const participantAny = participant as any;
+  const location = participantAny.province || participantAny.location || participantAny.department || "";
 
   const safeFont = Number(fontSize || 10);
   const nameFont =
@@ -537,5 +538,6 @@ function LabelCard({
     </section>
   );
 }
+
 
 
