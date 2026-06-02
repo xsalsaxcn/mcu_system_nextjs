@@ -371,3 +371,62 @@ body {
   }
 }
 
+/* mobile hamburger z-index fix v70 */
+@media (max-width: 768px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  [class*="fixed"][class*="inset-0"],
+  [class*="fixed"][class*="top-0"],
+  [class*="fixed"][class*="left-0"],
+  [class*="fixed"][class*="right-0"],
+  [class*="fixed"][class*="bottom-0"] {
+    z-index: 99990 !important;
+  }
+
+  .mobile-menu,
+  .hamburger-menu,
+  .menu-drawer,
+  .drawer,
+  [data-menu],
+  [data-drawer],
+  [data-harmony-menu],
+  aside[class*="fixed"],
+  nav[class*="fixed"],
+  div[class*="fixed"][class*="shadow"] {
+    z-index: 100000 !important;
+  }
+
+  .mobile-menu,
+  .hamburger-menu,
+  .menu-drawer,
+  .drawer,
+  [data-menu],
+  [data-drawer],
+  [data-harmony-menu],
+  aside[class*="fixed"],
+  nav[class*="fixed"] {
+    width: min(88vw, 380px) !important;
+    max-width: min(88vw, 380px) !important;
+    max-height: 100dvh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  main,
+  section,
+  form,
+  .card,
+  [class*="rounded-[2rem]"],
+  [class*="rounded-3xl"] {
+    z-index: auto;
+  }
+
+  header {
+    z-index: 1000;
+  }
+}
+
