@@ -962,6 +962,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 function StationPrintLabel({
   station,
+  participant,
   form,
   fontSize,
   showBorder,
@@ -969,16 +970,18 @@ function StationPrintLabel({
   showBarcodeText
 }: {
   station: StationPrintOption;
-  form: any;
+  participant?: any;
+  form?: any;
   fontSize: number;
   showBorder: boolean;
   showQr: boolean;
   showBarcodeText: boolean;
 }) {
-  const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
-  const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
-  const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
-  const location = String(form?.province || form?.provinsi || form?.location || form?.lokasi || form?.department || "").trim();
+  const data = form || participant || {};
+  const idText = String(data?.mcu_id || data?.external_id || data?.nomor_mcu || data?.id || "").trim();
+  const nameText = String(data?.name || data?.nama || data?.full_name || "-").trim().toUpperCase();
+  const institution = String(data?.company_name || data?.institution_name || data?.company || "BPIP / CAPASKA").trim();
+  const location = String(data?.province || data?.provinsi || data?.location || data?.lokasi || data?.department || "").trim();
   const stationText =
     station.label === "PENYAKIT DALAM"
       ? "PENYAKIT DALAM"
@@ -988,9 +991,9 @@ function StationPrintLabel({
 
   const safeFont = Number(fontSize || 10);
   const nameFont =
-    nameText.length > 34 ? Math.max(12, safeFont + 5) :
-    nameText.length > 24 ? Math.max(14, safeFont + 7) :
-    Math.max(16, safeFont + 9);
+    nameText.length > 34 ? Math.max(13, safeFont + 5) :
+    nameText.length > 24 ? Math.max(15, safeFont + 7) :
+    Math.max(18, safeFont + 10);
 
   const qrValue = idText || nameText;
 
@@ -1032,14 +1035,14 @@ function StationPrintLabel({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          maxWidth: showQr ? "calc(100% - 22mm)" : "100%",
-          marginTop: "1.8mm",
+          maxWidth: showQr ? "calc(100% - 23mm)" : "100%",
+          marginTop: "1.6mm",
           marginBottom: "1.8mm",
           padding: "1mm 2.2mm",
           borderRadius: "999px",
           background: "#dbeafe",
           color: "#1e3a8a",
-          fontSize: "10px",
+          fontSize: "9.5px",
           lineHeight: 1,
           fontWeight: 900,
           whiteSpace: "normal",
@@ -1051,7 +1054,7 @@ function StationPrintLabel({
 
       <div
         style={{
-          width: showQr ? "calc(100% - 22mm)" : "100%",
+          width: showQr ? "calc(100% - 23mm)" : "100%",
           fontSize: `${Math.max(10, safeFont + 2)}px`,
           lineHeight: 1.18,
           fontWeight: 700,
@@ -1107,4 +1110,3 @@ function StationPrintLabel({
     </section>
   );
 }
-

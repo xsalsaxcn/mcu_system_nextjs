@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -212,7 +212,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v22 · fast search · QR MCU saja
+          Label Search v22 Â· fast search Â· QR MCU saja
         </div>
       </section>
 
@@ -304,7 +304,7 @@ function LabelPrinter({ user }: { user: any }) {
             <div>
               <div className="text-lg font-black">Pilih Peserta</div>
               <div className="text-sm text-slate-500">
-                Terpilih {selectedParticipants.length} peserta × {copies} stiker = {labels.length} label
+                Terpilih {selectedParticipants.length} peserta Ã— {copies} stiker = {labels.length} label
               </div>
             </div>
 
@@ -400,54 +400,140 @@ function LabelCard({
   qrSize,
   fontSize,
   showBorder,
+  showQr,
+  showBarcodeText,
   printMode = false
 }: {
   participant: Participant;
   qrSize: number;
   fontSize: number;
   showBorder: boolean;
+  showQr: boolean;
+  showBarcodeText: boolean;
   printMode?: boolean;
 }) {
-  const idText = participant.mcu_id || participant.external_id || String(participant.id);
+  const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
   const qrValue = idText;
+  const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
+  const location = participant.province || participant.location || participant.department || "";
+
+  const safeFont = Number(fontSize || 10);
+  const nameFont =
+    nameText.length > 34 ? Math.max(13, safeFont + 5) :
+    nameText.length > 24 ? Math.max(15, safeFont + 7) :
+    Math.max(18, safeFont + 10);
 
   return (
-    <div
+    <section
       className={`${printMode ? "label-page" : ""} bg-white`}
       style={{
-        width: "40mm",
-        height: "30mm",
-        padding: "2.4mm",
+        position: "relative",
+        width: "58mm",
+        minHeight: "38mm",
+        padding: "4.5mm 4.5mm 3.8mm 4.5mm",
         boxSizing: "border-box",
-        border: showBorder ? "0.3mm solid #cbd5e1" : "none",
-        borderRadius: showBorder ? "2.5mm" : "0",
-        overflow: "hidden"
+        overflow: "hidden",
+        border: showBorder ? "0.45mm solid #d4d4d8" : "0.35mm solid #d4d4d8",
+        borderRadius: "5mm",
+        background: "#ffffff",
+        WebkitPrintColorAdjust: "exact",
+        printColorAdjust: "exact"
       }}
     >
-      <div className="flex h-full w-full items-start justify-between gap-1">
-        <div className="min-w-0 flex-1" style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }}>
-          <div
-            className="truncate font-black uppercase text-slate-950"
-            style={{ fontSize: `${fontSize + 2}px` }}
-          >
-            {participant.name}
-          </div>
-          <div className="mt-1 truncate text-slate-900">MCU: {idText}</div>
-          <div className="mt-1 truncate text-slate-900">{institution}</div>
-          {participant.province && <div className="mt-1 truncate text-slate-600">{participant.province}</div>}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-center">
-          <QRCodeImage value={qrValue} size={qrSize} />
-          <div
-            className="mt-1 max-w-[18mm] truncate text-center text-slate-700"
-            style={{ fontSize: `${Math.max(fontSize - 1, 6)}px`, lineHeight: 1.1 }}
-          >
-            {idText}
-          </div>
-        </div>
+      <div
+        style={{
+          width: "100%",
+          paddingRight: 0,
+          fontSize: `${nameFont}px`,
+          lineHeight: 1.02,
+          fontWeight: 900,
+          color: "#000",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+          letterSpacing: "-0.03em"
+        }}
+      >
+        {nameText || "-"}
       </div>
-    </div>
+
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          maxWidth: showQr ? "calc(100% - 23mm)" : "100%",
+          marginTop: "1.6mm",
+          marginBottom: "1.8mm",
+          padding: "1mm 2.2mm",
+          borderRadius: "999px",
+          background: "#dbeafe",
+          color: "#1e3a8a",
+          fontSize: "9.5px",
+          lineHeight: 1,
+          fontWeight: 900,
+          whiteSpace: "normal",
+          overflowWrap: "anywhere"
+        }}
+      >
+        LABEL PESERTA
+      </div>
+
+      <div
+        style={{
+          width: showQr ? "calc(100% - 23mm)" : "100%",
+          fontSize: `${Math.max(10, safeFont + 2)}px`,
+          lineHeight: 1.18,
+          fontWeight: 700,
+          color: "#111827",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere"
+        }}
+      >
+        <div>MCU: {idText || "-"}</div>
+        <div style={{ marginTop: "1.2mm" }}>{institution || "-"}</div>
+        {location ? <div style={{ marginTop: "1.2mm", color: "#4b5563" }}>{location}</div> : null}
+      </div>
+
+      {showQr && (
+        <div
+          style={{
+            position: "absolute",
+            right: "4mm",
+            bottom: showBarcodeText ? "5.5mm" : "4mm",
+            width: "20mm",
+            height: "20mm",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#fff"
+          }}
+        >
+          <QRCodeImage value={qrValue} size={76} />
+        </div>
+      )}
+
+      {showQr && showBarcodeText && (
+        <div
+          style={{
+            position: "absolute",
+            right: "3.2mm",
+            bottom: "2mm",
+            width: "21.5mm",
+            textAlign: "center",
+            fontSize: "7.5px",
+            lineHeight: 1,
+            fontWeight: 800,
+            color: "#111827",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis"
+          }}
+        >
+          {idText || "-"}
+        </div>
+      )}
+    </section>
   );
 }
