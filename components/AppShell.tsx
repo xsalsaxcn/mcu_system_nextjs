@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, type ReactNode } from "react";
 import type { SessionUser } from "@/lib/shared/types";
@@ -132,8 +132,7 @@ function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
 function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
   const [open, setOpen] = useState(false);
 
-  return (
-    <div className="relative">
+  return (`n    <div className="relative z-[9999]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -307,3 +306,4 @@ export default function AppShell({
     </div>
   );
 }
+

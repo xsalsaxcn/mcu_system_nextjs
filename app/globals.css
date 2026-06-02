@@ -430,3 +430,32 @@ body {
   }
 }
 
+
+/* mobile menu component fallback v72 */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 768px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden !important;
+  }
+
+  header {
+    z-index: 50;
+  }
+
+  main,
+  section,
+  form,
+  input,
+  select,
+  textarea,
+  button {
+    max-width: 100%;
+  }
+}
