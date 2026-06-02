@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -212,7 +212,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v22 Â· fast search Â· QR MCU saja
+          Label Search v22 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -304,7 +304,7 @@ function LabelPrinter({ user }: { user: any }) {
             <div>
               <div className="text-lg font-black">Pilih Peserta</div>
               <div className="text-sm text-slate-500">
-                Terpilih {selectedParticipants.length} peserta Ã— {copies} stiker = {labels.length} label
+                Terpilih {selectedParticipants.length} peserta Ãƒâ€” {copies} stiker = {labels.length} label
               </div>
             </div>
 
@@ -417,7 +417,8 @@ function LabelCard({
   const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
   const participantAny = participant as any;
-  const location = participantAny.province || participantAny.location || participantAny.department || "";
+  const birthDate = participantAny.date_of_birth || participantAny.birth_date || participantAny.tanggal_lahir || participantAny.dob || "";
+  const provinceText = participantAny.province || participantAny.provinsi || participantAny.location || participantAny.lokasi || participantAny.department || "";
 
   const safeFont = Number(fontSize || 10);
   const nameFont =
@@ -443,7 +444,7 @@ function LabelCard({
         style={{
           position: "absolute",
           left: "8%",
-          top: "9%",
+          top: "8%",
           right: "8%",
           zIndex: 2
         }}
@@ -458,7 +459,7 @@ function LabelCard({
             wordBreak: "break-word",
             overflowWrap: "anywhere",
             letterSpacing: "-0.03em",
-            maxHeight: "38%",
+            maxHeight: "36%",
             overflow: "hidden"
           }}
         >
@@ -470,11 +471,11 @@ function LabelCard({
         style={{
           position: "absolute",
           left: "8%",
-          top: "42%",
-          right: showQr ? "40%" : "8%",
+          top: "39%",
+          right: showQr ? "34%" : "8%",
           zIndex: 2,
-          fontSize: `${Math.max(10, safeFont + 1)}px`,
-          lineHeight: 1.18,
+          fontSize: `${Math.max(9, safeFont)}px`,
+          lineHeight: 1.12,
           fontWeight: 700,
           color: "#111827",
           whiteSpace: "normal",
@@ -483,16 +484,17 @@ function LabelCard({
         }}
       >
         <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "6px" }}>{institution || "-"}</div>
-        {location ? <div style={{ marginTop: "6px", color: "#4b5563" }}>{location}</div> : null}
+        <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
+        {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
+        {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
       </div>
 
       {showQr && (
         <div
           style={{
             position: "absolute",
-            right: "8%",
-            bottom: showBarcodeText ? "15%" : "9%",
+            right: "2%",
+            bottom: showBarcodeText ? "12%" : "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
             display: "flex",
@@ -510,11 +512,11 @@ function LabelCard({
         <div
           style={{
             position: "absolute",
-            right: "6%",
-            bottom: "7%",
+            right: "1%",
+            bottom: "3%",
             width: "34%",
             textAlign: "center",
-            fontSize: "10px",
+            fontSize: "9px",
             lineHeight: 1,
             fontWeight: 800,
             color: "#111827",

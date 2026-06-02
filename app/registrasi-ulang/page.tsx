@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -650,7 +650,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v38 Â· auto close hasil retrieve
+          Registrasi Ulang v38 Ã‚Â· auto close hasil retrieve
         </div>
       </section>
 
@@ -710,7 +710,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               >
                 <div className="font-black">{p.name}</div>
                 <div className="text-sm text-slate-500">
-                  {p.mcu_id || p.external_id || "-"} Â· NIK {p.employee_nik || p.nik || "-"} Â· MCU {formatDate(p.examination_date || p.exam_date)} Â· Lahir {formatDate(p.birth_date || p.date_of_birth)} Â· {p.source_name || "-"}
+                  {p.mcu_id || p.external_id || "-"} Ã‚Â· NIK {p.employee_nik || p.nik || "-"} Ã‚Â· MCU {formatDate(p.examination_date || p.exam_date)} Ã‚Â· Lahir {formatDate(p.birth_date || p.date_of_birth)} Ã‚Â· {p.source_name || "-"}
                 </div>
               </button>
             ))}
@@ -978,7 +978,8 @@ function StationPrintLabel({
   const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
   const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
   const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
-  const location = String(form?.province || form?.provinsi || form?.location || form?.lokasi || form?.department || "").trim();
+  const birthDate = String(form?.date_of_birth || form?.birth_date || form?.tanggal_lahir || form?.dob || "").trim();
+  const provinceText = String(form?.province || form?.provinsi || form?.location || form?.lokasi || "").trim();
   const stationText =
     station.label === "PENYAKIT DALAM"
       ? "PENYAKIT DALAM"
@@ -1011,7 +1012,7 @@ function StationPrintLabel({
         style={{
           position: "absolute",
           left: "8%",
-          top: "8%",
+          top: "7%",
           right: "8%",
           zIndex: 2
         }}
@@ -1032,33 +1033,17 @@ function StationPrintLabel({
         >
           {nameText || "-"}
         </div>
-
-        <div
-          style={{
-            display: "inline-flex",
-            marginTop: "5px",
-            padding: "3px 8px",
-            borderRadius: "999px",
-            background: "#dbeafe",
-            color: "#1e3a8a",
-            fontSize: "10px",
-            lineHeight: 1,
-            fontWeight: 900
-          }}
-        >
-          {stationText}
-        </div>
       </div>
 
       <div
         style={{
           position: "absolute",
           left: "8%",
-          top: "46%",
-          right: showQr ? "40%" : "8%",
+          top: "39%",
+          right: showQr ? "34%" : "8%",
           zIndex: 2,
-          fontSize: `${Math.max(10, safeFont + 1)}px`,
-          lineHeight: 1.18,
+          fontSize: `${Math.max(9, safeFont)}px`,
+          lineHeight: 1.12,
           fontWeight: 700,
           color: "#111827",
           whiteSpace: "normal",
@@ -1067,16 +1052,18 @@ function StationPrintLabel({
         }}
       >
         <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "6px" }}>{institution || "-"}</div>
-        {location ? <div style={{ marginTop: "6px", color: "#4b5563" }}>{location}</div> : null}
+        <div style={{ marginTop: "4px" }}>Stage: {stationText}</div>
+        {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
+        {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
+        <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
       </div>
 
       {showQr && (
         <div
           style={{
             position: "absolute",
-            right: "8%",
-            bottom: showBarcodeText ? "15%" : "9%",
+            right: "2%",
+            bottom: showBarcodeText ? "12%" : "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
             display: "flex",
@@ -1094,11 +1081,11 @@ function StationPrintLabel({
         <div
           style={{
             position: "absolute",
-            right: "6%",
-            bottom: "7%",
+            right: "1%",
+            bottom: "3%",
             width: "34%",
             textAlign: "center",
-            fontSize: "10px",
+            fontSize: "9px",
             lineHeight: 1,
             fontWeight: 800,
             color: "#111827",
