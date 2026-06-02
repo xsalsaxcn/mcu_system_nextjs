@@ -910,6 +910,7 @@ function InputForm({ user }: { user: any }) {
       const json = await res.json();
       const doneList = json.participants || [];
 
+      setShowDoneList(true);
       setDoneParticipants(doneList);
       setHasMoreDoneParticipants(Boolean(json.has_more));
       setHasLoadedList(true);
@@ -1046,8 +1047,10 @@ function InputForm({ user }: { user: any }) {
             
             
             
+            
             <span aria-hidden="true">{String.fromCodePoint(0x1F4F7)}</span>
             <span className="sr-only">Scan barcode</span>
+          
           
           
           
@@ -1059,7 +1062,7 @@ function InputForm({ user }: { user: any }) {
         <button
           type="button"
           className="rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
-          onClick={() => refreshLists(true)}
+          onClick={async () => { setShowDoneList(true); await refreshLists(true); }}
           disabled={loadingList}
         >
           {loadingList ? "Memuat..." : "Selesai"}
@@ -1097,81 +1100,99 @@ function InputForm({ user }: { user: any }) {
         </section>
       )}
 
-      {!isAdminStageAssist && (
+            {!isAdminStageAssist && (
       <section className="card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="font-black">Daftar Peserta Selesai Operator Ini</div>
-            <div className="text-sm text-slate-500">Hanya peserta yang sudah submit di stage {effectivePostName}. Klik peserta untuk lihat/edit hasil.</div>
+            <div className="text-sm text-slate-500">Hanya peserta yang sudah submit di stage {effectivePostName}. Klik Selesai untuk tampil/sembunyikan daftar.</div>
           </div>
 
           <button
             type="button"
-            className="rounded-2xl bg-blue-600 px-4 py-2 font-black text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-            onClick={() => refreshLists(true)}
+            onClick={async () => {
+              if (showDoneList) {
+                setShowDoneList(false);
+                return;
+              }
+
+              setShowDoneList(true);
+              if (!hasLoadedList) {
+                await refreshLists(true);
+              }
+            }}
             disabled={loadingList}
+            className={`rounded-2xl px-5 py-3 font-black text-white shadow-sm transition disabled:opacity-60 ${
+              showDoneList ? "bg-slate-700 hover:bg-slate-800" : "bg-blue-600 hover:bg-blue-700"
+            }`}
           >
-            {loadingList ? "Memuat..." : `Selesai (${doneParticipants.length})`}
+            {loadingList ? "Memuat..." : showDoneList ? `Sembunyikan (${doneParticipants.length})` : `Selesai (${doneParticipants.length})`}
           </button>
         </div>
 
-        <div className="mt-4 grid gap-2">
-          {showDoneList && !displayedList.length && (
-            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
-              {loadingList
-                ? "Memuat daftar peserta selesai..."
-                : hasLoadedList
-                  ? "Belum ada peserta selesai untuk operator ini."
-                  : "Klik tombol Selesai untuk menampilkan daftar peserta yang sudah submit."}
-            </div>
-          )}
+        {showDoneList && (
+          <div className="mt-4 grid gap-2">
+            {!displayedList.length && (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                {loadingList
+                  ? "Memuat daftar peserta selesai..."
+                  : hasLoadedList
+                    ? "Belum ada peserta selesai untuk operator ini."
+                    : "Klik tombol Selesai untuk menampilkan daftar."}
+              </div>
+            )}
 
-          {displayedList.map((p: any) => (
-            <div
-              key={`${listTab}-${p.id}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => openFromOperatorList(p)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") openFromOperatorList(p);
-              }}
-              className={`cursor-pointer rounded-2xl border p-3 transition ${donePreviewParticipant?.id === p.id || participant?.id === p.id ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="font-black">{p.name}</div>
-                  <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+            {displayedList.map((p: any) => (
+              <div
+                key={`${listTab}-${p.id}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openFromOperatorList(p)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") openFromOperatorList(p);
+                }}
+                className={`cursor-pointer rounded-2xl border p-3 transition ${
+                  participant?.id === p.id
+                    ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100"
+                    : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-black">{p.name}</div>
+                    <div className="text-sm text-slate-500">{p.mcu_id || "-"}{" \u00B7 "}{p.province || "-"}{" \u00B7 "}{p.source_name || "-"}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+                      Skor akhir: {p.operator_final_score_label ?? p.operator_final_score ?? "-"}
+                    </div>
+                    <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                      Sudah submit {"\u00B7"} klik untuk edit
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
-                    Skor akhir: {p.operator_final_score_label ?? p.operator_final_score ?? "-"}
-                  </div>
-                  <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-                    Sudah submit · klik untuk edit
-                  </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openFromOperatorList(p);
+                    }}
+                  >
+                    Lihat / Edit Hasil
+                  </button>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-black text-white"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openFromOperatorList(p);
-                  }}
-                >
-                  Lihat / Edit Hasil
-                </button>
-              </div>
-            </div>
-          ))}
+            ))}
 
-          {hasMoreDoneParticipants && (
-            <div className="rounded-2xl bg-amber-50 p-3 text-sm font-semibold text-amber-700">
-              Data selesai dibatasi 80 peserta terbaru supaya halaman tetap ringan. Gunakan kolom pencarian untuk membuka peserta tertentu yang tidak tampil di daftar.
-            </div>
-          )}
-        </div>
+            {hasMoreDoneParticipants && (
+              <div className="rounded-2xl bg-amber-50 p-3 text-sm font-semibold text-amber-700">
+                Data selesai dibatasi 80 peserta terbaru supaya halaman tetap ringan. Gunakan kolom pencarian untuk membuka peserta tertentu yang tidak tampil di daftar.
+              </div>
+            )}
+          </div>
+        )}
       </section>
       )}
 
@@ -1260,6 +1281,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
