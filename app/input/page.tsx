@@ -400,6 +400,13 @@ function stageIsDone(stage: any) {
   return false;
 }
 
+
+function normChoice(input: any) {
+  return String(input ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
 function ParameterInput({
   param,
   value,
@@ -440,7 +447,7 @@ function ParameterInput({
           {options.map((opt, index) => {
                         const choiceValue = String(opt.label ?? opt.value ?? "");
             const inputId = `param-${param.id}-choice-${index}`;
-            const checked = norm(value) === norm(choiceValue);
+            const checked = normChoice(value) === normChoice(choiceValue);
             const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
 
             return (
@@ -475,7 +482,7 @@ function ParameterInput({
 
         {value && (
           <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Terpilih: {value || getSelectedChoiceOption(param, value)?.label || "-"} · Skor: {scoreForParam(param, value)}
+            Terpilih: {value || "-"} · Skor: {scoreForParam(param, value)}
             {isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
           </div>
         )}
@@ -1341,6 +1348,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
