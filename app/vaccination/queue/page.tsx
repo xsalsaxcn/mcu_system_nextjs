@@ -47,6 +47,37 @@ function label(status: string) {
   return status || "-";
 }
 
+function cleanVaccinationQueueText(value: any) {
+  return String(value ?? "")
+    .replace(/Ãƒâ€šÃ‚Â·/g, " - ")
+    .replace(/Ã‚Â·/g, " - ")
+    .replace(/Ãƒâ€š/g, "")
+    .replace(/Ã‚/g, "")
+    .replace(/Ã¢â‚¬Â¢/g, " - ")
+    .replace(/Ã¢â‚¬â€œ/g, "-")
+    .replace(/Ã¢â‚¬â€/g, "-")
+    .replace(/Ã¢â‚¬Ëœ|Ã¢â‚¬â„¢/g, "'")
+    .replace(/Ã¢â‚¬Å“|Ã¢â‚¬ï¿½/g, '"')
+    .replace(/â”¬â•–/g, " - ")
+    .replace(/\s+[-Â·]\s+/g, " - ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function cleanVaccinationSession(session: any) {
+  if (!session) return session;
+  return {
+    ...session,
+    session_name: cleanVaccinationQueueText(session.session_name),
+    company_name: cleanVaccinationQueueText(session.company_name),
+    location_name: cleanVaccinationQueueText(session.location_name),
+    display_name: cleanVaccinationQueueText(session.display_name),
+  };
+}
+
+function cleanVaccinationSessions(items: any) {
+  return Array.isArray(items) ? items.map(cleanVaccinationSession) : [];
+}
 export default function VaccinationQueuePage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
@@ -60,7 +91,7 @@ export default function VaccinationQueuePage() {
     const json = await fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json());
     if (json.ok) {
       const loadedSessions = json.sessions || [];
-      setSessions(loadedSessions);
+      setSessions(cleanVaccinationSessions(loadedSessions));
       let saved: any = null;
       if (typeof window !== "undefined") {
         try { saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null"); } catch { saved = null; }
@@ -74,7 +105,8 @@ export default function VaccinationQueuePage() {
     if (!id) return;
     const json = await fetch(`/api/vaccination/queue?session_id=${id}`, { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Gagal mengambil antrian."); return; }
-    setSession(json.session); setRegistrations(json.registrations || []);
+    setSession(cleanVaccinationSession(json.session));
+    setRegistrations(cleanVaccinationSessions(json.registrations || []));
   }
   async function action(actionName: string, registrationId?: number) {
     setError("");
@@ -125,4 +157,7 @@ export default function VaccinationQueuePage() {
     </div></main>
   );
 }
+
+
+
 
