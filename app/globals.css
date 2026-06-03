@@ -1,4 +1,4 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -567,3 +567,210 @@ body {
     transform: none;
   }
 }
+
+/* HARMONY_PRO_UI_V100_START
+   Professional UI base inspired by the uploaded mobile design reference.
+   Safe layer: screen-only. Print labels/pages are intentionally not changed.
+*/
+@media screen {
+  :root {
+    --hha-navy: #071126;
+    --hha-slate: #0f172a;
+    --hha-blue: #2563eb;
+    --hha-blue-2: #1d4ed8;
+    --hha-cyan: #38bdf8;
+    --hha-green: #059669;
+    --hha-amber: #f59e0b;
+    --hha-red: #dc2626;
+    --hha-soft: #f4f7fb;
+    --hha-soft-2: #eef4fb;
+    --hha-card: rgba(255, 255, 255, 0.92);
+    --hha-border: rgba(148, 163, 184, 0.28);
+    --hha-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+    --hha-shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.06);
+    --hha-radius: 28px;
+    --hha-radius-sm: 18px;
+  }
+
+  html {
+    background: radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 32%),
+                linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+  }
+
+  body {
+    min-height: 100vh;
+    color: var(--hha-slate);
+    background:
+      radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.10), transparent 28%),
+      radial-gradient(circle at 88% 4%, rgba(56, 189, 248, 0.10), transparent 24%),
+      linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%) !important;
+    font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: rgba(37, 99, 235, 0.18);
+    color: #0f172a;
+  }
+
+  /* Main cards used across Dashboard, Input CAPASKA, Vaccination, Admin pages */
+  .card,
+  section.card,
+  div.card {
+    border: 1px solid var(--hha-border) !important;
+    border-radius: var(--hha-radius) !important;
+    background: var(--hha-card) !important;
+    box-shadow: var(--hha-shadow-soft) !important;
+    backdrop-filter: blur(12px);
+  }
+
+  .card:hover {
+    box-shadow: var(--hha-shadow) !important;
+  }
+
+  /* Inputs / selects */
+  .input,
+  input.input,
+  select.input,
+  textarea.input {
+    min-height: 52px;
+    border: 1px solid rgba(148, 163, 184, 0.32) !important;
+    border-radius: 18px !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    color: #0f172a !important;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.035) !important;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 160ms ease;
+  }
+
+  .input::placeholder,
+  input.input::placeholder,
+  textarea.input::placeholder {
+    color: #94a3b8 !important;
+  }
+
+  .input:focus,
+  input.input:focus,
+  select.input:focus,
+  textarea.input:focus {
+    outline: none !important;
+    border-color: rgba(37, 99, 235, 0.75) !important;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 10px 28px rgba(37, 99, 235, 0.08) !important;
+    background: #ffffff !important;
+  }
+
+  textarea.input {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  /* Main app buttons */
+  .btn-primary,
+  button.btn-primary,
+  a.btn-primary {
+    border: 0 !important;
+    border-radius: 18px !important;
+    background: linear-gradient(135deg, var(--hha-blue), var(--hha-blue-2)) !important;
+    color: #ffffff !important;
+    box-shadow: 0 14px 28px rgba(37, 99, 235, 0.22) !important;
+    transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
+  }
+
+  .btn-primary:hover,
+  button.btn-primary:hover,
+  a.btn-primary:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.04);
+    box-shadow: 0 18px 34px rgba(37, 99, 235, 0.26) !important;
+  }
+
+  .btn-primary:active,
+  button.btn-primary:active,
+  a.btn-primary:active {
+    transform: translateY(0);
+  }
+
+  /* Softer table appearance without changing data logic */
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  thead th {
+    background: linear-gradient(180deg, #f8fafc, #eef2f7) !important;
+    color: #334155 !important;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  tbody tr {
+    transition: background 140ms ease;
+  }
+
+  tbody tr:hover {
+    background: rgba(37, 99, 235, 0.035);
+  }
+
+  /* Pills / status badges */
+  .rounded-full {
+    letter-spacing: -0.01em;
+  }
+
+  /* Modal/popout polish */
+  [data-operator-form-modal="v82"] > div,
+  .fixed.inset-0.z-\[9999\] > div {
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    box-shadow: 0 28px 80px rgba(2, 6, 23, 0.24) !important;
+  }
+
+  /* Mobile-first polish */
+  @media (max-width: 768px) {
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.16), transparent 38%),
+        linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%) !important;
+    }
+
+    .card,
+    section.card,
+    div.card {
+      border-radius: 24px !important;
+      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07) !important;
+    }
+
+    .input,
+    input.input,
+    select.input,
+    textarea.input {
+      min-height: 50px;
+      border-radius: 16px !important;
+      font-size: 16px;
+    }
+
+    .btn-primary,
+    button.btn-primary,
+    a.btn-primary {
+      min-height: 50px;
+      border-radius: 16px !important;
+    }
+
+    table {
+      font-size: 13px;
+    }
+  }
+
+  /* Dashboard-style hero polish for common gradient sections */
+  section[class*="bg-gradient"],
+  div[class*="bg-gradient"] {
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  }
+
+  /* Keep print/label pages safe: no visual override */
+  .label-page,
+  .print-label,
+  [data-print-label="true"] {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+  }
+}
+/* HARMONY_PRO_UI_V100_END */
+
