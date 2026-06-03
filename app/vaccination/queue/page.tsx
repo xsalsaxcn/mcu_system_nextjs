@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -22,8 +22,8 @@ function queueNote(registration: any) {
   const notDone = items.filter((item: any) => !["ADMINISTERED", "DONE"].includes(String(item?.status || "").toUpperCase()));
   const productText = notDone.map((item: any) => {
     const product = item?.vaccine?.name || "Produk";
-    const category = item?.price_category ? ` · ${item.price_category}` : "";
-    const pay = item?.payment_note || item?.payment_method ? ` · ${item.payment_note || item.payment_method}` : "";
+    const category = item?.price_category ? ` Â· ${item.price_category}` : "";
+    const pay = item?.payment_note || item?.payment_method ? ` Â· ${item.payment_note || item.payment_method}` : "";
     return `${product}${category}${pay}`;
   }).filter(Boolean).join("; ");
   return [base, productText ? `Produk Not Done: ${productText}` : ""].filter(Boolean).join(" | ") || "-";
@@ -33,7 +33,7 @@ function sessionLabel(session: any) {
   const eventName = session?.source_name || String(session?.session_name || "").split(" - ")[0] || "Session";
   return [eventName, session?.location, session?.session_date]
     .filter(Boolean)
-    .join(" · ");
+    .join(" Â· ");
 }
 
 function label(status: string) {
@@ -41,7 +41,8 @@ function label(status: string) {
   if (["IMPORTED", "REGISTERED"].includes(s)) return "Belum Datang";
   if (s === "WAITING") return "Waiting";
   if (s === "WAITING_WITH_NOTE") return "Waiting With Note";
-  if (["CALLED", "IN_PROGRESS"].includes(s)) return "Dokter";
+  if (s === "CALLED") return "Dipanggil";
+  if (s === "IN_PROGRESS") return "Dokter";
   if (["ADMINISTERED", "DONE"].includes(s)) return "Selesai";
   return status || "-";
 }
@@ -97,14 +98,14 @@ export default function VaccinationQueuePage() {
 
   return (
     <main className="p-6"><div className="rounded-2xl border bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Vaksin</h1><p className="mt-2 text-sm text-slate-600">Kode warna: Waiting merah, Dokter biru, Selesai hijau, Belum Datang hitam.</p></div><a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div>
+      <div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Vaksin</h1><p className="mt-2 text-sm text-slate-600">Kode warna: Waiting merah, Dipanggil/Dokter biru, Selesai hijau, Belum Datang hitam.</p></div><a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">â˜° Menu Vaksinasi</a></div>
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
       <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
           <div>
             <select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}><option value="">Pilih session</option>{sessions.map((s) => <option key={s.id} value={s.id}>{sessionLabel(s)}</option>)}</select>
-            {contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">🔒 Session terkunci dari Registrasi</div> : null}
+            {contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">ðŸ”’ Session terkunci dari Registrasi</div> : null}
           </div>
           <button onClick={() => action("call-next")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700">Panggil Nomor Berikutnya</button>
           {session?.public_queue_token ? <a target="_blank" className="rounded-xl border bg-white px-5 py-3 text-sm font-bold text-blue-700" href={`/vaccination/public/queue/${session.public_queue_token}`}>Public Queue</a> : null}
@@ -124,3 +125,4 @@ export default function VaccinationQueuePage() {
     </div></main>
   );
 }
+
