@@ -64,7 +64,6 @@ export async function POST(req: NextRequest) {
       .select("*")
       .maybeSingle();
 
-    // Some schemas may not have updated_at. Retry safely without touching other fields.
     if (updated.error) {
       updated = await supabase
         .from("vaccination_registrations")

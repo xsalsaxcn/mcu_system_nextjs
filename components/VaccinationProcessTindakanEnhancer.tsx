@@ -2,9 +2,17 @@
 
 import { useEffect } from "react";
 
+let originalPrint: (() => void) | null = null;
+let originalOpen: typeof window.open | null = null;
+let suppressTimer: number | null = null;
+
 function isAdministerPage() {
   if (typeof window === "undefined") return false;
   return window.location.pathname.includes("/vaccination/administer");
+}
+
+function textOf(el: Element | null) {
+  return String(el?.textContent || "").replace(/\s+/g, " ").trim();
 }
 
 function optionText(select: HTMLSelectElement | null) {
@@ -17,13 +25,18 @@ function selectedValue(select: HTMLSelectElement | null) {
   return String(select.value || "").trim();
 }
 
+function parseQueueNumber(text: string) {
+  const match = String(text || "").match(/\b[A-Z]-\d+\b/i);
+  return match ? match[0].toUpperCase() : "";
+}
+
 function findAdministerSelects() {
   const selects = Array.from(document.querySelectorAll("select")) as HTMLSelectElement[];
 
   const participantSelect =
     selects.find((select) => {
       const text = optionText(select);
-      return /^A-\d+/i.test(text) || /-.*(DONE|NOT DONE|IN_PROGRESS|WAITING|DOKTER|DIPANGGIL)/i.test(text);
+      return /^A-\d+/i.test(text) || /-(WAITING|IN_PROGRESS|DONE|NOT DONE|DOKTER|DIPANGGIL)/i.test(text);
     }) || selects[1] || null;
 
   const sessionSelect =
@@ -35,19 +48,169 @@ function findAdministerSelects() {
   return { participantSelect, sessionSelect };
 }
 
-function parseQueueNumber(text: string) {
-  const match = String(text || "").match(/\b[A-Z]-\d+\b/i);
-  return match ? match[0].toUpperCase() : "";
-}
-
 function hasValidParticipant(select: HTMLSelectElement | null) {
   const text = optionText(select);
   const value = selectedValue(select);
   return Boolean(value || parseQueueNumber(text));
 }
 
-function ensureButton() {
+function findVaccinationSection() {
+  const headings = Array.from(document.querySelectorAll("h1,h2,h3,div,section"));
+  const heading = headings.find((el) => /Vaksin yang Diberikan/i.test(textOf(el)));
+  return (
+    heading?.closest("section") ||
+    heading?.closest(".card") ||
+    heading?.parentElement?.parentElement ||
+    heading?.parentElement ||
+    null
+  );
+}
+
+function setInlineInfo(message: string, tone: "info" | "success" | "error" = "info") {
   if (!isAdministerPage()) return;
+
+  let box = document.getElementById("hha-doctor-workflow-info");
+  const section = findVaccinationSection();
+
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "hha-doctor-workflow-info";
+    box.style.margin = "10px 0 0";
+    box.style.padding = "12px 14px";
+    box.style.borderRadius = "14px";
+    box.style.fontWeight = "800";
+    box.style.fontSize = "13px";
+    box.style.border = "1px solid #dbeafe";
+
+    if (section) {
+      section.insertBefore(box, section.children[1] || null);
+    } else {
+      document.body.prepend(box);
+    }
+  }
+
+  box.textContent = message;
+
+  if (tone === "success") {
+    box.style.background = "#ecfdf5";
+    box.style.color = "#047857";
+    box.style.borderColor = "#bbf7d0";
+  } else if (tone === "error") {
+    box.style.background = "#fff1f2";
+    box.style.color = "#be123c";
+    box.style.borderColor = "#fecdd3";
+  } else {
+    box.style.background = "#eff6ff";
+    box.style.color = "#1d4ed8";
+    box.style.borderColor = "#bfdbfe";
+  }
+}
+
+function suppressPrintForProductDone() {
+  if (typeof window === "undefined") return;
+
+  if (!originalPrint) originalPrint = window.print.bind(window);
+  if (!originalOpen) originalOpen = window.open.bind(window);
+
+  window.print = (() => {
+    setInlineInfo("Produk ditandai Done. Print sticker ditahan sampai tombol selesai dokter diklik.", "info");
+  }) as typeof window.print;
+
+  window.open = ((url?: string | URL, target?: string, features?: string) => {
+    const textUrl = String(url || "");
+    if (/print|label|sticker|barcode/i.test(textUrl)) {
+      setInlineInfo("Produk ditandai Done. Print sticker ditahan sampai tombol selesai dokter diklik.", "info");
+      return null;
+    }
+
+    return originalOpen ? originalOpen(url as any, target, features) : null;
+  }) as typeof window.open;
+
+  if (suppressTimer) window.clearTimeout(suppressTimer);
+  suppressTimer = window.setTimeout(() => {
+    restorePrint();
+  }, 9000);
+}
+
+function restorePrint() {
+  if (typeof window === "undefined") return;
+
+  if (originalPrint) {
+    window.print = originalPrint as typeof window.print;
+  }
+
+  if (originalOpen) {
+    window.open = originalOpen;
+  }
+
+  if (suppressTimer) {
+    window.clearTimeout(suppressTimer);
+    suppressTimer = null;
+  }
+}
+
+function isProductDoneButton(button: HTMLButtonElement) {
+  const txt = textOf(button);
+  if (txt !== "Done") return false;
+  if (button.id === "hha-proses-tindakan-action") return false;
+
+  const section = button.closest("section") || button.closest(".card") || button.closest("div");
+  return /Vaksin|Lot|Not Done|Hapus|Tambah Vaksin/i.test(textOf(section));
+}
+
+function isFinalDoctorDoneButton(button: HTMLButtonElement) {
+  const txt = textOf(button);
+  return /Done\s*\+\s*Print|Print Semua|Selesai Dokter|Selesaikan Tindakan/i.test(txt);
+}
+
+function decorateFinalButton() {
+  const buttons = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
+
+  for (const button of buttons) {
+    if (!isFinalDoctorDoneButton(button)) continue;
+
+    if (!button.dataset.hhaFinalDoctorButton) {
+      button.dataset.hhaFinalDoctorButton = "1";
+      button.textContent = "Selesai Dokter + Print Semua Sticker";
+      button.title = "Klik ini setelah semua produk vaksin sudah Done. Status dokter selesai dan semua sticker akan diprint.";
+      button.style.fontWeight = "900";
+    }
+  }
+}
+
+function decorateProductDoneButtons() {
+  const buttons = Array.from(document.querySelectorAll("button")) as HTMLButtonElement[];
+
+  for (const button of buttons) {
+    if (!isProductDoneButton(button)) continue;
+
+    if (!button.dataset.hhaProductDoneButton) {
+      button.dataset.hhaProductDoneButton = "1";
+      button.title = "Tandai produk ini selesai tanpa print. Print dilakukan saat Selesai Dokter.";
+    }
+  }
+}
+
+function updateSelectedOptionToInProgress(select: HTMLSelectElement | null) {
+  if (!select) return;
+
+  const option = select.options[select.selectedIndex];
+  if (!option) return;
+
+  const before = option.textContent || "";
+  const after = before
+    .replace(/WAITING/gi, "IN_PROGRESS")
+    .replace(/DIPANGGIL/gi, "IN_PROGRESS")
+    .replace(/DOKTER/gi, "IN_PROGRESS");
+
+  option.textContent = after;
+}
+
+function ensureProcessButton() {
+  if (!isAdministerPage()) return;
+
+  decorateFinalButton();
+  decorateProductDoneButtons();
 
   if (document.getElementById("hha-proses-tindakan-button")) return;
 
@@ -69,6 +232,7 @@ function ensureButton() {
   wrapper.style.flexWrap = "wrap";
 
   const button = document.createElement("button");
+  button.id = "hha-proses-tindakan-action";
   button.type = "button";
   button.textContent = "Proses Tindakan";
   button.style.border = "0";
@@ -128,12 +292,13 @@ function ensureButton() {
         throw new Error(json.message || "Gagal mengubah status antrian.");
       }
 
+      updateSelectedOptionToInProgress(participantSelect);
       note.textContent = "Status antrian: Dokter / Proses Tindakan.";
       note.style.color = "#047857";
-      button.textContent = "Sudah Proses Tindakan";
+      button.textContent = "Sedang Proses Tindakan";
+      setInlineInfo("Data layanan pasien tetap tampil. Done produk tidak akan print sampai Selesai Dokter diklik.", "success");
 
       window.dispatchEvent(new CustomEvent("vaccination-queue-updated", { detail: json }));
-      setTimeout(() => window.location.reload(), 700);
     } catch (error: any) {
       note.textContent = error?.message || "Gagal mengubah status antrian.";
       note.style.color = "#dc2626";
@@ -147,11 +312,27 @@ function ensureButton() {
   wrapper.appendChild(button);
   wrapper.appendChild(note);
 
-  const participantCard = participantSelect.closest("div")?.parentElement;
-  if (participantCard) {
-    participantCard.appendChild(wrapper);
-  } else {
-    host.appendChild(wrapper);
+  const row = participantSelect.closest("div")?.parentElement || host;
+  row.appendChild(wrapper);
+}
+
+function handleCaptureClick(event: MouseEvent) {
+  if (!isAdministerPage()) return;
+
+  const target = event.target as HTMLElement | null;
+  const button = target?.closest("button") as HTMLButtonElement | null;
+  if (!button) return;
+
+  if (isProductDoneButton(button)) {
+    suppressPrintForProductDone();
+    setInlineInfo("Produk vaksin akan ditandai Done tanpa print. Lanjutkan sampai semua produk Done, lalu klik Selesai Dokter + Print Semua Sticker.", "info");
+    return;
+  }
+
+  if (isFinalDoctorDoneButton(button)) {
+    restorePrint();
+    button.textContent = "Memproses selesai dokter + print...";
+    setInlineInfo("Menyelesaikan tindakan dokter dan menyiapkan print semua sticker vaksin.", "success");
   }
 }
 
@@ -159,8 +340,10 @@ export default function VaccinationProcessTindakanEnhancer() {
   useEffect(() => {
     if (!isAdministerPage()) return;
 
-    const run = () => ensureButton();
+    const run = () => ensureProcessButton();
     run();
+
+    document.addEventListener("click", handleCaptureClick, true);
 
     const observer = new MutationObserver(run);
     observer.observe(document.body, { childList: true, subtree: true });
@@ -168,8 +351,10 @@ export default function VaccinationProcessTindakanEnhancer() {
     const interval = window.setInterval(run, 1500);
 
     return () => {
+      document.removeEventListener("click", handleCaptureClick, true);
       observer.disconnect();
       window.clearInterval(interval);
+      restorePrint();
     };
   }, []);
 
