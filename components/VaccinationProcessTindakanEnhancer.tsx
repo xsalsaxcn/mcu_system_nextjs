@@ -2,10 +2,6 @@
 
 import { useEffect } from "react";
 
-let originalPrint: (() => void) | null = null;
-let originalOpen: typeof window.open | null = null;
-let suppressTimer: number | null = null;
-
 function isAdministerPage() {
   if (typeof window === "undefined") return false;
   return window.location.pathname.includes("/vaccination/administer");
@@ -106,61 +102,63 @@ function setInlineInfo(message: string, tone: "info" | "success" | "error" = "in
   }
 }
 
-function suppressPrintForProductDone() {
-  if (typeof window === "undefined") return;
-
-  if (!originalPrint) originalPrint = window.print.bind(window);
-  if (!originalOpen) originalOpen = window.open.bind(window);
-
-  window.print = (() => {
-    setInlineInfo("Produk ditandai Done. Print sticker ditahan sampai tombol selesai dokter diklik.", "info");
-  }) as typeof window.print;
-
-  window.open = ((url?: string | URL, target?: string, features?: string) => {
-    const textUrl = String(url || "");
-    if (/print|label|sticker|barcode/i.test(textUrl)) {
-      setInlineInfo("Produk ditandai Done. Print sticker ditahan sampai tombol selesai dokter diklik.", "info");
-      return null;
-    }
-
-    return originalOpen ? originalOpen(url as any, target, features) : null;
-  }) as typeof window.open;
-
-  if (suppressTimer) window.clearTimeout(suppressTimer);
-  suppressTimer = window.setTimeout(() => {
-    restorePrint();
-  }, 9000);
-}
-
-function restorePrint() {
-  if (typeof window === "undefined") return;
-
-  if (originalPrint) {
-    window.print = originalPrint as typeof window.print;
-  }
-
-  if (originalOpen) {
-    window.open = originalOpen;
-  }
-
-  if (suppressTimer) {
-    window.clearTimeout(suppressTimer);
-    suppressTimer = null;
-  }
+function isFinalDoctorDoneButton(button: HTMLButtonElement) {
+  const txt = textOf(button);
+  return /Done\s*\+\s*Print|Print Semua|Selesai Dokter|Selesaikan Tindakan/i.test(txt);
 }
 
 function isProductDoneButton(button: HTMLButtonElement) {
   const txt = textOf(button);
   if (txt !== "Done") return false;
   if (button.id === "hha-proses-tindakan-action") return false;
+  if (isFinalDoctorDoneButton(button)) return false;
 
   const section = button.closest("section") || button.closest(".card") || button.closest("div");
   return /Vaksin|Lot|Not Done|Hapus|Tambah Vaksin/i.test(textOf(section));
 }
 
-function isFinalDoctorDoneButton(button: HTMLButtonElement) {
-  const txt = textOf(button);
-  return /Done\s*\+\s*Print|Print Semua|Selesai Dokter|Selesaikan Tindakan/i.test(txt);
+function findProductRow(button: HTMLButtonElement) {
+  let node: HTMLElement | null = button.parentElement;
+
+  while (node && node !== document.body) {
+    const txt = textOf(node);
+    const hasLotOrVaccine = /Lot|Vaxigrip|Typhim|Dengvaxia|Vaksin|Not Done|Hapus/i.test(txt);
+    const hasQtyOrSelect = node.querySelectorAll("select,input,button").length >= 3;
+
+    if (hasLotOrVaccine && hasQtyOrSelect) return node;
+
+    node = node.parentElement;
+  }
+
+  return button.parentElement;
+}
+
+function markProductDoneLocal(button: HTMLButtonElement) {
+  const row = findProductRow(button);
+  if (row) row.dataset.hhaProductDoneLocal = "1";
+
+  button.textContent = "Done";
+  button.disabled = true;
+  button.style.opacity = "0.95";
+  button.style.cursor = "default";
+  button.style.background = "linear-gradient(135deg, #2563eb, #1d4ed8)";
+  button.style.color = "#ffffff";
+  button.title = "Produk sudah ditandai Done lokal. Print ditahan sampai Selesai Dokter.";
+
+  const candidates = Array.from((row || document).querySelectorAll("span,div,button")) as HTMLElement[];
+  for (const el of candidates) {
+    if (/^Not Done$/i.test(textOf(el))) {
+      el.textContent = "Done";
+      el.style.background = "#ecfdf5";
+      el.style.color = "#047857";
+      el.style.fontWeight = "900";
+    }
+  }
+
+  setInlineInfo(
+    "Produk vaksin ditandai Done. Tidak print dan tidak reset. Lanjutkan sampai semua produk Done, lalu klik Selesai Dokter + Print Semua Sticker.",
+    "success"
+  );
 }
 
 function decorateFinalButton() {
@@ -172,7 +170,7 @@ function decorateFinalButton() {
     if (!button.dataset.hhaFinalDoctorButton) {
       button.dataset.hhaFinalDoctorButton = "1";
       button.textContent = "Selesai Dokter + Print Semua Sticker";
-      button.title = "Klik ini setelah semua produk vaksin sudah Done. Status dokter selesai dan semua sticker akan diprint.";
+      button.title = "Klik ini setelah semua produk vaksin sudah Done. Baru di tahap ini status selesai dan print semua sticker.";
       button.style.fontWeight = "900";
     }
   }
@@ -186,7 +184,7 @@ function decorateProductDoneButtons() {
 
     if (!button.dataset.hhaProductDoneButton) {
       button.dataset.hhaProductDoneButton = "1";
-      button.title = "Tandai produk ini selesai tanpa print. Print dilakukan saat Selesai Dokter.";
+      button.title = "Tandai produk Done tanpa print. Print hanya saat Selesai Dokter.";
     }
   }
 }
@@ -296,7 +294,7 @@ function ensureProcessButton() {
       note.textContent = "Status antrian: Dokter / Proses Tindakan.";
       note.style.color = "#047857";
       button.textContent = "Sedang Proses Tindakan";
-      setInlineInfo("Data layanan pasien tetap tampil. Done produk tidak akan print sampai Selesai Dokter diklik.", "success");
+      setInlineInfo("Data layanan pasien tetap tampil. Done produk tidak akan print/reset sampai Selesai Dokter diklik.", "success");
 
       window.dispatchEvent(new CustomEvent("vaccination-queue-updated", { detail: json }));
     } catch (error: any) {
@@ -324,13 +322,15 @@ function handleCaptureClick(event: MouseEvent) {
   if (!button) return;
 
   if (isProductDoneButton(button)) {
-    suppressPrintForProductDone();
-    setInlineInfo("Produk vaksin akan ditandai Done tanpa print. Lanjutkan sampai semua produk Done, lalu klik Selesai Dokter + Print Semua Sticker.", "info");
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    markProductDoneLocal(button);
     return;
   }
 
   if (isFinalDoctorDoneButton(button)) {
-    restorePrint();
     button.textContent = "Memproses selesai dokter + print...";
     setInlineInfo("Menyelesaikan tindakan dokter dan menyiapkan print semua sticker vaksin.", "success");
   }
@@ -354,7 +354,6 @@ export default function VaccinationProcessTindakanEnhancer() {
       document.removeEventListener("click", handleCaptureClick, true);
       observer.disconnect();
       window.clearInterval(interval);
-      restorePrint();
     };
   }, []);
 
