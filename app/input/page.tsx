@@ -419,9 +419,9 @@ function ParameterInput({
       <>
         <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)}>
           <option value="">-- Pilih --</option>
-                    {options.map((opt) => {
+          {options.map((opt, index) => {
             const optionChoiceValue = String(opt.label ?? opt.value ?? "");
-            return <option key={opt.value ?? opt.label} value={optionChoiceValue}>{opt.label}</option>;
+            return <option key={`${param.id}-select-${index}-${optionChoiceValue}`} value={optionChoiceValue}>{opt.label}</option>;
           })}
         </select>
         {value && (
@@ -437,19 +437,22 @@ function ParameterInput({
     return (
       <div className="grid gap-2">
         <div className="grid gap-2 sm:grid-cols-2">
-          {options.map((opt) => {
+          {options.map((opt, index) => {
                         const choiceValue = String(opt.label ?? opt.value ?? "");
+            const inputId = `param-${param.id}-choice-${index}`;
             const checked = norm(value) === norm(choiceValue);
             const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
 
             return (
               <label
-                key={opt.value}
+                key={`${param.id}-${index}-${choiceValue}`}
+                htmlFor={inputId}
                 className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 text-sm transition ${
                   checked ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-blue-300"
                 }`}
               >
                 <input
+                  id={inputId}
                   type="radio"
                   className="mt-1"
                   name={`param-${param.id}`}
@@ -1338,6 +1341,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
