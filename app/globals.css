@@ -774,3 +774,292 @@ body {
 }
 /* HARMONY_PRO_UI_V100_END */
 
+/* HARMONY_CLEAN_MEDICAL_UI_V101_START
+   Clean medical UI base inspired by the uploaded app references:
+   white canvas, calm cards, professional font feel, pill accents, iOS-like controls.
+   Safe: screen-only. Print labels/pages are intentionally not changed.
+*/
+@media screen {
+  :root {
+    --hha-clean-bg: #f3f5f4;
+    --hha-clean-panel: #ffffff;
+    --hha-clean-panel-soft: #f8faf9;
+    --hha-clean-text: #111827;
+    --hha-clean-muted: #64748b;
+    --hha-clean-border: #e5e9ee;
+    --hha-clean-accent: #07b6c8;
+    --hha-clean-accent-2: #0ea5b7;
+    --hha-clean-blue: #2563eb;
+    --hha-clean-green: #93c83e;
+    --hha-clean-peach: #ff8f66;
+    --hha-clean-radius-xl: 30px;
+    --hha-clean-radius-lg: 22px;
+    --hha-clean-radius-md: 16px;
+    --hha-clean-shadow: 0 12px 32px rgba(15, 23, 42, 0.055);
+    --hha-clean-shadow-light: 0 6px 18px rgba(15, 23, 42, 0.035);
+  }
+
+  html {
+    background: var(--hha-clean-bg) !important;
+  }
+
+  body {
+    min-height: 100vh;
+    color: var(--hha-clean-text);
+    background:
+      radial-gradient(circle at top left, rgba(7, 182, 200, 0.08), transparent 28%),
+      linear-gradient(180deg, #f8faf9 0%, var(--hha-clean-bg) 100%) !important;
+    font-family: Manrope, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: -0.018em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  ::selection {
+    background: rgba(7, 182, 200, 0.18);
+    color: #0f172a;
+  }
+
+  /* App shell/header: cleaner, brighter, less heavy */
+  header,
+  nav {
+    backdrop-filter: blur(14px);
+  }
+
+  /* Cards: white, rounded, clean, not too much shadow */
+  .card,
+  section.card,
+  div.card,
+  .rounded-\[2rem\],
+  .rounded-2xl {
+    border-color: var(--hha-clean-border) !important;
+  }
+
+  .card,
+  section.card,
+  div.card {
+    border: 1px solid var(--hha-clean-border) !important;
+    border-radius: var(--hha-clean-radius-xl) !important;
+    background: var(--hha-clean-panel) !important;
+    box-shadow: var(--hha-clean-shadow) !important;
+  }
+
+  .card:hover {
+    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.07) !important;
+  }
+
+  /* Inputs like the reference: large white search bars */
+  .input,
+  input.input,
+  select.input,
+  textarea.input {
+    min-height: 56px;
+    border: 1px solid var(--hha-clean-border) !important;
+    border-radius: 18px !important;
+    background: #ffffff !important;
+    color: var(--hha-clean-text) !important;
+    box-shadow: var(--hha-clean-shadow-light) !important;
+    font-weight: 600;
+    transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  }
+
+  .input::placeholder,
+  input.input::placeholder,
+  textarea.input::placeholder {
+    color: #9aa5b1 !important;
+    font-weight: 600;
+  }
+
+  .input:focus,
+  input.input:focus,
+  select.input:focus,
+  textarea.input:focus {
+    outline: none !important;
+    border-color: rgba(7, 182, 200, 0.95) !important;
+    box-shadow: 0 0 0 4px rgba(7, 182, 200, 0.12), var(--hha-clean-shadow-light) !important;
+    background: #ffffff !important;
+  }
+
+  textarea.input {
+    padding-top: 15px;
+    padding-bottom: 15px;
+  }
+
+  /* Buttons: cyan/blue clean pill, like medical mobile design */
+  .btn-primary,
+  button.btn-primary,
+  a.btn-primary {
+    border: 0 !important;
+    border-radius: 18px !important;
+    background: linear-gradient(135deg, var(--hha-clean-accent), var(--hha-clean-accent-2)) !important;
+    color: #ffffff !important;
+    box-shadow: 0 12px 26px rgba(7, 182, 200, 0.22) !important;
+    font-weight: 900;
+    transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+  }
+
+  .btn-primary:hover,
+  button.btn-primary:hover,
+  a.btn-primary:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.05);
+    box-shadow: 0 15px 30px rgba(7, 182, 200, 0.26) !important;
+  }
+
+  .btn-primary:active,
+  button.btn-primary:active,
+  a.btn-primary:active {
+    transform: translateY(0);
+  }
+
+  /* Generic buttons inside app: cleaner pills without changing function */
+  button {
+    letter-spacing: -0.015em;
+  }
+
+  button.rounded-xl,
+  button.rounded-2xl,
+  a.rounded-xl,
+  a.rounded-2xl {
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.045);
+  }
+
+  /* Status badges / pills: softer medical style */
+  .rounded-full {
+    font-weight: 800;
+  }
+
+  .bg-blue-50 {
+    background-color: #eef8ff !important;
+  }
+
+  .text-blue-700 {
+    color: #0f66a3 !important;
+  }
+
+  .bg-emerald-50 {
+    background-color: #edfdf6 !important;
+  }
+
+  .text-emerald-700 {
+    color: #047857 !important;
+  }
+
+  .bg-amber-50 {
+    background-color: #fff8e8 !important;
+  }
+
+  .text-amber-700 {
+    color: #b45309 !important;
+  }
+
+  .bg-red-50 {
+    background-color: #fff1f2 !important;
+  }
+
+  .text-red-700 {
+    color: #be123c !important;
+  }
+
+  /* Radio/option cards: clean selected state */
+  label[class*="cursor-pointer"][class*="rounded-2xl"] {
+    border-radius: 20px !important;
+  }
+
+  label[class*="border-blue-500"],
+  .border-blue-500.bg-blue-50 {
+    border-color: var(--hha-clean-accent) !important;
+    background: #effcff !important;
+  }
+
+  /* Tables: less corporate-heavy, more app-like */
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  thead th {
+    background: #f7f9fb !important;
+    color: #475569 !important;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.035em;
+  }
+
+  tbody td {
+    color: #0f172a;
+  }
+
+  tbody tr {
+    transition: background 130ms ease;
+  }
+
+  tbody tr:hover {
+    background: rgba(7, 182, 200, 0.04);
+  }
+
+  /* Modals/popouts */
+  [data-operator-form-modal="v82"] > div,
+  .fixed.inset-0.z-\[9999\] > div {
+    border: 1px solid rgba(229, 233, 238, 0.95);
+    border-radius: 30px !important;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22) !important;
+  }
+
+  /* Hero / dashboard dark cards become cleaner and less harsh */
+  section[class*="bg-gradient"],
+  div[class*="bg-gradient"] {
+    box-shadow: 0 20px 48px rgba(15, 23, 42, 0.10);
+  }
+
+  /* Make mobile look closer to uploaded references */
+  @media (max-width: 768px) {
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(7, 182, 200, 0.12), transparent 36%),
+        linear-gradient(180deg, #fbfcfb 0%, #eff3f1 100%) !important;
+    }
+
+    .card,
+    section.card,
+    div.card {
+      border-radius: 28px !important;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.055) !important;
+    }
+
+    .input,
+    input.input,
+    select.input,
+    textarea.input {
+      min-height: 54px;
+      border-radius: 18px !important;
+      font-size: 16px;
+    }
+
+    .btn-primary,
+    button.btn-primary,
+    a.btn-primary {
+      min-height: 52px;
+      border-radius: 18px !important;
+    }
+
+    table {
+      font-size: 13px;
+    }
+
+    h1, .text-3xl {
+      letter-spacing: -0.04em;
+    }
+  }
+
+  /* Print/label safety: do not apply UI polish to label pages */
+  .label-page,
+  .print-label,
+  [data-print-label="true"] {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    background: #ffffff !important;
+  }
+}
+/* HARMONY_CLEAN_MEDICAL_UI_V101_END */
+
