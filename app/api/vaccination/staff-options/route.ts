@@ -32,12 +32,7 @@ export async function GET() {
 
     if (result.error) {
       if (isMissingTable(result.error)) {
-        return json({
-          ok: true,
-          staff: [],
-          needs_setup: true,
-          message: "Table vaccination_staff_options belum dibuat. Jalankan SQL v117.",
-        });
+        return json({ ok: true, staff: [], needs_setup: true, message: "Table vaccination_staff_options belum dibuat. Jalankan SQL v122." });
       }
 
       return json({ ok: false, staff: [], message: result.error.message || "Gagal membaca nama petugas." }, 500);
@@ -54,38 +49,46 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const name = cleanName(body.name);
 
-    if (!name) {
-      return json({ ok: false, message: "Nama petugas wajib diisi." }, 400);
-    }
+    if (!name) return json({ ok: false, message: "Nama petugas wajib diisi." }, 400);
 
     const supabase = supabaseAdmin();
 
-    const result = await supabase
+    const existing = await supabase
       .from("vaccination_staff_options")
-      .upsert(
-        {
-          name,
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "name" }
-      )
+      .select("id, name, is_active, created_at")
+      .eq("name", name)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing.error) {
+      if (isMissingTable(existing.error)) {
+        return json({ ok: false, needs_setup: true, message: "Table vaccination_staff_options belum dibuat. Jalankan SQL v122 dahulu." }, 500);
+      }
+
+      return json({ ok: false, message: existing.error.message || "Gagal membaca nama petugas." }, 500);
+    }
+
+    if (existing.data?.id) {
+      const updated = await supabase
+        .from("vaccination_staff_options")
+        .update({ is_active: true, updated_at: new Date().toISOString() })
+        .eq("id", existing.data.id)
+        .select("id, name, is_active, created_at")
+        .maybeSingle();
+
+      if (updated.error) return json({ ok: false, message: updated.error.message || "Gagal update nama petugas." }, 500);
+      return json({ ok: true, staff: updated.data });
+    }
+
+    const inserted = await supabase
+      .from("vaccination_staff_options")
+      .insert({ name, is_active: true })
       .select("id, name, is_active, created_at")
       .maybeSingle();
 
-    if (result.error) {
-      if (isMissingTable(result.error)) {
-        return json({
-          ok: false,
-          needs_setup: true,
-          message: "Table vaccination_staff_options belum dibuat. Jalankan SQL v117 dahulu.",
-        }, 500);
-      }
+    if (inserted.error) return json({ ok: false, message: inserted.error.message || "Gagal menyimpan nama petugas." }, 500);
 
-      return json({ ok: false, message: result.error.message || "Gagal menyimpan nama petugas." }, 500);
-    }
-
-    return json({ ok: true, staff: result.data });
+    return json({ ok: true, staff: inserted.data });
   } catch (error: any) {
     return json({ ok: false, message: error?.message || "Gagal menyimpan nama petugas." }, 500);
   }
