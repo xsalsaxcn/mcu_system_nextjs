@@ -80,12 +80,10 @@ function installClick() {
     catch (error: any) { button.disabled = false; button.textContent = old; window.alert(error?.message || "Gagal mengirim ke Tim Validasi."); }
   }, true);
 }
-// Administered flow is handled natively by app/vaccination/administer/page.tsx and /api/vaccination/administer.
-// This enhancer now only injects the Session Setup print-label routing field.
 export default function VaccinationPrintLabelRouting() {
   useEffect(() => {
     if (!isVaccinationPath()) return; let cancelled = false; const delays = [150, 500, 1200, 2500, 4500];
-    const run = () => { if (cancelled) return; ensureSessionField(); };
+    const run = () => { if (cancelled) return; ensureSessionField(); ensureAdministerRouting(); installClick(); };
     const timers = delays.map((d) => window.setTimeout(run, d));
     const onChange = () => window.setTimeout(run, 120); document.addEventListener("change", onChange, true);
     return () => { cancelled = true; timers.forEach((t) => window.clearTimeout(t)); document.removeEventListener("change", onChange, true); };
