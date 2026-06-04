@@ -3,6 +3,30 @@ import { addDays, clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../
 
 export const dynamic = "force-dynamic";
 
+function normalizePrintHandler(value: any) {
+  const raw = clean(value).toUpperCase();
+  return raw === "VALIDASI" || raw === "TIM_VALIDASI" || raw === "TIM VALIDASI" ? "VALIDASI" : "MEDIS";
+}
+
+function missingColumn(error: any) {
+  const msg = String(error?.message || "").toLowerCase();
+  return String(error?.code || "") === "42703" || msg.includes("column") || msg.includes("schema cache");
+}
+
+async function getPrintLabelHandler(supabase: any, sessionId: number, fallback: any) {
+  const fallbackMode = normalizePrintHandler(fallback || "MEDIS");
+  if (!sessionId) return fallbackMode;
+
+  const result = await supabase
+    .from("vaccination_sessions")
+    .select("print_label_handler")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (result.error) return fallbackMode;
+  return normalizePrintHandler(result.data?.print_label_handler || fallbackMode);
+}
+
 async function getSessionVaccines(supabase: any, sessionId: number) {
   const result = await supabase
     .from("vaccination_session_vaccines")
@@ -145,6 +169,12 @@ export async function POST(req: NextRequest) {
   const regResult = await supabase.from("vaccination_registrations").select("*").eq("id", registrationId).single();
   if (regResult.error) return fail(regResult.error.message, 500);
   const reg = regResult.data;
+  const printLabelHandler = await getPrintLabelHandler(
+    supabase,
+    toInt(reg.session_id, 0),
+    body.printLabelHandler || body.print_label_handler
+  );
+  const validationPrint = printLabelHandler === "VALIDASI";
 
   const requestedVaccines = Array.isArray(body.vaccines)
     ? body.vaccines
@@ -335,22 +365,64 @@ export async function POST(req: NextRequest) {
 
   const hasRemainingNotDone = (remainingItemsResult.data || []).some((item: any) => !["ADMINISTERED", "DONE"].includes(String(item.status || "").toUpperCase()));
 
-  await supabase
+  const now = new Date().toISOString();
+  const nextRegistrationPayload: any = hasRemainingNotDone
+    ? {
+        queue_status: "IN_PROGRESS",
+        status_note: reg.status_note || "Masih ada produk/vaksin Not Done.",
+        updated_at: now,
+      }
+    : validationPrint
+      ? {
+          queue_status: "PENDING_VALIDATION",
+          validation_status: "PENDING",
+          print_status: "NOT_PRINTED",
+          updated_at: now,
+        }
+      : {
+          queue_status: "ADMINISTERED",
+          status_note: reg.status_note,
+          updated_at: now,
+        };
+
+  const registrationUpdate = await supabase
     .from("vaccination_registrations")
-    .update({
-      queue_status: hasRemainingNotDone ? "IN_PROGRESS" : "ADMINISTERED",
-      status_note: hasRemainingNotDone ? (reg.status_note || "Masih ada produk/vaksin Not Done.") : reg.status_note,
-      updated_at: new Date().toISOString(),
-    })
+    .update(nextRegistrationPayload)
     .eq("id", registrationId);
+
+  if (registrationUpdate.error) {
+    if (validationPrint && missingColumn(registrationUpdate.error)) {
+      const fallbackUpdate = await supabase
+        .from("vaccination_registrations")
+        .update({ queue_status: "PENDING_VALIDATION", updated_at: now })
+        .eq("id", registrationId);
+      if (fallbackUpdate.error) return fail(fallbackUpdate.error.message, 500);
+    } else {
+      return fail(registrationUpdate.error.message, 500);
+    }
+  }
 
   const ids = records.map((record) => record.id).join(",");
   const stickerUrl = records.length > 1 ? `/vaccination/sticker/bulk?ids=${encodeURIComponent(ids)}` : `/vaccination/sticker/${records[0].id}`;
+  const validationMessage = records.length > 1
+    ? `${records.length} produk berhasil ditandai Done. Peserta dikirim ke Tim Validasi untuk print label dan status selesai.`
+    : "Produk berhasil ditandai Done. Peserta dikirim ke Tim Validasi untuk print label dan status selesai.";
+  const validationPartialMessage = records.length > 1
+    ? `${records.length} produk berhasil ditandai Done. Masih ada produk Not Done; peserta belum dikirim ke Tim Validasi.`
+    : "Produk berhasil ditandai Done. Masih ada produk Not Done; peserta belum dikirim ke Tim Validasi.";
+  const medisMessage = records.length > 1
+    ? `${records.length} vaksin berhasil ditandai Done. Sticker siap diprint.`
+    : "Vaksin berhasil ditandai Done. Sticker siap diprint.";
+  const message = validationPrint
+    ? (hasRemainingNotDone ? validationPartialMessage : validationMessage)
+    : medisMessage;
 
   return ok({
-    message: records.length > 1 ? `${records.length} vaksin berhasil ditandai Done. Sticker siap diprint.` : "Vaksin berhasil ditandai Done. Sticker siap diprint.",
+    message,
     record: records[0],
     records,
-    stickerUrl,
+    stickerUrl: validationPrint ? null : stickerUrl,
+    printLabelHandler,
+    validationPending: validationPrint && !hasRemainingNotDone,
   });
 }

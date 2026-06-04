@@ -53,6 +53,7 @@ export default function VaccinationAdministerPage() {
   const [message, setMessage] = useState("Pilih antrian. Daftar vaksin session otomatis menjadi daftar sticker.");
   const [error, setError] = useState("");
   const [processingIndex, setProcessingIndex] = useState<number | "all" | null>(null);
+  const [printLabelHandler, setPrintLabelHandler] = useState<"MEDIS" | "VALIDASI">("MEDIS");
 
   const [form, setForm] = useState({
     registrationId: "",
@@ -78,6 +79,20 @@ export default function VaccinationAdministerPage() {
     if (json.ok) {
       setSessions(json.sessions || []);
       if (!sessionId && json.sessions?.[0]?.id) setSessionId(String(json.sessions[0].id));
+    }
+  }
+
+  async function loadPrintSetting(id = sessionId) {
+    if (!id) {
+      setPrintLabelHandler("MEDIS");
+      return;
+    }
+    try {
+      const json = await fetch(`/api/vaccination/session-print-setting?session_id=${encodeURIComponent(id)}`, { cache: "no-store" }).then((r) => r.json());
+      const mode = String(json?.print_label_handler || "MEDIS").toUpperCase() === "VALIDASI" ? "VALIDASI" : "MEDIS";
+      setPrintLabelHandler(mode);
+    } catch {
+      setPrintLabelHandler("MEDIS");
     }
   }
 
@@ -145,7 +160,7 @@ export default function VaccinationAdministerPage() {
         return;
       }
 
-
+      const isValidationPrint = printLabelHandler === "VALIDASI";
       const sourceVaccines: SelectedVaccineItem[] = typeof targetIndex === "number"
         ? (selectedVaccines[targetIndex] ? [selectedVaccines[targetIndex]] : [])
         : selectedVaccines.filter((item) => !isDoneStatus(item.status));
@@ -164,9 +179,12 @@ export default function VaccinationAdministerPage() {
         return;
       }
 
-      const printWindow = window.open("about:blank", "_blank", "width=520,height=720");
-      if (printWindow) {
-        printWindow.document.write("<p style='font-family:Arial;padding:16px'>Menyiapkan sticker...</p>");
+      let printWindow: Window | null = null;
+      if (!isValidationPrint) {
+        printWindow = window.open("about:blank", "_blank", "width=520,height=720");
+        if (printWindow) {
+          printWindow.document.write("<p style='font-family:Arial;padding:16px'>Menyiapkan sticker...</p>");
+        }
       }
 
       const res = await fetch("/api/vaccination/administer", {
@@ -177,6 +195,7 @@ export default function VaccinationAdministerPage() {
           administeredAt: form.administeredAt,
           administeredByName: form.administeredByName,
           notes: form.notes,
+          printLabelHandler,
           vaccines: vaccinesPayload,
         }),
       });
@@ -192,7 +211,7 @@ export default function VaccinationAdministerPage() {
       setMessage(json.message);
       setForm((f) => ({ ...f, notes: "" }));
       await loadData();
-      if (json.stickerUrl) {
+      if (!isValidationPrint && json.stickerUrl) {
         if (printWindow) printWindow.location.href = json.stickerUrl;
         else window.open(json.stickerUrl, "_blank", "width=520,height=720");
       } else if (printWindow) {
@@ -209,6 +228,7 @@ export default function VaccinationAdministerPage() {
 
   useEffect(() => {
     loadData(sessionId);
+    loadPrintSetting(sessionId);
   }, [sessionId]);
 
   const selectedRegistration = registrations.find((r) => String(r.id) === String(form.registrationId));
@@ -284,7 +304,7 @@ export default function VaccinationAdministerPage() {
           <div>
             <h1 className="text-2xl font-bold">Administered / Medis</h1>
             <p className="mt-2 text-sm text-slate-600">
-              Input dokter/petugas saat Done. Peserta selesai bisa difilter berdasarkan dokter.
+              Administered hanya menandai produk selesai. Jika print label diset Tim Validasi, printout dan status selesai final dilakukan di Tim Validasi.
             </p>
           </div>
           <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
@@ -292,6 +312,11 @@ export default function VaccinationAdministerPage() {
 
         {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
+        {printLabelHandler === "VALIDASI" ? (
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-bold text-blue-800">
+            Mode session: print label oleh Tim Validasi. Tombol Done di halaman ini tidak akan membuka printout; peserta masuk ke Tim Validasi setelah semua produk selesai.
+          </div>
+        ) : null}
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <h2 className="font-bold">1. Pilih Peserta</h2>
@@ -418,7 +443,7 @@ export default function VaccinationAdministerPage() {
                       onClick={() => donePrint(index)}
                       className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-60"
                     >
-                      {processingIndex === index ? "Proses..." : "Done"}
+                      {processingIndex === index ? "Proses..." : "Done Produk"}
                     </button>
                   )}
                   <button
@@ -444,7 +469,7 @@ export default function VaccinationAdministerPage() {
           <textarea className="mt-3 w-full rounded-xl border px-3 py-2.5" placeholder="Catatan opsional" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
 
           <button disabled={processingIndex !== null} onClick={() => donePrint()} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
-            {processingIndex === "all" ? "Memproses..." : "Done + Print Semua Vaksin Not Done"}
+            {processingIndex === "all" ? "Memproses..." : printLabelHandler === "VALIDASI" ? "Done Semua Produk - Kirim ke Tim Validasi" : "Done + Print Semua Vaksin Not Done"}
           </button>
         </section>
 
