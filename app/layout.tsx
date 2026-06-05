@@ -5,8 +5,7 @@ import VaccinationProcessTindakanEnhancer from "../components/VaccinationProcess
 import VaccinationSessionLightFeatures from "../components/VaccinationSessionLightFeatures";
 import VaccinationQueueDecodeCleanup from "../components/VaccinationQueueDecodeCleanup";
 import VaccinationDoctorSingleStaffField from "../components/VaccinationDoctorSingleStaffField";
-import VaccinationPrintLabelRouting from "../components/VaccinationPrintLabelRouting";
-import VaccinationValidationHardGuard from "../components/VaccinationValidationHardGuard";
+import VaccinationValidationFinalGuard from "../components/VaccinationValidationFinalGuard";
 export const metadata: Metadata = {
   title: "Harmony Health App",
   description: "Harmony Health App - MCU, corporate health, and vaccination workflow",
@@ -16,8 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id">
       <body>
-        <VaccinationValidationHardGuard />
-        <VaccinationPrintLabelRouting />
+        <VaccinationValidationFinalGuard />
         <VaccinationDoctorSingleStaffField />
         <VaccinationQueueDecodeCleanup />
         <VaccinationSessionLightFeatures />
@@ -25,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
 
 
 
