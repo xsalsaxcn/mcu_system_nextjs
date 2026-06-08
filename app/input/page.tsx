@@ -1475,6 +1475,116 @@ function capaskaGigiCanonicalLabelV150(param: any, optionOrValue: any): string {
   return raw;
 }
 
+
+/* CAPASKA progress canonical count v151
+   Purpose:
+   Fix stage progress/completion count so Penyakit Dalam is 28 canonical params,
+   not 29 raw DB params.
+
+   Specific canonical rules for progress:
+   - Penyakit Dalam: Hipospadia + Hidrokel = 1 question "Hipospadia Hidrokel"
+   - THT: duplicate Rhinitis Alergi (lividae/divide/dividae) counted once
+
+   This does not change scoring.
+*/
+function capaskaProgressNormV151(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaProgressParamTextV151(param: any): string {
+  return capaskaProgressNormV151([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaProgressIsRhinitisLividaeV151(param: any): boolean {
+  const p = capaskaProgressParamTextV151(param);
+  return /rhinitis|rinitis/.test(p) && /lividae|divide|dividae/.test(p);
+}
+
+function capaskaProgressIsHipospadiaV151(param: any): boolean {
+  return /hipospadia/.test(capaskaProgressParamTextV151(param));
+}
+
+function capaskaProgressIsStandaloneHidrokelV151(param: any): boolean {
+  const p = capaskaProgressParamTextV151(param);
+  return /hidrokel/.test(p) && !/hipospadia/.test(p);
+}
+
+function capaskaProgressCleanParamsV151(params: any): any[] {
+  const list = Array.isArray(params) ? params : [];
+  const cleaned: any[] = [];
+  let hasRhinitisLividae = false;
+  let hasHipospadiaHidrokel = false;
+
+  for (const param of list) {
+    if (capaskaProgressIsRhinitisLividaeV151(param)) {
+      if (hasRhinitisLividae) continue;
+      hasRhinitisLividae = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    if (capaskaProgressIsHipospadiaV151(param)) {
+      if (hasHipospadiaHidrokel) continue;
+      hasHipospadiaHidrokel = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    if (capaskaProgressIsStandaloneHidrokelV151(param)) {
+      continue;
+    }
+
+    cleaned.push(param);
+  }
+
+  return cleaned;
+}
+
+function capaskaProgressTotalV151(params: any): number {
+  return capaskaProgressCleanParamsV151(params).length;
+}
+
+function capaskaProgressValueForParamV151(param: any, values: any): any {
+  if (!values || !param) return "";
+
+  const keys = [
+    param?.id,
+    String(param?.id ?? ""),
+    param?.parameter_id,
+    String(param?.parameter_id ?? ""),
+    param?.key,
+    param?.name,
+    param?.label,
+    param?.param_name,
+    param?.parameter,
+  ].filter((key) => key !== undefined && key !== null && String(key) !== "");
+
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(values, key)) return values[key];
+  }
+
+  return "";
+}
+
+function capaskaProgressIsParamAnsweredV151(param: any, values: any): boolean {
+  const value = capaskaProgressValueForParamV151(param, values);
+  if (value === undefined || value === null) return false;
+  return String(value).trim() !== "";
+}
+
 function scoreForParam(param: any, value: string) {
   const gigiV150SelectedOption = getSelectedChoiceOption(param, value);
   const gigiV150Score = capaskaGigiCanonicalScoreV150(param, gigiV150SelectedOption || value);
@@ -2521,7 +2631,7 @@ function InputForm({ user }: { user: any }) {
             Form {effectivePostName}<br />
             <span className="text-base font-black text-slate-700">{participant?.name}</span>
           </div>
-          {!parameters.length && <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">Tidak ada parameter untuk post ini. Jalankan SQL reference dan cek mapping package.</div>}
+          {!capaskaProgressTotalV151(parameters) && <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">Tidak ada parameter untuk post ini. Jalankan SQL reference dan cek mapping package.</div>}
 
           {groupedParameters.map((group) => (
             <div key={group.category} className="space-y-5">
@@ -2555,7 +2665,7 @@ function InputForm({ user }: { user: any }) {
             </div>
           ))}
 
-          <button className="btn-primary" disabled={!parameters.length}>Simpan Hasil Pemeriksaan</button>
+          <button className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
           {message && <div className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">{message}</div>}
         </form>
             </div>
@@ -2565,6 +2675,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
