@@ -441,38 +441,8 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
   // =========================
   // 3. THT, total 10
   // =========================
-  if (/membran.*timpani|timpani/.test(p)) {
-    if (/intak/.test(c) && !/tidak/.test(c)) return 2;
-    if (/tidak intak/.test(c)) return -10;
-  }
-
-  if (/serumen/.test(p)) {
-    if (/tidak ada/.test(c)) return 2;
-    if (/ada/.test(c)) return 1;
-  }
-
-  if (/tonsil/.test(p)) {
-    if (/t0.*t1|t1.*t1|tonsilektomi/.test(c)) return 2;
-    if (/t2a/.test(c)) return 1;
-    if (/t2b/.test(c)) return -1;
-    if (/t3/.test(c)) return -10;
-  }
-
-  if (/rhinitis|lividae|divide/.test(p)) {
-    if (/negative|negatif|\(-\)|tidak ada/.test(c)) return 2;
-    if (/positive|positif|\(\+\)|ada/.test(c)) return 1;
-  }
-
-  if (/epistaksis/.test(p)) {
-    if (/tidak ada/.test(c)) return 1;
-    if (/ada/.test(c)) return -1;
-  }
-
-  if (/garputala|weber/.test(p)) {
-    if (/normal/.test(c) && !/tidak normal/.test(c)) return 1;
-    if (/tidak normal/.test(c)) return -10;
-  }
-
+  const canonicalThtScoreV154 = capaskaThtFinalScoreV154(param, optionOrValue);
+  if (canonicalThtScoreV154 !== null) return canonicalThtScoreV154;
   // =========================
   // 4. PENYAKIT DALAM, total 28
   // =========================
@@ -971,50 +941,7 @@ function capaskaThtIsTidakNormal(choice: string): boolean {
 }
 
 function capaskaThtScoreFix(param: any, optionOrValue: any): number | null {
-  const p = capaskaThtParamText(param);
-  const c = capaskaThtChoiceText(optionOrValue);
-
-  if (!c) return null;
-
-  // Membran timpani
-  if (/membran.*timpani|timpani/.test(p)) {
-    if (/tidak\s*intak|tidak intac|tidak intact/.test(c)) return -10;
-    if (/intak|intac|intact/.test(c)) return 2;
-  }
-
-  // Serumen
-  if (/serumen/.test(p)) {
-    if (/ada serumen/.test(c) || (capaskaThtIsAda(c) && !capaskaThtIsTidakAda(c))) return 1;
-    if (capaskaThtIsTidakAda(c)) return 2;
-  }
-
-  // Tonsil
-  if (/tonsil/.test(p)) {
-    if (/tonsilektomi|t0\s*\/?\s*t1|t0\s*-\s*t1|t1\s*-\s*t1|t1\s*\/?\s*t1/.test(c)) return 2;
-    if (/t2a/.test(c)) return 1;
-    if (/t2b/.test(c)) return -1;
-    if (/t3/.test(c)) return -10;
-  }
-
-  // Rhinitis alergi lividae. Some old labels/options may say divide/dividae; score same as lividae reference.
-  if (/rhinitis|rinitis|lividae|divide|dividae/.test(p)) {
-    if (capaskaThtIsTidakAda(c) || /negatif|negative/.test(c)) return 2;
-    if (capaskaThtIsAda(c) || /positif|positive/.test(c)) return 1;
-  }
-
-  // Epistaksis 1 tahun terakhir
-  if (/epistaksis|epistaxis/.test(p)) {
-    if (capaskaThtIsTidakAda(c)) return 1;
-    if (capaskaThtIsAda(c)) return -1;
-  }
-
-  // Tes garputala Weber
-  if (/garputala|weber/.test(p)) {
-    if (capaskaThtIsTidakNormal(c)) return -10;
-    if (capaskaThtIsNormal(c)) return 1;
-  }
-
-  return null;
+  return capaskaThtFinalScoreV154(param, optionOrValue);
 }
 
 
@@ -1585,7 +1512,130 @@ function capaskaProgressIsParamAnsweredV151(param: any, values: any): boolean {
   return String(value).trim() !== "";
 }
 
+
+/* CAPASKA THT final score fix v154
+   Root cause fixed:
+   Some THT option labels are stored/displayed without spaces, e.g. "Tidakada" and "Adaserumen".
+   Old final scoring can fail to recognize those values, so UI badges can total 10 but final saved score becomes 8.
+
+   Canonical THT rules:
+   - Membran timpani: Intak=2, Tidak intak=-10
+   - Serumen: Tidak ada=2, Ada serumen=1
+   - Rhinitis Alergi (lividae): Negatif/(-)=2, Positif/(+)=1
+   - Tonsil: T0/T1-T1=2, Sudah tonsilektomi=2, T2a=1, T2b=-1, T3=-10
+   - Epistaksis 1 tahun terakhir: Tidak ada=1, Ada=-1
+   - Tes Garputala Weber 512 Hz: Normal=1, Tidak normal=-10
+*/
+function capaskaThtFinalNormV154(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaThtFinalCompactV154(value: any): string {
+  return capaskaThtFinalNormV154(value).replace(/\s+/g, "");
+}
+
+function capaskaThtFinalParamTextV154(param: any): string {
+  return capaskaThtFinalNormV154([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaThtFinalChoiceTextV154(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaThtFinalNormV154([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaThtFinalNormV154(optionOrValue);
+}
+
+function capaskaThtFinalIsTidakAdaV154(choice: string): boolean {
+  const c = capaskaThtFinalCompactV154(choice);
+  return /tidakada|tidakterdapat|\(-\)|negatif|negative/.test(c);
+}
+
+function capaskaThtFinalIsAdaV154(choice: string): boolean {
+  const c = capaskaThtFinalCompactV154(choice);
+  return /(^| )ada( |$)|adaserumen|\(\+\)|positif|positive/.test(choice) || /adaserumen|\(\+\)|positif|positive/.test(c);
+}
+
+function capaskaThtFinalScoreV154(param: any, optionOrValue: any): number | null {
+  const p = capaskaThtFinalParamTextV154(param);
+  const pc = capaskaThtFinalCompactV154(p);
+  const c = capaskaThtFinalChoiceTextV154(optionOrValue);
+  const cc = capaskaThtFinalCompactV154(c);
+
+  if (!c) return null;
+
+  // Membran timpani
+  if (/membran.*timpani|timpani/.test(p)) {
+    if (/tidakintak|tidakintac|tidakintact/.test(cc)) return -10;
+    if (/intak|intac|intact/.test(cc)) return 2;
+  }
+
+  // Serumen. Handles "Tidakada" and "Adaserumen".
+  if (/serumen/.test(p) || /serumen/.test(pc)) {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(cc)) return 2;
+    if (/adaserumen|ada|\(\+\)|positif|positive/.test(cc)) return 1;
+  }
+
+  // Rhinitis Alergi lividae. Also handles old divide/dividae.
+  if (/rhinitis|rinitis|lividae|divide|dividae/.test(p)) {
+    if (/negatif|negative|\(-\)|tidakada/.test(cc)) return 2;
+    if (/positif|positive|\(\+\)|ada/.test(cc)) return 1;
+  }
+
+  // Tonsil
+  if (/tonsil/.test(p)) {
+    if (/tonsilektomi/.test(cc)) return 2;
+    if (/t0\/?t1-?t1|t0-?t1|t0\/?t1|t1-?t1|t1\/?t1/.test(cc)) return 2;
+    if (/t2a/.test(cc)) return 1;
+    if (/t2b/.test(cc)) return -1;
+    if (/t3/.test(cc)) return -10;
+  }
+
+  // Epistaksis
+  if (/epistaksis|epistaxis/.test(p)) {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(cc)) return 1;
+    if (/ada|\(\+\)|positif|positive/.test(cc)) return -1;
+  }
+
+  // Tes Garputala Weber
+  if (/garputala|weber/.test(p)) {
+    if (/tidaknormal|abnormal/.test(cc)) return -10;
+    if (/normal/.test(cc)) return 1;
+  }
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
+  const thtV154SelectedOption = getSelectedChoiceOption(param, value);
+  const thtV154Score = capaskaThtFinalScoreV154(param, thtV154SelectedOption || value);
+  if (thtV154Score !== null) return thtV154Score;
+
   const gigiV150SelectedOption = getSelectedChoiceOption(param, value);
   const gigiV150Score = capaskaGigiCanonicalScoreV150(param, gigiV150SelectedOption || value);
   if (gigiV150Score !== null) return gigiV150Score;
@@ -1615,6 +1665,10 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const thtV154SelectedOptionForCritical = getSelectedChoiceOption(param, value);
+  const thtV154CriticalScore = capaskaThtFinalScoreV154(param, thtV154SelectedOptionForCritical || value);
+  if (thtV154CriticalScore !== null) return thtV154CriticalScore <= -10;
+
   const gigiV150SelectedOptionForCritical = getSelectedChoiceOption(param, value);
   const gigiV150CriticalScore = capaskaGigiCanonicalScoreV150(param, gigiV150SelectedOptionForCritical || value);
   if (gigiV150CriticalScore !== null) return gigiV150CriticalScore <= -10;
@@ -1798,7 +1852,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{capaskaGigiCanonicalLabelV150(param, opt)}</span>
                   {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {capaskaThtFinalScoreV154(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -2675,6 +2729,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
