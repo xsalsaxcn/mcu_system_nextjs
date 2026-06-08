@@ -1898,6 +1898,42 @@ function capaskaThtTotalForScoreFieldV157(scoreField: any, parameters: any[], sc
   return count >= 6 ? total : null;
 }
 
+
+/* CAPASKA THT stage based total fix v158
+   v157 was inserted correctly, but it can still return null if the hidden Score/Total field
+   itself does not contain the word THT in name/category.
+
+   Safer narrow logic:
+   - Do not depend on the score field label.
+   - Detect the current parameter set/stage by the presence of the 6 canonical THT questions.
+   - Only override when all 6 canonical THT keys are present and scored:
+     membran, serumen, rhinitis, tonsil, epistaksis, weber.
+   - Other stages will not match all 6 keys, so they are untouched.
+*/
+function capaskaThtTotalForScoreFieldV158(scoreField: any, parameters: any[], scores: Record<string, number>): number | null {
+  if (!Array.isArray(parameters)) return null;
+
+  const requiredKeys = ["membran", "serumen", "rhinitis", "tonsil", "epistaksis", "weber"];
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const candidate of parameters) {
+    const key = capaskaThtCanonicalKeyV157(candidate);
+    if (!key || seen.has(key)) continue;
+
+    const score = scores[String(candidate?.id)];
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+  }
+
+  const hasAllThtKeys = requiredKeys.every((key) => seen.has(key));
+  if (!hasAllThtKeys) return null;
+
+  return total;
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -1932,9 +1968,9 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     const pCat = norm(p.category);
     const totalAll = pName.includes("total");
 
-        const thtCanonicalTotalV157 = capaskaThtTotalForScoreFieldV157(p, parameters, scores);
-    if (thtCanonicalTotalV157 !== null) {
-      computed[p.id] = String(thtCanonicalTotalV157);
+        const thtCanonicalTotalV158 = capaskaThtTotalForScoreFieldV158(p, parameters, scores);
+    if (thtCanonicalTotalV158 !== null) {
+      computed[p.id] = String(thtCanonicalTotalV158);
       return;
     }
 let total = 0;
@@ -2934,6 +2970,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
