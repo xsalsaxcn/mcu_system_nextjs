@@ -613,8 +613,77 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
   return null;
 }
 
+
+/* CAPASKA vertebra scoring fix v136
+   Scope only: Ortopedi > Vertebra / Tulang Belakang
+   Parameters: Skoliosis, Kifosis, Lordosis
+   Reference:
+   - Tidak ada = 2 untuk setiap poin
+   - Ringan = -1 untuk setiap poin
+   - Sedang / Berat = Tidak Direkomendasikan (-10)
+   Current UI may show "Ada" instead of "Sedang/Berat"; treat "Ada" as red flag (-10).
+*/
+function capaskaVertebraNorm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaVertebraParamText(param: any): string {
+  return capaskaVertebraNorm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaVertebraChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaVertebraNorm([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaVertebraNorm(optionOrValue);
+}
+
+function capaskaIsVertebraParam(param: any): boolean {
+  const p = capaskaVertebraParamText(param);
+  return /skoliosis|scoliosis|kifosis|kyphosis|lordosis/.test(p);
+}
+
+function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null {
+  if (!capaskaIsVertebraParam(param)) return null;
+
+  const c = capaskaVertebraChoiceText(optionOrValue);
+
+  if (/tidak ada|normal/.test(c)) return 2;
+  if (/ringan/.test(c)) return -1;
+  if (/sedang|berat|ada/.test(c)) return -10;
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
+  if (vertebraOverride !== null) return vertebraOverride;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
   if (overrideScore !== null) return overrideScore;
 
@@ -626,6 +695,8 @@ function scoreForParam(param: any, value: string) {
 
 function isCriticalChoice(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
+  if (vertebraOverride !== null) return vertebraOverride <= -10;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
   if (overrideScore !== null) return overrideScore <= -10;
 
@@ -1667,6 +1738,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
