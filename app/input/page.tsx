@@ -1817,6 +1817,87 @@ function isCriticalChoice(param: any, value: string) {
   return capaskaIsRedFlagText(text);
 }
 
+
+/* CAPASKA THT score total narrow fix v157
+   Root cause:
+   The hidden THT score/total field can sit before Epistaksis and Weber in parameter order.
+   Existing computeValues totals only candidates before the score field, so final THT score becomes 8:
+   Membran 2 + Serumen 2 + Rhinitis 2 + Tonsil 2 = 8
+
+   Narrow fix:
+   Only for THT score fields, compute total from the 6 canonical THT input parameters,
+   regardless of parameter order:
+   Membran + Serumen + Rhinitis + Tonsil + Epistaksis + Weber = 10
+*/
+function capaskaThtTotalNormV157(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaThtTotalParamTextV157(param: any): string {
+  return capaskaThtTotalNormV157([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaIsThtScoreFieldV157(param: any): boolean {
+  const text = capaskaThtTotalParamTextV157(param);
+  const cat = capaskaThtTotalNormV157(param?.category);
+  return /tht|telinga|hidung|tenggorokan/.test(text) || /tht|telinga|hidung|tenggorokan/.test(cat);
+}
+
+function capaskaThtCanonicalKeyV157(param: any): string | null {
+  const text = capaskaThtTotalParamTextV157(param);
+
+  if (/membran.*timpani|timpani/.test(text)) return "membran";
+  if (/serumen/.test(text)) return "serumen";
+  if (/rhinitis|rinitis|lividae|divide|dividae/.test(text)) return "rhinitis";
+  if (/tonsil/.test(text)) return "tonsil";
+  if (/epistaksis|epistaxis/.test(text)) return "epistaksis";
+  if (/garputala|weber/.test(text)) return "weber";
+
+  return null;
+}
+
+function capaskaThtTotalForScoreFieldV157(scoreField: any, parameters: any[], scores: Record<string, number>): number | null {
+  if (!capaskaIsThtScoreFieldV157(scoreField)) return null;
+  if (!Array.isArray(parameters)) return null;
+
+  const seen = new Set<string>();
+  let total = 0;
+  let count = 0;
+
+  for (const candidate of parameters) {
+    const key = capaskaThtCanonicalKeyV157(candidate);
+    if (!key || seen.has(key)) continue;
+
+    const score = scores[String(candidate?.id)];
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+    count += 1;
+  }
+
+  // Only override when this is really the canonical THT form.
+  // This avoids touching any partial/non-THT score field.
+  return count >= 6 ? total : null;
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -1851,7 +1932,12 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     const pCat = norm(p.category);
     const totalAll = pName.includes("total");
 
-    let total = 0;
+        const thtCanonicalTotalV157 = capaskaThtTotalForScoreFieldV157(p, parameters, scores);
+    if (thtCanonicalTotalV157 !== null) {
+      computed[p.id] = String(thtCanonicalTotalV157);
+      return;
+    }
+let total = 0;
     let hasAny = false;
 
     parameters.forEach((candidate, candidateIdx) => {
@@ -2848,6 +2934,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
