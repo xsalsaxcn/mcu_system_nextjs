@@ -1934,6 +1934,51 @@ function capaskaThtTotalForScoreFieldV158(scoreField: any, parameters: any[], sc
   return total;
 }
 
+
+/* CAPASKA THT total from values fix v159
+   Why v158 can still fall back to 8:
+   v158 only sums scores that already exist inside the `scores` object.
+   If Epistaksis or Weber are selected but not present in `scores` for any reason,
+   v158 returns null and the old ordered calculation still saves 8.
+
+   v159 computes canonical THT total from the selected values directly:
+   - First use scores[id] if available.
+   - If missing, read computed[id] and call scoreForParam(candidate, selected).
+   - Require all 6 canonical THT keys to be answered:
+     membran, serumen, rhinitis, tonsil, epistaksis, weber.
+*/
+function capaskaThtTotalForScoreFieldV159(scoreField: any, parameters: any[], scores: Record<string, number>, computed: Record<string, string>): number | null {
+  if (!Array.isArray(parameters)) return null;
+
+  const requiredKeys = ["membran", "serumen", "rhinitis", "tonsil", "epistaksis", "weber"];
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const candidate of parameters) {
+    const key = capaskaThtCanonicalKeyV157(candidate);
+    if (!key || seen.has(key)) continue;
+
+    let score = scores[String(candidate?.id)];
+
+    if (typeof score !== "number" || !Number.isFinite(score)) {
+      const selected = computed?.[candidate?.id];
+      if (selected !== undefined && selected !== null && String(selected).trim() !== "") {
+        score = scoreForParam(candidate, String(selected));
+      }
+    }
+
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+  }
+
+  const hasAllThtKeys = requiredKeys.every((key) => seen.has(key));
+  if (!hasAllThtKeys) return null;
+
+  return total;
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -1968,9 +2013,9 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     const pCat = norm(p.category);
     const totalAll = pName.includes("total");
 
-        const thtCanonicalTotalV158 = capaskaThtTotalForScoreFieldV158(p, parameters, scores);
-    if (thtCanonicalTotalV158 !== null) {
-      computed[p.id] = String(thtCanonicalTotalV158);
+        const thtCanonicalTotalV159 = capaskaThtTotalForScoreFieldV159(p, parameters, scores, computed);
+    if (thtCanonicalTotalV159 !== null) {
+      computed[p.id] = String(thtCanonicalTotalV159);
       return;
     }
 let total = 0;
@@ -2970,6 +3015,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
