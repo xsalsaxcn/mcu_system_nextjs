@@ -1845,8 +1845,7 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     }
   });
 
-  parameters.forEach((p, idx) => {
-    if (!isScoreField(p)) return;
+  parameters.forEach((p) => {
     const pName = String(p.name || "").toLowerCase();
     const pCat = norm(p.category);
     const totalAll = pName.includes("total");
@@ -1854,8 +1853,7 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
     let total = 0;
     let hasAny = false;
 
-    parameters.forEach((candidate, candidateIdx) => {
-      if (candidateIdx >= idx) return;
+    parameters.forEach((candidate) => {
       if (isAutoField(candidate)) return;
       if (!hasChoiceOptions(candidate)) return;
 
@@ -2848,6 +2846,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
