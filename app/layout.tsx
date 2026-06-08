@@ -6,6 +6,7 @@ import VaccinationSessionLightFeatures from "../components/VaccinationSessionLig
 import VaccinationQueueDecodeCleanup from "../components/VaccinationQueueDecodeCleanup";
 import VaccinationDoctorSingleStaffField from "../components/VaccinationDoctorSingleStaffField";
 import VaccinationValidationFinalGuard from "../components/VaccinationValidationFinalGuard";
+import LoginQuickAccessAllCapaska from "../components/LoginQuickAccessAllCapaska";
 export const metadata: Metadata = {
   title: "Harmony Health App",
   description: "Harmony Health App - MCU, corporate health, and vaccination workflow",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id">
       <body>
+        <LoginQuickAccessAllCapaska />
         <VaccinationValidationFinalGuard />
         <VaccinationDoctorSingleStaffField />
         <VaccinationQueueDecodeCleanup />
@@ -23,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
 
 
 
