@@ -10,10 +10,10 @@ type DemoCredential = {
 };
 
 const CREDENTIALS: DemoCredential[] = [
-  { label: "Admin", username: "admin", password: "admin", tag: "admin" },
+  { label: "Admin", username: "admin", password: "admin123", tag: "admin" },
   { label: "Registrasi Ulang", username: "capaska_registrasi", password: "registrasi123", tag: "registrasi" },
   { label: "Operator Mata", username: "capaska_mata", password: "mata123", tag: "mata" },
-  { label: "Operator Penyakit Dalam", username: "capaska_penyakit_dalam", password: "penyakitdalam123", tag: "penyakit dalam" },
+  { label: "Operator Penyakit Dalam", username: "capaska_penyakitdalam", password: "pd123", tag: "penyakit dalam" },
   { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123", tag: "gigi" },
   { label: "Operator THT", username: "capaska_tht", password: "tht123", tag: "tht" },
   { label: "Operator Jantung", username: "capaska_jantung", password: "jantung123", tag: "jantung" },
@@ -232,4 +232,5 @@ export default function LoginQuickAccessAllCapaska() {
 
   return null;
 }
+
 
