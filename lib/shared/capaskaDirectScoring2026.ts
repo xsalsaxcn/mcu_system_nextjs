@@ -1,4 +1,4 @@
-export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_BACKEND_DIRECT_OPTION_V45";
+﻿export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_BACKEND_DIRECT_OPTION_V45";
 
 export type CapaskaDomainKey =
   | "mata"
@@ -73,8 +73,8 @@ export function normalizeCapaskaKey(text: any) {
     .toLowerCase()
     .replace(/\(\s*\+\s*\)/g, "positif")
     .replace(/\(\s*-\s*\)/g, "negatif")
-    .replace(/≥/g, "gte")
-    .replace(/≤/g, "lte")
+    .replace(/â‰¥/g, "gte")
+    .replace(/â‰¤/g, "lte")
     .replace(/>=/g, "gte")
     .replace(/<=/g, "lte")
     .replace(/>/g, "gt")
@@ -114,7 +114,7 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Tes buta warna", ["Buta warna parsial", "Buta warna total"], -10, true);
   addRule(rules, "Strabismus / Juling", ["(-) / (-)", "(-)/(-)", "Negatif", "Tidak ada"], 3);
   addRule(rules, "Strabismus / Juling", ["(+) / (-)", "(-) / (+)", "(+) / (+)", "(+)/(-)", "(-)/(+)", "(+)/(+)", "Positif", "Ada"], -5);
-  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["Normal 6/6", "Normal >= 6/6", "Normal ≥ 6/6"], 3);
+  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["Normal 6/6", "Normal >= 6/6", "Normal â‰¥ 6/6"], 3);
   addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["<6/6 - 6/12", "<6/6-6/12", "<6/6 sampai 6/12"], 2);
   addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], "<6/12", -10, true);
 
@@ -127,13 +127,13 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Caries Dentis", "3 caries", -3);
   addRule(rules, "Caries Dentis", ">3 caries", -10, true);
   addRule(rules, "Tumpatan Gigi", "0 tumpatan", 2);
-  addRule(rules, "Tumpatan Gigi", ["<=5 tumpatan", "≤5 tumpatan", "<5 tumpatan", "<3 tumpatan"], 1);
+  addRule(rules, "Tumpatan Gigi", ["<=5 tumpatan", "â‰¤5 tumpatan", "<5 tumpatan", "<3 tumpatan"], 1);
   addRule(rules, "Tumpatan Gigi", [">5 tumpatan", ">3 tumpatan"], -5);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "0 gigi", 3);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "1 gigi", 2);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], ["2 gigi", "2 gigi impaksi / impaksi 1 gigi depan"], 1);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">2 gigi", ">2 gigi impaksi", ">2 gigi impaksi atau 2 gigi depan impaksi"], -5);
-  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">=4 gigi", "≥4 gigi"], -10, true);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">=4 gigi", "â‰¥4 gigi"], -10, true);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "0 gigi", 2);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "1 gigi", 1);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "2 gigi", 0);
@@ -506,7 +506,7 @@ function getParameterByName(byName: Map<string, any>, name: string) {
   return null;
 }
 
-export function computeCapaskaDerivedValues(parameters: any[], inputValues: Record<string, string>) {
+function computeCapaskaDerivedValuesBaseV162(parameters: any[], inputValues: Record<string, string>) {
   const next = { ...inputValues };
   const byName = new Map<string, any>();
 
@@ -818,3 +818,142 @@ export function evaluateMcuGraduation2026(
 
   return totalScore >= min && totalScore <= max ? "Lulus" : "Tidak Lulus";
 }
+
+function capaskaSharedThtNormV162(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaSharedThtCompactV162(value: any) {
+  return capaskaSharedThtNormV162(value).replace(/\s+/g, "");
+}
+
+function capaskaSharedThtParamTextV162(param: any) {
+  return capaskaSharedThtNormV162([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaSharedThtCanonicalKeyV162(param: any): string | null {
+  const text = capaskaSharedThtParamTextV162(param);
+
+  if (/membran.*timpani|timpani/.test(text)) return "membran";
+  if (/serumen/.test(text)) return "serumen";
+  if (/rhinitis|rinitis|lividae|divide|dividae|bividas/.test(text)) return "rhinitis";
+  if (/tonsil/.test(text)) return "tonsil";
+  if (/epistaksis|epistaxis/.test(text)) return "epistaksis";
+  if (/garputala|weber/.test(text)) return "weber";
+
+  return null;
+}
+
+function capaskaSharedIsScoreFieldV162(param: any) {
+  const name = String(param?.name || "").toLowerCase().trim();
+  const text = capaskaSharedThtParamTextV162(param);
+  return (
+    name.startsWith("score ") ||
+    name.startsWith("total score") ||
+    name.includes("score total") ||
+    /score/.test(text)
+  );
+}
+
+function capaskaSharedThtScoreV162(param: any, rawValue: any): number | null {
+  const key = capaskaSharedThtCanonicalKeyV162(param);
+  if (!key) return null;
+
+  const value = capaskaSharedThtNormV162(rawValue);
+  const compact = capaskaSharedThtCompactV162(rawValue);
+
+  if (!value) return null;
+
+  if (key === "membran") {
+    if (/tidakintak|tidakintac|tidakintact/.test(compact)) return -10;
+    if (/intak|intac|intact/.test(compact)) return 2;
+  }
+
+  if (key === "serumen") {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(compact)) return 2;
+    if (/adaserumen|ada|\(\+\)|positif|positive/.test(compact)) return 1;
+  }
+
+  if (key === "rhinitis") {
+    if (/negatif|negative|\(-\)|tidakada/.test(compact)) return 2;
+    if (/positif|positive|\(\+\)|ada/.test(compact)) return 1;
+  }
+
+  if (key === "tonsil") {
+    if (/tonsilektomi/.test(compact)) return 2;
+    if (/t0\/?t1-?t1|t0\/?t1|t0-?t1|t1-?t1|t1\/?t1|t0t1t1/.test(compact)) return 2;
+    if (/t2a/.test(compact)) return 1;
+    if (/t2b/.test(compact)) return -1;
+    if (/t3/.test(compact)) return -10;
+  }
+
+  if (key === "epistaksis") {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(compact)) return 1;
+    if (/ada|\(\+\)|positif|positive/.test(compact)) return -1;
+  }
+
+  if (key === "weber") {
+    if (/tidaknormal|abnormal/.test(compact)) return -10;
+    if (/normal/.test(compact)) return 1;
+  }
+
+  return null;
+}
+
+function capaskaApplyThtCanonicalTotalV162(parameters: any[], baseValues: Record<string, string>, rawValues: Record<string, string>) {
+  const list = Array.isArray(parameters) ? parameters : [];
+  const nextValues: Record<string, string> = { ...(baseValues || {}) };
+  const sourceValues: Record<string, string> = { ...(rawValues || {}), ...(baseValues || {}) };
+
+  const requiredKeys = ["membran", "serumen", "rhinitis", "tonsil", "epistaksis", "weber"];
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const param of list) {
+    const key = capaskaSharedThtCanonicalKeyV162(param);
+    if (!key || seen.has(key)) continue;
+
+    const selected = sourceValues[String(param?.id)];
+    const score = capaskaSharedThtScoreV162(param, selected);
+
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+  }
+
+  const hasAllThtKeys = requiredKeys.every((key) => seen.has(key));
+  if (!hasAllThtKeys) return nextValues;
+
+  const scoreFields = list.filter((param) => capaskaSharedIsScoreFieldV162(param));
+
+  for (const scoreField of scoreFields) {
+    nextValues[String(scoreField.id)] = String(total);
+  }
+
+  return nextValues;
+}
+
+export function computeCapaskaDerivedValues(parameters: any[], values: Record<string, string>) {
+  const baseValues = computeCapaskaDerivedValuesBaseV162(parameters, values);
+  return capaskaApplyThtCanonicalTotalV162(parameters, baseValues, values);
+}
+
