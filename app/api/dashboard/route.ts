@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { computeStagesForParticipant } from "@/lib/server/progress";
@@ -30,6 +30,60 @@ function isRegistrasiUlangDone(participant: any) {
     participant?.registrasi_ulang_done === "1";
 }
 
+
+function capaskaDashboardProgressNormV153(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaDashboardParamTextV153(param: any) {
+  return capaskaDashboardProgressNormV153([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function canonicalCapaskaDashboardStageParamsV153(params: any[]) {
+  const list = Array.isArray(params) ? params : [];
+  const cleaned: any[] = [];
+  let seenRhinitisLividae = false;
+  let seenHipospadiaHidrokel = false;
+
+  for (const param of list) {
+    const text = capaskaDashboardParamTextV153(param);
+
+    if ((/rhinitis|rinitis/.test(text)) && (/lividae|divide|dividae/.test(text))) {
+      if (seenRhinitisLividae) continue;
+      seenRhinitisLividae = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    if (/hipospadia/.test(text)) {
+      if (seenHipospadiaHidrokel) continue;
+      seenHipospadiaHidrokel = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    if (/hidrokel/.test(text) && !/hipospadia/.test(text)) {
+      continue;
+    }
+
+    cleaned.push(param);
+  }
+
+  return cleaned;
+}
 function normalizeDashboardStages(stages: any[], participant: any) {
   return (stages || [])
     .filter((stage) => {
@@ -198,3 +252,4 @@ export async function GET(req: NextRequest) {
     rule_count: graduationRules.data?.length || 0
   });
 }
+

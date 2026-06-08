@@ -1,4 +1,4 @@
-import { stageOrder } from "@/lib/shared/constants";
+﻿import { stageOrder } from "@/lib/shared/constants";
 import type { StageProgress } from "@/lib/shared/types";
 
 function isActive(value: any) {
@@ -24,6 +24,66 @@ function isScoreHelperParameter(parameterName: string) {
     name.includes("total skor")
   );
 }
+function capaskaProgressNormV153(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaProgressParamTextV153(param: any) {
+  return capaskaProgressNormV153([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function canonicalCapaskaProgressParamsV153(params: any[]) {
+  const list = Array.isArray(params) ? params : [];
+  const cleaned: any[] = [];
+  let seenRhinitisLividae = false;
+  let seenHipospadiaHidrokel = false;
+
+  for (const param of list) {
+    const text = capaskaProgressParamTextV153(param);
+
+    const isRhinitisLividae =
+      /rhinitis|rinitis/.test(text) && /lividae|divide|dividae/.test(text);
+
+    if (isRhinitisLividae) {
+      if (seenRhinitisLividae) continue;
+      seenRhinitisLividae = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    const isHipospadia = /hipospadia/.test(text);
+    const isStandaloneHidrokel = /hidrokel/.test(text) && !/hipospadia/.test(text);
+
+    if (isHipospadia) {
+      if (seenHipospadiaHidrokel) continue;
+      seenHipospadiaHidrokel = true;
+      cleaned.push(param);
+      continue;
+    }
+
+    if (isStandaloneHidrokel) {
+      continue;
+    }
+
+    cleaned.push(param);
+  }
+
+  return cleaned;
+}
+
 
 export function computeStagesForParticipant(
   participantId: number,
@@ -69,7 +129,7 @@ export function computeStagesForParticipant(
   for (const [postId, params] of grouped.entries()) {
     const postName = postMap.get(postId) || "-";
 
-    const inputParams = params.filter((p) => !isScoreHelperParameter(String(p.name || "")));
+    const inputParams = canonicalCapaskaProgressParamsV153(params.filter((p) => !isScoreHelperParameter(String(p.name || ""))));
 
     const countedParams = inputParams.length ? inputParams : params;
     const total = countedParams.length;
@@ -96,3 +156,4 @@ export function computeStagesForParticipant(
 
   return stages.sort((a, b) => a.stage_order - b.stage_order || a.post_id - b.post_id);
 }
+
