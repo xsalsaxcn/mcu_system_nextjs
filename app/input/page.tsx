@@ -836,8 +836,100 @@ function capaskaPenyakitDalamScoreFix(param: any, optionOrValue: any): number | 
   return null;
 }
 
+
+/* CAPASKA jantung scoring fix v138
+   Scope only: Form Kesehatan Jantung dan Pembuluh Darah.
+   Reference:
+   - Kelainan Anatomi Jantung: Tidak ada = 2, Ada = -10
+   - Kelainan Irama Jantung yang mengganggu latihan fisik sedang: Tidak ada = 2, Ada = -10
+   - Iskemik Miocardial: Tidak ada = 2, Ada = -10
+   - Kelainan kongenital jantung: Tidak ada = 2, Ada = -10
+   - Varises Tungkai (insufisiensi vena): Tidak ada = 2, Ada = -1
+   - Kelainan Arteri pada ekstremitas: Tidak ada = 2, Ada = -10
+*/
+function capaskaJantungNorm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaJantungParamText(param: any): string {
+  return capaskaJantungNorm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaJantungChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaJantungNorm([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaJantungNorm(optionOrValue);
+}
+
+function capaskaJantungIsTidakAda(choice: string): boolean {
+  return /tidak ada|tidak terdapat|\(-\)|negatif|negative|normal/.test(choice) && !/tidak normal/.test(choice);
+}
+
+function capaskaJantungIsAda(choice: string): boolean {
+  return /(^| )ada( |$)|\(\+\)|positif|positive|tidak normal/.test(choice);
+}
+
+function capaskaJantungScoreFix(param: any, optionOrValue: any): number | null {
+  const p = capaskaJantungParamText(param);
+  const c = capaskaJantungChoiceText(optionOrValue);
+
+  if (!c) return null;
+
+  // Restrict to Jantung dan Pembuluh Darah fields only.
+  const isJantungField =
+    /kelainan anatomi jantung|anatomi jantung/.test(p) ||
+    /kelainan irama jantung|irama jantung/.test(p) ||
+    /iskemik|miocardial|miokardial/.test(p) ||
+    /kelainan kongenital jantung|kongenital jantung/.test(p) ||
+    /varises tungkai|insufisiensi vena|vena/.test(p) ||
+    /kelainan arteri|arteri.*ekstremitas|ekstrimitas|ekstremitas/.test(p);
+
+  if (!isJantungField) return null;
+
+  // Varises is the only non-redflag "Ada" in this section.
+  if (/varises tungkai|insufisiensi vena|vena/.test(p)) {
+    if (capaskaJantungIsTidakAda(c)) return 2;
+    if (capaskaJantungIsAda(c)) return -1;
+    return null;
+  }
+
+  // All other Jantung/Pembuluh Darah items.
+  if (capaskaJantungIsTidakAda(c)) return 2;
+  if (capaskaJantungIsAda(c)) return -10;
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const jantungOverride = capaskaJantungScoreFix(param, selectedOption || value);
+  if (jantungOverride !== null) return jantungOverride;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
   if (penyakitDalamOverride !== null) return penyakitDalamOverride;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
@@ -853,6 +945,8 @@ function scoreForParam(param: any, value: string) {
 
 function isCriticalChoice(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const jantungOverride = capaskaJantungScoreFix(param, selectedOption || value);
+  if (jantungOverride !== null) return jantungOverride <= -10;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
   if (penyakitDalamOverride !== null) return penyakitDalamOverride <= -10;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
@@ -1898,6 +1992,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
