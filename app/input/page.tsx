@@ -926,8 +926,136 @@ function capaskaJantungScoreFix(param: any, optionOrValue: any): number | null {
   return null;
 }
 
+
+/* CAPASKA THT scoring fix v139
+   Scope only: Pemeriksaan Kesehatan THT.
+   Reference:
+   - Membran timpani: Intak = 2, Tidak intak = -10
+   - Serumen: Tidak ada = 2, Ada serumen = 1
+   - Tonsil: T0/T1-T1 or Sudah tonsilektomi = 2, T2a-T2a = 1, T2b-T2b = -1, T3-T3 = -10
+   - Rhinitis Alergi (lividae): Negatif/(-) = 2, Positif/(+) = 1
+   - Epistaksis 1 tahun terakhir: Tidak ada = 1, Ada = -1
+   - Tes Garputala Weber 512 Hz: Normal = 1, Tidak Normal = -10
+
+   Notes:
+   - If old database label says divide/dividae, treat it as lividae for scoring and display.
+*/
+function capaskaThtNorm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaThtParamText(param: any): string {
+  return capaskaThtNorm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaThtChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaThtNorm([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaThtNorm(optionOrValue);
+}
+
+function capaskaThtDisplayLabelFix(value: any): any {
+  if (typeof value !== "string") return value;
+  return value
+    .replace(/\(\s*dividae\s*\)/gi, "(lividae)")
+    .replace(/\(\s*divide\s*\)/gi, "(lividae)")
+    .replace(/Rhinitis Alergi\s+divide/gi, "Rhinitis Alergi (lividae)")
+    .replace(/Rhinitis Alergi\s+dividae/gi, "Rhinitis Alergi (lividae)");
+}
+
+function capaskaThtIsTidakAda(choice: string): boolean {
+  return /tidak ada|tidak terdapat|\(-\)|negatif|negative/.test(choice);
+}
+
+function capaskaThtIsAda(choice: string): boolean {
+  return /(^| )ada( |$)|\(\+\)|positif|positive/.test(choice);
+}
+
+function capaskaThtIsNormal(choice: string): boolean {
+  return /normal/.test(choice) && !/tidak normal|abnormal/.test(choice);
+}
+
+function capaskaThtIsTidakNormal(choice: string): boolean {
+  return /tidak normal|abnormal/.test(choice);
+}
+
+function capaskaThtScoreFix(param: any, optionOrValue: any): number | null {
+  const p = capaskaThtParamText(param);
+  const c = capaskaThtChoiceText(optionOrValue);
+
+  if (!c) return null;
+
+  // Membran timpani
+  if (/membran.*timpani|timpani/.test(p)) {
+    if (/tidak\s*intak|tidak intac|tidak intact/.test(c)) return -10;
+    if (/intak|intac|intact/.test(c)) return 2;
+  }
+
+  // Serumen
+  if (/serumen/.test(p)) {
+    if (/ada serumen/.test(c) || (capaskaThtIsAda(c) && !capaskaThtIsTidakAda(c))) return 1;
+    if (capaskaThtIsTidakAda(c)) return 2;
+  }
+
+  // Tonsil
+  if (/tonsil/.test(p)) {
+    if (/tonsilektomi|t0\s*\/?\s*t1|t0\s*-\s*t1|t1\s*-\s*t1|t1\s*\/?\s*t1/.test(c)) return 2;
+    if (/t2a/.test(c)) return 1;
+    if (/t2b/.test(c)) return -1;
+    if (/t3/.test(c)) return -10;
+  }
+
+  // Rhinitis alergi lividae. Some old labels/options may say divide/dividae; score same as lividae reference.
+  if (/rhinitis|rinitis|lividae|divide|dividae/.test(p)) {
+    if (capaskaThtIsTidakAda(c) || /negatif|negative/.test(c)) return 2;
+    if (capaskaThtIsAda(c) || /positif|positive/.test(c)) return 1;
+  }
+
+  // Epistaksis 1 tahun terakhir
+  if (/epistaksis|epistaxis/.test(p)) {
+    if (capaskaThtIsTidakAda(c)) return 1;
+    if (capaskaThtIsAda(c)) return -1;
+  }
+
+  // Tes garputala Weber
+  if (/garputala|weber/.test(p)) {
+    if (capaskaThtIsTidakNormal(c)) return -10;
+    if (capaskaThtIsNormal(c)) return 1;
+  }
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const thtOverride = capaskaThtScoreFix(param, selectedOption || value);
+  if (thtOverride !== null) return thtOverride;
   const jantungOverride = capaskaJantungScoreFix(param, selectedOption || value);
   if (jantungOverride !== null) return jantungOverride;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
@@ -945,6 +1073,8 @@ function scoreForParam(param: any, value: string) {
 
 function isCriticalChoice(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const thtOverride = capaskaThtScoreFix(param, selectedOption || value);
+  if (thtOverride !== null) return thtOverride <= -10;
   const jantungOverride = capaskaJantungScoreFix(param, selectedOption || value);
   if (jantungOverride !== null) return jantungOverride <= -10;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
@@ -1969,7 +2099,7 @@ function InputForm({ user }: { user: any }) {
                         : "border-slate-200 bg-white"
                     }`}
                   >
-                    <label className="label">{param.name}{param.unit ? ` (${param.unit})` : ""}</label>
+                    <label className="label">{capaskaThtDisplayLabelFix(param.name)}{param.unit ? ` (${param.unit})` : ""}</label>
                     {param.reference_text && <div className="mb-2 text-xs text-slate-500">{param.reference_text}</div>}
                     <ParameterInput
                       param={param}
@@ -1992,6 +2122,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
