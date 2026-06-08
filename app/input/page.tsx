@@ -196,32 +196,39 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
 
     // GIGI
     [`${norm("Karang Gigi")}::${norm("Negative")}`]: 2,
-    [`${norm("Karang Gigi")}::${norm("Positive")}`]: 0,
-    [`${norm("Caries Dentis")}::${norm("0 caries")}`]: 2,
-    [`${norm("Caries Dentis")}::${norm("1 caries")}`]: 1,
-    [`${norm("Caries Dentis")}::${norm("2 caries")}`]: 1,
-    [`${norm("Caries Dentis")}::${norm("3 caries")}`]: 0,
-    [`${norm("Caries Dentis")}::${norm(">3 caries")}`]: 0,
+    [`${norm("Karang Gigi")}::${norm("Positive")}`]: -1,
+    [`${norm("Caries Dentis")}::${norm("0 caries")}`]: 3,
+    [`${norm("Caries Dentis")}::${norm("1 caries")}`]: -1,
+    [`${norm("Caries Dentis")}::${norm("2 caries")}`]: -2,
+    [`${norm("Caries Dentis")}::${norm("3 caries")}`]: -3,
+    [`${norm("Caries Dentis")}::${norm(">3 caries")}`]: -10,
     [`${norm("Tumpatan Gigi")}::${norm("0 tumpatan")}`]: 2,
     [`${norm("Tumpatan Gigi")}::${norm("<3 tumpatan")}`]: 1,
-    [`${norm("Tumpatan Gigi")}::${norm(">3 tumpatan")}`]: 0,
+    [`${norm("Tumpatan Gigi")}::${norm("<=5 tumpatan")}`]: 1,
     [`${norm("Tumpatan Gigi")}::${norm("<5 tumpatan")}`]: 1,
-    [`${norm("Tumpatan Gigi")}::${norm(">5 tumpatan")}`]: 0,
-    [`${norm("Impaksi gigi")}::${norm("0 gigi")}`]: 2,
-    [`${norm("Impaksi gigi")}::${norm("1 gigi")}`]: 1,
-    [`${norm("Impaksi gigi")}::${norm("2 gigi")}`]: 0,
-    [`${norm("Impaksi gigi")}::${norm(">2 gigi")}`]: 0,
+    [`${norm("Tumpatan Gigi")}::${norm(">3 tumpatan")}`]: -5,
+    [`${norm("Tumpatan Gigi")}::${norm(">5 tumpatan")}`]: -5,
+    [`${norm("Impaksi gigi")}::${norm("0 gigi")}`]: 3,
+    [`${norm("Impaksi gigi")}::${norm("1 gigi")}`]: 2,
+    [`${norm("Impaksi gigi")}::${norm("2 gigi")}`]: 1,
+    [`${norm("Impaksi gigi")}::${norm("1 gigi depan")}`]: 1,
+    [`${norm("Impaksi gigi")}::${norm(">2 gigi")}`]: -5,
+    [`${norm("Impaksi gigi")}::${norm("2 gigi depan")}`]: -5,
+    [`${norm("Impaksi gigi")}::${norm(">=4 gigi")}`]: -10,
     [`${norm("Kehilangan Gigi (Baik depan maupun belakang)")}::${norm("0 gigi")}`]: 2,
     [`${norm("Kehilangan Gigi (Baik depan maupun belakang)")}::${norm("1 gigi")}`]: 1,
     [`${norm("Kehilangan Gigi (Baik depan maupun belakang)")}::${norm("2 gigi")}`]: 0,
-    [`${norm("Kehilangan Gigi (Baik depan maupun belakang)")}::${norm(">2 gigi")}`]: 0,
-    [`${norm("Infeksi Gusi")}::${norm("Negative")}`]: 2,
-    [`${norm("Infeksi Gusi")}::${norm("Positive")}`]: 0,
-    [`${norm("Dental panoramic")}::${norm("Normal")}`]: 2,
-    [`${norm("Dental panoramic")}::${norm("ditemukan kelainan")}`]: 0,
-    [`${norm("Dental panoramik")}::${norm("Normal")}`]: 2,
-    [`${norm("Dental panoramik")}::${norm("ditemukan kelainan")}`]: 0,
-
+    [`${norm("Kehilangan Gigi (Baik depan maupun belakang)")}::${norm(">2 gigi")}`]: -10,
+    [`${norm("Kehilangan Gigi bagian depan")}::${norm("0 gigi")}`]: 2,
+    [`${norm("Kehilangan Gigi bagian depan")}::${norm("1 gigi")}`]: 1,
+    [`${norm("Kehilangan Gigi bagian depan")}::${norm("2 gigi")}`]: 0,
+    [`${norm("Kehilangan Gigi bagian depan")}::${norm(">2 gigi")}`]: -10,
+    [`${norm("Infeksi Gusi")}::${norm("Negative")}`]: 1,
+    [`${norm("Infeksi Gusi")}::${norm("Positive")}`]: -1,
+    [`${norm("Dental panoramic")}::${norm("Normal")}`]: 3,
+    [`${norm("Dental panoramic")}::${norm("ditemukan kelainan")}`]: -1,
+    [`${norm("Dental panoramik")}::${norm("Normal")}`]: 3,
+    [`${norm("Dental panoramik")}::${norm("ditemukan kelainan")}`]: -1,
     // THT - direct CAPASK 2026 scoring.
     [`${norm("Membran timpani")}::${norm("Intak")}`]: 2,
     [`${norm("Membran timpani")}::${norm("Tidak Intak")}`]: -10,
@@ -429,50 +436,8 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
   // =========================
   // 2. GIGI, total 16
   // =========================
-  if (/karang/.test(p)) {
-    if (/negative|negatif|tidak ada|\(-\)/.test(c)) return 2;
-    if (/positive|positif|ada|\(\+\)/.test(c)) return -1;
-  }
-
-  if (/caries|karies/.test(p)) {
-    if (/0/.test(c)) return 3;
-    if (/\b1\b/.test(c)) return -1;
-    if (/\b2\b/.test(c)) return -2;
-    if (/\b3\b/.test(c) && !/>|lebih/.test(c)) return -3;
-    if (/>|lebih|lebih dari/.test(c)) return -10;
-  }
-
-  if (/tumpatan/.test(p)) {
-    if (/0/.test(c)) return 2;
-    if (/<=?\s*5|â‰¤\s*5|<\s*3|<\s*5|1|2|3|4|5/.test(c)) return 1;
-    if (/>|lebih/.test(c)) return -5;
-  }
-
-  if (/impaksi/.test(p)) {
-    if (/0/.test(c)) return 3;
-    if (/\b1\b/.test(c) && !/depan/.test(c)) return 2;
-    if (/\b2\b|1 gigi depan/.test(c) && !/>|lebih|4/.test(c)) return 1;
-    if (/>2|lebih dari 2|2 gigi depan/.test(c)) return -5;
-    if (/>=?\s*4|â‰¥\s*4|4 gigi/.test(c)) return -10;
-  }
-
-  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
-    if (/0/.test(c)) return 2;
-    if (/\b1\b/.test(c)) return 1;
-    if (/\b2\b/.test(c) && !/>|lebih/.test(c)) return 0;
-    if (/>|lebih/.test(c)) return -10;
-  }
-
-  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
-    if (/negative|negatif|tidak ada|\(-\)/.test(c)) return 1;
-    if (/positive|positif|ada|\(\+\)/.test(c)) return -1;
-  }
-
-  if (/dental.*panoramic|panoramik/.test(p)) {
-    if (/normal/.test(c) && !/tidak normal|kelainan/.test(c)) return 3;
-    if (/kelainan|tidak normal|abnormal/.test(c)) return -1;
-  }
-
+  const canonicalGigiScoreV150 = capaskaGigiCanonicalScoreV150(param, optionOrValue);
+  if (canonicalGigiScoreV150 !== null) return canonicalGigiScoreV150;
   // =========================
   // 3. THT, total 10
   // =========================
@@ -1137,63 +1102,7 @@ function capaskaGigiIsNegative(choice: string): boolean {
 }
 
 function capaskaGigiFullScoreFix(param: any, optionOrValue: any): number | null {
-  const p = capaskaGigiFullParamText(param);
-  const c = capaskaGigiFullChoiceText(optionOrValue);
-
-  if (!c) return null;
-
-  // Karang Gigi
-  if (/karang/.test(p)) {
-    if (capaskaGigiIsPositive(c)) return -1;
-    if (capaskaGigiIsNegative(c)) return 2;
-  }
-
-  // Caries Dentis. Check >3 before "3 caries".
-  if (/caries|karies/.test(p)) {
-    if (/> ?3|>\s*3|lebih\s*dari\s*3|di atas\s*3|lebih\s*3/.test(c)) return -10;
-    if (/(^|[^0-9])0\s*(caries|karies)/.test(c)) return 3;
-    if (/(^|[^0-9])1\s*(caries|karies)/.test(c)) return -1;
-    if (/(^|[^0-9])2\s*(caries|karies)/.test(c)) return -2;
-    if (/(^|[^0-9])3\s*(caries|karies)/.test(c)) return -3;
-  }
-
-  // Tumpatan Gigi. Old UI may still say <=3 / >3; normalize to the new reference <=5 / >5.
-  if (/tumpatan/.test(p)) {
-    if (/(^|[^0-9])0\s*tumpatan/.test(c)) return 2;
-    if (/<=\s*5|â‰¤\s*5|<\s*=\s*5|<=\s*3|â‰¤\s*3|<\s*=\s*3/.test(c)) return 1;
-    if (/>\s*5|lebih\s*dari\s*5|>\s*3|lebih\s*dari\s*3/.test(c)) return -5;
-  }
-
-  // Impaksi Gigi Depan. Check severe cases first.
-  if (/impaksi|impacted/.test(p)) {
-    if (/>=\s*4|â‰¥\s*4|4\s*gigi|lebih\s*dari\s*3/.test(c)) return -10;
-    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return -5;
-    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return 1;
-    if (/(^|[^0-9])1\s*gigi/.test(c)) return 2;
-    if (/(^|[^0-9])0\s*gigi/.test(c)) return 3;
-  }
-
-  // Kehilangan Gigi bagian depan.
-  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
-    if (/> ?2|>\s*2|lebih\s*dari\s*2/.test(c)) return -10;
-    if (/(^|[^0-9])2\s*gigi/.test(c)) return 0;
-    if (/(^|[^0-9])1\s*gigi/.test(c)) return 1;
-    if (/(^|[^0-9])0\s*gigi/.test(c)) return 2;
-  }
-
-  // Infeksi Gusi
-  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
-    if (capaskaGigiIsPositive(c)) return -1;
-    if (capaskaGigiIsNegative(c)) return 1;
-  }
-
-  // Dental Panoramic
-  if (/dental.*panoramic|panoramik|panoramic/.test(p)) {
-    if (/normal/.test(c) && !/tidak normal|kelainan|abnormal/.test(c)) return 3;
-    if (/kelainan|ditemukan|tidak normal|abnormal/.test(c)) return -1;
-  }
-
-  return null;
+  return capaskaGigiCanonicalScoreV150(param, optionOrValue);
 }
 
 
@@ -1362,69 +1271,7 @@ function capaskaGigiV149Negative(choice: string): boolean {
 }
 
 function capaskaGigiV149Score(param: any, optionOrValue: any): number | null {
-  const p = capaskaGigiV149ParamText(param);
-  const c = capaskaGigiV149ChoiceText(optionOrValue);
-
-  if (!c) return null;
-
-  // Karang Gigi
-  if (/karang/.test(p)) {
-    if (capaskaGigiV149Positive(c)) return -1;
-    if (capaskaGigiV149Negative(c)) return 2;
-  }
-
-  // Caries Dentis
-  if (/caries|karies/.test(p)) {
-    if (/> ?3|>\s*3|lebih\s*dari\s*3|di atas\s*3|lebih\s*3/.test(c)) return -10;
-    if (/(^|[^0-9])0\s*(caries|karies)/.test(c)) return 3;
-    if (/(^|[^0-9])1\s*(caries|karies)/.test(c)) return -1;
-    if (/(^|[^0-9])2\s*(caries|karies)/.test(c)) return -2;
-    if (/(^|[^0-9])3\s*(caries|karies)/.test(c)) return -3;
-  }
-
-  // Tumpatan Gigi
-  if (/tumpatan/.test(p)) {
-    if (/(^|[^0-9])0\s*tumpatan/.test(c)) return 2;
-
-    // Old UI labels may say <3 / <=3, but the 2026 reference is <=5.
-    // Those old "small tumpatan" choices still score 1.
-    if (/<\s*3|<=\s*3|<\s*=\s*3|<\s*5|<=\s*5|<\s*=\s*5/.test(c)) return 1;
-
-    // Any more-than threshold choice in this parameter must be the new high tumpatan penalty.
-    if (/>\s*3|>\s*5|lebih\s*dari\s*3|lebih\s*dari\s*5/.test(c)) return -5;
-  }
-
-  // Impaksi gigi depan
-  if (/impaksi|impacted/.test(p)) {
-    // Must check red flag and negative cases before "2 gigi".
-    if (/>=\s*4|>\s*=\s*4|4\s*gigi|lebih\s*dari\s*3/.test(c)) return -10;
-    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return -5;
-    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return 1;
-    if (/(^|[^0-9])1\s*gigi/.test(c)) return 2;
-    if (/(^|[^0-9])0\s*gigi/.test(c)) return 3;
-  }
-
-  // Kehilangan Gigi bagian depan
-  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
-    if (/> ?2|>\s*2|lebih\s*dari\s*2/.test(c)) return -10;
-    if (/(^|[^0-9])2\s*gigi/.test(c)) return 0;
-    if (/(^|[^0-9])1\s*gigi/.test(c)) return 1;
-    if (/(^|[^0-9])0\s*gigi/.test(c)) return 2;
-  }
-
-  // Infeksi Gusi
-  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
-    if (capaskaGigiV149Positive(c)) return -1;
-    if (capaskaGigiV149Negative(c)) return 1;
-  }
-
-  // Dental Panoramic
-  if (/dental.*panoramic|panoramik|panoramic/.test(p)) {
-    if (/normal/.test(c) && !/tidak normal|kelainan|abnormal/.test(c)) return 3;
-    if (/kelainan|ditemukan|tidak normal|abnormal/.test(c)) return -1;
-  }
-
-  return null;
+  return capaskaGigiCanonicalScoreV150(param, optionOrValue);
 }
 
 function capaskaGigiV149DisplayScore(param: any, optionOrValue: any, fallbackValue?: any): number {
@@ -1470,7 +1317,169 @@ function capaskaGigiV149OptionLabel(param: any, optionOrValue: any): string {
   return raw;
 }
 
+
+/* CAPASKA GIGI canonical cleanup v150
+   Purpose: remove the effect of old Gigi scoring history.
+   This is the single highest-priority Gigi resolver for:
+   Karang, Caries, Tumpatan, Impaksi, Kehilangan Gigi, Infeksi Gusi, Dental Panoramic.
+*/
+function capaskaGigiCanonicalNormV150(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/â‰¥|Ã¢â€°Â¥/g, ">=")
+    .replace(/â‰¤|Ã¢â€°Â¤/g, "<=")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaGigiCanonicalParamTextV150(param: any): string {
+  return capaskaGigiCanonicalNormV150([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaGigiCanonicalChoiceTextV150(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaGigiCanonicalNormV150([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaGigiCanonicalNormV150(optionOrValue);
+}
+
+function capaskaGigiCanonicalIsGigiParamV150(param: any): boolean {
+  const p = capaskaGigiCanonicalParamTextV150(param);
+  return /karang|caries|karies|dentis|tumpatan|impaksi|kehilangan.*gigi|gigi.*hilang|infeksi.*gusi|gusi.*infeksi|dental.*panoramic|dental.*panoramik|panoramic|panoramik/.test(p);
+}
+
+function capaskaGigiCanonicalPositiveV150(choice: string): boolean {
+  return /positive|positif|\(\+\)|(^| )ada( |$)/.test(choice) && !/tidak ada/.test(choice);
+}
+
+function capaskaGigiCanonicalNegativeV150(choice: string): boolean {
+  return /negative|negatif|\(-\)|tidak ada/.test(choice);
+}
+
+function capaskaGigiCanonicalScoreV150(param: any, optionOrValue: any): number | null {
+  const p = capaskaGigiCanonicalParamTextV150(param);
+  const c = capaskaGigiCanonicalChoiceTextV150(optionOrValue);
+
+  if (!c || !capaskaGigiCanonicalIsGigiParamV150(param)) return null;
+
+  // Karang Gigi: (+) = -1, (-) = 2
+  if (/karang/.test(p)) {
+    if (capaskaGigiCanonicalPositiveV150(c)) return -1;
+    if (capaskaGigiCanonicalNegativeV150(c)) return 2;
+  }
+
+  // Caries Dentis: 0=3, 1=-1, 2=-2, 3=-3, >3=-10
+  if (/caries|karies|dentis/.test(p)) {
+    if (/> ?3|>\s*3|lebih\s*dari\s*3|di atas\s*3|lebih\s*3/.test(c)) return -10;
+    if (/(^|[^0-9])0\s*(caries|karies)?/.test(c)) return 3;
+    if (/(^|[^0-9])1\s*(caries|karies)?/.test(c)) return -1;
+    if (/(^|[^0-9])2\s*(caries|karies)?/.test(c)) return -2;
+    if (/(^|[^0-9])3\s*(caries|karies)?/.test(c)) return -3;
+  }
+
+  // Tumpatan Gigi: 0=2, <=5=1, >5=-5.
+  // Old UI labels <3 / <=3 are treated as the latest <=5 bucket.
+  if (/tumpatan/.test(p)) {
+    if (/(^|[^0-9])0\s*tumpatan/.test(c)) return 2;
+
+    // IMPORTANT: high bucket must be checked before matching any number 5.
+    if (/> ?5|>\s*5|lebih\s*dari\s*5|>\s*3|lebih\s*dari\s*3/.test(c)) return -5;
+
+    if (/<= ?5|<=\s*5|<\s*=\s*5|< ?5|<\s*5|<= ?3|<=\s*3|<\s*=\s*3|< ?3|<\s*3/.test(c)) return 1;
+    if (/(^|[^0-9])[1-5]\s*tumpatan/.test(c)) return 1;
+  }
+
+  // Impaksi Gigi Depan:
+  // 0=3, 1=2, 2 gigi / 1 gigi depan=1,
+  // >2 gigi / 2 gigi depan=-5, >=4=-10.
+  if (/impaksi|impacted/.test(p)) {
+    if (/>= ?4|>=\s*4|4\s*gigi|lebih\s*dari\s*3|di atas\s*3/.test(c)) return -10;
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return -5;
+    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return 1;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 2;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 3;
+  }
+
+  // Kehilangan Gigi bagian depan: 0=2, 1=1, 2=0, >2=-10
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|di atas\s*2/.test(c)) return -10;
+    if (/(^|[^0-9])2\s*gigi/.test(c)) return 0;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 1;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 2;
+  }
+
+  // Infeksi Gusi: (+)=-1, (-)=1
+  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
+    if (capaskaGigiCanonicalPositiveV150(c)) return -1;
+    if (capaskaGigiCanonicalNegativeV150(c)) return 1;
+  }
+
+  // Dental Panoramic: Normal=3, kelainan=-1
+  if (/dental.*panoramic|dental.*panoramik|panoramic|panoramik/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal|kelainan|abnormal/.test(c)) return 3;
+    if (/kelainan|ditemukan|tidak normal|abnormal/.test(c)) return -1;
+  }
+
+  return null;
+}
+
+function capaskaGigiCanonicalLabelV150(param: any, optionOrValue: any): string {
+  const raw =
+    optionOrValue && typeof optionOrValue === "object"
+      ? String(optionOrValue.label ?? optionOrValue.value ?? "")
+      : String(optionOrValue ?? "");
+
+  const p = capaskaGigiCanonicalParamTextV150(param);
+  const c = capaskaGigiCanonicalNormV150(raw);
+
+  if (/tumpatan/.test(p)) {
+    if (/(^|[^0-9])0\s*tumpatan/.test(c)) return "0 tumpatan";
+    if (/> ?5|>\s*5|lebih\s*dari\s*5|>\s*3|lebih\s*dari\s*3/.test(c)) return ">5 tumpatan";
+    if (/<= ?5|<=\s*5|<\s*=\s*5|< ?5|<\s*5|<= ?3|<=\s*3|<\s*=\s*3|< ?3|<\s*3/.test(c)) return "<=5 tumpatan";
+  }
+
+  if (/impaksi|impacted/.test(p)) {
+    if (/>= ?4|>=\s*4|4\s*gigi|lebih\s*dari\s*3|di atas\s*3/.test(c)) return ">=4 gigi";
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return ">2 gigi impaksi / 2 gigi depan impaksi";
+    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return "2 gigi impaksi / 1 gigi depan impaksi";
+  }
+
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|di atas\s*2/.test(c)) return ">2 gigi";
+    return raw.replace(/baik depan maupun belakang/gi, "bagian depan");
+  }
+
+  return raw;
+}
+
 function scoreForParam(param: any, value: string) {
+  const gigiV150SelectedOption = getSelectedChoiceOption(param, value);
+  const gigiV150Score = capaskaGigiCanonicalScoreV150(param, gigiV150SelectedOption || value);
+  if (gigiV150Score !== null) return gigiV150Score;
+
   const gigiV149SelectedOption = getSelectedChoiceOption(param, value);
   const gigiV149Score = capaskaGigiV149Score(param, gigiV149SelectedOption || value);
   if (gigiV149Score !== null) return gigiV149Score;
@@ -1496,6 +1505,10 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const gigiV150SelectedOptionForCritical = getSelectedChoiceOption(param, value);
+  const gigiV150CriticalScore = capaskaGigiCanonicalScoreV150(param, gigiV150SelectedOptionForCritical || value);
+  if (gigiV150CriticalScore !== null) return gigiV150CriticalScore <= -10;
+
   const gigiV149SelectedOptionForCritical = getSelectedChoiceOption(param, value);
   const gigiV149CriticalScore = capaskaGigiV149Score(param, gigiV149SelectedOptionForCritical || value);
   if (gigiV149CriticalScore !== null) return gigiV149CriticalScore <= -10;
@@ -1632,7 +1645,7 @@ function ParameterInput({
           <option value="">-- Pilih --</option>
           {options.map((opt, index) => {
             const optionChoiceValue = String(opt.label ?? opt.value ?? "");
-            return <option key={`${param.id}-select-${index}-${optionChoiceValue}`} value={optionChoiceValue}>{capaskaGigiChoiceDisplayLabelFix(param, opt)}</option>;
+            return <option key={`${param.id}-select-${index}-${optionChoiceValue}`} value={optionChoiceValue}>{capaskaGigiCanonicalLabelV150(param, opt)}</option>;
           })}
         </select>
         {value && (
@@ -1652,7 +1665,7 @@ function ParameterInput({
                         const choiceValue = String(opt.label ?? opt.value ?? "");
             const inputId = `param-${param.id}-choice-${index}`;
             const checked = normChoice(value) === normChoice(choiceValue);
-            const critical = (capaskaGigiV149Score(param, opt) ?? scoreForParam(param, choiceValue)) <= -10;
+            const critical = (capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)) <= -10;
 
             return (
               <label
@@ -1672,10 +1685,10 @@ function ParameterInput({
                   onChange={() => onChange(choiceValue)}
                 />
                 <span className="flex-1">
-                  <span className="block font-bold text-slate-900">{capaskaGigiChoiceDisplayLabelFix(param, opt)}</span>
+                  <span className="block font-bold text-slate-900">{capaskaGigiCanonicalLabelV150(param, opt)}</span>
                   {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {scoreForParam(param, String(opt.label ?? opt.value ?? ""))}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -2552,6 +2565,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
