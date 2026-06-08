@@ -306,36 +306,45 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
 }
 
 
-/* CAPASKA eye-only scoring fix v133
-   Scope: only parameter Mata / Lensa kontak / kacamata.
-   Rule restored:
-   - Tidak menggunakan = +3
-   Everything else follows existing scoring.
+
+
+/* CAPASKA scoring 2026 restore v134
+   Source: SIMULASI SCORING DALAM PENILAIAN KESEHATAN CAPASKA TK PUSAT 2026.
+   Central rule:
+   - Tidak Direkomendasikan / red flag = -10.
+   - Healthy total target = 100.
+   - This helper overrides old DB option.score when a known CAPASKA rule is found.
 */
-function capaskaEyeOnlyNormalize(value: any): string {
+function capaskaNorm(value: any): string {
   return String(value ?? "")
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â‰¥]/g, ">=")
+    .replace(/[â‰¤]/g, "<=")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function capaskaEyeOnlyParamText(param: any): string {
-  return capaskaEyeOnlyNormalize([
+function capaskaParamText(param: any): string {
+  return capaskaNorm([
     param?.label,
     param?.name,
     param?.title,
     param?.parameter,
     param?.param_name,
     param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
     param?.id,
   ].filter(Boolean).join(" "));
 }
 
-function capaskaEyeOnlyChoiceText(optionOrValue: any): string {
+function capaskaChoiceText(optionOrValue: any): string {
   if (optionOrValue && typeof optionOrValue === "object") {
-    return capaskaEyeOnlyNormalize([
+    return capaskaNorm([
       optionOrValue.label,
       optionOrValue.value,
       optionOrValue.name,
@@ -345,22 +354,260 @@ function capaskaEyeOnlyChoiceText(optionOrValue: any): string {
     ].filter(Boolean).join(" "));
   }
 
-  return capaskaEyeOnlyNormalize(optionOrValue);
+  return capaskaNorm(optionOrValue);
 }
 
-function capaskaEyeOnlyIsLensParam(param: any): boolean {
-  const text = capaskaEyeOnlyParamText(param);
-  return /lensa|kacamata|kaca mata|kontak/.test(text);
+function capaskaRawOptionScore(optionOrValue: any): number | null {
+  if (!optionOrValue || typeof optionOrValue !== "object") return null;
+
+  const raw =
+    optionOrValue.score_new ??
+    optionOrValue.new_score ??
+    optionOrValue.latest_score ??
+    optionOrValue.score_2026 ??
+    optionOrValue.score2026 ??
+    optionOrValue.capaska_score_2026 ??
+    optionOrValue.capaska_score ??
+    optionOrValue.value_score_new ??
+    optionOrValue.skor_baru ??
+    optionOrValue.score ??
+    optionOrValue.skor ??
+    optionOrValue.value_score;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-function capaskaEyeOnlyIsTidakMenggunakan(optionOrValue: any): boolean {
-  const text = capaskaEyeOnlyChoiceText(optionOrValue);
-  return /tidak menggunakan|tidak pakai|tanpa kacamata|tanpa kaca mata|tanpa lensa/.test(text);
+function capaskaHas(text: string, pattern: RegExp): boolean {
+  return pattern.test(text);
 }
 
-function capaskaEyeOnlyOverrideScore(param: any, optionOrValue: any): number | null {
-  if (capaskaEyeOnlyIsLensParam(param) && capaskaEyeOnlyIsTidakMenggunakan(optionOrValue)) {
-    return 3;
+function capaskaNo(choice: string): boolean {
+  return /tidak ada|tidak menggunakan|tidak pakai|tanpa|negative|negatif|\(-\)|normal|sesuai juknis|0 /.test(choice);
+}
+
+function capaskaAda(choice: string): boolean {
+  return /(^| )ada( |$)|positive|positif|tidak normal|tidak sesuai|tidak intak|buta warna|ringan|sedang|berat|\(\+\)|>/.test(choice);
+}
+
+function capaskaIsRedFlagText(text: string): boolean {
+  return /tidak direkomendasi|tidak direkomendasikan|red flag|unfit|diskualifikasi/.test(text);
+}
+
+function capaskaScore2026(param: any, optionOrValue: any): number | null {
+  const p = capaskaParamText(param);
+  const c = capaskaChoiceText(optionOrValue);
+  const t = `${p} ${c}`;
+
+  if (!c) return null;
+  if (capaskaIsRedFlagText(t)) return -10;
+
+  // =========================
+  // 1. MATA, total 12
+  // =========================
+  if (/lensa|kacamata|kaca mata|kontak/.test(p)) {
+    if (/tidak menggunakan|tidak pakai|tanpa/.test(c)) return 3;
+    if (/menggunakan|pakai/.test(c)) return -1;
+  }
+
+  if (/buta warna/.test(p)) {
+    if (/tidak buta warna/.test(c)) return 3;
+    if (/parsial|total|buta warna/.test(c)) return -10;
+  }
+
+  if (/strabismus|juling/.test(p)) {
+    if (/\(-\)\s*\/\s*\(-\)|negatif|tidak ada|normal/.test(c)) return 3;
+    if (/\(\+\)|positif|ada/.test(c)) return -5;
+  }
+
+  if (/visus|od|os/.test(p)) {
+    if (/normal|6\/6/.test(c) && !/<\s*6\/6/.test(c)) return 3;
+    if (/<\s*6\/6|6\/12/.test(c) && !/<\s*6\/12/.test(c)) return 2;
+    if (/<\s*6\/12/.test(c)) return -10;
+  }
+
+  // =========================
+  // 2. GIGI, total 16
+  // =========================
+  if (/karang/.test(p)) {
+    if (/negative|negatif|tidak ada|\(-\)/.test(c)) return 2;
+    if (/positive|positif|ada|\(\+\)/.test(c)) return -1;
+  }
+
+  if (/caries|karies/.test(p)) {
+    if (/0/.test(c)) return 3;
+    if (/\b1\b/.test(c)) return -1;
+    if (/\b2\b/.test(c)) return -2;
+    if (/\b3\b/.test(c) && !/>|lebih/.test(c)) return -3;
+    if (/>|lebih|lebih dari/.test(c)) return -10;
+  }
+
+  if (/tumpatan/.test(p)) {
+    if (/0/.test(c)) return 2;
+    if (/<=?\s*5|â‰¤\s*5|<\s*3|<\s*5|1|2|3|4|5/.test(c)) return 1;
+    if (/>|lebih/.test(c)) return -5;
+  }
+
+  if (/impaksi/.test(p)) {
+    if (/0/.test(c)) return 3;
+    if (/\b1\b/.test(c) && !/depan/.test(c)) return 2;
+    if (/\b2\b|1 gigi depan/.test(c) && !/>|lebih|4/.test(c)) return 1;
+    if (/>2|lebih dari 2|2 gigi depan/.test(c)) return -5;
+    if (/>=?\s*4|â‰¥\s*4|4 gigi/.test(c)) return -10;
+  }
+
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
+    if (/0/.test(c)) return 2;
+    if (/\b1\b/.test(c)) return 1;
+    if (/\b2\b/.test(c) && !/>|lebih/.test(c)) return 0;
+    if (/>|lebih/.test(c)) return -10;
+  }
+
+  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
+    if (/negative|negatif|tidak ada|\(-\)/.test(c)) return 1;
+    if (/positive|positif|ada|\(\+\)/.test(c)) return -1;
+  }
+
+  if (/dental.*panoramic|panoramik/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal|kelainan/.test(c)) return 3;
+    if (/kelainan|tidak normal|abnormal/.test(c)) return -1;
+  }
+
+  // =========================
+  // 3. THT, total 10
+  // =========================
+  if (/membran.*timpani|timpani/.test(p)) {
+    if (/intak/.test(c) && !/tidak/.test(c)) return 2;
+    if (/tidak intak/.test(c)) return -10;
+  }
+
+  if (/serumen/.test(p)) {
+    if (/tidak ada/.test(c)) return 2;
+    if (/ada/.test(c)) return 1;
+  }
+
+  if (/tonsil/.test(p)) {
+    if (/t0.*t1|t1.*t1|tonsilektomi/.test(c)) return 2;
+    if (/t2a/.test(c)) return 1;
+    if (/t2b/.test(c)) return -1;
+    if (/t3/.test(c)) return -10;
+  }
+
+  if (/rhinitis|lividae|divide/.test(p)) {
+    if (/negative|negatif|\(-\)|tidak ada/.test(c)) return 2;
+    if (/positive|positif|\(\+\)|ada/.test(c)) return 1;
+  }
+
+  if (/epistaksis/.test(p)) {
+    if (/tidak ada/.test(c)) return 1;
+    if (/ada/.test(c)) return -1;
+  }
+
+  if (/garputala|weber/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal/.test(c)) return -10;
+  }
+
+  // =========================
+  // 4. PENYAKIT DALAM, total 28
+  // =========================
+  if (/berat badan|bb\b/.test(p)) {
+    if (/sesuai/.test(c) && !/tidak/.test(c)) return 1;
+    if (/tidak sesuai/.test(c)) return -10;
+  }
+
+  if (/tinggi badan|\btb\b|tb\./.test(p)) {
+    if (/sesuai/.test(c) && !/tidak/.test(c)) return 1;
+    if (/tidak sesuai/.test(c)) return -10;
+  }
+
+  if (/tanda vital|suhu|nadi|napas|tekanan darah/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal/.test(c)) return 2;
+    if (/tidak normal/.test(c)) return 1;
+  }
+
+  if (/tato/.test(p)) {
+    if (/tidak ada/.test(c)) return 1;
+    if (/ada/.test(c)) return -10;
+  }
+
+  if (/tindik/.test(p)) {
+    if (/tidak ada|wanita.*1|1.*telinga/.test(c)) return 1;
+    if (/ada|pria|>1|lebih/.test(c)) return -10;
+  }
+
+  if (/fisik.*jantung|pemeriksaan.*jantung/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal/.test(c)) return 2;
+    if (/tidak normal/.test(c)) return 1;
+  }
+
+  if (/fisik.*paru|pemeriksaan.*paru/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal/.test(c)) return 2;
+    if (/tidak normal/.test(c)) return 1;
+  }
+
+  if (/nt epigastr|epigastrium|liver|bising usus|bekas operasi/.test(p)) {
+    if (/normal|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|ada/.test(c)) return -2;
+  }
+
+  if (/hernia/.test(p)) {
+    if (/normal|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|ada/.test(c)) return -10;
+  }
+
+  if (/benjolan|tumor/.test(p)) {
+    if (/normal|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|ada/.test(c)) return -10;
+  }
+
+  if (/hemoroid|fisura/.test(p)) {
+    if (/normal|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|ada/.test(c)) return 0;
+  }
+
+  if (/struktur|striktur|prolaps|recti|rektum/.test(p)) {
+    if (/normal|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|ada/.test(c)) return -10;
+  }
+
+  if (/hidronefrosis|kongenital|hipospadia|hidrokel|undescensus|undecensus|testis|batu sal|saluran kemih|cystitis|varikokel|phimosis/.test(p)) {
+    if (/normal|negatif|negative|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
+    if (/tidak normal|positif|positive|ada/.test(c)) return -10;
+  }
+
+  // =========================
+  // 5. JANTUNG DAN PEMBULUH DARAH, total 12
+  // =========================
+  if (/jantung|miocardial|miokardial|varises|vena|arteri|ekstremitas/.test(p)) {
+    if (/tidak ada/.test(c)) return 2;
+    if (/ada/.test(c)) {
+      if (/varises|vena|insufisiensi/.test(p)) return -1;
+      return -10;
+    }
+  }
+
+  // =========================
+  // 6. ORTOPEDI, total target 16
+  // =========================
+  if (/sindaktili|polidaktili|polidact|spina bifida|mallet|hiperekstensi lengan|hammer toe|hallux|webbed toe|o\/x|bean|been|pes planus|kaki datar|hiperekstensi kaki|general laxity/.test(p)) {
+    if (/tidak ada|normal|dalam toleransi|<\s*5/.test(c)) return 1;
+    if (/ada|tidak normal|di luar|>\s*5/.test(c)) return -10;
+  }
+
+  if (/ortopedi/.test(p) && /skoliosis|kifosis|lordosis|vertebra|tulang belakang/.test(p)) {
+    if (/tidak ada|normal/.test(c)) return 1;
+    if (/ringan/.test(c)) return -1;
+    if (/sedang|berat|ada|tidak normal/.test(c)) return -10;
+  }
+
+  // =========================
+  // 7. RADIOLOGI / WHOLE SPINE, total 6
+  // =========================
+  if (/radiologi|rontgen|whole spine|ap lateral|thoracolumbosacral/.test(p)) {
+    if (/tidak ada|normal|ta\b/.test(c)) return 2;
+    if (/ringan/.test(c)) return -1;
+    if (/sedang|berat|ada|tidak normal/.test(c)) return -10;
   }
 
   return null;
@@ -368,24 +615,25 @@ function capaskaEyeOnlyOverrideScore(param: any, optionOrValue: any): number | n
 
 function scoreForParam(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
-  const eyeOnlyOverride = capaskaEyeOnlyOverrideScore(param, selectedOption || value);
-  if (eyeOnlyOverride !== null) return eyeOnlyOverride;
+  const overrideScore = capaskaScore2026(param, selectedOption || value);
+  if (overrideScore !== null) return overrideScore;
 
-  const oldScoreForParam = (paramInner: any, valueInner: string) => {
+  const rawScore = capaskaRawOptionScore(selectedOption);
+  if (rawScore !== null) return rawScore;
 
-  const selectedOption = getSelectedChoiceOption(param, selectedValue);
-  if (selectedOption && typeof selectedOption.score === "number") return selectedOption.score;
-  return scoreByChoice(String(param?.name || ""), selectedValue);
-
-  };
-
-  return oldScoreForParam(param, value);
+  return 0;
 }
 
-function isCriticalChoice(param: any, selectedValue: string): boolean {
-  const selectedOption = getSelectedChoiceOption(param, selectedValue);
-  if (selectedOption?.is_critical) return true;
-  return scoreForParam(param, selectedValue) <= -10;
+function isCriticalChoice(param: any, value: string) {
+  const selectedOption = getSelectedChoiceOption(param, value);
+  const overrideScore = capaskaScore2026(param, selectedOption || value);
+  if (overrideScore !== null) return overrideScore <= -10;
+
+  const rawScore = capaskaRawOptionScore(selectedOption);
+  if (rawScore !== null) return rawScore <= -10;
+
+  const text = `${capaskaParamText(param)} ${capaskaChoiceText(selectedOption || value)}`;
+  return capaskaIsRedFlagText(text);
 }
 
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
@@ -519,7 +767,7 @@ function ParameterInput({
                         const choiceValue = String(opt.label ?? opt.value ?? "");
             const inputId = `param-${param.id}-choice-${index}`;
             const checked = normChoice(value) === normChoice(choiceValue);
-            const critical = Boolean(opt.is_critical) || Number(opt.score ?? 0) <= -10;
+            const critical = scoreForParam(param, choiceValue) <= -10;
 
             return (
               <label
@@ -540,7 +788,7 @@ function ParameterInput({
                 />
                 <span className="flex-1">
                   <span className="block font-bold text-slate-900">{opt.label}</span>
-                  {typeof opt.score === "number" && (
+                  {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
                       Skor {scoreForParam(param, String(opt.label ?? opt.value ?? ""))}{critical ? " · Tidak Direkomendasikan" : ""}
                     </span>
@@ -1419,6 +1667,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
