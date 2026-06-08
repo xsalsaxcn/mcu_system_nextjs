@@ -680,8 +680,166 @@ function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null 
   return null;
 }
 
+
+/* CAPASKA penyakit dalam scoring fix v137
+   Scope only: Pemeriksaan Kesehatan Penyakit Dalam.
+   Reference from CAPASKA 2026 table:
+   - BB/TB sesuai juknis = 1, tidak sesuai juknis = -10
+   - Tanda vital normal = 2, tidak normal = 1
+   - Tato tidak ada = 1, ada = -10
+   - Tindik tidak ada / wanita hanya 1 telinga = 1, pria ada / wanita >1 = -10
+   - Fisik jantung/paru normal = 2, tidak normal = 1
+   - Abdomen normal = 1, tidak normal = -2
+   - Hernia/benjolan/tumor tidak ada = 1, ada = -10
+   - Hemoroid/fisura tidak ada = 1, ada = 0
+   - Striktur/prolaps recti tidak ada = 1, ada = -10
+   - Urogenitalia normal = 1, tidak normal = -10
+*/
+function capaskaPenyakitDalamNorm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â‰¥]/g, ">=")
+    .replace(/[â‰¤]/g, "<=")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaPenyakitDalamParamText(param: any): string {
+  return capaskaPenyakitDalamNorm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaPenyakitDalamChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaPenyakitDalamNorm([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaPenyakitDalamNorm(optionOrValue);
+}
+
+function capaskaPDChoiceIsNormal(c: string): boolean {
+  return /normal/.test(c) && !/tidak normal|abnormal/.test(c);
+}
+
+function capaskaPDChoiceIsTidakNormal(c: string): boolean {
+  return /tidak normal|abnormal/.test(c);
+}
+
+function capaskaPDChoiceIsTidakAda(c: string): boolean {
+  return /tidak ada|tidak terdapat|\(-\)|negatif|negative/.test(c);
+}
+
+function capaskaPDChoiceIsAda(c: string): boolean {
+  return /(^| )ada( |$)|\(\+\)|positif|positive/.test(c);
+}
+
+function capaskaPenyakitDalamScoreFix(param: any, optionOrValue: any): number | null {
+  const p = capaskaPenyakitDalamParamText(param);
+  const c = capaskaPenyakitDalamChoiceText(optionOrValue);
+
+  if (!c) return null;
+
+  // BB / TB
+  if (/(^| )bb(\b| )|berat badan/.test(p)) {
+    if (/tidak sesuai/.test(c)) return -10;
+    if (/sesuai/.test(c)) return 1;
+  }
+
+  if (/(^| )tb(\b| )|tinggi badan/.test(p)) {
+    if (/tidak sesuai/.test(c)) return -10;
+    if (/sesuai/.test(c)) return 1;
+  }
+
+  // Tanda vital
+  if (/tanda vital|suhu|nadi|napas|pernapasan|respirasi|tekanan darah|tensi/.test(p)) {
+    if (capaskaPDChoiceIsTidakNormal(c)) return 1;
+    if (capaskaPDChoiceIsNormal(c)) return 2;
+  }
+
+  // Tato
+  if (/tato/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c) || /tidak ada tato/.test(c)) return 1;
+    if (capaskaPDChoiceIsAda(c) || /ada tato/.test(c)) return -10;
+  }
+
+  // Tindik selain anting. Wanita hanya 1/telinga masih acceptable.
+  if (/tindik/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c)) return 1;
+    if (/pria|wanita.*>\s*1|wanita.*lebih|>\s*1|lebih dari 1/.test(c) || capaskaPDChoiceIsAda(c)) return -10;
+  }
+
+  // Pemeriksaan fisik jantung dan paru
+  if (/fisik.*jantung|pemeriksaan.*jantung/.test(p)) {
+    if (capaskaPDChoiceIsTidakNormal(c)) return 1;
+    if (capaskaPDChoiceIsNormal(c)) return 2;
+  }
+
+  if (/fisik.*paru|pemeriksaan.*paru/.test(p)) {
+    if (capaskaPDChoiceIsTidakNormal(c)) return 1;
+    if (capaskaPDChoiceIsNormal(c)) return 2;
+  }
+
+  // Abdomen: NT epigastrium, liver, bising usus, bekas operasi >3 bulan
+  if (/nt epigastr|epigastrium|liver|bising usus|bekas operasi/.test(p)) {
+    if (capaskaPDChoiceIsTidakNormal(c)) return -2;
+    if (capaskaPDChoiceIsNormal(c)) return 1;
+  }
+
+  // Hernia, benjolan, tumor
+  if (/hernia/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c)) return 1;
+    if (capaskaPDChoiceIsAda(c)) return -10;
+  }
+
+  if (/benjolan|tumor/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c)) return 1;
+    if (capaskaPDChoiceIsAda(c)) return -10;
+  }
+
+  // Anus & rektum
+  if (/striktur|struktur|prolaps|recti|rektum/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c) || capaskaPDChoiceIsNormal(c)) return 1;
+    if (capaskaPDChoiceIsAda(c) || capaskaPDChoiceIsTidakNormal(c)) return -10;
+  }
+
+  if (/hemoroid|hemorrhoid|fisura/.test(p)) {
+    if (capaskaPDChoiceIsTidakAda(c) || capaskaPDChoiceIsNormal(c)) return 1;
+    if (capaskaPDChoiceIsAda(c) || capaskaPDChoiceIsTidakNormal(c)) return 0;
+  }
+
+  // Urogenitalia: each normal = 1, any tidak normal/positive = -10.
+  if (/hidronefrosis|kelainan kongenital|hipospadia|hidrokel|undescensus|undecensus|testis|batu.*kemih|batu.*sal|saluran kemih|cystitis|sistitis|varikokel|phimosis|fimosis/.test(p)) {
+    if (capaskaPDChoiceIsTidakNormal(c) || capaskaPDChoiceIsAda(c)) return -10;
+    if (capaskaPDChoiceIsNormal(c) || capaskaPDChoiceIsTidakAda(c)) return 1;
+  }
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
+  if (penyakitDalamOverride !== null) return penyakitDalamOverride;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
   if (vertebraOverride !== null) return vertebraOverride;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
@@ -695,6 +853,8 @@ function scoreForParam(param: any, value: string) {
 
 function isCriticalChoice(param: any, value: string) {
   const selectedOption = getSelectedChoiceOption(param, value);
+  const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
+  if (penyakitDalamOverride !== null) return penyakitDalamOverride <= -10;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
   if (vertebraOverride !== null) return vertebraOverride <= -10;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
@@ -1738,6 +1898,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
