@@ -1,4 +1,5 @@
 ﻿export const CAPASKA_SCORING_VERSION = "CAPASKA_SCORING_2026_BACKEND_DIRECT_OPTION_V45";
+// CAPASKA THT domain alias fix v163
 
 export type CapaskaDomainKey =
   | "mata"
@@ -153,12 +154,12 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Tonsil", ["T0 - T2a", "T2a-T2a", "T0: T2a-T2a"], 1);
   addRule(rules, "Tonsil", ["T0 - T2b", "T2b-T2b", "T0: T2b-T2b"], -1);
   addRule(rules, "Tonsil", ["T2 - T3", "T3-T3", "T0: T3-T3"], -10, true);
-  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (Bividas)"], ["Negative", "Negatif", "(-)"], 2);
-  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (Bividas)"], ["Positive", "Positif", "(+)"], 1);
+  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (dividae)", "Rhinitis Alergi (Bividas)", "Rhinitis alergi / lividae"], ["Negative", "Negatif", "(-)"], 2);
+  addRule(rules, ["Rhinitis Alergi (divide)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (dividae)", "Rhinitis Alergi (Bividas)", "Rhinitis alergi / lividae"], ["Positive", "Positif", "(+)"], 1);
   addRule(rules, "Epistaksis 1 tahun terakhir", "Tidak Ada", 1);
   addRule(rules, "Epistaksis 1 tahun terakhir", "Ada", -1);
-  addRule(rules, "Tes Garputala (Weber) 512 Hz", "Normal", 1);
-  addRule(rules, "Tes Garputala (Weber) 512 Hz", "Tidak Normal", -10, true);
+  addRule(rules, ["Tes Garputala (Weber) 512 Hz", "Tes Garputala Weber 512 Hz", "Tes Garputala (Weber) 512Hz", "Tes Garputala / Weber 512 Hz"], "Normal", 1);
+  addRule(rules, ["Tes Garputala (Weber) 512 Hz", "Tes Garputala Weber 512 Hz", "Tes Garputala (Weber) 512Hz", "Tes Garputala / Weber 512 Hz"], "Tidak Normal", -10, true);
 
   // PENYAKIT DALAM, max 28.
   addRule(rules, ["Berat Badan (Kg)", "BB. (Kg)", "BB (Kg)"], "Sesuai juknis", 1);
@@ -249,7 +250,7 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Membran timpani",
       "Serumen",
       "Tonsil",
-      "Rhinitis Alergi (divide)",
+      "Rhinitis Alergi (lividae)",
       "Epistaksis 1 tahun terakhir",
       "Tes Garputala (Weber) 512 Hz",
     ],
@@ -351,6 +352,15 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   [normalizeCapaskaKey("Batu sal kemih")]: ["Batu saluran kemih"],
   [normalizeCapaskaKey("O/X bean")]: ["O/X been"],
   [normalizeCapaskaKey("Polidactily")]: ["Polidactyly"],
+  // CAPASKA THT domain alias fix v163:
+  // Final scoring uses CAPASKA_DOMAIN_RULES components and getParameterByName().
+  // Treat old "divide/dividae/Bividas" names as the reference "lividae".
+  [normalizeCapaskaKey("Rhinitis Alergi (lividae)")]: ["Rhinitis Alergi (lividae)", "Rhinitis Alergi (dividae)", "Rhinitis Alergi (Bividas)", "Rhinitis alergi / lividae"],
+  [normalizeCapaskaKey("Rhinitis Alergi (divide)")]: ["Rhinitis Alergi (lividae)", "Rhinitis Alergi (dividae)", "Rhinitis Alergi (Bividas)", "Rhinitis alergi / lividae"],
+  [normalizeCapaskaKey("Rhinitis Alergi (dividae)")]: ["Rhinitis Alergi (lividae)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (Bividas)", "Rhinitis alergi / lividae"],
+  [normalizeCapaskaKey("Rhinitis Alergi (Bividas)")]: ["Rhinitis Alergi (lividae)", "Rhinitis Alergi (lividae)", "Rhinitis Alergi (dividae)", "Rhinitis alergi / lividae"],
+  [normalizeCapaskaKey("Tes Garputala (Weber) 512 Hz")]: ["Tes Garputala Weber 512 Hz", "Tes Garputala (Weber) 512Hz", "Tes Garputala / Weber 512 Hz"],
+  [normalizeCapaskaKey("Tes Garputala Weber 512 Hz")]: ["Tes Garputala (Weber) 512 Hz", "Tes Garputala (Weber) 512Hz", "Tes Garputala / Weber 512 Hz"],
 };
 
 const VALUE_FIELD_BY_PARAMETER: Record<string, string> = {
@@ -956,4 +966,5 @@ export function computeCapaskaDerivedValues(parameters: any[], values: Record<st
   const baseValues = computeCapaskaDerivedValuesBaseV162(parameters, values);
   return capaskaApplyThtCanonicalTotalV162(parameters, baseValues, values);
 }
+
 
