@@ -1301,7 +1301,180 @@ function capaskaCleanDisplayParams(params: any): any[] {
   return cleaned;
 }
 
+
+/* CAPASKA gigi strict score fix v149
+   Scope only: Gigi & Mulut + Dental Panoramik scoring display.
+   This override wins over old DB score/old patches for these exact Gigi rules:
+   - Tumpatan: 0=2, <=5=1, >5=-5
+   - Impaksi: 0=3, 1=2, 2 / 1 gigi depan=1, >2 / 2 gigi depan=-5, >=4=-10
+   - Kehilangan Gigi: 0=2, 1=1, 2=0, >2=-10
+   - Caries: 0=3, 1=-1, 2=-2, 3=-3, >3=-10
+   - Karang/Infeksi/Dental panoramic kept per reference.
+*/
+function capaskaGigiV149Norm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â‰¥]/g, ">=")
+    .replace(/[â‰¤]/g, "<=")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaGigiV149ParamText(param: any): string {
+  return capaskaGigiV149Norm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaGigiV149ChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaGigiV149Norm([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaGigiV149Norm(optionOrValue);
+}
+
+function capaskaGigiV149Positive(choice: string): boolean {
+  return /positive|positif|\(\+\)|(^| )ada( |$)/.test(choice) && !/tidak ada/.test(choice);
+}
+
+function capaskaGigiV149Negative(choice: string): boolean {
+  return /negative|negatif|\(-\)|tidak ada/.test(choice);
+}
+
+function capaskaGigiV149Score(param: any, optionOrValue: any): number | null {
+  const p = capaskaGigiV149ParamText(param);
+  const c = capaskaGigiV149ChoiceText(optionOrValue);
+
+  if (!c) return null;
+
+  // Karang Gigi
+  if (/karang/.test(p)) {
+    if (capaskaGigiV149Positive(c)) return -1;
+    if (capaskaGigiV149Negative(c)) return 2;
+  }
+
+  // Caries Dentis
+  if (/caries|karies/.test(p)) {
+    if (/> ?3|>\s*3|lebih\s*dari\s*3|di atas\s*3|lebih\s*3/.test(c)) return -10;
+    if (/(^|[^0-9])0\s*(caries|karies)/.test(c)) return 3;
+    if (/(^|[^0-9])1\s*(caries|karies)/.test(c)) return -1;
+    if (/(^|[^0-9])2\s*(caries|karies)/.test(c)) return -2;
+    if (/(^|[^0-9])3\s*(caries|karies)/.test(c)) return -3;
+  }
+
+  // Tumpatan Gigi
+  if (/tumpatan/.test(p)) {
+    if (/(^|[^0-9])0\s*tumpatan/.test(c)) return 2;
+
+    // Old UI labels may say <3 / <=3, but the 2026 reference is <=5.
+    // Those old "small tumpatan" choices still score 1.
+    if (/<\s*3|<=\s*3|<\s*=\s*3|<\s*5|<=\s*5|<\s*=\s*5/.test(c)) return 1;
+
+    // Any more-than threshold choice in this parameter must be the new high tumpatan penalty.
+    if (/>\s*3|>\s*5|lebih\s*dari\s*3|lebih\s*dari\s*5/.test(c)) return -5;
+  }
+
+  // Impaksi gigi depan
+  if (/impaksi|impacted/.test(p)) {
+    // Must check red flag and negative cases before "2 gigi".
+    if (/>=\s*4|>\s*=\s*4|4\s*gigi|lebih\s*dari\s*3/.test(c)) return -10;
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return -5;
+    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return 1;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 2;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 3;
+  }
+
+  // Kehilangan Gigi bagian depan
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
+    if (/> ?2|>\s*2|lebih\s*dari\s*2/.test(c)) return -10;
+    if (/(^|[^0-9])2\s*gigi/.test(c)) return 0;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 1;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 2;
+  }
+
+  // Infeksi Gusi
+  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) {
+    if (capaskaGigiV149Positive(c)) return -1;
+    if (capaskaGigiV149Negative(c)) return 1;
+  }
+
+  // Dental Panoramic
+  if (/dental.*panoramic|panoramik|panoramic/.test(p)) {
+    if (/normal/.test(c) && !/tidak normal|kelainan|abnormal/.test(c)) return 3;
+    if (/kelainan|ditemukan|tidak normal|abnormal/.test(c)) return -1;
+  }
+
+  return null;
+}
+
+function capaskaGigiV149DisplayScore(param: any, optionOrValue: any, fallbackValue?: any): number {
+  const forced = capaskaGigiV149Score(param, optionOrValue);
+  if (forced !== null) return forced;
+
+  const fromFallback = capaskaGigiV149Score(param, fallbackValue);
+  if (fromFallback !== null) return fromFallback;
+
+  const raw =
+    optionOrValue && typeof optionOrValue === "object"
+      ? optionOrValue.score ?? optionOrValue.skor ?? optionOrValue.value_score
+      : null;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function capaskaGigiV149OptionLabel(param: any, optionOrValue: any): string {
+  const p = capaskaGigiV149ParamText(param);
+  const raw =
+    optionOrValue && typeof optionOrValue === "object"
+      ? String(optionOrValue.label ?? optionOrValue.value ?? "")
+      : String(optionOrValue ?? "");
+
+  const c = capaskaGigiV149Norm(raw);
+
+  if (/tumpatan/.test(p)) {
+    if (/<\s*3|<=\s*3|<\s*=\s*3|<\s*5|<=\s*5|<\s*=\s*5/.test(c)) return "<=5 tumpatan";
+    if (/>\s*3|>\s*5|lebih\s*dari\s*3|lebih\s*dari\s*5/.test(c)) return ">5 tumpatan";
+  }
+
+  if (/impaksi|impacted/.test(p)) {
+    if (/>=\s*4|>\s*=\s*4|4\s*gigi|lebih\s*dari\s*3/.test(c)) return ">=4 gigi";
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return ">2 gigi impaksi / 2 gigi depan impaksi";
+    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return "2 gigi impaksi / 1 gigi depan impaksi";
+  }
+
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) {
+    if (/> ?2|>\s*2|lebih\s*dari\s*2/.test(c)) return ">2 gigi";
+  }
+
+  return raw;
+}
+
 function scoreForParam(param: any, value: string) {
+  const gigiV149SelectedOption = getSelectedChoiceOption(param, value);
+  const gigiV149Score = capaskaGigiV149Score(param, gigiV149SelectedOption || value);
+  if (gigiV149Score !== null) return gigiV149Score;
+
   const selectedOption = getSelectedChoiceOption(param, value);
   const gigiFullOverride = capaskaGigiFullScoreFix(param, selectedOption || value);
   if (gigiFullOverride !== null) return gigiFullOverride;
@@ -1323,6 +1496,10 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const gigiV149SelectedOptionForCritical = getSelectedChoiceOption(param, value);
+  const gigiV149CriticalScore = capaskaGigiV149Score(param, gigiV149SelectedOptionForCritical || value);
+  if (gigiV149CriticalScore !== null) return gigiV149CriticalScore <= -10;
+
   const selectedOption = getSelectedChoiceOption(param, value);
   const gigiFullOverride = capaskaGigiFullScoreFix(param, selectedOption || value);
   if (gigiFullOverride !== null) return gigiFullOverride <= -10;
@@ -1475,7 +1652,7 @@ function ParameterInput({
                         const choiceValue = String(opt.label ?? opt.value ?? "");
             const inputId = `param-${param.id}-choice-${index}`;
             const checked = normChoice(value) === normChoice(choiceValue);
-            const critical = scoreForParam(param, choiceValue) <= -10;
+            const critical = (capaskaGigiV149Score(param, opt) ?? scoreForParam(param, choiceValue)) <= -10;
 
             return (
               <label
@@ -2375,6 +2552,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
