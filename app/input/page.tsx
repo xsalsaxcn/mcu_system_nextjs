@@ -2545,6 +2545,18 @@ function InputForm({ user }: { user: any }) {
   function updateValue(parameterId: number | string, nextValue: string) {
     setValues((prev) => computeValues(parameters, { ...prev, [parameterId]: nextValue }));
   }
+  async function refreshDetailAfterSaveV160() {
+    if (!participant?.id) return;
+
+    try {
+      const detailRes = await fetch(`/api/participant?id=${participant.id}&_=${Date.now()}`, { cache: "no-store" });
+      const detailJson = await detailRes.json();
+      setDetail(detailJson);
+    } catch {
+      // Keep save successful even if refresh fails.
+    }
+  }
+
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -2566,6 +2578,7 @@ function InputForm({ user }: { user: any }) {
     setMessage(json.ok ? "Hasil berhasil disimpan." : json.message || "Gagal menyimpan.");
     if (json.ok) {
       setValues(finalValues);
+      await refreshDetailAfterSaveV160();
       setListTab("selesai");
       await refreshLists(false);
     }
@@ -3015,6 +3028,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
