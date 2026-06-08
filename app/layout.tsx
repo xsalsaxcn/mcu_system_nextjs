@@ -9,6 +9,7 @@ import VaccinationValidationFinalGuard from "../components/VaccinationValidation
 import LoginQuickAccessAllCapaska from "../components/LoginQuickAccessAllCapaska";
 import CapaskaHideDuplicateThtRhinitis from "../components/CapaskaHideDuplicateThtRhinitis";
 import CapaskaCombineHipospadiaHidrokelV145 from "../components/CapaskaCombineHipospadiaHidrokelV145";
+import CapaskaStageProgressDisplayFixV152 from "../components/CapaskaStageProgressDisplayFixV152";
 export const metadata: Metadata = {
   title: "Harmony Health App",
   description: "Harmony Health App - MCU, corporate health, and vaccination workflow",
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="id">
       <body>
+        <CapaskaStageProgressDisplayFixV152 />
         <CapaskaCombineHipospadiaHidrokelV145 />
         <CapaskaHideDuplicateThtRhinitis />
         <LoginQuickAccessAllCapaska />
@@ -29,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
 
 
 
