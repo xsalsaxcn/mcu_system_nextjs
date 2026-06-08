@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
@@ -12,6 +12,131 @@ function stringifyValues(values: Record<string, any>) {
   return Object.fromEntries(
     Object.entries(values || {}).map(([key, value]) => [key, String(value ?? "").trim()])
   ) as Record<string, string>;
+}
+
+function capaskaRouteThtNormV161(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaRouteThtCompactV161(value: any) {
+  return capaskaRouteThtNormV161(value).replace(/\s+/g, "");
+}
+
+function capaskaRouteThtParamTextV161(param: any) {
+  return capaskaRouteThtNormV161([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaRouteThtCanonicalKeyV161(param: any): string | null {
+  const text = capaskaRouteThtParamTextV161(param);
+
+  if (/membran.*timpani|timpani/.test(text)) return "membran";
+  if (/serumen/.test(text)) return "serumen";
+  if (/rhinitis|rinitis|lividae|divide|dividae|bividas/.test(text)) return "rhinitis";
+  if (/tonsil/.test(text)) return "tonsil";
+  if (/epistaksis|epistaxis/.test(text)) return "epistaksis";
+  if (/garputala|weber/.test(text)) return "weber";
+
+  return null;
+}
+
+function capaskaRouteIsScoreFieldV161(param: any) {
+  const name = String(param?.name || "").toLowerCase().trim();
+  return name.startsWith("score ") || name.startsWith("total score") || name.includes("score total");
+}
+
+function capaskaRouteThtScoreV161(param: any, rawValue: any): number | null {
+  const key = capaskaRouteThtCanonicalKeyV161(param);
+  if (!key) return null;
+
+  const value = capaskaRouteThtNormV161(rawValue);
+  const compact = capaskaRouteThtCompactV161(rawValue);
+
+  if (!value) return null;
+
+  if (key === "membran") {
+    if (/tidakintak|tidakintac|tidakintact/.test(compact)) return -10;
+    if (/intak|intac|intact/.test(compact)) return 2;
+  }
+
+  if (key === "serumen") {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(compact)) return 2;
+    if (/adaserumen|ada|\(\+\)|positif|positive/.test(compact)) return 1;
+  }
+
+  if (key === "rhinitis") {
+    if (/negatif|negative|\(-\)|tidakada/.test(compact)) return 2;
+    if (/positif|positive|\(\+\)|ada/.test(compact)) return 1;
+  }
+
+  if (key === "tonsil") {
+    if (/tonsilektomi/.test(compact)) return 2;
+    if (/t0\/?t1-?t1|t0\/?t1|t0-?t1|t1-?t1|t1\/?t1|t0t1t1/.test(compact)) return 2;
+    if (/t2a/.test(compact)) return 1;
+    if (/t2b/.test(compact)) return -1;
+    if (/t3/.test(compact)) return -10;
+  }
+
+  if (key === "epistaksis") {
+    if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(compact)) return 1;
+    if (/ada|\(\+\)|positif|positive/.test(compact)) return -1;
+  }
+
+  if (key === "weber") {
+    if (/tidaknormal|abnormal/.test(compact)) return -10;
+    if (/normal/.test(compact)) return 1;
+  }
+
+  return null;
+}
+
+function capaskaRouteApplyThtBackendTotalV161(parameters: any[], values: Record<string, string>) {
+  const list = Array.isArray(parameters) ? parameters : [];
+  const nextValues = { ...(values || {}) };
+
+  const requiredKeys = ["membran", "serumen", "rhinitis", "tonsil", "epistaksis", "weber"];
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const param of list) {
+    const key = capaskaRouteThtCanonicalKeyV161(param);
+    if (!key || seen.has(key)) continue;
+
+    const selected = nextValues[String(param?.id)];
+    const score = capaskaRouteThtScoreV161(param, selected);
+
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+  }
+
+  const hasAllThtKeys = requiredKeys.every((key) => seen.has(key));
+  if (!hasAllThtKeys) return nextValues;
+
+  const scoreFields = list.filter((param) => capaskaRouteIsScoreFieldV161(param));
+  for (const scoreField of scoreFields) {
+    nextValues[String(scoreField.id)] = String(total);
+  }
+
+  return nextValues;
 }
 
 async function maybeComputeCapaskaBackendValues(args: {
@@ -67,7 +192,8 @@ async function maybeComputeCapaskaBackendValues(args: {
 
   if (parameterError || !parameters?.length) return values;
 
-  return computeCapaskaDerivedValues(parameters || [], values);
+  const backendValues = computeCapaskaDerivedValues(parameters || [], values);
+  return capaskaRouteApplyThtBackendTotalV161(parameters || [], backendValues);
 }
 
 export async function POST(req: NextRequest) {
@@ -153,3 +279,4 @@ export async function POST(req: NextRequest) {
 
   return ok({ saved, scoring_backend: true });
 }
+
