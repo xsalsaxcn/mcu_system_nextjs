@@ -305,10 +305,81 @@ function scoreByChoice(parameterName: string, selectedValue: string): number {
   return 0;
 }
 
-function scoreForParam(param: any, selectedValue: string): number {
+
+/* CAPASKA eye-only scoring fix v133
+   Scope: only parameter Mata / Lensa kontak / kacamata.
+   Rule restored:
+   - Tidak menggunakan = +3
+   Everything else follows existing scoring.
+*/
+function capaskaEyeOnlyNormalize(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaEyeOnlyParamText(param: any): string {
+  return capaskaEyeOnlyNormalize([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaEyeOnlyChoiceText(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaEyeOnlyNormalize([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaEyeOnlyNormalize(optionOrValue);
+}
+
+function capaskaEyeOnlyIsLensParam(param: any): boolean {
+  const text = capaskaEyeOnlyParamText(param);
+  return /lensa|kacamata|kaca mata|kontak/.test(text);
+}
+
+function capaskaEyeOnlyIsTidakMenggunakan(optionOrValue: any): boolean {
+  const text = capaskaEyeOnlyChoiceText(optionOrValue);
+  return /tidak menggunakan|tidak pakai|tanpa kacamata|tanpa kaca mata|tanpa lensa/.test(text);
+}
+
+function capaskaEyeOnlyOverrideScore(param: any, optionOrValue: any): number | null {
+  if (capaskaEyeOnlyIsLensParam(param) && capaskaEyeOnlyIsTidakMenggunakan(optionOrValue)) {
+    return 3;
+  }
+
+  return null;
+}
+
+function scoreForParam(param: any, value: string) {
+  const selectedOption = getSelectedChoiceOption(param, value);
+  const eyeOnlyOverride = capaskaEyeOnlyOverrideScore(param, selectedOption || value);
+  if (eyeOnlyOverride !== null) return eyeOnlyOverride;
+
+  const oldScoreForParam = (paramInner: any, valueInner: string) => {
+
   const selectedOption = getSelectedChoiceOption(param, selectedValue);
   if (selectedOption && typeof selectedOption.score === "number") return selectedOption.score;
   return scoreByChoice(String(param?.name || ""), selectedValue);
+
+  };
+
+  return oldScoreForParam(param, value);
 }
 
 function isCriticalChoice(param: any, selectedValue: string): boolean {
@@ -471,7 +542,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{opt.label}</span>
                   {typeof opt.score === "number" && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {opt.score}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {scoreForParam(param, String(opt.label ?? opt.value ?? ""))}{critical ? " · Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -1348,6 +1419,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
