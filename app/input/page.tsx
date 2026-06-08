@@ -103,8 +103,8 @@ function getForcedThtOptions(param: any): ChoiceOption[] {
 
 function getChoiceOptions(param: any): ChoiceOption[] {
   const forcedTht = getForcedThtOptions(param);
-  if (forcedTht.length) return forcedTht;
-  return parseChoiceOptions(param?.config_json);
+  if (forcedTht.length) return capaskaThtCanonicalizeOptionsV155(param, forcedTht);
+  return capaskaThtCanonicalizeOptionsV155(param, parseChoiceOptions(param?.config_json));
 }
 
 function parseOptions(config: any): string[] {
@@ -441,8 +441,8 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
   // =========================
   // 3. THT, total 10
   // =========================
-  const canonicalThtScoreV154 = capaskaThtFinalScoreV154(param, optionOrValue);
-  if (canonicalThtScoreV154 !== null) return canonicalThtScoreV154;
+  const canonicalThtScoreV155 = capaskaThtHardScoreV155(param, optionOrValue);
+  if (canonicalThtScoreV155 !== null) return canonicalThtScoreV155;
   // =========================
   // 4. PENYAKIT DALAM, total 28
   // =========================
@@ -941,7 +941,7 @@ function capaskaThtIsTidakNormal(choice: string): boolean {
 }
 
 function capaskaThtScoreFix(param: any, optionOrValue: any): number | null {
-  return capaskaThtFinalScoreV154(param, optionOrValue);
+  return capaskaThtHardScoreV155(param, optionOrValue);
 }
 
 
@@ -1582,12 +1582,77 @@ function capaskaThtFinalIsAdaV154(choice: string): boolean {
 }
 
 function capaskaThtFinalScoreV154(param: any, optionOrValue: any): number | null {
-  const p = capaskaThtFinalParamTextV154(param);
-  const pc = capaskaThtFinalCompactV154(p);
-  const c = capaskaThtFinalChoiceTextV154(optionOrValue);
-  const cc = capaskaThtFinalCompactV154(c);
+  return capaskaThtHardScoreV155(param, optionOrValue);
+}
 
-  if (!c) return null;
+
+/* CAPASKA THT hard canonical score v155
+   Root cause: THT final score can still become 9 even when visible badges total 10,
+   because some old option.score / saved score paths still read DB score instead of
+   canonical THT scoring. This block canonicalizes THT option objects and all THT
+   scoring paths.
+
+   Canonical THT max total:
+   Intak 2 + Serumen Tidak ada 2 + Rhinitis Negatif 2 + Tonsil T0/T1-T1 2
+   + Epistaksis Tidak ada 1 + Weber Normal 1 = 10
+*/
+function capaskaThtHardNormV155(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaThtHardCompactV155(value: any): string {
+  return capaskaThtHardNormV155(value).replace(/\s+/g, "");
+}
+
+function capaskaThtHardParamTextV155(param: any): string {
+  return capaskaThtHardNormV155([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaThtHardChoiceTextV155(optionOrValue: any): string {
+  if (optionOrValue && typeof optionOrValue === "object") {
+    return capaskaThtHardNormV155([
+      optionOrValue.label,
+      optionOrValue.value,
+      optionOrValue.name,
+      optionOrValue.text,
+      optionOrValue.option_label,
+      optionOrValue.description,
+    ].filter(Boolean).join(" "));
+  }
+
+  return capaskaThtHardNormV155(optionOrValue);
+}
+
+function capaskaThtHardIsThtParamV155(param: any): boolean {
+  const p = capaskaThtHardParamTextV155(param);
+  return /membran.*timpani|timpani|serumen|tonsil|rhinitis|rinitis|lividae|divide|dividae|epistaksis|epistaxis|garputala|weber/.test(p);
+}
+
+function capaskaThtHardScoreV155(param: any, optionOrValue: any): number | null {
+  const p = capaskaThtHardParamTextV155(param);
+  const pc = capaskaThtHardCompactV155(p);
+  const c = capaskaThtHardChoiceTextV155(optionOrValue);
+  const cc = capaskaThtHardCompactV155(c);
+
+  if (!c || !capaskaThtHardIsThtParamV155(param)) return null;
 
   // Membran timpani
   if (/membran.*timpani|timpani/.test(p)) {
@@ -1595,34 +1660,34 @@ function capaskaThtFinalScoreV154(param: any, optionOrValue: any): number | null
     if (/intak|intac|intact/.test(cc)) return 2;
   }
 
-  // Serumen. Handles "Tidakada" and "Adaserumen".
+  // Serumen. Handles old compact labels: Tidakada / Adaserumen.
   if (/serumen/.test(p) || /serumen/.test(pc)) {
     if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(cc)) return 2;
     if (/adaserumen|ada|\(\+\)|positif|positive/.test(cc)) return 1;
   }
 
-  // Rhinitis Alergi lividae. Also handles old divide/dividae.
-  if (/rhinitis|rinitis|lividae|divide|dividae/.test(p)) {
-    if (/negatif|negative|\(-\)|tidakada/.test(cc)) return 2;
-    if (/positif|positive|\(\+\)|ada/.test(cc)) return 1;
-  }
-
-  // Tonsil
+  // Tonsil. Handles T0/T1-T1, T0 / T1-T1, T2a, T2b, T3.
   if (/tonsil/.test(p)) {
     if (/tonsilektomi/.test(cc)) return 2;
-    if (/t0\/?t1-?t1|t0-?t1|t0\/?t1|t1-?t1|t1\/?t1/.test(cc)) return 2;
+    if (/t0\/?t1-?t1|t0\/?t1|t0-?t1|t1-?t1|t1\/?t1|t0t1t1/.test(cc)) return 2;
     if (/t2a/.test(cc)) return 1;
     if (/t2b/.test(cc)) return -1;
     if (/t3/.test(cc)) return -10;
   }
 
-  // Epistaksis
+  // Rhinitis alergi lividae. Old database may say divide/dividae.
+  if (/rhinitis|rinitis|lividae|divide|dividae/.test(p)) {
+    if (/negatif|negative|\(-\)|tidakada/.test(cc)) return 2;
+    if (/positif|positive|\(\+\)|ada/.test(cc)) return 1;
+  }
+
+  // Epistaksis 1 tahun terakhir. Handles Tidakada compact.
   if (/epistaksis|epistaxis/.test(p)) {
     if (/tidakada|tidakterdapat|\(-\)|negatif|negative/.test(cc)) return 1;
     if (/ada|\(\+\)|positif|positive/.test(cc)) return -1;
   }
 
-  // Tes Garputala Weber
+  // Tes Garputala / Weber 512 Hz
   if (/garputala|weber/.test(p)) {
     if (/tidaknormal|abnormal/.test(cc)) return -10;
     if (/normal/.test(cc)) return 1;
@@ -1631,7 +1696,57 @@ function capaskaThtFinalScoreV154(param: any, optionOrValue: any): number | null
   return null;
 }
 
+function capaskaThtCanonicalizeOptionsV155(param: any, options: any): any {
+  if (!Array.isArray(options) || !capaskaThtHardIsThtParamV155(param)) return options;
+
+  return options.map((opt: any) => {
+    const forcedScore = capaskaThtHardScoreV155(param, opt);
+    if (forcedScore === null) return opt;
+
+    return {
+      ...opt,
+      score: forcedScore,
+      skor: forcedScore,
+      value_score: forcedScore,
+      is_critical: forcedScore <= -10,
+    };
+  });
+}
+
+function capaskaThtScoreForAnyValueV155(param: any, value: any, options?: any[]): number | null {
+  if (!capaskaThtHardIsThtParamV155(param)) return null;
+
+  const direct = capaskaThtHardScoreV155(param, value);
+  if (direct !== null) return direct;
+
+  const normalizedValue = capaskaThtHardNormV155(value);
+  const compactValue = capaskaThtHardCompactV155(value);
+
+  const list = Array.isArray(options) ? options : [];
+  for (const opt of list) {
+    const optionText = capaskaThtHardChoiceTextV155(opt);
+    const optionCompact = capaskaThtHardCompactV155(opt?.label ?? opt?.value ?? optionText);
+    const optionValue = capaskaThtHardNormV155(opt?.value ?? "");
+    const optionLabel = capaskaThtHardNormV155(opt?.label ?? "");
+
+    if (
+      optionText === normalizedValue ||
+      optionCompact === compactValue ||
+      optionValue === normalizedValue ||
+      optionLabel === normalizedValue
+    ) {
+      return capaskaThtHardScoreV155(param, opt);
+    }
+  }
+
+  return null;
+}
+
 function scoreForParam(param: any, value: string) {
+  const thtV155Options = capaskaThtCanonicalizeOptionsV155(param, getChoiceOptions(param)) || [];
+  const thtV155Score = capaskaThtScoreForAnyValueV155(param, value, thtV155Options);
+  if (thtV155Score !== null) return thtV155Score;
+
   const thtV154SelectedOption = getSelectedChoiceOption(param, value);
   const thtV154Score = capaskaThtFinalScoreV154(param, thtV154SelectedOption || value);
   if (thtV154Score !== null) return thtV154Score;
@@ -1665,6 +1780,10 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const thtV155CriticalOptions = capaskaThtCanonicalizeOptionsV155(param, getChoiceOptions(param)) || [];
+  const thtV155CriticalScore = capaskaThtScoreForAnyValueV155(param, value, thtV155CriticalOptions);
+  if (thtV155CriticalScore !== null) return thtV155CriticalScore <= -10;
+
   const thtV154SelectedOptionForCritical = getSelectedChoiceOption(param, value);
   const thtV154CriticalScore = capaskaThtFinalScoreV154(param, thtV154SelectedOptionForCritical || value);
   if (thtV154CriticalScore !== null) return thtV154CriticalScore <= -10;
@@ -1852,7 +1971,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{capaskaGigiCanonicalLabelV150(param, opt)}</span>
                   {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {capaskaThtFinalScoreV154(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {capaskaThtHardScoreV155(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -2729,6 +2848,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
