@@ -571,7 +571,7 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
     if (/tidak normal|ada/.test(c)) return -10;
   }
 
-  if (/hidronefrosis|kongenital|hipospadia|hidrokel|undescensus|undecensus|testis|batu sal|saluran kemih|cystitis|varikokel|phimosis/.test(p)) {
+  if (/hidronefrosis|kongenital|hipospadia hidrokel|hipospadia|hidrokel|undescensus|undecensus|testis|batu sal|saluran kemih|cystitis|varikokel|phimosis/.test(p)) {
     if (/normal|negatif|negative|tidak ada/.test(c) && !/tidak normal/.test(c)) return 1;
     if (/tidak normal|positif|positive|ada/.test(c)) return -10;
   }
@@ -828,7 +828,7 @@ function capaskaPenyakitDalamScoreFix(param: any, optionOrValue: any): number | 
   }
 
   // Urogenitalia: each normal = 1, any tidak normal/positive = -10.
-  if (/hidronefrosis|kelainan kongenital|hipospadia|hidrokel|undescensus|undecensus|testis|batu.*kemih|batu.*sal|saluran kemih|cystitis|sistitis|varikokel|phimosis|fimosis/.test(p)) {
+  if (/hidronefrosis|kelainan kongenital|hipospadia hidrokel|hipospadia|hidrokel|undescensus|undecensus|testis|batu.*kemih|batu.*sal|saluran kemih|cystitis|sistitis|varikokel|phimosis|fimosis/.test(p)) {
     if (capaskaPDChoiceIsTidakNormal(c) || capaskaPDChoiceIsAda(c)) return -10;
     if (capaskaPDChoiceIsNormal(c) || capaskaPDChoiceIsTidakAda(c)) return 1;
   }
@@ -1194,6 +1194,111 @@ function capaskaGigiFullScoreFix(param: any, optionOrValue: any): number | null 
   }
 
   return null;
+}
+
+
+/* CAPASKA parameter structure cleanup v148
+   Scope only: CAPASKA input form display structure.
+   Fixes:
+   1) THT: Rhinitis Alergi (lividae) appears once only.
+   2) Penyakit Dalam: Hipospadia + Hidrokel appears as one combined question "Hipospadia Hidrokel".
+   Notes:
+   - Scoring functions are not changed here.
+   - Other parameters keep their original structure.
+*/
+function capaskaParamStructureNorm(value: any): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaParamStructureText(param: any): string {
+  return capaskaParamStructureNorm([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaIsRhinitisLividaeParam(param: any): boolean {
+  const p = capaskaParamStructureText(param);
+  return /rhinitis|rinitis/.test(p) && /lividae|divide|dividae/.test(p);
+}
+
+function capaskaIsHipospadiaParam(param: any): boolean {
+  const p = capaskaParamStructureText(param);
+  return /hipospadia/.test(p);
+}
+
+function capaskaIsStandaloneHidrokelParam(param: any): boolean {
+  const p = capaskaParamStructureText(param);
+  return /hidrokel/.test(p) && !/hipospadia/.test(p);
+}
+
+function capaskaInputDisplayLabel(param: any): string {
+  const raw = String(param?.label ?? param?.name ?? param?.title ?? param?.parameter ?? param?.param_name ?? param?.question ?? "");
+
+  if (capaskaIsRhinitisLividaeParam(param)) {
+    return "Rhinitis Alergi (lividae)";
+  }
+
+  if (capaskaIsHipospadiaParam(param)) {
+    return "Hipospadia Hidrokel";
+  }
+
+  return raw;
+}
+
+function capaskaCloneParamWithLabel(param: any, label: string): any {
+  if (!param || typeof param !== "object") return param;
+
+  return {
+    ...param,
+    label,
+    name: param?.name ? label : param?.name,
+    title: param?.title ? label : param?.title,
+    parameter: param?.parameter ? label : param?.parameter,
+    param_name: param?.param_name ? label : param?.param_name,
+    question: param?.question ? label : param?.question,
+  };
+}
+
+function capaskaCleanDisplayParams(params: any): any[] {
+  const list = Array.isArray(params) ? params : [];
+  const cleaned: any[] = [];
+  let hasRhinitisLividae = false;
+  let hasHipospadiaCombined = false;
+
+  for (const param of list) {
+    if (capaskaIsRhinitisLividaeParam(param)) {
+      if (hasRhinitisLividae) continue;
+      hasRhinitisLividae = true;
+      cleaned.push(capaskaCloneParamWithLabel(param, "Rhinitis Alergi (lividae)"));
+      continue;
+    }
+
+    if (capaskaIsHipospadiaParam(param)) {
+      if (hasHipospadiaCombined) continue;
+      hasHipospadiaCombined = true;
+      cleaned.push(capaskaCloneParamWithLabel(param, "Hipospadia Hidrokel"));
+      continue;
+    }
+
+    if (capaskaIsStandaloneHidrokelParam(param)) {
+      continue;
+    }
+
+    cleaned.push(param);
+  }
+
+  return cleaned;
 }
 
 function scoreForParam(param: any, value: string) {
@@ -2234,7 +2339,7 @@ function InputForm({ user }: { user: any }) {
                 {group.category}
               </div>
 
-              {group.params.map((param) => {
+              {capaskaCleanDisplayParams(group.params).map((param) => {
                 const questionIndex = questionIndexByParamId[String(param.id)] ?? 0;
                 const isCreamRow = questionIndex % 2 === 0;
 
@@ -2270,6 +2375,7 @@ function InputForm({ user }: { user: any }) {
     </div>
   );
 }
+
 
 
 
