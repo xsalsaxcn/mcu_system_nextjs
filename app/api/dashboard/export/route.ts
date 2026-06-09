@@ -169,17 +169,33 @@ function appendJsonSheet(workbook: XLSX.WorkBook, rows: any[], sheetName: string
   XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheetName));
 }
 
+function uniqueCleanValuesV185(values: any[]) {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const value of values || []) {
+    const text = String(value ?? "").trim();
+    const key = text.toLowerCase().replace(/\s+/g, " ");
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    output.push(text);
+  }
+
+  return output;
+}
+
 function makeGroupedWideSheet(args: {
   rows: any[];
   identityHeaders: string[];
   resultHeaders: string[];
+  doctorHeaders?: string[];
   scoreHeaders: string[];
   domainHeaders: string[];
   infoHeaders: string[];
   finalHeaders: string[];
 }) {
-  const { rows, identityHeaders, resultHeaders, scoreHeaders, domainHeaders, infoHeaders, finalHeaders } = args;
-  const headers = [...identityHeaders, ...resultHeaders, ...scoreHeaders, ...domainHeaders, ...infoHeaders, ...finalHeaders];
+  const { rows, identityHeaders, resultHeaders, doctorHeaders = [], scoreHeaders, domainHeaders, infoHeaders, finalHeaders } = args;
+  const headers = [...identityHeaders, ...resultHeaders, ...doctorHeaders, ...scoreHeaders, ...domainHeaders, ...infoHeaders, ...finalHeaders];
 
   const groupRow: string[] = [];
   const addGroup = (label: string, count: number) => {
@@ -188,6 +204,7 @@ function makeGroupedWideSheet(args: {
 
   addGroup("Data Peserta", identityHeaders.length);
   addGroup("Hasil Pertanyaan", resultHeaders.length);
+  addGroup("Nama Dokter", doctorHeaders.length);
   addGroup("Skor Per Pertanyaan", scoreHeaders.length);
   addGroup("Skor Pemeriksaan", domainHeaders.length);
   addGroup("Info", infoHeaders.length);
@@ -198,7 +215,7 @@ function makeGroupedWideSheet(args: {
 
   const merges: XLSX.Range[] = [];
   let cursor = 0;
-  for (const count of [identityHeaders.length, resultHeaders.length, scoreHeaders.length, domainHeaders.length, infoHeaders.length, finalHeaders.length]) {
+  for (const count of [identityHeaders.length, resultHeaders.length, doctorHeaders.length, scoreHeaders.length, domainHeaders.length, infoHeaders.length, finalHeaders.length]) {
     if (count > 1) merges.push({ s: { r: 0, c: cursor }, e: { r: 0, c: cursor + count - 1 } });
     cursor += count;
   }
@@ -206,6 +223,7 @@ function makeGroupedWideSheet(args: {
   worksheet["!cols"] = headers.map((header) => {
     if (header === "Red Flag") return { wch: 42 };
     if (header.startsWith("Hasil - ")) return { wch: 28 };
+    if (header.startsWith("Dokter - ")) return { wch: 26 };
     if (header.startsWith("Skor - ")) return { wch: 22 };
     if (header === "Total Skor Akhir") return { wch: 18 };
     return { wch: 18 };
@@ -218,6 +236,7 @@ function makeGroupedWideSheet(args: {
 }
 
 
+// DASHBOARD_EXPORT_WIDE_SELESAI_PROVINCE_GENDER_DOCTORS_V185
 // DASHBOARD_EXPORT_STATUS_CATATAN_SHEET_V179
 function cleanStatusSheetV179(value: any) {
   return String(value ?? "").trim();
@@ -504,6 +523,21 @@ export async function GET(req: NextRequest) {
     resultByParticipantParam.set(makeKey(Number(result.participant_id), Number(result.parameter_id)), result);
   });
 
+  const { data: stageStaffAssignmentsData } = isCapaskaProgram && participantIds.length
+    ? await supabase
+        .from("mcu_stage_staff_assignments")
+        .select("participant_id,post_id,staff_name")
+        .in("participant_id", participantIds)
+    : { data: [] as any[] };
+
+  const staffByParticipantPostV185 = new Map<string, string[]>();
+  for (const row of stageStaffAssignmentsData || []) {
+    const key = makeKey(Number(row.participant_id), Number(row.post_id));
+    const current = staffByParticipantPostV185.get(key) || [];
+    current.push(row.staff_name);
+    staffByParticipantPostV185.set(key, uniqueCleanValuesV185(current));
+  }
+
   const progressRows = participantRows.map((p: any) => {
     const stages = normalizeDashboardStages(
       computeStagesForParticipant(
@@ -664,8 +698,17 @@ export async function GET(req: NextRequest) {
     ).values());
 
     if (isCapaskaProgram) {
-      const identityHeaders = ["Nama", "No MCU", "NIK", "Jenis Kelamin", "Database", "Instansi", "Paket", "Status Progress", "Kelulusan"];
+      const identityHeaders = ["Nama", "No MCU", "NIK", "Asal Provinsi", "Jenis Kelamin", "Database", "Instansi", "Paket", "Status Progress", "Kelulusan"];
       const resultWideHeaders = exportParameters.map((param: any) => `Hasil - ${postName.get(Number(param.post_id)) || "Post"} - ${param.name}`);
+      const doctorPostsV185 = Array.from(new Map(
+        exportParameters
+          .map((param: any) => {
+            const postId = Number(param.post_id);
+            return [postId, { id: postId, name: postName.get(postId) || "Post" }];
+          })
+          .filter(([postId]: any) => Boolean(postId))
+      ).values());
+      const doctorWideHeaders = doctorPostsV185.map((post: any) => `Dokter - ${post.name}`);
       const scoreWideHeaders = exportParameters.map((param: any) => `Skor - ${postName.get(Number(param.post_id)) || "Post"} - ${param.name}`);
       const domainHeaders = [
         "Skor Mata",
@@ -687,7 +730,8 @@ export async function GET(req: NextRequest) {
             "Nama": participant.name,
             "No MCU": participant.mcu_id || participant.external_id || "-",
             "NIK": participant.nik || "-",
-            "Jenis Kelamin": participant.gender || "-",
+            "Asal Provinsi": participant.province || "-",
+            "Jenis Kelamin": genderLabelStatusSheetV179(participant.gender || "-"),
             "Database": sourceMap.get(Number(participant.source_id))?.name || "-",
             "Instansi": sourceMap.get(Number(participant.source_id))?.institution_name || "-",
             "Paket": packageName.get(Number(participant.package_id)) || "-",
@@ -703,6 +747,11 @@ export async function GET(req: NextRequest) {
             const value = String(result?.value ?? "").trim();
             row[valueHeader] = value;
             row[scoreHeader] = value ? scoreCapaskaDirectChoice(param, value) : "";
+          });
+
+          doctorPostsV185.forEach((post: any) => {
+            const names = staffByParticipantPostV185.get(makeKey(Number(participant.id), Number(post.id))) || [];
+            row[`Dokter - ${post.name}`] = names.join(", ");
           });
 
           row["Skor Mata"] = progressInfo?.["Mata"] ?? "";
@@ -725,6 +774,7 @@ export async function GET(req: NextRequest) {
         rows: wideRows,
         identityHeaders,
         resultHeaders: resultWideHeaders,
+        doctorHeaders: doctorWideHeaders,
         scoreHeaders: scoreWideHeaders,
         domainHeaders,
         infoHeaders,
