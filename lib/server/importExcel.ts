@@ -217,6 +217,28 @@ function makeImportLocationKey(
   ].join("|");
 }
 
+function importParticipantDedupeKeyV168(row: {
+  name: string;
+  gender: string;
+  province: string;
+  nik?: string;
+  external_id?: string;
+}) {
+  const nik = norm(row.nik || "");
+  if (nik) return `nik|${nik}`;
+
+  const externalId = norm(row.external_id || "");
+  if (externalId) return `external|${externalId}`;
+
+  return [
+    "name",
+    norm(row.name),
+    norm(row.gender),
+    norm(row.province),
+  ].join("|");
+}
+
+
 async function getOrCreateCompany(
   supabase: any,
   name: string,
@@ -356,10 +378,12 @@ export async function importParticipantsFromExcel(
     skipped_rows: [],
     detected_columns: [],
     skipped_sheets: [],
+    duplicate_candidates_skipped: 0,
   };
 
   const insertRows: any[] = [];
   const counterByYear = new Map<string, number>();
+  const seenImportParticipantKeysV168 = new Set<string>();
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -619,43 +643,16 @@ export async function importParticipantsFromExcel(
       const candidates: { name: string; gender: string; province: string }[] =
         [];
 
-      if (
-        programType === PROGRAM_CAPASKA &&
-        putraCol >= 0 &&
-        clean(row[putraCol])
-      ) {
-        candidates.push({
-          name: clean(row[putraCol]),
-          gender: "Laki-laki",
-          province:
-            provincePutraCol >= 0
-              ? clean(row[provincePutraCol])
-              : provinceCol >= 0
-                ? clean(row[provinceCol])
-                : "",
-        });
-      }
+      const primaryName =
+        nameCol >= 0 && clean(row[nameCol]) ? clean(row[nameCol]) : "";
 
-      if (
-        programType === PROGRAM_CAPASKA &&
-        putriCol >= 0 &&
-        clean(row[putriCol])
-      ) {
+      // v168:
+      // Prefer a real name column when it exists.
+      // Older logic pushed both Putra and Putri for CAPASKA before checking Nama,
+      // so consolidated files with Putra + Putri helper columns could import 2x rows.
+      if (primaryName) {
         candidates.push({
-          name: clean(row[putriCol]),
-          gender: "Perempuan",
-          province:
-            provincePutriCol >= 0
-              ? clean(row[provincePutriCol])
-              : provinceCol >= 0
-                ? clean(row[provinceCol])
-                : "",
-        });
-      }
-
-      if (!candidates.length && nameCol >= 0 && clean(row[nameCol])) {
-        candidates.push({
-          name: clean(row[nameCol]),
+          name: primaryName,
           gender:
             programType === PROGRAM_VACCINATION
               ? normalizeVaccinationGender(genderCol >= 0 ? row[genderCol] : "")
@@ -669,6 +666,40 @@ export async function importParticipantsFromExcel(
                 ? clean(row[provinceCol])
                 : "",
         });
+      } else {
+        if (
+          programType === PROGRAM_CAPASKA &&
+          putraCol >= 0 &&
+          clean(row[putraCol])
+        ) {
+          candidates.push({
+            name: clean(row[putraCol]),
+            gender: "Laki-laki",
+            province:
+              provincePutraCol >= 0
+                ? clean(row[provincePutraCol])
+                : provinceCol >= 0
+                  ? clean(row[provinceCol])
+                  : "",
+          });
+        }
+
+        if (
+          programType === PROGRAM_CAPASKA &&
+          putriCol >= 0 &&
+          clean(row[putriCol])
+        ) {
+          candidates.push({
+            name: clean(row[putriCol]),
+            gender: "Perempuan",
+            province:
+              provincePutriCol >= 0
+                ? clean(row[provincePutriCol])
+                : provinceCol >= 0
+                  ? clean(row[provinceCol])
+                  : "",
+          });
+        }
       }
 
       if (!candidates.length) {
@@ -679,6 +710,29 @@ export async function importParticipantsFromExcel(
       }
 
       for (const candidate of candidates) {
+        const dedupeKeyV168 = importParticipantDedupeKeyV168({
+          ...candidate,
+          nik: base.nik,
+          external_id: base.external_id,
+        });
+
+        if (seenImportParticipantKeysV168.has(dedupeKeyV168)) {
+          stats.duplicate_candidates_skipped += 1;
+          stats.participants_skipped += 1;
+          if (stats.skipped_rows.length < 50) {
+            stats.skipped_rows.push({
+              sheet: sheetName,
+              reason: "duplicate_in_import_v168",
+              name: candidate.name,
+              gender: candidate.gender,
+              province: candidate.province,
+            });
+          }
+          continue;
+        }
+
+        seenImportParticipantKeysV168.add(dedupeKeyV168);
+
         const mcuId = makeMcuId();
 
         insertRows.push({
