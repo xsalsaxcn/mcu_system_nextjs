@@ -5,7 +5,7 @@ import { fail } from "@/lib/server/response";
 
 export const runtime = "nodejs";
 
-// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V178
+// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V181_CAPASKA_ONLY
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -68,6 +68,9 @@ function stageKeyFromText(value: any) {
 function isScoreOrAutoParam(param: any) {
   const name = norm(param?.name);
   const category = norm(param?.category);
+
+  // Field "Value ..." adalah field angka untuk scoring otomatis, bukan catatan medis yang perlu tampil di export.
+  if (name.startsWith("value ") || name.startsWith("nilai ")) return true;
   if (name.includes("skor") || name.includes("score") || name.includes("total")) return true;
   if (category.includes("skor") || category.includes("score")) return true;
   if (param?.type && norm(param.type).includes("auto")) return true;
@@ -76,12 +79,12 @@ function isScoreOrAutoParam(param: any) {
 
 function isHeightParam(param: any) {
   const name = norm(param?.name);
-  return name.includes("tinggi badan") || name === "tb" || name.includes("tb ");
+  return name.includes("tinggi badan") || /\btb\b/.test(name);
 }
 
 function isWeightParam(param: any) {
   const name = norm(param?.name);
-  return name.includes("berat badan") || name === "bb" || name.includes("bb ");
+  return name.includes("berat badan") || /\bbb\b/.test(name);
 }
 
 function isNeutralValue(value: any) {
@@ -91,6 +94,10 @@ function isNeutralValue(value: any) {
   const neutralExact = new Set([
     "normal",
     "tidak ada",
+    "ga ada",
+    "gak ada",
+    "nggak ada",
+    "ngga ada",
     "negatif",
     "negative",
     "intak",
@@ -100,6 +107,8 @@ function isNeutralValue(value: any) {
     "0 gigi",
     "0 tumpatan",
     "tidak ditemukan",
+    "tidak menggunakan",
+    "tidak pakai",
     "sesuai juknis",
     "sesuai",
     "t0 / t1-t1",
@@ -108,15 +117,32 @@ function isNeutralValue(value: any) {
     "t0/t1",
     "6/6",
     "normal 6/6",
+    "-/-",
+    "(-)/(-)",
+    "(-) / (-)",
   ]);
 
   if (neutralExact.has(text)) return true;
 
   if (/^normal\b/.test(text)) return true;
   if (/^tidak ada\b/.test(text)) return true;
+  if (/^(ga|gak|nggak|ngga) ada\b/.test(text)) return true;
+  if (/^tidak menggunakan\b/.test(text)) return true;
+  if (/^tidak pakai\b/.test(text)) return true;
+  if (/^tanpa\b/.test(text)) return true;
   if (/^negatif\b/.test(text)) return true;
   if (/^vod:? ?6\/6.*vos:? ?6\/6$/.test(text)) return true;
   if (/^6\/6$/.test(text)) return true;
+
+  // Mata: tidak memakai kontak lens/kacamata berarti normal.
+  if (/(kontak|contact|lensa|lens|softlens|kacamata|kaca mata)/.test(text) && /(tidak menggunakan|tidak pakai|tanpa|tidak ada|ga ada|gak ada|nggak ada|negatif|negative)/.test(text)) return true;
+
+  // Mata: buta warna tidak ada / tidak buta warna berarti normal.
+  if (/buta warna/.test(text) && /(tidak buta warna|tidak ada|ga ada|gak ada|nggak ada|ngga ada|negatif|negative|\btidak\b)/.test(text)) return true;
+
+  // Mata: juling/strabismus -/- berarti normal.
+  if (/^\(?-\)?\s*\/\s*\(?-\)?$/.test(text)) return true;
+  if (/(juling|strabismus)/.test(text) && (/\(?-\)?\s*\/\s*\(?-\)?/.test(text) || /(tidak ada|negatif|negative|normal)/.test(text))) return true;
 
   return false;
 }
@@ -127,6 +153,7 @@ function resultSeverity(value: any, score?: number | null) {
   if (typeof score === "number" && score <= -10) return "red";
   if (text.includes("tidak direkomendasi") || text.includes("tidak direkomendasikan")) return "red";
   if (text.includes("red flag")) return "red";
+  if (text.includes("buta warna") && !isNeutralValue(value)) return "red";
   if (text.includes("t3-t3") || text.includes("t3 / t3")) return "red";
   if (text.includes(">3 caries") || text.includes("> 3 caries") || text.includes(">3 karies")) return "red";
   if (/\b(caries|karies)\s*(4|5|6|7|8|9|10|11|12|13)\b/.test(text)) return "red";
@@ -184,7 +211,7 @@ function stageSummary(stageKey: string, items: any[]) {
 
     if (stageKey === "mata") {
       if (/visus|vod|vos|tajam/i.test(paramName) && valueText) {
-        findings.push(valueText);
+        if (!isNeutralValue(valueText)) findings.push(valueText);
         continue;
       }
     }
@@ -200,12 +227,13 @@ function stageSummary(stageKey: string, items: any[]) {
 }
 
 const STAGE_MAX_SCORE_V178: Record<string, number> = {
-  mata: 16,
+  mata: 12,
   tht: 10,
   gigi: 16,
-  penyakit_dalam: 25,
+  penyakit_dalam: 28,
   jantung: 12,
   ortopedi: 16,
+  radiologi: 6,
 };
 
 function stageDisplayLabel(stageKey: string) {
@@ -262,6 +290,15 @@ function stageStatusAndNotes(stageKey: string, items: any[], summary: string, se
     };
   }
 
+  if (stageKey === "mata" && !notes.length && severity !== "yellow") {
+    return {
+      status: "Normal",
+      note: "",
+      score,
+      maxScore: maxScore || "",
+    };
+  }
+
   if (score !== null && maxScore && score < maxScore) {
     return {
       status: "Dengan Catatan",
@@ -288,6 +325,12 @@ function stageStatusAndNotes(stageKey: string, items: any[], summary: string, se
   };
 }
 
+function formatDeltaCapaskaJuknisV181(value: number) {
+  const rounded = Math.round(value);
+  if (rounded >= 1) return String(rounded);
+  return String(Math.round(value * 10) / 10).replace(".", ",");
+}
+
 function statusTbBb(height: any, weight: any, gender: any) {
   const h = toNumber(height);
   const w = toNumber(weight);
@@ -297,14 +340,18 @@ function statusTbBb(height: any, weight: any, gender: any) {
 
   const minHeight = g === "putra" ? 170 : 165;
   const maxHeight = g === "putra" ? 180 : 175;
-  const minWeight = h - 115;
-  const maxWeight = h - 105;
+
+  // Standar BB dibuat proporsional terhadap TB sesuai tabel juknis: BMI 18,5 s.d. 24,0.
+  // Contoh putri TB 168,4 cm dan BB 71,25 kg: batas atas 24,0 x 1,684^2 = 68,1 kg, jadi BB > 3kg.
+  const heightM = h / 100;
+  const minWeight = 18.5 * heightM * heightM;
+  const maxWeight = 24 * heightM * heightM;
   const issues: string[] = [];
 
-  if (h < minHeight) issues.push(`TB kurang ${Math.round((minHeight - h) * 10) / 10} cm`);
-  if (h > maxHeight) issues.push(`TB lebih ${Math.round((h - maxHeight) * 10) / 10} cm`);
-  if (w < minWeight) issues.push(`BB kurang ${Math.round((minWeight - w) * 10) / 10} kg`);
-  if (w > maxWeight) issues.push(`BB lebih ${Math.round((w - maxWeight) * 10) / 10} kg`);
+  if (h < minHeight) issues.push(`TB < ${formatDeltaCapaskaJuknisV181(minHeight - h)}cm`);
+  if (h > maxHeight) issues.push(`TB > ${formatDeltaCapaskaJuknisV181(h - maxHeight)}cm`);
+  if (w < minWeight) issues.push(`BB < ${formatDeltaCapaskaJuknisV181(minWeight - w)}kg`);
+  if (w > maxWeight) issues.push(`BB > ${formatDeltaCapaskaJuknisV181(w - maxWeight)}kg`);
 
   return issues.length ? issues.join("; ") : "Sesuai";
 }
@@ -554,8 +601,8 @@ export async function GET(req: NextRequest) {
       const stage = stageKeyFromText(`${item.param?.category || ""} ${item.postName || ""} ${item.param?.name || ""}`) || "data_awal";
       if (byStage[stage]) byStage[stage].push(item);
 
-      if (!height && isHeightParam(item.param)) height = clean(item.value);
-      if (!weight && isWeightParam(item.param)) weight = clean(item.value);
+      if (isHeightParam(item.param) && toNumber(item.value) !== null) height = clean(item.value);
+      if (isWeightParam(item.param) && toNumber(item.value) !== null) weight = clean(item.value);
     }
 
     const summaries = {
