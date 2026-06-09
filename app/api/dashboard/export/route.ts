@@ -236,6 +236,7 @@ function makeGroupedWideSheet(args: {
 }
 
 
+// DASHBOARD_EXPORT_WIDE_DOCTORS_TS_FIX_V187
 // DASHBOARD_EXPORT_WIDE_SELESAI_PROVINCE_GENDER_DOCTORS_V185
 // DASHBOARD_EXPORT_STATUS_CATATAN_SHEET_V179
 function cleanStatusSheetV179(value: any) {
@@ -700,14 +701,13 @@ export async function GET(req: NextRequest) {
     if (isCapaskaProgram) {
       const identityHeaders = ["Nama", "No MCU", "NIK", "Asal Provinsi", "Jenis Kelamin", "Database", "Instansi", "Paket", "Status Progress", "Kelulusan"];
       const resultWideHeaders = exportParameters.map((param: any) => `Hasil - ${postName.get(Number(param.post_id)) || "Post"} - ${param.name}`);
-      const doctorPostsV185 = Array.from(new Map(
-        exportParameters
-          .map((param: any) => {
-            const postId = Number(param.post_id);
-            return [postId, { id: postId, name: postName.get(postId) || "Post" }];
-          })
-          .filter(([postId]: any) => Boolean(postId))
-      ).values());
+      const doctorPostMapV187 = new Map<number, { id: number; name: string }>();
+      exportParameters.forEach((param: any) => {
+        const postId = Number(param.post_id);
+        if (!postId || doctorPostMapV187.has(postId)) return;
+        doctorPostMapV187.set(postId, { id: postId, name: String(postName.get(postId) || "Post") });
+      });
+      const doctorPostsV185 = Array.from(doctorPostMapV187.values());
       const doctorWideHeaders = doctorPostsV185.map((post: any) => `Dokter - ${post.name}`);
       const scoreWideHeaders = exportParameters.map((param: any) => `Skor - ${postName.get(Number(param.post_id)) || "Post"} - ${param.name}`);
       const domainHeaders = [
