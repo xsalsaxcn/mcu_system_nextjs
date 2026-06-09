@@ -5,7 +5,7 @@ import { fail } from "@/lib/server/response";
 
 export const runtime = "nodejs";
 
-// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V181_CAPASKA_ONLY
+// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V183_CAPASKA_ONLY_NOTES_BY_PROBLEM_CHOICE
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -91,6 +91,9 @@ function isNeutralValue(value: any) {
   const text = norm(value);
   if (!text) return true;
 
+  const compact = text.replace(/\s+/g, "");
+  if (compact === "-/-" || compact === "(-)/(-)") return true;
+
   const neutralExact = new Set([
     "normal",
     "tidak ada",
@@ -120,6 +123,9 @@ function isNeutralValue(value: any) {
     "-/-",
     "(-)/(-)",
     "(-) / (-)",
+    "( -) / ( -)",
+    "(- ) / (- )",
+    "( - ) / ( - )",
   ]);
 
   if (neutralExact.has(text)) return true;
@@ -135,14 +141,14 @@ function isNeutralValue(value: any) {
   if (/^6\/6$/.test(text)) return true;
 
   // Mata: tidak memakai kontak lens/kacamata berarti normal.
-  if (/(kontak|contact|lensa|lens|softlens|kacamata|kaca mata)/.test(text) && /(tidak menggunakan|tidak pakai|tanpa|tidak ada|ga ada|gak ada|nggak ada|negatif|negative)/.test(text)) return true;
+  if (/(kontak|contact|lensa|lens|softlens|kacamata|kaca mata)/.test(text) && /(tidak menggunakan|tidak pakai|tanpa|tidak ada|ga ada|gak ada|nggak ada|ngga ada|negatif|negative)/.test(text)) return true;
 
   // Mata: buta warna tidak ada / tidak buta warna berarti normal.
   if (/buta warna/.test(text) && /(tidak buta warna|tidak ada|ga ada|gak ada|nggak ada|ngga ada|negatif|negative|\btidak\b)/.test(text)) return true;
 
-  // Mata: juling/strabismus -/- berarti normal.
-  if (/^\(?-\)?\s*\/\s*\(?-\)?$/.test(text)) return true;
-  if (/(juling|strabismus)/.test(text) && (/\(?-\)?\s*\/\s*\(?-\)?/.test(text) || /(tidak ada|negatif|negative|normal)/.test(text))) return true;
+  // Mata: juling/strabismus -/- atau (-) / (-) berarti normal.
+  if (/^\(?\s*-\s*\)?\s*\/\s*\(?\s*-\s*\)?$/.test(text)) return true;
+  if (/(juling|strabismus)/.test(text) && (/\(?\s*-\s*\)?\s*\/\s*\(?\s*-\s*\)?/.test(text) || /(tidak ada|negatif|negative|normal)/.test(text))) return true;
 
   return false;
 }
@@ -177,16 +183,86 @@ function cssStatus(status: string) {
   return "";
 }
 
+function pairKeyForControlParam(param: any) {
+  const name = norm(param?.name);
+
+  if (!name) return "";
+  if (name.startsWith("value ") || name.startsWith("nilai ")) return "";
+
+  if (name.includes("berat badan")) return "bb";
+  if (name === "bb" || /^bb\b/.test(name)) return "bb";
+  if (name.includes("tinggi badan")) return "tb";
+  if (name === "tb" || /^tb[\s.(]/.test(name) || name.includes("tb.")) return "tb";
+  if (name === "tanda vital") return "tanda_vital";
+  if (name.includes("dental panoramic")) return "dental_panoramic";
+
+  return "";
+}
+
+function pairKeyForDetailParam(param: any) {
+  const name = norm(param?.name);
+
+  if (!name) return "";
+  if (name.startsWith("value ") || name.startsWith("nilai ")) return "";
+
+  if (name === "bb" || /^bb\b/.test(name)) return "bb";
+  if (name === "tb" || /^tb[\s.(]/.test(name) || name.includes("tb.")) return "tb";
+  if (name.includes("suhu") && name.includes("nadi")) return "tanda_vital";
+  if (name.includes("bentuk kelainan dental")) return "dental_panoramic";
+
+  return "";
+}
+
+function pairKeyForScoreParam(param: any) {
+  const name = norm(param?.name);
+
+  if (!name) return "";
+  if (!name.startsWith("value ") && !name.startsWith("nilai ")) return "";
+
+  const base = name.replace(/^(value|nilai)\s+/, "");
+  if (base.includes("berat badan")) return "bb";
+  if (base === "bb" || /^bb\b/.test(base)) return "bb";
+  if (base.includes("tinggi badan")) return "tb";
+  if (base === "tb" || /^tb[\s.(]/.test(base) || base.includes("tb.")) return "tb";
+
+  return "";
+}
+
+function isPairedDetailParam(param: any) {
+  return Boolean(pairKeyForDetailParam(param));
+}
+
+function sortItemsByParam(items: any[]) {
+  return [...(items || [])].sort((a: any, b: any) => {
+    const sa = Number(a?.param?.sort_order || 0);
+    const sb = Number(b?.param?.sort_order || 0);
+    if (sa !== sb) return sa - sb;
+    return Number(a?.param?.id || 0) - Number(b?.param?.id || 0);
+  });
+}
+
 function stageSeverity(stageKey: string, items: any[]) {
   let hasYellow = false;
 
   for (const item of items) {
     if (isScoreOrAutoParam(item.param)) {
+      // Score BB/TB dievaluasi di kolom STATUS TB/BB, bukan sebagai catatan Penyakit Dalam.
+      const scorePairKey = pairKeyForScoreParam(item.param);
+      if (scorePairKey === "bb" || scorePairKey === "tb") continue;
+
       const n = toNumber(item.value);
       if (typeof n === "number" && n <= -10) return "red";
       if (typeof n === "number" && n < 0) hasYellow = true;
       continue;
     }
+
+    // Field detail seperti BB, TB, dan Suhu/Nadi hanya boleh muncul jika single choice induknya bermasalah.
+    // Jadi field detail sendiri tidak boleh membuat status stage menjadi catatan.
+    if (isPairedDetailParam(item.param)) continue;
+
+    // BB/TB dievaluasi di kolom STATUS TB/BB, bukan di STATUS PENYAKIT DALAM.
+    const controlKey = pairKeyForControlParam(item.param);
+    if (controlKey === "bb" || controlKey === "tb") continue;
 
     const severity = resultSeverity(item.value, null);
     if (severity === "red") return "red";
@@ -198,8 +274,20 @@ function stageSeverity(stageKey: string, items: any[]) {
 
 function stageSummary(stageKey: string, items: any[]) {
   const findings: string[] = [];
+  const sortedItems = sortItemsByParam(items);
+  const detailsByKey = new Map<string, any>();
 
-  for (const item of items) {
+  for (const item of sortedItems) {
+    if (isScoreOrAutoParam(item.param)) continue;
+
+    const key = pairKeyForDetailParam(item.param);
+    const valueText = clean(item.value);
+    if (!key || !valueText) continue;
+
+    detailsByKey.set(key, item);
+  }
+
+  for (const item of sortedItems) {
     const value = clean(item.value);
     if (!value) continue;
 
@@ -207,7 +295,14 @@ function stageSummary(stageKey: string, items: any[]) {
     const valueText = clean(value);
 
     if (isScoreOrAutoParam(item.param)) continue;
-    if (isHeightParam(item.param) || isWeightParam(item.param)) continue;
+
+    // Field detail tidak berdiri sendiri sebagai catatan; ia hanya dipakai saat single choice induknya abnormal.
+    if (isPairedDetailParam(item.param)) continue;
+
+    const controlKey = pairKeyForControlParam(item.param);
+
+    // BB/TB punya kolom khusus STATUS TB/BB dan CATATAN TB/BB, jadi jangan dobel masuk ke Penyakit Dalam.
+    if (controlKey === "bb" || controlKey === "tb") continue;
 
     if (stageKey === "mata") {
       if (/visus|vod|vos|tajam/i.test(paramName) && valueText) {
@@ -216,10 +311,25 @@ function stageSummary(stageKey: string, items: any[]) {
       }
     }
 
+    // Jika single choice normal / sesuai juknis, catatan harus kosong.
+    // Catatan hanya diisi dari single choice yang bermasalah.
     if (isNeutralValue(valueText)) continue;
 
-    if (paramName) findings.push(`${paramName}: ${valueText}`);
-    else findings.push(valueText);
+    let noteLabel = paramName;
+    let noteValue = valueText;
+
+    // Untuk parameter yang punya field detail, tampilkan value/detail-nya hanya jika pilihan induknya bermasalah.
+    if (controlKey) {
+      const detail = detailsByKey.get(controlKey);
+      const detailValue = clean(detail?.value);
+      if (detailValue) {
+        noteLabel = clean(detail?.param?.name) || paramName;
+        noteValue = detailValue;
+      }
+    }
+
+    if (noteLabel) findings.push(noteLabel + ": " + noteValue);
+    else findings.push(noteValue);
   }
 
   const unique = Array.from(new Set(findings.map((x) => x.trim()).filter(Boolean)));
@@ -287,24 +397,6 @@ function stageStatusAndNotes(stageKey: string, items: any[], summary: string, se
       note: notes.length ? notes.join("; ") : "Ada red flag / skor -10",
       score,
       maxScore: maxScore || "",
-    };
-  }
-
-  if (stageKey === "mata" && !notes.length && severity !== "yellow") {
-    return {
-      status: "Normal",
-      note: "",
-      score,
-      maxScore: maxScore || "",
-    };
-  }
-
-  if (score !== null && maxScore && score < maxScore) {
-    return {
-      status: "Dengan Catatan",
-      note: notes.length ? notes.join("; ") : `Skor belum maksimal (${score}/${maxScore})`,
-      score,
-      maxScore,
     };
   }
 
