@@ -1,0 +1,116 @@
+import { NextRequest } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { fail, ok } from "@/lib/server/response";
+
+function cleanText(value: any) {
+  return String(value || "").trim();
+}
+
+function norm(value: any) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function uniqueNames(values: any[]) {
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const value of values || []) {
+    const name = cleanText(value);
+    const key = norm(name);
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+
+  return names;
+}
+
+function stageMatches(rowStageName: string, requestedStageName: string) {
+  const rowKey = norm(rowStageName);
+  const requestedKey = norm(requestedStageName);
+
+  if (!requestedKey) return true;
+  if (rowKey === requestedKey) return true;
+  if (rowKey.includes(requestedKey) || requestedKey.includes(rowKey)) return true;
+
+  return false;
+}
+
+export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  const url = new URL(req.url);
+  const programType = cleanText(url.searchParams.get("program_type") || url.searchParams.get("program") || user.program_type || "capaska");
+  const stageName = cleanText(url.searchParams.get("stage_name") || "");
+
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("mcu_stage_staff_options")
+    .select("id, program_type, stage_name, staff_name, is_active")
+    .eq("program_type", programType)
+    .eq("is_active", true)
+    .order("stage_name", { ascending: true })
+    .order("staff_name", { ascending: true });
+
+  if (error) return fail(error.message, 500);
+
+  const rows = (data || []).filter((row: any) => stageMatches(row.stage_name, stageName));
+  const staffNames = uniqueNames(rows.map((row: any) => row.staff_name));
+
+  return ok({ program_type: programType, stage_name: stageName, staff_names: staffNames, rows });
+}
+
+export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+  if (String(user.role || "").toLowerCase() !== "admin") return fail("Hanya admin yang dapat mengatur nama petugas.", 403);
+
+  const body = await req.json().catch(() => ({}));
+  const programType = cleanText(body.program_type || body.program || "capaska");
+  const stages = Array.isArray(body.stages) ? body.stages : [];
+
+  if (!programType) return fail("program_type wajib.");
+  if (!stages.length) return ok({ saved: 0 });
+
+  const supabase = getSupabaseAdmin();
+  let saved = 0;
+
+  for (const stage of stages) {
+    const stageName = cleanText(stage.stage_name || stage.name || stage.stage);
+    const staffNames = uniqueNames(stage.staff_names || stage.names || []);
+
+    if (!stageName) continue;
+
+    const { error: deleteError } = await supabase
+      .from("mcu_stage_staff_options")
+      .delete()
+      .eq("program_type", programType)
+      .eq("stage_name", stageName);
+
+    if (deleteError) return fail(deleteError.message, 500);
+
+    if (!staffNames.length) continue;
+
+    const inserts = staffNames.map((staffName) => ({
+      program_type: programType,
+      stage_name: stageName,
+      staff_name: staffName,
+      is_active: true,
+      created_by: String(user.id || user.username || "")
+    }));
+
+    const { error: insertError } = await supabase.from("mcu_stage_staff_options").insert(inserts);
+    if (insertError) return fail(insertError.message, 500);
+
+    saved += inserts.length;
+  }
+
+  return ok({ saved });
+}

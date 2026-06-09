@@ -2437,6 +2437,9 @@ function InputForm({ user }: { user: any }) {
   const [hasMoreDoneParticipants, setHasMoreDoneParticipants] = useState(false);
   const [doneSearch, setDoneSearch] = useState("");
   const [donePreviewParticipant, setDonePreviewParticipant] = useState<any>(null);
+  const [stageStaffOptionsV166, setStageStaffOptionsV166] = useState<string[]>([]);
+  const [selectedStageStaffV166, setSelectedStageStaffV166] = useState<string[]>([]);
+  const showMcuStageStaffPickerV166 = program === "capaska" || program === "corporate";
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
@@ -2499,6 +2502,55 @@ function InputForm({ user }: { user: any }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdminStageAssist, adminParticipantId, effectivePostId]);
 
+
+
+  function toggleStageStaffV166(staffName: string) {
+    setSelectedStageStaffV166((prev) => {
+      const exists = prev.includes(staffName);
+      return exists ? prev.filter((name) => name !== staffName) : [...prev, staffName];
+    });
+  }
+
+  async function loadStageStaffForParticipantV166(participantId: number | string) {
+    if (!showMcuStageStaffPickerV166 || !participantId || !effectivePostId) {
+      setStageStaffOptionsV166([]);
+      setSelectedStageStaffV166([]);
+      return;
+    }
+
+    const stageName = String(effectivePostName || "").trim();
+
+    try {
+      const [optionsRes, assignmentRes] = await Promise.all([
+        fetch(`/api/mcu/stage-staff/options?program_type=${encodeURIComponent(program)}&stage_name=${encodeURIComponent(stageName)}`, { cache: "no-store" }),
+        fetch(`/api/mcu/stage-staff/assignment?participant_id=${participantId}&post_id=${effectivePostId}`, { cache: "no-store" }),
+      ]);
+
+      const optionsJson = await optionsRes.json().catch(() => ({}));
+      const assignmentJson = await assignmentRes.json().catch(() => ({}));
+
+      setStageStaffOptionsV166(optionsJson.staff_names || []);
+      setSelectedStageStaffV166(assignmentJson.staff_names || []);
+    } catch {
+      setStageStaffOptionsV166([]);
+      setSelectedStageStaffV166([]);
+    }
+  }
+
+  async function saveStageStaffAssignmentV166() {
+    if (!showMcuStageStaffPickerV166 || !participant?.id || !effectivePostId) return;
+
+    await fetch("/api/mcu/stage-staff/assignment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        participant_id: participant.id,
+        post_id: effectivePostId,
+        staff_names: selectedStageStaffV166,
+      }),
+    }).catch(() => null);
+  }
+
   async function search(e?: React.FormEvent, overrideKeyword?: string) {
     e?.preventDefault();
     setParticipant(null);
@@ -2540,6 +2592,7 @@ function InputForm({ user }: { user: any }) {
     });
 
     setValues(computeValues(nextParameters, nextValues));
+    await loadStageStaffForParticipantV166(p.id);
   }
 
   function updateValue(parameterId: number | string, nextValue: string) {
@@ -2578,6 +2631,7 @@ function InputForm({ user }: { user: any }) {
     setMessage(json.ok ? "Hasil berhasil disimpan." : json.message || "Gagal menyimpan.");
     if (json.ok) {
       setValues(finalValues);
+      await saveStageStaffAssignmentV166();
       await refreshDetailAfterSaveV160();
       setListTab("selesai");
       await refreshLists(false);
@@ -2986,7 +3040,35 @@ function InputForm({ user }: { user: any }) {
           </div>
           {!capaskaProgressTotalV151(parameters) && <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">Tidak ada parameter untuk post ini. Jalankan SQL reference dan cek mapping package.</div>}
 
-          {groupedParameters.map((group) => (
+                    {showMcuStageStaffPickerV166 && participant && (
+            <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-lg font-black">Nama Petugas Pemeriksa</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Pilih satu atau lebih dokter/petugas yang melakukan tindakan pada stage ini.
+              </div>
+
+              {stageStaffOptionsV166.length > 0 ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {stageStaffOptionsV166.map((staffName) => (
+                    <label key={staffName} className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold">
+                      <input
+                        type="checkbox"
+                        checked={selectedStageStaffV166.includes(staffName)}
+                        onChange={() => toggleStageStaffV166(staffName)}
+                      />
+                      <span>{staffName}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  Belum ada daftar nama petugas untuk stage {effectivePostName}. Tambahkan dari halaman Import Database Peserta.
+                </div>
+              )}
+            </section>
+          )}
+
+{groupedParameters.map((group) => (
             <div key={group.category} className="space-y-5">
               <div className="border-b border-slate-200 pb-2 text-base font-black text-slate-900">
                 {group.category}

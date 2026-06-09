@@ -1,0 +1,95 @@
+import { NextRequest } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { fail, ok } from "@/lib/server/response";
+
+function cleanText(value: any) {
+  return String(value || "").trim();
+}
+
+function norm(value: any) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function uniqueNames(values: any[]) {
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const value of values || []) {
+    const name = cleanText(value);
+    const key = norm(name);
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+
+  return names;
+}
+
+export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  const url = new URL(req.url);
+  const participantId = Number(url.searchParams.get("participant_id") || 0);
+  const postId = Number(url.searchParams.get("post_id") || user.post_id || 0);
+
+  if (!participantId || !postId) return fail("participant_id dan post_id wajib.");
+
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("mcu_stage_staff_assignments")
+    .select("staff_name")
+    .eq("participant_id", participantId)
+    .eq("post_id", postId)
+    .order("staff_name", { ascending: true });
+
+  if (error) return fail(error.message, 500);
+
+  return ok({ staff_names: uniqueNames((data || []).map((row: any) => row.staff_name)) });
+}
+
+export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  const body = await req.json().catch(() => ({}));
+  const participantId = Number(body.participant_id || 0);
+  const postId = Number(body.post_id || user.post_id || 0);
+  const staffNames = uniqueNames(body.staff_names || body.names || []);
+
+  if (!participantId || !postId) return fail("participant_id dan post_id wajib.");
+
+  if (String(user.role || "").toLowerCase() === "operator" && Number(user.post_id) !== postId) {
+    return fail("Operator hanya boleh input di post sendiri.", 403);
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  const { error: deleteError } = await supabase
+    .from("mcu_stage_staff_assignments")
+    .delete()
+    .eq("participant_id", participantId)
+    .eq("post_id", postId);
+
+  if (deleteError) return fail(deleteError.message, 500);
+
+  if (staffNames.length) {
+    const inserts = staffNames.map((staffName) => ({
+      participant_id: participantId,
+      post_id: postId,
+      staff_name: staffName,
+      input_by: String(user.id || user.username || "")
+    }));
+
+    const { error: insertError } = await supabase.from("mcu_stage_staff_assignments").insert(inserts);
+    if (insertError) return fail(insertError.message, 500);
+  }
+
+  return ok({ saved: staffNames.length });
+}
