@@ -215,66 +215,118 @@ export async function POST(req: NextRequest) {
   const inputValues = stringifyValues(rawValues);
   const values = await maybeComputeCapaskaBackendValues({ supabase, participantId, postId, values: inputValues });
 
+  // bulkSaveResultsV173:
+  // Previous version did SELECT + UPDATE/INSERT one by one for every parameter.
+  // That makes the UI popup stay too long. This version:
+  // 1. fetches all existing results in one query,
+  // 2. bulk inserts new results,
+  // 3. updates changed existing rows in parallel,
+  // 4. bulk inserts audit logs.
+  const saveEntries = Object.entries(values)
+    .map(([parameterIdText, rawValue]) => ({
+      parameterId: Number(parameterIdText),
+      value: String(rawValue ?? "").trim()
+    }))
+    .filter((entry) => Boolean(entry.parameterId));
+
+  const parameterIds = saveEntries.map((entry) => entry.parameterId);
   let saved = 0;
 
-  for (const [parameterIdText, rawValue] of Object.entries(values)) {
-    const parameterId = Number(parameterIdText);
-    if (!parameterId) continue;
-
-    const value = String(rawValue ?? "").trim();
-
-    const { data: existing } = await supabase
+  if (parameterIds.length) {
+    const { data: existingRows, error: existingReadError } = await supabase
       .from("examination_results")
-      .select("*")
+      .select("id, parameter_id, value")
       .eq("participant_id", participantId)
-      .eq("parameter_id", parameterId)
-      .limit(1)
-      .maybeSingle();
+      .in("parameter_id", parameterIds);
 
-    if (existing) {
-      if (String(existing.value || "") !== value) {
-        const { error } = await supabase
-          .from("examination_results")
-          .update({
-            value,
-            updated_by: user.id,
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", existing.id);
+    if (existingReadError) return fail(existingReadError.message, 500);
 
-        if (error) return fail(error.message, 500);
+    const existingByParameterId = new Map<number, any>();
+    for (const row of existingRows || []) {
+      const parameterId = Number(row.parameter_id);
+      if (!existingByParameterId.has(parameterId)) existingByParameterId.set(parameterId, row);
+    }
 
-        await supabase.from("audit_logs").insert({
-          user_id: user.id,
-          action: "UPDATE_RESULT",
+    const nowIso = new Date().toISOString();
+    const updates: any[] = [];
+    const inserts: any[] = [];
+    const auditLogs: any[] = [];
+
+    for (const entry of saveEntries) {
+      const parameterId = entry.parameterId;
+      const value = entry.value;
+      const existing = existingByParameterId.get(parameterId);
+
+      if (existing) {
+        if (String(existing.value || "") !== value) {
+          updates.push({
+            id: existing.id,
+            parameterId,
+            oldValue: existing.value,
+            value
+          });
+
+          auditLogs.push({
+            user_id: user.id,
+            action: "UPDATE_RESULT",
+            participant_id: participantId,
+            parameter_id: parameterId,
+            old_value: existing.value,
+            new_value: value
+          });
+        }
+      } else if (value !== "") {
+        inserts.push({
           participant_id: participantId,
           parameter_id: parameterId,
-          old_value: existing.value,
+          value,
+          input_by: user.id,
+          input_post_id: postId
+        });
+
+        auditLogs.push({
+          user_id: user.id,
+          action: "CREATE_RESULT",
+          participant_id: participantId,
+          parameter_id: parameterId,
+          old_value: null,
           new_value: value
         });
       }
-    } else if (value !== "") {
-      const { error } = await supabase.from("examination_results").insert({
-        participant_id: participantId,
-        parameter_id: parameterId,
-        value,
-        input_by: user.id,
-        input_post_id: postId
-      });
 
-      if (error) return fail(error.message, 500);
-
-      await supabase.from("audit_logs").insert({
-        user_id: user.id,
-        action: "CREATE_RESULT",
-        participant_id: participantId,
-        parameter_id: parameterId,
-        old_value: null,
-        new_value: value
-      });
+      saved += 1;
     }
 
-    saved += 1;
+    if (inserts.length) {
+      const { error: insertError } = await supabase
+        .from("examination_results")
+        .insert(inserts);
+
+      if (insertError) return fail(insertError.message, 500);
+    }
+
+    if (updates.length) {
+      const updateResults = await Promise.all(
+        updates.map((item) =>
+          supabase
+            .from("examination_results")
+            .update({
+              value: item.value,
+              updated_by: user.id,
+              updated_at: nowIso
+            })
+            .eq("id", item.id)
+        )
+      );
+
+      const updateError = updateResults.find((result) => result.error)?.error;
+      if (updateError) return fail(updateError.message, 500);
+    }
+
+    if (auditLogs.length) {
+      const { error: auditError } = await supabase.from("audit_logs").insert(auditLogs);
+      if (auditError) return fail(auditError.message, 500);
+    }
   }
 
   return ok({ saved, scoring_backend: true });
