@@ -217,6 +217,236 @@ function makeGroupedWideSheet(args: {
   return worksheet;
 }
 
+
+// DASHBOARD_EXPORT_STATUS_CATATAN_SHEET_V179
+function cleanStatusSheetV179(value: any) {
+  return String(value ?? "").trim();
+}
+
+function normStatusSheetV179(value: any) {
+  return cleanStatusSheetV179(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function numberFromStatusSheetV179(value: any): number | null {
+  const text = cleanStatusSheetV179(value).replace(",", ".");
+  const match = text.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function genderKeyStatusSheetV179(value: any) {
+  const text = normStatusSheetV179(value);
+  if (text.includes("laki") || text.includes("putra") || text === "l" || text === "lk" || text === "male") return "putra";
+  if (text.includes("perempuan") || text.includes("putri") || text === "p" || text === "pr" || text === "female") return "putri";
+  return "";
+}
+
+function genderLabelStatusSheetV179(value: any) {
+  const key = genderKeyStatusSheetV179(value);
+  if (key === "putra") return "PUTRA";
+  if (key === "putri") return "PUTRI";
+  return cleanStatusSheetV179(value).toUpperCase();
+}
+
+function stageKeyStatusSheetV179(value: any) {
+  const text = normStatusSheetV179(value);
+  if (text.includes("mata") || text.includes("visus") || text.includes("buta warna")) return "mata";
+  if (text.includes("tht") || text.includes("telinga") || text.includes("hidung") || text.includes("tenggorok") || text.includes("garputala")) return "tht";
+  if (text.includes("gigi") || text.includes("mulut") || text.includes("panoramik") || text.includes("panoramic")) return "gigi";
+  if (text.includes("penyakit dalam") || text.includes("abdomen") || text.includes("urogenital") || text.includes("dalam")) return "penyakit_dalam";
+  if (text.includes("jantung") || text.includes("pembuluh darah") || text.includes("kardiovask")) return "jantung";
+  if (text.includes("ortopedi") || text.includes("orthop") || text.includes("tulang") || text.includes("skoliosis") || text.includes("kifosis") || text.includes("lordosis")) return "ortopedi";
+  if (text.includes("radiologi") || text.includes("radiology") || text.includes("thorax") || text.includes("rontgen") || text.includes("xray") || text.includes("x-ray")) return "radiologi";
+  return "";
+}
+
+function isHeightParamStatusSheetV179(param: any) {
+  const name = normStatusSheetV179(param?.name);
+  return name.includes("tinggi badan") || name === "tb" || name.includes("tb ");
+}
+
+function isWeightParamStatusSheetV179(param: any) {
+  const name = normStatusSheetV179(param?.name);
+  return name.includes("berat badan") || name === "bb" || name.includes("bb ");
+}
+
+function isNeutralStatusSheetV179(value: any) {
+  const text = normStatusSheetV179(value);
+  if (!text) return true;
+  const neutralExact = new Set([
+    "normal", "tidak ada", "negatif", "negative", "intak", "0", "0 caries", "0 karies", "0 gigi", "0 tumpatan",
+    "tidak ditemukan", "sesuai juknis", "sesuai", "6/6", "normal 6/6", "t0 / t1-t1", "t0/t1-t1", "t0 / t1", "t0/t1"
+  ]);
+  if (neutralExact.has(text)) return true;
+  if (/^normal\b/.test(text)) return true;
+  if (/^tidak ada\b/.test(text)) return true;
+  if (/^negatif\b/.test(text)) return true;
+  if (/^vod:? ?6\/6.*vos:? ?6\/6$/.test(text)) return true;
+  return false;
+}
+
+function severityStatusSheetV179(value: any, score: any) {
+  const text = normStatusSheetV179(value);
+  const n = typeof score === "number" ? score : numberFromStatusSheetV179(score);
+  if (typeof n === "number" && n <= -10) return "red";
+  if (text.includes("tidak direkomendasi") || text.includes("tidak direkomendasikan")) return "red";
+  if (text.includes("red flag")) return "red";
+  if (text.includes("t3-t3") || text.includes("t3 / t3")) return "red";
+  if (text.includes(">3 caries") || text.includes("> 3 caries") || text.includes(">3 karies")) return "red";
+  if (/\b(caries|karies)\s*(4|5|6|7|8|9|10|11|12|13)\b/.test(text)) return "red";
+  if (text.includes("hemorroid") || text.includes("hemoroid")) return "red";
+  if (text.includes("hernia") || text.includes("undescensus") || text.includes("undecensus")) return "red";
+  if (text.includes("striktur") || text.includes("prolaps")) return "red";
+  if (text.includes("tidak sesuai juknis")) return "red";
+  if (text.includes("kelainan darah") || text.includes("anemia")) return "red";
+  if (text.includes("tidak intak") || text.includes("tidak normal")) return "red";
+  if (typeof n === "number" && n < 0) return "yellow";
+  if (!isNeutralStatusSheetV179(value) && text !== "sesuai") return "yellow";
+  return "";
+}
+
+const STAGE_CONFIG_STATUS_SHEET_V179: any = {
+  mata: { label: "Mata", max: 16, scoreKey: "Mata" },
+  tht: { label: "THT", max: 10, scoreKey: "THT" },
+  gigi: { label: "Gigi", max: 16, scoreKey: "Gigi Mulut" },
+  penyakit_dalam: { label: "Penyakit Dalam", max: 25, scoreKey: "Penyakit Dalam" },
+  jantung: { label: "Jantung", max: 12, scoreKey: "Jantung Pembuluh Darah" },
+  ortopedi: { label: "Ortopedi", max: 16, scoreKey: "Ortopedi" },
+  radiologi: { label: "Radiologi", max: null, scoreKey: "Radiologi" },
+};
+
+function tbBbNoteStatusSheetV179(height: any, weight: any, gender: any) {
+  const h = numberFromStatusSheetV179(height);
+  const w = numberFromStatusSheetV179(weight);
+  const g = genderKeyStatusSheetV179(gender);
+  if (!h || !w || !g) return "";
+  const minHeight = g === "putra" ? 170 : 165;
+  const maxHeight = g === "putra" ? 180 : 175;
+  const minWeight = h - 115;
+  const maxWeight = h - 105;
+  const issues: string[] = [];
+  if (h < minHeight) issues.push(`TB kurang ${Math.round((minHeight - h) * 10) / 10} cm`);
+  if (h > maxHeight) issues.push(`TB lebih ${Math.round((h - maxHeight) * 10) / 10} cm`);
+  if (w < minWeight) issues.push(`BB kurang ${Math.round((minWeight - w) * 10) / 10} kg`);
+  if (w > maxWeight) issues.push(`BB lebih ${Math.round((w - maxWeight) * 10) / 10} kg`);
+  return issues.join("; ");
+}
+
+function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
+  const config = STAGE_CONFIG_STATUS_SHEET_V179[stageKey] || {};
+  const score = numberFromStatusSheetV179(progressInfo?.[config.scoreKey]);
+  const maxScore = config.max;
+  if (redNotes.length) return { status: "Tidak Direkomendasikan", note: redNotes.join("; ") || "Ada red flag / skor -10" };
+  if (typeof score === "number" && typeof maxScore === "number" && score < maxScore) {
+    return { status: "Dengan Catatan", note: notes.length ? notes.join("; ") : `Skor belum maksimal (${score}/${maxScore})` };
+  }
+  if (notes.length) return { status: "Dengan Catatan", note: notes.join("; ") };
+  return { status: "Normal", note: "" };
+}
+
+function buildCapaskaStatusCatatanRowsV179(args: any) {
+  const { participantRows, completedProgressRows, sourceMap, packageName, postName, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice } = args;
+  const progressById = new Map((completedProgressRows || []).map((row: any) => [Number(row["Participant ID"]), row]));
+  return (participantRows || []).map((participant: any, index: number) => {
+    const progressInfo = progressById.get(Number(participant.id)) || {};
+    const source = sourceMap.get(Number(participant.source_id));
+    const notesByStage: any = { mata: [], tht: [], gigi: [], penyakit_dalam: [], jantung: [], ortopedi: [], radiologi: [] };
+    const redNotesByStage: any = { mata: [], tht: [], gigi: [], penyakit_dalam: [], jantung: [], ortopedi: [], radiologi: [] };
+    let height = "";
+    let weight = "";
+
+    for (const param of exportParameters || []) {
+      const result = resultByParticipantParam.get(makeKey(Number(participant.id), Number(param.id)));
+      const value = cleanStatusSheetV179(result?.value ?? "");
+      if (!value) continue;
+      const postLabel = postName.get(Number(param.post_id)) || "";
+      const paramText = `${postLabel} ${param.category || ""} ${param.name || ""}`;
+      if (!height && isHeightParamStatusSheetV179(param)) height = value;
+      if (!weight && isWeightParamStatusSheetV179(param)) weight = value;
+      const stageKey = stageKeyStatusSheetV179(paramText);
+      if (!stageKey || !notesByStage[stageKey]) continue;
+      const score = value ? scoreCapaskaDirectChoice(param, value) : "";
+      const severity = severityStatusSheetV179(value, score);
+      if (!isNeutralStatusSheetV179(value)) {
+        const note = `${param.name}: ${value}`;
+        notesByStage[stageKey].push(note);
+        if (severity === "red") redNotesByStage[stageKey].push(note);
+      } else if (severity === "red") {
+        const note = `${param.name}: ${value || "Red flag"}`;
+        notesByStage[stageKey].push(note);
+        redNotesByStage[stageKey].push(note);
+      }
+    }
+
+    const tbBbNote = tbBbNoteStatusSheetV179(height, weight, participant.gender);
+    const tbBbStatus = tbBbNote ? "Dengan Catatan" : "Normal";
+    const stageEval: any = {};
+    for (const stageKey of Object.keys(STAGE_CONFIG_STATUS_SHEET_V179)) {
+      stageEval[stageKey] = evaluateStageStatusSheetV179(stageKey, Array.from(new Set(notesByStage[stageKey] || [])), Array.from(new Set(redNotesByStage[stageKey] || [])), progressInfo);
+    }
+
+    const allNotes: string[] = [];
+    const redFindings: string[] = [];
+    if (tbBbNote) allNotes.push(`TB/BB: ${tbBbNote}`);
+    for (const stageKey of Object.keys(STAGE_CONFIG_STATUS_SHEET_V179)) {
+      const evaluation = stageEval[stageKey];
+      const label = STAGE_CONFIG_STATUS_SHEET_V179[stageKey].label;
+      if (evaluation.note) {
+        const noteText = `${label}: ${evaluation.note}`;
+        allNotes.push(noteText);
+        if (evaluation.status === "Tidak Direkomendasikan") redFindings.push(noteText);
+      }
+    }
+    const finalStatus = redFindings.length ? "Tidak Direkomendasikan" : allNotes.length ? "Dengan Catatan" : "Normal";
+    return {
+      "NO": index + 1,
+      "PROVINSI": participant.province || "-",
+      "JENIS KELAMIN": genderLabelStatusSheetV179(participant.gender || "-"),
+      "MCU ID / NO PESERTA": participant.mcu_id || participant.external_id || "-",
+      "NAMA": participant.name || "-",
+      "TINGGI BADAN": height,
+      "BERAT BADAN": weight,
+      "STATUS TB/BB": tbBbStatus,
+      "CATATAN TB/BB": tbBbNote,
+      "STATUS MATA": stageEval.mata.status,
+      "CATATAN MATA": stageEval.mata.note,
+      "STATUS THT": stageEval.tht.status,
+      "CATATAN THT": stageEval.tht.note,
+      "STATUS GIGI": stageEval.gigi.status,
+      "CATATAN GIGI": stageEval.gigi.note,
+      "STATUS PENYAKIT DALAM": stageEval.penyakit_dalam.status,
+      "CATATAN PENYAKIT DALAM": stageEval.penyakit_dalam.note,
+      "STATUS JANTUNG": stageEval.jantung.status,
+      "CATATAN JANTUNG": stageEval.jantung.note,
+      "STATUS ORTOPEDI": stageEval.ortopedi.status,
+      "CATATAN ORTOPEDI": stageEval.ortopedi.note,
+      "STATUS RADIOLOGI": stageEval.radiologi.status,
+      "CATATAN RADIOLOGI": stageEval.radiologi.note,
+      "TOTAL SKOR": progressInfo?.["Total Score"] ?? "",
+      "STATUS AKHIR": finalStatus,
+      "RINGKASAN CATATAN": allNotes.join(" | "),
+      "TEMUAN MERAH / RED FLAG": redFindings.join(" | ") || progressInfo?.["Red Flag"] || "",
+      "DATABASE": source?.name || "-",
+      "INSTANSI": source?.institution_name || "-",
+      "PAKET": packageName.get(Number(participant.package_id)) || "-",
+    };
+  });
+}
+
+const CAPASKA_STATUS_CATATAN_HEADERS_V179 = [
+  "NO", "PROVINSI", "JENIS KELAMIN", "MCU ID / NO PESERTA", "NAMA", "TINGGI BADAN", "BERAT BADAN",
+  "STATUS TB/BB", "CATATAN TB/BB", "STATUS MATA", "CATATAN MATA", "STATUS THT", "CATATAN THT",
+  "STATUS GIGI", "CATATAN GIGI", "STATUS PENYAKIT DALAM", "CATATAN PENYAKIT DALAM", "STATUS JANTUNG",
+  "CATATAN JANTUNG", "STATUS ORTOPEDI", "CATATAN ORTOPEDI", "STATUS RADIOLOGI", "CATATAN RADIOLOGI",
+  "TOTAL SKOR", "STATUS AKHIR", "RINGKASAN CATATAN", "TEMUAN MERAH / RED FLAG", "DATABASE", "INSTANSI", "PAKET"
+];
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
@@ -501,6 +731,24 @@ export async function GET(req: NextRequest) {
         finalHeaders,
       });
       XLSX.utils.book_append_sheet(workbook, wideWorksheet, safeSheetName("Hasil Wide Selesai"));
+      const capaskaStatusCatatanRowsV179 = buildCapaskaStatusCatatanRowsV179({
+        participantRows: participantRows.filter((participant: any) => completedParticipantIds.has(Number(participant.id))),
+        completedProgressRows,
+        sourceMap,
+        packageName,
+        postName,
+        exportParameters,
+        resultByParticipantParam,
+        makeKey,
+        scoreCapaskaDirectChoice,
+      });
+
+      appendJsonSheet(
+        workbook,
+        capaskaStatusCatatanRowsV179,
+        "Rekap Status & Catatan",
+        CAPASKA_STATUS_CATATAN_HEADERS_V179
+      );
     } else {
       const completedParticipantCodes = new Set(
         completedProgressRows.map((row: any) => String(row["No MCU"]))
