@@ -5,7 +5,7 @@ import { fail } from "@/lib/server/response";
 
 export const runtime = "nodejs";
 
-// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V183_CAPASKA_ONLY_NOTES_BY_PROBLEM_CHOICE
+// CAPASKA_FINISHED_EXPORT_FULL_STATUS_NOTES_V184_CAPASKA_ONLY_TB_BB_TABLE_JUKNIS
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -38,8 +38,8 @@ function toNumber(value: any): number | null {
 
 function genderKey(value: any) {
   const text = norm(value);
-  if (/^(l|lk|laki|laki laki|putra|male|m)$/.test(text) || text.includes("laki") || text.includes("putra")) return "putra";
-  if (/^(p|pr|perempuan|putri|female|f)$/.test(text) || text.includes("perempuan") || text.includes("putri")) return "putri";
+  if (/^(l|lk|laki|laki laki|putra|pria|male|m)$/.test(text) || text.includes("laki") || text.includes("putra") || text.includes("pria")) return "putra";
+  if (/^(p|pr|perempuan|putri|wanita|female|f|w)$/.test(text) || text.includes("perempuan") || text.includes("putri") || text.includes("wanita")) return "putri";
   return "";
 }
 
@@ -417,10 +417,12 @@ function stageStatusAndNotes(stageKey: string, items: any[], summary: string, se
   };
 }
 
-function formatDeltaCapaskaJuknisV181(value: number) {
-  const rounded = Math.round(value);
-  if (rounded >= 1) return String(rounded);
-  return String(Math.round(value * 10) / 10).replace(".", ",");
+
+function formatDeltaCapaskaJuknisV184(value: number, unit: "cm" | "kg") {
+  const absValue = Math.abs(value);
+  const rounded = Math.round(absValue);
+  const display = rounded >= 1 ? String(rounded) : String(Math.round(absValue * 10) / 10).replace(".", ",");
+  return display + unit;
 }
 
 function statusTbBb(height: any, weight: any, gender: any) {
@@ -433,24 +435,26 @@ function statusTbBb(height: any, weight: any, gender: any) {
   const minHeight = g === "putra" ? 170 : 165;
   const maxHeight = g === "putra" ? 180 : 175;
 
-  // Standar BB dibuat proporsional terhadap TB sesuai tabel juknis: BMI 18,5 s.d. 24,0.
-  // Contoh putri TB 168,4 cm dan BB 71,25 kg: batas atas 24,0 x 1,684^2 = 68,1 kg, jadi BB > 3kg.
-  const heightM = h / 100;
-  const minWeight = 18.5 * heightM * heightM;
-  const maxWeight = 24 * heightM * heightM;
+  // Referensi tabel juknis CAPASKA:
+  // Putra: TB 170-180 cm, BB per TB = TB-115 s.d. TB-105 kg.
+  // Putri: TB 165-175 cm, BB per TB = TB-115 s.d. TB-105 kg.
+  // Untuk TB desimal, batas BB mengikuti rumus tabel yang sama agar tetap presisi.
+  const minWeight = h - 115;
+  const maxWeight = h - 105;
   const issues: string[] = [];
 
-  if (h < minHeight) issues.push(`TB < ${formatDeltaCapaskaJuknisV181(minHeight - h)}cm`);
-  if (h > maxHeight) issues.push(`TB > ${formatDeltaCapaskaJuknisV181(h - maxHeight)}cm`);
-  if (w < minWeight) issues.push(`BB < ${formatDeltaCapaskaJuknisV181(minWeight - w)}kg`);
-  if (w > maxWeight) issues.push(`BB > ${formatDeltaCapaskaJuknisV181(w - maxWeight)}kg`);
+  if (h < minHeight) issues.push(`TB < ${formatDeltaCapaskaJuknisV184(minHeight - h, "cm")}`);
+  if (h > maxHeight) issues.push(`TB > ${formatDeltaCapaskaJuknisV184(h - maxHeight, "cm")}`);
+  if (w < minWeight) issues.push(`BB < ${formatDeltaCapaskaJuknisV184(minWeight - w, "kg")}`);
+  if (w > maxWeight) issues.push(`BB > ${formatDeltaCapaskaJuknisV184(w - maxWeight, "kg")}`);
 
-  return issues.length ? issues.join("; ") : "Sesuai";
+  return issues.length ? `Tidak sesuai Juknis : ${issues.join("; ")}` : "Sesuai Juknis";
 }
 
 function tbBbStatusAndNote(tbBbStatus: string) {
   const text = clean(tbBbStatus);
-  if (!text || text === "Sesuai") return { status: "Normal", note: "" };
+  const normalized = norm(text);
+  if (!text || normalized === "sesuai" || normalized === "sesuai juknis") return { status: "Normal", note: "" };
   return { status: "Dengan Catatan", note: text };
 }
 
