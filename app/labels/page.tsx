@@ -14,6 +14,7 @@ type Participant = {
   company_name?: string;
   source_name?: string;
   institution_name?: string;
+  gender?: string;
   province?: string;
 };
 
@@ -36,6 +37,17 @@ function buildCombinedQrValue(participant: Participant) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
   const nameText = sanitizeQrText(participant.name);
   return `MCU=${idText};NAME=${nameText}`;
+}
+
+function normalizeGenderLabel(value: any) {
+  const raw = String(value || "").trim();
+  const compact = raw.toLowerCase().replace(/[^a-z]/g, "");
+
+  if (!compact) return "";
+  if (["putra", "pria", "lakilaki", "laki", "male", "m", "lk"].includes(compact)) return "PUTRA";
+  if (["putri", "wanita", "perempuan", "female", "f", "pr"].includes(compact)) return "PUTRI";
+
+  return raw.toUpperCase();
 }
 
 function LabelPrinter({ user }: { user: any }) {
@@ -212,7 +224,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v22 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v25 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -329,6 +341,7 @@ function LabelPrinter({ user }: { user: any }) {
                   <th>Nama</th>
                   <th>Nomor MCU</th>
                   <th>Database</th>
+                  <th>Jenis Kelamin</th>
                   <th>Provinsi</th>
                 </tr>
               </thead>
@@ -348,6 +361,7 @@ function LabelPrinter({ user }: { user: any }) {
                     <td className="font-bold">{p.name}</td>
                     <td>{p.mcu_id || p.external_id || "-"}</td>
                     <td>{p.source_name || "-"}</td>
+                    <td>{normalizeGenderLabel((p as any).gender) || "-"}</td>
                     <td>{p.province || "-"}</td>
                   </tr>
                 ))}
@@ -418,6 +432,7 @@ function LabelCard({
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
   const participantAny = participant as any;
   const birthDate = participantAny.date_of_birth || participantAny.birth_date || participantAny.tanggal_lahir || participantAny.dob || "";
+  const genderText = normalizeGenderLabel(participantAny.gender || participantAny.jenis_kelamin || participantAny.sex || "");
   const provinceText = participantAny.province || participantAny.provinsi || participantAny.location || participantAny.lokasi || participantAny.department || "";
 
   const safeFont = Number(fontSize || 10);
@@ -427,6 +442,8 @@ function LabelCard({
     Math.max(16, safeFont + 6);
 
   const qrPx = Math.max(38, Number(qrSize || 46));
+  const labelInfoFont = Math.max(9, safeFont);
+  const genderProvinceFont = Math.max(10, safeFont + 2);
 
   return (
     <section
@@ -474,7 +491,7 @@ function LabelCard({
           top: "39%",
           right: showQr ? "34%" : "8%",
           zIndex: 2,
-          fontSize: `${Math.max(9, safeFont)}px`,
+          fontSize: `${labelInfoFont}px`,
           lineHeight: 1.12,
           fontWeight: 700,
           color: "#111827",
@@ -486,7 +503,34 @@ function LabelCard({
         <div>MCU: {idText || "-"}</div>
         <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
         {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
-        {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
+        {genderText ? (
+          <div
+            style={{
+              marginTop: "4px",
+              fontSize: `${genderProvinceFont}px`,
+              lineHeight: 1.05,
+              fontWeight: 900,
+              color: "#000000",
+              textTransform: "uppercase"
+            }}
+          >
+            {genderText}
+          </div>
+        ) : null}
+        {provinceText ? (
+          <div
+            style={{
+              marginTop: "2px",
+              fontSize: `${genderProvinceFont}px`,
+              lineHeight: 1.05,
+              fontWeight: 900,
+              color: "#000000",
+              textTransform: "uppercase"
+            }}
+          >
+            Provinsi: {provinceText}
+          </div>
+        ) : null}
       </div>
 
       {showQr && (
