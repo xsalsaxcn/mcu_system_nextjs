@@ -2625,7 +2625,6 @@ function InputForm({ user }: { user: any }) {
   }
 
   async function saveStageStaffAssignmentV166() {
-    showSavePopupDomV171("processing");
     if (!showMcuStageStaffPickerV166 || !participant?.id || !effectivePostId) return;
 
     await fetch("/api/mcu/stage-staff/assignment", {
@@ -2701,6 +2700,7 @@ function InputForm({ user }: { user: any }) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    showSavePopupDomV171("processing");
     setMessage("");
 
     const finalValues = computeValues(parameters, values);
@@ -2716,14 +2716,34 @@ function InputForm({ user }: { user: any }) {
     });
 
     const json = await res.json();
-    setMessage(json.ok ? "Hasil berhasil disimpan." : json.message || "Gagal menyimpan.");
-    if (json.ok) {
-      setValues(finalValues);
-      await saveStageStaffAssignmentV166();
-      await refreshDetailAfterSaveV160();
-      setListTab("selesai");
-      await refreshLists(false);
+
+    // nonBlockingSaveAfterApiV175:
+    // The main save is complete when /api/results/save returns ok.
+    // Do not block the success popup on staff assignment, detail refresh, or list refresh.
+    if (!json.ok) {
+      hideSavePopupDomV171();
+      setMessage(json.message || "Gagal menyimpan.");
+      return;
     }
+
+    setValues(finalValues);
+    showSavePopupDomV171("success");
+    setMessage("Hasil berhasil disimpan.");
+
+    setTimeout(() => {
+      returnToSearchAfterSaveV171();
+    }, 650);
+
+    void (async () => {
+      try {
+        await saveStageStaffAssignmentV166();
+        await refreshDetailAfterSaveV160();
+        setListTab("selesai");
+        await refreshLists(false);
+      } catch (error) {
+        console.error("Background post-save refresh failed", error);
+      }
+    })();
   }
 
   async function refreshLists(showMessage = true) {
