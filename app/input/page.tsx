@@ -2537,7 +2537,95 @@ function InputForm({ user }: { user: any }) {
     }
   }
 
+
+
+  function showSavePopupDomV171(mode: "processing" | "success") {
+    if (typeof document === "undefined") return;
+
+    let overlay = document.getElementById("save-popup-dom-v171");
+
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "save-popup-dom-v171";
+      overlay.style.position = "fixed";
+      overlay.style.inset = "0";
+      overlay.style.zIndex = "99999";
+      overlay.style.display = "flex";
+      overlay.style.alignItems = "center";
+      overlay.style.justifyContent = "center";
+      overlay.style.background = "rgba(15, 23, 42, 0.42)";
+      overlay.style.backdropFilter = "blur(4px)";
+      overlay.style.padding = "16px";
+      document.body.appendChild(overlay);
+    }
+
+    const isSuccess = mode === "success";
+    overlay.innerHTML = `
+      <div style="width:100%;max-width:420px;border-radius:28px;border:1px solid #e2e8f0;background:#ffffff;padding:28px;text-align:center;box-shadow:0 24px 80px rgba(15,23,42,.24);font-family:inherit;">
+        <div style="margin:0 auto;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:999px;background:${isSuccess ? "#ecfdf5" : "#eff6ff"};font-size:34px;">
+          ${isSuccess ? "✅" : "⏳"}
+        </div>
+        <div style="margin-top:16px;font-size:24px;line-height:1.25;font-weight:900;color:#0f172a;">
+          ${isSuccess ? "Penyimpanan berhasil" : "Penyimpanan di proses"}
+        </div>
+        <div style="margin-top:8px;font-size:14px;line-height:1.5;font-weight:700;color:#64748b;">
+          ${isSuccess ? "Kembali ke field pencarian..." : "Mohon tunggu, hasil pemeriksaan sedang disimpan."}
+        </div>
+      </div>
+    `;
+  }
+
+  function hideSavePopupDomV171() {
+    if (typeof document === "undefined") return;
+    document.getElementById("save-popup-dom-v171")?.remove();
+  }
+
+  function returnToSearchAfterSaveV171() {
+    hideSavePopupDomV171();
+
+    try {
+      setParticipant(null);
+      setParameters([]);
+      setValues({});
+      setSelectedStageStaffV166([]);
+      setStageStaffOptionsV166([]);
+    } catch {
+      // Keep UI stable even if one optional state is unavailable.
+    }
+
+    setTimeout(() => {
+      const searchInput =
+        document.querySelector<HTMLInputElement>('input[type="search"]') ||
+        document.querySelector<HTMLInputElement>('input[placeholder*="Cari"]') ||
+        document.querySelector<HTMLInputElement>('input[placeholder*="cari"]') ||
+        document.querySelector<HTMLInputElement>('input[placeholder*="nama"]') ||
+        document.querySelector<HTMLInputElement>('input[placeholder*="Nama"]') ||
+        document.querySelector<HTMLInputElement>('input');
+      searchInput?.focus();
+      searchInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  }
+
+  function setMessageWithSavePopupV171(nextMessage: string) {
+    setMessage(nextMessage);
+
+    const text = String(nextMessage || "").toLowerCase();
+
+    if (/berhasil|sukses|tersimpan|selesai/.test(text) && !/gagal|error|salah/.test(text)) {
+      showSavePopupDomV171("success");
+      setTimeout(() => {
+        returnToSearchAfterSaveV171();
+      }, 900);
+      return;
+    }
+
+    if (/gagal|error|wajib|pilih|tidak|unauthorized|salah/.test(text)) {
+      hideSavePopupDomV171();
+    }
+  }
+
   async function saveStageStaffAssignmentV166() {
+    showSavePopupDomV171("processing");
     if (!showMcuStageStaffPickerV166 || !participant?.id || !effectivePostId) return;
 
     await fetch("/api/mcu/stage-staff/assignment", {
