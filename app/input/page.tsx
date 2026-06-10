@@ -2293,7 +2293,7 @@ function ScannerModal({
           canvas.width = 720;
           canvas.height = 720;
 
-          const ctx = canvas.getContext("2d", { willReadFrequently: true } as any);
+          const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
           if (!ctx) return;
           (ctx as any).filter = "grayscale(1) contrast(1.9) brightness(1.18)";
           (ctx as CanvasRenderingContext2D).drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
@@ -2588,7 +2588,7 @@ function InputForm({ user }: { user: any }) {
   const [detail, setDetail] = useState<any>(null);
   const [parameters, setParameters] = useState<any[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(""); const [savePopupStateV198, setSavePopupStateV198] = useState<"processing" | "success" | null>(null); // SAVE_POPUP_MOBILE_STATE_V198
   const [scannerOpen, setScannerOpen] = useState(false);
   const [listTab, setListTab] = useState<ListTab>("selesai");
   const [loadingList, setLoadingList] = useState(false);
@@ -2701,7 +2701,7 @@ function InputForm({ user }: { user: any }) {
 
 
   function showSavePopupDomV171(mode: "processing" | "success") {
-    if (typeof document === "undefined") return;
+     setSavePopupStateV198(mode); // SAVE_POPUP_SHOW_STATE_V198 if (typeof document === "undefined") return;
 
     let overlay = document.getElementById("save-popup-dom-v171");
 
@@ -2737,7 +2737,7 @@ function InputForm({ user }: { user: any }) {
   }
 
   function hideSavePopupDomV171() {
-    if (typeof document === "undefined") return;
+     setSavePopupStateV198(null); // SAVE_POPUP_HIDE_STATE_V198 if (typeof document === "undefined") return;
     document.getElementById("save-popup-dom-v171")?.remove();
   }
 
@@ -2996,7 +2996,7 @@ function InputForm({ user }: { user: any }) {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5"> {savePopupStateV198 && ( <div className="fixed inset-0 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" style={{ zIndex: 2147483647 }} data-save-popup-mobile-v198="true" role="status" aria-live="polite"> <div className="w-full max-w-[420px] rounded-[28px] border border-slate-200 bg-white p-7 text-center shadow-2xl md:p-8"> <div className={savePopupStateV198 === "success" ? "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-[34px]" : "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-[34px]"}> {savePopupStateV198 === "success" ? "✅" : "⏳"} </div> <div className="mt-4 text-2xl font-black leading-tight text-slate-950"> {savePopupStateV198 === "success" ? "Penyimpanan berhasil" : "Penyimpanan diproses"} </div> <div className="mt-2 text-sm font-bold leading-6 text-slate-500"> {savePopupStateV198 === "success" ? "Kembali ke field pencarian..." : "Mohon tunggu, hasil pemeriksaan sedang disimpan."} </div> </div> </div> )} {/* SAVE_POPUP_REACT_OVERLAY_V198 */}
       <ScannerModal
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
