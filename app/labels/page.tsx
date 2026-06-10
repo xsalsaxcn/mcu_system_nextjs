@@ -224,7 +224,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v29 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v30 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -290,7 +290,7 @@ function LabelPrinter({ user }: { user: any }) {
             <input
               type="number"
               min={32}
-              max={72}
+              max={110}
               className="input"
               value={qrSize}
               onChange={(e) => setQrSize(Number(e.target.value || 46))}
@@ -441,7 +441,7 @@ function LabelCard({
     nameText.length > 24 ? Math.max(14, safeFont + 4) :
     Math.max(16, safeFont + 6);
 
-  const qrPx = Math.max(38, Number(qrSize || 46));
+  const qrPx = Math.min(110, Math.max(38, Number(qrSize || 46)));
   const labelInfoFont = Math.max(9, safeFont);
   const genderProvinceFont = Math.max(10, safeFont + 2);
 
@@ -542,7 +542,7 @@ function LabelCard({
         <div
           style={{
             position: "absolute",
-            right: "-6px",
+            right: "-1mm",
             bottom: showBarcodeText ? "12%" : "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
@@ -550,7 +550,8 @@ function LabelCard({
             alignItems: "center",
             justifyContent: "center",
             background: "#ffffff",
-            zIndex: 1
+            padding: "1px",
+            zIndex: 3
           }}
         >
           <QRCodeImage value={qrValue} size={qrPx} />
