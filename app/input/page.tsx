@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -2296,7 +2296,7 @@ function ScannerModal({
           const ctx = canvas.getContext("2d", { willReadFrequently: true } as any);
           if (!ctx) return;
           (ctx as any).filter = "grayscale(1) contrast(1.9) brightness(1.18)";
-          ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+          (ctx as CanvasRenderingContext2D).drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
           (ctx as any).filter = "none";
 
           const cropResults = await detector.detect(canvas);
@@ -2724,7 +2724,7 @@ function InputForm({ user }: { user: any }) {
     overlay.innerHTML = `
       <div style="width:100%;max-width:420px;border-radius:28px;border:1px solid #e2e8f0;background:#ffffff;padding:28px;text-align:center;box-shadow:0 24px 80px rgba(15,23,42,.24);font-family:inherit;">
         <div style="margin:0 auto;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:999px;background:${isSuccess ? "#ecfdf5" : "#eff6ff"};font-size:34px;">
-          ${isSuccess ? "✅" : "⏳"}
+          ${isSuccess ? "?" : "?"}
         </div>
         <div style="margin-top:16px;font-size:24px;line-height:1.25;font-weight:900;color:#0f172a;">
           ${isSuccess ? "Penyimpanan berhasil" : "Penyimpanan di proses"}
