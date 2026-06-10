@@ -169,14 +169,14 @@ function LabelPrinter({ user }: { user: any }) {
     <div className="space-y-5">
       <style jsx global>{`
         @page {
-          size: 40mm 30mm;
+          size: 50mm 30mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 40mm;
+            width: 50mm;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
@@ -201,7 +201,7 @@ function LabelPrinter({ user }: { user: any }) {
           }
 
           .label-page {
-            width: 40mm !important;
+            width: 50mm !important;
             height: 30mm !important;
             page-break-after: always;
             break-after: page;
@@ -224,7 +224,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v30 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v31 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -290,7 +290,7 @@ function LabelPrinter({ user }: { user: any }) {
             <input
               type="number"
               min={32}
-              max={110}
+              max={130}
               className="input"
               value={qrSize}
               onChange={(e) => setQrSize(Number(e.target.value || 46))}
@@ -441,7 +441,7 @@ function LabelCard({
     nameText.length > 24 ? Math.max(14, safeFont + 4) :
     Math.max(16, safeFont + 6);
 
-  const qrPx = Math.min(110, Math.max(38, Number(qrSize || 46)));
+  const qrPx = Math.min(130, Math.max(38, Number(qrSize || 46)));
   const labelInfoFont = Math.max(9, safeFont);
   const genderProvinceFont = Math.max(10, safeFont + 2);
 
@@ -542,7 +542,7 @@ function LabelCard({
         <div
           style={{
             position: "absolute",
-            right: "-1mm",
+            right: "1mm",
             bottom: showBarcodeText ? "12%" : "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
@@ -551,7 +551,7 @@ function LabelCard({
             justifyContent: "center",
             background: "#ffffff",
             padding: "1px",
-            zIndex: 3
+            zIndex: 2
           }}
         >
           <QRCodeImage value={qrValue} size={qrPx} />
