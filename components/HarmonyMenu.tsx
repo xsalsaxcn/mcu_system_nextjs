@@ -29,7 +29,9 @@ const menuGroups = [
       { label: "Dashboard Wellness", href: "/wellness/dashboard" },
       { label: "Input Harian Wellness", href: "/wellness/input" },
       { label: "Profil Wellness", href: "/wellness/profile" },
+      { label: "Signup Peserta Wellness", href: "/wellness/signup" },
       { label: "Master Wellness", href: "/wellness/master" },
+      { label: "Import Peserta Wellness", href: "/wellness/import" },
     ],
   },
   {

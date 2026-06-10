@@ -90,6 +90,11 @@ function WellnessMaster() {
 
       <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-600">{message}</div>
 
+      <section className="grid gap-3 md:grid-cols-2">
+        <a href="/wellness/import" className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-black text-white">Import Peserta Wellness</a>
+        <a href="/wellness/signup" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-black text-blue-700">Link Signup Peserta</a>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-2">
         <form onSubmit={saveFood} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xl font-black text-slate-900">Tambah Makanan</div>

@@ -98,7 +98,7 @@ function WellnessProfile() {
             <div className="text-lg font-black text-slate-900">Strava / Smartwatch</div>
             <div className="mt-2 text-sm font-semibold leading-6 text-slate-500">Opsional dan gratis untuk tahap awal. Smartwatch sync ke Strava, lalu Wellness mengambil aktivitas lewat API Strava jika env sudah diset.</div>
             <div className="mt-4 grid gap-2">
-              <a href="/api/wellness/strava/connect" className="rounded-2xl bg-orange-500 px-4 py-3 text-center text-sm font-black text-white">Connect Strava</a>
+              <a href="/wellness/strava-approval" className="rounded-2xl bg-orange-500 px-4 py-3 text-center text-sm font-black text-white">Connect Strava</a>
               <button type="button" onClick={syncStrava} className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-black text-orange-700">Sync Strava</button>
             </div>
           </div>
