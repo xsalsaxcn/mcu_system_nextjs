@@ -1,4 +1,4 @@
-export type ProgramType = "capaska" | "corporate" | "all";
+export type ProgramType = "capaska" | "corporate" | "vaccination" | "wellness" | "all";
 
 export type SessionUser = {
   id: number;

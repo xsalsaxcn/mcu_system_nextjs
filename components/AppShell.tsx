@@ -27,6 +27,15 @@ const adminMenuGroups = [
     ],
   },
   {
+    title: "Wellness",
+    items: [
+      { label: "Dashboard Wellness", href: "/wellness/dashboard" },
+      { label: "Input Harian Wellness", href: "/wellness/input" },
+      { label: "Profil Wellness", href: "/wellness/profile" },
+      { label: "Master Wellness", href: "/wellness/master" },
+    ],
+  },
+  {
     title: "Vaksinasi Perusahaan",
     items: [
       { label: "Dashboard Vaksinasi", href: "/vaccination/dashboard" },
@@ -74,6 +83,25 @@ function getPost(rawUser: Record<string, unknown>) {
 
 function getUsername(rawUser: Record<string, unknown>) {
   return valueOf(rawUser, ["username", "email", "name"]).toLowerCase();
+}
+
+function isWellnessParticipantUser(rawUser: Record<string, unknown>) {
+  const role = getRole(rawUser);
+  const program = getProgram(rawUser);
+  return role === "wellness_participant" || role === "participant" || program === "wellness";
+}
+
+function getWellnessParticipantMenuGroups() {
+  return [
+    {
+      title: "Wellness",
+      items: [
+        { label: "Dashboard Saya", href: "/wellness/dashboard" },
+        { label: "Input Harian", href: "/wellness/input" },
+        { label: "Profil Saya", href: "/wellness/profile" },
+      ],
+    },
+  ];
 }
 
 function getOperatorFormRoute(rawUser: Record<string, unknown>) {
@@ -319,7 +347,8 @@ export default function AppShell({
       "Admin"
   );
 
-  const menuGroups = isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
+  const isWellnessParticipant = isWellnessParticipantUser(rawUser);
+  const menuGroups = isWellnessParticipant ? getWellnessParticipantMenuGroups() : isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
   const operatorFormRoute = getOperatorFormRoute(rawUser);
   const operatorFormLabel = getOperatorFormLabel(rawUser);
 
@@ -352,7 +381,11 @@ export default function AppShell({
               Dashboard
             </a>
 
-            {isOperator ? (
+            {isWellnessParticipant ? (
+              <a href="/wellness/dashboard" className="top-nav-link">
+                Wellness Saya
+              </a>
+            ) : isOperator ? (
               <a href={operatorFormRoute} className="top-nav-link">
                 {operatorFormLabel}
               </a>

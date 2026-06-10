@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
-type ModuleKey = "mcu_capaska" | "mcu_corporate" | "vaccination";
+type ModuleKey = "mcu_capaska" | "mcu_corporate" | "vaccination" | "wellness";
 
 const MODULES: Array<{
   key: ModuleKey;
@@ -28,6 +28,12 @@ const MODULES: Array<{
     title: "Vaksinasi Perusahaan",
     subtitle: "Vaksin, antrian, administered, dokter, dan export.",
     accent: "from-emerald-600 to-teal-700",
+  },
+  {
+    key: "wellness",
+    title: "Wellness",
+    subtitle: "Pemantauan berat badan, makanan, aktivitas, BMI, dan Strava optional.",
+    accent: "from-fuchsia-600 via-rose-600 to-orange-500",
   },
 ];
 
@@ -123,7 +129,7 @@ function compareSortValues(a: any, b: any, sortConfig: SortConfig, isVaccination
 
   const aNumber = typeof aValue === "number" ? aValue : Number(String(aValue).replace(/[^0-9.-]/g, ""));
   const bNumber = typeof bValue === "number" ? bValue : Number(String(bValue).replace(/[^0-9.-]/g, ""));
-  const numericKeys = ["queue_number", "total_score", "progress_percent", "done_stage", "total_stage"];
+  const numericKeys = ["queue_number", "total_score", "progress_percent", "done_stage", "total_stage", "initial_weight_kg", "current_weight_kg", "weight_delta_kg", "bmi", "calories_today"];
 
   if (numericKeys.includes(sortConfig.key) && Number.isFinite(aNumber) && Number.isFinite(bNumber)) {
     return (aNumber - bNumber) * direction;
@@ -464,6 +470,7 @@ function AdminDashboard() {
 
   const activeModule = MODULES.find((m) => m.key === moduleKey) || MODULES[0];
   const isVaccination = moduleKey === "vaccination";
+  const isWellness = moduleKey === "wellness";
   const mcuProgram = moduleKey === "mcu_capaska" ? "capaska" : "corporate";
 
   async function loadOptions(nextModule = moduleKey) {
@@ -472,6 +479,14 @@ function AdminDashboard() {
     setSummary({});
     setLoaded(false);
     setSearch("");
+
+    if (nextModule === "wellness") {
+      setSourceId("");
+      setSessionId("");
+      setSources([]);
+      setSessions([]);
+      return;
+    }
 
     if (nextModule === "vaccination") {
       setSourceId("");
@@ -502,6 +517,24 @@ function AdminDashboard() {
     setMessage("Memuat dashboard...");
 
     try {
+      if (isWellness) {
+        const json = await fetch("/api/wellness/dashboard", { cache: "no-store" }).then((r) => r.json());
+
+        if (!json.ok) {
+          setMessage(json.message || "Gagal memuat dashboard Wellness.");
+          setRows([]);
+          setSummary({});
+          setLoaded(true);
+          return;
+        }
+
+        setSummary(json.summary || {});
+        setRows(json.rows || []);
+        setMessage("Dashboard Wellness berhasil dimuat.");
+        setLoaded(true);
+        return;
+      }
+
       if (isVaccination) {
         const params = new URLSearchParams();
         params.set("status", vaccStatus);
@@ -565,6 +598,11 @@ function AdminDashboard() {
   }
 
   function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full") {
+    if (isWellness) {
+      window.open("/api/wellness/export", "_blank");
+      return;
+    }
+
     if (isVaccination) {
       const params = new URLSearchParams();
       params.set("format", "csv");
@@ -593,13 +631,23 @@ function AdminDashboard() {
 
   useEffect(() => {
     setSortConfig(isVaccination ? { key: "queue_number", direction: "asc" } : { key: "name", direction: "asc" });
-  }, [isVaccination]);
+  }, [isVaccination, isWellness]);
 
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     const searchedRows = keyword
       ? rows.filter((row: any) => {
-          const haystack = isVaccination
+          const haystack = isWellness
+            ? [
+                row.name,
+                row.code,
+                row.group_name,
+                row.current_weight_kg,
+                row.bmi,
+                row.bmi_status,
+                row.latest_weight_date,
+              ]
+            : isVaccination
             ? [
                 row.queue_number,
                 row.participant_name,
@@ -629,9 +677,9 @@ function AdminDashboard() {
       : rows;
 
     return [...searchedRows].sort((a: any, b: any) => compareSortValues(a, b, sortConfig, isVaccination));
-  }, [rows, search, isVaccination, sortConfig]);
+  }, [rows, search, isVaccination, isWellness, sortConfig]);
 
-  const canClickMcuMetric = mcuProgram === "capaska";
+  const canClickMcuMetric = !isWellness && mcuProgram === "capaska";
 
   return (
     <div className="space-y-6">
@@ -654,7 +702,7 @@ function AdminDashboard() {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-4 lg:grid-cols-4">
         {MODULES.map((item) => (
           <button
             type="button"
@@ -691,7 +739,11 @@ function AdminDashboard() {
             ))}
           </select>
 
-          {isVaccination ? (
+          {isWellness ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">
+              Data Wellness semua peserta sesuai akses akun
+            </div>
+          ) : isVaccination ? (
             <select
               className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               value={sessionId}
@@ -719,7 +771,12 @@ function AdminDashboard() {
             </select>
           )}
 
-          {isVaccination ? (
+          {isWellness ? (
+            <div className="flex flex-wrap gap-2">
+              <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input Harian</a>
+              <a href="/wellness/master" className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700">Master</a>
+            </div>
+          ) : isVaccination ? (
             <select
               className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               value={vaccStatus}
@@ -763,7 +820,15 @@ function AdminDashboard() {
 
       {loaded ? (
         <>
-          {isVaccination ? (
+          {isWellness ? (
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <MetricCard label="Peserta" value={summary.total} tone="slate" />
+              <MetricCard label="Rata-rata BMI" value={summary.avg_bmi} tone="blue" />
+              <MetricCard label="Kalori Makanan Hari Ini" value={summary.total_food_calories_today} tone="amber" />
+              <MetricCard label="Kalori Aktivitas Hari Ini" value={summary.total_activity_calories_today} tone="emerald" />
+              <MetricCard label="Aktif" value={summary.active} tone="indigo" />
+            </section>
+          ) : isVaccination ? (
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <MetricCard label="Total" value={summary.total} tone="slate" onClick={() => setVaccStatus("all")} active={vaccStatus === "all"} />
               <MetricCard label="Sudah" value={summary.done} tone="emerald" onClick={() => setVaccStatus("done")} active={vaccStatus === "done"} />
@@ -833,7 +898,12 @@ function AdminDashboard() {
                   onChange={(e) => setSearch(e.target.value)}
                 />
 
-                {isVaccination ? (
+                {isWellness ? (
+                  <>
+                    <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input Harian</a>
+                    <button className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => exportData("all")}>Export Wellness</button>
+                  </>
+                ) : isVaccination ? (
                   <>
                     <button className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" onClick={() => exportData("done")}>Export Sudah</button>
                     <button className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-black text-amber-700" onClick={() => exportData("not_done")}>Export Belum</button>
@@ -849,7 +919,36 @@ function AdminDashboard() {
             </div>
 
             <div className="overflow-x-auto">
-              {isVaccination ? (
+              {isWellness ? (
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Nama" sortKey="name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Kelompok" sortKey="group_name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="BB Awal" sortKey="initial_weight_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="BB Kini" sortKey="current_weight_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Delta" sortKey="weight_delta_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="BMI" sortKey="bmi" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Kalori" sortKey="calories_today" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredRows.map((row: any) => (
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-black text-slate-900">{row.name}<div className="text-xs font-semibold text-slate-400">{row.code || "-"}</div></td>
+                        <td className="px-4 py-3 text-slate-600">{row.group_name || "-"}</td>
+                        <td className="px-4 py-3 font-bold">{row.initial_weight_kg ? `${row.initial_weight_kg} kg` : "-"}</td>
+                        <td className="px-4 py-3 font-bold">{row.current_weight_kg ? `${row.current_weight_kg} kg` : "-"}</td>
+                        <td className={`px-4 py-3 font-black ${Number(row.weight_delta_kg || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>{row.weight_delta_kg !== null && row.weight_delta_kg !== undefined ? `${row.weight_delta_kg} kg` : "-"}</td>
+                        <td className="px-4 py-3"><StatusPill tone="blue">{row.bmi || "-"} · {row.bmi_status || "-"}</StatusPill></td>
+                        <td className="px-4 py-3 text-slate-600">Makan {row.calories_today || 0} / Aktivitas {row.activity_calories_today || 0}</td>
+                        <td className="px-4 py-3"><a href="/wellness/input" className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white">Input</a></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : isVaccination ? (
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>

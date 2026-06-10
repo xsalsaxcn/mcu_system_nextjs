@@ -24,6 +24,15 @@ const menuGroups = [
     ],
   },
   {
+    title: "Wellness",
+    items: [
+      { label: "Dashboard Wellness", href: "/wellness/dashboard" },
+      { label: "Input Harian Wellness", href: "/wellness/input" },
+      { label: "Profil Wellness", href: "/wellness/profile" },
+      { label: "Master Wellness", href: "/wellness/master" },
+    ],
+  },
+  {
     title: "Vaksinasi Perusahaan",
     items: [
       { label: "Dashboard Vaksinasi", href: "/vaccination/dashboard" },
