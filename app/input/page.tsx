@@ -2186,6 +2186,10 @@ function ScannerModal({
   const scannerId = "mcu-html5-qrcode-reader";
   const scannerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const ultraDetectorRef = useRef<any>(null);
+  const ultraScanIntervalRef = useRef<any>(null);
+  const ultraCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const torchOnRef = useRef(false);
 
   const [manualCode, setManualCode] = useState("");
   const [status, setStatus] = useState("");
@@ -2193,15 +2197,16 @@ function ScannerModal({
   const [scanMode, setScanMode] = useState<"camera" | "manual">("camera");
 
 
-  // SCANNER_QR_SQUARE_FOCUS_V194
+  // SCANNER_ULTRA_QR_SENSITIVE_V195
   async function applyScannerCameraSharpness(scanner: any, showMessage = false) {
     if (!scanner) return;
 
-    // Mode QR kecil: area scan kotak, FPS tinggi, dan tuning kamera dibuat safe per device.
+    // Ultra QR kecil: utamakan autofocus, exposure stabil, zoom lebih tinggi, dan torch bila tersedia.
     try {
       await scanner.applyVideoConstraints?.({
         advanced: [
           { focusMode: "continuous" },
+          { focusMode: "single-shot" },
           { exposureMode: "continuous" },
           { whiteBalanceMode: "continuous" }
         ]
@@ -2213,11 +2218,11 @@ function ScannerModal({
       const settings = scanner.getRunningTrackSettings?.() || {};
       const zoomCap = capabilities.zoom;
 
-      // QR label kecil lebih mudah terbaca dengan zoom sedang, supaya HP tidak perlu terlalu dekat dan tidak blur.
+      // Zoom lebih agresif supaya QR kecil terlihat besar tanpa kamera ditempel terlalu dekat.
       if (zoomCap && typeof zoomCap === "object") {
         const minZoom = Number(zoomCap.min ?? 1);
         const maxZoom = Number(zoomCap.max ?? minZoom);
-        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 2));
+        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 2.8));
         const currentZoom = Number(settings.zoom ?? 0);
 
         if (targetZoom > minZoom && Math.abs(currentZoom - targetZoom) > 0.05) {
@@ -2234,15 +2239,95 @@ function ScannerModal({
         video.style.width = "100%";
         video.style.height = "100%";
         video.style.transform = "translateZ(0)";
+        video.style.imageRendering = "auto";
       }
     } catch {}
 
     if (showMessage) {
-      setStatus("Fokus QR dioptimalkan. Arahkan hanya QR ke kotak, jarak 20-35 cm, tahan stabil 2 detik.");
+      setStatus("Mode ultra fokus QR aktif. Isi kotak hanya dengan QR, mundur 25-45 cm, tahan stabil 2 detik.");
+    }
+  }
+
+  function stopUltraQrDetector() {
+    if (ultraScanIntervalRef.current) {
+      window.clearInterval(ultraScanIntervalRef.current);
+      ultraScanIntervalRef.current = null;
+    }
+  }
+
+  async function startUltraQrDetector() {
+    stopUltraQrDetector();
+
+    try {
+      const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+      if (!BarcodeDetectorCtor) return;
+
+      if (!ultraDetectorRef.current) {
+        ultraDetectorRef.current = new BarcodeDetectorCtor({ formats: ["qr_code"] });
+      }
+
+      ultraScanIntervalRef.current = window.setInterval(async () => {
+        const detector = ultraDetectorRef.current;
+        const video = document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null;
+        if (!detector || !video || video.readyState < 2) return;
+        if (video.dataset.ultraBusy === "1") return;
+
+        video.dataset.ultraBusy = "1";
+        try {
+          const directResults = await detector.detect(video);
+          const directCode = String(directResults?.[0]?.rawValue || directResults?.[0]?.displayValue || "").trim();
+          if (directCode) {
+            finishDetected(directCode);
+            return;
+          }
+
+          const vw = video.videoWidth || video.clientWidth || 0;
+          const vh = video.videoHeight || video.clientHeight || 0;
+          if (!vw || !vh) return;
+
+          const cropSize = Math.floor(Math.min(vw, vh) * 0.55);
+          const sx = Math.max(0, Math.floor((vw - cropSize) / 2));
+          const sy = Math.max(0, Math.floor((vh - cropSize) / 2));
+          const canvas = ultraCanvasRef.current || document.createElement("canvas");
+          ultraCanvasRef.current = canvas;
+          canvas.width = 720;
+          canvas.height = 720;
+
+          const ctx = canvas.getContext("2d", { willReadFrequently: true } as any);
+          if (!ctx) return;
+          (ctx as any).filter = "grayscale(1) contrast(1.9) brightness(1.18)";
+          ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+          (ctx as any).filter = "none";
+
+          const cropResults = await detector.detect(canvas);
+          const cropCode = String(cropResults?.[0]?.rawValue || cropResults?.[0]?.displayValue || "").trim();
+          if (cropCode) finishDetected(cropCode);
+        } catch {
+          // BrowserDetector bisa gagal per frame; scanner html5-qrcode tetap jalan sebagai fallback.
+        } finally {
+          video.dataset.ultraBusy = "0";
+        }
+      }, 110);
+    } catch {}
+  }
+
+  async function toggleScannerTorch(scanner: any) {
+    if (!scanner) return;
+
+    try {
+      const nextTorch = !torchOnRef.current;
+      await scanner.applyVideoConstraints?.({ advanced: [{ torch: nextTorch }] });
+      torchOnRef.current = nextTorch;
+      setStatus(nextTorch ? "Lampu kamera aktif. Arahkan QR ke kotak dan tahan stabil." : "Lampu kamera dimatikan.");
+    } catch {
+      setStatus("Lampu kamera tidak didukung di browser/HP ini. Pakai cahaya luar yang lebih terang.");
     }
   }
 
   async function stopScanner() {
+    stopUltraQrDetector();
+    torchOnRef.current = false;
+
     try {
       await scannerRef.current?.stop?.();
     } catch {}
@@ -2288,10 +2373,10 @@ function ScannerModal({
       scannerRef.current = scanner;
 
       const config = {
-        fps: 30,
+        fps: 45,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const base = Math.min(viewfinderWidth, viewfinderHeight);
-          const size = Math.max(190, Math.min(Math.floor(base * 0.72), 330));
+          const size = Math.max(145, Math.min(Math.floor(base * 0.52), 245));
           return { width: size, height: size };
         },
         aspectRatio: 1,
@@ -2303,7 +2388,7 @@ function ScannerModal({
           facingMode: { ideal: "environment" },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30, max: 30 },
+          frameRate: { ideal: 60, max: 60 },
           focusMode: "continuous",
           exposureMode: "continuous",
           whiteBalanceMode: "continuous"
@@ -2321,11 +2406,13 @@ function ScannerModal({
         }
       );
 
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 250);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 900);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1800);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 200);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 700);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1400);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 2400);
+      window.setTimeout(() => startUltraQrDetector(), 650);
 
-      setStatus("Scanner QR aktif. Arahkan QR saja ke dalam kotak, tunggu fokus 1-2 detik.");
+      setStatus("Scanner QR ULTRA aktif. Masukkan QR saja ke kotak kecil, jarak 25-45 cm, tahan stabil 2 detik.");
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")) {
@@ -2382,26 +2469,29 @@ function ScannerModal({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-lg font-black">Scan Barcode / QR</div>
-            <div className="text-xs text-slate-400">Scanner v21 QR kotak + fokus lebih sensitif.</div>
+            <div className="text-xs text-slate-400">Scanner v22 ULTRA sensitif khusus QR kecil.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-3 py-2 font-bold">
             Tutup
           </button>
         </div>
 
-        <div className="overflow-hidden rounded-2xl bg-black">
-          <div id={scannerId} className="aspect-square w-full min-h-0" />
+        <div
+          className="mx-auto aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-black"
+          onClick={() => applyScannerCameraSharpness(scannerRef.current, true)}
+        >
+          <div id={scannerId} className="h-full w-full" />
         </div>
 
         <div className="mt-3 grid gap-2 rounded-xl bg-slate-900 p-3 text-sm text-slate-200">
           <div>{isStarting ? "Menyiapkan scanner..." : status}</div>
           <div className="text-xs text-slate-400">
-            Tips: arahkan kotak tepat ke QR saja, bukan seluruh label. Jarak ideal 20-35 cm, cahaya harus terang, tahan stabil 2 detik.
-            Kalau tetap blur, tekan Fokus QR, mundurkan HP sedikit, lalu dekatkan pelan-pelan.
+            Tips: isi kotak hanya dengan QR, bukan seluruh label. Jarak ideal 25-45 cm. Kalau blur, jangan ditempel terlalu dekat: mundur sedikit, tekan Fokus QR Ultra, lalu tahan 2 detik.
+            Untuk label glossy/gelap, tekan Lampu atau tambah cahaya dari samping.
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <button
             type="button"
             className="rounded-xl bg-slate-800 px-3 py-2 font-black"
@@ -2417,7 +2507,16 @@ function ScannerModal({
             onClick={() => applyScannerCameraSharpness(scannerRef.current, true)}
             disabled={isStarting}
           >
-            Fokus Ulang
+            Fokus QR Ultra
+          </button>
+
+          <button
+            type="button"
+            className="rounded-xl bg-slate-800 px-3 py-2 font-black"
+            onClick={() => toggleScannerTorch(scannerRef.current)}
+            disabled={isStarting}
+          >
+            Lampu
           </button>
 
           <button
