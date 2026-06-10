@@ -2636,17 +2636,52 @@ function InputForm({ user }: { user: any }) {
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
-
     parameters.filter((param) => !isAutoField(param)).forEach((param) => {
       const category = param.category || effectivePostName || "Pemeriksaan";
       const last = groups[groups.length - 1];
-
       if (!last || last.category !== category) {
         groups.push({ category, params: [param] });
       } else {
         last.params.push(param);
       }
     });
+
+    // TB_BB_FORM_ORDER_V203
+    // Urutan tampil khusus TB/BB: semua group TB dulu, baru semua group BB.
+    // Group lain tetap mengikuti urutan asli dari database/API.
+    const groupTextV203 = (group: { category: string; params: any[] }) =>
+      [group.category, ...group.params.map((param: any) => param?.name || "")]
+        .join(" ")
+        .toLowerCase();
+
+    const isTbGroupV203 = (group: { category: string; params: any[] }) =>
+      /tinggi\s*badan|(^|[^a-z])tb([^a-z]|$)/i.test(groupTextV203(group));
+
+    const isBbGroupV203 = (group: { category: string; params: any[] }) =>
+      /berat\s*badan|(^|[^a-z])bb([^a-z]|$)/i.test(groupTextV203(group));
+
+    const taggedGroupsV203 = groups.map((group, index) => ({ group, index }));
+    const tbBbIndexesV203 = taggedGroupsV203
+      .filter(({ group }) => isTbGroupV203(group) || isBbGroupV203(group))
+      .map(({ index }) => index);
+
+    if (tbBbIndexesV203.length) {
+      const firstTbBbIndexV203 = Math.min(...tbBbIndexesV203);
+      const tbGroupsV203 = taggedGroupsV203
+        .filter(({ group }) => isTbGroupV203(group))
+        .map(({ group }) => group);
+      const bbGroupsV203 = taggedGroupsV203
+        .filter(({ group }) => !isTbGroupV203(group) && isBbGroupV203(group))
+        .map(({ group }) => group);
+      const beforeTbBbV203 = taggedGroupsV203
+        .filter(({ group, index }) => index < firstTbBbIndexV203 && !isTbGroupV203(group) && !isBbGroupV203(group))
+        .map(({ group }) => group);
+      const afterTbBbV203 = taggedGroupsV203
+        .filter(({ group, index }) => index >= firstTbBbIndexV203 && !isTbGroupV203(group) && !isBbGroupV203(group))
+        .map(({ group }) => group);
+
+      return [...beforeTbBbV203, ...tbGroupsV203, ...bbGroupsV203, ...afterTbBbV203];
+    }
 
     return groups;
   }, [parameters, effectivePostName]);
