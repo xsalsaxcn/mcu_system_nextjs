@@ -224,7 +224,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v28 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v29 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -442,9 +442,6 @@ function LabelCard({
     Math.max(16, safeFont + 6);
 
   const qrPx = Math.max(38, Number(qrSize || 46));
-  // QR_RIGHT_LAYOUT_V205: geser QR ke kanan dan sisakan ruang teks agar QR size 70 tidak menabrak tulisan.
-  const qrReservedPx = showQr ? Math.max(qrPx + 14, 88) : 0;
-  const textRightOffset = showQr ? `${qrReservedPx}px` : "8%";
   const labelInfoFont = Math.max(9, safeFont);
   const genderProvinceFont = Math.max(10, safeFont + 2);
 
@@ -465,7 +462,7 @@ function LabelCard({
           position: "absolute",
           left: "8%",
           top: "8%",
-          right: textRightOffset,
+          right: "8%",
           zIndex: 2
         }}
       >
@@ -492,7 +489,7 @@ function LabelCard({
           position: "absolute",
           left: "8%",
           top: "39%",
-          right: textRightOffset,
+          right: showQr ? "34%" : "8%",
           zIndex: 2,
           fontSize: `${labelInfoFont}px`,
           lineHeight: 1.12,
@@ -545,7 +542,7 @@ function LabelCard({
         <div
           style={{
             position: "absolute",
-            right: "0%",
+            right: "-6px",
             bottom: showBarcodeText ? "12%" : "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
@@ -553,7 +550,7 @@ function LabelCard({
             alignItems: "center",
             justifyContent: "center",
             background: "#ffffff",
-            zIndex: 3
+            zIndex: 1
           }}
         >
           <QRCodeImage value={qrValue} size={qrPx} />
