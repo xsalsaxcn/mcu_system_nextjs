@@ -2193,11 +2193,11 @@ function ScannerModal({
   const [scanMode, setScanMode] = useState<"camera" | "manual">("camera");
 
 
-  // SCANNER_CAMERA_SHARPNESS_V193
+  // SCANNER_QR_SQUARE_FOCUS_V194
   async function applyScannerCameraSharpness(scanner: any, showMessage = false) {
     if (!scanner) return;
 
-    // Browser support berbeda-beda per HP. Semua tuning dibuat safe: jika tidak didukung, scanner tetap jalan normal.
+    // Mode QR kecil: area scan kotak, FPS tinggi, dan tuning kamera dibuat safe per device.
     try {
       await scanner.applyVideoConstraints?.({
         advanced: [
@@ -2213,11 +2213,11 @@ function ScannerModal({
       const settings = scanner.getRunningTrackSettings?.() || {};
       const zoomCap = capabilities.zoom;
 
-      // Zoom ringan membantu label kecil terbaca tanpa kamera ditempel terlalu dekat, sehingga gambar tidak mudah blur.
+      // QR label kecil lebih mudah terbaca dengan zoom sedang, supaya HP tidak perlu terlalu dekat dan tidak blur.
       if (zoomCap && typeof zoomCap === "object") {
         const minZoom = Number(zoomCap.min ?? 1);
         const maxZoom = Number(zoomCap.max ?? minZoom);
-        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 1.6));
+        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 2));
         const currentZoom = Number(settings.zoom ?? 0);
 
         if (targetZoom > minZoom && Math.abs(currentZoom - targetZoom) > 0.05) {
@@ -2233,11 +2233,12 @@ function ScannerModal({
         video.style.objectFit = "cover";
         video.style.width = "100%";
         video.style.height = "100%";
+        video.style.transform = "translateZ(0)";
       }
     } catch {}
 
     if (showMessage) {
-      setStatus("Fokus kamera dioptimalkan. Pegang stabil 1-2 detik, jangan terlalu dekat dengan label.");
+      setStatus("Fokus QR dioptimalkan. Arahkan hanya QR ke kotak, jarak 20-35 cm, tahan stabil 2 detik.");
     }
   }
 
@@ -2277,15 +2278,9 @@ function ScannerModal({
       const Html5QrcodeSupportedFormats = mod.Html5QrcodeSupportedFormats;
 
       const scanner = new Html5Qrcode(scannerId, {
+        // Fokus ke QR_CODE saja agar decoding QR kecil lebih cepat dan sensitif.
         formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.ITF
+          Html5QrcodeSupportedFormats.QR_CODE
         ],
         verbose: false
       });
@@ -2293,18 +2288,21 @@ function ScannerModal({
       scannerRef.current = scanner;
 
       const config = {
-        fps: 24,
+        fps: 30,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const width = Math.floor(viewfinderWidth * 0.9);
-          const height = Math.max(130, Math.floor(viewfinderHeight * 0.34));
-          return { width, height };
+          const base = Math.min(viewfinderWidth, viewfinderHeight);
+          const size = Math.max(190, Math.min(Math.floor(base * 0.72), 330));
+          return { width: size, height: size };
         },
-        aspectRatio: 1.3333333,
+        aspectRatio: 1,
         disableFlip: false,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
         videoConstraints: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
           frameRate: { ideal: 30, max: 30 },
           focusMode: "continuous",
           exposureMode: "continuous",
@@ -2323,10 +2321,11 @@ function ScannerModal({
         }
       );
 
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 350);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1300);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 250);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 900);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1800);
 
-      setStatus("Scanner aktif. Tunggu kamera fokus dulu, lalu arahkan QR/barcode di dalam kotak 1-2 detik.");
+      setStatus("Scanner QR aktif. Arahkan QR saja ke dalam kotak, tunggu fokus 1-2 detik.");
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")) {
@@ -2383,7 +2382,7 @@ function ScannerModal({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-lg font-black">Scan Barcode / QR</div>
-            <div className="text-xs text-slate-400">Scanner v20 autofocus + mode label kecil.</div>
+            <div className="text-xs text-slate-400">Scanner v21 QR kotak + fokus lebih sensitif.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-3 py-2 font-bold">
             Tutup
@@ -2391,14 +2390,14 @@ function ScannerModal({
         </div>
 
         <div className="overflow-hidden rounded-2xl bg-black">
-          <div id={scannerId} className="min-h-80 w-full" />
+          <div id={scannerId} className="aspect-square w-full min-h-0" />
         </div>
 
         <div className="mt-3 grid gap-2 rounded-xl bg-slate-900 p-3 text-sm text-slate-200">
           <div>{isStarting ? "Menyiapkan scanner..." : status}</div>
           <div className="text-xs text-slate-400">
-            Tips: pakai Chrome Android, cahaya cukup, jarak 15-30 cm, jangan terlalu dekat agar tidak blur.
-            Kalau gambar tetap blur, tekan Fokus Ulang atau Scan Ulang, lalu tahan stabil 1-2 detik.
+            Tips: arahkan kotak tepat ke QR saja, bukan seluruh label. Jarak ideal 20-35 cm, cahaya harus terang, tahan stabil 2 detik.
+            Kalau tetap blur, tekan Fokus QR, mundurkan HP sedikit, lalu dekatkan pelan-pelan.
           </div>
         </div>
 
