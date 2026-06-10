@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -238,7 +238,7 @@ function makeGroupedWideSheet(args: {
 
 // DASHBOARD_EXPORT_WIDE_DOCTORS_TS_FIX_V187
 // DASHBOARD_EXPORT_WIDE_SELESAI_PROVINCE_GENDER_DOCTORS_V185
-// DASHBOARD_EXPORT_STATUS_CATATAN_SHEET_V179
+// DASHBOARD_EXPORT_STATUS_CATATAN_SHEET_V200_EYE_NEUTRAL
 function cleanStatusSheetV179(value: any) {
   return String(value ?? "").trim();
 }
@@ -299,15 +299,61 @@ function isWeightParamStatusSheetV179(param: any) {
 function isNeutralStatusSheetV179(value: any) {
   const text = normStatusSheetV179(value);
   if (!text) return true;
+
   const neutralExact = new Set([
-    "normal", "tidak ada", "negatif", "negative", "intak", "0", "0 caries", "0 karies", "0 gigi", "0 tumpatan",
-    "tidak ditemukan", "sesuai juknis", "sesuai", "6/6", "normal 6/6", "t0 / t1-t1", "t0/t1-t1", "t0 / t1", "t0/t1"
+    "normal",
+    "tidak ada",
+    "ga ada",
+    "gak ada",
+    "nggak ada",
+    "ngga ada",
+    "negatif",
+    "negative",
+    "intak",
+    "0",
+    "0 caries",
+    "0 karies",
+    "0 gigi",
+    "0 tumpatan",
+    "tidak ditemukan",
+    "tidak menggunakan",
+    "tidak pakai",
+    "tanpa",
+    "sesuai juknis",
+    "sesuai",
+    "6/6",
+    "normal 6/6",
+    "t0 / t1-t1",
+    "t0/t1-t1",
+    "t0 / t1",
+    "t0/t1",
+    "-/-",
+    "(-)/(-)",
+    "(-) / (-)",
   ]);
+
   if (neutralExact.has(text)) return true;
+
   if (/^normal\b/.test(text)) return true;
   if (/^tidak ada\b/.test(text)) return true;
+  if (/^(ga|gak|nggak|ngga) ada\b/.test(text)) return true;
+  if (/^tidak menggunakan\b/.test(text)) return true;
+  if (/^tidak pakai\b/.test(text)) return true;
+  if (/^tanpa\b/.test(text)) return true;
   if (/^negatif\b/.test(text)) return true;
   if (/^vod:? ?6\/6.*vos:? ?6\/6$/.test(text)) return true;
+  if (/^6\/6$/.test(text)) return true;
+
+  // Mata: tidak memakai kontak lens/kacamata berarti normal.
+  if (/(kontak|contact|lensa|lens|softlens|kacamata|kaca mata)/.test(text) && /(tidak menggunakan|tidak pakai|tanpa|tidak ada|ga ada|gak ada|nggak ada|ngga ada|negatif|negative)/.test(text)) return true;
+
+  // Mata: buta warna tidak ada / tidak buta warna berarti normal.
+  if (/buta warna/.test(text) && /(tidak buta warna|tidak ada|ga ada|gak ada|nggak ada|ngga ada|negatif|negative|\btidak\b)/.test(text)) return true;
+
+  // Mata: juling / strabismus -/- berarti normal.
+  if (/^\(?-\)?\s*\/\s*\(?-\)?$/.test(text)) return true;
+  if (/(juling|strabismus)/.test(text) && (/\(?-\)?\s*\/\s*\(?-\)?/.test(text) || /(tidak ada|negatif|negative|normal)/.test(text))) return true;
+
   return false;
 }
 
@@ -332,13 +378,13 @@ function severityStatusSheetV179(value: any, score: any) {
 }
 
 const STAGE_CONFIG_STATUS_SHEET_V179: any = {
-  mata: { label: "Mata", max: 16, scoreKey: "Mata" },
+  mata: { label: "Mata", max: 12, scoreKey: "Mata" },
   tht: { label: "THT", max: 10, scoreKey: "THT" },
   gigi: { label: "Gigi", max: 16, scoreKey: "Gigi Mulut" },
-  penyakit_dalam: { label: "Penyakit Dalam", max: 25, scoreKey: "Penyakit Dalam" },
+  penyakit_dalam: { label: "Penyakit Dalam", max: 28, scoreKey: "Penyakit Dalam" },
   jantung: { label: "Jantung", max: 12, scoreKey: "Jantung Pembuluh Darah" },
   ortopedi: { label: "Ortopedi", max: 16, scoreKey: "Ortopedi" },
-  radiologi: { label: "Radiologi", max: null, scoreKey: "Radiologi" },
+  radiologi: { label: "Radiologi", max: 6, scoreKey: "Radiologi" },
 };
 
 function tbBbNoteStatusSheetV179(height: any, weight: any, gender: any) {
@@ -362,7 +408,13 @@ function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNote
   const config = STAGE_CONFIG_STATUS_SHEET_V179[stageKey] || {};
   const score = numberFromStatusSheetV179(progressInfo?.[config.scoreKey]);
   const maxScore = config.max;
+
   if (redNotes.length) return { status: "Tidak Direkomendasikan", note: redNotes.join("; ") || "Ada red flag / skor -10" };
+
+  // Khusus Mata: lensa/kacamata tidak menggunakan, tidak buta warna, dan juling -/- adalah normal.
+  // Jangan jadikan Dengan Catatan hanya karena skor lama/max lama tidak cocok.
+  if (stageKey === "mata" && !notes.length) return { status: "Normal", note: "" };
+
   if (typeof score === "number" && typeof maxScore === "number" && score < maxScore) {
     return { status: "Dengan Catatan", note: notes.length ? notes.join("; ") : `Skor belum maksimal (${score}/${maxScore})` };
   }
