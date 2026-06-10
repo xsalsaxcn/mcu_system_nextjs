@@ -224,7 +224,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v26 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v27 Ã‚Â· fast search Ã‚Â· QR MCU saja
         </div>
       </section>
 
@@ -525,11 +525,12 @@ function LabelCard({
               lineHeight: 1.05,
               fontWeight: 900,
               color: "#000000",
-              whiteSpace: "normal",,
-              overflow: "visible",,
-              textOverflow: "clip",,
-              wordBreak: "break-word",,
-              maxWidth: "100%",
+              whiteSpace: "normal",
+              overflow: "visible",
+              textOverflow: "clip",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              maxWidth: "100%"
             }}
           >
             {provinceText}
