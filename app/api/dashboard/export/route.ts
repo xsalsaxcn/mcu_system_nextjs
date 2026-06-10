@@ -287,13 +287,13 @@ function stageKeyStatusSheetV179(value: any) {
 }
 
 function isHeightParamStatusSheetV179(param: any) {
-  const name = normStatusSheetV179(param?.name);
-  return name.includes("tinggi badan") || name === "tb" || name.includes("tb ");
+  const name = normStatusSheetV179([param?.label, param?.name, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" "));
+  return name.includes("tinggi badan") || /\btb\b/.test(name) || name.includes("tb.");
 }
 
 function isWeightParamStatusSheetV179(param: any) {
-  const name = normStatusSheetV179(param?.name);
-  return name.includes("berat badan") || name === "bb" || name.includes("bb ");
+  const name = normStatusSheetV179([param?.label, param?.name, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" "));
+  return name.includes("berat badan") || /\bbb\b/.test(name) || name.includes("bb.");
 }
 
 function isNeutralStatusSheetV179(value: any) {
@@ -387,21 +387,43 @@ const STAGE_CONFIG_STATUS_SHEET_V179: any = {
   radiologi: { label: "Radiologi", max: 6, scoreKey: "Radiologi" },
 };
 
+function tbBbDeltaStatusSheetV201(value: number) {
+  const rounded = Math.round(value);
+  if (rounded >= 1) return String(rounded);
+  return String(Math.round(value * 10) / 10).replace(".", ",");
+}
+
+function isTbBbSesuaiJuknisStatusSheetV201(value: any) {
+  const text = normStatusSheetV179(value);
+  if (!text) return false;
+  return !text.includes("tidak sesuai") && (text === "sesuai" || text === "sesuai juknis" || text.includes("sesuai juknis"));
+}
+
+function isTbBbTidakSesuaiJuknisStatusSheetV201(value: any) {
+  const text = normStatusSheetV179(value);
+  return text.includes("tidak sesuai");
+}
+
 function tbBbNoteStatusSheetV179(height: any, weight: any, gender: any) {
   const h = numberFromStatusSheetV179(height);
   const w = numberFromStatusSheetV179(weight);
   const g = genderKeyStatusSheetV179(gender);
   if (!h || !w || !g) return "";
+
   const minHeight = g === "putra" ? 170 : 165;
   const maxHeight = g === "putra" ? 180 : 175;
+
+  // Tabel juknis CAPASKA: BB minimum = TB - 115, BB maksimum = TB - 105.
   const minWeight = h - 115;
   const maxWeight = h - 105;
   const issues: string[] = [];
-  if (h < minHeight) issues.push(`TB kurang ${Math.round((minHeight - h) * 10) / 10} cm`);
-  if (h > maxHeight) issues.push(`TB lebih ${Math.round((h - maxHeight) * 10) / 10} cm`);
-  if (w < minWeight) issues.push(`BB kurang ${Math.round((minWeight - w) * 10) / 10} kg`);
-  if (w > maxWeight) issues.push(`BB lebih ${Math.round((w - maxWeight) * 10) / 10} kg`);
-  return issues.join("; ");
+
+  if (h < minHeight) issues.push(`TB < ${tbBbDeltaStatusSheetV201(minHeight - h)}cm`);
+  if (h > maxHeight) issues.push(`TB > ${tbBbDeltaStatusSheetV201(h - maxHeight)}cm`);
+  if (w < minWeight) issues.push(`BB < ${tbBbDeltaStatusSheetV201(minWeight - w)}kg`);
+  if (w > maxWeight) issues.push(`BB > ${tbBbDeltaStatusSheetV201(w - maxWeight)}kg`);
+
+  return issues.length ? `Tidak sesuai Juknis : ${issues.join("; ")}` : "";
 }
 
 function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
@@ -432,6 +454,8 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
     const redNotesByStage: any = { mata: [], tht: [], gigi: [], penyakit_dalam: [], jantung: [], ortopedi: [], radiologi: [] };
     let height = "";
     let weight = "";
+    let tbJuknisChoiceV201 = "";
+    let bbJuknisChoiceV201 = "";
 
     for (const param of exportParameters || []) {
       const result = resultByParticipantParam.get(makeKey(Number(participant.id), Number(param.id)));
@@ -439,8 +463,14 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       if (!value) continue;
       const postLabel = postName.get(Number(param.post_id)) || "";
       const paramText = `${postLabel} ${param.category || ""} ${param.name || ""}`;
-      if (!height && isHeightParamStatusSheetV179(param)) height = value;
-      if (!weight && isWeightParamStatusSheetV179(param)) weight = value;
+      if (isHeightParamStatusSheetV179(param)) {
+        if (isTbBbSesuaiJuknisStatusSheetV201(value) || isTbBbTidakSesuaiJuknisStatusSheetV201(value)) tbJuknisChoiceV201 = value;
+        if (numberFromStatusSheetV179(value) !== null) height = value;
+      }
+      if (isWeightParamStatusSheetV179(param)) {
+        if (isTbBbSesuaiJuknisStatusSheetV201(value) || isTbBbTidakSesuaiJuknisStatusSheetV201(value)) bbJuknisChoiceV201 = value;
+        if (numberFromStatusSheetV179(value) !== null) weight = value;
+      }
       const stageKey = stageKeyStatusSheetV179(paramText);
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
@@ -456,7 +486,10 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       }
     }
 
-    const tbBbNote = tbBbNoteStatusSheetV179(height, weight, participant.gender);
+    const tbBbChoicesSesuaiV201 = isTbBbSesuaiJuknisStatusSheetV201(tbJuknisChoiceV201) && isTbBbSesuaiJuknisStatusSheetV201(bbJuknisChoiceV201);
+    const tbBbManualTidakSesuaiV201 = isTbBbTidakSesuaiJuknisStatusSheetV201(tbJuknisChoiceV201) || isTbBbTidakSesuaiJuknisStatusSheetV201(bbJuknisChoiceV201);
+    const computedTbBbNoteV201 = tbBbNoteStatusSheetV179(height, weight, participant.gender);
+    const tbBbNote = tbBbChoicesSesuaiV201 ? "" : (computedTbBbNoteV201 || (tbBbManualTidakSesuaiV201 ? "Tidak sesuai Juknis" : ""));
     const tbBbStatus = tbBbNote ? "Dengan Catatan" : "Normal";
     const stageEval: any = {};
     for (const stageKey of Object.keys(STAGE_CONFIG_STATUS_SHEET_V179)) {
@@ -520,6 +553,7 @@ const CAPASKA_STATUS_CATATAN_HEADERS_V179 = [
 ];
 
 
+// DASHBOARD_EXPORT_TB_BB_STATUS_V201
 // DASHBOARD_EXPORT_LULUS_LABEL_V199
 function displayKelulusanExportV199(value: any) {
   const text = String(value ?? '').trim();

@@ -1106,6 +1106,38 @@ function capaskaCloneParamWithLabel(param: any, label: string): any {
   };
 }
 
+// TB_BB_INPUT_ORDER_V201
+function capaskaTbBbDisplayOrderV201(param: any): number {
+  const text = String([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+  ].filter(Boolean).join(" "))
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " " )
+    .trim();
+
+  // Di form CAPASKA, urutan input TB/BB harus TB dulu, baru BB.
+  if (/tinggi badan|\btb\b|tb\./.test(text)) return 1;
+  if (/berat badan|\bbb\b|bb\./.test(text)) return 2;
+  return 99;
+}
+
+function capaskaSortTbBeforeBbV201(params: any[]): any[] {
+  return (Array.isArray(params) ? params : [])
+    .map((param, index) => ({ param, index, order: capaskaTbBbDisplayOrderV201(param) }))
+    .sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.index - b.index;
+    })
+    .map((item) => item.param);
+}
+
 function capaskaCleanDisplayParams(params: any): any[] {
   const list = Array.isArray(params) ? params : [];
   const cleaned: any[] = [];
