@@ -2230,6 +2230,15 @@ function ScannerModal({
 
 
   // SCANNER_ULTRA_QR_SENSITIVE_V195
+  // SCANNER_IOS_COMPAT_V210
+  function isIosScannerDeviceV210() {
+    if (typeof navigator === "undefined") return false;
+    const ua = navigator.userAgent || "";
+    const platform = (navigator as any).platform || "";
+    const maxTouchPoints = Number((navigator as any).maxTouchPoints || 0);
+    return /iPad|iPhone|iPod/i.test(ua) || (platform === "MacIntel" && maxTouchPoints > 1);
+  }
+
   async function applyScannerCameraSharpness(scanner: any, showMessage = false) {
     if (!scanner) return;
 
@@ -2352,7 +2361,7 @@ function ScannerModal({
       torchOnRef.current = nextTorch;
       setStatus(nextTorch ? "Lampu kamera aktif. Arahkan QR ke kotak dan tahan stabil." : "Lampu kamera dimatikan.");
     } catch {
-      setStatus("Lampu kamera tidak didukung di browser/HP ini. Pakai cahaya luar yang lebih terang.");
+      setStatus("Lampu kamera tidak didukung di browser/HP ini. Di iPhone biasanya pakai cahaya luar, atau gunakan Scan dari Foto.");
     }
   }
 
@@ -2404,6 +2413,8 @@ function ScannerModal({
 
       scannerRef.current = scanner;
 
+      const isIosScannerV210 = isIosScannerDeviceV210();
+
       const config = {
         fps: 45,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
@@ -2414,9 +2425,14 @@ function ScannerModal({
         aspectRatio: 1,
         disableFlip: false,
         experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
+          useBarCodeDetectorIfSupported: !isIosScannerV210
         },
-        videoConstraints: {
+        videoConstraints: isIosScannerV210 ? {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 }
+        } : {
           facingMode: { ideal: "environment" },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
@@ -2428,7 +2444,7 @@ function ScannerModal({
       };
 
       await scanner.start(
-        { facingMode: "environment" },
+        isIosScannerV210 ? { facingMode: { ideal: "environment" } } : { facingMode: "environment" },
         config,
         (decodedText: string) => {
           finishDetected(decodedText);
@@ -2442,17 +2458,17 @@ function ScannerModal({
       window.setTimeout(() => applyScannerCameraSharpness(scanner), 700);
       window.setTimeout(() => applyScannerCameraSharpness(scanner), 1400);
       window.setTimeout(() => applyScannerCameraSharpness(scanner), 2400);
-      window.setTimeout(() => startUltraQrDetector(), 650);
+      if (!isIosScannerV210) window.setTimeout(() => startUltraQrDetector(), 650);
 
-      setStatus("Scanner QR ULTRA aktif. Masukkan QR saja ke kotak kecil, jarak 25-45 cm, tahan stabil 2 detik.");
+      setStatus(isIosScannerV210 ? "Scanner iPhone aktif. Arahkan QR ke kotak, tunggu fokus. Jika belum terbaca, tekan Scan dari Foto." : "Scanner QR ULTRA aktif. Masukkan QR saja ke kotak kecil, jarak 25-45 cm, tahan stabil 2 detik.");
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")) {
-        setStatus("Izin kamera ditolak. Aktifkan camera permission atau input barcode manual.");
+        setStatus("Izin kamera ditolak. Di iPhone buka Settings > Safari/Chrome > Camera > Allow, lalu refresh halaman.");
       } else if (msg.toLowerCase().includes("notfound")) {
         setStatus("Kamera tidak ditemukan. Gunakan input barcode manual.");
       } else {
-        setStatus("Scanner kamera tidak berhasil dibuka. Coba Chrome Android, refresh halaman, atau input barcode manual.");
+        setStatus("Scanner kamera tidak berhasil dibuka. Di iPhone gunakan Safari/Chrome terbaru, izinkan kamera, atau tekan Scan dari Foto / input manual.");
       }
     } finally {
       setIsStarting(false);
@@ -2501,7 +2517,7 @@ function ScannerModal({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-lg font-black">Scan Barcode / QR</div>
-            <div className="text-xs text-slate-400">Scanner v22 ULTRA sensitif khusus QR kecil.</div>
+            <div className="text-xs text-slate-400">Scanner v23 iPhone compatible + ULTRA QR.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-3 py-2 font-bold">
             Tutup
