@@ -2192,6 +2192,55 @@ function ScannerModal({
   const [isStarting, setIsStarting] = useState(false);
   const [scanMode, setScanMode] = useState<"camera" | "manual">("camera");
 
+
+  // SCANNER_CAMERA_SHARPNESS_V193
+  async function applyScannerCameraSharpness(scanner: any, showMessage = false) {
+    if (!scanner) return;
+
+    // Browser support berbeda-beda per HP. Semua tuning dibuat safe: jika tidak didukung, scanner tetap jalan normal.
+    try {
+      await scanner.applyVideoConstraints?.({
+        advanced: [
+          { focusMode: "continuous" },
+          { exposureMode: "continuous" },
+          { whiteBalanceMode: "continuous" }
+        ]
+      });
+    } catch {}
+
+    try {
+      const capabilities = scanner.getRunningTrackCameraCapabilities?.() || {};
+      const settings = scanner.getRunningTrackSettings?.() || {};
+      const zoomCap = capabilities.zoom;
+
+      // Zoom ringan membantu label kecil terbaca tanpa kamera ditempel terlalu dekat, sehingga gambar tidak mudah blur.
+      if (zoomCap && typeof zoomCap === "object") {
+        const minZoom = Number(zoomCap.min ?? 1);
+        const maxZoom = Number(zoomCap.max ?? minZoom);
+        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 1.6));
+        const currentZoom = Number(settings.zoom ?? 0);
+
+        if (targetZoom > minZoom && Math.abs(currentZoom - targetZoom) > 0.05) {
+          await scanner.applyVideoConstraints?.({ advanced: [{ zoom: targetZoom }] });
+        }
+      }
+    } catch {}
+
+    try {
+      const video = document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null;
+      if (video) {
+        video.setAttribute("playsinline", "true");
+        video.style.objectFit = "cover";
+        video.style.width = "100%";
+        video.style.height = "100%";
+      }
+    } catch {}
+
+    if (showMessage) {
+      setStatus("Fokus kamera dioptimalkan. Pegang stabil 1-2 detik, jangan terlalu dekat dengan label.");
+    }
+  }
+
   async function stopScanner() {
     try {
       await scannerRef.current?.stop?.();
@@ -2244,20 +2293,22 @@ function ScannerModal({
       scannerRef.current = scanner;
 
       const config = {
-        fps: 15,
+        fps: 24,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const width = Math.floor(viewfinderWidth * 0.92);
-          const height = Math.max(110, Math.floor(viewfinderHeight * 0.28));
+          const width = Math.floor(viewfinderWidth * 0.9);
+          const height = Math.max(130, Math.floor(viewfinderHeight * 0.34));
           return { width, height };
         },
-        aspectRatio: 1.7777778,
+        aspectRatio: 1.3333333,
         disableFlip: false,
         videoConstraints: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
-          focusMode: "continuous"
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 },
+          focusMode: "continuous",
+          exposureMode: "continuous",
+          whiteBalanceMode: "continuous"
         }
       };
 
@@ -2272,7 +2323,10 @@ function ScannerModal({
         }
       );
 
-      setStatus("Scanner aktif. Letakkan barcode/QR di dalam kotak. Tahan 1-2 detik.");
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 350);
+      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1300);
+
+      setStatus("Scanner aktif. Tunggu kamera fokus dulu, lalu arahkan QR/barcode di dalam kotak 1-2 detik.");
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")) {
@@ -2329,7 +2383,7 @@ function ScannerModal({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-lg font-black">Scan Barcode / QR</div>
-            <div className="text-xs text-slate-400">Scanner v19 pakai html5-qrcode, lebih sensitif di mobile.</div>
+            <div className="text-xs text-slate-400">Scanner v20 autofocus + mode label kecil.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-3 py-2 font-bold">
             Tutup
@@ -2343,12 +2397,12 @@ function ScannerModal({
         <div className="mt-3 grid gap-2 rounded-xl bg-slate-900 p-3 text-sm text-slate-200">
           <div>{isStarting ? "Menyiapkan scanner..." : status}</div>
           <div className="text-xs text-slate-400">
-            Tips: pakai Chrome Android, landscape untuk barcode panjang, jarak 10-25 cm, cahaya cukup, tahan 1-2 detik.
-            Untuk label kecil, QR code lebih mudah terbaca daripada barcode garis.
+            Tips: pakai Chrome Android, cahaya cukup, jarak 15-30 cm, jangan terlalu dekat agar tidak blur.
+            Kalau gambar tetap blur, tekan Fokus Ulang atau Scan Ulang, lalu tahan stabil 1-2 detik.
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <button
             type="button"
             className="rounded-xl bg-slate-800 px-3 py-2 font-black"
@@ -2356,6 +2410,15 @@ function ScannerModal({
             disabled={isStarting}
           >
             Scan Ulang
+          </button>
+
+          <button
+            type="button"
+            className="rounded-xl bg-slate-800 px-3 py-2 font-black"
+            onClick={() => applyScannerCameraSharpness(scannerRef.current, true)}
+            disabled={isStarting}
+          >
+            Fokus Ulang
           </button>
 
           <button
