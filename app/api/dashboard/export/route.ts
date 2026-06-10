@@ -467,6 +467,14 @@ const CAPASKA_STATUS_CATATAN_HEADERS_V179 = [
   "TOTAL SKOR", "STATUS AKHIR", "RINGKASAN CATATAN", "TEMUAN MERAH / RED FLAG", "DATABASE", "INSTANSI", "PAKET"
 ];
 
+
+// DASHBOARD_EXPORT_LULUS_LABEL_V199
+function displayKelulusanExportV199(value: any) {
+  const text = String(value ?? '').trim();
+  if (text === 'Lulus') return 'Direkomendasikan';
+  return text;
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
@@ -582,7 +590,7 @@ export async function GET(req: NextRequest) {
       "Instansi": source?.institution_name || "-",
       "Paket": packageName.get(Number(p.package_id)) || "-",
       "Status Progress": complete ? "Selesai" : "Belum Selesai",
-      "Kelulusan": kelulusan,
+      "Kelulusan": displayKelulusanExportV199(kelulusan),
       "Total Score": totalScore ?? "",
       "Score Sebelum Penalti": scoreResult.totalBeforePenalty ?? "",
       "Penalti Red Flag": scoreResult.penalty || 0,
@@ -604,7 +612,7 @@ export async function GET(req: NextRequest) {
   }).filter((r: any) => {
     if (status === "Selesai") return r["Status Progress"] === "Selesai";
     if (status === "Belum Selesai") return r["Status Progress"] !== "Selesai";
-    if (status === "Lulus") return r["Kelulusan"] === "Lulus";
+    if (status === "Lulus" || status === "Direkomendasikan") return r["Kelulusan"] === "Lulus" || r["Kelulusan"] === "Direkomendasikan";
     if (status === "Tidak Lulus") return r["Kelulusan"] === "Tidak Lulus" || r["Kelulusan"] === "Tidak Direkomendasikan";
     if (status === "Belum Dinilai") return r["Kelulusan"] === "Belum Dinilai";
     return true;
@@ -616,7 +624,7 @@ export async function GET(req: NextRequest) {
     { Metric: "Total Peserta", Value: progressRows.length },
     { Metric: "Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] === "Selesai").length },
     { Metric: "Belum Selesai", Value: progressRows.filter((r: any) => r["Status Progress"] !== "Selesai").length },
-    { Metric: "Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Lulus").length },
+    { Metric: "Direkomendasikan", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Lulus" || r["Kelulusan"] === "Direkomendasikan").length },
     { Metric: "Tidak Lulus", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Lulus" || r["Kelulusan"] === "Tidak Direkomendasikan").length },
     { Metric: "Tidak Direkomendasikan", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Tidak Direkomendasikan").length },
     { Metric: "Belum Dinilai", Value: progressRows.filter((r: any) => r["Kelulusan"] === "Belum Dinilai").length }
