@@ -244,7 +244,7 @@ function displayColumns(rows: Row[], preferred: string[] = []) {
     }
   }
 
-  return cols.slice(0, 18);
+  return cols;
 }
 
 function valueText(value: any) {
@@ -315,7 +315,7 @@ function TableView({ rows, preferred = [] }: { rows: Row[]; preferred?: string[]
         <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-500">Belum ada data.</div>
       ) : (
         <div className="max-h-[560px] overflow-auto rounded-2xl border">
-          <table className="min-w-full text-sm">
+          <table className="min-w-max text-sm">
             <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
               <tr>
                 {cols.map((col) => (
@@ -329,7 +329,7 @@ function TableView({ rows, preferred = [] }: { rows: Row[]; preferred?: string[]
               {filtered.slice(0, limit).map((row, index) => (
                 <tr key={index} className="hover:bg-slate-50">
                   {cols.map((col) => (
-                    <td key={col} className="max-w-[360px] truncate whitespace-nowrap p-3" title={valueText(row[col])}>
+                    <td key={col} className="min-w-[140px] max-w-[520px] whitespace-nowrap p-3 align-top" title={valueText(row[col])}>
                       {valueText(row[col]) || "-"}
                     </td>
                   ))}
