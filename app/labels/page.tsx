@@ -643,7 +643,6 @@ function LabelPrinter({ user }: { user: any }) {
     </div>
   );
 }
-
 function LabelCard({
   participant,
   qrSize,
@@ -661,133 +660,157 @@ function LabelCard({
   showBarcodeText?: boolean;
   printMode?: boolean;
 }) {
+  const participantAny = participant as any;
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
   const qrValue = idText;
   const nameText = sanitizeQrText(participant.name).toUpperCase();
-  const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
-  const participantAny = participant as any;
-  const birthDate = participantAny.date_of_birth || participantAny.birth_date || participantAny.tanggal_lahir || participantAny.dob || "";
-  const genderText = normalizeGenderLabel(participantAny.gender || participantAny.jenis_kelamin || participantAny.sex || "");
-  const provinceText = participantAny.province || participantAny.provinsi || participantAny.location || participantAny.lokasi || participantAny.department || "";
+  const institution = sanitizeQrText(participant.company_name || participant.institution_name || participantAny.company || participantAny.institution || "BPIP / CAPASKA").toUpperCase();
+  const genderRaw = sanitizeQrText(participantAny.gender || participantAny.jenis_kelamin || participantAny.sex || participantAny.kelamin || "").toUpperCase();
+  const genderText = genderRaw.includes("WANITA") || genderRaw.includes("PEREMPUAN") || genderRaw.includes("PUTRI") ? "PUTRI" : genderRaw.includes("PRIA") || genderRaw.includes("LAKI") || genderRaw.includes("PUTRA") ? "PUTRA" : genderRaw;
+  const birthDate = sanitizeQrText(participantAny.date_of_birth || participantAny.birth_date || participantAny.tanggal_lahir || participantAny.dob || "");
+  const provinceText = sanitizeQrText(
+    participantAny.province ||
+    participantAny.provinsi ||
+    participantAny.asal_provinsi ||
+    participantAny.asalProvinsi ||
+    participantAny.province_name ||
+    participantAny.provinsi_asal ||
+    participantAny.location ||
+    participantAny.lokasi ||
+    participantAny.department ||
+    participantAny.raw?.province ||
+    participantAny.raw?.provinsi ||
+    participantAny.raw?.asal_provinsi ||
+    ""
+  );
 
   const safeFont = Number(fontSize || 10);
-  const nameFont =
-    nameText.length > 34 ? Math.max(12, safeFont + 2) :
-    nameText.length > 24 ? Math.max(14, safeFont + 4) :
-    Math.max(16, safeFont + 6);
-
   const qrPx = Math.min(160, Math.max(38, Number(qrSize || 46)));
-  const labelInfoFont = Math.max(9, safeFont);
-  const genderProvinceFont = Math.max(10, safeFont + 2);
+  const nameFont = nameText.length > 34 ? Math.max(10, safeFont + 2) : nameText.length > 24 ? Math.max(11, safeFont + 3) : Math.max(12, safeFont + 5);
+  const detailFont = Math.max(6.4, Math.min(9, safeFont + 1));
+  const provinceFont = provinceText.length > 23 ? Math.max(6.2, safeFont - 0.5) : provinceText.length > 16 ? Math.max(6.8, safeFont) : Math.max(7.2, safeFont + 0.5);
+  const textRight = showQr ? "calc(" + qrPx + "px + 4mm)" : "2.4mm";
 
   return (
     <section
-      className={`${printMode ? "label-page" : ""} bg-white`}
+      className={(printMode ? "label-page" : "") + " bg-white"}
       style={{
         position: "relative",
+        width: "50mm",
+        height: "30mm",
         overflow: "hidden",
         border: showBorder ? "1px solid #d4d4d8" : undefined,
-        borderRadius: showBorder ? "18px" : undefined,
+        borderRadius: showBorder ? "1.4mm" : undefined,
         WebkitPrintColorAdjust: "exact",
-        printColorAdjust: "exact"
+        printColorAdjust: "exact",
+        background: "#ffffff",
+        boxSizing: "border-box"
       }}
     >
       <div
         style={{
           position: "absolute",
-          left: "8%",
-          top: "8%",
-          right: "8%",
-          zIndex: 2
+          left: "2.4mm",
+          top: "2.2mm",
+          right: textRight,
+          zIndex: 2,
+          fontSize: nameFont + "px",
+          lineHeight: 0.94,
+          fontWeight: 950,
+          color: "#000000",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere",
+          letterSpacing: "-0.04em",
+          maxHeight: "9.2mm",
+          overflow: "hidden"
         }}
       >
-        <div
-          style={{
-            fontSize: `${nameFont}px`,
-            lineHeight: 1.03,
-            fontWeight: 900,
-            color: "#000000",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-            letterSpacing: "-0.03em",
-            maxHeight: "36%",
-            overflow: "hidden"
-          }}
-        >
-          {nameText || "-"}
-        </div>
+        {nameText || "-"}
       </div>
 
       <div
         style={{
           position: "absolute",
-          left: "8%",
-          top: "39%",
-          right: showQr ? "34%" : "8%",
+          left: "2.4mm",
+          top: "12.3mm",
+          right: textRight,
           zIndex: 2,
-          fontSize: `${labelInfoFont}px`,
-          lineHeight: 1.12,
-          fontWeight: 700,
+          fontSize: detailFont + "px",
+          lineHeight: 1.02,
+          fontWeight: 900,
           color: "#111827",
           whiteSpace: "normal",
           wordBreak: "break-word",
-          overflowWrap: "anywhere"
+          overflowWrap: "anywhere",
+          maxHeight: "7.6mm",
+          overflow: "hidden"
         }}
       >
         <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
-        {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
-        {genderText ? (
-          <div
-            style={{
-              marginTop: "4px",
-              fontSize: `${genderProvinceFont}px`,
-              lineHeight: 1.05,
-              fontWeight: 900,
-              color: "#000000",
-              textTransform: "uppercase"
-            }}
-          >
-            {genderText}
-          </div>
-        ) : null}
-        {provinceText ? (
-          <div
-            style={{
-              marginTop: "2px",
-              fontSize: `${genderProvinceFont}px`,
-              lineHeight: 1.05,
-              fontWeight: 900,
-              color: "#000000",
-              whiteSpace: "normal",
-              overflow: "visible",
-              textOverflow: "clip",
-              wordBreak: "break-word",
-              overflowWrap: "anywhere",
-              maxWidth: "100%"
-            }}
-          >
-            {provinceText}
-          </div>
-        ) : null}
+        <div style={{ marginTop: "1mm" }}>{institution || "-"}</div>
+        {birthDate ? <div style={{ marginTop: "1mm" }}>TTL: {birthDate}</div> : null}
       </div>
+
+      {genderText ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            bottom: provinceText ? "6.7mm" : "2.8mm",
+            right: textRight,
+            zIndex: 3,
+            fontSize: Math.max(8, safeFont + 1) + "px",
+            lineHeight: 1,
+            fontWeight: 950,
+            color: "#000000",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "clip"
+          }}
+        >
+          {genderText}
+        </div>
+      ) : null}
+
+      {provinceText ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            bottom: "2.2mm",
+            right: textRight,
+            zIndex: 3,
+            fontSize: provinceFont + "px",
+            lineHeight: 0.98,
+            fontWeight: 950,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            maxHeight: "4.6mm",
+            overflow: "hidden",
+            textOverflow: "clip"
+          }}
+        >
+          {provinceText}
+        </div>
+      ) : null}
 
       {showQr && (
         <div
           style={{
             position: "absolute",
-            right: "auto",
-            bottom: showBarcodeText ? "12%" : "5%",
-            width: `${qrPx}px`,
-            height: `${qrPx}px`,
+            right: "0.5mm",
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: qrPx + "px",
+            height: qrPx + "px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             background: "#ffffff",
-            padding: "1px",
-            zIndex: 5,
-            left: `calc(50mm - ${qrPx}px - 0.5mm)`,
+            zIndex: 1
           }}
         >
           <QRCodeImage value={qrValue} size={qrPx} />
