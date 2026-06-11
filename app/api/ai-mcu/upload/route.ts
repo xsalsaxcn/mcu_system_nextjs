@@ -23,7 +23,7 @@ const ALIASES: Record<string,string[]> = {
   JK:["jk","jenis kelamin","gender","sex"], TGLLAHIR:["tgllahir","tanggal lahir","tgl lahir","birth date","dob"],
   USIA:["usia","umur","age"], DEPT:["dept","departemen","department","bagian","unit","divisi"],
   PAKET:["paket","package"], KATEGORI:["kategori","status fit","fit status","status"],
-  KESIMPULAN:["kesimpulan","conclusion"], SARAN:["saran","recommendation","rekomendasi"]
+  KESIMPULAN:["kesimpulan","conclusion"], SARAN:["saran","recommendation","rekomendasi"],
 
   MEDICAL_RECORD_NO:["no medical record","no. medical record","medical record","no mr","no. mr","mr","no rekam medis","no. rekam medis","nomor rekam medis","rekam medis"],
   NO_MR:["no medical record","no. medical record","medical record","no mr","no. mr","mr","no rekam medis","no. rekam medis","nomor rekam medis","rekam medis"],
