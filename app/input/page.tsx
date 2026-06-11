@@ -2234,6 +2234,7 @@ function ParameterInput({
 }
 
 
+
 function ScannerModal({
   open,
   onClose,
@@ -2245,171 +2246,90 @@ function ScannerModal({
 }) {
   const scannerId = "mcu-html5-qrcode-reader";
   const scannerRef = useRef<any>(null);
+  const zxingReaderRef = useRef<any>(null);
+  const zxingControlsRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const ultraDetectorRef = useRef<any>(null);
-  const ultraScanIntervalRef = useRef<any>(null);
-  const ultraCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const torchOnRef = useRef(false);
 
   const [manualCode, setManualCode] = useState("");
   const [status, setStatus] = useState("");
   const [isStarting, setIsStarting] = useState(false);
-  const [scanMode, setScanMode] = useState<"camera" | "manual">("camera");
+  const [isIosMode, setIsIosMode] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
-
-  // SCANNER_ULTRA_QR_SENSITIVE_V195
-  // SCANNER_IOS_COMPAT_V210
-  function isIosScannerDeviceV210() {
+  function isIosScannerDeviceV227() {
     if (typeof navigator === "undefined") return false;
     const ua = navigator.userAgent || "";
     const platform = (navigator as any).platform || "";
-    const maxTouchPoints = Number((navigator as any).maxTouchPoints || 0);
-    return /iPad|iPhone|iPod/i.test(ua) || (platform === "MacIntel" && maxTouchPoints > 1);
+    return /iPad|iPhone|iPod/i.test(ua) || (platform === "MacIntel" && Number((navigator as any).maxTouchPoints || 0) > 1);
   }
 
-  async function applyScannerCameraSharpness(scanner: any, showMessage = false) {
-    if (!scanner) return;
-
-    // Ultra QR kecil: utamakan autofocus, exposure stabil, zoom lebih tinggi, dan torch bila tersedia.
-    try {
-      await scanner.applyVideoConstraints?.({
-        advanced: [
-          { focusMode: "continuous" },
-          { focusMode: "single-shot" },
-          { exposureMode: "continuous" },
-          { whiteBalanceMode: "continuous" }
-        ]
-      });
-    } catch {}
+  function normalizeDetectedCodeV227(value: any) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
 
     try {
-      const capabilities = scanner.getRunningTrackCameraCapabilities?.() || {};
-      const settings = scanner.getRunningTrackSettings?.() || {};
-      const zoomCap = capabilities.zoom;
-
-      // Zoom lebih agresif supaya QR kecil terlihat besar tanpa kamera ditempel terlalu dekat.
-      if (zoomCap && typeof zoomCap === "object") {
-        const minZoom = Number(zoomCap.min ?? 1);
-        const maxZoom = Number(zoomCap.max ?? minZoom);
-        const targetZoom = Math.min(maxZoom, Math.max(minZoom, 2.8));
-        const currentZoom = Number(settings.zoom ?? 0);
-
-        if (targetZoom > minZoom && Math.abs(currentZoom - targetZoom) > 0.05) {
-          await scanner.applyVideoConstraints?.({ advanced: [{ zoom: targetZoom }] });
-        }
-      }
-    } catch {}
-
-    try {
-      const video = document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null;
-      if (video) {
-        video.setAttribute("playsinline", "true");
-        video.style.objectFit = "cover";
-        video.style.width = "100%";
-        video.style.height = "100%";
-        video.style.transform = "translateZ(0)";
-        video.style.imageRendering = "auto";
-      }
-    } catch {}
-
-    if (showMessage) {
-      setStatus("Mode ultra fokus QR aktif. Isi kotak hanya dengan QR, mundur 25-45 cm, tahan stabil 2 detik.");
-    }
-  }
-
-  function stopUltraQrDetector() {
-    if (ultraScanIntervalRef.current) {
-      window.clearInterval(ultraScanIntervalRef.current);
-      ultraScanIntervalRef.current = null;
-    }
-  }
-
-  async function startUltraQrDetector() {
-    stopUltraQrDetector();
-
-    try {
-      const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-      if (!BarcodeDetectorCtor) return;
-
-      if (!ultraDetectorRef.current) {
-        ultraDetectorRef.current = new BarcodeDetectorCtor({ formats: ["qr_code"] });
-      }
-
-      ultraScanIntervalRef.current = window.setInterval(async () => {
-        const detector = ultraDetectorRef.current;
-        const video = document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null;
-        if (!detector || !video || video.readyState < 2) return;
-        if (video.dataset.ultraBusy === "1") return;
-
-        video.dataset.ultraBusy = "1";
-        try {
-          const directResults = await detector.detect(video);
-          const directCode = String(directResults?.[0]?.rawValue || directResults?.[0]?.displayValue || "").trim();
-          if (directCode) {
-            finishDetected(directCode);
-            return;
-          }
-
-          const vw = video.videoWidth || video.clientWidth || 0;
-          const vh = video.videoHeight || video.clientHeight || 0;
-          if (!vw || !vh) return;
-
-          const cropSize = Math.floor(Math.min(vw, vh) * 0.55);
-          const sx = Math.max(0, Math.floor((vw - cropSize) / 2));
-          const sy = Math.max(0, Math.floor((vh - cropSize) / 2));
-          const canvas = ultraCanvasRef.current || document.createElement("canvas");
-          ultraCanvasRef.current = canvas;
-          canvas.width = 720;
-          canvas.height = 720;
-
-          const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
-          if (!ctx) return;
-          (ctx as any).filter = "grayscale(1) contrast(1.9) brightness(1.18)";
-          (ctx as CanvasRenderingContext2D).drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
-          (ctx as any).filter = "none";
-
-          const cropResults = await detector.detect(canvas);
-          const cropCode = String(cropResults?.[0]?.rawValue || cropResults?.[0]?.displayValue || "").trim();
-          if (cropCode) finishDetected(cropCode);
-        } catch {
-          // BrowserDetector bisa gagal per frame; scanner html5-qrcode tetap jalan sebagai fallback.
-        } finally {
-          video.dataset.ultraBusy = "0";
-        }
-      }, 110);
-    } catch {}
-  }
-
-  async function toggleScannerTorch(scanner: any) {
-    if (!scanner) return;
-
-    try {
-      const nextTorch = !torchOnRef.current;
-      await scanner.applyVideoConstraints?.({ advanced: [{ torch: nextTorch }] });
-      torchOnRef.current = nextTorch;
-      setStatus(nextTorch ? "Lampu kamera aktif. Arahkan QR ke kotak dan tahan stabil." : "Lampu kamera dimatikan.");
+      const parsed = new URL(raw, typeof window !== "undefined" ? window.location.origin : "https://inharmony-health.vercel.app");
+      const scanParam = parsed.searchParams.get("scan") || parsed.searchParams.get("code") || parsed.searchParams.get("id");
+      if (scanParam) return scanParam.trim();
+      const qMatch = parsed.pathname.match(/\/q\/([^/?#]+)/i);
+      if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
     } catch {
-      setStatus("Lampu kamera tidak didukung di browser/HP ini. Di iPhone biasanya pakai cahaya luar, atau gunakan Scan dari Foto.");
+      const qMatch = raw.match(/\/q\/([^\s/?#]+)/i);
+      if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
     }
+
+    return raw;
+  }
+
+  async function tuneRunningTrack(showMessage = false) {
+    try {
+      const video = videoRef.current || (document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null);
+      const stream = video?.srcObject as MediaStream | null;
+      const track = stream?.getVideoTracks?.()[0] as any;
+      if (!track) return;
+
+      const caps = track.getCapabilities?.() || {};
+      const settings = track.getSettings?.() || {};
+      const advanced: any[] = [];
+
+      if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) advanced.push({ focusMode: "continuous" });
+      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes("continuous")) advanced.push({ exposureMode: "continuous" });
+      if (Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes("continuous")) advanced.push({ whiteBalanceMode: "continuous" });
+
+      if (caps.zoom && typeof caps.zoom === "object") {
+        const minZoom = Number(caps.zoom.min ?? 1);
+        const maxZoom = Number(caps.zoom.max ?? minZoom);
+        const targetZoom = Math.min(maxZoom, Math.max(minZoom, isIosMode ? 2.0 : 1.7));
+        const currentZoom = Number(settings.zoom ?? 0);
+        if (targetZoom > minZoom && Math.abs(currentZoom - targetZoom) > 0.05) advanced.push({ zoom: targetZoom });
+      }
+
+      if (advanced.length) await track.applyConstraints?.({ advanced });
+      if (showMessage) setStatus("Fokus kamera dioptimalkan. Arahkan hanya ke QR, tahan stabil 1-2 detik.");
+    } catch {}
   }
 
   async function stopScanner() {
-    stopUltraQrDetector();
-    torchOnRef.current = false;
+    try { zxingControlsRef.current?.stop?.(); } catch {}
+    try { zxingReaderRef.current?.reset?.(); } catch {}
+    zxingControlsRef.current = null;
+    zxingReaderRef.current = null;
 
-    try {
-      await scannerRef.current?.stop?.();
-    } catch {}
-
-    try {
-      await scannerRef.current?.clear?.();
-    } catch {}
-
+    try { await scannerRef.current?.stop?.(); } catch {}
+    try { await scannerRef.current?.clear?.(); } catch {}
     scannerRef.current = null;
+
+    try {
+      const video = videoRef.current;
+      const stream = video?.srcObject as MediaStream | null;
+      stream?.getTracks?.().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
+    } catch {}
   }
 
   function finishDetected(code: string) {
-    const clean = String(code || "").trim();
+    const clean = normalizeDetectedCodeV227(code);
     if (!clean) return;
 
     stopScanner();
@@ -2417,97 +2337,154 @@ function ScannerModal({
     onClose();
   }
 
+  async function startIosZxingScanner() {
+    const video = videoRef.current;
+    if (!video) throw new Error("Video scanner belum siap");
+
+    const zxing = await import("@zxing/browser");
+    const ReaderCtor = (zxing as any).BrowserQRCodeReader || (zxing as any).BrowserMultiFormatReader;
+    if (!ReaderCtor) throw new Error("ZXing browser reader tidak tersedia");
+
+    const reader = new ReaderCtor(undefined, {
+      delayBetweenScanAttempts: 60,
+      delayBetweenScanSuccess: 250
+    } as any);
+    zxingReaderRef.current = reader;
+
+    video.setAttribute("playsinline", "true");
+    video.muted = true;
+    video.autoplay = true;
+    video.style.objectFit = "cover";
+
+    const constraints: any = {
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { min: 640, ideal: 1920 },
+        height: { min: 480, ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 }
+      }
+    };
+
+    const controls = await reader.decodeFromConstraints(
+      constraints,
+      video,
+      (result: any) => {
+        const text = String(result?.getText?.() || result?.text || "").trim();
+        if (text) finishDetected(text);
+      }
+    );
+
+    zxingControlsRef.current = controls;
+    setTimeout(() => tuneRunningTrack(false), 450);
+    setTimeout(() => tuneRunningTrack(false), 1200);
+    setTimeout(() => tuneRunningTrack(false), 2200);
+    setStatus("Mode iPhone aktif. Arahkan kotak hanya ke QR, bukan seluruh label. Jarak 20-35 cm, tahan stabil 1-2 detik.");
+  }
+
+  async function startHtml5Scanner() {
+    const mod = await import("html5-qrcode");
+    const Html5Qrcode = mod.Html5Qrcode;
+    const Html5QrcodeSupportedFormats = mod.Html5QrcodeSupportedFormats;
+
+    const scanner = new Html5Qrcode(scannerId, {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.ITF
+      ],
+      verbose: false
+    });
+    scannerRef.current = scanner;
+
+    const config: any = {
+      fps: 30,
+      qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+        const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+        return { width: Math.max(180, side), height: Math.max(180, side) };
+      },
+      aspectRatio: 1,
+      disableFlip: false,
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true
+      },
+      videoConstraints: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30 },
+        focusMode: "continuous"
+      }
+    };
+
+    await scanner.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText: string) => finishDetected(decodedText),
+      () => {}
+    );
+
+    setTimeout(() => tuneRunningTrack(false), 450);
+    setTimeout(() => tuneRunningTrack(false), 1200);
+    setStatus("Scanner Android aktif. Arahkan kotak hanya ke QR, tahan stabil 1-2 detik.");
+  }
+
   async function startScanner() {
     if (!open) return;
 
     setIsStarting(true);
-    setStatus("Membuka kamera dan scanner sensitif...");
-    setScanMode("camera");
+    setTorchOn(false);
+    setStatus("Membuka kamera scanner universal...");
 
     try {
       await stopScanner();
+      const ios = isIosScannerDeviceV227();
+      setIsIosMode(ios);
+      await new Promise((resolve) => setTimeout(resolve, 120));
 
-      const mod = await import("html5-qrcode");
-      const Html5Qrcode = mod.Html5Qrcode;
-      const Html5QrcodeSupportedFormats = mod.Html5QrcodeSupportedFormats;
-
-      const scanner = new Html5Qrcode(scannerId, {
-        // Fokus ke QR_CODE saja agar decoding QR kecil lebih cepat dan sensitif.
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE
-        ],
-        verbose: false
-      });
-
-      scannerRef.current = scanner;
-
-      const isIosScannerV210 = isIosScannerDeviceV210();
-
-      const config = {
-        fps: 45,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const base = Math.min(viewfinderWidth, viewfinderHeight);
-          const size = Math.max(145, Math.min(Math.floor(base * 0.52), 245));
-          return { width: size, height: size };
-        },
-        aspectRatio: 1,
-        disableFlip: false,
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: !isIosScannerV210
-        },
-        videoConstraints: isIosScannerV210 ? {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 24, max: 30 }
-        } : {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 60, max: 60 },
-          focusMode: "continuous",
-          exposureMode: "continuous",
-          whiteBalanceMode: "continuous"
-        }
-      };
-
-      await scanner.start(
-        isIosScannerV210 ? { facingMode: { ideal: "environment" } } : { facingMode: "environment" },
-        config,
-        (decodedText: string) => {
-          finishDetected(decodedText);
-        },
-        () => {
-          // ignore frame scan failures; continuous scanner will retry
-        }
-      );
-
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 200);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 700);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 1400);
-      window.setTimeout(() => applyScannerCameraSharpness(scanner), 2400);
-      if (!isIosScannerV210) window.setTimeout(() => startUltraQrDetector(), 650);
-
-      setStatus(isIosScannerV210 ? "Scanner iPhone aktif. Arahkan QR ke kotak, tunggu fokus. Jika belum terbaca, tekan Scan dari Foto." : "Scanner QR ULTRA aktif. Masukkan QR saja ke kotak kecil, jarak 25-45 cm, tahan stabil 2 detik.");
+      if (ios) await startIosZxingScanner();
+      else await startHtml5Scanner();
     } catch (err: any) {
-      const msg = String(err?.message || err || "");
-      if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")) {
-        setStatus("Izin kamera ditolak. Di iPhone buka Settings > Safari/Chrome > Camera > Allow, lalu refresh halaman.");
-      } else if (msg.toLowerCase().includes("notfound")) {
-        setStatus("Kamera tidak ditemukan. Gunakan input barcode manual.");
+      const msg = String(err?.message || err || "").toLowerCase();
+      if (msg.includes("permission") || msg.includes("notallowed")) {
+        setStatus("Izin kamera ditolak. Aktifkan camera permission, lalu tekan Scan Ulang.");
+      } else if (msg.includes("notfound") || msg.includes("not found")) {
+        setStatus("Kamera tidak ditemukan. Gunakan Scan dari Foto atau input manual.");
       } else {
-        setStatus("Scanner kamera tidak berhasil dibuka. Di iPhone gunakan Safari/Chrome terbaru, izinkan kamera, atau tekan Scan dari Foto / input manual.");
+        setStatus("Scanner live camera belum berhasil. Untuk iPhone, tekan Scan dari Foto / Kamera Native sebagai mode paling stabil.");
       }
     } finally {
       setIsStarting(false);
     }
   }
 
+  async function toggleTorch() {
+    try {
+      const video = videoRef.current || (document.querySelector("#" + scannerId + " video") as HTMLVideoElement | null);
+      const stream = video?.srcObject as MediaStream | null;
+      const track = stream?.getVideoTracks?.()[0] as any;
+      const caps = track?.getCapabilities?.() || {};
+      if (!track || !caps.torch) {
+        setStatus("Lampu kamera tidak didukung browser/HP ini.");
+        return;
+      }
+      const next = !torchOn;
+      await track.applyConstraints?.({ advanced: [{ torch: next }] });
+      setTorchOn(next);
+      setStatus(next ? "Lampu kamera aktif." : "Lampu kamera mati.");
+    } catch {
+      setStatus("Lampu kamera tidak bisa diaktifkan di perangkat/browser ini.");
+    }
+  }
+
   async function scanUploadedImage(file: File) {
     if (!file) return;
-
-    setStatus("Membaca barcode dari foto...");
-    setScanMode("manual");
+    setStatus("Membaca QR dari foto...");
 
     try {
       await stopScanner();
@@ -2516,21 +2493,34 @@ function ScannerModal({
       const Html5Qrcode = mod.Html5Qrcode;
       const scanner = new Html5Qrcode(scannerId, { verbose: false });
       scannerRef.current = scanner;
-
       const decodedText = await scanner.scanFile(file, true);
       finishDetected(decodedText);
-    } catch {
-      setStatus("Barcode dari foto belum terbaca. Coba foto lebih dekat/terang atau input manual.");
-    }
+      return;
+    } catch {}
+
+    try {
+      const zxing = await import("@zxing/browser");
+      const ReaderCtor = (zxing as any).BrowserQRCodeReader || (zxing as any).BrowserMultiFormatReader;
+      const reader = new ReaderCtor();
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const result = await reader.decodeFromImageUrl(objectUrl);
+        const text = String(result?.getText?.() || result?.text || "").trim();
+        if (text) {
+          finishDetected(text);
+          return;
+        }
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {}
+
+    setStatus("QR dari foto belum terbaca. Foto ulang lebih dekat, terang, dan pastikan QR memenuhi foto.");
   }
 
   useEffect(() => {
     if (!open) return;
-
-    const timer = setTimeout(() => {
-      startScanner();
-    }, 250);
-
+    const timer = setTimeout(() => startScanner(), 250);
     return () => {
       clearTimeout(timer);
       stopScanner();
@@ -2545,29 +2535,36 @@ function ScannerModal({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-lg font-black">Scan Barcode / QR</div>
-            <div className="text-xs text-slate-400">Scanner v23 iPhone compatible + ULTRA QR.</div>
+            <div className="text-xs text-slate-400">Scanner v227 universal: Android sensitif + iPhone high-res.</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-3 py-2 font-bold">
             Tutup
           </button>
         </div>
 
-        <div
-          className="mx-auto aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-black"
-          onClick={() => applyScannerCameraSharpness(scannerRef.current, true)}
-        >
-          <div id={scannerId} className="h-full w-full" />
+        <div className="relative overflow-hidden rounded-2xl bg-black">
+          <video
+            ref={videoRef}
+            className="h-80 w-full bg-black object-cover"
+            playsInline
+            muted
+            autoPlay
+            style={{ display: isIosMode ? "block" : "none" }}
+          />
+          <div id={scannerId} className="min-h-80 w-full" style={{ display: isIosMode ? "none" : "block" }} />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="h-48 w-48 rounded-2xl border-4 border-white/90 shadow-[0_0_0_999px_rgba(0,0,0,0.18)]" />
+          </div>
         </div>
 
         <div className="mt-3 grid gap-2 rounded-xl bg-slate-900 p-3 text-sm text-slate-200">
           <div>{isStarting ? "Menyiapkan scanner..." : status}</div>
           <div className="text-xs text-slate-400">
-            Tips: isi kotak hanya dengan QR, bukan seluruh label. Jarak ideal 25-45 cm. Kalau blur, jangan ditempel terlalu dekat: mundur sedikit, tekan Fokus QR Ultra, lalu tahan 2 detik.
-            Untuk label glossy/gelap, tekan Lampu atau tambah cahaya dari samping.
+            Tips: arahkan kotak hanya ke QR, jangan seluruh label. Untuk iPhone gunakan Safari/Chrome iOS langsung, jarak 20-35 cm, tahan stabil 1-2 detik. Jika live camera tetap sulit, tekan Scan dari Foto / Kamera Native.
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <button
             type="button"
             className="rounded-xl bg-slate-800 px-3 py-2 font-black"
@@ -2580,27 +2577,29 @@ function ScannerModal({
           <button
             type="button"
             className="rounded-xl bg-slate-800 px-3 py-2 font-black"
-            onClick={() => applyScannerCameraSharpness(scannerRef.current, true)}
+            onClick={() => tuneRunningTrack(true)}
             disabled={isStarting}
           >
-            Fokus QR Ultra
+            Fokus
           </button>
 
           <button
             type="button"
             className="rounded-xl bg-slate-800 px-3 py-2 font-black"
-            onClick={() => toggleScannerTorch(scannerRef.current)}
+            onClick={toggleTorch}
             disabled={isStarting}
           >
             Lampu
           </button>
+        </div>
 
+        <div className="mt-2 grid grid-cols-1 gap-2">
           <button
             type="button"
-            className="rounded-xl bg-slate-800 px-3 py-2 font-black"
+            className="rounded-xl bg-emerald-600 px-3 py-2 font-black text-white"
             onClick={() => fileInputRef.current?.click()}
           >
-            Scan dari Foto
+            Scan dari Foto / Kamera Native
           </button>
         </div>
 
@@ -2636,6 +2635,7 @@ function ScannerModal({
     </div>
   );
 }
+
 
 
 export default function InputPage() {
