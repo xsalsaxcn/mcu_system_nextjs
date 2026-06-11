@@ -326,6 +326,7 @@ async function nextMcuCounter(supabase: any, year: string, prefixBase: string) {
 async function getOrCreateParticipantSourceForImportV228(
   supabase: any,
   options: {
+    source_id?: number;
     database_name: string;
     institution_name: string;
     company_name: string;
@@ -334,6 +335,32 @@ async function getOrCreateParticipantSourceForImportV228(
   },
 ) {
   const cleanName = clean(options.database_name);
+
+  // IMPORT_EXISTING_DATABASE_SELECT_V237 helper
+  const requestedSourceId = Number((options as any).source_id || 0);
+  if (Number.isFinite(requestedSourceId) && requestedSourceId > 0) {
+    const { data: selected, error: selectedError } = await supabase
+      .from("participant_sources")
+      .select("id,name,program_type")
+      .eq("id", requestedSourceId)
+      .limit(1)
+      .maybeSingle();
+
+    if (selectedError) throw selectedError;
+    if (selected?.id) {
+      await supabase
+        .from("participant_sources")
+        .update({
+          name: cleanName || selected.name,
+          institution_name: options.institution_name || options.company_name,
+          description: options.description || "",
+          uploaded_filename: "upload.xlsx",
+        })
+        .eq("id", selected.id);
+
+      return Number(selected.id);
+    }
+  }
 
   const { data: existing, error: existingError } = await supabase
     .from("participant_sources")
@@ -464,7 +491,8 @@ export async function importParticipantsFromExcel(
     package_name: string;
     description?: string;
     program_type?: string;
-  },
+      source_id?: number;
+},
 ) {
   await seedDefaults(supabase);
 
@@ -485,6 +513,7 @@ export async function importParticipantsFromExcel(
   await mapProgramPackages(supabase, programType);
 
   const sourceId = await getOrCreateParticipantSourceForImportV228(supabase, {
+    source_id: (options as any).source_id,
     database_name: options.database_name,
     institution_name: options.institution_name,
     company_name: options.company_name,
@@ -495,6 +524,7 @@ export async function importParticipantsFromExcel(
 
   const stats: any = {
     source_id: sourceId,
+    selected_source_id_v237: options.source_id || null,
     program_type: programType,
     rows_read: 0,
     participants_created: 0,

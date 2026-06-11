@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
         ? "Vaksinasi Perusahaan"
         : "CAPASKA 2025/2026";
 
+  // IMPORT_EXISTING_DATABASE_SELECT_V237
+  const sourceId = Number(form.get("source_id") || form.get("database_id") || 0);
   const databaseName = String(form.get("database_name") || "").trim();
   const institutionName = String(form.get("institution_name") || defaultInstitution).trim();
   const companyName = String(form.get("company_name") || institutionName || defaultInstitution).trim();
@@ -47,6 +49,7 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
 
   const stats = await importParticipantsFromExcel(supabase, buffer, {
+    ...(Number.isFinite(sourceId) && sourceId > 0 ? { source_id: sourceId } : {}),
     database_name: databaseName,
     institution_name: institutionName,
     company_name: companyName,

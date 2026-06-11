@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 export default function ImportPage() {
@@ -75,9 +75,20 @@ function getImportTarget(programType: string) {
   return IMPORT_TARGETS.find((target) => target.value === programType) || IMPORT_TARGETS[0];
 }
 
+type ImportSourceOptionV237 = {
+  id: number;
+  name: string;
+  institution_name?: string | null;
+  description?: string | null;
+  program_type?: string | null;
+};
+
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
   const [databaseName, setDatabaseName] = useState("");
+  const [selectedSourceIdV237, setSelectedSourceIdV237] = useState("");
+  const [sourceOptionsV237, setSourceOptionsV237] = useState<ImportSourceOptionV237[]>([]);
+  const [loadingSourcesV237, setLoadingSourcesV237] = useState(false);
   const [institutionName, setInstitutionName] = useState("BPIP / CAPASKA");
   const [companyName, setCompanyName] = useState("BPIP / CAPASKA");
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
@@ -86,6 +97,36 @@ function ImportForm({ user }: { user: any }) {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [stageStaffOptionsV165, setStageStaffOptionsV165] = useState<Record<string, string[]>>(makeStageStaffMapV165());
+
+
+  // IMPORT_EXISTING_DATABASE_SELECT_V237
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSourcesV237() {
+      setLoadingSourcesV237(true);
+      try {
+        const res = await fetch(`/api/sources?program=${encodeURIComponent(programType)}`, { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        const rows = Array.isArray(json?.sources) ? json.sources : [];
+        setSourceOptionsV237(rows.map((row: any) => ({
+          id: Number(row.id),
+          name: String(row.name || ""),
+          institution_name: row.institution_name || "",
+          description: row.description || "",
+          program_type: row.program_type || "",
+        })).filter((row: ImportSourceOptionV237) => row.id && row.name));
+      } catch {
+        if (!cancelled) setSourceOptionsV237([]);
+      } finally {
+        if (!cancelled) setLoadingSourcesV237(false);
+      }
+    }
+
+    loadSourcesV237();
+    return () => { cancelled = true; };
+  }, [programType]);
 
   if (user.role !== "admin") {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat import database peserta.</div>;
@@ -98,11 +139,30 @@ function ImportForm({ user }: { user: any }) {
     const target = getImportTarget(nextProgram);
 
     setProgramType(target.value);
+    setSelectedSourceIdV237("");
+    setDatabaseName("");
     setInstitutionName(target.institution);
     setCompanyName(target.company);
     setPackageName(target.packageName);
   }
 
+
+
+  function chooseExistingDatabaseV237(sourceId: string) {
+    setSelectedSourceIdV237(sourceId);
+
+    if (!sourceId) return;
+
+    const selected = sourceOptionsV237.find((source) => String(source.id) === sourceId);
+    if (!selected) return;
+
+    setDatabaseName(selected.name || "");
+    if (selected.institution_name) {
+      setInstitutionName(selected.institution_name);
+      setCompanyName(selected.institution_name);
+    }
+    if (selected.description && !description) setDescription(selected.description);
+  }
 
   function updateStageStaffNameV165(stageName: string, index: number, value: string) {
     setStageStaffOptionsV165((prev) => {
@@ -152,6 +212,7 @@ function ImportForm({ user }: { user: any }) {
     const form = new FormData();
     form.append("program_type", programType);
     form.append("database_name", databaseName);
+    form.append("source_id", selectedSourceIdV237);
     form.append("institution_name", institutionName);
     form.append("company_name", companyName);
     form.append("package_name", packageName);
@@ -180,6 +241,7 @@ function ImportForm({ user }: { user: any }) {
         <div className="text-2xl font-black">Import Database Peserta</div>
         <div className="mt-1 text-sm text-slate-500">
           Import peserta dipusatkan di Admin. Pilih tujuan data: MCU Corporate, CAPASKA, atau Vaksinasi. Template tidak wajib, sistem auto-detect header nama peserta.
+          Field Database Existing dipakai untuk merge import berkala ke database yang sama.
         </div>
       </section>
 
@@ -199,9 +261,43 @@ function ImportForm({ user }: { user: any }) {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="label">Nama Database</label>
-            <input className="input" value={databaseName} onChange={(e) => setDatabaseName(e.target.value)} placeholder={selectedTarget.databasePlaceholder} required />
+          <div className="space-y-3">
+            <div>
+              <label className="label">Database Existing</label>
+              <select
+                className="input"
+                value={selectedSourceIdV237}
+                onChange={(e) => chooseExistingDatabaseV237(e.target.value)}
+              >
+                <option value="">+ Buat database baru / isi manual</option>
+                {sourceOptionsV237.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
+                {loadingSourcesV237
+                  ? "Memuat database existing..."
+                  : selectedSourceIdV237
+                    ? "Mode merge: import akan masuk ke database existing yang dipilih. Peserta lama di-update, peserta baru ditambahkan."
+                    : "Pilih database existing untuk merge berkala, atau kosongkan untuk membuat database baru."}
+              </div>
+            </div>
+
+            <div>
+              <label className="label">Nama Database</label>
+              <input
+                className="input"
+                value={databaseName}
+                onChange={(e) => {
+                  setDatabaseName(e.target.value);
+                  setSelectedSourceIdV237("");
+                }}
+                placeholder={selectedTarget.databasePlaceholder}
+                required
+              />
+            </div>
           </div>
           <div>
             <label className="label">Nama Instansi / Source</label>
