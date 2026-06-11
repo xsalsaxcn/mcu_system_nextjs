@@ -17,10 +17,9 @@ export default function QRCodeImage({
   useEffect(() => {
     let cancelled = false;
 
-    // QR_LABEL_IPHONE_CRISP_V217
-    // Untuk iPhone: gunakan SVG supaya hasil print thermal tetap tajam,
-    // margin/quiet zone cukup, dan error correction M agar QR tidak terlalu padat.
-    QRCode.toString(qrText, {
+    // QR_LABEL_IPHONE_CRISP_V218
+    // Untuk iPhone: SVG tajam, quiet zone cukup, error correction M supaya QR tidak terlalu padat.
+    const options = {
       type: "svg",
       margin: 4,
       scale: 8,
@@ -30,18 +29,22 @@ export default function QRCodeImage({
         dark: "#000000",
         light: "#ffffff"
       }
-    } as any)
-      .then((rawSvg) => {
-        if (cancelled) return;
-        const improvedSvg = String(rawSvg)
-          .replace(/<svg([^>]*)>/, "<svg$1 style=\"width:100%;height:100%;display:block;shape-rendering:crispEdges;\" preserveAspectRatio=\"xMidYMid meet\">")
-          .replace(/<path /g, "<path shape-rendering=\"crispEdges\" ")
-          .replace(/<rect /g, "<rect shape-rendering=\"crispEdges\" ");
-        setSvg(improvedSvg);
-      })
-      .catch(() => {
-        if (!cancelled) setSvg("");
-      });
+    } as any;
+
+    QRCode.toString(qrText, options, (err: unknown, rawSvg: string) => {
+      if (cancelled) return;
+      if (err || !rawSvg) {
+        setSvg("");
+        return;
+      }
+
+      const improvedSvg = String(rawSvg)
+        .replace(/<svg([^>]*)>/, "<svg$1 style=\"width:100%;height:100%;display:block;shape-rendering:crispEdges;\" preserveAspectRatio=\"xMidYMid meet\">")
+        .replace(/<path /g, "<path shape-rendering=\"crispEdges\" ")
+        .replace(/<rect /g, "<rect shape-rendering=\"crispEdges\" ");
+
+      setSvg(improvedSvg);
+    });
 
     return () => {
       cancelled = true;
