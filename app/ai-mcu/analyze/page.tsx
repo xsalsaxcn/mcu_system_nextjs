@@ -235,7 +235,7 @@ function displayColumns(rows: Row[], preferred: string[] = []) {
     }
   }
 
-  for (const row of rows.slice(0, 20)) {
+  for (const row of rows) {
     for (const col of Object.keys(row)) {
       if (!seen.has(col)) {
         seen.add(col);
@@ -314,14 +314,14 @@ function TableView({ rows, preferred = [] }: { rows: Row[]; preferred?: string[]
       {!filtered.length ? (
         <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-500">Belum ada data.</div>
       ) : (
-        <div className="max-h-[560px] overflow-auto rounded-2xl border">
-          <table className="min-w-max text-sm">
+        <div className="max-h-[680px] overflow-auto rounded-2xl border">
+          <table className="min-w-max table-auto text-sm">
             <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
               <tr>
                 {cols.map((col) => (
-                  <th key={col} className="whitespace-nowrap p-3 text-left font-black">
-                    {col}
-                  </th>
+                  <th key={col} className="min-w-[180px] max-w-[260px] p-3 text-left align-top font-black">
+  <div className="max-w-[260px] whitespace-normal break-words leading-snug">{col}</div>
+</th>
                 ))}
               </tr>
             </thead>
@@ -329,9 +329,11 @@ function TableView({ rows, preferred = [] }: { rows: Row[]; preferred?: string[]
               {filtered.slice(0, limit).map((row, index) => (
                 <tr key={index} className="hover:bg-slate-50">
                   {cols.map((col) => (
-                    <td key={col} className="min-w-[140px] max-w-[520px] whitespace-nowrap p-3 align-top" title={valueText(row[col])}>
-                      {valueText(row[col]) || "-"}
-                    </td>
+                    <td key={col} className="min-w-[180px] max-w-[420px] p-3 align-top" title={valueText(row[col])}>
+  <div className="max-w-[420px] whitespace-normal break-words leading-relaxed text-slate-900">
+    {valueText(row[col]) || "-"}
+  </div>
+</td>
                   ))}
                 </tr>
               ))}
