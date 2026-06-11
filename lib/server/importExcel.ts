@@ -322,6 +322,138 @@ async function nextMcuCounter(supabase: any, year: string, prefixBase: string) {
   return Number.isFinite(last) ? last + 1 : 1;
 }
 
+
+async function getOrCreateParticipantSourceForImportV228(
+  supabase: any,
+  options: {
+    database_name: string;
+    institution_name: string;
+    company_name: string;
+    description?: string;
+    program_type: string;
+  },
+) {
+  const cleanName = clean(options.database_name);
+
+  const { data: existing, error: existingError } = await supabase
+    .from("participant_sources")
+    .select("id")
+    .eq("program_type", options.program_type)
+    .ilike("name", cleanName)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+
+  if (existing?.id) {
+    await supabase
+      .from("participant_sources")
+      .update({
+        institution_name: options.institution_name || options.company_name,
+        description: options.description || "",
+        uploaded_filename: "upload.xlsx",
+      })
+      .eq("id", existing.id);
+
+    return Number(existing.id);
+  }
+
+  const { data: source, error: sourceError } = await supabase
+    .from("participant_sources")
+    .insert({
+      name: cleanName,
+      institution_name: options.institution_name || options.company_name,
+      program_type: options.program_type,
+      description: options.description || "",
+      uploaded_filename: "upload.xlsx",
+    })
+    .select("id")
+    .single();
+
+  if (sourceError) throw sourceError;
+  return Number(source.id);
+}
+
+async function findCapaskaExistingParticipantForMergeV228(
+  supabase: any,
+  args: {
+    source_id: number;
+    candidate: { name: string; gender: string; province: string };
+    nik?: string;
+    external_id?: string;
+  },
+) {
+  const nik = clean(args.nik);
+  const externalId = clean(args.external_id);
+
+  if (nik) {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("id,mcu_id,barcode_value")
+      .eq("program_type", PROGRAM_CAPASKA)
+      .eq("nik", nik)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) return data;
+  }
+
+  if (externalId) {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("id,mcu_id,barcode_value")
+      .eq("program_type", PROGRAM_CAPASKA)
+      .eq("external_id", externalId)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) return data;
+  }
+
+  const { data, error } = await supabase
+    .from("participants")
+    .select("id,mcu_id,barcode_value")
+    .eq("program_type", PROGRAM_CAPASKA)
+    .eq("source_id", args.source_id)
+    .ilike("name", clean(args.candidate.name))
+    .ilike("gender", clean(args.candidate.gender))
+    .ilike("province", clean(args.candidate.province))
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function updateCapaskaExistingParticipantForMergeV228(
+  supabase: any,
+  id: number,
+  data: any,
+) {
+  const updateRow = {
+    external_id: data.external_id || null,
+    nik: data.nik || null,
+    name: data.name,
+    gender: data.gender,
+    province: data.province || null,
+    company_id: data.company_id,
+    package_id: data.package_id,
+    source_id: data.source_id,
+    service_date: data.service_date || null,
+    mcu_date: data.mcu_date || null,
+    exam_type: data.exam_type || null,
+    doctor_assigned: data.doctor_assigned || null,
+    nurse_assigned: data.nurse_assigned || null,
+  };
+
+  const { error } = await supabase
+    .from("participants")
+    .update(updateRow)
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
 export async function importParticipantsFromExcel(
   supabase: any,
   fileBuffer: Buffer,
@@ -352,21 +484,13 @@ export async function importParticipantsFromExcel(
   );
   await mapProgramPackages(supabase, programType);
 
-  const { data: source, error: sourceError } = await supabase
-    .from("participant_sources")
-    .insert({
-      name: options.database_name,
-      institution_name: options.institution_name || options.company_name,
-      program_type: programType,
-      description: options.description || "",
-      uploaded_filename: "upload.xlsx",
-    })
-    .select("id")
-    .single();
-
-  if (sourceError) throw sourceError;
-
-  const sourceId = source.id as number;
+  const sourceId = await getOrCreateParticipantSourceForImportV228(supabase, {
+    database_name: options.database_name,
+    institution_name: options.institution_name,
+    company_name: options.company_name,
+    description: options.description,
+    program_type: programType,
+  });
   const workbook = XLSX.read(fileBuffer, { type: "buffer" });
 
   const stats: any = {
@@ -374,6 +498,7 @@ export async function importParticipantsFromExcel(
     program_type: programType,
     rows_read: 0,
     participants_created: 0,
+    participants_updated: 0,
     participants_skipped: 0,
     skipped_rows: [],
     detected_columns: [],
@@ -733,6 +858,35 @@ export async function importParticipantsFromExcel(
 
         seenImportParticipantKeysV168.add(dedupeKeyV168);
 
+        if (programType === PROGRAM_CAPASKA) {
+          const existingParticipant = await findCapaskaExistingParticipantForMergeV228(supabase, {
+            source_id: sourceId,
+            candidate,
+            nik: base.nik,
+            external_id: base.external_id,
+          });
+
+          if (existingParticipant?.id) {
+            await updateCapaskaExistingParticipantForMergeV228(supabase, existingParticipant.id, {
+              external_id: base.external_id,
+              nik: base.nik,
+              name: candidate.name,
+              gender: candidate.gender,
+              province: candidate.province,
+              company_id: companyId,
+              package_id: packageId,
+              source_id: sourceId,
+              service_date: base.service_date,
+              mcu_date: base.mcu_date,
+              exam_type: base.exam_type,
+              doctor_assigned: base.doctor_assigned,
+              nurse_assigned: base.nurse_assigned,
+            });
+            stats.participants_updated += 1;
+            continue;
+          }
+        }
+
         const mcuId = makeMcuId();
 
         insertRows.push({
@@ -862,6 +1016,7 @@ export async function importParticipantsFromExcel(
     stats.vaccination_location_count = groupedLocations.size;
   }
 
+  stats.import_mode = programType === PROGRAM_CAPASKA ? "merge_existing_by_nik_external_or_name_gender_province" : "insert_new";
   stats.barcode_generation_mode = "on_demand";
   stats.barcodes_ready = 0;
 

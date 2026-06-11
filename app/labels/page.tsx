@@ -16,6 +16,9 @@ type Participant = {
   institution_name?: string;
   gender?: string;
   province?: string;
+  label_printed_at?: string | null;
+  label_printed_by?: string;
+  label_print_count?: number;
 };
 
 export default function LabelsPage() {
@@ -74,6 +77,7 @@ function normalizeGenderLabel(value: any) {
 function LabelPrinter({ user }: { user: any }) {
   const [sources, setSources] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
+  const [labelPrintStatus, setLabelPrintStatus] = useState("unprinted");
   const [keyword, setKeyword] = useState("");
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [selectedIds, setSelectedIds] = useState<Record<number, boolean>>({});
@@ -138,7 +142,8 @@ function LabelPrinter({ user }: { user: any }) {
         program,
         source_id: sourceId,
         keyword: trimmedKeyword,
-        limit: "25"
+        limit: "25",
+        label_print_status: labelPrintStatus
       });
 
       const res = await fetch(`/api/labels/participants?${params.toString()}`, {
@@ -181,9 +186,41 @@ function LabelPrinter({ user }: { user: any }) {
     setPrintReady(false);
   }
 
+  async function markSelectedPrinted() {
+    const ids = selectedParticipants.map((p) => p.id);
+    if (!ids.length) {
+      setMessage("Pilih peserta yang sudah dicetak dulu.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("Menandai label sebagai sudah print...");
+
+    try {
+      const res = await fetch("/api/labels/mark-printed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids })
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setMessage(json.message || "Gagal menandai sudah print.");
+        return;
+      }
+      setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
+      setSelectedIds({});
+      await loadParticipants();
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal menandai sudah print.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function printLabels() {
     setPrintReady(true);
     setTimeout(() => window.print(), 350);
+    setMessage("Jika label sudah tercetak, klik tombol Tandai Sudah Print supaya peserta tidak muncul lagi di filter Belum print.");
   }
 
   return (
@@ -250,7 +287,7 @@ function LabelPrinter({ user }: { user: any }) {
       </section>
 
       <section className="card p-5 no-print">
-        <form onSubmit={loadParticipants} className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+        <form onSubmit={loadParticipants} className="grid gap-3 lg:grid-cols-[1fr_1fr_220px_auto]">
           <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
             <option value="all">Semua Database Instansi</option>
             {sources.map((s) => (
@@ -364,6 +401,7 @@ function LabelPrinter({ user }: { user: any }) {
                   <th>Database</th>
                   <th>Jenis Kelamin</th>
                   <th>Provinsi</th>
+                  <th>Status Label</th>
                 </tr>
               </thead>
               <tbody>
@@ -384,6 +422,13 @@ function LabelPrinter({ user }: { user: any }) {
                     <td>{p.source_name || "-"}</td>
                     <td>{normalizeGenderLabel((p as any).gender) || "-"}</td>
                     <td>{p.province || "-"}</td>
+                    <td>
+                      {p.label_printed_at ? (
+                        <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">Sudah print</span>
+                      ) : (
+                        <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">Belum print</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
