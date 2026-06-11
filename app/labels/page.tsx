@@ -50,7 +50,7 @@ function buildIphoneCameraQrValueV220(value: any) {
 function buildShortQrUrlV221(value: any) {
   const cleanCode = sanitizeQrText(value);
   if (!cleanCode) return "";
-  const baseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "https://inharmony-health.vercel.app").replace(//+$/, "");
+  const baseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "https://inharmony-health.vercel.app").replace(/\/+$/, "");
   return baseUrl + "/q/" + encodeURIComponent(cleanCode);
 }
 
