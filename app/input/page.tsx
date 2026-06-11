@@ -132,10 +132,10 @@ function extractBarcodeKeyword(rawCode: string) {
     const parsed = new URL(raw);
     const scanParam = parsed.searchParams.get("scan") || parsed.searchParams.get("code") || parsed.searchParams.get("id");
     if (scanParam) return scanParam.trim();
-    const qMatch = parsed.pathname.match(//q/([^/?#]+)/i);
+    const qMatch = parsed.pathname.match(/\/q\/([^/?#]+)/i);
     if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
   } catch {
-    const qMatch = raw.match(//q/([^s/?#]+)/i);
+    const qMatch = raw.match(/\/q\/([^\s/?#]+)/i);
     if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
   }
 if (!raw) return "";
