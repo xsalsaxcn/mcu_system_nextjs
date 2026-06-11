@@ -15,10 +15,12 @@ export default function QRCodeImage({
   useEffect(() => {
     let cancelled = false;
 
+    // QR_IPHONE_SCAN_V215
     QRCode.toDataURL(value || "-", {
-      margin: 0,
+      margin: 4,
       width: size * 4,
-      errorCorrectionLevel: "M"
+      errorCorrectionLevel: "H",
+      color: { dark: "#000000", light: "#ffffff" }
     })
       .then((url) => {
         if (!cancelled) setSrc(url);
@@ -35,7 +37,7 @@ export default function QRCodeImage({
   if (!src) {
     return (
       <div
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, display: "block", objectFit: "contain", background: "#ffffff" }}
         className="flex items-center justify-center border border-slate-200 text-[8px] text-slate-400"
       >
         QR
