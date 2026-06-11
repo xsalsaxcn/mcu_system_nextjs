@@ -125,7 +125,7 @@ function LabelPrinter({ user }: { user: any }) {
     if (key === "source_name") return participant.source_name || anyParticipant.database_name || anyParticipant.source || "";
     if (key === "gender") return participant.gender || anyParticipant.jenis_kelamin || "";
     if (key === "province") return participant.province || anyParticipant.provinsi || "";
-    if (key === "print_status") return anyParticipant.label_printed_at ? "Sudah print" : "Belum print";
+    if (key === "print_status") return isLabelPrintedV236(anyParticipant) ? "Sudah print" : "Belum print";
     return String(anyParticipant[key] || "");
   }
 
@@ -280,7 +280,7 @@ function LabelPrinter({ user }: { user: any }) {
       }
       setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
       setSelectedIds({});
-      await loadParticipants();
+      setTimeout(() => { loadParticipants(); }, 800);
     } catch (error: any) {
       setMessage(error?.message || "Gagal menandai sudah print.");
     } finally {
@@ -313,7 +313,7 @@ function LabelPrinter({ user }: { user: any }) {
       }
       setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
       setSelectedIds({});
-      await loadParticipants();
+      setTimeout(() => { loadParticipants(); }, 800);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "Gagal menandai sudah print.");
       setMessage(message);
@@ -322,7 +322,29 @@ function LabelPrinter({ user }: { user: any }) {
     }
   }
 
-    async function markSelectedPrintedV235() {
+    
+  function isLabelPrintedV236(participant: any) {
+    const statusText = String(participant?.label_print_status || participant?.print_status || "").toLowerCase();
+    return Boolean(
+      participant?.label_printed_at ||
+      participant?.label_printed ||
+      statusText.includes("sudah") ||
+      statusText.includes("printed")
+    );
+  }
+
+  function withPrintedStatusV236(participant: any, printedAt: string) {
+    return {
+      ...participant,
+      label_printed_at: printedAt,
+      label_printed_by: participant?.label_printed_by || "printed",
+      label_print_count: Number(participant?.label_print_count || 0) + 1,
+      label_print_status: "printed",
+      print_status: "Sudah print",
+      label_printed: true,
+    };
+  }
+async function markSelectedPrintedV235() {
     const fromSelectedParticipants = Array.isArray(selectedParticipants)
       ? selectedParticipants.map((p: any) => Number(p.id)).filter((id: number) => Number.isFinite(id) && id > 0)
       : [];
@@ -359,19 +381,14 @@ function LabelPrinter({ user }: { user: any }) {
       const printedAt = json.printed_at || new Date().toISOString();
       setParticipants((prev: Participant[]) => prev.map((p: any) => {
         if (!ids.includes(Number(p.id))) return p;
-        return {
-          ...p,
-          label_printed_at: printedAt,
-          label_printed_by: "printed",
-          label_print_count: Number(p.label_print_count || 0) + 1,
-        };
+        return withPrintedStatusV236(p, printedAt);
       }));
       setSelectedIds({});
       setPrintReady(false);
       const successMsg = "Berhasil menandai " + (json.updated || ids.length) + " peserta sebagai Sudah print.";
       setMessage(successMsg);
       window.alert(successMsg);
-      await loadParticipants();
+      setTimeout(() => { loadParticipants(); }, 800);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error || "Gagal menandai Sudah print.");
       setMessage(msg);
@@ -407,7 +424,7 @@ async function markSelectedPrintedV234() {
       setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
       setSelectedIds({});
       setPrintReady(false);
-      await loadParticipants();
+      setTimeout(() => { loadParticipants(); }, 800);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error || "Gagal menandai sudah print.");
       setMessage(msg);
@@ -736,7 +753,7 @@ function printLabels() {
                     <td>{normalizeGenderLabel((p as any).gender) || "-"}</td>
                     <td>{p.province || "-"}</td>
                     <td>
-                      {(p as any).label_printed_at ? (
+                      {isLabelPrintedV236(p) ? (
                         <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">Sudah print</span>
                       ) : (
                         <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">Belum print</span>

@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+// LABEL_PARTICIPANTS_NO_CACHE_V236
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -58,7 +61,11 @@ function mapRows(data: any[]) {
     package_name: "-",
     company_name: "",
     source_name: "-",
-    institution_name: ""
+    institution_name: "",
+    label_printed_at: (p as any).label_printed_at || null,
+    label_printed_by: (p as any).label_printed_by || "",
+    label_print_count: Number((p as any).label_print_count || 0),
+    label_print_status: (p as any).label_printed_at ? "printed" : "unprinted"
   }));
 }
 
