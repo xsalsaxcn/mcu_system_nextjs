@@ -322,6 +322,41 @@ function LabelPrinter({ user }: { user: any }) {
     }
   }
 
+  async function markSelectedPrintedV234() {
+    const ids = selectedParticipants.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0);
+    if (!ids.length) {
+      setMessage("Pilih peserta yang sudah dicetak dulu.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Tandai ${ids.length} peserta sebagai Sudah print?`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage("Menandai peserta terpilih sebagai Sudah print...");
+
+    try {
+      const res = await fetch("/api/labels/mark-printed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal menandai sudah print.");
+      }
+      setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
+      setSelectedIds({});
+      setPrintReady(false);
+      await loadParticipants();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "Gagal menandai sudah print.");
+      setMessage(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
 function printLabels() {
     setPrintReady(true);
     setTimeout(() => window.print(), 350);
@@ -571,7 +606,23 @@ function printLabels() {
             </div>
           </div>
 
-          <div className="mobile-table">
+                    {/* LABEL_MARK_PRINT_TOOLBAR_V234 */}
+          <div className="mb-4 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 no-print">
+            <div className="text-sm font-semibold text-emerald-900">
+              <div className="font-black">Status Label Printing</div>
+              <div className="text-xs text-emerald-700">Setelah label benar-benar tercetak, klik tombol ini agar peserta pindah dari Belum print ke Sudah print.</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={markSelectedPrintedV234}
+              disabled={!selectedParticipants.length || loading}
+            >
+              Tandai Sudah Print
+            </button>
+          </div>
+
+<div className="mobile-table">
             <table>
               <thead>
                 <tr>
