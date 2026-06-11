@@ -5,30 +5,34 @@ import { fail, ok } from "@/lib/server/response";
 
 export const runtime = "nodejs";
 
+function parseIds(value: any) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0)));
+}
+
 export async function POST(req: NextRequest) {
   const user = getSessionUser(req);
-  if (!user || user.role !== "admin") return fail("Unauthorized", 401);
+  if (!user) return fail("Unauthorized", 401);
 
   const body = await req.json().catch(() => ({}));
-  const ids = Array.isArray(body?.ids)
-    ? body.ids.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0)
-    : [];
+  const ids = parseIds(body?.ids || body?.participantIds || body?.selectedIds);
 
   if (!ids.length) return fail("Tidak ada peserta yang dipilih.");
 
   const supabase = getSupabaseAdmin();
-  const { data: existing, error: selectError } = await supabase
+  const now = new Date().toISOString();
+  const printedBy = user.username || user.role || "admin";
+
+  // Ambil count lama supaya print count bertambah dengan aman.
+  const { data: rows, error: selectError } = await supabase
     .from("participants")
     .select("id,label_print_count")
     .in("id", ids);
 
   if (selectError) return fail(selectError.message, 500);
 
-  const printedBy = user.username || user.role || "admin";
-  const now = new Date().toISOString();
   let updated = 0;
-
-  for (const row of existing || []) {
+  for (const row of rows || []) {
     const { error } = await supabase
       .from("participants")
       .update({
@@ -42,5 +46,5 @@ export async function POST(req: NextRequest) {
     updated += 1;
   }
 
-  return ok({ updated, printed_at: now });
+  return ok({ updated, requested: ids.length, ids, printed_at: now });
 }

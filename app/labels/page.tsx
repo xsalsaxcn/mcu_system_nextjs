@@ -322,7 +322,66 @@ function LabelPrinter({ user }: { user: any }) {
     }
   }
 
-  async function markSelectedPrintedV234() {
+    async function markSelectedPrintedV235() {
+    const fromSelectedParticipants = Array.isArray(selectedParticipants)
+      ? selectedParticipants.map((p: any) => Number(p.id)).filter((id: number) => Number.isFinite(id) && id > 0)
+      : [];
+    const fromSelectedIds = Object.entries(selectedIds || {})
+      .filter(([, checked]) => Boolean(checked))
+      .map(([id]) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const ids = Array.from(new Set([...fromSelectedParticipants, ...fromSelectedIds]));
+
+    if (!ids.length) {
+      const msg = "Centang peserta dulu, lalu klik Tandai Sudah Print.";
+      setMessage(msg);
+      window.alert(msg);
+      return;
+    }
+
+    const confirmed = window.confirm("Tandai " + ids.length + " peserta sebagai Sudah print?");
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage("Menandai peserta sebagai Sudah print...");
+
+    try {
+      const res = await fetch("/api/labels/mark-printed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) {
+        throw new Error(json.message || json.error || "Gagal menandai Sudah print.");
+      }
+
+      const printedAt = json.printed_at || new Date().toISOString();
+      setParticipants((prev: Participant[]) => prev.map((p: any) => {
+        if (!ids.includes(Number(p.id))) return p;
+        return {
+          ...p,
+          label_printed_at: printedAt,
+          label_printed_by: "printed",
+          label_print_count: Number(p.label_print_count || 0) + 1,
+        };
+      }));
+      setSelectedIds({});
+      setPrintReady(false);
+      const successMsg = "Berhasil menandai " + (json.updated || ids.length) + " peserta sebagai Sudah print.";
+      setMessage(successMsg);
+      window.alert(successMsg);
+      await loadParticipants();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "Gagal menandai Sudah print.");
+      setMessage(msg);
+      window.alert(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+async function markSelectedPrintedV234() {
     const ids = selectedParticipants.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0);
     if (!ids.length) {
       setMessage("Pilih peserta yang sudah dicetak dulu.");
@@ -615,8 +674,8 @@ function printLabels() {
             <button
               type="button"
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={markSelectedPrintedV234}
-              disabled={!selectedParticipants.length || loading}
+              onClick={markSelectedPrintedV235}
+              disabled={loading}
             >
               Tandai Sudah Print
             </button>
