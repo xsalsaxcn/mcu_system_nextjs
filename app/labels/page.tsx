@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -31,6 +31,19 @@ function sanitizeQrText(value: any) {
     .replace(/[;\n\r]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+
+function buildIphoneCameraQrValueV220(value: any) {
+  const code = sanitizeQrText(value);
+  if (!code) return "";
+
+  // iPhone Camera lebih stabil membaca QR yang berisi URL.
+  // Scanner Harmony tetap mengambil nomor MCU dari parameter scan.
+  if (typeof window === "undefined") return code;
+  const origin = String(window.location?.origin || "").trim();
+  if (!origin) return code;
+  return `${origin}/input?scan=${encodeURIComponent(code)}`;
 }
 
 function buildCombinedQrValue(participant: Participant) {
@@ -427,7 +440,7 @@ function LabelCard({
   printMode?: boolean;
 }) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
-  const qrValue = idText;
+  const qrValue = buildIphoneCameraQrValueV220(idText);
   const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
   const participantAny = participant as any;

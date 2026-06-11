@@ -126,8 +126,24 @@ function getSelectedChoiceOption(param: any, selectedValue: string) {
 
 function extractBarcodeKeyword(rawCode: string) {
   const raw = String(rawCode || "").trim();
+if (!raw) return "";
 
-  if (!raw) return "";
+  // QR_URL_SCAN_V220
+  // Support QR URL, misalnya https://domain/input?scan=CAPASKA-2026-0001.
+  try {
+    const url = new URL(raw);
+    const fromParam =
+      url.searchParams.get("scan") ||
+      url.searchParams.get("mcu") ||
+      url.searchParams.get("id") ||
+      url.searchParams.get("code") ||
+      url.searchParams.get("q");
+    if (fromParam) return decodeURIComponent(fromParam).trim();
+
+    const pathParts = url.pathname.split("/").map((x) => x.trim()).filter(Boolean);
+    const last = pathParts[pathParts.length - 1];
+    if (last && !/^(input|scan|barcode|qr)$/i.test(last)) return decodeURIComponent(last).trim();
+  } catch {}
 
   // Format QR rekomendasi:
   // MCU=CAPASKA-2026-0603;NAME=CHELSE OLIVIA
@@ -2628,6 +2644,7 @@ function InputForm({ user }: { user: any }) {
   const effectivePostId = isAdminStageAssist ? adminPostId : Number(user.post_id);
   const effectivePostName = isAdminStageAssist ? (adminPostName || `Post ${adminPostId}`) : user.post_name;
   const autoLoadRef = useRef(false);
+  const autoScanQrRefV220 = useRef(false);
   const [sources, setSources] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
   const [keyword, setKeyword] = useState("");
@@ -2900,7 +2917,27 @@ function InputForm({ user }: { user: any }) {
     }
   }
 
-  async function loadParticipant(p: any, mode: LoadMode) {
+  
+  useEffect(() => {
+    // AUTO_SCAN_QR_URL_V220
+    // Jika QR dibuka dari kamera iPhone sebagai URL /input?scan=..., otomatis cari peserta.
+    if (autoScanQrRefV220.current) return;
+    const rawScan =
+      searchParams.get("scan") ||
+      searchParams.get("mcu") ||
+      searchParams.get("id") ||
+      searchParams.get("code") ||
+      searchParams.get("q") ||
+      "";
+    const code = extractBarcodeKeyword(rawScan);
+    if (!code) return;
+    autoScanQrRefV220.current = true;
+    setKeyword(code);
+    window.setTimeout(() => {
+      search(undefined, code);
+    }, 250);
+  }, [searchParams, sourceId]);
+async function loadParticipant(p: any, mode: LoadMode) {
     setParticipant(p);
     setMessage("");
 

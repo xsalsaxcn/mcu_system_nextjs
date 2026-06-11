@@ -17,11 +17,11 @@ export default function QRCodeImage({
   useEffect(() => {
     let cancelled = false;
 
-    // QR_LABEL_IPHONE_CRISP_V218
-    // Untuk iPhone: SVG tajam, quiet zone cukup, error correction M supaya QR tidak terlalu padat.
+    // QR_LABEL_IPHONE_URL_V220
+    // SVG tajam + quiet zone cukup. Error correction M menjaga modul QR tidak terlalu padat untuk label thermal.
     const options = {
       type: "svg",
-      margin: 4,
+      margin: 3,
       scale: 8,
       width: Math.max(256, safeSize * 8),
       errorCorrectionLevel: "M",
