@@ -13,10 +13,11 @@ function normalizeQrValueV221(value: string) {
 }
 
 function improveSvgV221(rawSvg: string) {
+  // QR_SVG_BLACK_FIX_V224
+  // Jangan replace semua fill menjadi hitam. SVG QR punya area putih/quiet zone yang wajib tetap putih,
+  // terutama untuk iPhone. Patch lama membuat background putih ikut hitam sehingga QR jadi kotak hitam.
   return String(rawSvg || "")
-    .replace(/<svg([^>]*)>/, '<svg$1 style="width:100%;height:100%;display:block;shape-rendering:crispEdges;background:#ffffff;" preserveAspectRatio="xMidYMid meet">')
-    .replace(/fill="#[0-9a-fA-F]{3,6}"/g, 'fill="#000000"')
-    .replace(/stroke="#[0-9a-fA-F]{3,6}"/g, 'stroke="#000000"');
+    .replace(/<svg([^>]*)>/, '<svg$1 style="width:100%;height:100%;display:block;background:#ffffff;shape-rendering:crispEdges;" preserveAspectRatio="xMidYMid meet">');
 }
 
 export default function QRCodeImage({ value, size = 64 }: QRCodeImageProps) {
