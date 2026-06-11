@@ -24,6 +24,14 @@ const ALIASES: Record<string,string[]> = {
   USIA:["usia","umur","age"], DEPT:["dept","departemen","department","bagian","unit","divisi"],
   PAKET:["paket","package"], KATEGORI:["kategori","status fit","fit status","status"],
   KESIMPULAN:["kesimpulan","conclusion"], SARAN:["saran","recommendation","rekomendasi"]
+
+  MEDICAL_RECORD_NO:["no medical record","no. medical record","medical record","no mr","no. mr","mr","no rekam medis","no. rekam medis","nomor rekam medis","rekam medis"],
+  NO_MR:["no medical record","no. medical record","medical record","no mr","no. mr","mr","no rekam medis","no. rekam medis","nomor rekam medis","rekam medis"],
+  TANGGAL_MCU:["tanggal mcu","tgl mcu","tglmcu","mcu date","tanggal pemeriksaan","tgl pemeriksaan"],
+  PERUSAHAAN:["nama pt","perusahaan","company","company name","pt"],
+  DEPARTEMEN:["departemen","department","dept"],
+  BAGIAN:["bagian","section","unit","dept/bagian","department/bagian","division","divisi"],
+  JABATAN:["jabatan","position","job title","posisi"],
 };
 const HEADER_WORDS = Object.entries(ALIASES).flatMap(([k,a])=>[k,...a]).map(norm).filter(Boolean);
 function scoreHeader(row:any[], next:any[][]=[]) {
@@ -44,6 +52,19 @@ function canonical(row:Record<string,any>, mapping:Record<string,string>, ctx:an
   const out:Record<string,any>={...row}; Object.entries(mapping).forEach(([k,h])=>out[k]=row[h]??"");
   const name=val(row,mapping,"NAMA")||clean(out.NAMA)||clean(out.Nama); const mcu=val(row,mapping,"MCU_ID")||val(row,mapping,"NOMCU")||clean(out.MCU_ID)||clean(out.NOMCU)||clean(out["NO MCU"])||`${ctx.databaseName}-${index+1}`; const nik=val(row,mapping,"NIK")||clean(out.NIK)||clean(out["NIK/NRP/ID"]);
   out.MCU_ID=mcu; out.NOMCU=mcu; out["NO MCU"]=mcu; out.NAMA=name; out.Nama=name; out.NIK=nik; out.DEPT=out.DEPT||out.DEPARTEMEN||val(row,mapping,"DEPT"); out.DEPARTEMEN=out.DEPARTEMEN||out.DEPT; out["Nama PT"]=ctx.companyName; out.DATABASE_NAME=ctx.databaseName; out.PROGRAM_TYPE=ctx.programType; out._AI_MCU_FIELD_MAPPING=mapping;
+    // v241 fix: corporate MCU identity fields from Excel. Additive only; existing fields are preserved.
+  const medicalRecordNo = val(row,mapping,"MEDICAL_RECORD_NO") || val(row,mapping,"NO_MR") || clean(out.MEDICAL_RECORD_NO) || clean(out.NO_MR) || clean(out["No. Medical Record"]) || clean(out["No Medical Record"]) || clean(out["No MR"]) || clean(out["NO MR"]) || clean(out["No Rekam Medis"]);
+  const tanggalMcu = val(row,mapping,"TANGGAL_MCU") || clean(out.TANGGAL_MCU) || clean(out["Tanggal MCU"]) || clean(out["Tgl MCU"]) || clean(out["Tanggal Pemeriksaan"]);
+  const perusahaan = val(row,mapping,"PERUSAHAAN") || clean(out.PERUSAHAAN) || clean(out.Perusahaan) || clean(out["Nama PT"]) || clean(ctx.companyName);
+  const departemen = val(row,mapping,"DEPARTEMEN") || val(row,mapping,"DEPT") || clean(out.DEPARTEMEN) || clean(out.DEPT) || clean(out.Department) || clean(out.Departemen);
+  const bagian = val(row,mapping,"BAGIAN") || clean(out.BAGIAN) || clean(out.Bagian) || clean(out["Dept/Bagian"]) || clean(out.Unit);
+  const jabatan = val(row,mapping,"JABATAN") || clean(out.JABATAN) || clean(out.Jabatan) || clean(out.Position) || clean(out["Job Title"]);
+  out.MEDICAL_RECORD_NO = medicalRecordNo; out.NO_MR = medicalRecordNo; out["No. Medical Record"] = medicalRecordNo; out["No Medical Record"] = medicalRecordNo; out["No MR"] = medicalRecordNo; out["No Rekam Medis"] = medicalRecordNo;
+  out.TANGGAL_MCU = tanggalMcu; out["Tanggal MCU"] = tanggalMcu;
+  if (perusahaan) { out.PERUSAHAAN = perusahaan; out.Perusahaan = perusahaan; out["Nama PT"] = perusahaan; }
+  if (departemen) { out.DEPT = departemen; out.DEPARTEMEN = departemen; out.Department = departemen; }
+  if (bagian) { out.BAGIAN = bagian; out.Bagian = bagian; }
+  if (jabatan) { out.JABATAN = jabatan; out.Jabatan = jabatan; }
   return {row:out,name,mcu,nik};
 }
 async function parseExcel(file:File, ctx:any){

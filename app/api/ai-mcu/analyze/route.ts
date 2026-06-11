@@ -164,7 +164,14 @@ function normalizeRow(row: Dict, fallback: Dict = {}) {
     UR_BAKTERI: ["UR:Bakteri", "Bakteri Urine", "Bacteria"],
     THORAX: ["Thorax Foto", "Hasilthorax", "Hasil Thorax", "Foto Thorax", "Rontgen Thorax", "Thorax"],
     EKG: ["EKG", "HasilEKG", "Hasil EKG", "ECG"],
-  };
+  
+    MEDICAL_RECORD_NO: ["No Medical Record", "No. Medical Record", "Medical Record", "No MR", "NO MR", "MR", "No Rekam Medis", "No. Rekam Medis", "Nomor Rekam Medis"],
+    NO_MR: ["No Medical Record", "No. Medical Record", "Medical Record", "No MR", "NO MR", "MR", "No Rekam Medis", "No. Rekam Medis", "Nomor Rekam Medis"],
+    TANGGAL_MCU: ["Tanggal MCU", "TGL MCU", "TGLMCU", "MCU Date", "Tanggal Pemeriksaan", "Tgl Pemeriksaan"],
+    PERUSAHAAN: ["Nama PT", "PERUSAHAAN", "Perusahaan", "Company", "Company Name", "PT"],
+    BAGIAN: ["Bagian", "BAGIAN", "Dept/Bagian", "Unit", "Section", "Division", "Divisi"],
+    JABATAN: ["Jabatan", "JABATAN", "Position", "Job Title", "Posisi"],
+};
 
   for (const [target, aliases] of Object.entries(aliasMap)) {
     if (!clean(out[target])) {
@@ -177,6 +184,13 @@ function normalizeRow(row: Dict, fallback: Dict = {}) {
   out.MCU_ID = clean(out.MCU_ID) || clean(out.NOMCU) || clean(fallback.mcu_id) || clean(fallback.id);
   out.NOMCU = clean(out.NOMCU) || clean(out.MCU_ID);
   out.NIK = clean(out.NIK) || clean(fallback.nik);
+  out.MEDICAL_RECORD_NO = clean(out.MEDICAL_RECORD_NO) || clean(out.NO_MR) || clean(out["No. Medical Record"]);
+  out.NO_MR = clean(out.NO_MR) || clean(out.MEDICAL_RECORD_NO);
+  out["No. Medical Record"] = clean(out["No. Medical Record"]) || clean(out.MEDICAL_RECORD_NO);
+  out["Tanggal MCU"] = clean(out["Tanggal MCU"]) || clean(out.TANGGAL_MCU);
+  out.Perusahaan = clean(out.Perusahaan) || clean(out.PERUSAHAAN) || clean(out["Nama PT"]);
+  out.Bagian = clean(out.Bagian) || clean(out.BAGIAN);
+  out.Jabatan = clean(out.Jabatan) || clean(out.JABATAN);
 
   if (!clean(out.TD) && clean(out.TENSI)) out.TD = out.TENSI;
   if (!clean(out.TD) && clean(out.SISTOLIK) && clean(out.DIASTOLIK)) out.TD = `${out.SISTOLIK}/${out.DIASTOLIK}`;

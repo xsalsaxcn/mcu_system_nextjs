@@ -38,6 +38,10 @@ const FIELD_ALIASES: Record<string, string[]> = {
 
   conclusion: ["kesimpulan", "conclusion"],
   suggestion: ["saran", "suggestion", "rekomendasi"],
+
+  medicalRecordNo: ["no medical record", "no. medical record", "medical record", "no mr", "no. mr", "mr", "no rekam medis", "no. rekam medis", "nomor rekam medis"],
+  division: ["bagian", "dept/bagian", "unit", "section", "division", "divisi"],
+  position: ["jabatan", "position", "job title", "posisi"],
 };
 
 function normalize(value: unknown) {

@@ -127,7 +127,12 @@ function participantToRekapRow(
   const name = pick(uploadedRow.NAMA, uploadedRow.Nama, importRow?.participant_name, p.name, p.nama);
   const mcuId = pick(uploadedRow.NOMCU, uploadedRow["NO MCU"], importRow?.mcu_id, p.mcu_id, p.no_mcu, p.nomcu, p.barcode_value, p.external_id, p.id);
   const nik = pick(uploadedRow.NIK, uploadedRow["NIK/NRP/ID"], importRow?.nik, p.nik, p.external_id, p.employee_id, p.id);
-  const company = pick(uploadedRow["Nama PT"], uploadedRow.Perusahaan, importRow?.company_name, companyName, source?.institution_name, source?.name, p.company_name, p.institution_name);
+  const medicalRecordNo = pick(uploadedRow.MEDICAL_RECORD_NO, uploadedRow.NO_MR, uploadedRow["No. Medical Record"], uploadedRow["No Medical Record"], uploadedRow["No MR"], uploadedRow["NO MR"], uploadedRow["MR"], uploadedRow["No Rekam Medis"], p.medical_record_no, p.no_mr, p.no_rekam_medis);
+  const mcuDate = formatDateId(pick(uploadedRow["Tanggal MCU"], uploadedRow.TANGGAL_MCU, uploadedRow["TGL MCU"], uploadedRow.TGLMCU, uploadedRow["Tanggal Pemeriksaan"], p.mcu_date, uploadedRow.service_date, p.service_date, p.created_at, p.updated_at));
+  const department = pick(uploadedRow.DEPARTEMEN, uploadedRow.DEPT, uploadedRow.Department, uploadedRow.Departemen, p.department, p.departement, p.division, p.unit);
+  const bagian = pick(uploadedRow.BAGIAN, uploadedRow.Bagian, uploadedRow["Dept/Bagian"], uploadedRow.Unit, p.bagian, p.section, p.unit);
+  const jabatan = pick(uploadedRow.JABATAN, uploadedRow.Jabatan, uploadedRow.Position, uploadedRow["Job Title"], p.jabatan, p.position);
+  const company = pick(uploadedRow["Nama PT"], uploadedRow.PERUSAHAAN, uploadedRow.Perusahaan, uploadedRow.Company, uploadedRow["Company Name"], importRow?.company_name, companyName, source?.institution_name, source?.name, p.company_name, p.institution_name);
   const packageText = pick(uploadedRow.PAKET, uploadedRow.Paket, packageName, p.package_name, p.paket);
 
   return {
@@ -135,12 +140,21 @@ function participantToRekapRow(
 
     "_SheetName": pick(uploadedRow._SheetName, "FISIK"),
     "Nama PT": company,
-    "Tanggal MCU": formatDateId(p.mcu_date || uploadedRow["Tanggal MCU"] || p.created_at || p.updated_at),
+    "PERUSAHAAN": company,
+    "Perusahaan": company,
+    "Tanggal MCU": mcuDate,
+    "TANGGAL_MCU": mcuDate,
     "Issueddate": formatDateId(new Date().toISOString()),
 
     "NOMCU": mcuId,
     "NO MCU": mcuId,
     "NO.MCU": mcuId,
+    "No. Medical Record": medicalRecordNo,
+    "No Medical Record": medicalRecordNo,
+    "MEDICAL_RECORD_NO": medicalRecordNo,
+    "NO MR": medicalRecordNo,
+    "NO_MR": medicalRecordNo,
+    "No Rekam Medis": medicalRecordNo,
     "NO.URUT": pick(uploadedRow["NO.URUT"], uploadedRow["NO URUT"], p.no_urut, p.urut, p.sequence_no, p.barcode_value, mcuId),
 
     "NAMA": name,
@@ -153,7 +167,13 @@ function participantToRekapRow(
     "NIK": nik,
     "NIK/NRP/ID": nik,
 
-    "DEPARTEMEN": pick(uploadedRow.DEPARTEMEN, uploadedRow.Department, p.department, p.departement, p.division, p.unit, p.bagian),
+    "DEPARTEMEN": department,
+    "Department": department,
+    "DEPT": department,
+    "Bagian": bagian,
+    "BAGIAN": bagian,
+    "Jabatan": jabatan,
+    "JABATAN": jabatan,
     "PAKET": packageText,
     "KATEGORI": pick(uploadedRow.KATEGORI, p.program_type, source?.program_type, "corporate"),
 

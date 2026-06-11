@@ -58,6 +58,7 @@ APP_CONFIG: Dict[str, Any] = {
         "mcuDate": ["Tanggal MCU", "TGLMCU", "TGL MCU", "TGL_MCU"],
         "issuedDate": ["Issueddate", "IssuedDate", "Issued Date"],
         "nomcu": ["NOMCU", "NO MCU", "No MCU", "MCU_ID", "NO.MCU", "NO MCU/NO. MCU"],
+        "medicalRecordNo": ["No Medical Record", "No. Medical Record", "Medical Record", "No MR", "NO MR", "MR", "No Rekam Medis", "No. Rekam Medis", "Nomor Rekam Medis", "MEDICAL_RECORD_NO", "NO_MR"],
         "name": ["NAMA", "Nama", "NAME"],
         "gender": ["JK", "JENIS KELAMIN", "Gender", "Sex"],
         "dob": ["TGLLAHIR", "TGL LAHIR", "Tanggal Lahir", "DOB", "TANGGAL LAHIR"],
@@ -1407,6 +1408,7 @@ def _build_identity(allrow: Dict[str, Any], nama_fallback: str) -> Dict[str, str
         "mcuDate": _pick(allrow, ih["mcuDate"]),
         "issuedDate": _pick(allrow, ih["issuedDate"]) or _pick(allrow, ih["mcuDate"]),
         "nomcu": _pick(allrow, ih["nomcu"]),
+        "medicalRecordNo": _pick(allrow, ih["medicalRecordNo"]),
         "name": _pick(allrow, ih["name"]) or _safe(nama_fallback),
         "gender": gender,
         "dob": _pick(allrow, ih["dob"]),
@@ -2070,7 +2072,7 @@ def _render_cover(data: Dict[str, Any], page_no: int, page_count: int, tdir: Pat
     p = data["patient"]
     logo = _data_uri(clinic.get("logoDataUri") or _find_logo(tdir), tdir)
     photo = _data_uri(p.get("photoUrl") or "", tdir)
-    rows = [("Nama", p.get("name")), ("Tanggal Lahir", p.get("dob")), ("Jenis Kelamin / Usia", p.get("genderAge")), ("No. MCU", p.get("nomcu")), ("Tanggal Mcu", p.get("mcuDate")), ("NIK/NRP/ID", p.get("nik")), ("Perusahaan", p.get("companyName")), ("Departement", p.get("department")), ("Bagian", p.get("bagian") or "-"), ("Jabatan", p.get("jabatan") or "-")]
+    rows = [("Nama", p.get("name")), ("No. Medical Record", p.get("medicalRecordNo") or "-"), ("No. MCU", p.get("nomcu")), ("Tanggal MCU", p.get("mcuDate")), ("NIK/NRP/ID", p.get("nik")), ("Tanggal Lahir", p.get("dob")), ("Jenis Kelamin / Usia", p.get("genderAge")), ("Perusahaan", p.get("companyName")), ("Department", p.get("department")), ("Bagian", p.get("bagian") or "-"), ("Jabatan", p.get("jabatan") or "-")]
     trs = "".join([f'<tr><td class="c-label">{_e(k)}</td><td class="c-colon">:</td><td class="c-value">{_e(v)}</td></tr>' for k, v in rows])
     return f"""
     <div class="page">
@@ -2079,7 +2081,7 @@ def _render_cover(data: Dict[str, Any], page_no: int, page_count: int, tdir: Pat
           <div class="cover-top"><div class="cover-top-left"><div class="cover-logo-wrap">{f'<img src="{logo}" alt="Logo">' if logo else ''}</div></div>
           <div class="cover-top-right"><div class="cover-contact-box"><div>{_e(clinic.get('address'))}</div><div>{_e(clinic.get('phone'))}</div><div>{_e(clinic.get('email'))}</div><div>{_e(clinic.get('website'))}</div></div></div></div>
           <div class="cover-hero"><div class="cover-photo-col"><div class="cover-photo-box">{f'<img src="{photo}" alt="Foto Peserta">' if photo else ''}</div></div>
-          <div class="cover-hero-right"><div class="cover-patient-name">{_e(p.get('name'))}</div><div class="cover-mini-label">No. Medical Record / NIK/NRP</div><div class="cover-mini-value">{_e(p.get('nomcu'))} / {_e(p.get('nik') or '-')}</div><div class="cover-mini-label">Tanggal Mcu</div><div class="cover-mini-value">{_e(p.get('mcuDate'))}</div></div></div>
+          <div class="cover-hero-right"><div class="cover-patient-name">{_e(p.get('name'))}</div><div class="cover-mini-label">No. Medical Record / NIK/NRP</div><div class="cover-mini-value">{_e(p.get('medicalRecordNo') or '-')} / {_e(p.get('nik') or '-')}</div><div class="cover-mini-label">Tanggal MCU</div><div class="cover-mini-value">{_e(p.get('mcuDate'))}</div></div></div>
           <div class="cover-main-title">Laporan Hasil Medical Check Up</div>
           <div class="cover-section-bar">Data Pasien</div>
           <table class="cover-patient-table">{trs}</table>
@@ -2284,7 +2286,7 @@ body { margin: 0; padding: 0; background: #fff; color:#111; font-family: Arial, 
 .identity-left-wrap{ width:49%; }.identity-right-wrap{ width:51%; }
 .identity-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
 .identity-table td{ font-size:10.4px; padding:2px 0; vertical-align:top; line-height:1.08; }
-.identity-label{ width:105px; white-space:nowrap; }.identity-colon{ width:12px; text-align:center; }.identity-value{ font-weight:bold; word-break:normal; overflow-wrap:break-word; padding-left:2px!important; }
+.identity-label{ width:124px; white-space:nowrap; }.identity-colon{ width:12px; text-align:center; }.identity-value{ font-weight:bold; word-break:normal; overflow-wrap:break-word; padding-left:2px!important; }
 .section-strip{ background:#d9d9d9; border:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:12px; letter-spacing:.7px; padding:4px 6px; margin:6px 0; }
 .fit-box{ border:1px solid #777; margin:4px 0 8px 0; }.fit-title{ background:#d9d9d9; border-bottom:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:12px; padding:4px; }
 .fit-row{ width:100%; border-collapse:collapse; }.fit-row td{ font-size:11px; padding:9px 10px; text-align:center; font-weight:bold; }
