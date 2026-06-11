@@ -79,6 +79,11 @@ function LabelPrinter({ user }: { user: any }) {
   const [sourceId, setSourceId] = useState("all");
   const [labelPrintStatus, setLabelPrintStatus] = useState("unprinted");
   const [keyword, setKeyword] = useState("");
+  const [loadLimit, setLoadLimit] = useState(500);
+  const [pageSize, setPageSize] = useState(50);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [tableFilters, setTableFilters] = useState<Record<string, string>>({});
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [selectedIds, setSelectedIds] = useState<Record<number, boolean>>({});
   const [copies, setCopies] = useState(6);
@@ -112,6 +117,71 @@ function LabelPrinter({ user }: { user: any }) {
 
     return rows;
   }, [selectedParticipants, copies]);
+  function labelTableValueV230(participant: Participant, key: string) {
+    const anyParticipant = participant as any;
+    if (key === "selected") return selectedIds[participant.id] ? "1" : "0";
+    if (key === "name") return participant.name || "";
+    if (key === "mcu_id") return participant.mcu_id || participant.external_id || anyParticipant.barcode_value || "";
+    if (key === "source_name") return participant.source_name || anyParticipant.database_name || anyParticipant.source || "";
+    if (key === "gender") return participant.gender || anyParticipant.jenis_kelamin || "";
+    if (key === "province") return participant.province || anyParticipant.provinsi || "";
+    if (key === "print_status") return anyParticipant.label_printed_at ? "Sudah print" : "Belum print";
+    return String(anyParticipant[key] || "");
+  }
+
+  function updateTableFilterV230(key: string, value: string) {
+    setTableFilters((prev) => ({ ...prev, [key]: value }));
+    setPageNumber(1);
+  }
+
+  function toggleSortV230(key: string) {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc"
+    }));
+    setPageNumber(1);
+  }
+
+  function sortLabelV230(key: string) {
+    if (sortConfig.key !== key) return "↕";
+    return sortConfig.direction === "asc" ? "↑" : "↓";
+  }
+
+  const filteredParticipants = useMemo(() => {
+    const filters = Object.entries(tableFilters).filter(([, value]) => String(value || "").trim());
+    const filtered = participants.filter((participant) => {
+      return filters.every(([key, value]) =>
+        labelTableValueV230(participant, key).toLowerCase().includes(String(value).toLowerCase().trim())
+      );
+    });
+
+    return [...filtered].sort((a, b) => {
+      const av = labelTableValueV230(a, sortConfig.key).toLowerCase();
+      const bv = labelTableValueV230(b, sortConfig.key).toLowerCase();
+      const cmp = av.localeCompare(bv, "id", { numeric: true, sensitivity: "base" });
+      return sortConfig.direction === "asc" ? cmp : -cmp;
+    });
+  }, [participants, tableFilters, sortConfig, selectedIds]);
+
+  const totalTablePages = Math.max(1, Math.ceil(filteredParticipants.length / Math.max(1, pageSize)));
+  const safePageNumber = Math.min(pageNumber, totalTablePages);
+
+  const pagedParticipants = useMemo(() => {
+    const start = (safePageNumber - 1) * pageSize;
+    return filteredParticipants.slice(start, start + pageSize);
+  }, [filteredParticipants, safePageNumber, pageSize]);
+
+  function FilterInputV230({ column, placeholder }: { column: string; placeholder: string }) {
+    return (
+      <input
+        className="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700"
+        value={tableFilters[column] || ""}
+        onChange={(event) => updateTableFilterV230(column, event.target.value)}
+        placeholder={placeholder}
+      />
+    );
+  }
+
 
   if (user.role !== "admin") {
     return (
@@ -142,7 +212,7 @@ function LabelPrinter({ user }: { user: any }) {
         program,
         source_id: sourceId,
         keyword: trimmedKeyword,
-        limit: "25",
+        limit: String(loadLimit),
         label_print_status: labelPrintStatus
       });
 
@@ -159,6 +229,7 @@ function LabelPrinter({ user }: { user: any }) {
         return;
       }
 
+      setPageNumber(1);
       setParticipants(json.participants || []);
       setSelectedIds({});
 
@@ -282,7 +353,7 @@ function LabelPrinter({ user }: { user: any }) {
           Search dibuat ringan. QR/barcode berisi kode singkat agar lebih mudah discan Android dan iPhone.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v225 · QR sensitif Android/iPhone · kode singkat
+          Label Search v230 · data lengkap · filter & sort header
         </div>
       </section>
 
@@ -374,7 +445,7 @@ function LabelPrinter({ user }: { user: any }) {
             <div>
               <div className="text-lg font-black">Pilih Peserta</div>
               <div className="text-sm text-slate-500">
-                Terpilih {selectedParticipants.length} peserta Ãƒâ€” {copies} stiker = {labels.length} label
+                Terpilih {selectedParticipants.length} peserta x {copies} stiker = {labels.length} label
               </div>
             </div>
 
@@ -391,21 +462,119 @@ function LabelPrinter({ user }: { user: any }) {
             </div>
           </div>
 
+          <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3" data-label="Data ditampilkan v230">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div>
+                <label className="label">Ambil data maksimal</label>
+                <select
+                  className="input"
+                  value={loadLimit}
+                  onChange={(event) => {
+                    setLoadLimit(Number(event.target.value || 500));
+                    setParticipants([]);
+                    setSelectedIds({});
+                    setPrintReady(false);
+                  }}
+                >
+                  <option value={100}>100 data</option>
+                  <option value={250}>250 data</option>
+                  <option value={500}>500 data</option>
+                  <option value={1000}>1000 data</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Baris per halaman</label>
+                <select
+                  className="input"
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value || 50));
+                    setPageNumber(1);
+                  }}
+                >
+                  <option value={25}>25 baris</option>
+                  <option value={50}>50 baris</option>
+                  <option value={100}>100 baris</option>
+                  <option value={250}>250 baris</option>
+                  <option value={1000}>Semua yang terambil</option>
+                </select>
+              </div>
+              <div className="md:col-span-2 flex items-end justify-between gap-2 text-sm font-semibold text-slate-600">
+                <div>
+                  Menampilkan {pagedParticipants.length} dari {filteredParticipants.length} data terfilter
+                  {participants.length !== filteredParticipants.length ? ` · total terambil ${participants.length}` : ""}
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setTableFilters({});
+                    setSortConfig({ key: "name", direction: "asc" });
+                    setPageNumber(1);
+                  }}
+                >
+                  Reset Filter
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-semibold text-slate-600">
+            <div>Halaman {safePageNumber} dari {totalTablePages}</div>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary" disabled={safePageNumber <= 1} onClick={() => setPageNumber(1)}>
+                Awal
+              </button>
+              <button type="button" className="btn-secondary" disabled={safePageNumber <= 1} onClick={() => setPageNumber((p) => Math.max(1, p - 1))}>
+                Sebelumnya
+              </button>
+              <button type="button" className="btn-secondary" disabled={safePageNumber >= totalTablePages} onClick={() => setPageNumber((p) => Math.min(totalTablePages, p + 1))}>
+                Berikutnya
+              </button>
+              <button type="button" className="btn-secondary" disabled={safePageNumber >= totalTablePages} onClick={() => setPageNumber(totalTablePages)}>
+                Akhir
+              </button>
+            </div>
+          </div>
+
           <div className="mobile-table">
             <table>
               <thead>
                 <tr>
-                  <th>Pilih</th>
-                  <th>Nama</th>
-                  <th>Nomor MCU</th>
-                  <th>Database</th>
-                  <th>Jenis Kelamin</th>
-                  <th>Provinsi</th>
-                  <th>Status Label</th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("selected")}>Pilih {sortLabelV230("selected")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("name")}>Nama {sortLabelV230("name")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("mcu_id")}>Nomor MCU {sortLabelV230("mcu_id")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("source_name")}>Database {sortLabelV230("source_name")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("gender")}>Jenis Kelamin {sortLabelV230("gender")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("province")}>Provinsi {sortLabelV230("province")}</button>
+                  </th>
+                  <th>
+                    <button type="button" className="font-black" onClick={() => toggleSortV230("print_status")}>Status Label {sortLabelV230("print_status")}</button>
+                  </th>
+                </tr>
+                <tr>
+                  <th></th>
+                  <th><FilterInputV230 column="name" placeholder="Filter nama" /></th>
+                  <th><FilterInputV230 column="mcu_id" placeholder="Filter MCU" /></th>
+                  <th><FilterInputV230 column="source_name" placeholder="Filter database" /></th>
+                  <th><FilterInputV230 column="gender" placeholder="Filter gender" /></th>
+                  <th><FilterInputV230 column="province" placeholder="Filter provinsi" /></th>
+                  <th><FilterInputV230 column="print_status" placeholder="Sudah/Belum" /></th>
                 </tr>
               </thead>
               <tbody>
-                {participants.map((p) => (
+                {pagedParticipants.map((p) => (
                   <tr key={p.id}>
                     <td>
                       <input
@@ -423,7 +592,7 @@ function LabelPrinter({ user }: { user: any }) {
                     <td>{normalizeGenderLabel((p as any).gender) || "-"}</td>
                     <td>{p.province || "-"}</td>
                     <td>
-                      {p.label_printed_at ? (
+                      {(p as any).label_printed_at ? (
                         <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">Sudah print</span>
                       ) : (
                         <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">Belum print</span>

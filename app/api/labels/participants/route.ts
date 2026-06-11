@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
   const rawKeyword = String(req.nextUrl.searchParams.get("keyword") || "").trim();
   const keyword = cleanKeyword(extractBarcodeKeyword(rawKeyword));
-  const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 25), 1), 50);
+  const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 100), 1), 1000);
   const labelPrintStatus = String(req.nextUrl.searchParams.get("label_print_status") || req.nextUrl.searchParams.get("print_status") || "all").toLowerCase();
 
   if (sourceId === "all" && keyword.length < 2) {
