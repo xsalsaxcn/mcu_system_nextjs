@@ -17,7 +17,6 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return fail("Tidak ada peserta yang dipilih.");
 
   const supabase = getSupabaseAdmin();
-
   const { data: existing, error: selectError } = await supabase
     .from("participants")
     .select("id,label_print_count")

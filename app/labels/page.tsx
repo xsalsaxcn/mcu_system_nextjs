@@ -288,10 +288,44 @@ function LabelPrinter({ user }: { user: any }) {
     }
   }
 
-  function printLabels() {
+    async function markSelectedPrintedV233() {
+    const ids = selectedParticipants.map((p) => p.id).filter(Boolean);
+    if (!ids.length) {
+      setMessage("Pilih peserta yang sudah dicetak dulu.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Tandai ${ids.length} peserta sebagai Sudah print?`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage("Menandai label sebagai sudah print...");
+
+    try {
+      const res = await fetch("/api/labels/mark-printed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal menandai sudah print.");
+      }
+      setMessage(`Berhasil menandai ${json.updated || ids.length} peserta sebagai Sudah print.`);
+      setSelectedIds({});
+      await loadParticipants();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Gagal menandai sudah print.");
+      setMessage(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+function printLabels() {
     setPrintReady(true);
     setTimeout(() => window.print(), 350);
-    setMessage("Jika label sudah tercetak, klik tombol Tandai Sudah Print supaya peserta tidak muncul lagi di filter Belum print.");
+    setMessage("Setelah print selesai, klik Tandai Sudah Print supaya status peserta berubah menjadi Sudah print.");
   }
 
   return (
