@@ -242,10 +242,10 @@ function LabelPrinter({ user }: { user: any }) {
       <section className="card p-5 no-print">
         <div className="text-2xl font-black">Cetak Label QR / Barcode</div>
         <div className="mt-1 text-sm text-slate-500">
-          Search dibuat ringan. QR/barcode berisi Nomor MCU saja agar lebih mudah discan.
+          Search dibuat ringan. QR/barcode berisi kode singkat agar lebih mudah discan Android dan iPhone.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label Search v32 Ã‚Â· fast search Ã‚Â· QR MCU saja
+          Label Search v225 · QR sensitif Android/iPhone · kode singkat
         </div>
       </section>
 
@@ -448,7 +448,7 @@ function LabelCard({
   printMode?: boolean;
 }) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
-  const qrValue = buildShortQrUrlV221(idText);
+  const qrValue = idText;
   const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
   const participantAny = participant as any;

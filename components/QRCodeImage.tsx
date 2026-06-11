@@ -1,124 +1,85 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
-type QRCodeImageProps = {
+export default function QRCodeImage({
+  value,
+  size = 64
+}: {
   value: string;
   size?: number;
-};
-
-function normalizeQrValueV221(value: string) {
-  return String(value || "-").trim() || "-";
-}
-
-function improveSvgV221(rawSvg: string) {
-  // QR_SVG_BLACK_FIX_V224
-  // Jangan replace semua fill menjadi hitam. SVG QR punya area putih/quiet zone yang wajib tetap putih,
-  // terutama untuk iPhone. Patch lama membuat background putih ikut hitam sehingga QR jadi kotak hitam.
-  return String(rawSvg || "")
-    .replace(/<svg([^>]*)>/, '<svg$1 style="width:100%;height:100%;display:block;background:#ffffff;shape-rendering:crispEdges;" preserveAspectRatio="xMidYMid meet">');
-}
-
-export default function QRCodeImage({ value, size = 64 }: QRCodeImageProps) {
-  const qrText = useMemo(() => normalizeQrValueV221(value), [value]);
-  const safeSize = Math.max(32, Number(size || 64));
-  const [svg, setSvg] = useState("");
+}) {
   const [src, setSrc] = useState("");
+  const text = String(value || "-").trim() || "-";
+  const safeSize = Math.max(32, Number(size || 64));
 
   useEffect(() => {
     let cancelled = false;
-    setSvg("");
-    setSrc("");
+    const qrText = String(value || "-").trim() || "-";
+    const renderWidth = Math.max(768, Math.round(safeSize * 14));
 
-    const options = {
-      type: "svg",
-      margin: 4,
-      errorCorrectionLevel: "M",
-      color: {
-        dark: "#000000",
-        light: "#ffffff"
-      }
-    };
-
+    // UNIVERSAL_QR_SENSITIVE_V225
+    // Short content + high-resolution PNG + real white quiet zone is the most stable option
+    // for Android scanners, iPhone scanner, and thermal label printers.
     try {
-      (QRCode as any).toString(qrText, options, (err: any, rawSvg: string) => {
-        if (cancelled) return;
-
-        if (!err && rawSvg) {
-          setSvg(improveSvgV221(rawSvg));
-          return;
-        }
-
-        try {
-          (QRCode as any).toDataURL(qrText, {
-            margin: 4,
-            width: safeSize * 4,
-            errorCorrectionLevel: "M",
-            color: {
-              dark: "#000000",
-              light: "#ffffff"
-            }
-          }, (fallbackErr: any, url: string) => {
-            if (cancelled) return;
-            setSrc(!fallbackErr && url ? url : "");
-          });
-        } catch {
-          if (!cancelled) setSrc("");
-        }
-      });
-    } catch {
-      try {
-        (QRCode as any).toDataURL(qrText, {
+      (QRCode as any).toDataURL(
+        qrText,
+        {
+          type: "image/png",
+          width: renderWidth,
           margin: 4,
-          width: safeSize * 4,
           errorCorrectionLevel: "M",
           color: {
             dark: "#000000",
-            light: "#ffffff"
+            light: "#FFFFFF"
+          },
+          rendererOpts: {
+            quality: 1
           }
-        }, (fallbackErr: any, url: string) => {
+        },
+        (err: any, url: string) => {
           if (cancelled) return;
-          setSrc(!fallbackErr && url ? url : "");
-        });
-      } catch {
-        if (!cancelled) setSrc("");
-      }
+          if (err || !url) {
+            setSrc("");
+            return;
+          }
+          setSrc(url);
+        }
+      );
+    } catch {
+      if (!cancelled) setSrc("");
     }
 
     return () => {
       cancelled = true;
     };
-  }, [qrText, safeSize]);
+  }, [value, safeSize]);
 
-  if (svg) {
+  if (!src) {
     return (
-      <span
-        aria-label={"QR " + qrText}
-        className="block shrink-0 bg-white"
-        style={{ width: safeSize, height: safeSize, padding: 0, lineHeight: 0 }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
-    );
-  }
-
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={"QR " + qrText}
-        style={{ width: safeSize, height: safeSize, imageRendering: "pixelated", background: "#ffffff" }}
-        className="shrink-0"
-      />
+      <div
+        style={{ width: safeSize, height: safeSize }}
+        className="flex items-center justify-center border border-slate-200 bg-white text-[8px] text-slate-400"
+      >
+        QR
+      </div>
     );
   }
 
   return (
-    <div
-      style={{ width: safeSize, height: safeSize }}
-      className="flex items-center justify-center border border-slate-200 bg-white text-[8px] text-slate-400"
-    >
-      QR
-    </div>
+    <img
+      src={src}
+      alt={"QR " + text}
+      draggable={false}
+      style={{
+        width: safeSize,
+        height: safeSize,
+        display: "block",
+        background: "#ffffff",
+        imageRendering: "pixelated"
+      } as any}
+      className="shrink-0"
+    />
   );
 }
