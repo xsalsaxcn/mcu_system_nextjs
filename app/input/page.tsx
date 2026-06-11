@@ -126,6 +126,18 @@ function getSelectedChoiceOption(param: any, selectedValue: string) {
 
 function extractBarcodeKeyword(rawCode: string) {
   const raw = String(rawCode || "").trim();
+
+  // QR_URL_EXTRACT_V221: dukung QR URL pendek iPhone, misalnya /q/CAPASKA-001 atau /input?scan=CAPASKA-001.
+  try {
+    const parsed = new URL(raw);
+    const scanParam = parsed.searchParams.get("scan") || parsed.searchParams.get("code") || parsed.searchParams.get("id");
+    if (scanParam) return scanParam.trim();
+    const qMatch = parsed.pathname.match(//q/([^/?#]+)/i);
+    if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
+  } catch {
+    const qMatch = raw.match(//q/([^s/?#]+)/i);
+    if (qMatch?.[1]) return decodeURIComponent(qMatch[1]).trim();
+  }
 if (!raw) return "";
 
   // QR_URL_SCAN_V220

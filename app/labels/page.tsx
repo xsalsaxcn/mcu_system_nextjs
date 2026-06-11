@@ -46,6 +46,14 @@ function buildIphoneCameraQrValueV220(value: any) {
   return `${origin}/input?scan=${encodeURIComponent(code)}`;
 }
 
+
+function buildShortQrUrlV221(value: any) {
+  const cleanCode = sanitizeQrText(value);
+  if (!cleanCode) return "";
+  const baseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "https://inharmony-health.vercel.app").replace(//+$/, "");
+  return baseUrl + "/q/" + encodeURIComponent(cleanCode);
+}
+
 function buildCombinedQrValue(participant: Participant) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
   const nameText = sanitizeQrText(participant.name);
@@ -440,7 +448,7 @@ function LabelCard({
   printMode?: boolean;
 }) {
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
-  const qrValue = buildIphoneCameraQrValueV220(idText);
+  const qrValue = buildShortQrUrlV221(idText);
   const nameText = sanitizeQrText(participant.name).toUpperCase();
   const institution = participant.company_name || participant.institution_name || "BPIP / CAPASKA";
   const participantAny = participant as any;
