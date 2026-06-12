@@ -2853,6 +2853,117 @@ function InputForm({ user }: { user: any }) {
     document.getElementById("save-popup-dom-v171")?.remove();
   }
 
+  // STAGE_SCORE_POPUP_V223
+  function formatStageScorePopupV223(score: any) {
+    if (score === undefined || score === null || score === "") return "-";
+    const numeric = Number(String(score).replace(",", "."));
+    if (Number.isFinite(numeric)) return String(Math.round(numeric * 100) / 100).replace(".", ",");
+    return String(score);
+  }
+
+  function calculateStageScorePopupV223(params: any[], finalValues: Record<string, string>) {
+    const list = Array.isArray(params) ? params : [];
+    const computed = finalValues || {};
+    const scoreCandidates: { score: number; isTotal: boolean; index: number }[] = [];
+
+    list.forEach((param: any, index: number) => {
+      const label = String([param?.name, param?.label, param?.title, param?.category].filter(Boolean).join(" ")).toLowerCase();
+      const looksLikeScore = typeof isScoreField === "function" ? isScoreField(param) : /skor|score|total/.test(label);
+      if (!looksLikeScore) return;
+
+      const raw = computed[String(param?.id)] ?? computed[param?.id] ?? "";
+      if (raw === undefined || raw === null || String(raw).trim() === "") return;
+      const score = Number(String(raw).replace(",", "."));
+      if (!Number.isFinite(score)) return;
+
+      scoreCandidates.push({
+        score,
+        isTotal: /total|akhir|final|skor/.test(label),
+        index,
+      });
+    });
+
+    const totalCandidate = [...scoreCandidates].reverse().find((item) => item.isTotal);
+    if (totalCandidate) return totalCandidate.score;
+    if (scoreCandidates.length) return scoreCandidates[scoreCandidates.length - 1].score;
+
+    let total = 0;
+    let hasAny = false;
+    const visibleParams = typeof capaskaProgressCleanParamsV151 === "function" ? capaskaProgressCleanParamsV151(list) : list;
+
+    visibleParams.forEach((param: any) => {
+      const isAuto = typeof isAutoField === "function" ? isAutoField(param) : false;
+      const hasChoices = typeof hasChoiceOptions === "function" ? hasChoiceOptions(param) : Array.isArray(param?.options);
+      if (!param || isAuto || !hasChoices) return;
+      const selected = computed[String(param?.id)] ?? computed[param?.id] ?? "";
+      if (selected === undefined || selected === null || String(selected).trim() === "") return;
+      if (typeof scoreForParam !== "function") return;
+      const score = scoreForParam(param, String(selected));
+      if (!Number.isFinite(score)) return;
+      total += score;
+      hasAny = true;
+    });
+
+    return hasAny ? total : "-";
+  }
+
+  function appendStageScorePopupTextV223(parent: HTMLElement, textValue: string, cssText: string) {
+    const el = document.createElement("div");
+    el.style.cssText = cssText;
+    el.textContent = textValue;
+    parent.appendChild(el);
+    return el;
+  }
+
+  function showStageScorePopupV223(participantName: any, stageName: any, score: any) {
+    if (typeof document === "undefined") return;
+
+    try {
+      if (typeof hideSavePopupDomV171 === "function") hideSavePopupDomV171();
+    } catch {}
+
+    document.getElementById("stage-score-popup-v223")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "stage-score-popup-v223";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.48);backdrop-filter:blur(5px);padding:16px;";
+
+    const card = document.createElement("div");
+    card.style.cssText = "width:100%;max-width:440px;border-radius:30px;border:1px solid #dbeafe;background:#fff;padding:28px;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.28);font-family:inherit;";
+    overlay.appendChild(card);
+
+    appendStageScorePopupTextV223(card, "✓", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
+    appendStageScorePopupTextV223(card, "Hasil berhasil disimpan", "margin-top:16px;font-size:24px;line-height:1.2;font-weight:950;color:#0f172a;");
+
+    const info = document.createElement("div");
+    info.style.cssText = "margin-top:18px;border-radius:22px;background:#f8fafc;padding:18px;text-align:left;border:1px solid #e2e8f0;";
+    card.appendChild(info);
+
+    const safeName = String(participantName || participant?.name || "Peserta");
+    const safeStage = String(stageName || effectivePostName || "Post");
+    const safeScore = formatStageScorePopupV223(score);
+
+    appendStageScorePopupTextV223(info, "Nama Peserta", "font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
+    appendStageScorePopupTextV223(info, safeName, "margin-top:6px;font-size:22px;line-height:1.2;font-weight:950;color:#0f172a;word-break:break-word;");
+    appendStageScorePopupTextV223(info, safeStage, "margin-top:14px;font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
+    appendStageScorePopupTextV223(info, "Skor : " + safeScore, "margin-top:6px;font-size:28px;line-height:1.15;font-weight:950;color:#0369a1;");
+
+    const okButton = document.createElement("button");
+    okButton.id = "stage-score-popup-ok-v223";
+    okButton.type = "button";
+    okButton.textContent = "OK";
+    okButton.style.cssText = "margin-top:20px;width:100%;border:0;border-radius:18px;background:linear-gradient(135deg,#14b8a6,#2563eb);padding:15px 20px;color:#fff;font-size:18px;font-weight:950;cursor:pointer;box-shadow:0 14px 35px rgba(37,99,235,.25);";
+    card.appendChild(okButton);
+
+    document.body.appendChild(overlay);
+
+    okButton.addEventListener("click", () => {
+      document.getElementById("stage-score-popup-v223")?.remove();
+      returnToSearchAfterSaveV171();
+    }, { once: true });
+  }
+
+
   function returnToSearchAfterSaveV171() {
     hideSavePopupDomV171();
 
@@ -3056,13 +3167,12 @@ async function loadParticipant(p: any, mode: LoadMode) {
       return;
     }
 
+
     setValues(finalValues);
-    showSavePopupDomV171("success");
     setMessage("Hasil berhasil disimpan.");
 
-    setTimeout(() => {
-      returnToSearchAfterSaveV171();
-    }, 650);
+    const stageScoreV223 = calculateStageScorePopupV223(parameters, finalValues);
+    showStageScorePopupV223(participant?.name, effectivePostName, stageScoreV223);
 
     void (async () => {
       try {
