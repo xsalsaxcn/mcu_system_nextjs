@@ -223,7 +223,8 @@ function importParticipantDedupeKeyV168(row: {
   province: string;
   nik?: string;
   external_id?: string;
-}) {
+}
+) {
   const nik = norm(row.nik || "");
   if (nik) return `nik|${nik}`;
 
@@ -237,6 +238,72 @@ function importParticipantDedupeKeyV168(row: {
     norm(row.province),
   ].join("|");
 }
+
+// IMPORT_APPEND_ONLY_EXISTING_DEDUPE_V214
+// Import tambahan dibuat insert-only: peserta yang sudah ada di database akan diskip.
+// Ini menjaga nomor MCU dan data existing tidak berubah sama sekali.
+function genderAliasesAppendOnlyV214(value: any) {
+  const text = norm(value);
+  if (["laki laki", "laki", "pria", "putra", "male", "m"].includes(text)) {
+    return ["Laki-laki", "Putra", "Pria"];
+  }
+  if (["perempuan", "wanita", "putri", "female", "f"].includes(text)) {
+    return ["Perempuan", "Putri", "Wanita"];
+  }
+  return [clean(value)];
+}
+
+function participantKeyVariantsAppendOnlyV214(row: {
+  name: string;
+  gender: string;
+  province: string;
+  nik?: string;
+  external_id?: string;
+}) {
+  const variants = new Set<string>();
+  for (const gender of genderAliasesAppendOnlyV214(row.gender)) {
+    const key = importParticipantDedupeKeyV168({
+      ...row,
+      gender,
+    });
+    if (key) variants.add(key);
+  }
+  return Array.from(variants);
+}
+
+async function loadExistingParticipantKeysAppendOnlyV214(supabase: any, programType: string) {
+  const keys = new Set<string>();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("name,gender,province,nik,external_id,program_type")
+      .eq("program_type", programType)
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    for (const row of data || []) {
+      for (const key of participantKeyVariantsAppendOnlyV214({
+        name: row.name || "",
+        gender: row.gender || "",
+        province: row.province || "",
+        nik: row.nik || "",
+        external_id: row.external_id || "",
+      })) {
+        keys.add(key);
+      }
+    }
+
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return keys;
+}
+
 
 
 async function getOrCreateCompany(
@@ -534,8 +601,10 @@ export async function importParticipantsFromExcel(
     detected_columns: [],
     skipped_sheets: [],
     duplicate_candidates_skipped: 0,
+    existing_participants_skipped: 0,
   };
 
+  const existingParticipantKeysAppendOnlyV214 = await loadExistingParticipantKeysAppendOnlyV214(supabase, programType);
   const insertRows: any[] = [];
   const counterByYear = new Map<string, number>();
   const seenImportParticipantKeysV168 = new Set<string>();
@@ -870,6 +939,27 @@ export async function importParticipantsFromExcel(
           nik: base.nik,
           external_id: base.external_id,
         });
+
+        const existingKeysV214 = participantKeyVariantsAppendOnlyV214({
+          ...candidate,
+          nik: base.nik,
+          external_id: base.external_id,
+        });
+
+        if (existingKeysV214.some((key) => existingParticipantKeysAppendOnlyV214.has(key))) {
+          stats.existing_participants_skipped += 1;
+          stats.participants_skipped += 1;
+          if (stats.skipped_rows.length < 50) {
+            stats.skipped_rows.push({
+              sheet: sheetName,
+              reason: "existing_participant_append_only_v214",
+              name: candidate.name,
+              gender: candidate.gender,
+              province: candidate.province,
+            });
+          }
+          continue;
+        }
 
         if (seenImportParticipantKeysV168.has(dedupeKeyV168)) {
           stats.duplicate_candidates_skipped += 1;

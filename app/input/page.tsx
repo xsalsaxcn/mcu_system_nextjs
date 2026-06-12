@@ -2989,6 +2989,43 @@ async function loadParticipant(p: any, mode: LoadMode) {
       // Keep save successful even if refresh fails.
     }
   }
+  async function resetCurrentPostResultsV214() {
+    if (!participant?.id || !effectivePostId) return;
+
+    const confirmed = window.confirm("Reset hasil input form untuk peserta ini pada post/operator ini? Data peserta dan nomor MCU tidak akan dihapus.");
+    if (!confirmed) return;
+
+    setMessage("Menghapus hasil input form...");
+
+    const res = await fetch("/api/results/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        participant_id: participant.id,
+        post_id: effectivePostId,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!json.ok) {
+      setMessage(json.message || "Gagal reset hasil input form.");
+      return;
+    }
+
+    const emptyValues: Record<string, string> = {};
+    parameters.forEach((param: any) => {
+      emptyValues[String(param.id)] = "";
+    });
+
+    setValues(emptyValues);
+    try { setSelectedStageStaffV166([]); } catch {}
+    setMessage("Hasil input form berhasil direset. Form sudah kosong.");
+    try { await refreshDetailAfterSaveV160(); } catch {}
+    try { await loadStageStaffForParticipantV166(participant.id); } catch {}
+    try { void refreshLists(false); } catch {}
+  }
+
 
 
   async function save(e: React.FormEvent) {
@@ -3501,7 +3538,17 @@ async function loadParticipant(p: any, mode: LoadMode) {
             </div>
           ))}
 
-          <button className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
+          <div className="grid gap-3 md:grid-cols-2">
+            <button className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
+            <button
+              type="button"
+              onClick={resetCurrentPostResultsV214}
+              disabled={!participant?.id || !parameters.length}
+              className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 font-black text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Reset Hasil Form Ini
+            </button>
+          </div>
           {message && <div className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">{message}</div>}
         </form>
             </div>
