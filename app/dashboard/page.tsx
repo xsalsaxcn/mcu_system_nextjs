@@ -466,6 +466,8 @@ function AdminDashboard() {
   const [summary, setSummary] = useState<any>({});
   const [rows, setRows] = useState<any[]>([]);
   const [selectedMcuRow, setSelectedMcuRow] = useState<any>(null);
+  // DASHBOARD_RESET_SELECTED_RESULTS_V221
+  const [selectedMcuIds, setSelectedMcuIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("Pilih modul dan database, lalu klik Tampilkan Dashboard.");
 
   const activeModule = MODULES.find((m) => m.key === moduleKey) || MODULES[0];
@@ -595,6 +597,61 @@ function AdminDashboard() {
       key,
       direction: previous.key === key && previous.direction === "asc" ? "desc" : "asc",
     }));
+  }
+
+  function toggleSelectedMcuRowV221(row: any, checked: boolean) {
+    const id = String(row?.participant_id || "");
+    if (!id) return;
+
+    setSelectedMcuIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function resetSelectedCapaskaResultsV221() {
+    const participantIds = Array.from(selectedMcuIds)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (!participantIds.length) {
+      alert("Pilih minimal satu peserta dari tabel terlebih dahulu.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Reset seluruh hasil pengisian form untuk " + participantIds.length + " peserta terpilih?\n\nYang dihapus hanya hasil input pemeriksaan dan pilihan petugas pemeriksa. Data peserta, nomor MCU, dan status label print tidak akan diubah."
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage("Mereset hasil pengisian form peserta terpilih...");
+
+    try {
+      const json = await fetch("/api/results/reset-participants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantIds }),
+      }).then((response) => response.json());
+
+      if (!json.ok) {
+        alert(json.message || "Gagal reset hasil pengisian form.");
+        setMessage(json.message || "Gagal reset hasil pengisian form.");
+        return;
+      }
+
+      alert("Reset berhasil untuk " + (json.participantCount || participantIds.length) + " peserta.");
+      setSelectedMcuIds(new Set());
+      await loadDashboard();
+    } catch (error: any) {
+      alert(error?.message || "Gagal reset hasil pengisian form.");
+      setMessage(error?.message || "Gagal reset hasil pengisian form.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full") {
@@ -911,6 +968,20 @@ function AdminDashboard() {
                   </>
                 ) : (
                   <>
+                    {mcuProgram === "capaska" ? (
+                      <button
+                        type="button"
+                        disabled={!selectedMcuIds.size || loading}
+                        className={selectedMcuIds.size
+                          ? "rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 transition hover:bg-rose-100"
+                          : "rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-400 transition"
+                        }
+                        onClick={resetSelectedCapaskaResultsV221}
+                        title="Hapus seluruh hasil input form untuk peserta yang dipilih. Data peserta, nomor MCU, dan status label print tetap aman."
+                      >
+                        Reset Hasil Terpilih ({selectedMcuIds.size})
+                      </button>
+                    ) : null}
                     <button className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700" onClick={() => exportData("progress")}>Export Progress</button>
                     <button className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" onClick={() => exportData("full")}>Export Semua</button>
                   </>
@@ -923,6 +994,9 @@ function AdminDashboard() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
+                      <th className="w-12 px-4 py-3 text-left">
+                        <span className="sr-only">Pilih peserta untuk reset hasil form</span>
+                      </th>
                       <th className="px-4 py-3 text-left"><SortHeader label="Nama" sortKey="name" sortConfig={sortConfig} onSort={handleSort} /></th>
                       <th className="px-4 py-3 text-left"><SortHeader label="Kelompok" sortKey="group_name" sortConfig={sortConfig} onSort={handleSort} /></th>
                       <th className="px-4 py-3 text-left"><SortHeader label="BB Awal" sortKey="initial_weight_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
@@ -1002,6 +1076,18 @@ function AdminDashboard() {
   }}
   className={`hover:bg-slate-50 ${mcuProgram === "capaska" ? "cursor-pointer" : ""}`}
 >
+                        <td className="px-4 py-3">
+                          {mcuProgram === "capaska" ? (
+                            <input
+                              type="checkbox"
+                              checked={selectedMcuIds.has(String(row.participant_id || ""))}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => toggleSelectedMcuRowV221(row, event.currentTarget.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                              title="Pilih peserta ini untuk reset seluruh hasil pengisian form"
+                            />
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 font-bold text-slate-900">
                           {mcuProgram === "capaska" ? (
                             <button
