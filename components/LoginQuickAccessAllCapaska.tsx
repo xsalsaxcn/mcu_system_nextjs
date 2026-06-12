@@ -10,12 +10,10 @@ type DemoCredential = {
 };
 
 const CREDENTIALS: DemoCredential[] = [
-  { label: "Admin", username: "admin", password: "admin123", tag: "admin" },
-  { label: "Registrasi Ulang", username: "capaska_registrasi", password: "registrasi123", tag: "registrasi" },
   { label: "Operator Mata", username: "capaska_mata", password: "mata123", tag: "mata" },
-  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd123", tag: "penyakit dalam" },
-  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123", tag: "gigi" },
   { label: "Operator THT", username: "capaska_tht", password: "tht123", tag: "tht" },
+  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123", tag: "gigi" },
+  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd123", tag: "penyakit dalam" },
   { label: "Operator Jantung", username: "capaska_jantung", password: "jantung123", tag: "jantung" },
   { label: "Operator Ortopedi", username: "capaska_ortopedi", password: "ortopedi123", tag: "ortopedi" },
   { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123", tag: "radiologi" },
@@ -68,7 +66,7 @@ function findOldQuickAccessPanel() {
   return candidates
     .filter((element) => {
       const text = clean(element.textContent || "");
-      return /quick access demo/i.test(text) && /operator|admin/i.test(text);
+      return /quick access operator/i.test(text) && /operator|admin/i.test(text);
     })
     .sort((a, b) => clean(a.textContent).length - clean(b.textContent).length)[0] || null;
 }
@@ -108,7 +106,7 @@ function createPanel() {
   panel.style.boxShadow = "0 10px 30px rgba(15, 23, 42, 0.04)";
 
   const title = document.createElement("div");
-  title.textContent = "QUICK ACCESS DEMO";
+  title.textContent = "quick access operator";
   title.style.fontSize = "12px";
   title.style.fontWeight = "900";
   title.style.letterSpacing = ".02em";

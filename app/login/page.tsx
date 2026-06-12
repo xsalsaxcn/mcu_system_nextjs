@@ -10,17 +10,20 @@ type DemoUser = {
 };
 
 const demoUsers: DemoUser[] = [
-  { label: "Admin", username: "admin", password: "admin123" },
   { label: "Operator Mata", username: "capaska_mata", password: "mata123" },
   { label: "Operator THT", username: "capaska_tht", password: "tht123" },
+  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123" },
+  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd123" },
+  { label: "Operator Jantung", username: "capaska_jantung", password: "jantung123" },
+  { label: "Operator Ortopedi", username: "capaska_ortopedi", password: "ortopedi123" },
   { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123" },
 ];
 
 export default function LoginPage() {
   const router = useRouter();
 
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("capaska_mata");
+  const [password, setPassword] = useState("mata123");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
