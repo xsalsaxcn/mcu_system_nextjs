@@ -548,6 +548,45 @@ async function updateCapaskaExistingParticipantForMergeV228(
   if (error) throw error;
 }
 
+
+
+// LABEL_PRINT_STATUS_NEW_IMPORT_V216
+// Peserta baru hasil import tambahan harus BELUM PRINT.
+// Existing participant tetap diskip oleh append-only dan status print existing tidak disentuh.
+async function markInsertedParticipantsLabelUnprintedV216(supabase: any, participantIds: number[]) {
+  const ids = Array.from(new Set((participantIds || []).map(Number).filter(Boolean)));
+  if (!ids.length) return;
+
+  // Field status label berbeda-beda antar versi. Semua attempt dibuat best-effort.
+  // Kalau kolom tidak ada, error schema cache/column diabaikan agar build/runtime tetap aman.
+  const patches: Record<string, any>[] = [
+    { label_printed: false },
+    { is_label_printed: false },
+    { printed_label: false },
+    { label_print_status: "Belum print" },
+    { print_label_status: "Belum print" },
+    { label_status: "Belum print" },
+    { print_status: "Belum print" },
+    { label_printed_at: null },
+    { printed_at: null },
+    { label_print_at: null },
+    { label_printed_by: null },
+    { printed_by: null },
+    { label_print_count: 0 },
+    { print_count: 0 },
+    { barcode_created_at: null },
+    { barcode_image_path: null },
+  ];
+
+  for (const patch of patches) {
+    try {
+      await supabase.from("participants").update(patch).in("id", ids);
+    } catch {
+      // ignore best-effort column mismatch
+    }
+  }
+}
+
 export async function importParticipantsFromExcel(
   supabase: any,
   fileBuffer: Buffer,
@@ -1012,6 +1051,9 @@ export async function importParticipantsFromExcel(
         insertRows.push({
           mcu_id: mcuId,
           barcode_value: mcuId,
+          // LABEL_PRINT_DEFAULT_FIELDS_V216: data baru import belum pernah diprint label.
+          barcode_image_path: null,
+          barcode_created_at: null,
           external_id: base.external_id,
           name: candidate.name,
           nik: base.nik,
@@ -1095,13 +1137,18 @@ export async function importParticipantsFromExcel(
         });
       });
 
+      // LABEL_PRINT_MARK_VACCINATION_V216
+      await markInsertedParticipantsLabelUnprintedV216(supabase, (data || []).map((p: any) => Number(p.id)));
       stats.participants_created += data?.length || 0;
     } else {
-      const { error } = await supabase
+            const { data, error } = await supabase
         .from("participants")
-        .insert(participantRows);
+        .insert(participantRows)
+        .select("id");
       if (error) throw error;
-      stats.participants_created += chunk.length;
+      // LABEL_PRINT_MARK_NON_VACCINATION_V216
+      await markInsertedParticipantsLabelUnprintedV216(supabase, (data || []).map((p: any) => Number(p.id)));
+      stats.participants_created += data?.length || chunk.length;
     }
   }
 
