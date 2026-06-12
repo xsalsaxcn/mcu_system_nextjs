@@ -22,8 +22,8 @@ const demoUsers: DemoUser[] = [
 export default function LoginPage() {
   const router = useRouter();
 
-  const [username, setUsername] = useState("capaska_mata");
-  const [password, setPassword] = useState("mata123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -150,7 +150,7 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <form onSubmit={login} className="mt-6 space-y-4">
+              <form autoComplete="off" onSubmit={login} className="mt-6 space-y-4">
                 <div>
                   <label className="mb-1 block text-sm font-black text-slate-700">
                     Username
@@ -160,7 +160,7 @@ export default function LoginPage() {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="Masukkan username"
-                    autoComplete="username"
+                    autoComplete="off"
                   />
                 </div>
 
@@ -185,7 +185,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Masukkan password"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                   />
                 </div>
 
