@@ -35,6 +35,7 @@ export type CapaskaScoringConfig = {
   max_score?: number | null;
   scoring_type?: string;
   include_in_total_score?: boolean;
+  include_in_progress?: boolean;
 };
 
 type DomainRule = {
@@ -197,8 +198,8 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Varises Tungkai (insufisiensi vena)", "Ada", -1);
 
   // ORTOPEDI, max 16 mengikuti rekap 100. Vertebra klinis dibuat 1 poin per normal.
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Tidak Ada", 1);
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Ada", -10, true);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "OX Knee", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Tidak Ada", 1);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "OX Knee", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Ada", -10, true);
   addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Tidak Ada", "Tidak ada"], 1);
   addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Ada", "Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
 
@@ -316,12 +317,9 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Hallux valgus",
       "Webbed toe",
       "OX Knee",
-      "O/X bean",
-      "O/X been",
       "Pes planus / kaki datar",
       "Polidactily",
       "Hiperekstensi Lutut",
-      "Hiperekstensi kaki",
       "General Laxity",
       "Skoliosis",
       "Kifosis",
@@ -352,7 +350,7 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   [normalizeCapaskaKey("Struktur/Prolaps recti")]: ["Striktur/Prolaps recti", "Striktur / Prolaps recti"],
   [normalizeCapaskaKey("Undescensus testis")]: ["Undecensus testis"],
   [normalizeCapaskaKey("Batu sal kemih")]: ["Batu saluran kemih"],
-  [normalizeCapaskaKey("OX Knee")]: ["O/X bean", "O/X been"],
+  [normalizeCapaskaKey("OX Knee")]: ["OX Knee"],
   [normalizeCapaskaKey("Polidactily")]: ["Polidactyly"],
   // CAPASKA THT domain alias fix v163:
   // Final scoring uses CAPASKA_DOMAIN_RULES components and getParameterByName().
@@ -411,6 +409,7 @@ export function parseCapaskaScoringConfig(config: any): CapaskaScoringConfig {
       max_score: null,
       scoring_type: "by_option",
       include_in_total_score: true,
+      include_in_progress: true,
     };
   }
 
@@ -421,10 +420,11 @@ export function parseCapaskaScoringConfig(config: any): CapaskaScoringConfig {
       max_score: parseNumber(parsed.max_score),
       scoring_type: String(parsed.scoring_type || "by_option"),
       include_in_total_score: parsed.include_in_total_score === false ? false : true,
+      include_in_progress: parsed.include_in_progress === false ? false : true,
     };
   }
 
-  return { options: [], max_score: null, scoring_type: "by_option", include_in_total_score: true };
+  return { options: [], max_score: null, scoring_type: "by_option", include_in_total_score: true, include_in_progress: true };
 }
 
 export function parseCapaskaOptions(config: any) {
