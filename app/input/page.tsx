@@ -1,3 +1,4 @@
+// RESET_BUTTON_ADMIN_ONLY_V224
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -101,7 +102,36 @@ function getForcedThtOptions(param: any): ChoiceOption[] {
   return optionMap[name] || [];
 }
 
+
+function capaskaOrtopediNormV232(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s\n\r\t.,\-_\/\\><:;()]/g, "");
+}
+
+function capaskaOrtopediDisplayLabelV232(name: any) {
+  const key = capaskaOrtopediNormV232(name);
+  if (key === "hiperekstensikaki") return "Hiperekstensi Lutut";
+  if (key === "oxbean" || key === "oxbeen" || key === "oxknee") return "OX Knee";
+  return String(name || "");
+}
+
+function getForcedOrtopediOptionsV232(param: any): ChoiceOption[] {
+  const nameKey = capaskaOrtopediNormV232(param?.name);
+  const categoryKey = capaskaOrtopediNormV232(param?.category);
+  const isClinicalVertebra = ["skoliosis", "kifosis", "lordosis"].includes(nameKey) && categoryKey.includes("vertebra");
+  if (!isClinicalVertebra) return [];
+  return [
+    { label: "Tidak Ada", value: "Tidak Ada", score: 1, is_critical: false },
+    { label: "Ada", value: "Ada", score: -10, is_critical: true, note: "Tidak Direkomendasikan" },
+  ];
+}
+// ORTOPEDI_SCORING_V232
 function getChoiceOptions(param: any): ChoiceOption[] {
+  const forcedOrtopediV232 = getForcedOrtopediOptionsV232(param);
+  if (forcedOrtopediV232.length) return forcedOrtopediV232;
   const forcedTht = getForcedThtOptions(param);
   if (forcedTht.length) return capaskaThtCanonicalizeOptionsV155(param, forcedTht);
   return capaskaThtCanonicalizeOptionsV155(param, parseChoiceOptions(param?.config_json));
@@ -553,14 +583,14 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
   // =========================
   // 6. ORTOPEDI, total target 16
   // =========================
-  if (/sindaktili|polidaktili|polidact|spina bifida|mallet|hiperekstensi lengan|hammer toe|hallux|webbed toe|o\/x|bean|been|pes planus|kaki datar|hiperekstensi kaki|general laxity/.test(p)) {
+  if (/sindaktili|polidaktili|polidact|spina bifida|mallet|hiperekstensi lengan|hammer toe|hallux|webbed toe|o\/x|ox knee|bean|been|pes planus|kaki datar|hiperekstensi kaki|hiperekstensi lutut|general laxity/.test(p)) {
     if (/tidak ada|normal|dalam toleransi|<\s*5/.test(c)) return 1;
     if (/ada|tidak normal|di luar|>\s*5/.test(c)) return -10;
   }
 
   if (/ortopedi/.test(p) && /skoliosis|kifosis|lordosis|vertebra|tulang belakang/.test(p)) {
     if (/tidak ada|normal/.test(c)) return 1;
-    if (/ada|sedang|berat|tidak normal/.test(c)) return -10;
+    if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -10;
   }
 
   // =========================
@@ -580,9 +610,10 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
    Scope only: Ortopedi > Vertebra / Tulang Belakang
    Parameters: Skoliosis, Kifosis, Lordosis
    Reference:
-   - Tidak ada = 1 untuk setiap poin
-   - Ringan dihapus dari pilihan
-   - Ada = Tidak Direkomendasikan (-10)
+   - Tidak ada = 2 untuk setiap poin
+   - Ringan = -1 untuk setiap poin
+   - Sedang / Berat = Tidak Direkomendasikan (-10)
+   Current UI may show "Ada" instead of "Sedang/Berat"; treat "Ada" as red flag (-10).
 */
 function capaskaVertebraNorm(value: any): string {
   return String(value ?? "")
@@ -624,8 +655,36 @@ function capaskaVertebraChoiceText(optionOrValue: any): string {
   return capaskaVertebraNorm(optionOrValue);
 }
 
+function capaskaRadiologiParamTextV160(param: any): string {
+  return capaskaVertebraParamText(param);
+}
+
+function capaskaRadiologiChoiceTextV160(optionOrValue: any): string {
+  return capaskaVertebraChoiceText(optionOrValue);
+}
+
+function capaskaIsRadiologiParamV160(param: any): boolean {
+  const p = capaskaRadiologiParamTextV160(param);
+  const isRadiologiStage = /radiologi|rontgen|xray|x-ray|whole spine|ap lateral|thoracolumbosacral/.test(p);
+  const isWholeSpineItem = /skoliosis|scoliosis|kifosis|kyphosis|lordosis|vertebra|tulang belakang|spine/.test(p);
+  return isRadiologiStage && isWholeSpineItem;
+}
+
+function capaskaRadiologiScoreFixV160(param: any, optionOrValue: any): number | null {
+  if (!capaskaIsRadiologiParamV160(param)) return null;
+
+  const c = capaskaRadiologiChoiceTextV160(optionOrValue);
+
+  if (/tidak ada|normal|\bta\b/.test(c) && !/tidak normal|abnormal/.test(c)) return 2;
+  if (/ringan/.test(c)) return -1;
+  if (/sedang|berat|ada|tidak normal|abnormal/.test(c)) return -10;
+
+  return null;
+}
+
 function capaskaIsVertebraParam(param: any): boolean {
   const p = capaskaVertebraParamText(param);
+  if (/radiologi|rontgen|xray|x-ray|whole spine|ap lateral|thoracolumbosacral/.test(p)) return false;
   return /skoliosis|scoliosis|kifosis|kyphosis|lordosis/.test(p);
 }
 
@@ -635,7 +694,7 @@ function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null 
   const c = capaskaVertebraChoiceText(optionOrValue);
 
   if (/tidak ada|normal/.test(c)) return 1;
-  if (/ada|sedang|berat/.test(c)) return -10;
+  if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -10;
 
   return null;
 }
@@ -943,8 +1002,6 @@ function capaskaThtChoiceText(optionOrValue: any): string {
 function capaskaThtDisplayLabelFix(value: any): any {
   if (typeof value !== "string") return value;
   return value
-    .replace(/^Hiperekstensi kaki$/gi, "Hiperekstensi Lutut")
-    .replace(/^O\/?X\s*(bean|been)$/gi, "OX Knee")
     .replace(/\(\s*dividae\s*\)/gi, "(lividae)")
     .replace(/\(\s*divide\s*\)/gi, "(lividae)")
     .replace(/Rhinitis Alergi\s+divide/gi, "Rhinitis Alergi (lividae)")
@@ -1827,6 +1884,8 @@ function scoreForParam(param: any, value: string) {
   if (jantungOverride !== null) return jantungOverride;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
   if (penyakitDalamOverride !== null) return penyakitDalamOverride;
+  const radiologiOverride = capaskaRadiologiScoreFixV160(param, selectedOption || value);
+  if (radiologiOverride !== null) return radiologiOverride;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
   if (vertebraOverride !== null) return vertebraOverride;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
@@ -1864,6 +1923,8 @@ function isCriticalChoice(param: any, value: string) {
   if (jantungOverride !== null) return jantungOverride <= -10;
   const penyakitDalamOverride = capaskaPenyakitDalamScoreFix(param, selectedOption || value);
   if (penyakitDalamOverride !== null) return penyakitDalamOverride <= -10;
+  const radiologiOverride = capaskaRadiologiScoreFixV160(param, selectedOption || value);
+  if (radiologiOverride !== null) return radiologiOverride <= -10;
   const vertebraOverride = capaskaVertebraScoreFix(param, selectedOption || value);
   if (vertebraOverride !== null) return vertebraOverride <= -10;
   const overrideScore = capaskaScore2026(param, selectedOption || value);
@@ -2038,6 +2099,101 @@ function capaskaThtTotalForScoreFieldV159(scoreField: any, parameters: any[], sc
   return total;
 }
 
+
+/* CAPASKA Gigi/Radiologi total guard v160
+   Scope only: hidden Score/Total fields inside current post form.
+   Purpose:
+   - Gigi & Mulut total must remain 16 even if the hidden score field is not last.
+   - Radiologi / Whole Spine total must remain 6 and must not be captured by Ortopedi Vertebra scoring.
+   Other stages keep the existing calculation path.
+*/
+function capaskaGigiCanonicalKeyV160(param: any): string | null {
+  const p = capaskaGigiCanonicalParamTextV150(param);
+
+  if (/karang/.test(p)) return "karang";
+  if (/caries|karies|dentis/.test(p)) return "caries";
+  if (/tumpatan/.test(p)) return "tumpatan";
+  if (/impaksi|impacted/.test(p)) return "impaksi";
+  if (/kehilangan.*gigi|gigi.*hilang/.test(p)) return "kehilangan";
+  if (/infeksi.*gusi|gusi.*infeksi/.test(p)) return "infeksi";
+  if (/dental.*panoramic|dental.*panoramik|panoramic|panoramik/.test(p)) return "panoramik";
+
+  return null;
+}
+
+function capaskaTotalScoreFromCanonicalKeysV160(
+  parameters: any[],
+  scores: Record<string, number>,
+  computed: Record<string, string>,
+  requiredKeys: string[],
+  keyForParam: (param: any) => string | null,
+  scoreForCandidate: (param: any, value: string) => number
+): number | null {
+  if (!Array.isArray(parameters)) return null;
+
+  const seen = new Set<string>();
+  let total = 0;
+
+  for (const candidate of parameters) {
+    if (isAutoField(candidate)) continue;
+
+    const key = keyForParam(candidate);
+    if (!key || seen.has(key)) continue;
+
+    let score = scores[String(candidate?.id)];
+
+    if (typeof score !== "number" || !Number.isFinite(score)) {
+      const selected = computed?.[candidate?.id];
+      if (selected !== undefined && selected !== null && String(selected).trim() !== "") {
+        score = scoreForCandidate(candidate, String(selected));
+      }
+    }
+
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    seen.add(key);
+    total += score;
+  }
+
+  const hasAllKeys = requiredKeys.every((key) => seen.has(key));
+  if (!hasAllKeys) return null;
+
+  return total;
+}
+
+function capaskaGigiTotalForScoreFieldV160(parameters: any[], scores: Record<string, number>, computed: Record<string, string>): number | null {
+  return capaskaTotalScoreFromCanonicalKeysV160(
+    parameters,
+    scores,
+    computed,
+    ["karang", "caries", "tumpatan", "impaksi", "kehilangan", "infeksi", "panoramik"],
+    capaskaGigiCanonicalKeyV160,
+    (candidate, selected) => capaskaGigiCanonicalScoreV150(candidate, selected) ?? scoreForParam(candidate, selected)
+  );
+}
+
+function capaskaRadiologiCanonicalKeyV160(param: any): string | null {
+  if (!capaskaIsRadiologiParamV160(param)) return null;
+
+  const p = capaskaRadiologiParamTextV160(param);
+  if (/skoliosis|scoliosis/.test(p)) return "skoliosis";
+  if (/kifosis|kyphosis/.test(p)) return "kifosis";
+  if (/lordosis/.test(p)) return "lordosis";
+
+  return null;
+}
+
+function capaskaRadiologiTotalForScoreFieldV160(parameters: any[], scores: Record<string, number>, computed: Record<string, string>): number | null {
+  return capaskaTotalScoreFromCanonicalKeysV160(
+    parameters,
+    scores,
+    computed,
+    ["skoliosis", "kifosis", "lordosis"],
+    capaskaRadiologiCanonicalKeyV160,
+    (candidate, selected) => capaskaRadiologiScoreFixV160(candidate, selected) ?? scoreForParam(candidate, selected)
+  );
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -2075,6 +2231,18 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
         const thtCanonicalTotalV159 = capaskaThtTotalForScoreFieldV159(p, parameters, scores, computed);
     if (thtCanonicalTotalV159 !== null) {
       computed[p.id] = String(thtCanonicalTotalV159);
+      return;
+    }
+
+    const gigiCanonicalTotalV160 = capaskaGigiTotalForScoreFieldV160(parameters, scores, computed);
+    if (gigiCanonicalTotalV160 !== null) {
+      computed[p.id] = String(gigiCanonicalTotalV160);
+      return;
+    }
+
+    const radiologiCanonicalTotalV160 = capaskaRadiologiTotalForScoreFieldV160(parameters, scores, computed);
+    if (radiologiCanonicalTotalV160 !== null) {
+      computed[p.id] = String(radiologiCanonicalTotalV160);
       return;
     }
 let total = 0;
@@ -2652,6 +2820,7 @@ function InputForm({ user }: { user: any }) {
   const adminPostId = Number(searchParams.get("post_id") || 0);
   const adminPostName = String(searchParams.get("post_name") || "").trim();
   const isAdminStageAssist = String(user.role || "").toLowerCase() === "admin" && adminParticipantId > 0 && adminPostId > 0;
+  const canResetFormV224 = String(user?.role || "").toLowerCase() === "admin";
   const effectivePostId = isAdminStageAssist ? adminPostId : Number(user.post_id);
   const effectivePostName = isAdminStageAssist ? (adminPostName || `Post ${adminPostId}`) : user.post_name;
   const autoLoadRef = useRef(false);
@@ -2677,8 +2846,6 @@ function InputForm({ user }: { user: any }) {
   const [stageStaffOptionsV166, setStageStaffOptionsV166] = useState<string[]>([]);
   const [selectedStageStaffV166, setSelectedStageStaffV166] = useState<string[]>([]);
   const showMcuStageStaffPickerV166 = program === "capaska" || program === "corporate";
-  const isAdminUserV237 = String(user?.role || "").toLowerCase() === "admin";
-  const canResetFormAdminOnlyV237 = isAdminUserV237;
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
@@ -2779,7 +2946,7 @@ function InputForm({ user }: { user: any }) {
 
 
   function toggleStageStaffV166(staffName: string) {
-    // STAFF_SINGLE_SELECT_V237: satu post/operator wajib tepat 1 petugas.
+    // STAGE_STAFF_SINGLE_SELECT_V224
     setSelectedStageStaffV166([staffName]);
   }
 
@@ -2802,8 +2969,8 @@ function InputForm({ user }: { user: any }) {
       const assignmentJson = await assignmentRes.json().catch(() => ({}));
 
       setStageStaffOptionsV166(optionsJson.staff_names || []);
-      const assignedNames = assignmentJson.staff_names || [];
-      setSelectedStageStaffV166(assignedNames.length ? [assignedNames[0]] : []);
+      const savedStageStaffV224 = Array.isArray(assignmentJson.staff_names) ? assignmentJson.staff_names.filter(Boolean) : [];
+      setSelectedStageStaffV166(savedStageStaffV224.length ? [savedStageStaffV224[0]] : []);
     } catch {
       setStageStaffOptionsV166([]);
       setSelectedStageStaffV166([]);
@@ -2853,15 +3020,34 @@ function InputForm({ user }: { user: any }) {
     document.getElementById("save-popup-dom-v171")?.remove();
   }
 
-  // STAGE_SCORE_POPUP_V223
-  function formatStageScorePopupV223(score: any) {
+
+
+  
+
+
+  function appendStageScorePopupTextV223(parent: HTMLElement, textValue: string, cssText: string) {
+    const el = document.createElement("div");
+    el.style.cssText = cssText;
+    el.textContent = textValue;
+    parent.appendChild(el);
+    return el;
+  }
+
+  
+
+
+  // STAGE_SCORE_POPUP_V224
+
+
+
+function formatStageScorePopupV224(score: any) {
     if (score === undefined || score === null || score === "") return "-";
     const numeric = Number(String(score).replace(",", "."));
     if (Number.isFinite(numeric)) return String(Math.round(numeric * 100) / 100).replace(".", ",");
     return String(score);
   }
 
-  function calculateStageScorePopupV223(params: any[], finalValues: Record<string, string>) {
+  function calculateStageScorePopupV224(params: any[], finalValues: Record<string, string>) {
     const list = Array.isArray(params) ? params : [];
     const computed = finalValues || {};
     const scoreCandidates: { score: number; isTotal: boolean; index: number }[] = [];
@@ -2876,11 +3062,7 @@ function InputForm({ user }: { user: any }) {
       const score = Number(String(raw).replace(",", "."));
       if (!Number.isFinite(score)) return;
 
-      scoreCandidates.push({
-        score,
-        isTotal: /total|akhir|final|skor/.test(label),
-        index,
-      });
+      scoreCandidates.push({ score, isTotal: /total|akhir|final|skor/.test(label), index });
     });
 
     const totalCandidate = [...scoreCandidates].reverse().find((item) => item.isTotal);
@@ -2907,7 +3089,7 @@ function InputForm({ user }: { user: any }) {
     return hasAny ? total : "-";
   }
 
-  function appendStageScorePopupTextV223(parent: HTMLElement, textValue: string, cssText: string) {
+  function appendStageScorePopupTextV224(parent: HTMLElement, textValue: string, cssText: string) {
     const el = document.createElement("div");
     el.style.cssText = cssText;
     el.textContent = textValue;
@@ -2915,25 +3097,25 @@ function InputForm({ user }: { user: any }) {
     return el;
   }
 
-  function showStageScorePopupV223(participantName: any, stageName: any, score: any) {
+  function showStageScorePopupV224(participantName: any, stageName: any, score: any) {
     if (typeof document === "undefined") return;
 
-    try {
-      if (typeof hideSavePopupDomV171 === "function") hideSavePopupDomV171();
-    } catch {}
-
-    document.getElementById("stage-score-popup-v223")?.remove();
+    try { if (typeof hideSavePopupDomV171 === "function") hideSavePopupDomV171(); } catch {}
+    try { document.getElementById("save-popup-dom-v171")?.remove(); } catch {}
+    ["stage-score-popup-v222", "stage-score-popup-v223", "stage-score-popup-v224"].forEach((id) => {
+      try { document.getElementById(id)?.remove(); } catch {}
+    });
 
     const overlay = document.createElement("div");
-    overlay.id = "stage-score-popup-v223";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.48);backdrop-filter:blur(5px);padding:16px;";
+    overlay.id = "stage-score-popup-v224";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);padding:18px;";
 
     const card = document.createElement("div");
-    card.style.cssText = "width:100%;max-width:440px;border-radius:30px;border:1px solid #dbeafe;background:#fff;padding:28px;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.28);font-family:inherit;";
+    card.style.cssText = "width:100%;max-width:440px;border-radius:30px;border:1px solid #dbeafe;background:#ffffff;padding:28px;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.32);font-family:inherit;";
     overlay.appendChild(card);
 
-    appendStageScorePopupTextV223(card, "✓", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
-    appendStageScorePopupTextV223(card, "Hasil berhasil disimpan", "margin-top:16px;font-size:24px;line-height:1.2;font-weight:950;color:#0f172a;");
+    appendStageScorePopupTextV224(card, "✓", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
+    appendStageScorePopupTextV224(card, "Hasil berhasil disimpan", "margin-top:16px;font-size:24px;line-height:1.2;font-weight:950;color:#0f172a;");
 
     const info = document.createElement("div");
     info.style.cssText = "margin-top:18px;border-radius:22px;background:#f8fafc;padding:18px;text-align:left;border:1px solid #e2e8f0;";
@@ -2941,25 +3123,26 @@ function InputForm({ user }: { user: any }) {
 
     const safeName = String(participantName || participant?.name || "Peserta");
     const safeStage = String(stageName || effectivePostName || "Post");
-    const safeScore = formatStageScorePopupV223(score);
+    const safeScore = formatStageScorePopupV224(score);
 
-    appendStageScorePopupTextV223(info, "Nama Peserta", "font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
-    appendStageScorePopupTextV223(info, safeName, "margin-top:6px;font-size:22px;line-height:1.2;font-weight:950;color:#0f172a;word-break:break-word;");
-    appendStageScorePopupTextV223(info, safeStage, "margin-top:14px;font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
-    appendStageScorePopupTextV223(info, "Skor : " + safeScore, "margin-top:6px;font-size:28px;line-height:1.15;font-weight:950;color:#0369a1;");
+    appendStageScorePopupTextV224(info, "Nama Peserta", "font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
+    appendStageScorePopupTextV224(info, safeName, "margin-top:6px;font-size:22px;line-height:1.2;font-weight:950;color:#0f172a;word-break:break-word;");
+    appendStageScorePopupTextV224(info, safeStage, "margin-top:14px;font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#64748b;");
+    appendStageScorePopupTextV224(info, "Skor : " + safeScore, "margin-top:6px;font-size:30px;line-height:1.15;font-weight:950;color:#0369a1;");
 
     const okButton = document.createElement("button");
-    okButton.id = "stage-score-popup-ok-v223";
+    okButton.id = "stage-score-popup-ok-v224";
     okButton.type = "button";
     okButton.textContent = "OK";
     okButton.style.cssText = "margin-top:20px;width:100%;border:0;border-radius:18px;background:linear-gradient(135deg,#14b8a6,#2563eb);padding:15px 20px;color:#fff;font-size:18px;font-weight:950;cursor:pointer;box-shadow:0 14px 35px rgba(37,99,235,.25);";
     card.appendChild(okButton);
 
     document.body.appendChild(overlay);
+    try { okButton.focus(); } catch {}
 
     okButton.addEventListener("click", () => {
-      document.getElementById("stage-score-popup-v223")?.remove();
-      returnToSearchAfterSaveV171();
+      document.getElementById("stage-score-popup-v224")?.remove();
+      if (typeof returnToSearchAfterSaveV171 === "function") returnToSearchAfterSaveV171();
     }, { once: true });
   }
 
@@ -2997,9 +3180,7 @@ function InputForm({ user }: { user: any }) {
 
     if (/berhasil|sukses|tersimpan|selesai/.test(text) && !/gagal|error|salah/.test(text)) {
       showSavePopupDomV171("success");
-      setTimeout(() => {
-        returnToSearchAfterSaveV171();
-      }, 900);
+
       return;
     }
 
@@ -3141,14 +3322,14 @@ async function loadParticipant(p: any, mode: LoadMode) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    showSavePopupDomV171("processing");
-    setMessage("");
-
-    if (showMcuStageStaffPickerV166 && selectedStageStaffV166.length !== 1) {
-      hideSavePopupDomV171();
-      setMessage("Pilih tepat satu nama petugas pemeriksa sebelum menyimpan.");
+    // STAGE_STAFF_REQUIRED_ONE_V224
+    if (showMcuStageStaffPickerV166 && (!selectedStageStaffV166 || selectedStageStaffV166.length !== 1)) {
+      try { hideSavePopupDomV171(); } catch {}
+      setMessage("Wajib pilih tepat satu nama petugas pemeriksa.");
       return;
     }
+    showSavePopupDomV171("processing");
+    setMessage("");
 
     const finalValues = computeValues(parameters, values);
 
@@ -3177,8 +3358,18 @@ async function loadParticipant(p: any, mode: LoadMode) {
     setValues(finalValues);
     setMessage("Hasil berhasil disimpan.");
 
-    const stageScoreV223 = calculateStageScorePopupV223(parameters, finalValues);
-    showStageScorePopupV223(participant?.name, effectivePostName, stageScoreV223);
+    // STAGE_SCORE_AFTER_SAVE_CALL_V226
+    try {
+      const scoreForPopupV226 = typeof calculateStageScorePopupV224 === "function"
+        ? calculateStageScorePopupV224(parameters, finalValues)
+        : "-";
+      setTimeout(() => {
+        try { showStageScorePopupV224(participant?.name, effectivePostName, scoreForPopupV226); } catch {}
+      }, 80);
+    } catch {}
+
+    const stageScoreV224 = calculateStageScorePopupV224(parameters, finalValues);
+    showStageScorePopupV224(participant?.name, effectivePostName, stageScoreV224);
 
     void (async () => {
       try {
@@ -3607,7 +3798,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                     <label key={staffName} className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold">
                       <input
                         type="radio"
-                        name="stage-staff-v237"
+                        name="stageStaffV166"
                         checked={selectedStageStaffV166.includes(staffName)}
                         onChange={() => toggleStageStaffV166(staffName)}
                       />
@@ -3642,7 +3833,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                         : "border-slate-200 bg-white"
                     }`}
                   >
-                    <label className="label">{capaskaThtDisplayLabelFix(param.name)}{param.unit ? ` (${param.unit})` : ""}</label>
+                    <label className="label">{capaskaOrtopediDisplayLabelV232(capaskaThtDisplayLabelFix(param.name))}{param.unit ? ` (${param.unit})` : ""}</label>
                     {param.reference_text && <div className="mb-2 text-xs text-slate-500">{param.reference_text}</div>}
                     <ParameterInput
                       param={param}
@@ -3655,18 +3846,21 @@ async function loadParticipant(p: any, mode: LoadMode) {
             </div>
           ))}
 
-          <div className={canResetFormAdminOnlyV237 ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
-            <button className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
-            {canResetFormAdminOnlyV237 && (
-              <button
-                type="button"
-                onClick={resetCurrentPostResultsV214}
-                disabled={!participant?.id || !parameters.length}
-                className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 font-black text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Reset Hasil Form Ini
-              </button>
-            )}
+          <div className="grid gap-3 md:grid-cols-2">
+            <button
+            hidden={!canResetFormV224}
+            data-reset-admin-only="v224" className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
+            <button
+              hidden={!canResetFormV224}
+              aria-hidden={!canResetFormV224}
+              data-reset-admin-only="v226"
+              type="button"
+              onClick={resetCurrentPostResultsV214}
+              disabled={!participant?.id || !parameters.length}
+              className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 font-black text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Reset Hasil Form Ini
+            </button>
           </div>
           {message && <div className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">{message}</div>}
         </form>
