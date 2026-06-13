@@ -2194,6 +2194,91 @@ function capaskaRadiologiTotalForScoreFieldV160(parameters: any[], scores: Recor
   );
 }
 
+
+/* CAPASKA Gigi/Radiologi all-choice total guard v161
+   Scope only: current input form score/popup totals.
+   Purpose:
+   - Gigi can still show 14 when a hidden Score field is placed before one of the 2-point Gigi questions.
+   - Instead of trusting the hidden Score field order, sum all answered choice questions in the Gigi stage.
+   - Radiologi remains restricted to Whole Spine items only.
+   Other stages continue using the existing calculation path.
+*/
+function capaskaStageParamTextV161(param: any): string {
+  return String([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "))
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaIsGigiStageV161(parameters: any[]): boolean {
+  if (!Array.isArray(parameters)) return false;
+  return parameters.some((param) => {
+    const text = capaskaStageParamTextV161(param);
+    return /gigi|dental|karang|caries|karies|dentis|tumpatan|tambalan|impaksi|kehilangan.*gigi|gigi.*hilang|infeksi.*gusi|gusi.*infeksi|panoramic|panoramik|panorama/.test(text);
+  });
+}
+
+function capaskaIsGigiScoreCandidateV161(param: any): boolean {
+  const text = capaskaStageParamTextV161(param);
+  return /gigi|dental|karang|caries|karies|dentis|tumpatan|tambalan|impaksi|kehilangan.*gigi|gigi.*hilang|infeksi.*gusi|gusi.*infeksi|panoramic|panoramik|panorama/.test(text);
+}
+
+function capaskaReadComputedValueV161(param: any, computed: Record<string, string>): string {
+  const value = computed?.[String(param?.id)] ?? computed?.[param?.id] ?? "";
+  return String(value ?? "").trim();
+}
+
+function capaskaStageTotalFromAnsweredChoicesV161(parameters: any[], scores: Record<string, number>, computed: Record<string, string>): number | null {
+  if (!Array.isArray(parameters)) return null;
+
+  const isRadiologiStage = parameters.some((param) => capaskaIsRadiologiParamV160(param));
+  const isGigiStage = !isRadiologiStage && capaskaIsGigiStageV161(parameters);
+
+  if (!isRadiologiStage && !isGigiStage) return null;
+
+  let total = 0;
+  let hasAny = false;
+
+  for (const candidate of parameters) {
+    if (!candidate || isAutoField(candidate) || !hasChoiceOptions(candidate)) continue;
+
+    if (isRadiologiStage && !capaskaIsRadiologiParamV160(candidate)) continue;
+    if (isGigiStage && !capaskaIsGigiScoreCandidateV161(candidate)) continue;
+
+    const selected = capaskaReadComputedValueV161(candidate, computed);
+    if (!selected) continue;
+
+    let score = scores[String(candidate?.id)];
+
+    if (typeof score !== "number" || !Number.isFinite(score)) {
+      score = isRadiologiStage
+        ? (capaskaRadiologiScoreFixV160(candidate, selected) ?? scoreForParam(candidate, selected))
+        : (capaskaGigiCanonicalScoreV150(candidate, selected) ?? scoreForParam(candidate, selected));
+    }
+
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    total += score;
+    hasAny = true;
+  }
+
+  return hasAny ? total : null;
+}
+
 function computeValues(parameters: any[], rawValues: Record<string, string>) {
   const computed: Record<string, string> = { ...rawValues };
   const scores: Record<string, number> = {};
@@ -2231,6 +2316,12 @@ function computeValues(parameters: any[], rawValues: Record<string, string>) {
         const thtCanonicalTotalV159 = capaskaThtTotalForScoreFieldV159(p, parameters, scores, computed);
     if (thtCanonicalTotalV159 !== null) {
       computed[p.id] = String(thtCanonicalTotalV159);
+      return;
+    }
+
+    const stageChoiceTotalV161 = capaskaStageTotalFromAnsweredChoicesV161(parameters, scores, computed);
+    if (stageChoiceTotalV161 !== null) {
+      computed[p.id] = String(stageChoiceTotalV161);
       return;
     }
 
@@ -3050,6 +3141,9 @@ function formatStageScorePopupV224(score: any) {
   function calculateStageScorePopupV224(params: any[], finalValues: Record<string, string>) {
     const list = Array.isArray(params) ? params : [];
     const computed = finalValues || {};
+    const directStageTotalV161 = capaskaStageTotalFromAnsweredChoicesV161(list, {}, computed);
+    if (directStageTotalV161 !== null) return directStageTotalV161;
+
     const scoreCandidates: { score: number; isTotal: boolean; index: number }[] = [];
 
     list.forEach((param: any, index: number) => {
