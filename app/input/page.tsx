@@ -2936,7 +2936,8 @@ function InputForm({ user }: { user: any }) {
   const [donePreviewParticipant, setDonePreviewParticipant] = useState<any>(null);
   const [stageStaffOptionsV166, setStageStaffOptionsV166] = useState<string[]>([]);
   const [selectedStageStaffV166, setSelectedStageStaffV166] = useState<string[]>([]);
-  const showMcuStageStaffPickerV166 = program === "capaska" || program === "corporate";
+  const isCapaskaRegistrasiUlangStageV239 = program === "capaska" && norm(effectivePostName).includes("registrasiulang");
+  const showMcuStageStaffPickerV166 = (program === "capaska" || program === "corporate") && !isCapaskaRegistrasiUlangStageV239;
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
