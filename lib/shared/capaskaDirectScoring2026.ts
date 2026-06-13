@@ -35,7 +35,6 @@ export type CapaskaScoringConfig = {
   max_score?: number | null;
   scoring_type?: string;
   include_in_total_score?: boolean;
-  include_in_progress?: boolean;
 };
 
 type DomainRule = {
@@ -198,15 +197,15 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Varises Tungkai (insufisiensi vena)", "Ada", -1);
 
   // ORTOPEDI, max 16 mengikuti rekap 100. Vertebra klinis dibuat 1 poin per normal.
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Tidak Ada", 1);
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Ada", -10, true);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Tidak Ada", 1);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Ada", -10, true);
   addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Tidak Ada", "Tidak ada"], 1);
-  addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Ada", "Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
+  addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Ada", "Ringan", "Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
 
   // RADIOLOGI / WHOLE SPINE, max 6.
   addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], ["Tidak Ada", "Tidak ada", "TA", "Tidak ada (TA)"], 2);
   addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], "Ringan", -1);
-  addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], ["Ada", "Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
+  addRule(rules, ["Rontgen Whole Spine AP Lateral >> Skoliosis", "Rontgen Whole Spine AP Lateral >> Kifosis", "Rontgen Whole Spine AP Lateral >> Lordosis"], ["Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
 
   return rules;
 }
@@ -317,12 +316,9 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Hallux valgus",
       "Webbed toe",
       "OX Knee",
-      "O/X bean",
-      "O/X been",
       "Pes planus / kaki datar",
       "Polidactily",
       "Hiperekstensi Lutut",
-      "Hiperekstensi kaki",
       "General Laxity",
       "Skoliosis",
       "Kifosis",
@@ -355,6 +351,7 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   [normalizeCapaskaKey("Batu sal kemih")]: ["Batu saluran kemih"],
   [normalizeCapaskaKey("OX Knee")]: ["O/X bean", "O/X been"],
   [normalizeCapaskaKey("Polidactily")]: ["Polidactyly"],
+  [normalizeCapaskaKey("Hiperekstensi Lutut")]: ["Hiperekstensi kaki"],
   // CAPASKA THT domain alias fix v163:
   // Final scoring uses CAPASKA_DOMAIN_RULES components and getParameterByName().
   // Treat old "divide/dividae/Bividas" names as the reference "lividae".
@@ -449,6 +446,24 @@ export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
   const selected = String(selectedValue || "").trim();
   if (!selected) return 0;
 
+  // CAPASKA_GIGI_RADIOLOGI_CANONICAL_V163
+  // Keep this narrow: only known Gigi/Dental and Radiologi Whole Spine parameters.
+  // It prevents these stages from falling back to older DB/Ortopedi scoring paths.
+  const gigiCanonicalScoreV163 = capaskaSharedGigiScoreV163(param, selected);
+  if (gigiCanonicalScoreV163 !== null) return gigiCanonicalScoreV163;
+
+  const radiologiCanonicalScoreV163 = capaskaSharedRadiologiScoreV163(param, selected);
+  if (radiologiCanonicalScoreV163 !== null) return radiologiCanonicalScoreV163;
+
+  // CAPASKA_ORTHOPEDI_VERTEBRA_V232
+  const selectedKeyForOrtopediV232 = normalizeCapaskaKey(selected);
+  const parameterKeyForOrtopediV232 = normalizeCapaskaKey(String(param?.name || ""));
+  const categoryKeyForOrtopediV232 = normalizeCapaskaKey(String(param?.category || ""));
+  if (["skoliosis", "kifosis", "lordosis"].includes(parameterKeyForOrtopediV232) && categoryKeyForOrtopediV232.includes("vertebra")) {
+    if (selectedKeyForOrtopediV232 === "tidakada" || selectedKeyForOrtopediV232 === "normal") return 1;
+    if (["ada", "ringan", "sedang", "berat", "sedangberat", "tidaknormal"].includes(selectedKeyForOrtopediV232)) return -10;
+  }
+
   const configOption = findConfigOption(param, selected);
   if (configOption && typeof configOption.score === "number") return configOption.score;
 
@@ -472,7 +487,7 @@ export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
 
   if (category.includes("ortopedi") || category.includes("gerak") || category.includes("vertebra")) {
     if (selectedKey === "tidakada") return 1;
-    if (selectedKey === "ringan") return -1;
+    if (selectedKey === "ringan") return -10;
     if (["ada", "sedang", "berat", "sedangberat"].includes(selectedKey)) return -10;
   }
 
@@ -637,15 +652,6 @@ function computeCapaskaDerivedValuesBaseV162(parameters: any[], inputValues: Rec
   return next;
 }
 
-
-function normalizeDentalLegacyTotalV238(domainKey: string, totalValue: number) {
-  // Old dental config could store a full-normal score as 14. New reference max is 16.
-  if (domainKey === "gigi_mulut" && totalValue > 0 && totalValue <= 14) {
-    return roundScore(Math.min(16, (totalValue / 14) * 16));
-  }
-  return roundScore(Math.min(totalValue, domainKey === "gigi_mulut" ? 16 : totalValue));
-}
-
 function emptyScoring(): CapaskaScoringResult {
   const domainScores: Record<string, number> = {};
   const rawDomainScores: Record<string, number> = {};
@@ -806,11 +812,33 @@ export function computeMcuParticipantScoring2026(args: {
 
     if (totalValue !== null) {
       result.rawDomainScores[domain.key] = roundScore(totalValue);
-      result.domainScores[domain.key] = domain.key === "gigi_mulut"
-        ? normalizeDentalLegacyTotalV238(domain.key, totalValue)
-        : roundScore(Math.min(domain.maxScore, totalValue));
+      result.domainScores[domain.key] = roundScore(Math.min(domain.maxScore, totalValue));
       touched = true;
     }
+  }
+
+  const gigiCanonicalV163 = capaskaSharedComputeCanonicalDomainFromResultsV163(
+    paramsForPackage,
+    resultMap,
+    capaskaSharedGigiScoreV163
+  );
+  if (gigiCanonicalV163.count > 0) {
+    result.rawDomainScores.gigi_mulut = gigiCanonicalV163.total;
+    result.domainScores.gigi_mulut = roundScore(Math.min(16, gigiCanonicalV163.total));
+    for (const item of gigiCanonicalV163.redFlags) result.redFlags.push(`Gigi & Mulut + Dental Panoramik: ${item}`);
+    touched = true;
+  }
+
+  const radiologiCanonicalV163 = capaskaSharedComputeCanonicalDomainFromResultsV163(
+    paramsForPackage,
+    resultMap,
+    capaskaSharedRadiologiScoreV163
+  );
+  if (radiologiCanonicalV163.count > 0) {
+    result.rawDomainScores.radiologi = radiologiCanonicalV163.total;
+    result.domainScores.radiologi = roundScore(Math.min(6, radiologiCanonicalV163.total));
+    for (const item of radiologiCanonicalV163.redFlags) result.redFlags.push(`Radiologi: ${item}`);
+    touched = true;
   }
 
   if (!touched) return result;
@@ -976,9 +1004,228 @@ function capaskaApplyThtCanonicalTotalV162(parameters: any[], baseValues: Record
   return nextValues;
 }
 
+
+/* CAPASKA Gigi/Radiologi backend canonical totals v163
+   Scope only:
+   - Gigi & Mulut + Dental Panoramik: healthy max 16
+   - Radiologi Whole Spine AP Lateral: healthy max 6
+   Purpose:
+   - Save/dashboard must not trust a misplaced hidden Score field.
+   - Radiologi Skoliosis/Kifosis/Lordosis must not fall into Ortopedi Vertebra scoring.
+*/
+function capaskaSharedStageNormV163(value: any) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/â‰¥|Ã¢â€°Â¥/g, ">=")
+    .replace(/â‰¤|Ã¢â€°Â¤/g, "<=")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaSharedStageCompactV163(value: any) {
+  return capaskaSharedStageNormV163(value).replace(/\s+/g, "");
+}
+
+function capaskaSharedStageParamTextV163(param: any) {
+  return capaskaSharedStageNormV163([
+    param?.name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.id,
+  ].filter(Boolean).join(" "));
+}
+
+function capaskaSharedIsAutoOrScoreParamV163(param: any) {
+  const name = String(param?.name || "").toLowerCase().trim();
+  return (
+    name.startsWith("value ") ||
+    name.startsWith("nilai ") ||
+    name.startsWith("score ") ||
+    name.startsWith("total score") ||
+    name.includes("score total") ||
+    name.includes("skor total") ||
+    name.includes("total skor")
+  );
+}
+
+function capaskaSharedGigiKeyV163(param: any): string | null {
+  if (!param || capaskaSharedIsAutoOrScoreParamV163(param)) return null;
+  const text = capaskaSharedStageParamTextV163(param);
+
+  if (/karang/.test(text)) return "karang";
+  if (/caries|karies|dentis/.test(text)) return "caries";
+  if (/tumpatan|tambalan/.test(text)) return "tumpatan";
+  if (/impaksi|impacted/.test(text)) return "impaksi";
+  if (/kehilangan.*gigi|gigi.*hilang/.test(text)) return "kehilangan";
+  if (/infeksi.*gusi|gusi.*infeksi/.test(text)) return "infeksi";
+  if (/dental.*panoramic|dental.*panoramik|panoramic|panoramik|panorama/.test(text)) return "dental";
+
+  return null;
+}
+
+function capaskaSharedGigiScoreV163(param: any, rawValue: any): number | null {
+  const key = capaskaSharedGigiKeyV163(param);
+  if (!key) return null;
+
+  const c = capaskaSharedStageNormV163(rawValue);
+  const compact = capaskaSharedStageCompactV163(rawValue);
+  if (!c) return null;
+
+  if (key === "karang") {
+    if (/positive|positif|\(\+\)|(^| )ada( |$)/.test(c) && !/tidak ada/.test(c)) return -1;
+    if (/negative|negatif|\(-\)|tidak ada|tidakada/.test(c)) return 2;
+  }
+
+  if (key === "caries") {
+    if (/> ?3|>\s*3|lebih\s*dari\s*3|di atas\s*3|lebih\s*3/.test(c)) return -10;
+    if (/(^|[^0-9])0\s*(caries|karies)?/.test(c)) return 3;
+    if (/(^|[^0-9])1\s*(caries|karies)?/.test(c)) return -1;
+    if (/(^|[^0-9])2\s*(caries|karies)?/.test(c)) return -2;
+    if (/(^|[^0-9])3\s*(caries|karies)?/.test(c)) return -3;
+  }
+
+  if (key === "tumpatan") {
+    if (/(^|[^0-9])0\s*tumpatan|0tumpatan/.test(c) || compact === "0") return 2;
+    if (/> ?5|>\s*5|lebih\s*dari\s*5|>\s*3|lebih\s*dari\s*3/.test(c)) return -5;
+    if (/<= ?5|<=\s*5|<\s*=\s*5|< ?5|<\s*5|<= ?3|<=\s*3|<\s*=\s*3|< ?3|<\s*3/.test(c)) return 1;
+    if (/(^|[^0-9])[1-5]\s*tumpatan/.test(c)) return 1;
+  }
+
+  if (key === "impaksi") {
+    if (/>= ?4|>=\s*4|4\s*gigi|lebih\s*dari\s*3|di atas\s*3/.test(c)) return -10;
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|2\s*gigi\s*depan/.test(c)) return -5;
+    if (/2\s*gigi|1\s*gigi\s*depan/.test(c)) return 1;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 2;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 3;
+  }
+
+  if (key === "kehilangan") {
+    if (/> ?2|>\s*2|lebih\s*dari\s*2|di atas\s*2/.test(c)) return -10;
+    if (/(^|[^0-9])2\s*gigi/.test(c)) return 0;
+    if (/(^|[^0-9])1\s*gigi/.test(c)) return 1;
+    if (/(^|[^0-9])0\s*gigi/.test(c)) return 2;
+  }
+
+  if (key === "infeksi") {
+    if (/positive|positif|\(\+\)|(^| )ada( |$)/.test(c) && !/tidak ada/.test(c)) return -1;
+    if (/negative|negatif|\(-\)|tidak ada|tidakada/.test(c)) return 1;
+  }
+
+  if (key === "dental") {
+    if (/normal/.test(c) && !/tidak normal|kelainan|abnormal/.test(c)) return 3;
+    if (/kelainan|ditemukan|tidak normal|abnormal/.test(c)) return -1;
+  }
+
+  return null;
+}
+
+function capaskaSharedRadiologiKeyV163(param: any): string | null {
+  if (!param || capaskaSharedIsAutoOrScoreParamV163(param)) return null;
+  const text = capaskaSharedStageParamTextV163(param);
+  const hasRadiologyContext = /radiologi|rontgen|whole spine|ap lateral|thoracolumbosacral/.test(text);
+
+  if (!hasRadiologyContext) return null;
+  if (/skoliosis|scoliosis/.test(text)) return "skoliosis";
+  if (/kifosis|kyphosis/.test(text)) return "kifosis";
+  if (/lordosis/.test(text)) return "lordosis";
+
+  return null;
+}
+
+function capaskaSharedRadiologiScoreV163(param: any, rawValue: any): number | null {
+  const key = capaskaSharedRadiologiKeyV163(param);
+  if (!key) return null;
+
+  const c = capaskaSharedStageNormV163(rawValue);
+  const compact = capaskaSharedStageCompactV163(rawValue);
+  if (!c) return null;
+
+  if (/tidakada|tidakterdapat|normal|\(-\)|negatif|negative|^ta$/.test(compact)) return 2;
+  if (/ringan/.test(c)) return -1;
+  if (/sedang|berat|ada|tidak normal|abnormal|positif|positive|\(\+\)/.test(c)) return -10;
+
+  return null;
+}
+
+function capaskaSharedApplyStageCanonicalTotalV163(parameters: any[], baseValues: Record<string, string>, rawValues: Record<string, string>) {
+  const list = Array.isArray(parameters) ? parameters : [];
+  const nextValues: Record<string, string> = { ...(baseValues || {}) };
+  const sourceValues: Record<string, string> = { ...(rawValues || {}), ...(baseValues || {}) };
+
+  const computeTotal = (scoreFn: (param: any, value: any) => number | null) => {
+    let total = 0;
+    let count = 0;
+
+    for (const param of list) {
+      if (capaskaSharedIsAutoOrScoreParamV163(param)) continue;
+      const selected = String(sourceValues[String(param?.id)] ?? "").trim();
+      if (!selected) continue;
+
+      const score = scoreFn(param, selected);
+      if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+      total += score;
+      count += 1;
+    }
+
+    return count ? { total: roundScore(total), count } : null;
+  };
+
+  const gigi = computeTotal(capaskaSharedGigiScoreV163);
+  const radiologi = computeTotal(capaskaSharedRadiologiScoreV163);
+
+  const stage = radiologi && radiologi.count >= 1 ? radiologi : gigi && gigi.count >= 1 ? gigi : null;
+  if (!stage) return nextValues;
+
+  const scoreFields = list.filter((param) => capaskaSharedIsScoreFieldV162(param) || capaskaSharedIsAutoOrScoreParamV163(param));
+  for (const scoreField of scoreFields) {
+    const name = String(scoreField?.name || "").toLowerCase().trim();
+    if (name.startsWith("value ") || name.startsWith("nilai ")) continue;
+    nextValues[String(scoreField.id)] = String(stage.total);
+  }
+
+  return nextValues;
+}
+
+function capaskaSharedComputeCanonicalDomainFromResultsV163(
+  paramsForPackage: any[],
+  resultMap: Map<number, string>,
+  scoreFn: (param: any, value: any) => number | null,
+) {
+  let total = 0;
+  let count = 0;
+  const redFlags: string[] = [];
+
+  for (const param of paramsForPackage || []) {
+    if (capaskaSharedIsAutoOrScoreParamV163(param)) continue;
+    const value = String(resultMap.get(Number(param?.id)) || "").trim();
+    if (!value) continue;
+
+    const score = scoreFn(param, value);
+    if (typeof score !== "number" || !Number.isFinite(score)) continue;
+
+    total += score;
+    count += 1;
+    if (score <= -10) redFlags.push(`${String(param?.name || "Parameter")} = ${value}`);
+  }
+
+  return { total: roundScore(total), count, redFlags };
+}
+
 export function computeCapaskaDerivedValues(parameters: any[], values: Record<string, string>) {
   const baseValues = computeCapaskaDerivedValuesBaseV162(parameters, values);
-  return capaskaApplyThtCanonicalTotalV162(parameters, baseValues, values);
+  const thtValues = capaskaApplyThtCanonicalTotalV162(parameters, baseValues, values);
+  return capaskaSharedApplyStageCanonicalTotalV163(parameters, thtValues, values);
 }
 
 
