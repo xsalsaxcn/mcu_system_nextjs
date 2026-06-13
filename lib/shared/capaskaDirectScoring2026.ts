@@ -198,8 +198,8 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Varises Tungkai (insufisiensi vena)", "Ada", -1);
 
   // ORTOPEDI, max 16 mengikuti rekap 100. Vertebra klinis dibuat 1 poin per normal.
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "OX Knee", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Tidak Ada", 1);
-  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "OX Knee", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "General Laxity"], "Ada", -10, true);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Tidak Ada", 1);
+  addRule(rules, ["sindaktili", "polidaktili", "spina bifida", "mallet finger", "Hiperekstensi lengan", "Hammer toe", "Hallux valgus", "Webbed toe", "OX Knee", "O/X bean", "O/X been", "Pes planus / kaki datar", "Polidactily", "Polidactyly", "Hiperekstensi Lutut", "Hiperekstensi kaki", "General Laxity"], "Ada", -10, true);
   addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Tidak Ada", "Tidak ada"], 1);
   addRule(rules, ["Skoliosis", "Kifosis", "Lordosis"], ["Ada", "Sedang", "Berat", "Sedang / Berat", "Sedang/Berat"], -10, true);
 
@@ -317,9 +317,12 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Hallux valgus",
       "Webbed toe",
       "OX Knee",
+      "O/X bean",
+      "O/X been",
       "Pes planus / kaki datar",
       "Polidactily",
       "Hiperekstensi Lutut",
+      "Hiperekstensi kaki",
       "General Laxity",
       "Skoliosis",
       "Kifosis",
@@ -350,7 +353,7 @@ const PARAMETER_ALIASES: Record<string, string[]> = {
   [normalizeCapaskaKey("Struktur/Prolaps recti")]: ["Striktur/Prolaps recti", "Striktur / Prolaps recti"],
   [normalizeCapaskaKey("Undescensus testis")]: ["Undecensus testis"],
   [normalizeCapaskaKey("Batu sal kemih")]: ["Batu saluran kemih"],
-  [normalizeCapaskaKey("OX Knee")]: ["OX Knee"],
+  [normalizeCapaskaKey("OX Knee")]: ["O/X bean", "O/X been"],
   [normalizeCapaskaKey("Polidactily")]: ["Polidactyly"],
   // CAPASKA THT domain alias fix v163:
   // Final scoring uses CAPASKA_DOMAIN_RULES components and getParameterByName().
@@ -409,7 +412,6 @@ export function parseCapaskaScoringConfig(config: any): CapaskaScoringConfig {
       max_score: null,
       scoring_type: "by_option",
       include_in_total_score: true,
-      include_in_progress: true,
     };
   }
 
@@ -420,11 +422,10 @@ export function parseCapaskaScoringConfig(config: any): CapaskaScoringConfig {
       max_score: parseNumber(parsed.max_score),
       scoring_type: String(parsed.scoring_type || "by_option"),
       include_in_total_score: parsed.include_in_total_score === false ? false : true,
-      include_in_progress: parsed.include_in_progress === false ? false : true,
     };
   }
 
-  return { options: [], max_score: null, scoring_type: "by_option", include_in_total_score: true, include_in_progress: true };
+  return { options: [], max_score: null, scoring_type: "by_option", include_in_total_score: true };
 }
 
 export function parseCapaskaOptions(config: any) {
@@ -636,6 +637,15 @@ function computeCapaskaDerivedValuesBaseV162(parameters: any[], inputValues: Rec
   return next;
 }
 
+
+function normalizeDentalLegacyTotalV238(domainKey: string, totalValue: number) {
+  // Old dental config could store a full-normal score as 14. New reference max is 16.
+  if (domainKey === "gigi_mulut" && totalValue > 0 && totalValue <= 14) {
+    return roundScore(Math.min(16, (totalValue / 14) * 16));
+  }
+  return roundScore(Math.min(totalValue, domainKey === "gigi_mulut" ? 16 : totalValue));
+}
+
 function emptyScoring(): CapaskaScoringResult {
   const domainScores: Record<string, number> = {};
   const rawDomainScores: Record<string, number> = {};
@@ -796,7 +806,9 @@ export function computeMcuParticipantScoring2026(args: {
 
     if (totalValue !== null) {
       result.rawDomainScores[domain.key] = roundScore(totalValue);
-      result.domainScores[domain.key] = roundScore(Math.min(domain.maxScore, totalValue));
+      result.domainScores[domain.key] = domain.key === "gigi_mulut"
+        ? normalizeDentalLegacyTotalV238(domain.key, totalValue)
+        : roundScore(Math.min(domain.maxScore, totalValue));
       touched = true;
     }
   }
