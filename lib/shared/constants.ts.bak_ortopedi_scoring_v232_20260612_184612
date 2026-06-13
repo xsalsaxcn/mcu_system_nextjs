@@ -1434,7 +1434,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
         "sort_order": 90
       },
       {
-        "name": "OX Knee",
+        "name": "O/X bean",
         "category": "Pemeriksaan Anggota Gerak Bawah",
         "unit": "",
         "input_type": "radio",
@@ -1476,7 +1476,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
         "sort_order": 120
       },
       {
-        "name": "Hiperekstensi Lutut",
+        "name": "Hiperekstensi kaki",
         "category": "Pemeriksaan Anggota Gerak Bawah",
         "unit": "",
         "input_type": "radio",
@@ -1523,7 +1523,8 @@ export const CAPASKA_STAGES: StageSeed[] = [
         "reference_text": "",
         "config_json": [
           "Tidak Ada",
-          "Ada"
+          "Ada",
+          "Ringan"
         ],
         "is_required": 0,
         "sort_order": 160
@@ -1537,7 +1538,8 @@ export const CAPASKA_STAGES: StageSeed[] = [
         "reference_text": "",
         "config_json": [
           "Tidak Ada",
-          "Ada"
+          "Ada",
+          "Ringan"
         ],
         "is_required": 0,
         "sort_order": 170
@@ -1551,7 +1553,8 @@ export const CAPASKA_STAGES: StageSeed[] = [
         "reference_text": "",
         "config_json": [
           "Tidak Ada",
-          "Ada"
+          "Ada",
+          "Ringan"
         ],
         "is_required": 0,
         "sort_order": 180

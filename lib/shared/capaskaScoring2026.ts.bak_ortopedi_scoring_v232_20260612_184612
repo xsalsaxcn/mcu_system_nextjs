@@ -123,8 +123,9 @@ const GENERIC_SCORE_RULES: Record<string, Record<string, number>> = {
     "Ada (pria) Wanita >1)": 0,
   },
   ortopedi: {
-    "Tidak Ada": 1,
-    "Ada": -10,
+    "Tidak Ada": 2,
+    "Ada": 0,
+    "Ringan": 1,
   },
   radiologi: {
     "Tidak Ada": 2,
@@ -238,12 +239,9 @@ export const CAPASKA_DOMAIN_RULES: DomainRule[] = [
       "Hammer toe",
       "Hallux valgus",
       "Webbed toe",
-      "OX Knee",
       "O/X bean",
-      "O/X been",
       "Pes planus / kaki datar",
       "Polidactily",
-      "Hiperekstensi Lutut",
       "Hiperekstensi kaki",
       "General Laxity",
       "Skoliosis",
@@ -451,10 +449,10 @@ export function computeCapaskaDerivedValues(parameters: any[], inputValues: Reco
     "Hammer toe",
     "Hallux valgus",
     "Webbed toe",
-    "OX Knee",
+    "O/X bean",
     "Pes planus / kaki datar",
     "Polidactily",
-    "Hiperekstensi Lutut",
+    "Hiperekstensi kaki",
     "General Laxity",
   ]);
 

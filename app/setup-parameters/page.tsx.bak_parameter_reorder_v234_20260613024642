@@ -19,7 +19,6 @@ type Parameter = {
   is_active?: number;
   sort_order?: number;
   program_type?: string;
-  include_in_progress?: boolean;
 };
 
 type Post = {
@@ -55,7 +54,6 @@ const emptyForm = {
   max_score: "",
   scoring_type: "by_option",
   include_in_total_score: true,
-  include_in_progress: true,
   scoring_options: [] as ScoringOptionForm[],
   is_required: false,
   is_active: true,
@@ -94,7 +92,6 @@ function getParameterScoringForm(param: Parameter) {
     max_score: maxScore ? String(maxScore) : "",
     scoring_type: config.scoring_type || "by_option",
     include_in_total_score: config.include_in_total_score !== false,
-    include_in_progress: config.include_in_progress !== false,
     scoring_options: options,
   };
 }
@@ -155,7 +152,6 @@ function SetupParameters({ user }: { user: any }) {
   });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [draggedParamIdV237, setDraggedParamIdV237] = useState<number | null>(null);
 
   const activeParameters = useMemo(() => {
     return parameters.filter((p) => Number(p.is_active ?? 1) === 1);
@@ -260,7 +256,6 @@ function SetupParameters({ user }: { user: any }) {
             max_score: "",
             scoring_type: "by_option",
             include_in_total_score: true,
-            include_in_progress: true,
             scoring_options: [],
           }),
       is_required: !!param.is_required,
@@ -290,8 +285,7 @@ function SetupParameters({ user }: { user: any }) {
           scoring_options: scoringOptions,
           max_score: form.max_score,
           scoring_type: form.scoring_type,
-          include_in_total_score: form.include_in_total_score,
-          include_in_progress: form.include_in_progress !== false
+          include_in_total_score: form.include_in_total_score
         })
       });
 
@@ -450,59 +444,6 @@ function SetupParameters({ user }: { user: any }) {
       scoring_options: options,
       options_text: options.map((option) => option.label).filter(Boolean).join("\n")
     });
-  }
-
-  async function moveParameterByDragV237(targetParam: Parameter) {
-    if (!draggedParamIdV237 || draggedParamIdV237 === targetParam.id) return;
-    const draggedParam = parameters.find((param) => Number(param.id) === Number(draggedParamIdV237));
-    if (!draggedParam || Number(draggedParam.post_id) !== Number(targetParam.post_id)) {
-      setDraggedParamIdV237(null);
-      return;
-    }
-
-    const samePost = parameters
-      .filter((param) => Number(param.post_id) === Number(targetParam.post_id))
-      .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || Number(a.id) - Number(b.id));
-
-    const fromIndex = samePost.findIndex((param) => Number(param.id) === Number(draggedParam.id));
-    const toIndex = samePost.findIndex((param) => Number(param.id) === Number(targetParam.id));
-    if (fromIndex < 0 || toIndex < 0) return;
-
-    const nextPostOrder = [...samePost];
-    const [moved] = nextPostOrder.splice(fromIndex, 1);
-    nextPostOrder.splice(toIndex, 0, moved);
-
-    const orderMap = new Map<number, number>();
-    nextPostOrder.forEach((param, index) => orderMap.set(Number(param.id), (index + 1) * 10));
-
-    setParameters((prev) => prev
-      .map((param) => orderMap.has(Number(param.id)) ? { ...param, sort_order: orderMap.get(Number(param.id)) } : param)
-      .sort((a, b) => Number(a.post_id) - Number(b.post_id) || Number(a.sort_order || 0) - Number(b.sort_order || 0) || Number(a.id) - Number(b.id))
-    );
-    setDraggedParamIdV237(null);
-
-    try {
-      const res = await fetch("/api/setup/parameters", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "reorder",
-          post_id: Number(targetParam.post_id),
-          parameter_ids: nextPostOrder.map((param) => Number(param.id)),
-        }),
-      });
-      const json = await res.json();
-      if (!json.ok) {
-        setMessage(json.message || "Gagal menyimpan urutan parameter.");
-        await loadData(programType);
-        return;
-      }
-      setMessage("Urutan pertanyaan berhasil disimpan.");
-      await loadData(programType);
-    } catch (error: any) {
-      setMessage(error?.message || "Gagal menyimpan urutan parameter.");
-      await loadData(programType);
-    }
   }
 
   return (
@@ -665,15 +606,6 @@ function SetupParameters({ user }: { user: any }) {
               />
               Hitung ke total skor
             </label>
-
-            <label className="mt-7 flex items-center gap-2 text-sm font-semibold">
-              <input
-                type="checkbox"
-                checked={form.include_in_progress !== false}
-                onChange={(e) => setForm({ ...form, include_in_progress: e.target.checked })}
-              />
-              Masuk ke progress bar?
-            </label>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
@@ -826,7 +758,12 @@ function SetupParameters({ user }: { user: any }) {
           <button type="button" className="btn-secondary" onClick={() => selectAllProgram(false)}>Kosongkan</button>
           <button type="button" className="btn-primary" onClick={saveMapping} disabled={loading || !selectedPackageId}>Simpan Mapping</button>
           {programType === "capaska" && (
-            <a href="/setup-parameters/staff" className="rounded-xl bg-indigo-600 px-4 py-3 text-center text-sm font-bold text-white shadow-sm hover:bg-indigo-700">Edit Data Petugas</a>
+            <a
+              href="/setup-parameters/staff"
+              className="rounded-xl bg-indigo-600 px-4 py-3 text-center text-sm font-bold text-white shadow-sm hover:bg-indigo-700"
+            >
+              Edit Data Petugas
+            </a>
           )}
         </div>
 
@@ -836,28 +773,20 @@ function SetupParameters({ user }: { user: any }) {
               <div className="mb-3 font-black">{postName}</div>
               <div className="space-y-2">
                 {(params as Parameter[]).map((param) => (
-                  <div
-                    key={param.id}
-                    draggable
-                    onDragStart={() => setDraggedParamIdV237(param.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); void moveParameterByDragV237(param); }}
-                    className="flex cursor-grab items-start gap-2 rounded-xl bg-slate-50 p-2 text-sm active:cursor-grabbing"
-                    title="Drag untuk mengatur urutan. Klik nama pertanyaan untuk edit."
-                  >
+                  <label key={param.id} className="flex items-start gap-2 rounded-xl bg-slate-50 p-2 text-sm">
                     <input
                       type="checkbox"
                       className="mt-1"
                       checked={!!selectedParamIds[param.id]}
                       onChange={(e) => setSelectedParamIds({ ...selectedParamIds, [param.id]: e.target.checked })}
                     />
-                    <button type="button" className="flex-1 text-left" onClick={() => editParameter(param)}>
-                      <span className="font-bold">☰ {param.name}</span>
+                    <span>
+                      <span className="font-bold">{param.name}</span>
                       <span className="block text-xs text-slate-500">
-                        {param.input_type || "text"} {param.unit ? `· ${param.unit}` : ""} {param.is_required ? "· wajib" : ""} {(() => { try { const cfg = typeof param.config_json === "string" ? JSON.parse(param.config_json || "{}") : param.config_json; return cfg?.include_in_progress === false ? "· tidak masuk progress" : "· masuk progress"; } catch { return "· masuk progress"; } })()}
+                        {param.input_type || "text"} {param.unit ? `· ${param.unit}` : ""} {param.is_required ? "· wajib" : ""}
                       </span>
-                    </button>
-                  </div>
+                    </span>
+                  </label>
                 ))}
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { stageOrder } from "@/lib/shared/constants";
+﻿import { stageOrder } from "@/lib/shared/constants";
 import type { StageProgress } from "@/lib/shared/types";
 
 function isActive(value: any) {
@@ -10,16 +10,6 @@ function shouldHideStage(postName: string) {
 
   // Registrasi awal CAPASKA bukan stage pemeriksaan, jadi tidak dihitung di progress dashboard.
   return normalized === "registrasi capaska" || normalized.startsWith("registrasi capaska");
-}
-
-
-function includeInProgress(parameter: any) {
-  try {
-    const raw = parameter?.config_json;
-    const config = typeof raw === "string" ? JSON.parse(raw || "{}") : raw;
-    if (config && typeof config === "object" && config.include_in_progress === false) return false;
-  } catch {}
-  return true;
 }
 
 function isScoreHelperParameter(parameterName: string) {
@@ -139,7 +129,7 @@ export function computeStagesForParticipant(
   for (const [postId, params] of grouped.entries()) {
     const postName = postMap.get(postId) || "-";
 
-    const inputParams = canonicalCapaskaProgressParamsV153(params.filter((p) => includeInProgress(p) && !isScoreHelperParameter(String(p.name || ""))));
+    const inputParams = canonicalCapaskaProgressParamsV153(params.filter((p) => !isScoreHelperParameter(String(p.name || ""))));
 
     const countedParams = inputParams.length ? inputParams : params;
     const total = countedParams.length;

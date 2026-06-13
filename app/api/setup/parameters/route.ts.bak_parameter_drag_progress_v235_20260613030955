@@ -131,34 +131,46 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
 
 
-  if (mode === "reorder") {
-    const postId = Number(body.post_id || 0);
-    const parameterIds = Array.isArray(body.parameter_ids)
-      ? body.parameter_ids.map((id: any) => Number(id)).filter(Boolean)
+  // PARAMETER_REORDER_API_V234
+  if (mode === "sort_order") {
+    const programTypeForOrder = String(body.program_type || "capaska").trim();
+    const orders = Array.isArray(body.parameter_orders)
+      ? body.parameter_orders
+          .map((item: any) => ({
+            id: Number(item?.id),
+            sort_order: Number(item?.sort_order),
+          }))
+          .filter((item: any) => item.id > 0 && Number.isFinite(item.sort_order))
       : [];
 
-    if (!postId) return fail("post_id wajib untuk reorder.");
-    if (!parameterIds.length) return fail("parameter_ids wajib untuk reorder.");
+    if (!["capaska", "corporate"].includes(programTypeForOrder)) {
+      return fail("Program harus capaska atau corporate.");
+    }
 
-    for (let index = 0; index < parameterIds.length; index += 1) {
+    if (!orders.length) {
+      return fail("Data urutan parameter kosong.");
+    }
+
+    for (const item of orders) {
       const { error } = await supabase
         .from("parameters")
-        .update({ sort_order: (index + 1) * 10 })
-        .eq("id", parameterIds[index])
-        .eq("post_id", postId);
+        .update({ sort_order: item.sort_order })
+        .eq("id", item.id)
+        .eq("program_type", programTypeForOrder);
+
       if (error) return fail(error.message, 500);
     }
 
     await supabase.from("audit_logs").insert({
       user_id: user.id,
-      action: "REORDER_PARAMETERS",
+      action: "UPDATE_PARAMETER_SORT_ORDER",
       participant_id: null,
       parameter_id: null,
       old_value: null,
-      new_value: `post_id=${postId}; parameter_count=${parameterIds.length}`
+      new_value: "program_type=" + programTypeForOrder + "; parameter_count=" + orders.length
     });
 
-    return ok({ reordered: parameterIds.length });
+    return ok({ updated: orders.length });
   }
 
   if (mode === "mapping") {
@@ -168,9 +180,6 @@ export async function POST(req: NextRequest) {
       : [];
 
     if (!packageId) return fail("Pilih paket/instansi dulu.");
-    if (!parameterIds.length && body.allow_empty !== true) {
-      return fail("Mapping kosong tidak disimpan untuk mencegah paket kehilangan semua parameter. Pilih minimal satu parameter.");
-    }
 
     const deleteRes = await supabase
       .from("package_parameters")
@@ -225,8 +234,7 @@ export async function POST(req: NextRequest) {
         options: scoringOptions,
         max_score: maxScore,
         scoring_type: scoringType,
-        include_in_total_score: body.include_in_total_score === false ? false : true,
-        include_in_progress: body.include_in_progress === false ? false : true
+        include_in_total_score: body.include_in_total_score === false ? false : true
       }
     : plainOptions;
 

@@ -560,7 +560,8 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
 
   if (/ortopedi/.test(p) && /skoliosis|kifosis|lordosis|vertebra|tulang belakang/.test(p)) {
     if (/tidak ada|normal/.test(c)) return 1;
-    if (/ada|sedang|berat|tidak normal/.test(c)) return -10;
+    if (/ringan/.test(c)) return -1;
+    if (/sedang|berat|ada|tidak normal/.test(c)) return -10;
   }
 
   // =========================
@@ -580,9 +581,10 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
    Scope only: Ortopedi > Vertebra / Tulang Belakang
    Parameters: Skoliosis, Kifosis, Lordosis
    Reference:
-   - Tidak ada = 1 untuk setiap poin
-   - Ringan dihapus dari pilihan
-   - Ada = Tidak Direkomendasikan (-10)
+   - Tidak ada = 2 untuk setiap poin
+   - Ringan = -1 untuk setiap poin
+   - Sedang / Berat = Tidak Direkomendasikan (-10)
+   Current UI may show "Ada" instead of "Sedang/Berat"; treat "Ada" as red flag (-10).
 */
 function capaskaVertebraNorm(value: any): string {
   return String(value ?? "")
@@ -634,8 +636,9 @@ function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null 
 
   const c = capaskaVertebraChoiceText(optionOrValue);
 
-  if (/tidak ada|normal/.test(c)) return 1;
-  if (/ada|sedang|berat/.test(c)) return -10;
+  if (/tidak ada|normal/.test(c)) return 2;
+  if (/ringan/.test(c)) return -1;
+  if (/sedang|berat|ada/.test(c)) return -10;
 
   return null;
 }
@@ -943,8 +946,6 @@ function capaskaThtChoiceText(optionOrValue: any): string {
 function capaskaThtDisplayLabelFix(value: any): any {
   if (typeof value !== "string") return value;
   return value
-    .replace(/^Hiperekstensi kaki$/gi, "Hiperekstensi Lutut")
-    .replace(/^O\/?X\s*(bean|been)$/gi, "OX Knee")
     .replace(/\(\s*dividae\s*\)/gi, "(lividae)")
     .replace(/\(\s*divide\s*\)/gi, "(lividae)")
     .replace(/Rhinitis Alergi\s+divide/gi, "Rhinitis Alergi (lividae)")
@@ -2677,8 +2678,6 @@ function InputForm({ user }: { user: any }) {
   const [stageStaffOptionsV166, setStageStaffOptionsV166] = useState<string[]>([]);
   const [selectedStageStaffV166, setSelectedStageStaffV166] = useState<string[]>([]);
   const showMcuStageStaffPickerV166 = program === "capaska" || program === "corporate";
-  const isAdminUserV237 = String(user?.role || "").toLowerCase() === "admin";
-  const canResetFormAdminOnlyV237 = isAdminUserV237;
 
   const groupedParameters = useMemo(() => {
     const groups: { category: string; params: any[] }[] = [];
@@ -2779,8 +2778,10 @@ function InputForm({ user }: { user: any }) {
 
 
   function toggleStageStaffV166(staffName: string) {
-    // STAFF_SINGLE_SELECT_V237: satu post/operator wajib tepat 1 petugas.
-    setSelectedStageStaffV166([staffName]);
+    setSelectedStageStaffV166((prev) => {
+      const exists = prev.includes(staffName);
+      return exists ? prev.filter((name) => name !== staffName) : [...prev, staffName];
+    });
   }
 
   async function loadStageStaffForParticipantV166(participantId: number | string) {
@@ -2802,8 +2803,7 @@ function InputForm({ user }: { user: any }) {
       const assignmentJson = await assignmentRes.json().catch(() => ({}));
 
       setStageStaffOptionsV166(optionsJson.staff_names || []);
-      const assignedNames = assignmentJson.staff_names || [];
-      setSelectedStageStaffV166(assignedNames.length ? [assignedNames[0]] : []);
+      setSelectedStageStaffV166(assignmentJson.staff_names || []);
     } catch {
       setStageStaffOptionsV166([]);
       setSelectedStageStaffV166([]);
@@ -3143,12 +3143,6 @@ async function loadParticipant(p: any, mode: LoadMode) {
     e.preventDefault();
     showSavePopupDomV171("processing");
     setMessage("");
-
-    if (showMcuStageStaffPickerV166 && selectedStageStaffV166.length !== 1) {
-      hideSavePopupDomV171();
-      setMessage("Pilih tepat satu nama petugas pemeriksa sebelum menyimpan.");
-      return;
-    }
 
     const finalValues = computeValues(parameters, values);
 
@@ -3598,7 +3592,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
             <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-lg font-black">Nama Petugas Pemeriksa</div>
               <div className="mt-1 text-sm text-slate-500">
-                Pilih tepat satu dokter/petugas yang melakukan tindakan pada stage ini.
+                Pilih satu atau lebih dokter/petugas yang melakukan tindakan pada stage ini.
               </div>
 
               {stageStaffOptionsV166.length > 0 ? (
@@ -3606,8 +3600,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                   {stageStaffOptionsV166.map((staffName) => (
                     <label key={staffName} className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold">
                       <input
-                        type="radio"
-                        name="stage-staff-v237"
+                        type="checkbox"
                         checked={selectedStageStaffV166.includes(staffName)}
                         onChange={() => toggleStageStaffV166(staffName)}
                       />
@@ -3655,18 +3648,16 @@ async function loadParticipant(p: any, mode: LoadMode) {
             </div>
           ))}
 
-          <div className={canResetFormAdminOnlyV237 ? "grid gap-3 md:grid-cols-2" : "grid gap-3"}>
+          <div className="grid gap-3 md:grid-cols-2">
             <button className="btn-primary" disabled={!capaskaProgressTotalV151(parameters)}>Simpan Hasil Pemeriksaan</button>
-            {canResetFormAdminOnlyV237 && (
-              <button
-                type="button"
-                onClick={resetCurrentPostResultsV214}
-                disabled={!participant?.id || !parameters.length}
-                className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 font-black text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Reset Hasil Form Ini
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={resetCurrentPostResultsV214}
+              disabled={!participant?.id || !parameters.length}
+              className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 font-black text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Reset Hasil Form Ini
+            </button>
           </div>
           {message && <div className="rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">{message}</div>}
         </form>

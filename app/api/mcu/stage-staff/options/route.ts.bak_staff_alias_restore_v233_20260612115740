@@ -38,11 +38,6 @@ function stageMatches(rowStageName: string, requestedStageName: string) {
   if (rowKey === requestedKey) return true;
   if (rowKey.includes(requestedKey) || requestedKey.includes(rowKey)) return true;
 
-  const rowOrtho = rowKey.replace(/orthopedi/g, "ortopedi");
-  const requestedOrtho = requestedKey.replace(/orthopedi/g, "ortopedi");
-  if (rowOrtho === requestedOrtho) return true;
-  if (rowOrtho.includes(requestedOrtho) || requestedOrtho.includes(rowOrtho)) return true;
-
   return false;
 }
 
@@ -80,7 +75,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const programType = cleanText(body.program_type || body.program || "capaska");
   const stages = Array.isArray(body.stages) ? body.stages : [];
-  const replaceAll = body.replace_all === true || body.mode === "replace_all";
+  const replaceAll = body.replace_all === true || body.replace_all_options === true || body.mode === "replace_all";
 
   if (!programType) return fail("program_type wajib.");
   if (!stages.length) return ok({ saved: 0 });
@@ -90,12 +85,20 @@ export async function POST(req: NextRequest) {
 
   if (replaceAll) {
     const inserts: any[] = [];
+
     for (const stage of stages) {
       const stageName = cleanText(stage.stage_name || stage.name || stage.stage);
       const staffNames = uniqueNames(stage.staff_names || stage.names || []);
       if (!stageName) continue;
+
       for (const staffName of staffNames) {
-        inserts.push({ program_type: programType, stage_name: stageName, staff_name: staffName, is_active: true, created_by: String(user.id || user.username || "") });
+        inserts.push({
+          program_type: programType,
+          stage_name: stageName,
+          staff_name: staffName,
+          is_active: true,
+          created_by: String(user.id || user.username || "")
+        });
       }
     }
 
@@ -103,18 +106,20 @@ export async function POST(req: NextRequest) {
       .from("mcu_stage_staff_options")
       .delete()
       .eq("program_type", programType);
-    if (deleteError) return fail(deleteError.message, 500);
 
+    if (deleteError) return fail(deleteError.message, 500);
     if (!inserts.length) return ok({ saved: 0, replace_all: true });
 
     const { error: insertError } = await supabase.from("mcu_stage_staff_options").insert(inserts);
     if (insertError) return fail(insertError.message, 500);
+
     return ok({ saved: inserts.length, replace_all: true });
   }
 
   for (const stage of stages) {
     const stageName = cleanText(stage.stage_name || stage.name || stage.stage);
     const staffNames = uniqueNames(stage.staff_names || stage.names || []);
+
     if (!stageName) continue;
 
     const { error: deleteError } = await supabase
@@ -122,12 +127,22 @@ export async function POST(req: NextRequest) {
       .delete()
       .eq("program_type", programType)
       .eq("stage_name", stageName);
+
     if (deleteError) return fail(deleteError.message, 500);
 
     if (!staffNames.length) continue;
-    const inserts = staffNames.map((staffName) => ({ program_type: programType, stage_name: stageName, staff_name: staffName, is_active: true, created_by: String(user.id || user.username || "") }));
+
+    const inserts = staffNames.map((staffName) => ({
+      program_type: programType,
+      stage_name: stageName,
+      staff_name: staffName,
+      is_active: true,
+      created_by: String(user.id || user.username || "")
+    }));
+
     const { error: insertError } = await supabase.from("mcu_stage_staff_options").insert(inserts);
     if (insertError) return fail(insertError.message, 500);
+
     saved += inserts.length;
   }
 

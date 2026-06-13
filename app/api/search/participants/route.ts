@@ -8,6 +8,16 @@ function normalizeProgram(value: any) {
   return String(value || "").trim().toLowerCase();
 }
 
+
+function includeInProgress(parameter: any) {
+  try {
+    const raw = parameter?.config_json;
+    const config = typeof raw === "string" ? JSON.parse(raw || "{}") : raw;
+    if (config && typeof config === "object" && config.include_in_progress === false) return false;
+  } catch {}
+  return true;
+}
+
 function isScoreHelperParameter(parameterName: any) {
   const name = String(parameterName || "").toLowerCase().trim();
   return (
@@ -191,7 +201,7 @@ async function getCapaskaDoneParticipants(args: {
 
   if (paramError) throw new Error(paramError.message);
 
-  const inputParams = (postParams || []).filter((p: any) => !isScoreHelperParameter(p.name));
+  const inputParams = (postParams || []).filter((p: any) => includeInProgress(p) && !isScoreHelperParameter(p.name));
   const inputParamIds = inputParams.map((p: any) => Number(p.id)).filter(Boolean);
   if (!inputParamIds.length) return { participants: [], has_more: false };
 
