@@ -459,6 +459,19 @@ export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
   const selectedKeyForOrtopediV232 = normalizeCapaskaKey(selected);
   const parameterKeyForOrtopediV232 = normalizeCapaskaKey(String(param?.name || ""));
   const categoryKeyForOrtopediV232 = normalizeCapaskaKey(String(param?.category || ""));
+
+  // CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V242
+  // Prioritaskan skor dari Setup Parameter untuk Ortopedi Vertebra.
+  // Dengan ini, perubahan skor dari aplikasi langsung dipakai backend/dashboard/export.
+  const ortopediVertebraConfigOptionV242 = findConfigOption(param, selected);
+  if (
+    ["skoliosis", "kifosis", "lordosis"].includes(parameterKeyForOrtopediV232) &&
+    categoryKeyForOrtopediV232.includes("vertebra") &&
+    ortopediVertebraConfigOptionV242 &&
+    typeof ortopediVertebraConfigOptionV242.score === "number"
+  ) {
+    return ortopediVertebraConfigOptionV242.score;
+  }
   if (["skoliosis", "kifosis", "lordosis"].includes(parameterKeyForOrtopediV232) && categoryKeyForOrtopediV232.includes("vertebra")) {
     if (selectedKeyForOrtopediV232 === "tidakada" || selectedKeyForOrtopediV232 === "normal") return 1;
     if (["ada", "ringan", "sedang", "berat", "sedangberat", "tidaknormal"].includes(selectedKeyForOrtopediV232)) return -10;

@@ -693,6 +693,12 @@ function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null 
 
   const c = capaskaVertebraChoiceText(optionOrValue);
 
+  // CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V242
+  // Skor Ortopedi Vertebra (Skoliosis/Kifosis/Lordosis) mengikuti Setup Parameter.
+  // Ini mencegah hardcoded lama (-10) menimpa nilai yang sudah diatur di aplikasi, misalnya Ada = -5.
+  const configuredScoreV242 = capaskaRawOptionScore(optionOrValue);
+  if (configuredScoreV242 !== null) return configuredScoreV242;
+
   if (/tidak ada|normal/.test(c)) return 1;
   if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -10;
 
