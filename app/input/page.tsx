@@ -3281,7 +3281,7 @@ function formatStageScorePopupV224(score: any) {
     card.style.cssText = "width:100%;max-width:440px;border-radius:30px;border:1px solid #dbeafe;background:#ffffff;padding:28px;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.32);font-family:inherit;";
     overlay.appendChild(card);
 
-    appendStageScorePopupTextV224(card, "âœ“", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
+    appendStageScorePopupTextV224(card, "Ok“", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
     appendStageScorePopupTextV224(card, "Hasil berhasil disimpan", "margin-top:16px;font-size:24px;line-height:1.2;font-weight:950;color:#0f172a;");
 
     const info = document.createElement("div");
