@@ -2490,7 +2490,7 @@ function ParameterInput({
         </select>
         {value && (
           <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
+            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " - Tidak Direkomendasikan" : ""}
           </div>
         )}
       </>
@@ -2528,7 +2528,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{capaskaGigiCanonicalLabelV150(param, opt)}</span>
                   {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {capaskaThtHardScoreV155(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " Â· Tidak Direkomendasikan" : ""}
+                      Skor {capaskaThtHardScoreV155(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " - Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -2539,8 +2539,8 @@ function ParameterInput({
 
         {value && (
           <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Terpilih: {value || "-"} Â· Skor: {scoreForParam(param, value)}
-            {isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
+            Terpilih: {value || "-"} - Skor: {scoreForParam(param, value)}
+            {isCriticalChoice(param, value) ? " - Tidak Direkomendasikan" : ""}
           </div>
         )}
       </div>
@@ -3665,7 +3665,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 <div className="text-xs font-black uppercase tracking-wide text-emerald-600">Preview peserta selesai</div>
                 <div className="mt-1 text-xl font-black leading-tight text-slate-950 md:text-2xl">{donePreviewParticipant.name}</div>
                 <div className="mt-1 text-sm font-semibold leading-6 text-slate-500">
-                  {donePreviewParticipant.mcu_id || "-"} Â· {donePreviewParticipant.province || "-"} Â· {donePreviewParticipant.source_name || "-"}
+                  {donePreviewParticipant.mcu_id || "-"} - {donePreviewParticipant.province || "-"} - {donePreviewParticipant.source_name || "-"}
                 </div>
               </div>
               <button
@@ -3720,7 +3720,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
         <div className="text-2xl font-black">Input CAPASKA</div>
         <div className="mt-1 text-sm text-slate-500">Login sebagai {effectivePostName}. Operator hanya melihat parameter post masing-masing.</div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          AutoScore backend CAPASK aktif Â· pertanyaan selang-seling Â· value/score tersembunyi
+          AutoScore backend CAPASK aktif - pertanyaan selang-seling - value/score tersembunyi
         </div>
         {isAdminStageAssist && (
           <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
@@ -3784,7 +3784,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 }`}
               >
                 <div className="font-bold">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.mcu_id || "-"} Â· {p.province || "-"} Â· {p.source_name || "-"}</div>
+                <div className="text-sm text-slate-500">{p.mcu_id || "-"} - {p.province || "-"} - {p.source_name || "-"}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => loadParticipant(p, "blank")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white">
                     Input Baru
@@ -3918,7 +3918,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 <div className="text-xs font-black uppercase tracking-wide text-blue-700">{effectivePostName}</div>
                 <div className="mt-1 text-xl font-black leading-tight text-slate-950 md:text-2xl">{participant.name}</div>
                 <div className="mt-1 text-sm font-medium leading-6 text-slate-500">
-                  {participant.mcu_id || "-"} Â· {participant.province || "-"} Â· {detail?.participant?.source_name || participant.source_name || "-"}
+                  {participant.mcu_id || "-"} - {participant.province || "-"} - {detail?.participant?.source_name || participant.source_name || "-"}
                 </div>
               </div>
               <button
@@ -3939,7 +3939,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
         <section className="card space-y-4 p-5">
           <div>
             <div className="text-xl font-black">{participant.name}</div>
-            <div className="text-sm text-slate-500">{participant.mcu_id} Â· {participant.province || "-"} Â· {detail.participant.source_name || "-"}</div>
+            <div className="text-sm text-slate-500">{participant.mcu_id} - {participant.province || "-"} - {detail.participant.source_name || "-"}</div>
           </div>
           <StageProgress stages={detail.stages} />
         </section>
