@@ -442,6 +442,27 @@ function getBuiltinRule(parameterName: string, selectedValue: string) {
   return BUILTIN_SCORE_RULES[scoreKey(parameterName, selectedValue)] || null;
 }
 
+
+/* CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V243
+   Scope: Ortopedi clinical vertebra only (Skoliosis, Kifosis, Lordosis).
+   Config score from Setup Parameter already wins before this helper is called.
+   This helper only replaces the legacy fallback that forced Ada/Sedang/Berat to -10.
+   Radiologi / Rontgen Whole Spine is excluded and keeps its separate scoring.
+*/
+function capaskaSharedOrtopediVertebraScoreV243(param: any, selectedValue: string): number | null {
+  const nameKey = normalizeCapaskaKey(param?.name || '');
+  const categoryKey = normalizeCapaskaKey(param?.category || '');
+  const combined = `${nameKey} ${categoryKey}`;
+  const selectedKey = normalizeCapaskaKey(selectedValue || '');
+
+  if (!/skoliosis|scoliosis|kifosis|kyphosis|lordosis|vertebra|tulangbelakang/.test(combined)) return null;
+  if (/radiologi|rontgen|wholespine|aplateral|thoracolumbosacral/.test(combined)) return null;
+
+  if (selectedKey === 'tidakada' || selectedKey === 'normal') return 1;
+  if (['ada', 'sedang', 'berat', 'tidaknormal', 'sedangberat'].includes(selectedKey)) return -5;
+
+  return null;
+}
 export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
   const selected = String(selectedValue || "").trim();
   if (!selected) return 0;
@@ -480,6 +501,9 @@ export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
   const configOption = findConfigOption(param, selected);
   if (configOption && typeof configOption.score === "number") return configOption.score;
 
+  const ortopediVertebraScoreV243 = capaskaSharedOrtopediVertebraScoreV243(param, selected);
+  if (ortopediVertebraScoreV243 !== null) return ortopediVertebraScoreV243;
+
   const name = String(param?.name || "");
   const category = String(param?.category || "").toLowerCase();
   const exact = getBuiltinRule(name, selected);
@@ -515,7 +539,10 @@ export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
 
 export function isCapaskaCriticalChoice(param: any, selectedValue: string) {
   const configOption = findConfigOption(param, selectedValue);
-  if (configOption?.is_critical) return true;
+  if (configOption) return Boolean(configOption.is_critical) || (typeof configOption.score === "number" && configOption.score <= -10);
+
+  const ortopediVertebraScoreV243 = capaskaSharedOrtopediVertebraScoreV243(param, String(selectedValue || ""));
+  if (ortopediVertebraScoreV243 !== null) return ortopediVertebraScoreV243 <= -10;
 
   const exact = getBuiltinRule(String(param?.name || ""), String(selectedValue || ""));
   if (exact?.critical) return true;

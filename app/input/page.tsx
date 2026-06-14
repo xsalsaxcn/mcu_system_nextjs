@@ -1864,7 +1864,32 @@ function capaskaThtScoreForAnyValueV155(param: any, value: any, options?: any[])
   return null;
 }
 
+
+/* CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V243
+   Scope: Ortopedi clinical vertebra only (Skoliosis, Kifosis, Lordosis).
+   Purpose: stop old hardcoded -10 from overriding Setup Parameter.
+   Priority: configured option score from Setup Parameter wins. Fallback: Tidak Ada=1, Ada/Sedang/Berat=-5.
+   Radiologi / Rontgen Whole Spine is explicitly excluded so Radiologi scoring stays unchanged.
+*/
+function capaskaOrtopediVertebraConfiguredScoreV243(param: any, optionOrValue: any): number | null {
+  const p = capaskaVertebraParamText(param);
+  const c = capaskaVertebraChoiceText(optionOrValue);
+
+  if (!/skoliosis|scoliosis|kifosis|kyphosis|lordosis|vertebra|tulang belakang/.test(p)) return null;
+  if (/radiologi|rontgen|whole spine|ap lateral|thoracolumbosacral/.test(p)) return null;
+
+  const configuredScore = capaskaRawOptionScore(optionOrValue);
+  if (configuredScore !== null) return configuredScore;
+
+  if (/tidak ada|normal/.test(c)) return 1;
+  if (/ada|sedang|berat|tidak normal/.test(c)) return -5;
+
+  return null;
+}
 function scoreForParam(param: any, value: string) {
+  const ortopediV243SelectedOption = getSelectedChoiceOption(param, value);
+  const ortopediV243Score = capaskaOrtopediVertebraConfiguredScoreV243(param, ortopediV243SelectedOption || value);
+  if (ortopediV243Score !== null) return ortopediV243Score;
   const thtV155Options = capaskaThtCanonicalizeOptionsV155(param, getChoiceOptions(param)) || [];
   const thtV155Score = capaskaThtScoreForAnyValueV155(param, value, thtV155Options);
   if (thtV155Score !== null) return thtV155Score;
@@ -1904,6 +1929,9 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const ortopediV243SelectedOptionForCritical = getSelectedChoiceOption(param, value);
+  const ortopediV243CriticalScore = capaskaOrtopediVertebraConfiguredScoreV243(param, ortopediV243SelectedOptionForCritical || value);
+  if (ortopediV243CriticalScore !== null) return ortopediV243CriticalScore <= -10;
   const thtV155CriticalOptions = capaskaThtCanonicalizeOptionsV155(param, getChoiceOptions(param)) || [];
   const thtV155CriticalScore = capaskaThtScoreForAnyValueV155(param, value, thtV155CriticalOptions);
   if (thtV155CriticalScore !== null) return thtV155CriticalScore <= -10;
