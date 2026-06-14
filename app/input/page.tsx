@@ -119,14 +119,8 @@ function capaskaOrtopediDisplayLabelV232(name: any) {
 }
 
 function getForcedOrtopediOptionsV232(param: any): ChoiceOption[] {
-  const nameKey = capaskaOrtopediNormV232(param?.name);
-  const categoryKey = capaskaOrtopediNormV232(param?.category);
-  const isClinicalVertebra = ["skoliosis", "kifosis", "lordosis"].includes(nameKey) && categoryKey.includes("vertebra");
-  if (!isClinicalVertebra) return [];
-  return [
-    { label: "Tidak Ada", value: "Tidak Ada", score: 1, is_critical: false },
-    { label: "Ada", value: "Ada", score: -10, is_critical: true, note: "Tidak Direkomendasikan" },
-  ];
+  // Ortopedi vertebra mengikuti opsi dan skor dari Setup Parameter.
+  return [];
 }
 // ORTOPEDI_SCORING_V232
 function getChoiceOptions(param: any): ChoiceOption[] {
@@ -588,10 +582,13 @@ function capaskaScore2026(param: any, optionOrValue: any): number | null {
     if (/ada|tidak normal|di luar|>\s*5/.test(c)) return -10;
   }
 
-  if (/ortopedi/.test(p) && /skoliosis|kifosis|lordosis|vertebra|tulang belakang/.test(p)) {
-    if (/tidak ada|normal/.test(c)) return 1;
-    if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -10;
-  }
+if (/ortopedi/.test(p) && /skoliosis|kifosis|lordosis|vertebra|tulang belakang/.test(p)) {
+  const configuredScore = capaskaRawOptionScore(optionOrValue);
+  if (configuredScore !== null) return configuredScore;
+
+  if (/tidak ada|normal/.test(c)) return 1;
+  if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -5;
+}
 
   // =========================
   // 7. RADIOLOGI / WHOLE SPINE, total 6
@@ -700,7 +697,7 @@ function capaskaVertebraScoreFix(param: any, optionOrValue: any): number | null 
   if (configuredScoreV242 !== null) return configuredScoreV242;
 
   if (/tidak ada|normal/.test(c)) return 1;
-  if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -10;
+  if (/ringan|sedang|berat|ada|tidak normal/.test(c)) return -5;
 
   return null;
 }
@@ -1968,7 +1965,7 @@ function isCriticalChoice(param: any, value: string) {
   const selectedOptionOrtopediVertebraCriticalV244 = getSelectedChoiceOption(param, value);
   const ortopediVertebraSetupScoreCriticalV244 = capaskaOrtopediVertebraSetupScoreV244(param, selectedOptionOrtopediVertebraCriticalV244 || value);
   if (ortopediVertebraSetupScoreCriticalV244 !== null) {
-    return ortopediVertebraSetupScoreCriticalV244 <= -10 || Boolean((selectedOptionOrtopediVertebraCriticalV244 as any)?.is_critical);
+    return ortopediVertebraSetupScoreCriticalV244 <= -10;
   }
   const ortopediV243SelectedOptionForCritical = getSelectedChoiceOption(param, value);
   const ortopediV243CriticalScore = capaskaOrtopediVertebraConfiguredScoreV243(param, ortopediV243SelectedOptionForCritical || value);
