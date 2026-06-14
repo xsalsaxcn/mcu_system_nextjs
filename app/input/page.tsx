@@ -385,8 +385,8 @@ function capaskaNorm(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â‰¥]/g, ">=")
-    .replace(/[â‰¤]/g, "<=")
+    .replace(/[Ã¢â€°Â¥]/g, ">=")
+    .replace(/[Ã¢â€°Â¤]/g, "<=")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -725,8 +725,8 @@ function capaskaPenyakitDalamNorm(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â‰¥]/g, ">=")
-    .replace(/[â‰¤]/g, "<=")
+    .replace(/[Ã¢â€°Â¥]/g, ">=")
+    .replace(/[Ã¢â€°Â¤]/g, "<=")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1051,8 +1051,8 @@ function capaskaGigiFullNorm(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â‰¥]/g, ">=")
-    .replace(/[â‰¤]/g, "<=")
+    .replace(/[Ã¢â€°Â¥]/g, ">=")
+    .replace(/[Ã¢â€°Â¤]/g, "<=")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1099,7 +1099,7 @@ function capaskaGigiChoiceDisplayLabelFix(param: any, optionOrValue: any): strin
 
   // Display-only fix for old database labels in Gigi section.
   if (/tumpatan/.test(p)) {
-    if (/<=\s*3|â‰¤\s*3|<\s*=\s*3/.test(c)) return "<=5 tumpatan";
+    if (/<=\s*3|Ã¢â€°Â¤\s*3|<\s*=\s*3/.test(c)) return "<=5 tumpatan";
     if (/>\s*3/.test(c)) return ">5 tumpatan";
   }
 
@@ -1274,8 +1274,8 @@ function capaskaGigiV149Norm(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â‰¥]/g, ">=")
-    .replace(/[â‰¤]/g, "<=")
+    .replace(/[Ã¢â€°Â¥]/g, ">=")
+    .replace(/[Ã¢â€°Â¤]/g, "<=")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1377,9 +1377,9 @@ function capaskaGigiCanonicalNormV150(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/â‰¥|Ã¢â€°Â¥/g, ">=")
-    .replace(/â‰¤|Ã¢â€°Â¤/g, "<=")
-    .replace(/[â€“â€”]/g, "-")
+    .replace(/Ã¢â€°Â¥|ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥/g, ">=")
+    .replace(/Ã¢â€°Â¤|ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¤/g, "<=")
+    .replace(/[Ã¢â‚¬â€œÃ¢â‚¬â€]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1653,7 +1653,7 @@ function capaskaThtFinalNormV154(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â€“â€”]/g, "-")
+    .replace(/[Ã¢â‚¬â€œÃ¢â‚¬â€]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1723,7 +1723,7 @@ function capaskaThtHardNormV155(value: any): string {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â€“â€”]/g, "-")
+    .replace(/[Ã¢â‚¬â€œÃ¢â‚¬â€]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1886,7 +1886,43 @@ function capaskaOrtopediVertebraConfiguredScoreV243(param: any, optionOrValue: a
 
   return null;
 }
+
+/* CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V244
+   Scope only: Ortopedi - Pemeriksaan Vertebra / Tulang Belakang (Klinis).
+   Purpose: Skoliosis/Kifosis/Lordosis must follow Setup Parameter option scores
+   instead of the old hardcoded red-flag -10. This intentionally excludes Radiologi
+   Whole Spine so the fixed Radiologi scoring remains untouched.
+*/
+function capaskaOrtopediVertebraSetupScoreV244(param: any, optionOrValue: any): number | null {
+  const text = String([
+    param?.label,
+    param?.name,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.post,
+  ].filter(Boolean).join(" "))
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/radiologi|rontgen|whole spine|whole-spine|ap lateral/.test(text)) return null;
+  if (!/skoliosis|scoliosis|kifosis|kyphosis|lordosis|vertebra|tulang belakang/.test(text)) return null;
+
+  const rawScore = capaskaRawOptionScore(optionOrValue);
+  return rawScore !== null ? rawScore : null;
+}
 function scoreForParam(param: any, value: string) {
+  const selectedOptionOrtopediVertebraV244 = getSelectedChoiceOption(param, value);
+  const ortopediVertebraSetupScoreV244 = capaskaOrtopediVertebraSetupScoreV244(param, selectedOptionOrtopediVertebraV244 || value);
+  if (ortopediVertebraSetupScoreV244 !== null) return ortopediVertebraSetupScoreV244;
   const ortopediV243SelectedOption = getSelectedChoiceOption(param, value);
   const ortopediV243Score = capaskaOrtopediVertebraConfiguredScoreV243(param, ortopediV243SelectedOption || value);
   if (ortopediV243Score !== null) return ortopediV243Score;
@@ -1929,6 +1965,11 @@ function scoreForParam(param: any, value: string) {
 }
 
 function isCriticalChoice(param: any, value: string) {
+  const selectedOptionOrtopediVertebraCriticalV244 = getSelectedChoiceOption(param, value);
+  const ortopediVertebraSetupScoreCriticalV244 = capaskaOrtopediVertebraSetupScoreV244(param, selectedOptionOrtopediVertebraCriticalV244 || value);
+  if (ortopediVertebraSetupScoreCriticalV244 !== null) {
+    return ortopediVertebraSetupScoreCriticalV244 <= -10 || Boolean((selectedOptionOrtopediVertebraCriticalV244 as any)?.is_critical);
+  }
   const ortopediV243SelectedOptionForCritical = getSelectedChoiceOption(param, value);
   const ortopediV243CriticalScore = capaskaOrtopediVertebraConfiguredScoreV243(param, ortopediV243SelectedOptionForCritical || value);
   if (ortopediV243CriticalScore !== null) return ortopediV243CriticalScore <= -10;
@@ -2452,7 +2493,7 @@ function ParameterInput({
         </select>
         {value && (
           <div className={`mt-1 text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
+            Skor pilihan: {scoreForParam(param, value)}{isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
           </div>
         )}
       </>
@@ -2490,7 +2531,7 @@ function ParameterInput({
                   <span className="block font-bold text-slate-900">{capaskaGigiCanonicalLabelV150(param, opt)}</span>
                   {Number.isFinite(scoreForParam(param, choiceValue)) && (
                     <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-black ${critical ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                      Skor {capaskaThtHardScoreV155(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " · Tidak Direkomendasikan" : ""}
+                      Skor {capaskaThtHardScoreV155(param, opt) ?? capaskaGigiCanonicalScoreV150(param, opt) ?? scoreForParam(param, choiceValue)}{critical ? " Â· Tidak Direkomendasikan" : ""}
                     </span>
                   )}
                 </span>
@@ -2501,8 +2542,8 @@ function ParameterInput({
 
         {value && (
           <div className={`text-xs font-semibold ${isCriticalChoice(param, value) ? "text-red-700" : "text-blue-700"}`}>
-            Terpilih: {value || "-"} · Skor: {scoreForParam(param, value)}
-            {isCriticalChoice(param, value) ? " · Tidak Direkomendasikan" : ""}
+            Terpilih: {value || "-"} Â· Skor: {scoreForParam(param, value)}
+            {isCriticalChoice(param, value) ? " Â· Tidak Direkomendasikan" : ""}
           </div>
         )}
       </div>
@@ -3243,7 +3284,7 @@ function formatStageScorePopupV224(score: any) {
     card.style.cssText = "width:100%;max-width:440px;border-radius:30px;border:1px solid #dbeafe;background:#ffffff;padding:28px;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.32);font-family:inherit;";
     overlay.appendChild(card);
 
-    appendStageScorePopupTextV224(card, "✓", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
+    appendStageScorePopupTextV224(card, "âœ“", "margin:0 auto;display:flex;height:68px;width:68px;align-items:center;justify-content:center;border-radius:999px;background:#ecfdf5;color:#059669;font-size:36px;font-weight:900;");
     appendStageScorePopupTextV224(card, "Hasil berhasil disimpan", "margin-top:16px;font-size:24px;line-height:1.2;font-weight:950;color:#0f172a;");
 
     const info = document.createElement("div");
@@ -3601,7 +3642,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
   }
 
   return (
-    <div className="space-y-5"> {savePopupStateV198 && ( <div className="fixed inset-0 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" style={{ zIndex: 2147483647 }} data-save-popup-mobile-v198="true" role="status" aria-live="polite"> <div className="w-full max-w-[420px] rounded-[28px] border border-slate-200 bg-white p-7 text-center shadow-2xl md:p-8"> <div className={savePopupStateV198 === "success" ? "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-[34px]" : "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-[34px]"}> {savePopupStateV198 === "success" ? "✅" : "⏳"} </div> <div className="mt-4 text-2xl font-black leading-tight text-slate-950"> {savePopupStateV198 === "success" ? "Penyimpanan berhasil" : "Penyimpanan diproses"} </div> <div className="mt-2 text-sm font-bold leading-6 text-slate-500"> {savePopupStateV198 === "success" ? "Kembali ke field pencarian..." : "Mohon tunggu, hasil pemeriksaan sedang disimpan."} </div> </div> </div> )} {/* SAVE_POPUP_REACT_OVERLAY_V198 */}
+    <div className="space-y-5"> {savePopupStateV198 && ( <div className="fixed inset-0 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" style={{ zIndex: 2147483647 }} data-save-popup-mobile-v198="true" role="status" aria-live="polite"> <div className="w-full max-w-[420px] rounded-[28px] border border-slate-200 bg-white p-7 text-center shadow-2xl md:p-8"> <div className={savePopupStateV198 === "success" ? "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-[34px]" : "mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-[34px]"}> {savePopupStateV198 === "success" ? "âœ…" : "â³"} </div> <div className="mt-4 text-2xl font-black leading-tight text-slate-950"> {savePopupStateV198 === "success" ? "Penyimpanan berhasil" : "Penyimpanan diproses"} </div> <div className="mt-2 text-sm font-bold leading-6 text-slate-500"> {savePopupStateV198 === "success" ? "Kembali ke field pencarian..." : "Mohon tunggu, hasil pemeriksaan sedang disimpan."} </div> </div> </div> )} {/* SAVE_POPUP_REACT_OVERLAY_V198 */}
       <ScannerModal
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
@@ -3627,7 +3668,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 <div className="text-xs font-black uppercase tracking-wide text-emerald-600">Preview peserta selesai</div>
                 <div className="mt-1 text-xl font-black leading-tight text-slate-950 md:text-2xl">{donePreviewParticipant.name}</div>
                 <div className="mt-1 text-sm font-semibold leading-6 text-slate-500">
-                  {donePreviewParticipant.mcu_id || "-"} · {donePreviewParticipant.province || "-"} · {donePreviewParticipant.source_name || "-"}
+                  {donePreviewParticipant.mcu_id || "-"} Â· {donePreviewParticipant.province || "-"} Â· {donePreviewParticipant.source_name || "-"}
                 </div>
               </div>
               <button
@@ -3682,7 +3723,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
         <div className="text-2xl font-black">Input CAPASKA</div>
         <div className="mt-1 text-sm text-slate-500">Login sebagai {effectivePostName}. Operator hanya melihat parameter post masing-masing.</div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          AutoScore backend CAPASK aktif · pertanyaan selang-seling · value/score tersembunyi
+          AutoScore backend CAPASK aktif Â· pertanyaan selang-seling Â· value/score tersembunyi
         </div>
         {isAdminStageAssist && (
           <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
@@ -3746,7 +3787,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 }`}
               >
                 <div className="font-bold">{p.name}</div>
-                <div className="text-sm text-slate-500">{p.mcu_id || "-"} · {p.province || "-"} · {p.source_name || "-"}</div>
+                <div className="text-sm text-slate-500">{p.mcu_id || "-"} Â· {p.province || "-"} Â· {p.source_name || "-"}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => loadParticipant(p, "blank")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white">
                     Input Baru
@@ -3880,7 +3921,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
                 <div className="text-xs font-black uppercase tracking-wide text-blue-700">{effectivePostName}</div>
                 <div className="mt-1 text-xl font-black leading-tight text-slate-950 md:text-2xl">{participant.name}</div>
                 <div className="mt-1 text-sm font-medium leading-6 text-slate-500">
-                  {participant.mcu_id || "-"} · {participant.province || "-"} · {detail?.participant?.source_name || participant.source_name || "-"}
+                  {participant.mcu_id || "-"} Â· {participant.province || "-"} Â· {detail?.participant?.source_name || participant.source_name || "-"}
                 </div>
               </div>
               <button
@@ -3901,7 +3942,7 @@ async function loadParticipant(p: any, mode: LoadMode) {
         <section className="card space-y-4 p-5">
           <div>
             <div className="text-xl font-black">{participant.name}</div>
-            <div className="text-sm text-slate-500">{participant.mcu_id} · {participant.province || "-"} · {detail.participant.source_name || "-"}</div>
+            <div className="text-sm text-slate-500">{participant.mcu_id} Â· {participant.province || "-"} Â· {detail.participant.source_name || "-"}</div>
           </div>
           <StageProgress stages={detail.stages} />
         </section>

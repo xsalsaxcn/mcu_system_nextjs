@@ -74,8 +74,8 @@ export function normalizeCapaskaKey(text: any) {
     .toLowerCase()
     .replace(/\(\s*\+\s*\)/g, "positif")
     .replace(/\(\s*-\s*\)/g, "negatif")
-    .replace(/â‰¥/g, "gte")
-    .replace(/â‰¤/g, "lte")
+    .replace(/Ã¢â€°Â¥/g, "gte")
+    .replace(/Ã¢â€°Â¤/g, "lte")
     .replace(/>=/g, "gte")
     .replace(/<=/g, "lte")
     .replace(/>/g, "gt")
@@ -115,7 +115,7 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Tes buta warna", ["Buta warna parsial", "Buta warna total"], -10, true);
   addRule(rules, "Strabismus / Juling", ["(-) / (-)", "(-)/(-)", "Negatif", "Tidak ada"], 3);
   addRule(rules, "Strabismus / Juling", ["(+) / (-)", "(-) / (+)", "(+) / (+)", "(+)/(-)", "(-)/(+)", "(+)/(+)", "Positif", "Ada"], -5);
-  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["Normal 6/6", "Normal >= 6/6", "Normal â‰¥ 6/6"], 3);
+  addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["Normal 6/6", "Normal >= 6/6", "Normal Ã¢â€°Â¥ 6/6"], 3);
   addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], ["<6/6 - 6/12", "<6/6-6/12", "<6/6 sampai 6/12"], 2);
   addRule(rules, ["Pemeriksaan Visus OD / OS", "Pemeriksaan Visus OD  / OS"], "<6/12", -10, true);
 
@@ -128,13 +128,13 @@ function buildBuiltinScoreRules() {
   addRule(rules, "Caries Dentis", "3 caries", -3);
   addRule(rules, "Caries Dentis", ">3 caries", -10, true);
   addRule(rules, "Tumpatan Gigi", "0 tumpatan", 2);
-  addRule(rules, "Tumpatan Gigi", ["<=5 tumpatan", "â‰¤5 tumpatan", "<5 tumpatan", "<3 tumpatan"], 1);
+  addRule(rules, "Tumpatan Gigi", ["<=5 tumpatan", "Ã¢â€°Â¤5 tumpatan", "<5 tumpatan", "<3 tumpatan"], 1);
   addRule(rules, "Tumpatan Gigi", [">5 tumpatan", ">3 tumpatan"], -5);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "0 gigi", 3);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], "1 gigi", 2);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], ["2 gigi", "2 gigi impaksi / impaksi 1 gigi depan"], 1);
   addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">2 gigi", ">2 gigi impaksi", ">2 gigi impaksi atau 2 gigi depan impaksi"], -5);
-  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">=4 gigi", "â‰¥4 gigi"], -10, true);
+  addRule(rules, ["Impaksi gigi", "Impaksi gigi depan"], [">=4 gigi", "Ã¢â€°Â¥4 gigi"], -10, true);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "0 gigi", 2);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "1 gigi", 1);
   addRule(rules, ["Kehilangan Gigi (Baik depan maupun belakang)", "Kehilangan Gigi bagian depan", "Kehilangan Gigi Bagian depan"], "2 gigi", 0);
@@ -466,6 +466,31 @@ function capaskaSharedOrtopediVertebraScoreV243(param: any, selectedValue: strin
 export function scoreCapaskaDirectChoice(param: any, selectedValue: string) {
   const selected = String(selectedValue || "").trim();
   if (!selected) return 0;
+
+  // CAPASKA_ORTHOPEDI_VERTEBRA_CONFIG_SCORE_V244
+  // Ortopedi Skoliosis/Kifosis/Lordosis follows Setup Parameter option.score.
+  // Radiologi Whole Spine is explicitly excluded.
+  const ortopediTextV244 = normalizeCapaskaKey(String([
+    param?.name,
+    param?.category,
+    param?.post_name,
+    param?.stage_name,
+    param?.station_name,
+    param?.label,
+    param?.title,
+    param?.parameter,
+    param?.param_name,
+    param?.question,
+  ].filter(Boolean).join(" ")));
+  const ortopediConfigOptionV244 = findConfigOption(param, selected);
+  if (
+    ortopediConfigOptionV244 &&
+    typeof ortopediConfigOptionV244.score === "number" &&
+    !/radiologi|rontgen|wholespine|aplateral/.test(ortopediTextV244) &&
+    /skoliosis|scoliosis|kifosis|kyphosis|lordosis|vertebra|tulangbelakang/.test(ortopediTextV244)
+  ) {
+    return ortopediConfigOptionV244.score;
+  }
 
   // CAPASKA_GIGI_RADIOLOGI_CANONICAL_V163
   // Keep this narrow: only known Gigi/Dental and Radiologi Whole Spine parameters.
@@ -916,7 +941,7 @@ function capaskaSharedThtNormV162(value: any) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[â€“â€”]/g, "-")
+    .replace(/[Ã¢â‚¬â€œÃ¢â‚¬â€]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1058,9 +1083,9 @@ function capaskaSharedStageNormV163(value: any) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/â‰¥|Ã¢â€°Â¥/g, ">=")
-    .replace(/â‰¤|Ã¢â€°Â¤/g, "<=")
-    .replace(/[â€“â€”]/g, "-")
+    .replace(/Ã¢â€°Â¥|ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥/g, ">=")
+    .replace(/Ã¢â€°Â¤|ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¤/g, "<=")
+    .replace(/[Ã¢â‚¬â€œÃ¢â‚¬â€]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
