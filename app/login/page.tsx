@@ -9,15 +9,7 @@ type DemoUser = {
   password: string;
 };
 
-const demoUsers: DemoUser[] = [
-  { label: "Operator Mata", username: "capaska_mata", password: "mata123" },
-  { label: "Operator THT", username: "capaska_tht", password: "tht123" },
-  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123" },
-  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd123" },
-  { label: "Operator Jantung", username: "capaska_jantung", password: "jantung123" },
-  { label: "Operator Ortopedi", username: "capaska_ortopedi", password: "ortopedi123" },
-  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123" },
-];
+const demoUsers: DemoUser[] = []; // HIDE_QUICK_LOGIN_UPDATE_PASSWORD_V246
 
 export default function LoginPage() {
   const router = useRouter();
@@ -198,7 +190,7 @@ export default function LoginPage() {
                 </button>
               </form>
 
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="hidden" data-hide-quick-login-v246="true">
                 <div className="mb-3 text-xs font-black uppercase tracking-wide text-slate-500">
                   Quick access demo
                 </div>
