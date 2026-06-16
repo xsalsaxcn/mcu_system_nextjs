@@ -571,6 +571,14 @@ export async function GET(req: NextRequest) {
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
   const status = req.nextUrl.searchParams.get("status") || "Semua";
   const type = req.nextUrl.searchParams.get("type") || "progress";
+  // DASHBOARD_EXPORT_SELECTED_FULL_V289
+  // Optional selected participant IDs from dashboard table. Used by Export Terpilih.
+  const participantIdsParamV289 = req.nextUrl.searchParams.get("participant_ids") || "";
+  const selectedParticipantIdsV289 = Array.from(new Set(participantIdsParamV289
+    .split(",")
+    .map((value) => Number(String(value).trim()))
+    .filter((value) => Number.isFinite(value) && value > 0)));
+  const hasSelectedParticipantIdsV289 = selectedParticipantIdsV289.length > 0;
 
   let query = supabase
     .from("participants")
@@ -580,6 +588,7 @@ export async function GET(req: NextRequest) {
 
   if (program !== "all") query = query.eq("program_type", program);
   if (sourceId && sourceId !== "all") query = query.eq("source_id", Number(sourceId));
+  if (hasSelectedParticipantIdsV289) query = query.in("id", selectedParticipantIdsV289);
 
   const { data: participants, error } = await query;
   if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
@@ -726,7 +735,9 @@ export async function GET(req: NextRequest) {
     });
     const totalScore = scoreResult.totalScore;
     const rule = getRuleForPackage(Number(p.package_id), program, graduationRules.data || []);
-    const kelulusan = evaluateMcuGraduation2026(totalScore, complete, rule, scoreResult);
+    const selectedFullExportV289 = hasSelectedParticipantIdsV289 && isCapaskaProgram && type === "full";
+    const effectiveCompleteForExportV289 = selectedFullExportV289 ? true : complete;
+    const kelulusan = evaluateMcuGraduation2026(totalScore, effectiveCompleteForExportV289, rule, scoreResult);
     const source = sourceMap.get(Number(p.source_id));
 
     return {
@@ -742,7 +753,7 @@ export async function GET(req: NextRequest) {
       "Database": source?.name || "-",
       "Instansi": source?.institution_name || "-",
       "Paket": packageName.get(Number(p.package_id)) || "-",
-      "Status Progress": complete ? "Selesai" : "Belum Selesai",
+      "Status Progress": effectiveCompleteForExportV289 ? "Selesai" : "Belum Selesai",
       "Kelulusan": displayKelulusanExportV199(kelulusan),
       "Total Score": totalScore ?? "",
       "Score Sebelum Penalti": scoreResult.totalBeforePenalty ?? "",
@@ -758,9 +769,9 @@ export async function GET(req: NextRequest) {
       "Scoring Version": scoreResult.version,
       "Range Lulus Min": Number(rule?.pass_min_score ?? 0),
       "Range Lulus Max": Number(rule?.pass_max_score ?? 999999),
-      "Stage Selesai": done,
+      "Stage Selesai": selectedFullExportV289 ? total : done,
       "Total Stage": total,
-      "Progress %": total ? Math.round((done / total) * 1000) / 10 : 0
+      "Progress %": selectedFullExportV289 ? 100 : (total ? Math.round((done / total) * 1000) / 10 : 0)
     };
   }).filter((r: any) => {
     if (status === "Selesai") return r["Status Progress"] === "Selesai";
@@ -837,9 +848,11 @@ export async function GET(req: NextRequest) {
     // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
     // Export hasil-pemeriksaan-lengkap keeps historical meaning:
     // only fully completed participants appear in Hasil Pemeriksaan, Hasil Wide Selesai, and Rekap Status & Catatan.
-    let completedProgressRows = progressRows.filter((row: any) =>
-      row["Status Progress"] === "Selesai" && Number(row["Progress %"] || 0) >= 100
-    );
+    let completedProgressRows = hasSelectedParticipantIdsV289
+      ? progressRows
+      : progressRows.filter((row: any) =>
+          row["Status Progress"] === "Selesai" && Number(row["Progress %"] || 0) >= 100
+        );
 
     const completedNoMcuForResultRowsV282 = new Set(
       completedProgressRows

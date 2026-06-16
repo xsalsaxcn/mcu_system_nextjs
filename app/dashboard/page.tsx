@@ -839,7 +839,7 @@ function AdminDashboard() {
     }
   }
 
-  function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full") {
+  function exportData(type: "all" | "done" | "not_done" | "active" | "progress" | "full" | "selected_full") {
     if (isWellness) {
       window.open("/api/wellness/export", "_blank");
       return;
@@ -862,9 +862,25 @@ function AdminDashboard() {
       // DASHBOARD_EXPORT_FULL_ALL_STATUS_V273
       // Export Semua must ignore the active dashboard status filter so the XLSX is not header-only.
       status: type === "full" ? "Semua" : mcuStatus,
-      type: type === "full" ? "full" : "progress",
+      type: (type === "full" || type === "selected_full") ? "full" : "progress",
     });
 
+    // DASHBOARD_EXPORT_SELECTED_FULL_V289
+    // Export selected rows exactly as selected from the dashboard table.
+    if (type === "selected_full") {
+      const participantIds = Array.from(selectedMcuIds)
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+      if (!participantIds.length) {
+        alert("Pilih minimal satu peserta dari tabel terlebih dahulu.");
+        return;
+      }
+
+      params.set("participant_ids", participantIds.join(","));
+      params.set("selected", "1");
+      params.set("limit", String(Math.max(1000, participantIds.length)));
+    }
     window.open(`/api/dashboard/export?${params.toString()}`, "_blank");
   }
 
@@ -1279,6 +1295,14 @@ function AdminDashboard() {
                       </button>
                     ) : null}
                     <button className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700" onClick={() => exportData("progress")}>Export Progress</button>
+                    <button
+                      className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => exportData("selected_full")}
+                      disabled={!selectedMcuIds.size}
+                      title="Export hasil pemeriksaan lengkap untuk peserta yang dipilih di tabel dashboard"
+                    >
+                      Export Terpilih ({selectedMcuIds.size})
+                    </button>
                     <button className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700" onClick={() => exportData("full")}>Export Semua</button>
                   </>
                 )}
