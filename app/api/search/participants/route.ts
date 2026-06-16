@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
@@ -428,6 +428,56 @@ function isComponentScoreNameV263(value: any) {
   return name.startsWith("score ") || name.startsWith("skor ");
 }
 
+
+/* OPERATOR_DONE_PD_NORMAL_MAX_V267
+   Read-only Penyakit Dalam done-list preview guard.
+   If PD has exactly 28 main answer rows and every main answer is normal / no abnormality,
+   show the canonical max score 28 instead of legacy saved totals such as 26/27.
+   This does not write database data and does not change operator input/save/setup behavior.
+*/
+function isPdIgnoredPreviewParamV267(value: any) {
+  const name = normalizePostNameForScoreV263(value);
+  if (!name) return true;
+  if (name.startsWith("value ")) return true;
+  if (name.startsWith("score ") || name.startsWith("skor ")) return true;
+  if (name.includes("score total") || name.includes("total score") || name.includes("skor total")) return true;
+  return false;
+}
+
+function isPdNormalPreviewAnswerV267(value: any) {
+  const text = normalizePostNameForScoreV263(value);
+  if (!text) return false;
+  if (text === "normal") return true;
+  if (text === "dbn" || text === "dalam batas normal") return true;
+  if (text === "negatif") return true;
+  if (text.startsWith("tidak ada")) return true;
+  if (text.includes("tidak ada kelainan")) return true;
+  if (text.includes("tanpa kelainan")) return true;
+  if (text.includes("dalam batas normal")) return true;
+  if (text.includes("normal") && !text.includes("tidak normal") && !text.includes("abnormal")) return true;
+  return false;
+}
+
+function getPdNormalMainScoreV267(stageRows: any[], paramById: Map<number, any>): number | null {
+  const mainByParam = new Map<number, any>();
+  for (const row of stageRows || []) {
+    const paramId = Number(row?.parameter_id);
+    if (!Number.isFinite(paramId) || paramId <= 0) continue;
+    const param = paramById.get(paramId);
+    const name = String(param?.name || "");
+    if (isPdIgnoredPreviewParamV267(name)) continue;
+    mainByParam.set(paramId, row);
+  }
+
+  const mainRows = Array.from(mainByParam.values());
+  if (mainRows.length !== 28) return null;
+
+  for (const row of mainRows) {
+    if (!isPdNormalPreviewAnswerV267(row?.value)) return null;
+  }
+
+  return 28;
+}
 async function fetchPagedResultsForParticipantIdsV263(supabase: any, participantIds: number[]) {
   const allRows: any[] = [];
   const chunkSize = 250;
@@ -579,11 +629,16 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
       }
     }
 
+    const pdNormalMainScoreV267 = domainKey === "penyakit_dalam"
+      ? getPdNormalMainScoreV267(stageRows, paramById)
+      : null;
+
     let effectiveScore: number | null = null;
 
     // Prefer the dashboard scoring engine. If legacy names prevent dashboard scoring
     // from finding the domain, fall back to saved non-zero total / component score.
-    if (dashboardStageScore !== null && dashboardStageScore !== 0) effectiveScore = dashboardStageScore;
+    if (pdNormalMainScoreV267 !== null) effectiveScore = pdNormalMainScoreV267;
+    else if (dashboardStageScore !== null && dashboardStageScore !== 0) effectiveScore = dashboardStageScore;
     else if (savedNonZeroTotal !== null) effectiveScore = savedNonZeroTotal;
     else if (componentSum !== null && componentSum !== 0) effectiveScore = componentSum;
     else if (dashboardStageScore !== null) effectiveScore = dashboardStageScore;
@@ -607,6 +662,7 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
       saved_total_score_v253: savedTotal,
       score_component_sum_v261: componentSum,
       dashboard_stage_score_v263: dashboardStageScore,
+      pd_normal_main_score_v267: pdNormalMainScoreV267,
       operator_done_score_source_v263: dashboardStageScore !== null ? "dashboard_recompute" : (savedNonZeroTotal !== null ? "saved_total" : (componentSum !== null ? "component_sum" : "saved_total_zero")),
     };
   });
@@ -681,3 +737,4 @@ export async function GET(req: NextRequest) {
 
   return ok({ participants: participantsWithSavedTotalsV253, has_more: false });
 }
+
