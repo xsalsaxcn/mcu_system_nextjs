@@ -519,263 +519,126 @@ function shouldAddStatusNoteV295(param: any, value: any, score: any) {
   return true;
 }
 
-
-// DASHBOARD_EXPORT_NOTES_PARAM_RULES_V298
-// Rekap Status & Catatan is derived from Supabase form values using post/parameter-specific normal values.
-function statusSheetNumberV298(value: any): number | null {
-  const text = cleanStatusSheetV179(value).replace(',', '.');
-  const n = Number(text);
-  return Number.isFinite(n) ? n : null;
-}
-
-function statusSheetContainsAnyV298(text: string, words: string[]) {
-  return words.some((word) => text.includes(word));
-}
-
-// DASHBOARD_EXPORT_NOTES_NORMAL_VALUES_V299
-function isTonsilNormalStatusSheetV298(text: string) {
-  const raw = String(text || '').toLowerCase();
-  const compact = raw
-    .replace(/\s+/g, '')
-    .replace(/[–—]/g, '-')
-    .replace(/\\/g, '/')
-    .replace(/to/g, 't0');
-
-  if (!compact) return false;
-  if (compact.includes('tonsilektomi')) return true;
-
-  // Juknis: T0/T0, T1/T1, and mixed T0/T1 are still normal.
-  // T2a/T2b/T3 should become notes.
-  if (compact.includes('t3') || compact.includes('t2')) return false;
-  return compact.includes('t0') || compact.includes('t1');
-}
-
-function isZeroDentalValueStatusSheetV298(text: string) {
-  return text === '0' ||
-    text.includes('0 caries') ||
-    text.includes('0 karies') ||
-    text.includes('0 tumpatan') ||
-    text.includes('0 gigi') ||
-    text.includes('0 impaksi');
-}
-
-// DASHBOARD_EXPORT_NOTES_NORMAL_VALUES_V299
-function isNormalFormValueStatusSheetV298(param: any, value: any) {
-  const name = paramNameStatusSheetV295(param);
-  const text = normStatusSheetV179(value);
-  const clean = cleanStatusSheetV179(value);
-  if (!text) return true;
-
-  const compact = text
-    .replace(/\s+/g, '')
-    .replace(/[–—]/g, '-')
-    .replace(/\\/g, '/');
-
-  const blankLike = new Set([
-    '.', '-', 'n/a', 'na', 'n.a', 'n.a.', 'nihil',
-    'tidak', 'tidak ada catatan', 'tidak ada catatan khusus',
-    'tidak ada kondisi khusus', 'tidak ada keluhan', 'tidak ada temuan',
-    'tanpa catatan'
-  ]);
-  if (blankLike.has(text)) return true;
-
-  // Free-text note fields are normal only when they clearly say there is no note.
-  if (isFreeNoteParamStatusSheetV295(param)) {
-    return text.includes('n/a') ||
-      text.includes('tidak ada catatan') ||
-      text.includes('tidak ada kondisi') ||
-      text.includes('tidak ada keluhan') ||
-      text.includes('tidak ada temuan') ||
-      text === 'tidak';
-  }
-
-  // Common normal values used by the saved form in Supabase.
-  if (text === 'normal' || text.includes('normal 6/6')) return true;
-  if (text === 'intak') return true;
-  if (text === 'sesuai' || text === 'sesuai juknis' || text.includes('sesuai juknis') && !text.includes('tidak sesuai')) return true;
-  if (text.includes('tidak menggunakan')) return true;
-  if (text.includes('tidak buta warna')) return true;
-  if (text.includes('tidak ada')) return true;
-  if (text.includes('tidak ada tato')) return true;
-  if (text === 'negative' || text === 'negatif' || text.includes('negatif') || text.includes('negative')) return true;
-  if (compact.includes('(-)/(-)') || compact === '(-)' || compact.includes('negatif/(-)')) return true;
-
-  // Dental normal values.
-  if (isZeroDentalValueStatusSheetV298(text)) return true;
-  if (name.includes('dental') && text === 'normal') return true;
-
-  // THT tonsil normal values: T0/T0, T1/T1, mixed T0/T1, post tonsilectomy.
-  if (name.includes('tonsil') && isTonsilNormalStatusSheetV298(text)) return true;
-
-  // Pure numbers in TB/BB/vital/raw numeric fields are info, not notes.
-  if (isVitalOrNumericInfoStatusSheetV295(param) && /^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return true;
-  if (/^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return true;
-
-  // Explicit abnormal values.
-  if (text.includes('tidak sesuai')) return false;
-  if (text.includes('tidak normal')) return false;
-  if (text.includes('buta warna parsial') || text.includes('buta warna total')) return false;
-  if (text.includes('ditemukan kelainan')) return false;
-  if (text === 'positive' || text === 'positif' || text.includes('positive') || text.includes('positif')) return false;
-  if (text.includes('ada serumen')) return false;
-  if (text === 'ada' || text.startsWith('ada ') || text.endsWith(' ada') || text.includes(': ada')) return false;
-  if (text.includes('ringan') || text.includes('sedang') || text.includes('berat')) return false;
-
-  // If a value is not recognized as normal, keep it as a note so real findings are not hidden.
-  return false;
-}
-
-function isRedFlagFormValueStatusSheetV298(param: any, value: any, score: any) {
-  const text = normStatusSheetV179(value);
-  const name = paramNameStatusSheetV295(param);
-  const n = typeof score === 'number' ? score : statusSheetNumberV298(score);
-  if (n !== null && n <= -10) return true;
-  if (statusSheetContainsAnyV298(text, ['tidak direkomendasi', 'tidak rekomendasi'])) return true;
-  if (text.includes('buta warna')) return true;
-  if (text.includes('tidak intak')) return true;
-  if (name.includes('tonsil') && text.includes('t3')) return true;
-  if ((name.includes('radiologi') || name.includes('rontgen') || name.includes('whole spine') || name.includes('skoliosis') || name.includes('lordosis') || name.includes('kifosis')) && (text.includes('sedang') || text.includes('berat'))) return true;
-  if (text.includes('>3 caries') || text.includes('> 3 caries') || text.includes('lebih dari 3 caries') || text.includes('>3 karies') || text.includes('> 3 karies')) return true;
-  if (text.includes('>4 gigi') || text.includes('> 4 gigi') || text.includes('>=4 gigi') || text.includes('>= 4 gigi')) return true;
-  return false;
-}
-
-function statusSheetNoteDecisionV298(param: any, value: any, score: any) {
-  const text = normStatusSheetV179(value);
-  if (!text) return { add: false, red: false };
-  if (isNormalFormValueStatusSheetV298(param, value)) return { add: false, red: false };
-  if (/^[-+]?d[ds.,/:;-]*$/.test(text)) return { add: false, red: false };
-  const red = isRedFlagFormValueStatusSheetV298(param, value, score);
-  return { add: true, red };
-}
-
-
-
-// DASHBOARD_EXPORT_NOTES_PARAM_RULES_V300
-// Rekap Status & Catatan must be derived from Supabase form values with parameter-specific normal/abnormal rules.
-// It must not infer catatan from total score being below max.
-function statusSheetParamNameV300(param: any) {
+// DASHBOARD_EXPORT_REKAP_SUPABASE_RULES_V301
+// Rekap Status & Catatan uses Supabase examination_results values with per-parameter normal/abnormal rules.
+// It does not use score-max fallback and does not create Normal rows for participants with no medical results.
+function statusSheetParamNameV301(param: any) {
   return normStatusSheetV179([param?.label, param?.name, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" "));
 }
 
-function statusSheetRawTextV300(value: any) {
+function statusSheetRawTextV301(value: any) {
   return cleanStatusSheetV179(value).toLowerCase().trim();
 }
 
-function statusSheetNormTextV300(value: any) {
-  return normStatusSheetV179(value);
+function statusSheetScoreNumberV301(score: any): number | null {
+  if (typeof score === "number" && Number.isFinite(score)) return score;
+  return numberFromStatusSheetV179(score);
 }
 
-function statusSheetCompactV300(value: any) {
-  return statusSheetNormTextV300(value).replace(/\s+/g, "").replace(/[\-\/().]/g, "");
-}
-
-function statusSheetScoreNumberV300(score: any): number | null {
-  if (score === null || score === undefined || score === "") return null;
-  const parsed = Number(String(score).replace(",", ".").replace(/[^0-9.\-]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function statusSheetBlankLikeV300(value: any) {
-  const text = statusSheetNormTextV300(value);
-  const raw = statusSheetRawTextV300(value);
+function isBlankStatusValueV301(value: any) {
+  const text = normStatusSheetV179(value);
   if (!text) return true;
-  if (/^[\s.\-/()]+$/.test(raw)) return true;
-  return new Set([
-    ".", "-", "n/a", "na", "n.a", "n.a.", "nihil", "tidak",
-    "tidak ada catatan", "tidak ada catatan khusus", "tidak ada kondisi khusus",
-    "tidak ada keluhan", "tidak ada temuan", "tanpa catatan"
-  ]).has(text);
+  return new Set([".", "-", "n/a", "na", "n a", "nihil", "kosong", "tidak", "tidak ada catatan", "tidak ada catatan khusus", "tidak ada kondisi khusus", "tidak ada keluhan", "tidak ada temuan", "tanpa catatan"]).has(text);
 }
 
-function statusSheetIsFreeNoteParamV300(param: any) {
-  const name = statusSheetParamNameV300(param);
+function isFreeNoteParamV301(param: any) {
+  const name = statusSheetParamNameV301(param);
   return name.includes("catatan") || name.includes("keterangan") || name.includes("sebutkan") || name.includes("kondisi khusus");
 }
 
-function statusSheetIsNumericInfoParamV300(param: any) {
-  const name = statusSheetParamNameV300(param);
+function isNumericOrVitalParamV301(param: any) {
+  const name = statusSheetParamNameV301(param);
   return isHeightParamStatusSheetV179(param) ||
     isWeightParamStatusSheetV179(param) ||
-    name.includes("suhu") || name.includes("nadi") || name.includes("napas") || name.includes("nafas") ||
-    name.includes("tekanan darah") || name.includes("tensi") || name.includes("tanda vital");
+    name.includes("suhu") ||
+    name.includes("nadi") ||
+    name.includes("napas") ||
+    name.includes("nafas") ||
+    name.includes("tekanan darah") ||
+    name.includes("tensi") ||
+    name.includes("tanda vital");
 }
 
-function statusSheetTonsilNormalV300(value: any) {
-  const text = statusSheetNormTextV300(value);
-  const compact = statusSheetCompactV300(value).replace(/to/g, "t0");
+function isNumericOnlyValueV301(value: any) {
+  const text = statusSheetRawTextV301(value);
+  return /^[-+]?d[ds.,/:;-]*$/.test(text);
+}
+
+function hasMinusWithoutPlusV301(value: any) {
+  const raw = statusSheetRawTextV301(value);
+  return (raw.includes("(-)") || raw.includes("negatif")) && !raw.includes("(+)") && !raw.includes("positif");
+}
+
+function isTonsilNormalV301(value: any) {
+  const text = normStatusSheetV179(value);
   if (text.includes("tonsilektomi")) return true;
-  if (compact.includes("t2") || compact.includes("t3")) return false;
-  return compact === "t0" || compact === "t1" || /^[t01]+$/.test(compact);
+  if (text.includes("t3") || text.includes("t2")) return false;
+  return /(^|\b)t0(\b|$)/.test(text) || /(^|\b)t1(\b|$)/.test(text);
 }
 
-function statusSheetDentalZeroNormalV300(param: any, value: any) {
-  const name = statusSheetParamNameV300(param);
-  const text = statusSheetNormTextV300(value);
-  if (name.includes("caries") || name.includes("karies")) return text === "0" || text.includes("0 caries") || text.includes("0 karies");
-  if (name.includes("tumpatan")) return text === "0" || text.includes("0 tumpatan");
-  if (name.includes("impaksi")) return text === "0" || text.includes("0 gigi") || text.includes("0 impaksi");
-  if (name.includes("kehilangan") && name.includes("gigi")) return text === "0" || text.includes("0 gigi");
-  return false;
+function isDentalZeroNormalV301(param: any, value: any) {
+  const name = statusSheetParamNameV301(param);
+  const text = normStatusSheetV179(value);
+  if (!(name.includes("caries") || name.includes("karies") || name.includes("tumpatan") || name.includes("impaksi") || name.includes("kehilangan") || name.includes("gigi"))) return false;
+  return text === "0" || text.includes("0 caries") || text.includes("0 karies") || text.includes("0 tumpatan") || text.includes("0 gigi") || text.includes("0 impaksi");
 }
 
-function statusSheetUniversalNormalV300(param: any, value: any) {
-  const name = statusSheetParamNameV300(param);
-  const text = statusSheetNormTextV300(value);
-  const raw = statusSheetRawTextV300(value);
-  const compact = statusSheetCompactV300(value);
+function isNormalFormValueV301(stageKey: string, param: any, value: any) {
+  if (isBlankStatusValueV301(value)) return true;
+  const name = statusSheetParamNameV301(param);
+  const text = normStatusSheetV179(value);
+  const raw = statusSheetRawTextV301(value);
 
-  if (statusSheetBlankLikeV300(value)) return true;
-  if (statusSheetIsNumericInfoParamV300(param)) {
-    if (/^[-+]?\d[\d\s.,/:;-]*$/.test(raw)) return true;
-    if (!text.includes("tidak normal") && !text.includes("tidak sesuai")) return true;
+  if (isFreeNoteParamV301(param)) return false;
+  if (isNumericOrVitalParamV301(param)) {
+    if (text.includes("tidak normal") || text.includes("tidak sesuai")) return false;
+    return true;
   }
 
-  if (new Set([
-    "normal", "dalam batas normal", "dbn", "batas normal", "baik",
-    "sesuai", "sesuai juknis", "tidak ada", "tidak ditemukan", "tidak menggunakan",
-    "tidak buta warna", "intak", "negatif", "ta", "tidak ada tato", "tidak ada serumen"
-  ]).has(text)) return true;
-
-  if (text.includes("tidak ada tato")) return true;
-  if (text.includes("tidak buta warna")) return true;
-  if (text.includes("tidak menggunakan")) return true;
-  if (text.includes("sesuai juknis") && !text.includes("tidak sesuai")) return true;
-  if (raw.includes("(-)") && !raw.includes("(+)")) return true;
-  if (raw.includes("negatif") && !raw.includes("positif")) return true;
-  if (name.includes("tonsil") && statusSheetTonsilNormalV300(value)) return true;
-  if (statusSheetDentalZeroNormalV300(param, value)) return true;
-  if ((name.includes("karang") || name.includes("infeksi gusi")) && (compact === "" || compact === "minus" || raw.includes("(-)"))) return true;
-  if ((name.includes("dental") || name.includes("panoramik")) && text === "normal") return true;
-  if ((name.includes("skoliosis") || name.includes("kifosis") || name.includes("lordosis") || name.includes("whole spine")) && (text === "tidak ada" || text === "ta")) return true;
-  if (name.includes("tindik") && (text.includes("tidak ada") || (text.includes("wanita") && text.includes("1") && text.includes("telinga")))) return true;
+  if (text === "normal" || text.includes("dalam batas normal") || text === "dbn" || text === "baik") return true;
+  if (!text.includes("tidak sesuai") && (text === "sesuai" || text === "sesuai juknis" || text.includes("sesuai juknis"))) return true;
+  if (text.includes("tidak ada") || text.includes("tidak ditemukan") || text.includes("tidak menggunakan") || text.includes("tidak buta warna")) return true;
+  if (text === "intak" || (text.includes("intak") && !text.includes("tidak intak"))) return true;
+  if (text === "ta" || text === "tidak ada ta") return true;
+  if (hasMinusWithoutPlusV301(value)) return true;
+  if (isDentalZeroNormalV301(param, value)) return true;
+  if (name.includes("tonsil") && isTonsilNormalV301(value)) return true;
+  if ((name.includes("rhinitis") || name.includes("strabismus") || name.includes("juling")) && hasMinusWithoutPlusV301(value)) return true;
+  if (name.includes("dental") && name.includes("panor") && text === "normal") return true;
+  if (stageKey === "radiologi" && (text === "ta" || text.includes("tidak ada"))) return true;
 
   return false;
 }
 
-function statusSheetNoteDecisionV300(param: any, value: any, score: any, stageKey: string) {
-  const text = statusSheetNormTextV300(value);
-  const name = statusSheetParamNameV300(param);
-  const scoreNumber = statusSheetScoreNumberV300(score);
+function noteDecisionV301(stageKey: string, param: any, value: any, score: any) {
+  const text = normStatusSheetV179(value);
+  const name = statusSheetParamNameV301(param);
+  const scoreNum = statusSheetScoreNumberV301(score);
 
-  if (statusSheetUniversalNormalV300(param, value)) return { add: false, red: false };
-
-  if (statusSheetIsFreeNoteParamV300(param)) {
-    // Free text fields are only notes when user actually entered meaningful content.
-    return { add: !statusSheetBlankLikeV300(value), red: false };
+  if (isNormalFormValueV301(stageKey, param, value)) return { include: false, red: false };
+  if (isFreeNoteParamV301(param)) {
+    const raw = statusSheetRawTextV301(value);
+    const red = raw.includes("tidak direkomendasi") || raw.includes("red flag");
+    return { include: true, red };
   }
+  if (isNumericOrVitalParamV301(param) && isNumericOnlyValueV301(value)) return { include: false, red: false };
 
-  if (/^[-+]?\d[\d\s.,/:;-]*$/.test(statusSheetRawTextV300(value))) return { add: false, red: false };
+  const explicitRed = text.includes("tidak direkomendasi") || text.includes("red flag");
+  if (scoreNum !== null && scoreNum <= -10) return { include: true, red: true };
+  if (explicitRed) return { include: true, red: true };
+  if (stageKey === "radiologi" && (text.includes("sedang") || text.includes("berat"))) return { include: true, red: true };
+  if (name.includes("tonsil") && text.includes("t3")) return { include: true, red: true };
 
-  const explicitRed = text.includes("tidak direkomendasi") || text.includes("tidak direkomendasikan") || text.includes("red flag");
-  const scoreRed = scoreNumber !== null && scoreNumber <= -10;
-  const tonsilRed = name.includes("tonsil") && statusSheetCompactV300(value).includes("t3");
-  const radiologyRed = stageKey === "radiologi" && (text.includes("sedang") || text.includes("berat"));
-  const eyeRed = stageKey === "mata" && (text.includes("buta warna") || text.includes("<6/12"));
+  if (scoreNum !== null && scoreNum < 0) return { include: true, red: false };
+  if (text.includes("tidak normal") || text.includes("tidak sesuai")) return { include: true, red: false };
+  if (stageKey === "radiologi" && text.includes("ringan")) return { include: true, red: false };
+  if (name.includes("tonsil") && text.includes("t2")) return { include: true, red: false };
+  if (text.includes("buta warna")) return { include: true, red: false };
+  if (text.includes("ada") && !text.includes("tidak ada")) return { include: true, red: false };
+  if (!isNeutralStatusSheetV179(value)) return { include: true, red: false };
 
-  return { add: true, red: explicitRed || scoreRed || tonsilRed || radiologyRed || eyeRed };
+  return { include: false, red: false };
 }
-
 function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
   // DASHBOARD_EXPORT_STATUS_NOTES_EVALUATE_V295
   // Status/catatan follows actual abnormal answers from the form.
@@ -791,7 +654,22 @@ function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNote
 function buildCapaskaStatusCatatanRowsV179(args: any) {
   const { participantRows, completedProgressRows, sourceMap, packageName, postName, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice } = args;
   const progressById = new Map((completedProgressRows || []).map((row: any) => [Number(row["Participant ID"]), row]));
-  return (participantRows || []).map((participant: any, index: number) => {
+  // DASHBOARD_EXPORT_REKAP_SUPABASE_RULES_V301
+  // Only generate rekap rows for completed/export-eligible participants that have medical result values.
+  const completedParticipantIdsV301 = new Set((completedProgressRows || []).map((row: any) => Number(row["Participant ID"])));
+  const statusParticipantRowsV301 = (participantRows || []).filter((participant: any) => {
+    const participantId = Number(participant.id);
+    if (completedParticipantIdsV301.size && !completedParticipantIdsV301.has(participantId)) return false;
+    return (exportParameters || []).some((param: any) => {
+      const postLabel = postName.get(Number(param.post_id)) || "";
+      const stageKey = stageKeyStatusSheetV179(`${postLabel} ${param.category || ""} ${param.name || ""}`);
+      // DASHBOARD_EXPORT_REKAP_V301_TYPE_FIX
+      if (!stageKey || !STAGE_CONFIG_STATUS_SHEET_V179[stageKey]) return false;
+      const result = resultByParticipantParam.get(makeKey(participantId, Number(param.id)));
+      return !!cleanStatusSheetV179(result?.value ?? "");
+    });
+  });
+  return statusParticipantRowsV301.map((participant: any, index: number) => {
     const progressInfo = progressById.get(Number(participant.id)) || {};
     const source = sourceMap.get(Number(participant.source_id));
     const notesByStage: any = { mata: [], tht: [], gigi: [], penyakit_dalam: [], jantung: [], ortopedi: [], radiologi: [] };
@@ -818,11 +696,11 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       const stageKey = stageKeyStatusSheetV179(paramText);
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
-      const noteDecisionV300 = statusSheetNoteDecisionV300(param, value, score, stageKey);
-      if (noteDecisionV300.add) {
+      const decisionV301 = noteDecisionV301(stageKey, param, value, score);
+      if (decisionV301.include) {
         const note = `${param.name}: ${value}`;
         notesByStage[stageKey].push(note);
-        if (noteDecisionV300.red) redNotesByStage[stageKey].push(note);
+        if (decisionV301.red) redNotesByStage[stageKey].push(note);
       }
     }
 
