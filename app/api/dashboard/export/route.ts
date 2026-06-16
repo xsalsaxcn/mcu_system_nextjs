@@ -765,19 +765,26 @@ export async function GET(req: NextRequest) {
       ? ["Nama", "No MCU", "Database", "Paket", "Post/Station", "Kategori", "Parameter", "Hasil", "Skor", "Updated At"]
       : ["Nama", "No MCU", "Database", "Paket", "Post/Station", "Kategori", "Parameter", "Hasil", "Updated At"];
 
-    appendJsonSheet(workbook, resultRows as any[], "Hasil Pemeriksaan", resultHeaders);
 
-    let completedProgressRows = progressRows.filter((row: any) =>
+
+    // DASHBOARD_EXPORT_COMPLETED_ONLY_V281
+    // Full CAPASKA export: only fully completed participants are included in detail, wide, and recap sheets.
+    // Red Flag remains recorded and Total Skor Akhir remains at the far end of the wide sheet.
+    const completedProgressRows = progressRows.filter((row: any) =>
       row["Status Progress"] === "Selesai" && Number(row["Progress %"] || 0) >= 100
     );
 
-    // DASHBOARD_EXPORT_FULL_ALL_CAPASKA_V273
-    // For CAPASKA full export, include every participant in the wide and recap sheets.
-    // Previously these sheets only used fully completed rows, so if the dashboard status
-    // filter was Belum Selesai or only a few participants were 100%, the workbook looked empty.
-    if (isCapaskaProgram) {
-      completedProgressRows = progressRows;
-    }
+    const completedNoMcuForResultRowsV281 = new Set(
+      completedProgressRows
+        .map((row: any) => String(row["No MCU"] || "").trim())
+        .filter(Boolean)
+    );
+
+    const resultRowsForSheetV281 = (isCapaskaProgram && type === "full")
+      ? (resultRows as any[]).filter((row: any) => completedNoMcuForResultRowsV281.has(String(row["No MCU"] || "").trim()))
+      : resultRows;
+
+    appendJsonSheet(workbook, resultRowsForSheetV281 as any[], "Hasil Pemeriksaan", resultHeaders);
 
     const completedParticipantIds = new Set(completedProgressRows.map((row: any) => Number(row["Participant ID"])));
 
