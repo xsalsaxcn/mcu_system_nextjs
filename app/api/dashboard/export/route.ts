@@ -645,28 +645,47 @@ export async function GET(req: NextRequest) {
       ),
       p
     );
-
-    // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
-    // Export lengkap CAPASKA follows the historical finished-report rule:
-    // completed medical stages only; Registrasi Ulang is not a required export stage.
-    const completionStagesV282 = isCapaskaProgram
-      ? stages.filter((stage: any) => capaskaDashboardProgressNormV153(stage?.post_name || stage?.name || stage?.title) !== "registrasi ulang")
+    // DASHBOARD_EXPORT_MEDICAL_COMPLETED_V287
+    // Export completed participants follows dashboard medical/operator completion.
+    // Registrasi Ulang and non-medical stages are not required for hasil-pemeriksaan-lengkap.xlsx.
+    const stageNormV287 = (stage: any) => capaskaDashboardProgressNormV153([
+      stage?.post_name,
+      stage?.name,
+      stage?.title,
+      stage?.stage_name,
+      stage?.label,
+      stage?.key
+    ].filter(Boolean).join(" "));
+    const medicalPostIdsV287 = new Set([4, 5, 6, 7, 8, 9, 10]);
+    const isMedicalStageV287 = (stage: any) => {
+      const postId = Number(stage?.post_id ?? stage?.id ?? 0);
+      if (medicalPostIdsV287.has(postId)) return true;
+      const text = stageNormV287(stage);
+      if (!text) return false;
+      if (text.includes("registrasi") && text.includes("ulang")) return false;
+      return text.includes("mata") ||
+        (text.includes("penyakit") && text.includes("dalam")) ||
+        text.includes("gigi") ||
+        text.includes("dental") ||
+        text.includes("tht") ||
+        text.includes("jantung") ||
+        text.includes("pembuluh") ||
+        text.includes("ortopedi") ||
+        text.includes("radiologi") ||
+        text.includes("rontgen");
+    };
+    const medicalStagesV287 = isCapaskaProgram
+      ? (Array.isArray(stages) ? stages : []).filter(isMedicalStageV287)
       : stages;
-    // DASHBOARD_EXPORT_SKIP_REGISTRASI_COMPLETED_V285
-    // Full CAPASKA export follows dashboard completion: medical/operator stages only, not Registrasi Ulang.
-    const medicalStagesV285 = (Array.isArray(stages) ? stages : []).filter((stage: any) => {
-      const stageName = String(stage?.post_name || stage?.name || stage?.title || stage?.stage_name || "")
-        .toLowerCase()
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      return !(stageName.includes("registrasi") && stageName.includes("ulang"));
-    });
-    const effectiveStagesV285 = medicalStagesV285.length ? medicalStagesV285 : stages;
-    const done = effectiveStagesV285.filter((s: any) => s.is_done).length;
-    const total = effectiveStagesV285.length;
+    const fallbackStagesV287 = isCapaskaProgram
+      ? (Array.isArray(stages) ? stages : []).filter((stage: any) => {
+          const text = stageNormV287(stage);
+          return !(text.includes("registrasi") && text.includes("ulang"));
+        })
+      : stages;
+    const effectiveStagesV287 = medicalStagesV287.length ? medicalStagesV287 : fallbackStagesV287;
+    const done = effectiveStagesV287.filter((stage: any) => stage.is_done).length;
+    const total = effectiveStagesV287.length;
     const complete = total > 0 && done >= total;
     const scoreResult = computeMcuParticipantScoring2026({
       participantId: Number(p.id),
