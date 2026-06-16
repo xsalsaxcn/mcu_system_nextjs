@@ -455,69 +455,6 @@ async function fetchPagedResultsForParticipantIdsV263(supabase: any, participant
   return allRows;
 }
 
-/* OPERATOR_DONE_PD_PREVIEW_SCORE_V264
-   Read-only preview score correction for CAPASKA Penyakit Dalam done list.
-   Problem fixed: some existing rows have saved Score total Penyakit Dalam = 26/27,
-   while the 28 main answers are already stored as normal values. This helper keeps
-   the existing operator list/edit behavior, but when current operator post is
-   Penyakit Dalam it can display the real 28 score from normal main answers instead
-   of an old lower saved total. It does not write to examination_results, does not
-   change save/scoring/setup/database, and does not change the operator UI.
-*/
-function pdPreviewNormV264(value: any): string {
-  return String(value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[_\-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isPdScoreHelperParamV264(name: any): boolean {
-  const n = pdPreviewNormV264(name);
-  return (
-    n.startsWith("value ") ||
-    n.startsWith("score ") ||
-    n.startsWith("skor ") ||
-    n.startsWith("total score") ||
-    n.startsWith("total skor") ||
-    n.includes("score total") ||
-    n.includes("skor total") ||
-    n.includes("skor akhir")
-  );
-}
-
-function isScoreTotalParamV264(name: any): boolean {
-  const n = pdPreviewNormV264(name);
-  return (
-    n.startsWith("score total") ||
-    n.startsWith("total score") ||
-    n.startsWith("skor total") ||
-    n.startsWith("total skor") ||
-    n.includes("score total") ||
-    n.includes("skor total")
-  );
-}
-
-function isPdNormalAnswerV264(value: any): boolean {
-  const v = pdPreviewNormV264(value);
-  if (!v || v === "-" || v === "null" || v === "undefined") return false;
-
-  // Normal/negative patterns used by Penyakit Dalam main questions.
-  // Includes variants such as "Tidak ada tato", "Tidak ada", and "Normal".
-  if (v.includes("dalam batas normal")) return true;
-  if (v.includes("normal")) return true;
-  if (v.includes("tidak ada")) return true;
-  if (v.includes("tidak ditemukan")) return true;
-  if (v.includes("tanpa kelainan")) return true;
-  if (v.includes("negatif")) return true;
-  if (v.includes("negative")) return true;
-  if (v === "dbn") return true;
-
-  return false;
-}
-
 async function attachSavedOperatorScoreTotalV253(args: any) {
   const supabase = args?.supabase;
   const participants = Array.isArray(args?.participants) ? args.participants : [];
@@ -530,90 +467,131 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
     .filter((id: number) => Number.isFinite(id) && id > 0);
   if (!participantIds.length) return participants;
 
-  const { data: rows, error } = await supabase
-    .from("examination_results")
-    .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
-    .in("participant_id", participantIds)
-    .eq("input_post_id", postId)
-    .limit(Math.min(50000, Math.max(8000, participantIds.length * 120)));
+  const { data: postRow } = await supabase
+    .from("posts")
+    .select("id,name")
+    .eq("id", postId)
+    .maybeSingle();
+  const domainKey = capaskaDomainKeyFromPostNameV263(postRow?.name || postId);
 
-  if (error || !Array.isArray(rows) || !rows.length) return participants;
-
-  const parameterIds = Array.from(
-    new Set(rows.map((r: any) => Number(r?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0))
+  const packageIds = Array.from(
+    new Set(participants.map((p: any) => Number(p?.package_id)).filter((id: number) => Number.isFinite(id) && id > 0))
   );
-  if (!parameterIds.length) return participants;
 
-  const { data: params, error: paramError } = await supabase
-    .from("parameters")
-    .select("id,name,category,post_id")
-    .in("id", parameterIds);
+  let packageParameters: any[] = [];
+  let parameters: any[] = [];
 
-  if (paramError || !Array.isArray(params)) return participants;
+  if (packageIds.length) {
+    const { data: ppRows, error: ppError } = await supabase
+      .from("package_parameters")
+      .select("package_id,parameter_id")
+      .in("package_id", packageIds);
+    if (!ppError && Array.isArray(ppRows)) packageParameters = ppRows;
+
+    const parameterIds = Array.from(
+      new Set(packageParameters.map((pp: any) => Number(pp?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0))
+    );
+
+    if (parameterIds.length) {
+      const paramChunks: any[] = [];
+      const chunkSize = 800;
+      for (let i = 0; i < parameterIds.length; i += chunkSize) {
+        const chunk = parameterIds.slice(i, i + chunkSize);
+        const { data: paramRows, error: paramError } = await supabase
+          .from("parameters")
+          .select("*")
+          .in("id", chunk);
+        if (!paramError && Array.isArray(paramRows)) paramChunks.push(...paramRows);
+      }
+      parameters = paramChunks;
+    }
+  }
+
+  const allResults = await fetchPagedResultsForParticipantIdsV263(supabase, participantIds);
 
   const paramById = new Map<number, any>();
-  for (const param of params) paramById.set(Number(param?.id), param);
+  for (const param of parameters || []) paramById.set(Number(param?.id), param);
 
-  const savedScoreByParticipant = new Map<number, number>();
-  const pdStatsByParticipant = new Map<number, { total: number; normal: number; hasAbnormal: boolean }>();
+  const rowsByParticipant = new Map<number, any[]>();
+  const postRowsByParticipant = new Map<number, any[]>();
 
-  const postLooksLikePenyakitDalam =
-    Number(postId) === 5 ||
-    params.some((param: any) => {
-      const combined = `${pdPreviewNormV264(param?.name)} ${pdPreviewNormV264(param?.category)}`;
-      return combined.includes("penyakit dalam") || combined.includes("abdomen") || combined.includes("urogenitalia");
-    });
-
-  for (const row of rows) {
+  for (const row of allResults) {
     const participantId = Number(row?.participant_id);
-    const parameterId = Number(row?.parameter_id);
-    const param = paramById.get(parameterId);
-    if (!participantId || !parameterId || !param) continue;
+    if (!participantId) continue;
 
-    const paramName = String(param?.name || "");
-    const valueNumber = Number(row?.value);
+    if (!rowsByParticipant.has(participantId)) rowsByParticipant.set(participantId, []);
+    rowsByParticipant.get(participantId)!.push(row);
 
-    if (isScoreTotalParamV264(paramName) && Number.isFinite(valueNumber)) {
-      const previous = savedScoreByParticipant.get(participantId);
-      if (previous === undefined || valueNumber > previous) {
-        savedScoreByParticipant.set(participantId, valueNumber);
-      }
-    }
-
-    if (postLooksLikePenyakitDalam && Number(row?.input_post_id) === Number(postId) && !isPdScoreHelperParamV264(paramName)) {
-      const valueText = String(row?.value ?? "").trim();
-      if (!valueText) continue;
-      const stats = pdStatsByParticipant.get(participantId) || { total: 0, normal: 0, hasAbnormal: false };
-      stats.total += 1;
-      if (isPdNormalAnswerV264(valueText)) stats.normal += 1;
-      else stats.hasAbnormal = true;
-      pdStatsByParticipant.set(participantId, stats);
+    const param = paramById.get(Number(row?.parameter_id));
+    const belongsToPost = Number(row?.input_post_id) === postId || Number(param?.post_id) === postId;
+    if (belongsToPost) {
+      if (!postRowsByParticipant.has(participantId)) postRowsByParticipant.set(participantId, []);
+      postRowsByParticipant.get(participantId)!.push(row);
     }
   }
 
-  const pdPreviewScoreByParticipant = new Map<number, number>();
-  for (const [participantId, stats] of pdStatsByParticipant.entries()) {
-    // Penyakit Dalam canonical max is 28. Only override old saved total when
-    // all stored main answers are normal-like. This avoids inflating abnormal cases.
-    if (stats.total >= 26 && stats.normal === stats.total && !stats.hasAbnormal) {
-      pdPreviewScoreByParticipant.set(participantId, Math.min(28, stats.normal));
-    }
+  const packageParamsByPackage = new Map<number, any[]>();
+  for (const pp of packageParameters || []) {
+    const packageId = Number(pp?.package_id);
+    if (!packageParamsByPackage.has(packageId)) packageParamsByPackage.set(packageId, []);
+    packageParamsByPackage.get(packageId)!.push(pp);
   }
-
-  if (!savedScoreByParticipant.size && !pdPreviewScoreByParticipant.size) return participants;
 
   return participants.map((participant: any) => {
     const participantId = Number(participant?.id);
-    const savedScore = savedScoreByParticipant.get(participantId);
-    const pdPreviewScore = pdPreviewScoreByParticipant.get(participantId);
+    const packageId = Number(participant?.package_id);
+    const stageRows = postRowsByParticipant.get(participantId) || [];
+    const participantResults = rowsByParticipant.get(participantId) || [];
 
-    let effectiveScore = savedScore;
-    if (pdPreviewScore !== undefined && (effectiveScore === undefined || pdPreviewScore > effectiveScore)) {
-      effectiveScore = pdPreviewScore;
+    let dashboardStageScore: number | null = null;
+    if (domainKey && stageRows.length && packageId && parameters.length && packageParameters.length) {
+      try {
+        const scoring = computeMcuParticipantScoring2026({
+          participantId,
+          packageId,
+          packageParameters,
+          parameters,
+          results: participantResults,
+          program: "capaska",
+        } as any);
+        const rawScore = toNumberV263((scoring as any)?.domainScores?.[domainKey]);
+        if (rawScore !== null) dashboardStageScore = rawScore;
+      } catch {
+        dashboardStageScore = null;
+      }
     }
 
-    if (effectiveScore === undefined) return participant;
+    let savedTotal: number | null = null;
+    let savedNonZeroTotal: number | null = null;
+    let componentSum: number | null = null;
 
+    for (const row of stageRows) {
+      const param = paramById.get(Number(row?.parameter_id));
+      const name = String(param?.name || "");
+      const numeric = toNumberV263(row?.value);
+      if (numeric === null) continue;
+
+      if (isTotalScoreNameV263(name)) {
+        savedTotal = numeric;
+        if (numeric !== 0) savedNonZeroTotal = numeric;
+      } else if (isComponentScoreNameV263(name)) {
+        componentSum = (componentSum || 0) + numeric;
+      }
+    }
+
+    let effectiveScore: number | null = null;
+
+    // Prefer the dashboard scoring engine. If legacy names prevent dashboard scoring
+    // from finding the domain, fall back to saved non-zero total / component score.
+    if (dashboardStageScore !== null && dashboardStageScore !== 0) effectiveScore = dashboardStageScore;
+    else if (savedNonZeroTotal !== null) effectiveScore = savedNonZeroTotal;
+    else if (componentSum !== null && componentSum !== 0) effectiveScore = componentSum;
+    else if (dashboardStageScore !== null) effectiveScore = dashboardStageScore;
+    else if (savedTotal !== null) effectiveScore = savedTotal;
+
+    if (effectiveScore === null) return participant;
+
+    const label = String(effectiveScore);
     return {
       ...participant,
       score: effectiveScore,
@@ -623,9 +601,13 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
       operator_score: effectiveScore,
       score_akhir: effectiveScore,
       operator_final_score: effectiveScore,
-      operator_final_score_label: String(effectiveScore),
-      saved_total_score_effective_v264: effectiveScore,
-      pd_preview_score_v264: pdPreviewScore,
+      operator_final_score_label: label,
+      score_label: label,
+      final_score_label: label,
+      saved_total_score_v253: savedTotal,
+      score_component_sum_v261: componentSum,
+      dashboard_stage_score_v263: dashboardStageScore,
+      operator_done_score_source_v263: dashboardStageScore !== null ? "dashboard_recompute" : (savedNonZeroTotal !== null ? "saved_total" : (componentSum !== null ? "component_sum" : "saved_total_zero")),
     };
   });
 }
