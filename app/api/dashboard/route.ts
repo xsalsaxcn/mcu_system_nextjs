@@ -1,4 +1,4 @@
-﻿import { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { computeStagesForParticipant } from "@/lib/server/progress";
@@ -107,6 +107,44 @@ function normalizeDashboardStages(stages: any[], participant: any) {
     });
 }
 
+/* DASHBOARD_FETCH_ALL_RESULTS_V248
+   Dashboard admin bisa memuat ratusan peserta sekaligus. Supabase select() tanpa range
+   hanya mengembalikan batch terbatas, sehingga examination_results untuk peserta di luar
+   batch awal bisa terlihat kosong di dashboard walaupun datanya ada di database.
+   Helper ini mengambil examination_results per chunk participant_id dan per halaman 1000 row.
+   Scope: dashboard only; tidak mengubah save, scoring rules, setup parameter, atau SQL.
+*/
+async function fetchAllDashboardResultsV248(supabase: any, participantIds: number[]) {
+  const ids = [...new Set((participantIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!ids.length) return { data: [], error: null };
+
+  const all: any[] = [];
+  const chunkSize = 50;
+  const pageSize = 1000;
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("examination_results")
+        .select("*")
+        .in("participant_id", chunk)
+        .range(from, from + pageSize - 1);
+
+      if (error) return { data: all, error };
+
+      const rows = data || [];
+      all.push(...rows);
+
+      if (rows.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+
+  return { data: all, error: null };
+}
 
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
@@ -146,7 +184,7 @@ export async function GET(req: NextRequest) {
     packageIds.length ? supabase.from("package_parameters").select("*").in("package_id", packageIds) : Promise.resolve({ data: [] }),
     supabase.from("parameters").select("*").eq("is_active", 1),
     supabase.from("posts").select("*"),
-    participantIds.length ? supabase.from("examination_results").select("*").in("participant_id", participantIds) : Promise.resolve({ data: [] }),
+    fetchAllDashboardResultsV248(supabase, participantIds),
     supabase.from("packages").select("id,name,program_type"),
     supabase.from("participant_sources").select("id,name,institution_name"),
     supabase.from("graduation_rules").select("*")
