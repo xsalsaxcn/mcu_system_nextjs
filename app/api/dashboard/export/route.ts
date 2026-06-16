@@ -569,8 +569,22 @@ export async function GET(req: NextRequest) {
   const program = req.nextUrl.searchParams.get("program") || user.program_type || "capaska";
   const isCapaskaProgram = normalizeProgram(program) === "capaska";
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
-  const status = req.nextUrl.searchParams.get("status") || "Semua";
-  const type = req.nextUrl.searchParams.get("type") || "progress";
+  const statusRawV293 = req.nextUrl.searchParams.get("status") || "Semua";
+  const status = req.nextUrl.searchParams.get("selected_full") === "1" ? "Semua" : statusRawV293;
+  const requestedTypeV293 = req.nextUrl.searchParams.get("type") || "progress";
+  const type = requestedTypeV293 === "selected_full" ? "full" : requestedTypeV293;
+  // DASHBOARD_EXPORT_SELECTED_OVERRIDE_V293
+  // Optional selected participant export: selected rows become the final export set, while existing workbook builders stay unchanged.
+  const participantIdsParamV293 = String(req.nextUrl.searchParams.get("participant_ids") || "").trim();
+  const selectedParticipantIdsV293 = Array.from(new Set(
+    participantIdsParamV293
+      .split(",")
+      .map((value) => Number(String(value).trim()))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  ));
+  const selectedParticipantIdSetV293 = new Set(selectedParticipantIdsV293.map((value) => Number(value)));
+  const selectedFullExportV293 = req.nextUrl.searchParams.get("selected_full") === "1" || selectedParticipantIdsV293.length > 0;
+
   // DASHBOARD_EXPORT_SELECTED_FULL_V289
   // Optional selected participant IDs from dashboard table. Used by Export Terpilih.
   const participantIdsParamV289 = req.nextUrl.searchParams.get("participant_ids") || "";
@@ -590,6 +604,9 @@ export async function GET(req: NextRequest) {
   if (sourceId && sourceId !== "all") query = query.eq("source_id", Number(sourceId));
   if (hasSelectedParticipantIdsV289) query = query.in("id", selectedParticipantIdsV289);
 
+
+  // DASHBOARD_EXPORT_SELECTED_QUERY_FILTER_V293
+  if (selectedParticipantIdsV293.length) query = query.in("id", selectedParticipantIdsV293);
   const { data: participants, error } = await query;
   if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
 
@@ -866,6 +883,19 @@ export async function GET(req: NextRequest) {
 
     // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
     // No V273 include-all override here; wide and recap sheets remain completed-only.
+
+    // DASHBOARD_EXPORT_SELECTED_COMPLETED_ROWS_V293
+    // For Export Terpilih, trust the selected dashboard rows as the final completed export set.
+    if (selectedFullExportV293) {
+      completedProgressRows = progressRows
+        .filter((row: any) => selectedParticipantIdsV293.length ? selectedParticipantIdSetV293.has(Number(row["Participant ID"])) : true)
+        .map((row: any) => ({
+          ...row,
+          "Status Progress": "Selesai",
+          "Progress %": 100,
+          "Stage Selesai": row["Total Stage"] || row["Stage Selesai"],
+        }));
+    }
     const completedParticipantIds = new Set(completedProgressRows.map((row: any) => Number(row["Participant ID"])));
 
     const exportParameters = Array.from(new Map(
