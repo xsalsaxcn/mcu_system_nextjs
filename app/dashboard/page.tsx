@@ -796,6 +796,26 @@ function AdminDashboard() {
     });
   }
 
+  // DASHBOARD_SELECT_ALL_ROWS_V291
+  // Select every participant row currently visible in the dashboard table. Read-only UI helper.
+  function getVisibleMcuParticipantIdsV291() {
+    return (Array.isArray(filteredRows) ? filteredRows : [])
+      .map((row: any) => Number(row?.participant_id ?? row?.id ?? row?.["Participant ID"] ?? 0))
+      .filter((value: number) => Number.isFinite(value) && value > 0);
+  }
+
+  function selectAllVisibleMcuRowsV291() {
+    const ids = getVisibleMcuParticipantIdsV291();
+    if (!ids.length) {
+      alert("Tidak ada peserta yang sedang tampil untuk dipilih.");
+      return;
+    }
+    setSelectedMcuIds(new Set(ids.map((id) => String(id)))); // DASHBOARD_SELECT_ALL_ROWS_V291_TYPE_FIX
+  }
+
+  function clearSelectedMcuRowsV291() {
+    setSelectedMcuIds(new Set());
+  }
   async function resetSelectedCapaskaResultsV221() {
     const participantIds = Array.from(selectedMcuIds)
       .map((value) => Number(value))
@@ -1260,6 +1280,28 @@ function AdminDashboard() {
               </div>
 
               <div className="flex flex-wrap gap-2">
+                {/* DASHBOARD_SELECT_ALL_ROWS_V291 */}
+                {!isWellness && !isVaccination ? (
+                  <>
+                    <button
+                      type="button"
+                      className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 hover:bg-blue-100"
+                      onClick={selectAllVisibleMcuRowsV291}
+                      title="Pilih semua peserta yang sedang tampil sesuai filter dan pencarian dashboard"
+                    >
+                      Pilih Semua ({filteredRows.length})
+                    </button>
+                    {selectedMcuIds.size ? (
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50"
+                        onClick={clearSelectedMcuRowsV291}
+                      >
+                        Batal Pilih
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
                 <input
                   className="min-w-[260px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                   placeholder="Cari nama, nomor, status..."
