@@ -186,7 +186,14 @@ async function attachCapaskaOperatorScores(args: {
     const derivedValues = computeCapaskaDerivedValues(postParams || [], rawValues);
     const finalScoreParam = (postParams || []).find((param: any) => isFinalScoreParameter(param.name));
     const derivedFinalScore = finalScoreParam ? toNumberOrNull(derivedValues[String(finalScoreParam.id)]) : null;
-    const finalScore = savedFinalScore !== null ? savedFinalScore : derivedFinalScore;
+    /* OPERATOR_DONE_SCORE_ZERO_FALLBACK_V260
+       Read-only display fix: if an old hidden Score Total row is saved as 0
+       but current answers derive a non-zero score, show the derived score instead.
+    */
+    const finalScore =
+      savedFinalScore !== null && !(savedFinalScore === 0 && derivedFinalScore !== null && derivedFinalScore !== 0)
+        ? savedFinalScore
+        : derivedFinalScore;
 
     return {
       ...participant,
@@ -435,16 +442,36 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
     const savedScore = savedScoreByParticipant.get(participantId);
     if (savedScore === undefined) return participant;
 
+    /* OPERATOR_DONE_SCORE_ZERO_FALLBACK_V260
+       Read-only display fix: some older rows saved Score Total as 0 even when
+       the current answer-derived score is already available. Keep the non-zero
+       derived score and only use saved 0 when there is no better computed score.
+    */
+    const existingScoreCandidates = [
+      participant?.operator_final_score,
+      participant?.score_akhir,
+      participant?.operator_score,
+      participant?.stage_score,
+      participant?.final_score,
+      participant?.total_score,
+      participant?.score,
+    ]
+      .map((value: any) => Number(value))
+      .filter((value: number) => Number.isFinite(value));
+    const existingNonZero = existingScoreCandidates.find((value: number) => value !== 0);
+    const effectiveScore = savedScore === 0 && existingNonZero !== undefined ? existingNonZero : savedScore;
+
     return {
       ...participant,
-      score: savedScore,
-      total_score: savedScore,
-      final_score: savedScore,
-      stage_score: savedScore,
-      operator_score: savedScore,
-      score_akhir: savedScore,
-      operator_final_score: savedScore,
+      score: effectiveScore,
+      total_score: effectiveScore,
+      final_score: effectiveScore,
+      stage_score: effectiveScore,
+      operator_score: effectiveScore,
+      score_akhir: effectiveScore,
+      operator_final_score: effectiveScore,
       saved_total_score_v253: savedScore,
+      saved_total_score_effective_v260: effectiveScore,
     };
   });
 }
