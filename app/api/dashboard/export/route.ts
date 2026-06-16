@@ -300,6 +300,27 @@ function isNeutralStatusSheetV179(value: any) {
   const text = normStatusSheetV179(value);
   if (!text) return true;
 
+  // DASHBOARD_EXPORT_STATUS_NOTES_NEUTRAL_VALUES_V295
+  // Values like N/A, dot, dash, or an explicit "Tidak" for free-note questions are not medical notes.
+  const neutralBlankLikeV295 = new Set([
+    ".",
+    "-",
+    "n/a",
+    "na",
+    "n.a",
+    "n.a.",
+    "tidak",
+    "tidak ada catatan",
+    "tidak ada catatan khusus",
+    "tidak ada kondisi khusus",
+    "tidak ada keluhan",
+    "tidak ada temuan",
+    "tidak ada kelainan",
+    "tanpa catatan",
+    "nihil"
+  ]);
+  if (neutralBlankLikeV295.has(text)) return true;
+
   const neutralExact = new Set([
     "normal",
     "tidak ada",
@@ -426,21 +447,87 @@ function tbBbNoteStatusSheetV179(height: any, weight: any, gender: any) {
   return issues.length ? `Tidak sesuai Juknis : ${issues.join("; ")}` : "";
 }
 
-function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
-  const config = STAGE_CONFIG_STATUS_SHEET_V179[stageKey] || {};
-  const score = numberFromStatusSheetV179(progressInfo?.[config.scoreKey]);
-  const maxScore = config.max;
+// DASHBOARD_EXPORT_STATUS_NOTES_CLEAN_V295
+// Rekap Status & Catatan must be based on abnormal form answers, not on score-max fallback.
+function paramNameStatusSheetV295(param: any) {
+  return normStatusSheetV179([param?.label, param?.name, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" "));
+}
 
-  if (redNotes.length) return { status: "Tidak Direkomendasikan", note: redNotes.join("; ") || "Ada red flag / skor -10" };
+function isVitalOrNumericInfoStatusSheetV295(param: any) {
+  const name = paramNameStatusSheetV295(param);
+  return isHeightParamStatusSheetV179(param) ||
+    isWeightParamStatusSheetV179(param) ||
+    name.includes("suhu") ||
+    name.includes("nadi") ||
+    name.includes("napas") ||
+    name.includes("nafas") ||
+    name.includes("tekanan darah") ||
+    name.includes("tensi") ||
+    name.includes("tanda vital");
+}
 
-  // Khusus Mata: lensa/kacamata tidak menggunakan, tidak buta warna, dan juling -/- adalah normal.
-  // Jangan jadikan Dengan Catatan hanya karena skor lama/max lama tidak cocok.
-  if (stageKey === "mata" && !notes.length) return { status: "Normal", note: "" };
+function isFreeNoteParamStatusSheetV295(param: any) {
+  const name = paramNameStatusSheetV295(param);
+  return name.includes("catatan") ||
+    name.includes("keterangan") ||
+    name.includes("sebutkan") ||
+    name.includes("kondisi khusus");
+}
 
-  if (typeof score === "number" && typeof maxScore === "number" && score < maxScore) {
-    return { status: "Dengan Catatan", note: notes.length ? notes.join("; ") : `Skor belum maksimal (${score}/${maxScore})` };
+function isIgnorableStatusNoteValueV295(param: any, value: any) {
+  const text = normStatusSheetV179(value);
+  if (!text) return true;
+
+  const blankLike = new Set([
+    ".",
+    "-",
+    "n/a",
+    "na",
+    "n.a",
+    "n.a.",
+    "tidak",
+    "tidak ada catatan",
+    "tidak ada catatan khusus",
+    "tidak ada kondisi khusus",
+    "tidak ada keluhan",
+    "tidak ada temuan",
+    "tanpa catatan",
+    "nihil"
+  ]);
+  if (blankLike.has(text)) return true;
+
+  if (isFreeNoteParamStatusSheetV295(param)) {
+    if (text.includes("n/a") || text.includes("tidak ada catatan") || text.includes("tidak ada kondisi") || text.includes("tidak ada keluhan")) return true;
+    return false;
   }
-  if (notes.length) return { status: "Dengan Catatan", note: notes.join("; ") };
+
+  // TB, BB, vital sign, and raw numeric entries are not notes by themselves.
+  // TB/BB compatibility is evaluated separately by tbBbNoteStatusSheetV179.
+  if (isVitalOrNumericInfoStatusSheetV295(param) && /^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return true;
+  if (isVitalOrNumericInfoStatusSheetV295(param) && !text.includes("tidak normal") && !text.includes("tidak sesuai")) return true;
+
+  return false;
+}
+
+function shouldAddStatusNoteV295(param: any, value: any, score: any) {
+  if (isIgnorableStatusNoteValueV295(param, value)) return false;
+  const text = normStatusSheetV179(value);
+  const severity = severityStatusSheetV179(value, score);
+  if (severity) return true;
+  if (isNeutralStatusSheetV179(value)) return false;
+  if (/^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return false;
+  return true;
+}
+
+function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
+  // DASHBOARD_EXPORT_STATUS_NOTES_EVALUATE_V295
+  // Status/catatan follows actual abnormal answers from the form.
+  // Do not mark "Dengan Catatan" only because total post score is below a max value.
+  const uniqueNotes = Array.from(new Set((notes || []).map((item: any) => cleanStatusSheetV179(item)).filter(Boolean)));
+  const uniqueRedNotes = Array.from(new Set((redNotes || []).map((item: any) => cleanStatusSheetV179(item)).filter(Boolean)));
+
+  if (uniqueRedNotes.length) return { status: "Tidak Direkomendasikan", note: uniqueRedNotes.join("; ") || "Ada red flag / skor -10" };
+  if (uniqueNotes.length) return { status: "Dengan Catatan", note: uniqueNotes.join("; ") };
   return { status: "Normal", note: "" };
 }
 
@@ -475,11 +562,11 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
       const severity = severityStatusSheetV179(value, score);
-      if (!isNeutralStatusSheetV179(value)) {
+      if (shouldAddStatusNoteV295(param, value, score)) {
         const note = `${param.name}: ${value}`;
         notesByStage[stageKey].push(note);
         if (severity === "red") redNotesByStage[stageKey].push(note);
-      } else if (severity === "red") {
+      } else if (severity === "red" && !isIgnorableStatusNoteValueV295(param, value)) {
         const note = `${param.name}: ${value || "Red flag"}`;
         notesByStage[stageKey].push(note);
         redNotesByStage[stageKey].push(note);
