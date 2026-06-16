@@ -99,97 +99,104 @@ async function attachCapaskaOperatorScores(args: {
 }) {
   const { supabase, participants, program, user, listMode } = args;
 
-  // Hanya aktif di mode daftar CAPASKA operator. Corporate MCU dan Vaksinasi tidak disentuh.
+  /* OPERATOR_DONE_EDIT_LOADER_V255
+     Read-only score display fix.
+     - Does not change save/scoring/database.
+     - Prefer saved final score row for the operator post.
+     - Fallback to derived score from current post parameters.
+     - Read rows by input_post_id OR parameter_id to tolerate old/new saved data. */
   if (!listMode || program !== "capaska" || !participants.length || !user?.post_id) return participants;
 
+  const postId = Number(user.post_id);
   const participantIds = participants.map((p) => Number(p.id)).filter(Boolean);
   const packageIds = Array.from(new Set(participants.map((p) => Number(p.package_id)).filter(Boolean)));
-  if (!participantIds.length || !packageIds.length) return participants;
+  if (!postId || !participantIds.length || !packageIds.length) return participants;
 
-  const { data: mappings, error: mappingError } = await supabase
-    .from("package_parameters")
-    .select("package_id,parameter_id")
-    .in("package_id", packageIds);
-
-  if (mappingError) return participants;
-
-  const allParameterIds = Array.from(new Set((mappings || []).map((m: any) => Number(m.parameter_id)).filter(Boolean)));
-  if (!allParameterIds.length) return participants;
-
-  const { data: params, error: paramError } = await supabase
+  const { data: postParams, error: paramError } = await supabase
     .from("parameters")
     .select("*")
-    .in("id", allParameterIds)
-    .eq("post_id", Number(user.post_id))
+    .eq("post_id", postId)
     .eq("is_active", 1)
     .order("sort_order", { ascending: true })
     .order("id", { ascending: true });
 
-  if (paramError || !params?.length) return participants;
+  if (paramError || !postParams?.length) return participants;
 
-  const activePostParameterIds = (params || []).map((p: any) => Number(p.id)).filter(Boolean);
+  const postParamIds = (postParams || []).map((p: any) => Number(p.id)).filter(Boolean);
+  const finalScoreParamIds = new Set(
+    (postParams || [])
+      .filter((p: any) => isFinalScoreParameter(p.name))
+      .map((p: any) => Number(p.id))
+      .filter(Boolean)
+  );
 
-  const { data: results, error: resultError } = await supabase
+  const queryByInputPost = supabase
     .from("examination_results")
-    .select("participant_id,parameter_id,value")
+    .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
     .in("participant_id", participantIds)
-    .in("parameter_id", activePostParameterIds);
+    .eq("input_post_id", postId);
 
-  if (resultError) return participants;
+  const queryByParameter = postParamIds.length
+    ? supabase
+        .from("examination_results")
+        .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
+        .in("participant_id", participantIds)
+        .in("parameter_id", postParamIds)
+    : Promise.resolve({ data: [] });
 
-  const mappingsByPackage = new Map<number, Set<number>>();
-  for (const m of mappings || []) {
-    const packageId = Number(m.package_id);
-    const parameterId = Number(m.parameter_id);
-    if (!mappingsByPackage.has(packageId)) mappingsByPackage.set(packageId, new Set());
-    mappingsByPackage.get(packageId)!.add(parameterId);
+  const [byInputPost, byParameter] = await Promise.all([queryByInputPost, queryByParameter]);
+  if ((byInputPost as any)?.error || (byParameter as any)?.error) return participants;
+
+  const merged = new Map<string, any>();
+  for (const row of [...((byInputPost as any).data || []), ...((byParameter as any).data || [])]) {
+    const key = String(row?.id ?? `${row?.participant_id}-${row?.parameter_id}-${row?.input_post_id ?? ""}`);
+    if (!merged.has(key)) merged.set(key, row);
   }
 
-  const paramsByPackage = new Map<number, any[]>();
-  for (const packageId of packageIds) {
-    const allowed = mappingsByPackage.get(packageId) || new Set<number>();
-    paramsByPackage.set(
-      packageId,
-      (params || []).filter((p: any) => allowed.has(Number(p.id)))
-    );
+  const rowsByParticipant = new Map<number, any[]>();
+  for (const row of merged.values()) {
+    const participantId = Number(row?.participant_id);
+    if (!participantId) continue;
+    if (!rowsByParticipant.has(participantId)) rowsByParticipant.set(participantId, []);
+    rowsByParticipant.get(participantId)!.push(row);
   }
 
-  const resultsByParticipant = new Map<number, Record<string, string>>();
-  for (const r of results || []) {
-    const participantId = Number(r.participant_id);
-    if (!resultsByParticipant.has(participantId)) resultsByParticipant.set(participantId, {});
-    resultsByParticipant.get(participantId)![String(r.parameter_id)] = String(r.value ?? "").trim();
-  }
+  return participants.map((participant: any) => {
+    const rows = rowsByParticipant.get(Number(participant.id)) || [];
+    const rawValues: Record<string, string> = {};
+    let savedFinalScore: number | null = null;
+    let latestAt = "";
 
-  return participants.map((participant) => {
-    const packageId = Number(participant.package_id);
-    const participantParams = paramsByPackage.get(packageId) || [];
-    const rawValues = resultsByParticipant.get(Number(participant.id)) || {};
-    const derivedValues = computeCapaskaDerivedValues(participantParams, rawValues);
+    for (const row of rows) {
+      const parameterId = Number(row?.parameter_id);
+      const value = String(row?.value ?? "").trim();
+      if (!parameterId || !value) continue;
 
-    const finalScoreParam = participantParams.find((param: any) => isFinalScoreParameter(param.name));
-    const finalScore = finalScoreParam ? toNumberOrNull(derivedValues[String(finalScoreParam.id)]) : null;
+      if (postParamIds.includes(parameterId)) rawValues[String(parameterId)] = value;
+
+      if (finalScoreParamIds.has(parameterId)) {
+        const parsed = toNumberOrNull(value);
+        if (parsed !== null) savedFinalScore = parsed;
+      }
+
+      const rowLatest = String(row?.updated_at || row?.created_at || "");
+      if (rowLatest > latestAt) latestAt = rowLatest;
+    }
+
+    const derivedValues = computeCapaskaDerivedValues(postParams || [], rawValues);
+    const finalScoreParam = (postParams || []).find((param: any) => isFinalScoreParameter(param.name));
+    const derivedFinalScore = finalScoreParam ? toNumberOrNull(derivedValues[String(finalScoreParam.id)]) : null;
+    const finalScore = savedFinalScore !== null ? savedFinalScore : derivedFinalScore;
 
     return {
       ...participant,
       operator_final_score: finalScore,
       operator_final_score_label: finalScore === null ? "-" : String(finalScore),
+      operator_latest_updated_at: participant.operator_latest_updated_at || latestAt || null,
     };
   });
 }
 
-/* OPERATOR_DONE_LIST_SAVED_RESULTS_V249
-   Daftar peserta selesai operator sebelumnya terlalu ketat karena harus memenuhi
-   semua raw parameter dari package mapping. Beberapa stage CAPASKA punya parameter
-   raw/helper/legacy lebih banyak daripada jumlah canonical yang tampil di form
-   (contoh Penyakit Dalam 40 raw vs 28 canonical), sehingga peserta yang sudah submit
-   bisa tetap tidak muncul.
-
-   Patch ini hanya mengubah mode daftar selesai CAPASKA operator agar memakai bukti
-   submit yang sudah tersimpan di examination_results.input_post_id untuk post operator.
-   Scope read-only: tidak mengubah save operator, scoring, setup parameter, mapping,
-   SQL, atau data peserta.
-*/
 async function getCapaskaDoneParticipants(args: {
   supabase: any;
   user: any;
@@ -199,45 +206,81 @@ async function getCapaskaDoneParticipants(args: {
 }) {
   const { supabase, user, program, sourceId, limit } = args;
 
+  /* OPERATOR_DONE_EDIT_LOADER_V255
+     Read-only done-list fix.
+     A participant is considered done for the operator post when saved rows exist
+     for input_post_id OR current post parameters. This avoids raw mapping mismatch
+     blocking already-submitted participants. */
   if (program !== "capaska" || !user?.post_id) {
     return { participants: [], has_more: false };
   }
 
   const postId = Number(user.post_id);
-  if (!Number.isFinite(postId) || postId <= 0) {
-    return { participants: [], has_more: false };
-  }
 
-  // Ambil hasil yang benar-benar tersimpan dari submit operator untuk post ini.
-  // Pakai input_post_id agar tidak bergantung pada raw package mapping yang bisa lebih
-  // banyak dari canonical form dan menyebabkan daftar selesai kosong.
-  const resultRowLimit = Math.min(30000, Math.max(5000, limit * 300));
-  const { data: resultRows, error: resultError } = await supabase
+  const { data: postParams, error: paramError } = await supabase
+    .from("parameters")
+    .select("id,name,post_id,sort_order,config_json,input_type,is_active")
+    .eq("post_id", postId)
+    .eq("is_active", 1)
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (paramError) throw new Error(paramError.message);
+
+  const inputParams = (postParams || []).filter((p: any) => includeInProgress(p) && !isScoreHelperParameter(p.name));
+  const inputParamIds = inputParams.map((p: any) => Number(p.id)).filter(Boolean);
+  const postParamIds = (postParams || []).map((p: any) => Number(p.id)).filter(Boolean);
+  if (!postParamIds.length) return { participants: [], has_more: false };
+
+  const resultRowLimit = Math.min(50000, Math.max(8000, limit * Math.max(postParamIds.length, 20) * 12));
+
+  const byInputPost = supabase
     .from("examination_results")
     .select("participant_id,parameter_id,value,updated_at,created_at,input_post_id")
     .eq("input_post_id", postId)
     .order("updated_at", { ascending: false, nullsFirst: false })
     .limit(resultRowLimit);
 
-  if (resultError) throw new Error(resultError.message);
+  const byParameter = supabase
+    .from("examination_results")
+    .select("participant_id,parameter_id,value,updated_at,created_at,input_post_id")
+    .in("parameter_id", postParamIds)
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .limit(resultRowLimit);
 
-  const resultByParticipant = new Map<number, number>();
-  const latestByParticipant = new Map<number, string>();
+  const [inputResult, parameterResult] = await Promise.all([byInputPost, byParameter]);
+  if ((inputResult as any).error) throw new Error((inputResult as any).error.message);
+  if ((parameterResult as any).error) throw new Error((parameterResult as any).error.message);
 
-  for (const row of resultRows || []) {
-    if (!nonEmptyValue(row.value)) continue;
-
-    const participantId = Number(row.participant_id);
-    if (!participantId) continue;
-
-    resultByParticipant.set(participantId, (resultByParticipant.get(participantId) || 0) + 1);
-
-    const latest = String(row.updated_at || row.created_at || "");
-    const currentLatest = latestByParticipant.get(participantId) || "";
-    if (latest > currentLatest) latestByParticipant.set(participantId, latest);
+  const merged = new Map<string, any>();
+  for (const row of [...((inputResult as any).data || []), ...((parameterResult as any).data || [])]) {
+    if (!nonEmptyValue(row?.value)) continue;
+    const key = String(row?.id ?? `${row?.participant_id}-${row?.parameter_id}-${row?.input_post_id ?? ""}`);
+    if (!merged.has(key)) merged.set(key, row);
   }
 
-  const candidateParticipantIds = Array.from(resultByParticipant.keys());
+  const resultByParticipant = new Map<number, Map<number, string>>();
+  const totalRowsByParticipant = new Map<number, number>();
+  const latestByParticipant = new Map<number, string>();
+
+  for (const row of merged.values()) {
+    const participantId = Number(row.participant_id);
+    const parameterId = Number(row.parameter_id);
+    if (!participantId || !parameterId) continue;
+
+    totalRowsByParticipant.set(participantId, (totalRowsByParticipant.get(participantId) || 0) + 1);
+
+    if (inputParamIds.includes(parameterId)) {
+      if (!resultByParticipant.has(participantId)) resultByParticipant.set(participantId, new Map());
+      resultByParticipant.get(participantId)!.set(parameterId, String(row.value ?? "").trim());
+    }
+
+    const updatedAt = String(row.updated_at || row.created_at || "");
+    const currentLatest = latestByParticipant.get(participantId) || "";
+    if (updatedAt > currentLatest) latestByParticipant.set(participantId, updatedAt);
+  }
+
+  const candidateParticipantIds = Array.from(totalRowsByParticipant.keys());
   if (!candidateParticipantIds.length) return { participants: [], has_more: false };
 
   const { data: candidates, error: participantError } = await supabase
@@ -254,12 +297,18 @@ async function getCapaskaDoneParticipants(args: {
   }
 
   const doneParticipants = filteredCandidates
-    .filter((participant: any) => (resultByParticipant.get(Number(participant.id)) || 0) > 0)
+    .filter((participant: any) => {
+      const rowsCount = totalRowsByParticipant.get(Number(participant.id)) || 0;
+      const filledMain = resultByParticipant.get(Number(participant.id))?.size || 0;
+      // Saved rows for this post are already a submit trace. If enough main answers exist,
+      // mark as done; otherwise keep participants with score/helper rows visible too.
+      return rowsCount > 0 && (filledMain > 0 || rowsCount > 0);
+    })
     .map((participant: any) => ({
       ...participant,
       is_done_for_operator: true,
-      operator_saved_result_count: resultByParticipant.get(Number(participant.id)) || 0,
       operator_latest_updated_at: latestByParticipant.get(Number(participant.id)) || null,
+      operator_saved_result_count: totalRowsByParticipant.get(Number(participant.id)) || 0,
     }))
     .sort((a: any, b: any) => {
       const latestA = String(a.operator_latest_updated_at || "");
@@ -277,126 +326,91 @@ async function getCapaskaDoneParticipants(args: {
     user,
     listMode: true,
   });
-  const scoredWithSavedTotalsV253 = await attachSavedOperatorScoreTotalV253({
-    supabase,
-    participants: scored,
-    program,
-    user,
-    listMode: true,
-  });
 
   return {
-    participants: scoredWithSavedTotalsV253,
+    participants: scored,
     has_more: doneParticipants.length > limited.length,
   };
 }
 
 
-/* OPERATOR_DONE_LIST_SAVED_TOTAL_SAFE_V253
-   Read-only fix for CAPASKA operator done-list score display.
-   Some saved participants already have the correct final score row, for example
-   "Score total Pemeriksaan Ortopedi" = 16, but the done-list preview can still
-   show 0 because it follows an older derived-score path.
-
-   This helper reads saved final score rows for the current operator post from
-   examination_results. It only changes the API response display fields:
-   operator_final_score and operator_final_score_label.
-   It does not modify save logic, input form, setup parameter, scoring rules,
-   mapping, SQL, or participant data.
+/* OPERATOR_DONE_MISSING_HELPER_V256
+   Build-safety helper for the done-list score preview.
+   Read-only: reads examination_results + parameters and returns the same participant list
+   with saved score-total display fields when a Score/Total Score row exists for the operator post.
+   Does not write database, save results, change scoring, or change setup parameters.
 */
-async function attachSavedOperatorScoreTotalV253(args: {
-  supabase: any;
-  participants: any[];
-  program: string;
-  user: any;
-  listMode: boolean;
-}) {
-  const { supabase, participants, program, user, listMode } = args;
+async function attachSavedOperatorScoreTotalV253(args: any) {
+  const supabase = args?.supabase;
+  const participants = Array.isArray(args?.participants) ? args.participants : [];
+  const postId = Number(args?.postId ?? args?.post_id ?? args?.user?.post_id ?? args?.effectivePostId ?? 0);
 
-  if (!listMode || program !== "capaska" || !participants.length || !user?.post_id) return participants;
+  if (!supabase || !participants.length || !postId) return participants;
 
-  const postId = Number(user.post_id);
-  const participantIds = participants.map((p: any) => Number(p.id)).filter(Boolean);
-  if (!postId || !participantIds.length) return participants;
+  const participantIds = participants.map((p: any) => Number(p?.id)).filter((id: number) => Number.isFinite(id) && id > 0);
+  if (!participantIds.length) return participants;
 
-  const { data: postParams, error: paramError } = await supabase
+  const { data: rows, error } = await supabase
+    .from("examination_results")
+    .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
+    .in("participant_id", participantIds)
+    .eq("input_post_id", postId)
+    .limit(Math.min(30000, Math.max(5000, participantIds.length * 80)));
+
+  if (error || !Array.isArray(rows) || !rows.length) return participants;
+
+  const parameterIds = Array.from(new Set(rows.map((r: any) => Number(r?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0)));
+  if (!parameterIds.length) return participants;
+
+  const { data: params, error: paramError } = await supabase
     .from("parameters")
-    .select("id,name,post_id,is_active,sort_order")
-    .eq("post_id", postId)
-    .eq("is_active", 1)
-    .order("sort_order", { ascending: true })
-    .order("id", { ascending: true });
+    .select("id,name,category,post_id")
+    .in("id", parameterIds);
 
-  if (paramError || !postParams?.length) return participants;
+  if (paramError || !Array.isArray(params)) return participants;
 
-  const postParamIds = (postParams || []).map((p: any) => Number(p.id)).filter(Boolean);
-  const finalScoreParameterIds = (postParams || [])
-    .filter((p: any) => isFinalScoreParameter(p.name))
-    .map((p: any) => Number(p.id))
-    .filter(Boolean);
+  const paramById = new Map<number, any>();
+  for (const param of params) paramById.set(Number(param?.id), param);
 
-  if (!postParamIds.length && !finalScoreParameterIds.length) return participants;
+  const savedScoreByParticipant = new Map<number, number>();
 
-  const selectCols = "id,participant_id,parameter_id,value,input_post_id,updated_at,created_at";
-
-  const queries: Promise<any>[] = [
-    supabase
-      .from("examination_results")
-      .select(selectCols)
-      .in("participant_id", participantIds)
-      .eq("input_post_id", postId)
-      .limit(50000),
-  ];
-
-  if (postParamIds.length) {
-    queries.push(
-      supabase
-        .from("examination_results")
-        .select(selectCols)
-        .in("participant_id", participantIds)
-        .in("parameter_id", postParamIds)
-        .limit(50000)
-    );
-  }
-
-  const queryResults = await Promise.all(queries);
-  if (queryResults.some((res: any) => res?.error)) return participants;
-
-  const rowMap = new Map<string, any>();
-  for (const res of queryResults) {
-    for (const row of res?.data || []) {
-      const key = String(row?.id ?? `${row?.participant_id}-${row?.parameter_id}-${row?.input_post_id}`);
-      rowMap.set(key, row);
-    }
-  }
-
-  const finalIdSet = new Set<number>(finalScoreParameterIds);
-  const finalScoreByParticipant = new Map<number, { score: number; updatedAt: string; id: number }>();
-
-  for (const row of rowMap.values()) {
+  for (const row of rows) {
     const participantId = Number(row?.participant_id);
-    const parameterId = Number(row?.parameter_id);
-    if (!participantId || !parameterId || !finalIdSet.has(parameterId)) continue;
+    const param = paramById.get(Number(row?.parameter_id));
+    const name = String(param?.name || "").trim().toLowerCase();
+    const valueNumber = Number(row?.value);
 
-    const parsed = toNumberOrNull(row?.value);
-    if (parsed === null) continue;
+    const isScoreTotal =
+      name.startsWith("score total") ||
+      name.startsWith("total score") ||
+      name.includes("score total") ||
+      name.includes("skor total");
 
-    const updatedAt = String(row?.updated_at || row?.created_at || "");
-    const rowId = Number(row?.id || 0);
-    const current = finalScoreByParticipant.get(participantId);
-    if (!current || updatedAt > current.updatedAt || (updatedAt === current.updatedAt && rowId > current.id)) {
-      finalScoreByParticipant.set(participantId, { score: parsed, updatedAt, id: rowId });
+    if (!isScoreTotal || !Number.isFinite(valueNumber)) continue;
+
+    const previous = savedScoreByParticipant.get(participantId);
+    if (previous === undefined || valueNumber > previous) {
+      savedScoreByParticipant.set(participantId, valueNumber);
     }
   }
+
+  if (!savedScoreByParticipant.size) return participants;
 
   return participants.map((participant: any) => {
-    const saved = finalScoreByParticipant.get(Number(participant.id));
-    if (!saved) return participant;
+    const participantId = Number(participant?.id);
+    const savedScore = savedScoreByParticipant.get(participantId);
+    if (savedScore === undefined) return participant;
 
     return {
       ...participant,
-      operator_final_score: saved.score,
-      operator_final_score_label: String(saved.score),
+      score: savedScore,
+      total_score: savedScore,
+      final_score: savedScore,
+      stage_score: savedScore,
+      operator_score: savedScore,
+      score_akhir: savedScore,
+      operator_final_score: savedScore,
+      saved_total_score_v253: savedScore,
     };
   });
 }
