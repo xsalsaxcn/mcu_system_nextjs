@@ -375,11 +375,13 @@ async function getCapaskaDoneParticipants(args: {
   };
 }
 
-/* OPERATOR_DONE_MISSING_HELPER_V256
-   Build-safety helper for the done-list score preview.
-   Read-only: reads examination_results + parameters and returns the same participant list
-   with saved score-total display fields when a Score/Total Score row exists for the operator post.
-   Does not write database, save results, change scoring, or change setup parameters.
+/* OPERATOR_DONE_SCORE_COMPONENT_FALLBACK_V261
+   Read-only score display fix for operator done-list preview.
+   Some legacy rows keep "Score total ..." as 0 even though component score rows
+   already contain the correct stage score. For display only, use the non-zero
+   saved total when available; otherwise sum component score rows for the same
+   operator post. This does not write to database, does not change save logic,
+   does not change setup parameters, and does not change form scoring.
 */
 async function attachSavedOperatorScoreTotalV253(args: any) {
   const supabase = args?.supabase;
@@ -388,19 +390,24 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
 
   if (!supabase || !participants.length || !postId) return participants;
 
-  const participantIds = participants.map((p: any) => Number(p?.id)).filter((id: number) => Number.isFinite(id) && id > 0);
+  const participantIds = participants
+    .map((p: any) => Number(p?.id))
+    .filter((id: number) => Number.isFinite(id) && id > 0);
   if (!participantIds.length) return participants;
 
+  const rowLimit = Math.min(60000, Math.max(8000, participantIds.length * 160));
   const { data: rows, error } = await supabase
     .from("examination_results")
     .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
     .in("participant_id", participantIds)
     .eq("input_post_id", postId)
-    .limit(Math.min(30000, Math.max(5000, participantIds.length * 80)));
+    .limit(rowLimit);
 
   if (error || !Array.isArray(rows) || !rows.length) return participants;
 
-  const parameterIds = Array.from(new Set(rows.map((r: any) => Number(r?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0)));
+  const parameterIds = Array.from(
+    new Set(rows.map((r: any) => Number(r?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0))
+  );
   if (!parameterIds.length) return participants;
 
   const { data: params, error: paramError } = await supabase
@@ -413,65 +420,111 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
   const paramById = new Map<number, any>();
   for (const param of params) paramById.set(Number(param?.id), param);
 
-  const savedScoreByParticipant = new Map<number, number>();
+  const toNumberV261 = (value: any): number | null => {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim().replace(",", ".");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const normNameV261 = (value: any) => String(value || "").trim().toLowerCase();
+  const isTotalScoreNameV261 = (name: string) => {
+    const n = normNameV261(name);
+    return (
+      n.startsWith("score total") ||
+      n.startsWith("total score") ||
+      n.includes("score total") ||
+      n.includes("total score") ||
+      n.includes("skor total")
+    );
+  };
+  const isComponentScoreNameV261 = (name: string) => {
+    const n = normNameV261(name);
+    if (!n) return false;
+    if (isTotalScoreNameV261(n)) return false;
+    return n.startsWith("score ") || n.startsWith("skor ");
+  };
+
+  const statsByParticipant = new Map<number, { totalScores: number[]; componentScores: number[]; latestAt: string }>();
 
   for (const row of rows) {
     const participantId = Number(row?.participant_id);
+    if (!participantId) continue;
+
     const param = paramById.get(Number(row?.parameter_id));
-    const name = String(param?.name || "").trim().toLowerCase();
-    const valueNumber = Number(row?.value);
+    const name = String(param?.name || "");
+    const numericValue = toNumberV261(row?.value);
+    if (numericValue === null) continue;
 
-    const isScoreTotal =
-      name.startsWith("score total") ||
-      name.startsWith("total score") ||
-      name.includes("score total") ||
-      name.includes("skor total");
+    let stat = statsByParticipant.get(participantId);
+    if (!stat) {
+      stat = { totalScores: [], componentScores: [], latestAt: "" };
+      statsByParticipant.set(participantId, stat);
+    }
 
-    if (!isScoreTotal || !Number.isFinite(valueNumber)) continue;
+    if (isTotalScoreNameV261(name)) {
+      stat.totalScores.push(numericValue);
+    } else if (isComponentScoreNameV261(name)) {
+      stat.componentScores.push(numericValue);
+    }
 
-    const previous = savedScoreByParticipant.get(participantId);
-    if (previous === undefined || valueNumber > previous) {
-      savedScoreByParticipant.set(participantId, valueNumber);
+    const latest = String(row?.updated_at || row?.created_at || "");
+    if (latest > stat.latestAt) stat.latestAt = latest;
+  }
+
+  const effectiveScoreByParticipant = new Map<number, { score: number; componentSum: number | null; savedTotal: number | null }>();
+
+  for (const [participantId, stat] of statsByParticipant.entries()) {
+    const nonZeroTotals = stat.totalScores.filter((score) => score !== 0);
+    const savedTotal = nonZeroTotals.length
+      ? nonZeroTotals[nonZeroTotals.length - 1]
+      : (stat.totalScores.length ? stat.totalScores[stat.totalScores.length - 1] : null);
+    const componentSum = stat.componentScores.length
+      ? stat.componentScores.reduce((sum, score) => sum + score, 0)
+      : null;
+
+    let effectiveScore: number | null = null;
+
+    if (savedTotal !== null && savedTotal !== 0) {
+      effectiveScore = savedTotal;
+    } else if (componentSum !== null && componentSum !== 0) {
+      effectiveScore = componentSum;
+    } else if (savedTotal !== null) {
+      effectiveScore = savedTotal;
+    }
+
+    if (effectiveScore !== null) {
+      effectiveScoreByParticipant.set(participantId, { score: effectiveScore, componentSum, savedTotal });
     }
   }
 
-  if (!savedScoreByParticipant.size) return participants;
+  if (!effectiveScoreByParticipant.size) return participants;
 
   return participants.map((participant: any) => {
     const participantId = Number(participant?.id);
-    const savedScore = savedScoreByParticipant.get(participantId);
-    if (savedScore === undefined) return participant;
+    const effective = effectiveScoreByParticipant.get(participantId);
+    if (!effective) return participant;
 
-    /* OPERATOR_DONE_SCORE_ZERO_FALLBACK_V260
-       Read-only display fix: some older rows saved Score Total as 0 even when
-       the current answer-derived score is already available. Keep the non-zero
-       derived score and only use saved 0 when there is no better computed score.
-    */
-    const existingScoreCandidates = [
-      participant?.operator_final_score,
-      participant?.score_akhir,
-      participant?.operator_score,
-      participant?.stage_score,
-      participant?.final_score,
-      participant?.total_score,
-      participant?.score,
-    ]
-      .map((value: any) => Number(value))
-      .filter((value: number) => Number.isFinite(value));
-    const existingNonZero = existingScoreCandidates.find((value: number) => value !== 0);
-    const effectiveScore = savedScore === 0 && existingNonZero !== undefined ? existingNonZero : savedScore;
+    const score = effective.score;
+    const label = String(score);
 
     return {
       ...participant,
-      score: effectiveScore,
-      total_score: effectiveScore,
-      final_score: effectiveScore,
-      stage_score: effectiveScore,
-      operator_score: effectiveScore,
-      score_akhir: effectiveScore,
-      operator_final_score: effectiveScore,
-      saved_total_score_v253: savedScore,
-      saved_total_score_effective_v260: effectiveScore,
+      score,
+      total_score: score,
+      final_score: score,
+      stage_score: score,
+      operator_score: score,
+      score_akhir: score,
+      operator_final_score: score,
+      operator_final_score_label: label,
+      score_label: label,
+      final_score_label: label,
+      saved_total_score_v253: score,
+      saved_total_score_effective_v260: score,
+      score_component_sum_v261: effective.componentSum,
+      saved_total_score_raw_v261: effective.savedTotal,
     };
   });
 }
