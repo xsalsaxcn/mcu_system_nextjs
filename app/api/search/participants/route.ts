@@ -277,13 +277,129 @@ async function getCapaskaDoneParticipants(args: {
     user,
     listMode: true,
   });
+  const scoredWithSavedTotalsV253 = await attachSavedOperatorScoreTotalV253({
+    supabase,
+    participants: scored,
+    program,
+    user,
+    listMode: true,
+  });
 
   return {
-    participants: scored,
+    participants: scoredWithSavedTotalsV253,
     has_more: doneParticipants.length > limited.length,
   };
 }
 
+
+/* OPERATOR_DONE_LIST_SAVED_TOTAL_SAFE_V253
+   Read-only fix for CAPASKA operator done-list score display.
+   Some saved participants already have the correct final score row, for example
+   "Score total Pemeriksaan Ortopedi" = 16, but the done-list preview can still
+   show 0 because it follows an older derived-score path.
+
+   This helper reads saved final score rows for the current operator post from
+   examination_results. It only changes the API response display fields:
+   operator_final_score and operator_final_score_label.
+   It does not modify save logic, input form, setup parameter, scoring rules,
+   mapping, SQL, or participant data.
+*/
+async function attachSavedOperatorScoreTotalV253(args: {
+  supabase: any;
+  participants: any[];
+  program: string;
+  user: any;
+  listMode: boolean;
+}) {
+  const { supabase, participants, program, user, listMode } = args;
+
+  if (!listMode || program !== "capaska" || !participants.length || !user?.post_id) return participants;
+
+  const postId = Number(user.post_id);
+  const participantIds = participants.map((p: any) => Number(p.id)).filter(Boolean);
+  if (!postId || !participantIds.length) return participants;
+
+  const { data: postParams, error: paramError } = await supabase
+    .from("parameters")
+    .select("id,name,post_id,is_active,sort_order")
+    .eq("post_id", postId)
+    .eq("is_active", 1)
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (paramError || !postParams?.length) return participants;
+
+  const postParamIds = (postParams || []).map((p: any) => Number(p.id)).filter(Boolean);
+  const finalScoreParameterIds = (postParams || [])
+    .filter((p: any) => isFinalScoreParameter(p.name))
+    .map((p: any) => Number(p.id))
+    .filter(Boolean);
+
+  if (!postParamIds.length && !finalScoreParameterIds.length) return participants;
+
+  const selectCols = "id,participant_id,parameter_id,value,input_post_id,updated_at,created_at";
+
+  const queries: Promise<any>[] = [
+    supabase
+      .from("examination_results")
+      .select(selectCols)
+      .in("participant_id", participantIds)
+      .eq("input_post_id", postId)
+      .limit(50000),
+  ];
+
+  if (postParamIds.length) {
+    queries.push(
+      supabase
+        .from("examination_results")
+        .select(selectCols)
+        .in("participant_id", participantIds)
+        .in("parameter_id", postParamIds)
+        .limit(50000)
+    );
+  }
+
+  const queryResults = await Promise.all(queries);
+  if (queryResults.some((res: any) => res?.error)) return participants;
+
+  const rowMap = new Map<string, any>();
+  for (const res of queryResults) {
+    for (const row of res?.data || []) {
+      const key = String(row?.id ?? `${row?.participant_id}-${row?.parameter_id}-${row?.input_post_id}`);
+      rowMap.set(key, row);
+    }
+  }
+
+  const finalIdSet = new Set<number>(finalScoreParameterIds);
+  const finalScoreByParticipant = new Map<number, { score: number; updatedAt: string; id: number }>();
+
+  for (const row of rowMap.values()) {
+    const participantId = Number(row?.participant_id);
+    const parameterId = Number(row?.parameter_id);
+    if (!participantId || !parameterId || !finalIdSet.has(parameterId)) continue;
+
+    const parsed = toNumberOrNull(row?.value);
+    if (parsed === null) continue;
+
+    const updatedAt = String(row?.updated_at || row?.created_at || "");
+    const rowId = Number(row?.id || 0);
+    const current = finalScoreByParticipant.get(participantId);
+    if (!current || updatedAt > current.updatedAt || (updatedAt === current.updatedAt && rowId > current.id)) {
+      finalScoreByParticipant.set(participantId, { score: parsed, updatedAt, id: rowId });
+    }
+  }
+
+  return participants.map((participant: any) => {
+    const saved = finalScoreByParticipant.get(Number(participant.id));
+    if (!saved) return participant;
+
+    return {
+      ...participant,
+      operator_final_score: saved.score,
+      operator_final_score_label: String(saved.score),
+    };
+  });
+}
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -344,6 +460,13 @@ export async function GET(req: NextRequest) {
     user,
     listMode,
   });
+  const participantsWithSavedTotalsV253 = await attachSavedOperatorScoreTotalV253({
+    supabase,
+    participants: participantsWithScores,
+    program,
+    user,
+    listMode,
+  });
 
-  return ok({ participants: participantsWithScores, has_more: false });
+  return ok({ participants: participantsWithSavedTotalsV253, has_more: false });
 }
