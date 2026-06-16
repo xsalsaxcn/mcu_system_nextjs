@@ -385,6 +385,144 @@ function CapaskaParticipantDetailModal({ row, onClose }: { row: any; onClose: ()
   );
 }
 
+
+// DASHBOARD_OPERATOR_CLICK_DETAIL_V269
+// Read-only dashboard modal: lists participants that are done / not done for a clicked CAPASKA operator stage.
+// It only filters rows already retrieved by /api/dashboard. No database writes and no scoring/save/setup changes.
+function normalizeOperatorStageKeyV269(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getOperatorStageFromRowV269(row: any, item: any) {
+  const stages = Array.isArray(row?.stages) ? row.stages : [];
+  const itemKey = String(item?.key || "");
+  const itemName = normalizeOperatorStageKeyV269(item?.name);
+
+  return stages.find((stage: any) => {
+    const stageKey = String(stage?.post_id || stage?.id || stage?.key || "");
+    const stageName = normalizeOperatorStageKeyV269(stage?.post_name || stage?.name || stage?.title);
+    return (itemKey && stageKey && itemKey === stageKey) || (!!itemName && stageName === itemName);
+  });
+}
+
+function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; rows: any[]; onClose: () => void }) {
+  const [tab, setTab] = useState<"done" | "not_done">("done");
+
+  const detailRows = useMemo(() => {
+    return (Array.isArray(rows) ? rows : [])
+      .map((row: any) => {
+        const stage = getOperatorStageFromRowV269(row, item);
+        if (!stage) return null;
+
+        const totalParams = Number(stage?.total_parameters || 0);
+        const filledParams = Number(stage?.filled_parameters || 0);
+        const percent = totalParams > 0 ? Math.round((filledParams / totalParams) * 1000) / 10 : (stage?.is_done ? 100 : 0);
+
+        return {
+          row,
+          stage,
+          done: !!stage?.is_done,
+          percent,
+          filledParams,
+          totalParams,
+        };
+      })
+      .filter(Boolean) as any[];
+  }, [item, rows]);
+
+  const doneRows = detailRows.filter((entry: any) => entry.done);
+  const notDoneRows = detailRows.filter((entry: any) => !entry.done);
+  const activeRows = tab === "done" ? doneRows : notDoneRows;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-5 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-xs font-black uppercase tracking-wide text-blue-600">Detail Progress Operator</div>
+            <div className="mt-1 text-2xl font-black text-slate-950">{item?.name || "Operator"}</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">
+              Data read-only dari dashboard yang sedang tampil. Tidak ada perubahan data, scoring, atau hasil input.
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 hover:bg-slate-50">
+            Tutup
+          </button>
+        </div>
+
+        <div className="max-h-[calc(90vh-92px)] overflow-auto p-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-slate-400">Total Peserta</div>
+              <div className="mt-1 text-3xl font-black text-slate-950">{detailRows.length}</div>
+            </div>
+            <button type="button" onClick={() => setTab("done")} className={`rounded-2xl p-4 text-left ${tab === "done" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-900"}`}>
+              <div className="text-xs font-black uppercase tracking-wide opacity-70">Sudah Selesai</div>
+              <div className="mt-1 text-3xl font-black">{doneRows.length}</div>
+            </button>
+            <button type="button" onClick={() => setTab("not_done")} className={`rounded-2xl p-4 text-left ${tab === "not_done" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-900"}`}>
+              <div className="text-xs font-black uppercase tracking-wide opacity-70">Belum Selesai</div>
+              <div className="mt-1 text-3xl font-black">{notDoneRows.length}</div>
+            </button>
+          </div>
+
+          <div className="mt-5 overflow-hidden rounded-3xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 text-left">Nama</th>
+                  <th className="px-4 py-3 text-left">No. MCU</th>
+                  <th className="px-4 py-3 text-left">Database</th>
+                  <th className="px-4 py-3 text-left">Paket</th>
+                  <th className="px-4 py-3 text-left">Progress Stage</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {activeRows.length ? activeRows.map((entry: any) => {
+                  const row = entry.row || {};
+                  const stage = entry.stage || {};
+                  return (
+                    <tr key={`${row.participant_id || row.id}-${stage.post_id || item?.key}-${tab}`} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-black text-slate-900">{row.name || "-"}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.mcu_id || row.external_id || "-"}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.source_name || row.institution_name || "-"}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.package_name || "-"}</td>
+                      <td className="px-4 py-3 font-bold text-slate-700">{entry.filledParams}/{entry.totalParams} Â· {entry.percent}%</td>
+                      <td className="px-4 py-3">
+                        <StatusPill tone={entry.done ? "emerald" : "amber"}>{entry.done ? "Sudah" : "Belum"}</StatusPill>
+                      </td>
+                      <td className="px-4 py-3">
+                        {stage?.post_id ? (
+                          <a href={buildCapaskaAdminFormUrl(row, stage)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700">
+                            Lihat / Edit Hasil
+                          </a>
+                        ) : <span className="text-slate-400">-</span>}
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm font-bold text-slate-400">
+                      Tidak ada peserta pada tab ini.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function OperatorDashboard({ user }: { user: Record<string, unknown> }) {
   const formRoute = getOperatorFormRoute(user);
   const formLabel = getOperatorFormLabel(user);
@@ -466,6 +604,7 @@ function AdminDashboard() {
   const [summary, setSummary] = useState<any>({});
   const [rows, setRows] = useState<any[]>([]);
   const [selectedMcuRow, setSelectedMcuRow] = useState<any>(null);
+  const [selectedOperatorProgressV269, setSelectedOperatorProgressV269] = useState<any>(null); // DASHBOARD_OPERATOR_CLICK_DETAIL_V269
   // DASHBOARD_RESET_SELECTED_RESULTS_V221
   const [selectedMcuIds, setSelectedMcuIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("Pilih modul dan database, lalu klik Tampilkan Dashboard.");
@@ -796,6 +935,13 @@ function AdminDashboard() {
   return (
     <div className="space-y-6">
       {selectedMcuRow && <CapaskaParticipantDetailModal row={selectedMcuRow} onClose={() => setSelectedMcuRow(null)} />}
+      {selectedOperatorProgressV269 && (
+        <OperatorProgressDetailModalV269
+          item={selectedOperatorProgressV269}
+          rows={rows}
+          onClose={() => setSelectedOperatorProgressV269(null)}
+        />
+      )}
 
       <section className={`overflow-hidden rounded-[2rem] bg-gradient-to-r ${activeModule.accent} shadow-sm`}>
         <div className="p-7 text-white">
@@ -1010,7 +1156,17 @@ function AdminDashboard() {
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {mcuOperatorProgressSummaryV251.map((item: any) => (
-                  <div key={item.key} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div
+                    key={item.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedOperatorProgressV269(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") setSelectedOperatorProgressV269(item);
+                    }}
+                    className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 hover:shadow-md"
+                    title={`Lihat peserta sudah dan belum selesai untuk ${item.name}`}
+                  >
                     <div className="text-sm font-black text-slate-900">{item.name}</div>
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       <div>
@@ -1026,6 +1182,7 @@ function AdminDashboard() {
                       <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, Number(item.percent || 0))}%` }} />
                     </div>
                     <div className="mt-2 text-xs font-bold text-slate-500">Rata-rata progress input: {item.avgProgress}%</div>
+                    <div className="mt-2 text-xs font-black text-blue-600">Klik untuk lihat daftar peserta</div>
                   </div>
                 ))}
               </div>
