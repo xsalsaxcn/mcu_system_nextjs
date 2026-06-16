@@ -178,6 +178,18 @@ async function attachCapaskaOperatorScores(args: {
   });
 }
 
+/* OPERATOR_DONE_LIST_SAVED_RESULTS_V249
+   Daftar peserta selesai operator sebelumnya terlalu ketat karena harus memenuhi
+   semua raw parameter dari package mapping. Beberapa stage CAPASKA punya parameter
+   raw/helper/legacy lebih banyak daripada jumlah canonical yang tampil di form
+   (contoh Penyakit Dalam 40 raw vs 28 canonical), sehingga peserta yang sudah submit
+   bisa tetap tidak muncul.
+
+   Patch ini hanya mengubah mode daftar selesai CAPASKA operator agar memakai bukti
+   submit yang sudah tersimpan di examination_results.input_post_id untuk post operator.
+   Scope read-only: tidak mengubah save operator, scoring, setup parameter, mapping,
+   SQL, atau data peserta.
+*/
 async function getCapaskaDoneParticipants(args: {
   supabase: any;
   user: any;
@@ -191,48 +203,38 @@ async function getCapaskaDoneParticipants(args: {
     return { participants: [], has_more: false };
   }
 
-  const { data: postParams, error: paramError } = await supabase
-    .from("parameters")
-    .select("id,name,post_id,sort_order,config_json,input_type,is_active")
-    .eq("post_id", Number(user.post_id))
-    .eq("is_active", 1)
-    .order("sort_order", { ascending: true })
-    .order("id", { ascending: true });
+  const postId = Number(user.post_id);
+  if (!Number.isFinite(postId) || postId <= 0) {
+    return { participants: [], has_more: false };
+  }
 
-  if (paramError) throw new Error(paramError.message);
-
-  const inputParams = (postParams || []).filter((p: any) => includeInProgress(p) && !isScoreHelperParameter(p.name));
-  const inputParamIds = inputParams.map((p: any) => Number(p.id)).filter(Boolean);
-  if (!inputParamIds.length) return { participants: [], has_more: false };
-
-  // Ambil hasil hanya untuk parameter post operator ini.
-  // Ini menghindari N+1 request ke /api/participant untuk setiap peserta.
-  const resultRowLimit = Math.min(10000, Math.max(1500, limit * inputParamIds.length * 8));
+  // Ambil hasil yang benar-benar tersimpan dari submit operator untuk post ini.
+  // Pakai input_post_id agar tidak bergantung pada raw package mapping yang bisa lebih
+  // banyak dari canonical form dan menyebabkan daftar selesai kosong.
+  const resultRowLimit = Math.min(30000, Math.max(5000, limit * 300));
   const { data: resultRows, error: resultError } = await supabase
     .from("examination_results")
-    .select("participant_id,parameter_id,value,updated_at")
-    .in("parameter_id", inputParamIds)
+    .select("participant_id,parameter_id,value,updated_at,created_at,input_post_id")
+    .eq("input_post_id", postId)
     .order("updated_at", { ascending: false, nullsFirst: false })
     .limit(resultRowLimit);
 
   if (resultError) throw new Error(resultError.message);
 
-  const resultByParticipant = new Map<number, Map<number, string>>();
+  const resultByParticipant = new Map<number, number>();
   const latestByParticipant = new Map<number, string>();
 
   for (const row of resultRows || []) {
     if (!nonEmptyValue(row.value)) continue;
 
     const participantId = Number(row.participant_id);
-    const parameterId = Number(row.parameter_id);
-    if (!participantId || !parameterId) continue;
+    if (!participantId) continue;
 
-    if (!resultByParticipant.has(participantId)) resultByParticipant.set(participantId, new Map());
-    resultByParticipant.get(participantId)!.set(parameterId, String(row.value ?? "").trim());
+    resultByParticipant.set(participantId, (resultByParticipant.get(participantId) || 0) + 1);
 
-    const updatedAt = String(row.updated_at || "");
+    const latest = String(row.updated_at || row.created_at || "");
     const currentLatest = latestByParticipant.get(participantId) || "";
-    if (updatedAt > currentLatest) latestByParticipant.set(participantId, updatedAt);
+    if (latest > currentLatest) latestByParticipant.set(participantId, latest);
   }
 
   const candidateParticipantIds = Array.from(resultByParticipant.keys());
@@ -251,37 +253,12 @@ async function getCapaskaDoneParticipants(args: {
     filteredCandidates = filteredCandidates.filter((p: any) => Number(p.source_id) === Number(sourceId));
   }
 
-  const packageIds = Array.from(new Set(filteredCandidates.map((p: any) => Number(p.package_id)).filter(Boolean)));
-  if (!packageIds.length) return { participants: [], has_more: false };
-
-  const { data: packageParameters, error: mappingError } = await supabase
-    .from("package_parameters")
-    .select("package_id,parameter_id")
-    .in("package_id", packageIds)
-    .in("parameter_id", inputParamIds);
-
-  if (mappingError) throw new Error(mappingError.message);
-
-  const requiredParamsByPackage = new Map<number, number[]>();
-  for (const mapping of packageParameters || []) {
-    const packageId = Number(mapping.package_id);
-    const parameterId = Number(mapping.parameter_id);
-    if (!requiredParamsByPackage.has(packageId)) requiredParamsByPackage.set(packageId, []);
-    requiredParamsByPackage.get(packageId)!.push(parameterId);
-  }
-
   const doneParticipants = filteredCandidates
-    .filter((participant: any) => {
-      const packageId = Number(participant.package_id);
-      const requiredParameterIds = requiredParamsByPackage.get(packageId) || [];
-      if (!requiredParameterIds.length) return false;
-
-      const results = resultByParticipant.get(Number(participant.id)) || new Map<number, string>();
-      return requiredParameterIds.every((parameterId) => nonEmptyValue(results.get(parameterId)));
-    })
+    .filter((participant: any) => (resultByParticipant.get(Number(participant.id)) || 0) > 0)
     .map((participant: any) => ({
       ...participant,
       is_done_for_operator: true,
+      operator_saved_result_count: resultByParticipant.get(Number(participant.id)) || 0,
       operator_latest_updated_at: latestByParticipant.get(Number(participant.id)) || null,
     }))
     .sort((a: any, b: any) => {
