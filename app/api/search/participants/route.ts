@@ -317,7 +317,11 @@ async function getCapaskaDoneParticipants(args: {
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
 
-  const limited = doneParticipants.slice(0, limit);
+  // OPERATOR_DONE_LIST_LIMIT_SCORE_V258
+  // Done-list is read-only and must show all saved participants for the operator post.
+  // Keep search pages small, but do not truncate completed operator rows to the UI default limit.
+  const doneListDisplayLimitV258 = Math.max(limit, 1000);
+  const limited = doneParticipants.slice(0, doneListDisplayLimitV258);
   const enriched = await enrichParticipants({ supabase, participants: limited });
   const scored = await attachCapaskaOperatorScores({
     supabase,
@@ -327,8 +331,15 @@ async function getCapaskaDoneParticipants(args: {
     listMode: true,
   });
 
-  return {
+  const scoredWithSavedTotalsV258 = await attachSavedOperatorScoreTotalV253({
+    supabase,
     participants: scored,
+    postId,
+    user,
+  });
+
+  return {
+    participants: scoredWithSavedTotalsV258,
     has_more: doneParticipants.length > limited.length,
   };
 }
