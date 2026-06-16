@@ -88,7 +88,17 @@ function normalizeDashboardStages(stages: any[], participant: any) {
   return (stages || [])
     .filter((stage) => {
       const name = String(stage.post_name || "").toLowerCase().trim();
-      return !(name === "registrasi capaska" || name.startsWith("registrasi capaska"));
+      // SKIP_REGISTRASI_ULANG_STAGE_V271
+      // Registrasi Ulang is an admin data-retrieval/label stage, not a medical operator stage.
+      // Do not count it in dashboard completion/progress totals.
+      return !(
+        name === "registrasi capaska" ||
+        name.startsWith("registrasi capaska") ||
+        name === "registrasi ulang" ||
+        name.startsWith("registrasi ulang") ||
+        name === "registrasiulang" ||
+        name.startsWith("registrasiulang")
+      );
     })
     .map((stage) => {
       const name = String(stage.post_name || "").toLowerCase().trim();

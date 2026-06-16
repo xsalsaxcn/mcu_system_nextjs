@@ -295,6 +295,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [form, setForm] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [printReady, setPrintReady] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -539,6 +540,52 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }
 
+
+  /* DELETE_SELECTED_PARTICIPANT_V271
+     Admin-only UI action. No data changes happen automatically; deletion only runs
+     after the admin clicks Hapus Peserta and confirms by typing HAPUS.
+  */
+  async function deleteSelectedParticipantV271() {
+    if (!form?.id) return;
+
+    const label = String(form.name || form.mcu_id || form.external_id || form.id || 'Peserta');
+    const okFirst = window.confirm('Hapus peserta "' + label + '"? Tindakan ini akan menghapus data peserta terpilih dan hasil pemeriksaannya.');
+    if (!okFirst) return;
+
+    const typed = window.prompt('Ketik HAPUS untuk konfirmasi penghapusan peserta terpilih.');
+    if (typed !== 'HAPUS') {
+      setMessage('Hapus peserta dibatalkan. Konfirmasi tidak sesuai.');
+      return;
+    }
+
+    setDeleting(true);
+    setMessage('Menghapus peserta terpilih...');
+
+    try {
+      const res = await fetch('/api/registrasi-ulang/participant?id=' + encodeURIComponent(String(form.id)), {
+        method: 'DELETE',
+        cache: 'no-store'
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.ok) {
+        setMessage(json.message || 'Gagal menghapus peserta.');
+        return;
+      }
+
+      setForm(null);
+      setSelected(null);
+      setResults([]);
+      setKeyword('');
+      setPrintReady(false);
+      setMessage(json.message || 'Peserta berhasil dihapus.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Gagal menghapus peserta.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function printBarcode() {
     setPrintReady(true);
     setTimeout(() => window.print(), 300);
@@ -650,7 +697,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v38 Ã‚Â· auto close hasil retrieve
+          Registrasi Ulang v38  -  auto close hasil retrieve
         </div>
       </section>
 
@@ -710,7 +757,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               >
                 <div className="font-black">{p.name}</div>
                 <div className="text-sm text-slate-500">
-                  {p.mcu_id || p.external_id || "-"} Ã‚Â· NIK {p.employee_nik || p.nik || "-"} Ã‚Â· MCU {formatDate(p.examination_date || p.exam_date)} Ã‚Â· Lahir {formatDate(p.birth_date || p.date_of_birth)} Ã‚Â· {p.source_name || "-"}
+                  {p.mcu_id || p.external_id || "-"}  -  NIK {p.employee_nik || p.nik || "-"}  -  MCU {formatDate(p.examination_date || p.exam_date)}  -  Lahir {formatDate(p.birth_date || p.date_of_birth)}  -  {p.source_name || "-"}
                 </div>
               </button>
             ))}
@@ -734,6 +781,14 @@ function RegistrasiUlang({ user }: { user: any }) {
               </button>
               <button type="button" className="btn-secondary" onClick={() => fileRef.current?.click()}>
                 Upload dari Galeri
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+                disabled={saving || deleting || !form?.id}
+                onClick={deleteSelectedParticipantV271}
+              >
+                {deleting ? "Menghapus..." : "Hapus Peserta"}
               </button>
               <button type="button" className="btn-primary" disabled={saving} onClick={save}>
                 {saving ? "Menyimpan..." : "Save"}
