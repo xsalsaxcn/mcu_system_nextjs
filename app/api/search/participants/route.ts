@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
-import { computeCapaskaDerivedValues } from "@/lib/shared/capaskaDirectScoring2026";
+import { computeCapaskaDerivedValues, computeMcuParticipantScoring2026 } from "@/lib/shared/capaskaDirectScoring2026";
 
 function normalizeProgram(value: any) {
   return String(value || "").trim().toLowerCase();
@@ -375,14 +375,86 @@ async function getCapaskaDoneParticipants(args: {
   };
 }
 
-/* OPERATOR_DONE_SCORE_COMPONENT_FALLBACK_V261
-   Read-only score display fix for operator done-list preview.
-   Some legacy rows keep "Score total ..." as 0 even though component score rows
-   already contain the correct stage score. For display only, use the non-zero
-   saved total when available; otherwise sum component score rows for the same
-   operator post. This does not write to database, does not change save logic,
-   does not change setup parameters, and does not change form scoring.
+/* OPERATOR_DONE_SCORE_DASHBOARD_RECOMPUTE_V263
+   Read-only score preview fix for operator done-list.
+   The operator list keeps the exact same UI and edit flow, but the displayed score
+   is recalculated with the same CAPASKA scoring engine used by the admin dashboard.
+   This prevents legacy hidden rows such as "Score total ... = 0" from hiding the
+   real stage score. No database writes, no save changes, no setup/mapping changes.
 */
+function normalizePostNameForScoreV263(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capaskaDomainKeyFromPostNameV263(value: any): string | null {
+  const text = normalizePostNameForScoreV263(value);
+  if (!text) return null;
+  if (text.includes("mata")) return "mata";
+  if (text.includes("gigi") || text.includes("dental")) return "gigi_mulut";
+  if (text.includes("tht")) return "tht";
+  if (text.includes("penyakit") || text.includes("dalam")) return "penyakit_dalam";
+  if (text.includes("jantung") || text.includes("pembuluh")) return "jantung_pembuluh_darah";
+  if (text.includes("ortopedi") || text.includes("orthopedi")) return "ortopedi";
+  if (text.includes("radiologi") || text.includes("rontgen")) return "radiologi";
+  return null;
+}
+
+function toNumberV263(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim().replace(",", ".").replace(/[^0-9.\-]/g, "");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isTotalScoreNameV263(value: any) {
+  const name = normalizePostNameForScoreV263(value);
+  return name.startsWith("score total") ||
+    name.startsWith("total score") ||
+    name.includes("score total") ||
+    name.includes("total score") ||
+    name.includes("skor total");
+}
+
+function isComponentScoreNameV263(value: any) {
+  const name = normalizePostNameForScoreV263(value);
+  if (!name || isTotalScoreNameV263(name)) return false;
+  return name.startsWith("score ") || name.startsWith("skor ");
+}
+
+async function fetchPagedResultsForParticipantIdsV263(supabase: any, participantIds: number[]) {
+  const allRows: any[] = [];
+  const chunkSize = 250;
+  const pageSize = 1000;
+  const maxPages = 100;
+
+  for (let i = 0; i < participantIds.length; i += chunkSize) {
+    const chunk = participantIds.slice(i, i + chunkSize);
+    for (let page = 0; page < maxPages; page++) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await supabase
+        .from("examination_results")
+        .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
+        .in("participant_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (error) throw new Error(error.message);
+      const rows = Array.isArray(data) ? data : [];
+      allRows.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+  }
+
+  return allRows;
+}
+
 async function attachSavedOperatorScoreTotalV253(args: any) {
   const supabase = args?.supabase;
   const participants = Array.isArray(args?.participants) ? args.participants : [];
@@ -395,136 +467,147 @@ async function attachSavedOperatorScoreTotalV253(args: any) {
     .filter((id: number) => Number.isFinite(id) && id > 0);
   if (!participantIds.length) return participants;
 
-  const rowLimit = Math.min(60000, Math.max(8000, participantIds.length * 160));
-  const { data: rows, error } = await supabase
-    .from("examination_results")
-    .select("participant_id,parameter_id,value,input_post_id,updated_at,created_at")
-    .in("participant_id", participantIds)
-    .eq("input_post_id", postId)
-    .limit(rowLimit);
+  const { data: postRow } = await supabase
+    .from("posts")
+    .select("id,name")
+    .eq("id", postId)
+    .maybeSingle();
+  const domainKey = capaskaDomainKeyFromPostNameV263(postRow?.name || postId);
 
-  if (error || !Array.isArray(rows) || !rows.length) return participants;
-
-  const parameterIds = Array.from(
-    new Set(rows.map((r: any) => Number(r?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0))
+  const packageIds = Array.from(
+    new Set(participants.map((p: any) => Number(p?.package_id)).filter((id: number) => Number.isFinite(id) && id > 0))
   );
-  if (!parameterIds.length) return participants;
 
-  const { data: params, error: paramError } = await supabase
-    .from("parameters")
-    .select("id,name,category,post_id")
-    .in("id", parameterIds);
+  let packageParameters: any[] = [];
+  let parameters: any[] = [];
 
-  if (paramError || !Array.isArray(params)) return participants;
+  if (packageIds.length) {
+    const { data: ppRows, error: ppError } = await supabase
+      .from("package_parameters")
+      .select("package_id,parameter_id")
+      .in("package_id", packageIds);
+    if (!ppError && Array.isArray(ppRows)) packageParameters = ppRows;
+
+    const parameterIds = Array.from(
+      new Set(packageParameters.map((pp: any) => Number(pp?.parameter_id)).filter((id: number) => Number.isFinite(id) && id > 0))
+    );
+
+    if (parameterIds.length) {
+      const paramChunks: any[] = [];
+      const chunkSize = 800;
+      for (let i = 0; i < parameterIds.length; i += chunkSize) {
+        const chunk = parameterIds.slice(i, i + chunkSize);
+        const { data: paramRows, error: paramError } = await supabase
+          .from("parameters")
+          .select("*")
+          .in("id", chunk);
+        if (!paramError && Array.isArray(paramRows)) paramChunks.push(...paramRows);
+      }
+      parameters = paramChunks;
+    }
+  }
+
+  const allResults = await fetchPagedResultsForParticipantIdsV263(supabase, participantIds);
 
   const paramById = new Map<number, any>();
-  for (const param of params) paramById.set(Number(param?.id), param);
+  for (const param of parameters || []) paramById.set(Number(param?.id), param);
 
-  const toNumberV261 = (value: any): number | null => {
-    if (value === null || value === undefined) return null;
-    const raw = String(value).trim().replace(",", ".");
-    if (!raw) return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
+  const rowsByParticipant = new Map<number, any[]>();
+  const postRowsByParticipant = new Map<number, any[]>();
 
-  const normNameV261 = (value: any) => String(value || "").trim().toLowerCase();
-  const isTotalScoreNameV261 = (name: string) => {
-    const n = normNameV261(name);
-    return (
-      n.startsWith("score total") ||
-      n.startsWith("total score") ||
-      n.includes("score total") ||
-      n.includes("total score") ||
-      n.includes("skor total")
-    );
-  };
-  const isComponentScoreNameV261 = (name: string) => {
-    const n = normNameV261(name);
-    if (!n) return false;
-    if (isTotalScoreNameV261(n)) return false;
-    return n.startsWith("score ") || n.startsWith("skor ");
-  };
-
-  const statsByParticipant = new Map<number, { totalScores: number[]; componentScores: number[]; latestAt: string }>();
-
-  for (const row of rows) {
+  for (const row of allResults) {
     const participantId = Number(row?.participant_id);
     if (!participantId) continue;
 
+    if (!rowsByParticipant.has(participantId)) rowsByParticipant.set(participantId, []);
+    rowsByParticipant.get(participantId)!.push(row);
+
     const param = paramById.get(Number(row?.parameter_id));
-    const name = String(param?.name || "");
-    const numericValue = toNumberV261(row?.value);
-    if (numericValue === null) continue;
-
-    let stat = statsByParticipant.get(participantId);
-    if (!stat) {
-      stat = { totalScores: [], componentScores: [], latestAt: "" };
-      statsByParticipant.set(participantId, stat);
-    }
-
-    if (isTotalScoreNameV261(name)) {
-      stat.totalScores.push(numericValue);
-    } else if (isComponentScoreNameV261(name)) {
-      stat.componentScores.push(numericValue);
-    }
-
-    const latest = String(row?.updated_at || row?.created_at || "");
-    if (latest > stat.latestAt) stat.latestAt = latest;
-  }
-
-  const effectiveScoreByParticipant = new Map<number, { score: number; componentSum: number | null; savedTotal: number | null }>();
-
-  for (const [participantId, stat] of statsByParticipant.entries()) {
-    const nonZeroTotals = stat.totalScores.filter((score) => score !== 0);
-    const savedTotal = nonZeroTotals.length
-      ? nonZeroTotals[nonZeroTotals.length - 1]
-      : (stat.totalScores.length ? stat.totalScores[stat.totalScores.length - 1] : null);
-    const componentSum = stat.componentScores.length
-      ? stat.componentScores.reduce((sum, score) => sum + score, 0)
-      : null;
-
-    let effectiveScore: number | null = null;
-
-    if (savedTotal !== null && savedTotal !== 0) {
-      effectiveScore = savedTotal;
-    } else if (componentSum !== null && componentSum !== 0) {
-      effectiveScore = componentSum;
-    } else if (savedTotal !== null) {
-      effectiveScore = savedTotal;
-    }
-
-    if (effectiveScore !== null) {
-      effectiveScoreByParticipant.set(participantId, { score: effectiveScore, componentSum, savedTotal });
+    const belongsToPost = Number(row?.input_post_id) === postId || Number(param?.post_id) === postId;
+    if (belongsToPost) {
+      if (!postRowsByParticipant.has(participantId)) postRowsByParticipant.set(participantId, []);
+      postRowsByParticipant.get(participantId)!.push(row);
     }
   }
 
-  if (!effectiveScoreByParticipant.size) return participants;
+  const packageParamsByPackage = new Map<number, any[]>();
+  for (const pp of packageParameters || []) {
+    const packageId = Number(pp?.package_id);
+    if (!packageParamsByPackage.has(packageId)) packageParamsByPackage.set(packageId, []);
+    packageParamsByPackage.get(packageId)!.push(pp);
+  }
 
   return participants.map((participant: any) => {
     const participantId = Number(participant?.id);
-    const effective = effectiveScoreByParticipant.get(participantId);
-    if (!effective) return participant;
+    const packageId = Number(participant?.package_id);
+    const stageRows = postRowsByParticipant.get(participantId) || [];
+    const participantResults = rowsByParticipant.get(participantId) || [];
 
-    const score = effective.score;
-    const label = String(score);
+    let dashboardStageScore: number | null = null;
+    if (domainKey && stageRows.length && packageId && parameters.length && packageParameters.length) {
+      try {
+        const scoring = computeMcuParticipantScoring2026({
+          participantId,
+          packageId,
+          packageParameters,
+          parameters,
+          results: participantResults,
+          program: "capaska",
+        } as any);
+        const rawScore = toNumberV263((scoring as any)?.domainScores?.[domainKey]);
+        if (rawScore !== null) dashboardStageScore = rawScore;
+      } catch {
+        dashboardStageScore = null;
+      }
+    }
 
+    let savedTotal: number | null = null;
+    let savedNonZeroTotal: number | null = null;
+    let componentSum: number | null = null;
+
+    for (const row of stageRows) {
+      const param = paramById.get(Number(row?.parameter_id));
+      const name = String(param?.name || "");
+      const numeric = toNumberV263(row?.value);
+      if (numeric === null) continue;
+
+      if (isTotalScoreNameV263(name)) {
+        savedTotal = numeric;
+        if (numeric !== 0) savedNonZeroTotal = numeric;
+      } else if (isComponentScoreNameV263(name)) {
+        componentSum = (componentSum || 0) + numeric;
+      }
+    }
+
+    let effectiveScore: number | null = null;
+
+    // Prefer the dashboard scoring engine. If legacy names prevent dashboard scoring
+    // from finding the domain, fall back to saved non-zero total / component score.
+    if (dashboardStageScore !== null && dashboardStageScore !== 0) effectiveScore = dashboardStageScore;
+    else if (savedNonZeroTotal !== null) effectiveScore = savedNonZeroTotal;
+    else if (componentSum !== null && componentSum !== 0) effectiveScore = componentSum;
+    else if (dashboardStageScore !== null) effectiveScore = dashboardStageScore;
+    else if (savedTotal !== null) effectiveScore = savedTotal;
+
+    if (effectiveScore === null) return participant;
+
+    const label = String(effectiveScore);
     return {
       ...participant,
-      score,
-      total_score: score,
-      final_score: score,
-      stage_score: score,
-      operator_score: score,
-      score_akhir: score,
-      operator_final_score: score,
+      score: effectiveScore,
+      total_score: effectiveScore,
+      final_score: effectiveScore,
+      stage_score: effectiveScore,
+      operator_score: effectiveScore,
+      score_akhir: effectiveScore,
+      operator_final_score: effectiveScore,
       operator_final_score_label: label,
       score_label: label,
       final_score_label: label,
-      saved_total_score_v253: score,
-      saved_total_score_effective_v260: score,
-      score_component_sum_v261: effective.componentSum,
-      saved_total_score_raw_v261: effective.savedTotal,
+      saved_total_score_v253: savedTotal,
+      score_component_sum_v261: componentSum,
+      dashboard_stage_score_v263: dashboardStageScore,
+      operator_done_score_source_v263: dashboardStageScore !== null ? "dashboard_recompute" : (savedNonZeroTotal !== null ? "saved_total" : (componentSum !== null ? "component_sum" : "saved_total_zero")),
     };
   });
 }
