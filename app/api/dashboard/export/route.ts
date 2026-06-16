@@ -779,6 +779,44 @@ function displayKelulusanExportV199(value: any) {
   return text;
 }
 
+
+/* DASHBOARD_EXPORT_FETCH_ALL_RESULTS_V302
+   Export lengkap CAPASKA harus mengambil semua examination_results.
+   Supabase/PostgREST query .select().in() bisa kembali hanya batch terbatas,
+   sehingga hanya sebagian peserta yang punya value di Excel. Helper ini membaca
+   results per chunk participant_id dan per halaman 1000 row. Read-only.
+*/
+async function fetchAllDashboardExportResultsV302(supabase: any, participantIds: number[]) {
+  const ids = Array.from(new Set((participantIds || []).map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0)));
+  const allRows: any[] = [];
+  const chunkSize = 150;
+  const pageSize = 1000;
+  const maxPages = 100;
+
+  if (!ids.length) return { data: allRows, error: null };
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    for (let page = 0; page < maxPages; page++) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await supabase
+        .from("examination_results")
+        .select("*")
+        .in("participant_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      if (error) return { data: allRows, error };
+      const rows = Array.isArray(data) ? data : [];
+      allRows.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+  }
+
+  return { data: allRows, error: null };
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
@@ -844,7 +882,7 @@ export async function GET(req: NextRequest) {
     packageIds.length ? supabase.from("package_parameters").select("*").in("package_id", packageIds) : Promise.resolve({ data: [] }),
     supabase.from("parameters").select("*").eq("is_active", 1),
     supabase.from("posts").select("*"),
-    participantIds.length ? supabase.from("examination_results").select("*").in("participant_id", participantIds) : Promise.resolve({ data: [] }),
+    fetchAllDashboardExportResultsV302(supabase, participantIds),
     supabase.from("packages").select("id,name,program_type"),
     supabase.from("participant_sources").select("id,name,institution_name"),
     supabase.from("graduation_rules").select("*")
