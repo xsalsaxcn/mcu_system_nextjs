@@ -736,6 +736,61 @@ function AdminDashboard() {
     return [...searchedRows].sort((a: any, b: any) => compareSortValues(a, b, sortConfig, isVaccination));
   }, [rows, search, isVaccination, isWellness, sortConfig]);
 
+  // DASHBOARD_OPERATOR_PROGRESS_V251
+  // Read-only summary for admin: percentage and completed participant count per MCU operator/stage.
+  // It uses rows already returned by /api/dashboard, so it does not change saving, scoring, setup parameter, or database data.
+  const mcuOperatorProgressSummaryV251 = useMemo(() => {
+    if (isWellness || isVaccination || !Array.isArray(rows) || !rows.length) return [];
+
+    type OperatorProgressItemV251 = {
+      key: string;
+      name: string;
+      order: number;
+      total: number;
+      done: number;
+      progressSum: number;
+    };
+
+    const summaryMap = new Map<string, OperatorProgressItemV251>();
+    let orderCounter = 0;
+
+    rows.forEach((row: any) => {
+      const stages = Array.isArray(row?.stages) ? row.stages : [];
+
+      stages.forEach((stage: any) => {
+        const name = String(stage?.post_name || stage?.name || stage?.title || "").trim();
+        if (!name) return;
+
+        const normalizedName = name.toLowerCase();
+        if (normalizedName.includes("registrasi")) return;
+
+        const key = String(stage?.post_id || name);
+        let item = summaryMap.get(key);
+        if (!item) {
+          item = { key, name, order: orderCounter++, total: 0, done: 0, progressSum: 0 };
+          summaryMap.set(key, item);
+        }
+
+        const totalParams = Number(stage?.total_parameters || 0);
+        const filledParams = Number(stage?.filled_parameters || 0);
+        const stagePercent = totalParams > 0
+          ? Math.min(100, Math.round((filledParams / totalParams) * 1000) / 10)
+          : (stage?.is_done ? 100 : 0);
+
+        item.total += 1;
+        item.done += stage?.is_done ? 1 : 0;
+        item.progressSum += Number.isFinite(stagePercent) ? stagePercent : 0;
+      });
+    });
+
+    return Array.from(summaryMap.values())
+      .map((item) => ({
+        ...item,
+        percent: item.total ? Math.round((item.done / item.total) * 1000) / 10 : 0,
+        avgProgress: item.total ? Math.round((item.progressSum / item.total) * 10) / 10 : 0,
+      }))
+      .sort((a, b) => a.order - b.order);
+  }, [isVaccination, isWellness, rows]);
   const canClickMcuMetric = !isWellness && mcuProgram === "capaska";
 
   return (
@@ -939,7 +994,43 @@ function AdminDashboard() {
               />
             </section>
           )}
+          {!isWellness && !isVaccination && mcuOperatorProgressSummaryV251.length ? (
+            <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <div className="text-xl font-black text-slate-900">Progress Selesai per Operator</div>
+                  <div className="text-sm font-semibold text-slate-500">
+                    Menampilkan jumlah peserta selesai dan persentase selesai per stage/operator berdasarkan filter dashboard saat ini.
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">
+                  DASHBOARD_OPERATOR_PROGRESS_V251
+                </div>
+              </div>
 
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {mcuOperatorProgressSummaryV251.map((item: any) => (
+                  <div key={item.key} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-sm font-black text-slate-900">{item.name}</div>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">Selesai</div>
+                        <div className="text-2xl font-black text-slate-950">{item.done}/{item.total}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">Persen</div>
+                        <div className="text-2xl font-black text-blue-700">{item.percent}%</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-2 rounded-full bg-white">
+                      <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, Number(item.percent || 0))}%` }} />
+                    </div>
+                    <div className="mt-2 text-xs font-bold text-slate-500">Rata-rata progress input: {item.avgProgress}%</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <section className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
               <div>
