@@ -652,8 +652,21 @@ export async function GET(req: NextRequest) {
     const completionStagesV282 = isCapaskaProgram
       ? stages.filter((stage: any) => capaskaDashboardProgressNormV153(stage?.post_name || stage?.name || stage?.title) !== "registrasi ulang")
       : stages;
-    const done = completionStagesV282.filter((s: any) => s.is_done).length;
-    const total = completionStagesV282.length;
+    // DASHBOARD_EXPORT_SKIP_REGISTRASI_COMPLETED_V285
+    // Full CAPASKA export follows dashboard completion: medical/operator stages only, not Registrasi Ulang.
+    const medicalStagesV285 = (Array.isArray(stages) ? stages : []).filter((stage: any) => {
+      const stageName = String(stage?.post_name || stage?.name || stage?.title || stage?.stage_name || "")
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return !(stageName.includes("registrasi") && stageName.includes("ulang"));
+    });
+    const effectiveStagesV285 = medicalStagesV285.length ? medicalStagesV285 : stages;
+    const done = effectiveStagesV285.filter((s: any) => s.is_done).length;
+    const total = effectiveStagesV285.length;
     const complete = total > 0 && done >= total;
     const scoreResult = computeMcuParticipantScoring2026({
       participantId: Number(p.id),
