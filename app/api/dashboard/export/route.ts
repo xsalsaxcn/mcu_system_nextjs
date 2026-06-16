@@ -639,118 +639,6 @@ function noteDecisionV301(stageKey: string, param: any, value: any, score: any) 
 
   return { include: false, red: false };
 }
-
-
-// DASHBOARD_EXPORT_PD_MAX_SCORE_V303
-// Export-only correction: Penyakit Dalam maximum is 28. A participant with normal/eligible PD form values
-// and the old computed score 27 should be displayed as 28 in export sheets.
-function isPdVitalParamV303(param: any) {
-  const name = paramNameStatusSheetV295(param);
-  return name.includes("suhu") ||
-    name.includes("nadi") ||
-    name.includes("napas") ||
-    name.includes("nafas") ||
-    name.includes("tekanan darah") ||
-    name.includes("tensi") ||
-    name.includes("tanda vital");
-}
-
-function isPdParamV303(param: any) {
-  const postId = Number(param?.post_id ?? 0);
-  const name = paramNameStatusSheetV295(param);
-  const category = normStatusSheetV179(param?.category || "");
-  return postId === 5 ||
-    category.includes("penyakit dalam") ||
-    name.includes("penyakit dalam") ||
-    isPdVitalParamV303(param) ||
-    isHeightParamStatusSheetV179(param) ||
-    isWeightParamStatusSheetV179(param);
-}
-
-function isBlankLikePdV303(value: any) {
-  const text = normStatusSheetV179(value);
-  return !text || [".", "-", "n/a", "na", "n.a", "n.a.", "tidak", "tidak ada catatan", "tidak ada catatan khusus", "tidak ada kondisi khusus", "tidak ada keluhan", "tidak ada temuan", "tanpa catatan", "nihil"].includes(text);
-}
-
-function isPdVitalNormalV303(value: any) {
-  const text = normStatusSheetV179(value);
-  if (!text || text.includes("tidak normal") || text.includes("abnormal")) return false;
-  if (text === "normal" || text.includes("normal")) return true;
-  // Accept raw vital signs such as 36.8/92/20/100/60 as normal entries for the export max-score correction.
-  return /^[-+]?d[ds.,/:;-]*$/.test(text);
-}
-
-function isPdNormalValueV303(param: any, value: any) {
-  const text = normStatusSheetV179(value);
-  if (!text || isBlankLikePdV303(value)) return false;
-  if (isHeightParamStatusSheetV179(param) || isWeightParamStatusSheetV179(param)) {
-    if (isTbBbTidakSesuaiJuknisStatusSheetV201(value)) return false;
-    if (isTbBbSesuaiJuknisStatusSheetV201(value)) return true;
-    return numberFromStatusSheetV179(value) !== null;
-  }
-  if (isPdVitalParamV303(param)) return isPdVitalNormalV303(value);
-  if (text.includes("tidak sesuai") || text.includes("tidak normal") || text.includes("abnormal")) return false;
-  if (text.includes("ada tato") || text === "ada" || text.startsWith("ada ")) return false;
-  if (text.includes("positif") || text.includes("(+)") || text === "+") return false;
-  if (text === "normal" || (text.includes("normal") && !text.includes("tidak normal"))) return true;
-  if (text.includes("sesuai juknis") || text === "sesuai") return true;
-  if (text.includes("tidak ada") || text.includes("tanpa")) return true;
-  if (text === "(-)" || text === "-" || text.includes("negatif")) return true;
-  if (/^[-+]?d[ds.,/:;-]*$/.test(text)) return true;
-  return false;
-}
-
-function hasPdAbnormalValueV303(param: any, value: any) {
-  if (isBlankLikePdV303(value)) return false;
-  if (isPdNormalValueV303(param, value)) return false;
-  const text = normStatusSheetV179(value);
-  if (isFreeNoteParamStatusSheetV295(param)) return true;
-  return text.includes("tidak sesuai") ||
-    text.includes("tidak normal") ||
-    text.includes("abnormal") ||
-    text.includes("ada tato") ||
-    text === "ada" ||
-    text.startsWith("ada ") ||
-    text.includes("positif") ||
-    text.includes("(+)");
-}
-
-function isPenyakitDalamNormalMaxEligibleV303(participant: any, exportParameters: any[], resultByParticipantParam: Map<any, any>, makeKey: any) {
-  const participantId = Number(participant?.id ?? participant?.["Participant ID"] ?? 0);
-  if (!participantId) return false;
-  let hasPdValue = false;
-  let hasNormalVital = false;
-  for (const param of exportParameters || []) {
-    if (!isPdParamV303(param)) continue;
-    const result = resultByParticipantParam.get(makeKey(participantId, Number(param.id)));
-    const value = cleanStatusSheetV179(result?.value ?? "");
-    if (!value || isBlankLikePdV303(value)) continue;
-    hasPdValue = true;
-    if (isPdVitalParamV303(param) && isPdVitalNormalV303(value)) hasNormalVital = true;
-    if (hasPdAbnormalValueV303(param, value)) return false;
-  }
-  return hasPdValue && hasNormalVital;
-}
-
-function exportQuestionScoreV303(param: any, value: any, scoreCapaskaDirectChoice: any) {
-  if (isPdVitalParamV303(param) && isPdVitalNormalV303(value)) return 2;
-  return value ? exportQuestionScoreV303(param, String(value), scoreCapaskaDirectChoice) : "";
-}
-
-function exportPenyakitDalamScoreV303(progressInfo: any, participant: any, exportParameters: any[], resultByParticipantParam: Map<any, any>, makeKey: any, scoreCapaskaDirectChoice: any) {
-  const raw = Number(progressInfo?.["Penyakit Dalam"] ?? progressInfo?.penyakit_dalam ?? NaN);
-  if (raw === 27 && isPenyakitDalamNormalMaxEligibleV303(participant, exportParameters, resultByParticipantParam, makeKey)) return 28;
-  return progressInfo?.["Penyakit Dalam"] ?? progressInfo?.penyakit_dalam ?? "";
-}
-
-function exportTotalScoreWithPdFixV303(progressInfo: any, participant: any, exportParameters: any[], resultByParticipantParam: Map<any, any>, makeKey: any, scoreCapaskaDirectChoice: any) {
-  const rawTotal = Number(progressInfo?.["Total Score"] ?? NaN);
-  const rawPd = Number(progressInfo?.["Penyakit Dalam"] ?? NaN);
-  const fixedPd = Number(exportPenyakitDalamScoreV303(progressInfo, participant, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice));
-  if (Number.isFinite(rawTotal) && rawPd === 27 && fixedPd === 28) return rawTotal + 1;
-  return progressInfo?.["Total Score"] ?? "";
-}
-
 function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
   // DASHBOARD_EXPORT_STATUS_NOTES_EVALUATE_V295
   // Status/catatan follows actual abnormal answers from the form.
@@ -807,7 +695,7 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       }
       const stageKey = stageKeyStatusSheetV179(paramText);
       if (!stageKey || !notesByStage[stageKey]) continue;
-      const score = value ? exportQuestionScoreV303(param, value, scoreCapaskaDirectChoice) : "";
+      const score = value ? scoreCapaskaDirectChoice(param, value) : "";
       const decisionV301 = noteDecisionV301(stageKey, param, value, score);
       if (decisionV301.include) {
         const note = `${param.name}: ${value}`;
@@ -863,7 +751,7 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       "CATATAN ORTOPEDI": stageEval.ortopedi.note,
       "STATUS RADIOLOGI": stageEval.radiologi.status,
       "CATATAN RADIOLOGI": stageEval.radiologi.note,
-      "TOTAL SKOR": exportTotalScoreWithPdFixV303(progressInfo, participant, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice),
+      "TOTAL SKOR": progressInfo?.["Total Score"] ?? "",
       "STATUS AKHIR": finalStatus,
       "RINGKASAN CATATAN": allNotes.join(" | "),
       "TEMUAN MERAH / RED FLAG": redFindings.join(" | ") || progressInfo?.["Red Flag"] || "",
@@ -1209,7 +1097,7 @@ export async function GET(req: NextRequest) {
           "Kategori": parameter?.category || "-",
           "Parameter": parameter?.name || "-",
           "Hasil": value,
-          ...(isCapaskaProgram ? { "Skor": value ? exportQuestionScoreV303(parameter, String(value), scoreCapaskaDirectChoice) : "" } : {}),
+          ...(isCapaskaProgram ? { "Skor": value ? scoreCapaskaDirectChoice(parameter, String(value)) : "" } : {}),
           "Updated At": formatTimestamp(r.updated_at || r.created_at || "")
         };
       })
@@ -1333,7 +1221,7 @@ export async function GET(req: NextRequest) {
             const result = resultByParticipantParam.get(makeKey(Number(participant.id), Number(param.id)));
             const value = String(result?.value ?? "").trim();
             row[valueHeader] = value;
-            row[scoreHeader] = value ? exportQuestionScoreV303(param, value, scoreCapaskaDirectChoice) : "";
+            row[scoreHeader] = value ? scoreCapaskaDirectChoice(param, value) : "";
           });
 
           doctorPostsV185.forEach((post: any) => {
@@ -1344,7 +1232,7 @@ export async function GET(req: NextRequest) {
           row["Skor Mata"] = progressInfo?.["Mata"] ?? "";
           row["Skor Gigi Mulut"] = progressInfo?.["Gigi Mulut"] ?? "";
           row["Skor THT"] = progressInfo?.["THT"] ?? "";
-          row["Skor Penyakit Dalam"] = exportPenyakitDalamScoreV303(progressInfo, participant, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice);
+          row["Skor Penyakit Dalam"] = progressInfo?.["Penyakit Dalam"] ?? "";
           row["Skor Jantung Pembuluh Darah"] = progressInfo?.["Jantung Pembuluh Darah"] ?? "";
           row["Skor Ortopedi"] = progressInfo?.["Ortopedi"] ?? "";
           row["Skor Radiologi"] = progressInfo?.["Radiologi"] ?? "";
@@ -1352,7 +1240,7 @@ export async function GET(req: NextRequest) {
           row["Scoring Version"] = progressInfo?.["Scoring Version"] || "";
           row["Progress %"] = progressInfo?.["Progress %"] ?? 100;
           // Sengaja diletakkan paling akhir sesuai request.
-          row["Total Skor Akhir"] = exportTotalScoreWithPdFixV303(progressInfo, participant, exportParameters, resultByParticipantParam, makeKey, scoreCapaskaDirectChoice);
+          row["Total Skor Akhir"] = progressInfo?.["Total Score"] ?? "";
 
           return row;
         });
