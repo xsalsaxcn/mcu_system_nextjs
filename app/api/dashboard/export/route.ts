@@ -646,8 +646,14 @@ export async function GET(req: NextRequest) {
       p
     );
 
-    const done = stages.filter((s) => s.is_done).length;
-    const total = stages.length;
+    // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
+    // Export lengkap CAPASKA follows the historical finished-report rule:
+    // completed medical stages only; Registrasi Ulang is not a required export stage.
+    const completionStagesV282 = isCapaskaProgram
+      ? stages.filter((stage: any) => capaskaDashboardProgressNormV153(stage?.post_name || stage?.name || stage?.title) !== "registrasi ulang")
+      : stages;
+    const done = completionStagesV282.filter((s: any) => s.is_done).length;
+    const total = completionStagesV282.length;
     const complete = total > 0 && done >= total;
     const scoreResult = computeMcuParticipantScoring2026({
       participantId: Number(p.id),
@@ -767,25 +773,25 @@ export async function GET(req: NextRequest) {
 
 
 
-    // DASHBOARD_EXPORT_COMPLETED_ONLY_V281
-    // Full CAPASKA export: only fully completed participants are included in detail, wide, and recap sheets.
-    // Red Flag remains recorded and Total Skor Akhir remains at the far end of the wide sheet.
-    const completedProgressRows = progressRows.filter((row: any) =>
+    // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
+    // Export hasil-pemeriksaan-lengkap keeps historical meaning:
+    // only fully completed participants appear in Hasil Pemeriksaan, Hasil Wide Selesai, and Rekap Status & Catatan.
+    let completedProgressRows = progressRows.filter((row: any) =>
       row["Status Progress"] === "Selesai" && Number(row["Progress %"] || 0) >= 100
     );
 
-    const completedNoMcuForResultRowsV281 = new Set(
+    const completedNoMcuForResultRowsV282 = new Set(
       completedProgressRows
         .map((row: any) => String(row["No MCU"] || "").trim())
         .filter(Boolean)
     );
-
-    const resultRowsForSheetV281 = (isCapaskaProgram && type === "full")
-      ? (resultRows as any[]).filter((row: any) => completedNoMcuForResultRowsV281.has(String(row["No MCU"] || "").trim()))
+    const resultRowsForSheetV282 = (isCapaskaProgram && type === "full")
+      ? (resultRows as any[]).filter((row: any) => completedNoMcuForResultRowsV282.has(String(row["No MCU"] || "").trim()))
       : resultRows;
+    appendJsonSheet(workbook, resultRowsForSheetV282 as any[], "Hasil Pemeriksaan", resultHeaders);
 
-    appendJsonSheet(workbook, resultRowsForSheetV281 as any[], "Hasil Pemeriksaan", resultHeaders);
-
+    // DASHBOARD_EXPORT_RESTORE_HISTORY_V282
+    // No V273 include-all override here; wide and recap sheets remain completed-only.
     const completedParticipantIds = new Set(completedProgressRows.map((row: any) => Number(row["Participant ID"])));
 
     const exportParameters = Array.from(new Map(
