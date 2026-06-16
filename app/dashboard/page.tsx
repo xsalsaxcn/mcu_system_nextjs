@@ -411,8 +411,50 @@ function getOperatorStageFromRowV269(row: any, item: any) {
   });
 }
 
+// DASHBOARD_OPERATOR_STAFF_SORT_V277
+type OperatorDetailSortKeyV277 = "name" | "mcu" | "database" | "package" | "staff" | "progress" | "status";
+
+function getOperatorDetailSortValueV277(entry: any, key: OperatorDetailSortKeyV277) {
+  const row = entry?.row || {};
+  if (key === "name") return String(row.name || "");
+  if (key === "mcu") return String(row.mcu_id || row.external_id || "");
+  if (key === "database") return String(row.source_name || row.institution_name || "");
+  if (key === "package") return String(row.package_name || "");
+  if (key === "staff") return String(entry?.staffName || entry?.stage?.staff_name || "");
+  if (key === "progress") return Number(entry?.percent || 0);
+  if (key === "status") return entry?.done ? "Sudah" : "Belum";
+  return "";
+}
+
+function compareOperatorDetailRowsV277(a: any, b: any, sortState: { key: OperatorDetailSortKeyV277; direction: "asc" | "desc" }) {
+  const av = getOperatorDetailSortValueV277(a, sortState.key);
+  const bv = getOperatorDetailSortValueV277(b, sortState.key);
+  let result = 0;
+  if (typeof av === "number" || typeof bv === "number") result = Number(av || 0) - Number(bv || 0);
+  else result = String(av || "").localeCompare(String(bv || ""), "id", { sensitivity: "base", numeric: true });
+  return sortState.direction === "asc" ? result : -result;
+}
+
+function SortableOperatorHeaderV277({ label, sortKey, sortState, onSort }: { label: string; sortKey: OperatorDetailSortKeyV277; sortState: { key: OperatorDetailSortKeyV277; direction: "asc" | "desc" }; onSort: (key: OperatorDetailSortKeyV277) => void }) {
+  const active = sortState.key === sortKey;
+  return (
+    <button type="button" onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 font-black hover:text-blue-700" title={`Sort ${label}`}>
+      <span>{label}</span>
+      <span className="text-[10px]">{active ? (sortState.direction === "asc" ? "A-Z" : "Z-A") : "Sort"}</span>
+    </button>
+  );
+}
+
 function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; rows: any[]; onClose: () => void }) {
   const [tab, setTab] = useState<"done" | "not_done">("done");
+  const [sortV277, setSortV277] = useState<{ key: OperatorDetailSortKeyV277; direction: "asc" | "desc" }>({ key: "name", direction: "asc" });
+
+  function handleOperatorDetailSortV277(key: OperatorDetailSortKeyV277) {
+    setSortV277((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  }
 
   const detailRows = useMemo(() => {
     return (Array.isArray(rows) ? rows : [])
@@ -423,6 +465,7 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
         const totalParams = Number(stage?.total_parameters || 0);
         const filledParams = Number(stage?.filled_parameters || 0);
         const percent = totalParams > 0 ? Math.round((filledParams / totalParams) * 1000) / 10 : (stage?.is_done ? 100 : 0);
+        const staffName = String(stage?.staff_name || stage?.doctor_name || stage?.assigned_staff_name || stage?.staff || "").trim();
 
         return {
           row,
@@ -431,6 +474,7 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
           percent,
           filledParams,
           totalParams,
+          staffName,
         };
       })
       .filter(Boolean) as any[];
@@ -438,7 +482,7 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
 
   const doneRows = detailRows.filter((entry: any) => entry.done);
   const notDoneRows = detailRows.filter((entry: any) => !entry.done);
-  const activeRows = tab === "done" ? doneRows : notDoneRows;
+  const activeRows = [...(tab === "done" ? doneRows : notDoneRows)].sort((a: any, b: any) => compareOperatorDetailRowsV277(a, b, sortV277));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
@@ -476,12 +520,13 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3 text-left">Nama</th>
-                  <th className="px-4 py-3 text-left">No. MCU</th>
-                  <th className="px-4 py-3 text-left">Database</th>
-                  <th className="px-4 py-3 text-left">Paket</th>
-                  <th className="px-4 py-3 text-left">Progress Stage</th>
-                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Nama" sortKey="name" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="No. MCU" sortKey="mcu" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Database" sortKey="database" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Paket" sortKey="package" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Dokter/Staff" sortKey="staff" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Progress Stage" sortKey="progress" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
+                  <th className="px-4 py-3 text-left"><SortableOperatorHeaderV277 label="Status" sortKey="status" sortState={sortV277} onSort={handleOperatorDetailSortV277} /></th>
                   <th className="px-4 py-3 text-left">Aksi</th>
                 </tr>
               </thead>
@@ -495,7 +540,8 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
                       <td className="px-4 py-3 text-slate-600">{row.mcu_id || row.external_id || "-"}</td>
                       <td className="px-4 py-3 text-slate-600">{row.source_name || row.institution_name || "-"}</td>
                       <td className="px-4 py-3 text-slate-600">{row.package_name || "-"}</td>
-                      <td className="px-4 py-3 font-bold text-slate-700">{entry.filledParams}/{entry.totalParams} Â· {entry.percent}%</td>
+                      <td className="px-4 py-3 font-bold text-slate-700">{entry.staffName || stage?.staff_name || "-"}</td>
+                      <td className="px-4 py-3 font-bold text-slate-700">{entry.filledParams}/{entry.totalParams} - {entry.percent}%</td>
                       <td className="px-4 py-3">
                         <StatusPill tone={entry.done ? "emerald" : "amber"}>{entry.done ? "Sudah" : "Belum"}</StatusPill>
                       </td>
@@ -510,7 +556,7 @@ function OperatorProgressDetailModalV269({ item, rows, onClose }: { item: any; r
                   );
                 }) : (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm font-bold text-slate-400">
+                    <td colSpan={8} className="px-4 py-8 text-center text-sm font-bold text-slate-400">
                       Tidak ada peserta pada tab ini.
                     </td>
                   </tr>

@@ -189,7 +189,8 @@ export async function GET(req: NextRequest) {
     results,
     packages,
     sources,
-    graduationRules
+    graduationRules,
+    stageStaffAssignments
   ] = await Promise.all([
     packageIds.length ? supabase.from("package_parameters").select("*").in("package_id", packageIds) : Promise.resolve({ data: [] }),
     supabase.from("parameters").select("*").eq("is_active", 1),
@@ -197,14 +198,25 @@ export async function GET(req: NextRequest) {
     fetchAllDashboardResultsV248(supabase, participantIds),
     supabase.from("packages").select("id,name,program_type"),
     supabase.from("participant_sources").select("id,name,institution_name"),
-    supabase.from("graduation_rules").select("*")
+    supabase.from("graduation_rules").select("*"),
+    participantIds.length ? supabase.from("mcu_stage_staff_assignments").select("participant_id,post_id,staff_name,input_by").in("participant_id", participantIds) : Promise.resolve({ data: [] })
   ]);
 
   const packageName = new Map((packages.data || []).map((p: any) => [Number(p.id), p.name]));
   const sourceMap = new Map((sources.data || []).map((s: any) => [Number(s.id), s]));
 
+  // DASHBOARD_OPERATOR_STAGE_STAFF_V277
+  // Read-only map for dashboard operator detail modal: participant_id + post_id -> staff_name.
+  const stageStaffMapV277 = new Map<string, string>();
+  for (const assignment of (stageStaffAssignments.data || [])) {
+    const participantId = Number((assignment as any)?.participant_id);
+    const postId = Number((assignment as any)?.post_id);
+    const staffName = String((assignment as any)?.staff_name || (assignment as any)?.input_by || "").trim();
+    if (participantId && postId && staffName) stageStaffMapV277.set(String(participantId) + ":" + String(postId), staffName);
+  }
+
   const rows = participantRows.map((p: any) => {
-    const stages = normalizeDashboardStages(
+    const rawStages = normalizeDashboardStages(
       computeStagesForParticipant(
         Number(p.id),
         Number(p.package_id),
@@ -215,6 +227,17 @@ export async function GET(req: NextRequest) {
       ),
       p
     );
+
+    const stages = rawStages.map((stage: any) => {
+      const postId = Number(stage?.post_id || stage?.id || 0);
+      const staffName = stageStaffMapV277.get(String(Number(p.id)) + ":" + String(postId)) || "";
+      return {
+        ...stage,
+        staff_name: staffName || stage?.staff_name || stage?.doctor_name || stage?.assigned_staff_name || "",
+        doctor_name: staffName || stage?.doctor_name || stage?.staff_name || "",
+        assigned_staff_name: staffName || stage?.assigned_staff_name || stage?.staff_name || "",
+      };
+    });
 
     const done = stages.filter((s) => s.is_done).length;
     const total = stages.length;
