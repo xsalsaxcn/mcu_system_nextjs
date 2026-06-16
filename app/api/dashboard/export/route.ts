@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -519,6 +519,103 @@ function shouldAddStatusNoteV295(param: any, value: any, score: any) {
   return true;
 }
 
+
+// DASHBOARD_EXPORT_NOTES_PARAM_RULES_V298
+// Rekap Status & Catatan is derived from Supabase form values using post/parameter-specific normal values.
+function statusSheetNumberV298(value: any): number | null {
+  const text = cleanStatusSheetV179(value).replace(',', '.');
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+function statusSheetContainsAnyV298(text: string, words: string[]) {
+  return words.some((word) => text.includes(word));
+}
+
+function isTonsilNormalStatusSheetV298(text: string) {
+  const compact = text.replace(/\s+/g, '').replace(/to/g, 't0');
+  return compact === 't0' || compact === 't0-t0' || compact === 't0/t0' || compact === 't1' || compact === 't1-t1' || compact === 't1/t1' || text.includes('tonsilektomi');
+}
+
+function isZeroDentalValueStatusSheetV298(text: string) {
+  return text === '0' ||
+    text.includes('0 caries') ||
+    text.includes('0 karies') ||
+    text.includes('0 tumpatan') ||
+    text.includes('0 gigi') ||
+    text.includes('0 impaksi');
+}
+
+function isNormalFormValueStatusSheetV298(param: any, value: any) {
+  const text = normStatusSheetV179(value);
+  const name = paramNameStatusSheetV295(param);
+  if (!text) return true;
+  if (isIgnorableStatusNoteValueV295(param, value)) return true;
+
+  // Free-text note fields are ignored only when blank-like; any meaningful text is a real note.
+  if (isFreeNoteParamStatusSheetV295(param)) return false;
+
+  // TB, BB, and vital signs are informational; TB/BB compatibility is evaluated separately.
+  if (isVitalOrNumericInfoStatusSheetV295(param)) {
+    if (text.includes('tidak sesuai') || text.includes('tidak normal')) return false;
+    return true;
+  }
+
+  if (text === 'normal' || (text.includes('normal') && !text.includes('tidak normal'))) return true;
+  if (text.includes('sesuai') && !text.includes('tidak sesuai')) return true;
+  if (text === 'intak') return true;
+  if (text.includes('tidak buta warna')) return true;
+  if (text.includes('tidak menggunakan')) return true;
+  if (text === 'tidak ada' || text === 'tidak ditemukan' || text === 'negative' || text === 'negatif' || text === 'nihil') return true;
+  if (text === 'ta' || text === 't.a' || text === 'tidak ada ta' || text === 'tidak ada/ta') return true;
+  if (text === '(-)' || text === 'minus' || text === 'negatif') return true;
+  if (isZeroDentalValueStatusSheetV298(text)) return true;
+  if (isTonsilNormalStatusSheetV298(text)) return true;
+
+  // Parameter-specific normal values.
+  if (name.includes('lensa') || name.includes('kaca mata') || name.includes('kontak')) {
+    if (text.includes('tidak menggunakan')) return true;
+  }
+  if (name.includes('buta warna')) {
+    if (text.includes('tidak buta warna')) return true;
+  }
+  if (name.includes('serumen')) {
+    if (text.includes('tidak ada')) return true;
+  }
+  if (name.includes('tonsil')) {
+    if (isTonsilNormalStatusSheetV298(text)) return true;
+  }
+  if (name.includes('rontgen') || name.includes('radiologi') || name.includes('skoliosis') || name.includes('lordosis') || name.includes('kifosis')) {
+    if (text === 'ta' || text.includes('tidak ada')) return true;
+  }
+
+  return false;
+}
+
+function isRedFlagFormValueStatusSheetV298(param: any, value: any, score: any) {
+  const text = normStatusSheetV179(value);
+  const name = paramNameStatusSheetV295(param);
+  const n = typeof score === 'number' ? score : statusSheetNumberV298(score);
+  if (n !== null && n <= -10) return true;
+  if (statusSheetContainsAnyV298(text, ['tidak direkomendasi', 'tidak rekomendasi'])) return true;
+  if (text.includes('buta warna')) return true;
+  if (text.includes('tidak intak')) return true;
+  if (name.includes('tonsil') && text.includes('t3')) return true;
+  if ((name.includes('radiologi') || name.includes('rontgen') || name.includes('whole spine') || name.includes('skoliosis') || name.includes('lordosis') || name.includes('kifosis')) && (text.includes('sedang') || text.includes('berat'))) return true;
+  if (text.includes('>3 caries') || text.includes('> 3 caries') || text.includes('lebih dari 3 caries') || text.includes('>3 karies') || text.includes('> 3 karies')) return true;
+  if (text.includes('>4 gigi') || text.includes('> 4 gigi') || text.includes('>=4 gigi') || text.includes('>= 4 gigi')) return true;
+  return false;
+}
+
+function statusSheetNoteDecisionV298(param: any, value: any, score: any) {
+  const text = normStatusSheetV179(value);
+  if (!text) return { add: false, red: false };
+  if (isNormalFormValueStatusSheetV298(param, value)) return { add: false, red: false };
+  if (/^[-+]?d[ds.,/:;-]*$/.test(text)) return { add: false, red: false };
+  const red = isRedFlagFormValueStatusSheetV298(param, value, score);
+  return { add: true, red };
+}
+
 function evaluateStageStatusSheetV179(stageKey: string, notes: string[], redNotes: string[], progressInfo: any) {
   // DASHBOARD_EXPORT_STATUS_NOTES_EVALUATE_V295
   // Status/catatan follows actual abnormal answers from the form.
@@ -561,15 +658,11 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       const stageKey = stageKeyStatusSheetV179(paramText);
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
-      const severity = severityStatusSheetV179(value, score);
-      if (shouldAddStatusNoteV295(param, value, score)) {
+      const noteDecisionV298 = statusSheetNoteDecisionV298(param, value, score);
+      if (noteDecisionV298.add) {
         const note = `${param.name}: ${value}`;
         notesByStage[stageKey].push(note);
-        if (severity === "red") redNotesByStage[stageKey].push(note);
-      } else if (severity === "red" && !isIgnorableStatusNoteValueV295(param, value)) {
-        const note = `${param.name}: ${value || "Red flag"}`;
-        notesByStage[stageKey].push(note);
-        redNotesByStage[stageKey].push(note);
+        if (noteDecisionV298.red) redNotesByStage[stageKey].push(note);
       }
     }
 
@@ -1156,4 +1249,5 @@ export async function GET(req: NextRequest) {
     }
   });
 }
+
 
