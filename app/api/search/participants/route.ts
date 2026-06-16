@@ -206,11 +206,13 @@ async function getCapaskaDoneParticipants(args: {
 }) {
   const { supabase, user, program, sourceId, limit } = args;
 
-  /* OPERATOR_DONE_EDIT_LOADER_V255
-     Read-only done-list fix.
-     A participant is considered done for the operator post when saved rows exist
-     for input_post_id OR current post parameters. This avoids raw mapping mismatch
-     blocking already-submitted participants. */
+  /* OPERATOR_DONE_LIST_DASHBOARD_STYLE_V259
+     Read-only done-list loader.
+     Prinsipnya mengikuti dashboard: daftar selesai operator diambil dari semua
+     examination_results untuk input_post_id post operator, dengan paging range 1000 row.
+     Ini memperbaiki kasus Supabase/PostgREST hanya mengembalikan batch pertama
+     sehingga Ortopedi tampil 53 padahal database punya 128 peserta tersimpan.
+     Tidak menulis database, tidak mengubah save, scoring, setup parameter, mapping, atau UI. */
   if (program !== "capaska" || !user?.post_id) {
     return { participants: [], has_more: false };
   }
@@ -232,28 +234,42 @@ async function getCapaskaDoneParticipants(args: {
   const postParamIds = (postParams || []).map((p: any) => Number(p.id)).filter(Boolean);
   if (!postParamIds.length) return { participants: [], has_more: false };
 
-  const resultRowLimit = Math.min(50000, Math.max(8000, limit * Math.max(postParamIds.length, 20) * 12));
+  const selectCols = "id,participant_id,parameter_id,value,updated_at,created_at,input_post_id";
+  const pageSize = 1000;
+  const maxPages = 80;
 
-  const byInputPost = supabase
-    .from("examination_results")
-    .select("participant_id,parameter_id,value,updated_at,created_at,input_post_id")
-    .eq("input_post_id", postId)
-    .order("updated_at", { ascending: false, nullsFirst: false })
-    .limit(resultRowLimit);
+  async function fetchPagedRowsV259(makeQuery: () => any) {
+    const allRows: any[] = [];
+    for (let page = 0; page < maxPages; page++) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const res = await makeQuery().range(from, to);
+      if (res?.error) throw new Error(res.error.message);
+      const rows = Array.isArray(res?.data) ? res.data : [];
+      allRows.push(...rows);
+      if (rows.length < pageSize) break;
+    }
+    return allRows;
+  }
 
-  const byParameter = supabase
-    .from("examination_results")
-    .select("participant_id,parameter_id,value,updated_at,created_at,input_post_id")
-    .in("parameter_id", postParamIds)
-    .order("updated_at", { ascending: false, nullsFirst: false })
-    .limit(resultRowLimit);
+  const rowsByInputPost = await fetchPagedRowsV259(() =>
+    supabase
+      .from("examination_results")
+      .select(selectCols)
+      .eq("input_post_id", postId)
+      .order("id", { ascending: true })
+  );
 
-  const [inputResult, parameterResult] = await Promise.all([byInputPost, byParameter]);
-  if ((inputResult as any).error) throw new Error((inputResult as any).error.message);
-  if ((parameterResult as any).error) throw new Error((parameterResult as any).error.message);
+  const rowsByParameter = await fetchPagedRowsV259(() =>
+    supabase
+      .from("examination_results")
+      .select(selectCols)
+      .in("parameter_id", postParamIds)
+      .order("id", { ascending: true })
+  );
 
   const merged = new Map<string, any>();
-  for (const row of [...((inputResult as any).data || []), ...((parameterResult as any).data || [])]) {
+  for (const row of [...rowsByInputPost, ...rowsByParameter]) {
     if (!nonEmptyValue(row?.value)) continue;
     const key = String(row?.id ?? `${row?.participant_id}-${row?.parameter_id}-${row?.input_post_id ?? ""}`);
     if (!merged.has(key)) merged.set(key, row);
@@ -283,15 +299,23 @@ async function getCapaskaDoneParticipants(args: {
   const candidateParticipantIds = Array.from(totalRowsByParticipant.keys());
   if (!candidateParticipantIds.length) return { participants: [], has_more: false };
 
-  const { data: candidates, error: participantError } = await supabase
-    .from("participants")
-    .select("id,name,mcu_id,external_id,nik,barcode_value,province,package_id,source_id,company_id,program_type")
-    .in("id", candidateParticipantIds)
-    .eq("program_type", "capaska");
+  async function fetchParticipantsByIdsV259(ids: number[]) {
+    const out: any[] = [];
+    const chunkSize = 500;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from("participants")
+        .select("id,name,mcu_id,external_id,nik,barcode_value,province,package_id,source_id,company_id,program_type")
+        .in("id", chunk)
+        .eq("program_type", "capaska");
+      if (error) throw new Error(error.message);
+      out.push(...(data || []));
+    }
+    return out;
+  }
 
-  if (participantError) throw new Error(participantError.message);
-
-  let filteredCandidates = candidates || [];
+  let filteredCandidates = await fetchParticipantsByIdsV259(candidateParticipantIds);
   if (sourceId && sourceId !== "all") {
     filteredCandidates = filteredCandidates.filter((p: any) => Number(p.source_id) === Number(sourceId));
   }
@@ -299,16 +323,14 @@ async function getCapaskaDoneParticipants(args: {
   const doneParticipants = filteredCandidates
     .filter((participant: any) => {
       const rowsCount = totalRowsByParticipant.get(Number(participant.id)) || 0;
-      const filledMain = resultByParticipant.get(Number(participant.id))?.size || 0;
-      // Saved rows for this post are already a submit trace. If enough main answers exist,
-      // mark as done; otherwise keep participants with score/helper rows visible too.
-      return rowsCount > 0 && (filledMain > 0 || rowsCount > 0);
+      return rowsCount > 0;
     })
     .map((participant: any) => ({
       ...participant,
       is_done_for_operator: true,
       operator_latest_updated_at: latestByParticipant.get(Number(participant.id)) || null,
       operator_saved_result_count: totalRowsByParticipant.get(Number(participant.id)) || 0,
+      operator_main_answer_count: resultByParticipant.get(Number(participant.id))?.size || 0,
     }))
     .sort((a: any, b: any) => {
       const latestA = String(a.operator_latest_updated_at || "");
@@ -317,13 +339,13 @@ async function getCapaskaDoneParticipants(args: {
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
 
-  // OPERATOR_DONE_LIST_LIMIT_SCORE_V258
-  // Done-list is read-only and must show all saved participants for the operator post.
-  // Keep search pages small, but do not truncate completed operator rows to the UI default limit.
-  const doneListDisplayLimitV258 = Math.max(limit, 1000);
-  const limited = doneParticipants.slice(0, doneListDisplayLimitV258);
+  // Keep UI unchanged but return the full operator done set for current event scale.
+  // If a future event exceeds 1000 done participants, the API reports has_more.
+  const responseLimit = Math.max(1000, Number(limit) || 0);
+  const limited = doneParticipants.slice(0, responseLimit);
+
   const enriched = await enrichParticipants({ supabase, participants: limited });
-  const scored = await attachCapaskaOperatorScores({
+  const participantsWithScores = await attachCapaskaOperatorScores({
     supabase,
     participants: enriched,
     program,
@@ -331,19 +353,20 @@ async function getCapaskaDoneParticipants(args: {
     listMode: true,
   });
 
-  const scoredWithSavedTotalsV258 = await attachSavedOperatorScoreTotalV253({
+  const scoredWithSavedTotalsV259 = await attachSavedOperatorScoreTotalV253({
     supabase,
-    participants: scored,
-    postId,
+    participants: participantsWithScores,
+    program,
     user,
+    postId,
+    listMode: true,
   });
 
   return {
-    participants: scoredWithSavedTotalsV258,
+    participants: scoredWithSavedTotalsV259,
     has_more: doneParticipants.length > limited.length,
   };
 }
-
 
 /* OPERATOR_DONE_MISSING_HELPER_V256
    Build-safety helper for the done-list score preview.
