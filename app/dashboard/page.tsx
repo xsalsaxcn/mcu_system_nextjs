@@ -813,7 +813,9 @@ function AdminDashboard() {
     const params = new URLSearchParams({
       program: mcuProgram,
       source_id: sourceId || "all",
-      status: mcuStatus,
+      // DASHBOARD_EXPORT_FULL_ALL_STATUS_V273
+      // Export Semua must ignore the active dashboard status filter so the XLSX is not header-only.
+      status: type === "full" ? "Semua" : mcuStatus,
       type: type === "full" ? "full" : "progress",
     });
 

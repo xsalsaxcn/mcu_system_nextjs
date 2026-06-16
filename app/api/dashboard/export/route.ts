@@ -767,9 +767,17 @@ export async function GET(req: NextRequest) {
 
     appendJsonSheet(workbook, resultRows as any[], "Hasil Pemeriksaan", resultHeaders);
 
-    const completedProgressRows = progressRows.filter((row: any) =>
+    let completedProgressRows = progressRows.filter((row: any) =>
       row["Status Progress"] === "Selesai" && Number(row["Progress %"] || 0) >= 100
     );
+
+    // DASHBOARD_EXPORT_FULL_ALL_CAPASKA_V273
+    // For CAPASKA full export, include every participant in the wide and recap sheets.
+    // Previously these sheets only used fully completed rows, so if the dashboard status
+    // filter was Belum Selesai or only a few participants were 100%, the workbook looked empty.
+    if (isCapaskaProgram) {
+      completedProgressRows = progressRows;
+    }
 
     const completedParticipantIds = new Set(completedProgressRows.map((row: any) => Number(row["Participant ID"])));
 
