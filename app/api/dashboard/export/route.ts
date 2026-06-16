@@ -633,6 +633,29 @@ export async function GET(req: NextRequest) {
     staffByParticipantPostV185.set(key, uniqueCleanValuesV185(current));
   }
 
+  // DASHBOARD_EXPORT_RESULT_BASED_COMPLETED_V288
+  // Export full CAPASKA follows dashboard/operator completion by medical post results.
+  // Registrasi Ulang is bypassed. A participant is export-complete when all 7 medical posts have saved results.
+  const requiredMedicalPostIdsV288 = [4, 5, 6, 7, 8, 9, 10];
+  const requiredMedicalPostIdSetV288 = new Set(requiredMedicalPostIdsV288);
+  const parameterPostIdMapV288 = new Map<number, number>();
+  for (const param of (parameters.data || [])) {
+    const paramId = Number((param as any)?.id);
+    const postId = Number((param as any)?.post_id);
+    if (paramId && postId) parameterPostIdMapV288.set(paramId, postId);
+  }
+  const resultMedicalPostIdsByParticipantV288 = new Map<number, Set<number>>();
+  for (const result of (results.data || [])) {
+    const participantId = Number((result as any)?.participant_id);
+    const parameterId = Number((result as any)?.parameter_id);
+    const postId = Number((result as any)?.input_post_id || parameterPostIdMapV288.get(parameterId) || 0);
+    if (!participantId || !requiredMedicalPostIdSetV288.has(postId)) continue;
+    const valueText = String((result as any)?.value ?? "").trim();
+    if (!valueText) continue;
+    if (!resultMedicalPostIdsByParticipantV288.has(participantId)) resultMedicalPostIdsByParticipantV288.set(participantId, new Set<number>());
+    resultMedicalPostIdsByParticipantV288.get(participantId)!.add(postId);
+  }
+
   const progressRows = participantRows.map((p: any) => {
     const stages = normalizeDashboardStages(
       computeStagesForParticipant(
@@ -684,8 +707,14 @@ export async function GET(req: NextRequest) {
         })
       : stages;
     const effectiveStagesV287 = medicalStagesV287.length ? medicalStagesV287 : fallbackStagesV287;
-    const done = effectiveStagesV287.filter((stage: any) => stage.is_done).length;
-    const total = effectiveStagesV287.length;
+    // DASHBOARD_EXPORT_RESULT_BASED_COMPLETED_V288
+    // Use saved medical-post results as the completion source for CAPASKA export.
+    // This matches the operator/dashboard done state and bypasses Registrasi Ulang.
+    const medicalDonePostIdsV288 = resultMedicalPostIdsByParticipantV288.get(Number(p.id)) || new Set<number>();
+    const stageDoneFallbackV288 = effectiveStagesV287.filter((stage: any) => stage.is_done).length;
+    const stageTotalFallbackV288 = effectiveStagesV287.length;
+    const done = isCapaskaProgram ? requiredMedicalPostIdsV288.filter((postId) => medicalDonePostIdsV288.has(postId)).length : stageDoneFallbackV288;
+    const total = isCapaskaProgram ? requiredMedicalPostIdsV288.length : stageTotalFallbackV288;
     const complete = total > 0 && done >= total;
     const scoreResult = computeMcuParticipantScoring2026({
       participantId: Number(p.id),
