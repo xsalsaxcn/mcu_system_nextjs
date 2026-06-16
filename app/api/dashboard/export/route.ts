@@ -532,9 +532,22 @@ function statusSheetContainsAnyV298(text: string, words: string[]) {
   return words.some((word) => text.includes(word));
 }
 
+// DASHBOARD_EXPORT_NOTES_NORMAL_VALUES_V299
 function isTonsilNormalStatusSheetV298(text: string) {
-  const compact = text.replace(/\s+/g, '').replace(/to/g, 't0');
-  return compact === 't0' || compact === 't0-t0' || compact === 't0/t0' || compact === 't1' || compact === 't1-t1' || compact === 't1/t1' || text.includes('tonsilektomi');
+  const raw = String(text || '').toLowerCase();
+  const compact = raw
+    .replace(/\s+/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/\\/g, '/')
+    .replace(/to/g, 't0');
+
+  if (!compact) return false;
+  if (compact.includes('tonsilektomi')) return true;
+
+  // Juknis: T0/T0, T1/T1, and mixed T0/T1 are still normal.
+  // T2a/T2b/T3 should become notes.
+  if (compact.includes('t3') || compact.includes('t2')) return false;
+  return compact.includes('t0') || compact.includes('t1');
 }
 
 function isZeroDentalValueStatusSheetV298(text: string) {
@@ -546,49 +559,69 @@ function isZeroDentalValueStatusSheetV298(text: string) {
     text.includes('0 impaksi');
 }
 
+// DASHBOARD_EXPORT_NOTES_NORMAL_VALUES_V299
 function isNormalFormValueStatusSheetV298(param: any, value: any) {
-  const text = normStatusSheetV179(value);
   const name = paramNameStatusSheetV295(param);
+  const text = normStatusSheetV179(value);
+  const clean = cleanStatusSheetV179(value);
   if (!text) return true;
-  if (isIgnorableStatusNoteValueV295(param, value)) return true;
 
-  // Free-text note fields are ignored only when blank-like; any meaningful text is a real note.
-  if (isFreeNoteParamStatusSheetV295(param)) return false;
+  const compact = text
+    .replace(/\s+/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/\\/g, '/');
 
-  // TB, BB, and vital signs are informational; TB/BB compatibility is evaluated separately.
-  if (isVitalOrNumericInfoStatusSheetV295(param)) {
-    if (text.includes('tidak sesuai') || text.includes('tidak normal')) return false;
-    return true;
+  const blankLike = new Set([
+    '.', '-', 'n/a', 'na', 'n.a', 'n.a.', 'nihil',
+    'tidak', 'tidak ada catatan', 'tidak ada catatan khusus',
+    'tidak ada kondisi khusus', 'tidak ada keluhan', 'tidak ada temuan',
+    'tanpa catatan'
+  ]);
+  if (blankLike.has(text)) return true;
+
+  // Free-text note fields are normal only when they clearly say there is no note.
+  if (isFreeNoteParamStatusSheetV295(param)) {
+    return text.includes('n/a') ||
+      text.includes('tidak ada catatan') ||
+      text.includes('tidak ada kondisi') ||
+      text.includes('tidak ada keluhan') ||
+      text.includes('tidak ada temuan') ||
+      text === 'tidak';
   }
 
-  if (text === 'normal' || (text.includes('normal') && !text.includes('tidak normal'))) return true;
-  if (text.includes('sesuai') && !text.includes('tidak sesuai')) return true;
+  // Common normal values used by the saved form in Supabase.
+  if (text === 'normal' || text.includes('normal 6/6')) return true;
   if (text === 'intak') return true;
-  if (text.includes('tidak buta warna')) return true;
+  if (text === 'sesuai' || text === 'sesuai juknis' || text.includes('sesuai juknis') && !text.includes('tidak sesuai')) return true;
   if (text.includes('tidak menggunakan')) return true;
-  if (text === 'tidak ada' || text === 'tidak ditemukan' || text === 'negative' || text === 'negatif' || text === 'nihil') return true;
-  if (text === 'ta' || text === 't.a' || text === 'tidak ada ta' || text === 'tidak ada/ta') return true;
-  if (text === '(-)' || text === 'minus' || text === 'negatif') return true;
+  if (text.includes('tidak buta warna')) return true;
+  if (text.includes('tidak ada')) return true;
+  if (text.includes('tidak ada tato')) return true;
+  if (text === 'negative' || text === 'negatif' || text.includes('negatif') || text.includes('negative')) return true;
+  if (compact.includes('(-)/(-)') || compact === '(-)' || compact.includes('negatif/(-)')) return true;
+
+  // Dental normal values.
   if (isZeroDentalValueStatusSheetV298(text)) return true;
-  if (isTonsilNormalStatusSheetV298(text)) return true;
+  if (name.includes('dental') && text === 'normal') return true;
 
-  // Parameter-specific normal values.
-  if (name.includes('lensa') || name.includes('kaca mata') || name.includes('kontak')) {
-    if (text.includes('tidak menggunakan')) return true;
-  }
-  if (name.includes('buta warna')) {
-    if (text.includes('tidak buta warna')) return true;
-  }
-  if (name.includes('serumen')) {
-    if (text.includes('tidak ada')) return true;
-  }
-  if (name.includes('tonsil')) {
-    if (isTonsilNormalStatusSheetV298(text)) return true;
-  }
-  if (name.includes('rontgen') || name.includes('radiologi') || name.includes('skoliosis') || name.includes('lordosis') || name.includes('kifosis')) {
-    if (text === 'ta' || text.includes('tidak ada')) return true;
-  }
+  // THT tonsil normal values: T0/T0, T1/T1, mixed T0/T1, post tonsilectomy.
+  if (name.includes('tonsil') && isTonsilNormalStatusSheetV298(text)) return true;
 
+  // Pure numbers in TB/BB/vital/raw numeric fields are info, not notes.
+  if (isVitalOrNumericInfoStatusSheetV295(param) && /^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return true;
+  if (/^[-+]?\d[\d\s.,/:;-]*$/.test(text)) return true;
+
+  // Explicit abnormal values.
+  if (text.includes('tidak sesuai')) return false;
+  if (text.includes('tidak normal')) return false;
+  if (text.includes('buta warna parsial') || text.includes('buta warna total')) return false;
+  if (text.includes('ditemukan kelainan')) return false;
+  if (text === 'positive' || text === 'positif' || text.includes('positive') || text.includes('positif')) return false;
+  if (text.includes('ada serumen')) return false;
+  if (text === 'ada' || text.startsWith('ada ') || text.endsWith(' ada') || text.includes(': ada')) return false;
+  if (text.includes('ringan') || text.includes('sedang') || text.includes('berat')) return false;
+
+  // If a value is not recognized as normal, keep it as a note so real findings are not hidden.
   return false;
 }
 
