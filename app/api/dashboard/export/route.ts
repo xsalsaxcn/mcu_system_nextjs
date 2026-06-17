@@ -398,6 +398,154 @@ function severityStatusSheetV179(value: any, score: any) {
   return "";
 }
 
+
+// DASHBOARD_EXPORT_JUKNIS_CLEAN_V307
+// Export Rekap Status & Catatan follows Juknis by post_id first.
+// This prevents Radiologi spine notes from being classified as Ortopedi.
+function stageKeyFromPostStatusSheetV307(param: any, postNameMap?: any) {
+  const postId = Number(param?.post_id ?? 0);
+  if (postId === 4) return "mata";
+  if (postId === 5) return "penyakit_dalam";
+  if (postId === 6) return "gigi";
+  if (postId === 7) return "tht";
+  if (postId === 8) return "jantung";
+  if (postId === 9) return "ortopedi";
+  if (postId === 10) return "radiologi";
+
+  const postLabel = postNameMap && typeof postNameMap.get === "function" ? postNameMap.get(postId) : "";
+  const text = normStatusSheetV179([postLabel, param?.category, param?.name, param?.label, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" "));
+
+  // Radiologi must be checked before Ortopedi because both use Skoliosis/Kifosis/Lordosis terms.
+  if (text.includes("radiologi") || text.includes("radiology") || text.includes("rontgen") || text.includes("xray") || text.includes("x-ray") || text.includes("whole spine") || text.includes("thoracolumbosacral")) return "radiologi";
+  if (text.includes("ortopedi") || text.includes("orthopedi") || text.includes("orthopedic") || text.includes("bedah tulang")) return "ortopedi";
+  return stageKeyStatusSheetV179(text);
+}
+
+function normalizeJuknisValueV307(value: any) {
+  return normStatusSheetV179(value).replace(/\s+/g, " ").trim();
+}
+
+function rawJuknisValueV307(value: any) {
+  return cleanStatusSheetV179(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isBlankLikeJuknisValueV307(value: any) {
+  const text = normalizeJuknisValueV307(value);
+  if (!text) return true;
+  return new Set([".", "-", "--", "n/a", "na", "n.a", "n.a.", "nihil", "kosong", "tidak", "tidak ada catatan", "tidak ada catatan khusus", "tidak ada kondisi khusus", "tidak ada keluhan", "tidak ada temuan", "tanpa catatan"]).has(text);
+}
+
+function isPositiveNegativeNormalJuknisV307(value: any) {
+  const raw = rawJuknisValueV307(value);
+  const compact = raw.replace(/\s+/g, "");
+  if (compact === "(-)" || compact === "-" || compact === "(-)/(-)" || compact === "-/-") return true;
+  if ((raw.includes("(-)") || raw.includes("negatif") || raw.includes("negative")) && !raw.includes("(+)") && !raw.includes("positif")) return true;
+  return false;
+}
+
+function isTonsilNormalJuknisV307(value: any) {
+  const text = normalizeJuknisValueV307(value);
+  const compact = text.replace(/\s+/g, "").replace(/to/g, "t0");
+  return compact === "t0" || compact === "t0-t0" || compact === "t0/t0" || compact === "t1" || compact === "t1-t1" || compact === "t1/t1" || compact === "t0/t1-t1" || compact === "t0-t1" || text.includes("tonsilektomi");
+}
+
+function isZeroDentalJuknisV307(value: any) {
+  const text = normalizeJuknisValueV307(value);
+  return text === "0" || text.includes("0 caries") || text.includes("0 karies") || text.includes("0 tumpatan") || text.includes("0 gigi") || text.includes("0 impaksi");
+}
+
+function isNumericOnlyJuknisV307(value: any) {
+  const text = normalizeJuknisValueV307(value);
+  return /^[-+]?\d[\d\s.,/:;-]*$/.test(text);
+}
+
+function isCommonNormalJuknisV307(value: any) {
+  const text = normalizeJuknisValueV307(value);
+  const raw = rawJuknisValueV307(value);
+  if (isBlankLikeJuknisValueV307(value)) return true;
+  if (isPositiveNegativeNormalJuknisV307(value)) return true;
+  if (text === "normal" || text === "intak" || text === "sesuai" || text === "sesuai juknis" || text === "ta" || text === "t/a") return true;
+  if (text === "tidak ada" || text === "tidak ada tato" || text === "tidak menggunakan" || text === "tidak buta warna" || text === "tidak hamil") return true;
+  if (raw.includes("tidak ada") && !raw.includes("tidak ada catatan")) return true;
+  if (raw.includes("normal") && !raw.includes("tidak normal")) return true;
+  return false;
+}
+
+function isFreeNoteParamJuknisV307(param: any) {
+  const name = paramNameStatusSheetV295(param);
+  return name.includes("catatan") || name.includes("keterangan") || name.includes("sebutkan") || name.includes("kondisi khusus");
+}
+
+function isVitalOrInfoParamJuknisV307(param: any) {
+  const name = paramNameStatusSheetV295(param);
+  return isHeightParamStatusSheetV179(param) ||
+    isWeightParamStatusSheetV179(param) ||
+    name.includes("suhu") ||
+    name.includes("nadi") ||
+    name.includes("napas") ||
+    name.includes("nafas") ||
+    name.includes("tekanan darah") ||
+    name.includes("tensi") ||
+    name.includes("tanda vital");
+}
+
+function isNormalByPostJuknisV307(param: any, value: any) {
+  const postId = Number(param?.post_id ?? 0);
+  const name = paramNameStatusSheetV295(param);
+  const text = normalizeJuknisValueV307(value);
+
+  if (isBlankLikeJuknisValueV307(value)) return true;
+  if (isFreeNoteParamJuknisV307(param)) return false;
+  if (isVitalOrInfoParamJuknisV307(param) && !text.includes("tidak normal") && !text.includes("tidak sesuai")) return true;
+
+  if (postId === 4) {
+    if (text.includes("tidak menggunakan") || text.includes("tidak buta warna")) return true;
+    if ((name.includes("strabismus") || name.includes("juling")) && isPositiveNegativeNormalJuknisV307(value)) return true;
+    if (text.includes("normal") && !text.includes("tidak normal")) return true;
+  }
+
+  if (postId === 6) {
+    if (isZeroDentalJuknisV307(value)) return true;
+    if (name.includes("karang") && isPositiveNegativeNormalJuknisV307(value)) return true;
+    if (name.includes("infeksi") && isPositiveNegativeNormalJuknisV307(value)) return true;
+    if (name.includes("panoramik") || name.includes("panoramic")) return text === "normal" || text.includes("normal");
+  }
+
+  if (postId === 7) {
+    if (name.includes("tonsil") && isTonsilNormalJuknisV307(value)) return true;
+    if (name.includes("membran") && text.includes("intak") && !text.includes("tidak")) return true;
+    if (name.includes("serumen") && text.includes("tidak ada")) return true;
+    if (name.includes("rhinitis") && isPositiveNegativeNormalJuknisV307(value)) return true;
+    if (name.includes("epistaksis") && text.includes("tidak ada")) return true;
+    if (name.includes("garputala") || name.includes("weber")) return text === "normal" || text.includes("normal");
+  }
+
+  if (postId === 5 || postId === 8 || postId === 9 || postId === 10) {
+    if (isCommonNormalJuknisV307(value)) return true;
+    if (postId === 10 && (text === "ta" || text === "tidak ada" || text.includes("tidak ada"))) return true;
+  }
+
+  return isCommonNormalJuknisV307(value);
+}
+
+function noteDecisionJuknisV307(param: any, value: any, score: any) {
+  const text = normalizeJuknisValueV307(value);
+  const postId = Number(param?.post_id ?? 0);
+  if (isBlankLikeJuknisValueV307(value)) return { include: false, red: false };
+  if (isFreeNoteParamJuknisV307(param)) {
+    return isBlankLikeJuknisValueV307(value) ? { include: false, red: false } : { include: true, red: false };
+  }
+  if (isNormalByPostJuknisV307(param, value)) return { include: false, red: false };
+  if (isNumericOnlyJuknisV307(value) && isVitalOrInfoParamJuknisV307(param)) return { include: false, red: false };
+
+  const scoreNum = typeof score === "number" ? score : numberFromStatusSheetV179(score);
+  const red = (scoreNum !== null && scoreNum <= -10) ||
+    text.includes("tidak direkom") ||
+    (postId === 7 && (text.includes("t3-t3") || text.includes("t3 / t3"))) ||
+    (postId === 10 && (text.includes("sedang") || text.includes("berat")));
+  return { include: true, red };
+}
+
 const STAGE_CONFIG_STATUS_SHEET_V179: any = {
   mata: { label: "Mata", max: 12, scoreKey: "Mata" },
   tht: { label: "THT", max: 10, scoreKey: "THT" },
@@ -662,7 +810,7 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
     if (completedParticipantIdsV301.size && !completedParticipantIdsV301.has(participantId)) return false;
     return (exportParameters || []).some((param: any) => {
       const postLabel = postName.get(Number(param.post_id)) || "";
-      const stageKey = stageKeyStatusSheetV179(`${postLabel} ${param.category || ""} ${param.name || ""}`);
+      const stageKey = stageKeyFromPostStatusSheetV307(param, postName);
       // DASHBOARD_EXPORT_REKAP_V301_TYPE_FIX
       if (!stageKey || !STAGE_CONFIG_STATUS_SHEET_V179[stageKey]) return false;
       const result = resultByParticipantParam.get(makeKey(participantId, Number(param.id)));
@@ -693,14 +841,16 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
         if (isTbBbSesuaiJuknisStatusSheetV201(value) || isTbBbTidakSesuaiJuknisStatusSheetV201(value)) bbJuknisChoiceV201 = value;
         if (numberFromStatusSheetV179(value) !== null) weight = value;
       }
-      const stageKey = stageKeyStatusSheetV179(paramText);
+      const stageKey = stageKeyFromPostStatusSheetV307(param, postName);
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
-      const decisionV301 = noteDecisionV301(stageKey, param, value, score);
-      if (decisionV301.include) {
+      // DASHBOARD_EXPORT_JUKNIS_CLEAN_V307_TYPE_FIX
+      // DASHBOARD_EXPORT_JUKNIS_CLEAN_V307_ARG_FIX
+      const decisionV307 = noteDecisionJuknisV307(stageKey, param, value);
+      if (decisionV307.include) {
         const note = `${param.name}: ${value}`;
         notesByStage[stageKey].push(note);
-        if (decisionV301.red) redNotesByStage[stageKey].push(note);
+        if (decisionV307.red) redNotesByStage[stageKey].push(note);
       }
     }
 
