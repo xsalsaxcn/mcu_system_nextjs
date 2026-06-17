@@ -900,13 +900,46 @@ export async function GET(req: NextRequest) {
     resultByParticipantParam.set(makeKey(Number(result.participant_id), Number(result.parameter_id)), result);
   });
 
-  const { data: stageStaffAssignmentsData } = isCapaskaProgram && participantIds.length
-    ? await supabase
-        .from("mcu_stage_staff_assignments")
-        .select("participant_id,post_id,staff_name")
-        .in("participant_id", participantIds)
-    : { data: [] as any[] };
+  // DASHBOARD_EXPORT_FETCH_ALL_STAFF_ASSIGNMENTS_V305
+// Fetch every staff/doctor assignment for selected CAPASKA participants.
+// Supabase can page/limit large result sets, so export must fetch by chunk and range.
+async function fetchAllDashboardExportStageStaffAssignmentsV305(supabaseClient: any, ids: any[]) {
+  const numericIds = Array.from(new Set((ids || [])
+    .map((value: any) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0)));
+  const rows: any[] = [];
+  const chunkSize = 200;
+  const pageSize = 1000;
 
+  for (let i = 0; i < numericIds.length; i += chunkSize) {
+    const chunk = numericIds.slice(i, i + chunkSize);
+    let from = 0;
+
+    while (true) {
+      const to = from + pageSize - 1;
+      const { data, error } = await supabaseClient
+        .from("mcu_stage_staff_assignments")
+        .select("id, participant_id, post_id, staff_name, input_by, created_at, updated_at")
+        .in("participant_id", chunk)
+        .range(from, to);
+
+      if (error) throw error;
+      const pageRows = Array.isArray(data) ? data : [];
+      rows.push(...pageRows);
+      if (pageRows.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+
+  return rows;
+}
+
+const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
+  ? await fetchAllDashboardExportStageStaffAssignmentsV305(supabase, participantIds)
+  : [];
+
+  // DASHBOARD_EXPORT_STAFF_MAP_V306
+  // Map dokter/staff per participant + post for wide export.
   const staffByParticipantPostV185 = new Map<string, string[]>();
   for (const row of stageStaffAssignmentsData || []) {
     const key = makeKey(Number(row.participant_id), Number(row.post_id));
