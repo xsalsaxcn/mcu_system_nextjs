@@ -1633,6 +1633,11 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
             "Kelulusan": progressInfo?.["Kelulusan"] || "",
           };
 
+          // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V322_INIT
+          let wideScoreAdjustmentJuknisV321 = 0;
+          const wideDomainAdjustmentJuknisV321: any = {};
+          const wideRedFindingsJuknisV321: string[] = [];
+
           exportParameters.forEach((param: any) => {
             const postLabel = postName.get(Number(param.post_id)) || "Post";
             const valueHeader = `Hasil - ${postLabel} - ${param.name}`;
@@ -1640,7 +1645,19 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
             const result = resultByParticipantParam.get(makeKey(Number(participant.id), Number(param.id)));
             const value = String(result?.value ?? "").trim();
             row[valueHeader] = value;
-            row[scoreHeader] = value ? scoreCapaskaDirectChoice(param, value) : "";
+            // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_PARAM_SCORE
+            const paramTextWideV321 = `${postLabel} ${param.category || ""} ${param.name || ""}`;
+            const stageKeyWideV321 = stageKeyFromPostStatusSheetV319(param, postName, paramTextWideV321);
+            const baseScoreWideV321 = value ? scoreCapaskaDirectChoice(param, value) : "";
+            const scoreWideV321 = scoreCapaskaExportJuknisV319(stageKeyWideV321, param, value, baseScoreWideV321);
+            const scoreDeltaWideV321 = scoreDeltaExportJuknisV319(stageKeyWideV321, param, value, baseScoreWideV321, scoreWideV321);
+            wideScoreAdjustmentJuknisV321 += scoreDeltaWideV321;
+            if (stageKeyWideV321) wideDomainAdjustmentJuknisV321[stageKeyWideV321] = (wideDomainAdjustmentJuknisV321[stageKeyWideV321] || 0) + scoreDeltaWideV321;
+            if (isJuknisRedFlagExportV319(stageKeyWideV321, param, value)) {
+              const stageLabelWideV321 = STAGE_CONFIG_STATUS_SHEET_V179?.[stageKeyWideV321]?.label || postLabel;
+              wideRedFindingsJuknisV321.push(`${stageLabelWideV321}: ${param.name}: ${value}`);
+            }
+            row[scoreHeader] = scoreWideV321;
           });
 
           doctorPostsV185.forEach((post: any) => {
@@ -1648,18 +1665,28 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
             row[`Dokter - ${post.name}`] = names.join(", ");
           });
 
-          row["Skor Mata"] = progressInfo?.["Mata"] ?? "";
-          row["Skor Gigi Mulut"] = progressInfo?.["Gigi Mulut"] ?? "";
-          row["Skor THT"] = progressInfo?.["THT"] ?? "";
-          row["Skor Penyakit Dalam"] = progressInfo?.["Penyakit Dalam"] ?? "";
-          row["Skor Jantung Pembuluh Darah"] = progressInfo?.["Jantung Pembuluh Darah"] ?? "";
-          row["Skor Ortopedi"] = progressInfo?.["Ortopedi"] ?? "";
-          row["Skor Radiologi"] = progressInfo?.["Radiologi"] ?? "";
-          row["Red Flag"] = progressInfo?.["Red Flag"] || "";
+          // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_DOMAIN_HELPER
+          const addWideDomainScoreJuknisV321 = (base: any, stageKey: string) => {
+            const baseNum = numberFromStatusSheetV179(base);
+            const adj = wideDomainAdjustmentJuknisV321[stageKey] || 0;
+            return baseNum !== null ? baseNum + adj : (base ?? "");
+          };
+          row["Skor Mata"] = addWideDomainScoreJuknisV321(progressInfo?.["Mata"], "mata");
+          row["Skor Gigi Mulut"] = addWideDomainScoreJuknisV321(progressInfo?.["Gigi Mulut"], "gigi");
+          row["Skor THT"] = addWideDomainScoreJuknisV321(progressInfo?.["THT"], "tht");
+          row["Skor Penyakit Dalam"] = addWideDomainScoreJuknisV321(progressInfo?.["Penyakit Dalam"], "penyakit_dalam");
+          row["Skor Jantung Pembuluh Darah"] = addWideDomainScoreJuknisV321(progressInfo?.["Jantung Pembuluh Darah"], "jantung");
+          row["Skor Ortopedi"] = addWideDomainScoreJuknisV321(progressInfo?.["Ortopedi"], "ortopedi");
+          row["Skor Radiologi"] = addWideDomainScoreJuknisV321(progressInfo?.["Radiologi"], "radiologi");
+          // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_RED_FLAG
+          const baseRedFlagWideV321 = String(progressInfo?.["Red Flag"] || "").trim();
+          row["Red Flag"] = Array.from(new Set([baseRedFlagWideV321, ...wideRedFindingsJuknisV321].filter(Boolean))).join(" | ");
           row["Scoring Version"] = progressInfo?.["Scoring Version"] || "";
           row["Progress %"] = progressInfo?.["Progress %"] ?? 100;
           // Sengaja diletakkan paling akhir sesuai request.
-          row["Total Skor Akhir"] = progressInfo?.["Total Score"] ?? "";
+          // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_TOTAL
+          const totalScoreBaseWideV321 = numberFromStatusSheetV179(progressInfo?.["Total Score"]);
+          row["Total Skor Akhir"] = totalScoreBaseWideV321 !== null ? totalScoreBaseWideV321 + wideScoreAdjustmentJuknisV321 : (progressInfo?.["Total Score"] ?? "");
 
           return row;
         });
