@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { scoreCapaskaDirectChoice } from "@/lib/shared/capaskaDirectScoring2026";
 
 export const dynamic = "force-dynamic";
 
@@ -183,6 +184,121 @@ function participantToRekapRow(
   };
 }
 
+
+// CAPASKA_PDF_DETAILED_TEMPLATE_V341
+function isCapaskaTextV341(...values: any[]) {
+  return values.some((value) => String(value || "").toLowerCase().includes("capaska"));
+}
+
+function isAuxCapaskaParamV341(param: any) {
+  const name = String(param?.name || "").trim().toLowerCase();
+  const category = String(param?.category || "").trim().toLowerCase();
+  if (!name) return true;
+  if (name.startsWith("value ") || name.startsWith("value")) return true;
+  if (name.includes("total score") || name.includes("total skor")) return true;
+  if (name.includes("skor maksimal") || name.includes("score maksimal")) return true;
+  if (category.includes("hidden") || category.includes("system")) return true;
+  return false;
+}
+
+function cleanCapaskaPdfValueV341(value: any) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text || ["-", "null", "undefined", "nan"].includes(text.toLowerCase())) return "";
+  return text;
+}
+
+async function fetchCapaskaPdfDetailRowsV341(supabase: any, participantIds: number[], participantMap: Map<number, any>, importRowMap: Map<number, any>) {
+  const uniqueIds = Array.from(new Set((participantIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)));
+  if (!uniqueIds.length) return [];
+
+  const [paramsRes, postsRes] = await Promise.all([
+    supabase.from("parameters").select("*").order("post_id", { ascending: true }).order("sort_order", { ascending: true }).order("id", { ascending: true }),
+    supabase.from("posts").select("*")
+  ]);
+
+  const params = paramsRes.data || [];
+  const posts = postsRes.data || [];
+  // CAPASKA_PDF_DETAILED_TEMPLATE_TYPE_FIX_V342
+  const paramById = new Map<number, any>(params.map((p: any) => [Number(p.id), p]));
+  const postName = new Map(posts.map((p: any) => [Number(p.id), p.name]));
+
+  const results: any[] = [];
+  const staffRows: any[] = [];
+  for (let i = 0; i < uniqueIds.length; i += 400) {
+    const chunk = uniqueIds.slice(i, i + 400);
+    const { data: resultChunk, error: resultError } = await supabase
+      .from("examination_results")
+      .select("participant_id,parameter_id,value,updated_at,created_at")
+      .in("participant_id", chunk);
+    if (resultError) throw new Error(resultError.message);
+    results.push(...(resultChunk || []));
+
+    try {
+      const { data: staffChunk } = await supabase
+        .from("mcu_stage_staff_assignments")
+        .select("participant_id,post_id,staff_name")
+        .in("participant_id", chunk);
+      staffRows.push(...(staffChunk || []));
+    } catch (_) {
+      // staff assignment is optional for PDF detail.
+    }
+  }
+
+  const doctorsByParticipantPost = new Map<string, string[]>();
+  for (const row of staffRows) {
+    const key = String(Number(row.participant_id)) + ":" + String(Number(row.post_id));
+    const current = doctorsByParticipantPost.get(key) || [];
+    const staff = cleanCapaskaPdfValueV341(row.staff_name);
+    if (staff && !current.includes(staff)) current.push(staff);
+    doctorsByParticipantPost.set(key, current);
+  }
+
+  const rows: any[] = [];
+  for (const result of results) {
+    const participantId = Number(result.participant_id);
+    const param = paramById.get(Number(result.parameter_id));
+    const paramAny: any = param;
+    if (!paramAny || isAuxCapaskaParamV341(paramAny)) continue;
+    const value = cleanCapaskaPdfValueV341(result.value);
+    if (!value) continue;
+
+    let score: any = "";
+    try { score = scoreCapaskaDirectChoice(paramAny, value); } catch (_) { score = ""; }
+
+    const participant = participantMap.get(participantId) || {};
+    const importRow = importRowMap.get(participantId) || {};
+    const uploaded = importRow?.row_data && typeof importRow.row_data === "object" ? importRow.row_data : {};
+    const mcuId = pick(uploaded.NOMCU, uploaded["NO MCU"], importRow?.mcu_id, participant.mcu_id, participant.external_id, participant.id);
+    const name = pick(uploaded.NAMA, uploaded.Nama, importRow?.participant_name, participant.name, participant.nama);
+    const postId = Number(paramAny.post_id || 0);
+    const doctorKey = String(participantId) + ":" + String(postId);
+
+    rows.push({
+      participantId,
+      name,
+      mcuId,
+      postId,
+      postName: postName.get(postId) || "Post " + postId,
+      category: paramAny.category || "",
+      parameter: paramAny.name || "",
+      value,
+      score,
+      sortOrder: Number(paramAny.sort_order || paramAny.order_no || paramAny.id || 0),
+      updatedAt: result.updated_at || result.created_at || "",
+      doctorNames: doctorsByParticipantPost.get(doctorKey) || [],
+    });
+  }
+
+  rows.sort((a, b) => {
+    const pid = Number(a.participantId) - Number(b.participantId);
+    if (pid) return pid;
+    const post = Number(a.postId) - Number(b.postId);
+    if (post) return post;
+    return Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+  });
+  return rows;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const user = getSessionUser(req);
@@ -225,6 +341,13 @@ export async function POST(req: NextRequest) {
     const maps = await loadLookupMaps(supabase);
     const importRows = await fetchImportRows(supabase, participantIds);
 
+    // CAPASKA_PDF_DETAILED_TEMPLATE_V341
+    const participantMapV341 = new Map((participants || []).map((p: any) => [Number(p.id), p]));
+    const isCapaskaPdfV341 = (participants || []).some((p: any) => isCapaskaTextV341(p.program_type, p.package_name, p.mcu_id, p.external_id)) || isCapaskaTextV341(body.program, body.template);
+    const capaskaPdfRowsV341 = isCapaskaPdfV341
+      ? await fetchCapaskaPdfDetailRowsV341(supabase, participantIds, participantMapV341, importRows)
+      : [];
+
     const rekapRows = participants.map((p) => participantToRekapRow(p, importRows.get(Number(p.id)), maps));
     const names = rekapRows.map((row) => pick(row.NAMA, row.Nama)).filter(Boolean);
 
@@ -257,6 +380,10 @@ export async function POST(req: NextRequest) {
           "AI MCU"
         ),
         year: new Date().getFullYear(),
+        // CAPASKA_PDF_DETAILED_TEMPLATE_V341
+        template: isCapaskaPdfV341 ? "capaska" : "corporate",
+        program: isCapaskaPdfV341 ? "capaska" : String(participants[0]?.program_type || body.program || ""),
+        capaskaRows: capaskaPdfRowsV341,
       }),
     });
 

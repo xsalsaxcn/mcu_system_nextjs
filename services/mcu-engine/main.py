@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import math
 import os
 import re
@@ -300,6 +301,211 @@ def _merge_pdf_files_for_print(pdf_paths: List[Path], output_dir: Path, batch_si
         return merged_paths
 
 
+
+# CAPASKA_PDF_DETAILED_TEMPLATE_V341
+def _clean_capaska_pdf_value_v341(value: Any) -> str:
+    text = str(value if value is not None else "").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text or text.lower() in {"-", "nan", "none", "null", "undefined"}:
+        return ""
+    return text
+
+
+def _is_capaska_payload_v341(payload: Dict[str, Any], rekap_df: pd.DataFrame) -> bool:
+    pieces: List[str] = [
+        str(payload.get("template") or ""),
+        str(payload.get("program") or ""),
+        str(payload.get("company") or ""),
+    ]
+    if not rekap_df.empty:
+        for col in ["KATEGORI", "Kategori", "PAKET", "Paket", "PERUSAHAAN", "Perusahaan", "Nama PT"]:
+            if col in rekap_df.columns:
+                pieces.extend([str(x) for x in rekap_df[col].head(20).tolist()])
+    return any("capaska" in p.lower() for p in pieces)
+
+
+def _filter_capaska_rows_v341(capaska_df: pd.DataFrame, nama: str, rekap_rows: pd.DataFrame) -> pd.DataFrame:
+    if capaska_df is None or capaska_df.empty:
+        return pd.DataFrame()
+    name = str(nama or "").strip().lower()
+    mcu_values: List[str] = []
+    for col in ["NOMCU", "NO MCU", "NO.MCU", "No MCU"]:
+        if rekap_rows is not None and not rekap_rows.empty and col in rekap_rows.columns:
+            mcu_values.extend([str(x).strip().lower() for x in rekap_rows[col].dropna().tolist() if str(x).strip()])
+    df = capaska_df.copy()
+    masks = []
+    if "name" in df.columns and name:
+        masks.append(df["name"].astype(str).str.strip().str.lower().eq(name))
+    if "Nama" in df.columns and name:
+        masks.append(df["Nama"].astype(str).str.strip().str.lower().eq(name))
+    if mcu_values:
+        if "mcuId" in df.columns:
+            masks.append(df["mcuId"].astype(str).str.strip().str.lower().isin(mcu_values))
+        if "No MCU" in df.columns:
+            masks.append(df["No MCU"].astype(str).str.strip().str.lower().isin(mcu_values))
+    if not masks:
+        return df
+    mask = masks[0]
+    for m in masks[1:]:
+        mask = mask | m
+    return df.loc[mask].copy()
+
+
+def _capaska_identity_v341(nama: str, rekap_rows: pd.DataFrame) -> Dict[str, str]:
+    row = rekap_rows.iloc[0].to_dict() if rekap_rows is not None and not rekap_rows.empty else {}
+    def pick(*keys: str) -> str:
+        for k in keys:
+            v = _clean_capaska_pdf_value_v341(row.get(k))
+            if v:
+                return v
+        return ""
+    return {
+        "Nama": pick("NAMA", "Nama") or nama,
+        "No MCU": pick("NOMCU", "NO MCU", "NO.MCU", "No MCU"),
+        "NIK/ID": pick("NIK/NRP/ID", "NIK", "NRP", "ID"),
+        "Perusahaan": pick("PERUSAHAAN", "Perusahaan", "Nama PT") or "BPIP / CAPASKA",
+        "Tanggal MCU": pick("Tanggal MCU", "TANGGAL_MCU", "TGL MCU"),
+        "Jenis Kelamin / Usia": (pick("JK", "Gender", "JENIS KELAMIN") + (" / " + pick("USIA", "Usia", "Age") if pick("USIA", "Usia", "Age") else "")).strip(" /"),
+        "Tanggal Lahir": pick("TGLLAHIR", "Tanggal Lahir", "TANGGAL LAHIR"),
+        "Paket": pick("PAKET", "Paket"),
+    }
+
+
+def _capaska_status_from_rows_v341(rows: List[Dict[str, Any]]) -> Tuple[str, int, List[str], List[str]]:
+    total = 0
+    notes: List[str] = []
+    reds: List[str] = []
+    for r in rows:
+        score_text = _clean_capaska_pdf_value_v341(r.get("score"))
+        try:
+            score = int(float(score_text)) if score_text else 0
+        except Exception:
+            score = 0
+        total += score
+        param = _clean_capaska_pdf_value_v341(r.get("parameter"))
+        value = _clean_capaska_pdf_value_v341(r.get("value"))
+        post = _clean_capaska_pdf_value_v341(r.get("postName"))
+        if not param or not value:
+            continue
+        lower = value.lower()
+        normal = lower in {"normal", "tidak", "tidak ada", "negatif", "negative", "ta", "0", "0 caries", "0 karies", "0 tumpatan", "0 gigi"}
+        if score <= -10 or "tidak direkom" in lower:
+            reds.append(f"{post}: {param}: {value}")
+        elif not normal and score < 0:
+            notes.append(f"{post}: {param}: {value}")
+    if reds:
+        return "Tidak Direkomendasikan", total, notes, reds
+    if notes:
+        return "Dengan Catatan", total, notes, reds
+    return "Direkomendasikan", total, notes, reds
+
+
+def _build_capaska_pdf_bytes_v341(nama: str, rekap_rows: pd.DataFrame, capaska_rows: pd.DataFrame) -> bytes:
+    import io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=12*mm, leftMargin=12*mm, topMargin=12*mm, bottomMargin=10*mm)
+    styles = getSampleStyleSheet()
+    normal = ParagraphStyle("capaska-normal", parent=styles["Normal"], fontName="Helvetica", fontSize=8.2, leading=10)
+    small = ParagraphStyle("capaska-small", parent=styles["Normal"], fontName="Helvetica", fontSize=7.3, leading=8.6)
+    title = ParagraphStyle("capaska-title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=13, leading=15, alignment=1)
+    section = ParagraphStyle("capaska-section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=10, leading=12, spaceBefore=8, spaceAfter=4)
+
+    identity = _capaska_identity_v341(nama, rekap_rows)
+    rows = capaska_rows.to_dict("records") if capaska_rows is not None and not capaska_rows.empty else []
+    status, total_score, notes, reds = _capaska_status_from_rows_v341(rows)
+
+    def P(v: Any, st=normal):
+        return Paragraph(html.escape(_clean_capaska_pdf_value_v341(v)), st)
+
+    story: List[Any] = []
+    story.append(Paragraph("LAPORAN HASIL SELEKSI KESEHATAN CAPASKA", title))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("Format khusus CAPASKA - tidak mengubah template PDF corporate.", small))
+    story.append(Spacer(1, 6))
+
+    id_data = [
+        [P("Nama"), P(identity.get("Nama")), P("No MCU"), P(identity.get("No MCU"))],
+        [P("NIK/ID"), P(identity.get("NIK/ID")), P("Tanggal MCU"), P(identity.get("Tanggal MCU"))],
+        [P("Perusahaan"), P(identity.get("Perusahaan")), P("JK / Usia"), P(identity.get("Jenis Kelamin / Usia"))],
+        [P("Paket"), P(identity.get("Paket")), P("Tanggal Lahir"), P(identity.get("Tanggal Lahir"))],
+    ]
+    t = Table(id_data, colWidths=[28*mm, 62*mm, 28*mm, 62*mm])
+    t.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
+        ("BACKGROUND", (0,0), (0,-1), colors.whitesmoke),
+        ("BACKGROUND", (2,0), (2,-1), colors.whitesmoke),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
+
+    summary_data = [[P("Status Akhir"), P(status), P("Total Skor"), P(str(total_score))]]
+    t = Table(summary_data, colWidths=[36*mm, 62*mm, 28*mm, 54*mm])
+    t.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
+        ("BACKGROUND", (0,0), (0,-1), colors.lightgrey),
+        ("BACKGROUND", (2,0), (2,-1), colors.lightgrey),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 6))
+
+    if reds:
+        story.append(Paragraph("Temuan Merah / Tidak Direkomendasikan", section))
+        story.append(Paragraph("<br/>".join(html.escape(x) for x in reds[:40]), small))
+        story.append(Spacer(1, 5))
+    if notes:
+        story.append(Paragraph("Ringkasan Catatan", section))
+        story.append(Paragraph("<br/>".join(html.escape(x) for x in notes[:60]), small))
+        story.append(Spacer(1, 5))
+
+    story.append(Paragraph("Hasil Pemeriksaan Per Post", section))
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        post = _clean_capaska_pdf_value_v341(r.get("postName")) or "Lainnya"
+        grouped.setdefault(post, []).append(r)
+
+    if not grouped:
+        story.append(Paragraph("Belum ada detail hasil CAPASKA yang diterima engine.", normal))
+    else:
+        for post, items in grouped.items():
+            story.append(Paragraph(post, section))
+            doctor_names = []
+            for it in items:
+                raw_docs = it.get("doctorNames")
+                if isinstance(raw_docs, list):
+                    doctor_names.extend([_clean_capaska_pdf_value_v341(x) for x in raw_docs])
+            doctor_names = [x for i, x in enumerate(doctor_names) if x and x not in doctor_names[:i]]
+            if doctor_names:
+                story.append(Paragraph("Dokter/Pemeriksa: " + html.escape(", ".join(doctor_names)), small))
+                story.append(Spacer(1, 3))
+            table_data = [[P("Parameter", small), P("Hasil", small), P("Skor", small)]]
+            for it in items:
+                table_data.append([P(it.get("parameter"), small), P(it.get("value"), small), P(it.get("score"), small)])
+            tbl = Table(table_data, colWidths=[78*mm, 78*mm, 18*mm], repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+                ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                ("LEFTPADDING", (0,0), (-1,-1), 3),
+                ("RIGHTPADDING", (0,0), (-1,-1), 3),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 5))
+
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Dokumen ini dibuat otomatis dari data pemeriksaan CAPASKA.", small))
+    doc.build(story)
+    return buf.getvalue()
+
 def _build_mcu_pdf_bytes(nama: str, rekap_rows: pd.DataFrame, abn_rows: Optional[pd.DataFrame] = None, cond_rows: Optional[pd.DataFrame] = None) -> bytes:
     return build_mcu_pdf_bytes_gs_port(
         nama=nama,
@@ -347,6 +553,9 @@ def generate_pdf(payload: Dict[str, Any]):
         rekap_df = _as_records_df(payload.get("rekapRows"))
         abn_df = _as_records_df(payload.get("abnRows"))
         cond_df = _as_records_df(payload.get("condRows"))
+        # CAPASKA_PDF_DETAILED_TEMPLATE_V341
+        capaska_df = _as_records_df(payload.get("capaskaRows"))
+        is_capaska_pdf_v341 = _is_capaska_payload_v341(payload, rekap_df)
 
         if rekap_df.empty:
             rekap_df = _sample_rekap_rows()
@@ -376,7 +585,12 @@ def generate_pdf(payload: Dict[str, Any]):
             rekap_rows = _filter_df_by_name(rekap_df, nm)
             abn_rows = abn_by.get(str(nm), pd.DataFrame())
             cond_rows = cond_by.get(str(nm), pd.DataFrame())
-            pdf_bytes = _build_mcu_pdf_bytes(str(nm), rekap_rows, abn_rows, cond_rows)
+            # CAPASKA_PDF_DETAILED_TEMPLATE_V341
+            if is_capaska_pdf_v341:
+                capaska_rows = _filter_capaska_rows_v341(capaska_df, str(nm), rekap_rows)
+                pdf_bytes = _build_capaska_pdf_bytes_v341(str(nm), rekap_rows, capaska_rows)
+            else:
+                pdf_bytes = _build_mcu_pdf_bytes(str(nm), rekap_rows, abn_rows, cond_rows)
             if not pdf_bytes or len(pdf_bytes) < 1000:
                 raise RuntimeError(f"PDF kosong atau gagal dibuat untuk peserta: {nm}")
             file_name = _make_pdf_filename_for_print(str(nm), rekap_rows)
