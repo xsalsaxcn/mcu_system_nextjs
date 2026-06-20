@@ -200,6 +200,64 @@ function normalizeFormScoringOptions(options: ScoringOptionForm[]) {
 }
 
 
+
+// CAPASKA_SETUP_RULE_VALIDATION_V327
+const RULE_STATUS_OPTIONS_V327 = new Set(["normal", "dengan_catatan", "tidak_direkomendasikan"]);
+
+function isRuleInputTypeV327(inputType: any) {
+  const value = String(inputType || "").toLowerCase();
+  return value === "radio" || value === "select";
+}
+
+function numberFromRuleV327(value: any) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(String(value).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function validateCapaskaRuleFormV327(form: any) {
+  const errors: string[] = [];
+  const parameterKey = makeRuleKeyV326(form.parameter_key || form.name);
+  if (!parameterKey) errors.push("Stable Parameter Key wajib diisi.");
+
+  if (!isRuleInputTypeV327(form.input_type)) return errors;
+
+  const options = Array.isArray(form.scoring_options) ? form.scoring_options : [];
+  if (!options.length) {
+    errors.push("Opsi jawaban wajib diisi untuk radio/select.");
+    return errors;
+  }
+
+  const seenKeys = new Set<string>();
+  options.forEach((option: ScoringOptionForm, index: number) => {
+    const row = index + 1;
+    const label = String(option.label || "").trim();
+    const optionKey = makeRuleKeyV326(option.option_key || option.value || option.label);
+    const status = String(option.status_level || "").trim();
+    const score = numberFromRuleV327(option.score);
+    const labelText = label || "tanpa label";
+
+    if (!label) errors.push("Opsi baris " + row + ": label wajib diisi.");
+    if (!optionKey) errors.push("Opsi baris " + row + ": Option Key wajib diisi.");
+    if (optionKey && seenKeys.has(optionKey)) errors.push("Opsi baris " + row + ": Option Key '" + optionKey + "' duplikat.");
+    if (optionKey) seenKeys.add(optionKey);
+    if (!RULE_STATUS_OPTIONS_V327.has(status)) errors.push("Opsi baris " + row + " (" + labelText + "): Status Rule wajib dipilih.");
+    if (score === null) errors.push("Opsi baris " + row + " (" + labelText + "): skor wajib angka.");
+
+    if (status === "normal") {
+      if (option.is_redflag || option.is_critical) errors.push("Opsi baris " + row + " (" + labelText + "): Normal tidak boleh ditandai Tidak Direkomendasikan.");
+    }
+    if (status === "dengan_catatan" && score !== null && score <= -10) {
+      errors.push("Opsi baris " + row + " (" + labelText + "): skor <= -10 harus Status Rule Tidak Direkomendasikan.");
+    }
+    if (status === "tidak_direkomendasikan" && score !== null && score > -10) {
+      errors.push("Opsi baris " + row + " (" + labelText + "): Tidak Direkomendasikan harus memakai skor -10 atau lebih rendah.");
+    }
+  });
+
+  return errors;
+}
+
 function SetupParameters({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
   const [posts, setPosts] = useState<Post[]>([]);
@@ -336,6 +394,16 @@ function SetupParameters({ user }: { user: any }) {
     e.preventDefault();
     setLoading(true);
     setMessage("");
+
+    // CAPASKA_SETUP_RULE_VALIDATION_V327_SAVE
+    if (programType === "capaska") {
+      const validationErrors = validateCapaskaRuleFormV327(form);
+      if (validationErrors.length) {
+        setMessage(validationErrors.slice(0, 5).join(" "));
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       const scoringOptions = normalizeFormScoringOptions(form.scoring_options || []);
@@ -498,14 +566,17 @@ function SetupParameters({ user }: { user: any }) {
     if (field === "label" && !options[index].option_key) {
       options[index].option_key = makeRuleKeyV326(value);
     }
+    // CAPASKA_SETUP_RULE_VALIDATION_V327_OPTION_SYNC
     if (field === "status_level") {
       const status = String(value || "");
+      options[index].status_level = status;
       options[index].is_normal = status === "normal";
       options[index].is_note = status === "dengan_catatan" || status === "tidak_direkomendasikan";
       options[index].is_redflag = status === "tidak_direkomendasikan";
       options[index].is_critical = status === "tidak_direkomendasikan";
-      if (status === "tidak_direkomendasikan" && (!options[index].score || Number(options[index].score) === 0)) {
-        options[index].score = "-10";
+      if (status === "tidak_direkomendasikan") {
+        const score = numberFromRuleV327(options[index].score);
+        if (score === null || score > -10) options[index].score = "-10";
       }
     }
     if (field === "is_critical" || field === "is_redflag") {
@@ -513,6 +584,12 @@ function SetupParameters({ user }: { user: any }) {
       options[index].is_critical = Boolean(value);
       if (value) {
         options[index].status_level = "tidak_direkomendasikan";
+        options[index].is_note = true;
+        options[index].is_normal = false;
+        const score = numberFromRuleV327(options[index].score);
+        if (score === null || score > -10) options[index].score = "-10";
+      } else if (options[index].status_level === "tidak_direkomendasikan") {
+        options[index].status_level = "dengan_catatan";
         options[index].is_note = true;
         options[index].is_normal = false;
       }
@@ -788,6 +865,11 @@ function SetupParameters({ user }: { user: any }) {
               </button>
             </div>
 
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              {/* CAPASKA_SETUP_RULE_VALIDATION_V327_PREVIEW */}
+              <b>Validasi aturan:</b> Status Rule wajib dipilih untuk setiap opsi. Normal tidak masuk catatan, Dengan Catatan masuk ringkasan catatan, dan Tidak Direkomendasikan otomatis menjadi temuan merah dengan skor minimal -10.
+            </div>
+
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
@@ -796,7 +878,7 @@ function SetupParameters({ user }: { user: any }) {
                     <th className="p-2">Value</th>
                     <th className="p-2">Option Key</th>
                     <th className="p-2">Skor</th>
-                    <th className="p-2">Status Rule</th>
+                    <th className="p-2">Status Rule <span className="text-red-600">*</span>{/* CAPASKA_SETUP_RULE_VALIDATION_V327_STATUS_HEADER */}</th>
                     <th className="p-2">Tidak Direkomendasikan</th>
                     <th className="p-2">Catatan</th>
                     <th className="p-2"></th>

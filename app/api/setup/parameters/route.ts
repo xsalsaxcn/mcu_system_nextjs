@@ -67,6 +67,40 @@ function normalizeScoringOptions(value: any, fallbackText: any) {
     .filter(Boolean);
 }
 
+
+// CAPASKA_SETUP_RULE_VALIDATION_API_V327
+const RULE_STATUS_OPTIONS_API_V327 = new Set(["normal", "dengan_catatan", "tidak_direkomendasikan"]);
+
+function validateScoringOptionsApiV327(options: any[], inputType: any) {
+  const type = String(inputType || "").toLowerCase();
+  if (!(type === "radio" || type === "select")) return [];
+
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  if (!options.length) errors.push("Opsi jawaban wajib diisi untuk radio/select.");
+
+  for (let index = 0; index < options.length; index += 1) {
+    const option: any = options[index] || {};
+    const row = index + 1;
+    const label = String(option.label || option.value || "").trim();
+    const optionKey = normalizeRuleKeyV326(option.option_key || option.value || option.label);
+    const status = String(option.status_level || "").trim();
+    const score = parseNumber(option.score);
+
+    if (!label) errors.push("Opsi baris " + row + ": label wajib diisi.");
+    if (!optionKey) errors.push("Opsi baris " + row + ": Option Key wajib diisi.");
+    if (optionKey && seen.has(optionKey)) errors.push("Opsi baris " + row + ": Option Key duplikat.");
+    if (optionKey) seen.add(optionKey);
+    if (!RULE_STATUS_OPTIONS_API_V327.has(status)) errors.push("Opsi baris " + row + ": Status Rule wajib dipilih.");
+    if (score === null) errors.push("Opsi baris " + row + ": skor wajib angka.");
+    if (status === "normal" && (option.is_redflag || option.is_critical)) errors.push("Opsi baris " + row + ": Normal tidak boleh Tidak Direkomendasikan.");
+    if (status === "dengan_catatan" && score !== null && score <= -10) errors.push("Opsi baris " + row + ": skor <= -10 harus Tidak Direkomendasikan.");
+    if (status === "tidak_direkomendasikan" && score !== null && score > -10) errors.push("Opsi baris " + row + ": Tidak Direkomendasikan harus memakai skor -10 atau lebih rendah.");
+  }
+
+  return errors;
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
 
@@ -229,6 +263,8 @@ export async function POST(req: NextRequest) {
   const programType = String(body.program_type || "capaska").trim();
   const postId = Number(body.post_id);
   const name = String(body.name || "").trim();
+  // CAPASKA_SETUP_RULE_VALIDATION_API_V327_PARAMETER_KEY
+  const parameterKey = normalizeRuleKeyV326(body.parameter_key || name);
 
   if (!["capaska", "corporate"].includes(programType)) {
     return fail("Program harus capaska atau corporate.");
@@ -242,8 +278,17 @@ export async function POST(req: NextRequest) {
   const maxScore = parseNumber(body.max_score);
   const scoringType = String(body.scoring_type || "by_option").trim() || "by_option";
 
+  // CAPASKA_SETUP_RULE_VALIDATION_API_V327_VALIDATE
+  if (programType === "capaska") {
+    if (!parameterKey) return fail("Stable Parameter Key wajib diisi.");
+    const ruleErrors = validateScoringOptionsApiV327(scoringOptions, body.input_type);
+    if (ruleErrors.length) return fail(ruleErrors.slice(0, 5).join(" "));
+  }
+
   const configJson = programType === "capaska"
     ? {
+        // CAPASKA_SETUP_RULE_VALIDATION_API_V327_CONFIG
+        parameter_key: parameterKey,
         options: scoringOptions,
         max_score: maxScore,
         scoring_type: scoringType,
