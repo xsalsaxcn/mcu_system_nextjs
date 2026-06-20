@@ -108,7 +108,12 @@ function clearStoredJob() {
 }
 
 export default function AiMcuGeneratePage() {
-  const [programType, setProgramType] = useState("all");
+  // CAPASKA_GENERATE_PDF_MENU_V332_QUERY_DEFAULT
+  const [programType, setProgramType] = useState(() => {
+    if (typeof window === "undefined") return "all";
+    const queryProgram = new URLSearchParams(window.location.search).get("program");
+    return queryProgram === "capaska" || queryProgram === "corporate" || queryProgram === "all" ? queryProgram : "all";
+  });
   const [mode, setMode] = useState("single");
   const [uploadDrive, setUploadDrive] = useState(false);
   const [mergePdf, setMergePdf] = useState(true);
@@ -434,6 +439,10 @@ export default function AiMcuGeneratePage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Generate PDF AI MCU</h1>
+              {/* CAPASKA_GENERATE_PDF_MENU_V332_NOTICE */}
+              {programType === "capaska" ? (
+                <div className="mt-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Mode CAPASKA aktif</div>
+              ) : null}
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Pilih jenis program, database MCU, retrieve peserta, pilih single/multiple/select all,
               lalu generate PDF memakai async job.

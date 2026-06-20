@@ -31,6 +31,12 @@ const menuItems = [
     href: "/ai-mcu/generate",
     desc: "Generate PDF per peserta dan merge untuk print.",
   },
+  // CAPASKA_GENERATE_PDF_MENU_V332_AI_PAGE
+  {
+    title: "Generate PDF CAPASKA",
+    href: "/ai-mcu/generate?program=capaska",
+    desc: "Generate PDF hasil CAPASKA langsung dengan filter program CAPASKA.",
+  },
   {
     title: "Google Drive",
     href: "/ai-mcu/drive",
@@ -57,6 +63,7 @@ const drawerItems = [
   ["Preview / Edit Data", "/ai-mcu/preview"],
   ["Analisis MCU", "/ai-mcu/analyze"],
   ["Generate PDF", "/ai-mcu/generate"],
+  ["Generate PDF CAPASKA", "/ai-mcu/generate?program=capaska"],
   ["Google Drive", "/ai-mcu/drive"],
   ["Riwayat", "/ai-mcu/history"],
   ["Import Peserta", "/import"],

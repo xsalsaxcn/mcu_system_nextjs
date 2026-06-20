@@ -19,6 +19,8 @@ const menuGroups = [
       { label: "Input CAPASKA", href: "/input" },
       { label: "Input Corporate", href: "/input-corporate" },
       { label: "AI MCU Analyzer", href: "/ai-mcu/analyze" },
+      // CAPASKA_GENERATE_PDF_MENU_V332
+      { label: "Generate PDF CAPASKA", href: "/ai-mcu/generate?program=capaska" },
       { label: "Training AI MCU", href: "/ai-mcu/train" },
       { label: "Cetak Label", href: "/labels" },
     ],
