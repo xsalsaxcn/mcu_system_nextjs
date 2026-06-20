@@ -424,7 +424,6 @@ export default function AiMcuGeneratePage() {
       clearPollTimer();
     }
   }
-
   const progress = Math.max(0, Math.min(100, Number(result?.progress || 0)));
   const done = result?.status === "done";
   const hasFiles =
@@ -433,6 +432,11 @@ export default function AiMcuGeneratePage() {
     Boolean(result?.zipFile?.url) ||
     Boolean(result?.pdfFiles?.length) ||
     Boolean(result?.mergedFiles?.length);
+  // CAPASKA_GENERATE_PDF_DOWNLOAD_BUTTON_V336
+  // CAPASKA_GENERATE_PDF_GENERATE_PAGE_SYNTAX_REPAIR_V338
+  const fallbackDownloadUrlV336 = result?.jobId
+    ? `/api/ai-mcu/generate-pdf/download/${encodeURIComponent(result.jobId)}`
+    : "";
 
   return (
     <main className="relative p-6">
@@ -788,7 +792,7 @@ export default function AiMcuGeneratePage() {
               </div>
             )}
 
-            {done && hasFiles ? (
+            {done ? (
               <div className="mt-4 space-y-4">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                   <div className="font-bold">{result?.message}</div>
@@ -832,7 +836,23 @@ export default function AiMcuGeneratePage() {
                       Download ZIP
                     </a>
                   ) : null}
+                {fallbackDownloadUrlV336 ? (
+                  <a
+                    href={fallbackDownloadUrlV336}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl bg-emerald-700 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-800"
+                  >
+                    Download / Buka Hasil PDF
+                  </a>
+                ) : null}
                 </div>
+
+                {!hasFiles ? (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+                    Engine sudah selesai, tetapi daftar file belum dikirim di status job. Gunakan tombol <b>Download / Buka Hasil PDF</b> untuk mengambil hasil langsung dari engine.
+                  </div>
+                ) : null}
 
                 {result?.pdfFiles?.length ? (
                   <div className="rounded-2xl border">
