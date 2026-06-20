@@ -397,6 +397,170 @@ function severityStatusSheetV179(value: any, score: any) {
   if (!isNeutralStatusSheetV179(value) && text !== "sesuai") return "yellow";
   return "";
 }
+
+
+// DASHBOARD_EXPORT_BACKEND_JUKNIS_RULES_V315
+// Minimal backend/export overrides based on Juknis.
+// Keeps the previous stable note filter, then only upgrades known Juknis findings.
+function stageKeyFromPostStatusSheetV315(param: any, postNameMap?: any, fallbackText?: any) {
+  const postId = Number(param?.post_id ?? param?.postId ?? param?.post ?? 0);
+  if (postId === 4) return "mata";
+  if (postId === 5) return "penyakit_dalam";
+  if (postId === 6) return "gigi";
+  if (postId === 7) return "tht";
+  if (postId === 8) return "jantung";
+  if (postId === 9) return "ortopedi";
+  if (postId === 10) return "radiologi";
+
+  const postLabel = postNameMap && typeof postNameMap.get === "function" ? postNameMap.get(postId) : "";
+  const text = [postLabel, fallbackText, param?.category, param?.name, param?.label, param?.title, param?.parameter, param?.param_name, param?.question].filter(Boolean).join(" ");
+  return stageKeyStatusSheetV179(text);
+}
+
+function textJuknisV315(value: any) {
+  return normStatusSheetV179(value).replace(/\s+/g, " ").trim();
+}
+
+function rawTextJuknisV315(value: any) {
+  return cleanStatusSheetV179(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function paramNameJuknisV315(param: any) {
+  return paramNameStatusSheetV295(param);
+}
+
+function compactTextJuknisV315(value: any) {
+  return textJuknisV315(value).replace(/\s+/g, "").replace(/[.,;:]/g, "");
+}
+
+function isBlankJuknisV315(value: any) {
+  const text = textJuknisV315(value);
+  return !text || ["-", "--", ".", "n/a", "na", "nihil", "kosong", "tidak ada catatan", "tidak ada catatan khusus"].includes(text);
+}
+
+function isNormalValueJuknisV315(value: any) {
+  const text = textJuknisV315(value);
+  const compact = compactTextJuknisV315(value);
+  if (isBlankJuknisV315(value)) return true;
+  if (["normal", "sesuai", "sesuaijuknis", "intak", "ta", "t/a", "tidakada", "tidakmenggunakan", "tidakbutawarna", "tidakhamil", "negatif", "(-)", "-"].includes(compact)) return true;
+  if (compact === "0" || compact === "0gigi" || compact === "0caries" || compact === "0karies" || compact === "0tumpatan" || compact === "0impaksi") return true;
+  if (text.includes("tidak ada") && !text.includes("tidak ada catatan")) return true;
+  if (text.includes("normal") && !text.includes("tidak normal") && !text.includes("abnormal")) return true;
+  if (text.includes("sesuai juknis") && !text.includes("tidak sesuai")) return true;
+  if ((text.includes("(-)") || text.includes("negatif")) && !text.includes("(+)") && !text.includes("positif")) return true;
+  return false;
+}
+
+function isProblemValueJuknisV315(value: any) {
+  const text = textJuknisV315(value);
+  const compact = compactTextJuknisV315(value);
+  if (isNormalValueJuknisV315(value)) return false;
+  if (compact === "ada" || compact === "(+)" || compact === "+" || text.includes("positif") || text.includes("tidak normal") || text.includes("abnormal") || text.includes("kelainan")) return true;
+  return Boolean(text);
+}
+
+function scoreRedJuknisV315(score: any) {
+  const scoreNum = typeof score === "number" ? score : numberFromStatusSheetV179(score);
+  return scoreNum !== null && scoreNum <= -10;
+}
+
+function numericValueJuknisV315(value: any) {
+  const text = textJuknisV315(value);
+  const match = text.match(/-?\d+(?:[.,]\d+)?/);
+  if (!match) return null;
+  const num = Number(match[0].replace(",", "."));
+  return Number.isFinite(num) ? num : null;
+}
+
+function isTbBbRedFlagJuknisV315(stageKey: any, param: any, value: any) {
+  if (stageKey !== "penyakit_dalam") return false;
+  const name = paramNameJuknisV315(param);
+  const text = textJuknisV315(value);
+  const looksTbBb = name.includes("tb") || name.includes("tinggi badan") || name.includes("bb") || name.includes("berat badan");
+  return (looksTbBb || text.includes("juknis")) && text.includes("tidak sesuai") && text.includes("juknis");
+}
+
+function isAnusRectumRedFlagJuknisV315(stageKey: any, param: any, value: any) {
+  if (stageKey !== "penyakit_dalam") return false;
+  const name = paramNameJuknisV315(param);
+  const isAnusRectumParam = name.includes("hemoroid") || name.includes("haemoroid") || name.includes("ambeyen") || name.includes("fisura") || name.includes("fissura") || name.includes("striktur") || name.includes("prolaps") || name.includes("recti") || name.includes("rektum") || name.includes("anus");
+  if (!isAnusRectumParam) return false;
+  const text = textJuknisV315(value);
+  return text.includes("tidak normal") || text.includes("ada") || text.includes("(+)") || text.includes("positif");
+}
+
+function gigiDecisionJuknisV315(param: any, value: any, score: any) {
+  const name = paramNameJuknisV315(param);
+  const text = textJuknisV315(value);
+  const n = numericValueJuknisV315(value);
+  if (isNormalValueJuknisV315(value)) return { include: false, red: false };
+
+  if (name.includes("caries") || name.includes("karies")) {
+    if (text.includes(">3") || text.includes("lebih dari 3") || (n !== null && n > 3)) return { include: true, red: true };
+    if (n !== null && n >= 1) return { include: true, red: false };
+    if (isProblemValueJuknisV315(value)) return { include: true, red: scoreRedJuknisV315(score) };
+  }
+
+  if (name.includes("karang") || name.includes("infeksi") || name.includes("gusi")) {
+    return isProblemValueJuknisV315(value) ? { include: true, red: scoreRedJuknisV315(score) } : { include: false, red: false };
+  }
+
+  if (name.includes("tumpatan")) {
+    if (n !== null && n > 0) return { include: true, red: scoreRedJuknisV315(score) };
+    if (text.includes("<5") || text.includes(">5") || isProblemValueJuknisV315(value)) return { include: true, red: scoreRedJuknisV315(score) };
+  }
+
+  if (name.includes("impaksi")) {
+    if (text.includes(">4") || text.includes("lebih dari 4") || (n !== null && n > 4)) return { include: true, red: true };
+    if (n !== null && n > 0) return { include: true, red: false };
+    if (text.includes(">2") || text.includes("lebih dari 2")) return { include: true, red: scoreRedJuknisV315(score) };
+    if (isProblemValueJuknisV315(value)) return { include: true, red: scoreRedJuknisV315(score) };
+  }
+
+  if (name.includes("kehilangan") || name.includes("hilang")) {
+    if (text.includes(">2") || text.includes("lebih dari 2") || (n !== null && n > 2)) return { include: true, red: true };
+    if (n !== null && n > 0) return { include: true, red: false };
+    if (isProblemValueJuknisV315(value)) return { include: true, red: scoreRedJuknisV315(score) };
+  }
+
+  if (name.includes("panoramic") || name.includes("panoramik") || name.includes("dental panoramic")) {
+    if (text.includes("normal") && !text.includes("tidak normal") && !text.includes("kelainan")) return { include: false, red: false };
+    return isProblemValueJuknisV315(value) ? { include: true, red: scoreRedJuknisV315(score) } : { include: false, red: false };
+  }
+
+  return isProblemValueJuknisV315(value) ? { include: true, red: scoreRedJuknisV315(score) } : { include: false, red: false };
+}
+
+function ortopediDecisionJuknisV315(param: any, value: any, score: any) {
+  if (isNormalValueJuknisV315(value)) return { include: false, red: false };
+  const name = paramNameJuknisV315(param);
+  const severeClinical = ["sindaktili", "polidaktili", "polidactily", "spina bifida", "mallet", "hiperekstensi lengan", "hammer", "hallux", "webbed", "o/x", "ox knee", "o x knee", "pes planus", "kaki datar", "hiperekstensi lutut", "general laxity"];
+  const isSevereClinical = severeClinical.some((term) => name.includes(term));
+  const isVertebraClinical = name.includes("skoliosis") || name.includes("kifosis") || name.includes("lordosis") || name.includes("vertebra") || name.includes("tulang belakang");
+  if (isSevereClinical && isProblemValueJuknisV315(value)) return { include: true, red: true };
+  if (isVertebraClinical && isProblemValueJuknisV315(value)) return { include: true, red: scoreRedJuknisV315(score) };
+  return isProblemValueJuknisV315(value) ? { include: true, red: scoreRedJuknisV315(score) } : { include: false, red: false };
+}
+
+function radiologiDecisionJuknisV315(param: any, value: any, score: any) {
+  const text = textJuknisV315(value);
+  if (isNormalValueJuknisV315(value)) return { include: false, red: false };
+  if (text.includes("sedang") || text.includes("berat")) return { include: true, red: true };
+  if (text.includes("ringan")) return { include: true, red: false };
+  return isProblemValueJuknisV315(value) ? { include: true, red: scoreRedJuknisV315(score) } : { include: false, red: false };
+}
+
+function noteDecisionJuknisOverrideV315(stageKey: any, param: any, value: any, score: any) {
+  if (isBlankJuknisV315(value)) return { include: false, red: false };
+  if (isTbBbRedFlagJuknisV315(stageKey, param, value)) return { include: true, red: true };
+  if (isAnusRectumRedFlagJuknisV315(stageKey, param, value)) return { include: true, red: true };
+  if (stageKey === "gigi") return gigiDecisionJuknisV315(param, value, score);
+  if (stageKey === "ortopedi") return ortopediDecisionJuknisV315(param, value, score);
+  if (stageKey === "radiologi") return radiologiDecisionJuknisV315(param, value, score);
+  if (scoreRedJuknisV315(score) && !isNormalValueJuknisV315(value)) return { include: true, red: true };
+  return { include: false, red: false };
+}
+
 const STAGE_CONFIG_STATUS_SHEET_V179: any = {
   mata: { label: "Mata", max: 12, scoreKey: "Mata" },
   tht: { label: "THT", max: 10, scoreKey: "THT" },
@@ -663,7 +827,7 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       const postLabel = postName.get(Number(param.post_id)) || "";
       // RESTORE_EXPORT_PARAMTEXT_V314
       const paramText = `${postLabel} ${param.category || ""} ${param.name || ""}`;
-      const stageKey = stageKeyStatusSheetV179(paramText);
+      const stageKey = stageKeyFromPostStatusSheetV315(param, postName, paramText);
       // DASHBOARD_EXPORT_REKAP_V301_TYPE_FIX
       if (!stageKey || !STAGE_CONFIG_STATUS_SHEET_V179[stageKey]) return false;
       const result = resultByParticipantParam.get(makeKey(participantId, Number(param.id)));
@@ -694,15 +858,21 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
         if (isTbBbSesuaiJuknisStatusSheetV201(value) || isTbBbTidakSesuaiJuknisStatusSheetV201(value)) bbJuknisChoiceV201 = value;
         if (numberFromStatusSheetV179(value) !== null) weight = value;
       }
-      const stageKey = stageKeyStatusSheetV179(paramText);
+      const stageKey = stageKeyFromPostStatusSheetV315(param, postName, paramText);
       if (!stageKey || !notesByStage[stageKey]) continue;
       const score = value ? scoreCapaskaDirectChoice(param, value) : "";
       // DASHBOARD_EXPORT_RESTORE_TO_STAFF_MAP_V306_V312
+      // DASHBOARD_EXPORT_BACKEND_JUKNIS_RULES_V315_APPLY
       const decisionV301 = noteDecisionV301(stageKey, param, value, score);
-      if (decisionV301.include) {
+      const decisionJuknisV315 = noteDecisionJuknisOverrideV315(stageKey, param, value, score);
+      const decisionV315 = {
+        include: Boolean(decisionV301.include || decisionJuknisV315.include),
+        red: Boolean(decisionV301.red || decisionJuknisV315.red),
+      };
+      if (decisionV315.include) {
         const note = `${param.name}: ${value}`;
         notesByStage[stageKey].push(note);
-        if (decisionV301.red) redNotesByStage[stageKey].push(note);
+        if (decisionV315.red) redNotesByStage[stageKey].push(note);
       }
     }
 
