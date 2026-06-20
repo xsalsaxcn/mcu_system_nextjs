@@ -563,6 +563,8 @@ function noteDecisionJuknisOverrideV315(stageKey: any, param: any, value: any, s
 
 
 
+// DASHBOARD_EXPORT_FIX_REGEX_V324
+// Fix regex escaping so zero dental values like "0 caries" are treated as normal and numeric parsing works.
 // DASHBOARD_EXPORT_JUKNIS_SCORE_NOTES_V319
 // Read-only export helpers: Juknis red flags force export score to -10 and normal values are hidden from notes.
 function stageKeyFromPostStatusSheetV319(param: any, postNameMap?: any, fallbackText?: any) {
@@ -580,11 +582,11 @@ function stageKeyFromPostStatusSheetV319(param: any, postNameMap?: any, fallback
 }
 
 function textExportJuknisV319(value: any) {
-  return normStatusSheetV179(value).replace(/s+/g, " ").trim();
+  return normStatusSheetV179(value).replace(/\s+/g, " ").trim();
 }
 
 function rawExportJuknisV319(value: any) {
-  return cleanStatusSheetV179(value).toLowerCase().replace(/s+/g, " ").trim();
+  return cleanStatusSheetV179(value).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function paramNameExportJuknisV319(param: any) {
@@ -593,7 +595,7 @@ function paramNameExportJuknisV319(param: any) {
 
 function numericValueExportJuknisV319(value: any) {
   const text = rawExportJuknisV319(value);
-  const match = text.match(/-?d+(?:[.,]d+)?/);
+  const match = text.match(/-?\d+(?:[.,]\d+)?/);
   if (!match) return null;
   return Number(match[0].replace(",", "."));
 }
@@ -601,7 +603,7 @@ function numericValueExportJuknisV319(value: any) {
 function isPositiveFindingExportJuknisV319(value: any) {
   const text = textExportJuknisV319(value);
   const raw = rawExportJuknisV319(value);
-  const compact = raw.replace(/s+/g, "");
+  const compact = raw.replace(/\s+/g, "");
   if (!text) return false;
   if (isNormalValueExportJuknisV319(value)) return false;
   if (compact === "(+)" || compact === "+") return true;
@@ -614,7 +616,7 @@ function isPositiveFindingExportJuknisV319(value: any) {
 function isNormalValueExportJuknisV319(value: any) {
   const text = textExportJuknisV319(value);
   const raw = rawExportJuknisV319(value);
-  const compact = raw.replace(/[s.]/g, "");
+  const compact = raw.replace(/[\s.]/g, "");
   if (!text) return true;
   const normalSet = new Set([
     "-", "--", ".", "n/a", "na", "nihil", "kosong",
@@ -627,7 +629,7 @@ function isNormalValueExportJuknisV319(value: any) {
   if ((raw.includes("negative") || raw.includes("negatif") || raw.includes("(-)")) && !raw.includes("positive") && !raw.includes("positif") && !raw.includes("(+)")) return true;
   if (raw.includes("tidak ada") && !raw.includes("tidak ada catatan tambahan")) return true;
   if (raw.includes("normal") && !raw.includes("tidak normal") && !raw.includes("abnormal")) return true;
-  if (/^0(?:[s-]*(caries|karies|tumpatan|gigi|impaksi))?$/i.test(text)) return true;
+  if (/^0(?:[\s-]*(caries|karies|tumpatan|gigi|impaksi))?$/i.test(text)) return true;
   // DASHBOARD_EXPORT_CLEAN_ZERO_CARIES_V320_NORMAL_VALUE_PATCH
   if (raw.includes("0 caries") || raw.includes("0 karies") || raw.includes("0 tumpatan") || raw.includes("0 gigi") || raw.includes("0 impaksi")) return true;
   const zeroDentalCompactV320 = raw.replace(/[^0-9a-z]/g, "");
