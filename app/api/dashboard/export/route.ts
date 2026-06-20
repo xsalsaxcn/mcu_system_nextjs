@@ -762,6 +762,8 @@ function scoreDeltaExportJuknisV319(stageKey: any, param: any, value: any, baseS
 }
 
 function noteDecisionExportJuknisV319(stageKey: any, param: any, value: any, score: any, baseDecision: any) {
+  // DASHBOARD_EXPORT_SUM_SCORES_V323_NOTE_DECISION_PATCH
+  if (isNormalNoteByParamExportJuknisV320(param, value)) return { include: false, red: false };
   // DASHBOARD_EXPORT_CLEAN_ZERO_CARIES_V320_NOTE_DECISION_PATCH
   if (isNormalNoteByParamExportJuknisV320(param, value)) return { include: false, red: false };
   if (isNormalValueExportJuknisV319(value)) return { include: false, red: false };
@@ -1056,6 +1058,8 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
     let bbJuknisChoiceV201 = "";
     // DASHBOARD_EXPORT_JUKNIS_SCORE_NOTES_V319_SCORE_ADJUST
     let scoreAdjustmentJuknisV319 = 0;
+    // DASHBOARD_EXPORT_SUM_SCORES_V323_REKAP_SUM_INIT
+    let scoreSumExportJuknisV323 = 0;
 
     for (const param of exportParameters || []) {
       const result = resultByParticipantParam.get(makeKey(Number(participant.id), Number(param.id)));
@@ -1075,6 +1079,9 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
       if (!stageKey || !notesByStage[stageKey]) continue;
       const baseScoreV319 = value ? scoreCapaskaDirectChoice(param, value) : "";
       const score = scoreCapaskaExportJuknisV319(stageKey, param, value, baseScoreV319);
+      // DASHBOARD_EXPORT_SUM_SCORES_V323_REKAP_SUM_ADD
+      const scoreNumExportJuknisV323 = numberFromStatusSheetV179(score);
+      if (scoreNumExportJuknisV323 !== null) scoreSumExportJuknisV323 += scoreNumExportJuknisV323;
       scoreAdjustmentJuknisV319 += scoreDeltaExportJuknisV319(stageKey, param, value, baseScoreV319, score);
       // DASHBOARD_EXPORT_RESTORE_TO_STAFF_MAP_V306_V312// DASHBOARD_EXPORT_JUKNIS_SCORE_NOTES_V319_APPLY
       const baseDecisionV319 = noteDecisionV301(stageKey, param, value, score);
@@ -1112,7 +1119,8 @@ function buildCapaskaStatusCatatanRowsV179(args: any) {
     }
     const finalStatus = redFindings.length ? "Tidak Direkomendasikan" : allNotes.length ? "Dengan Catatan" : "Normal";
     const totalScoreBaseJuknisV319 = numberFromStatusSheetV179(progressInfo?.["Total Score"]);
-    const totalScoreExportJuknisV319 = totalScoreBaseJuknisV319 !== null ? totalScoreBaseJuknisV319 + scoreAdjustmentJuknisV319 : (progressInfo?.["Total Score"] ?? "");
+    // DASHBOARD_EXPORT_SUM_SCORES_V323_REKAP_TOTAL_SUM
+    const totalScoreExportJuknisV319 = scoreSumExportJuknisV323 > 0 ? scoreSumExportJuknisV323 : (totalScoreBaseJuknisV319 !== null ? totalScoreBaseJuknisV319 + scoreAdjustmentJuknisV319 : (progressInfo?.["Total Score"] ?? ""));
     return {
       "NO": index + 1,
       "PROVINSI": participant.province || "-",
@@ -1635,6 +1643,9 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
 
           // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V322_INIT
           let wideScoreAdjustmentJuknisV321 = 0;
+          // DASHBOARD_EXPORT_SUM_SCORES_V323_WIDE_SUM_INIT
+          let wideScoreSumJuknisV323 = 0;
+          const wideDomainScoreSumJuknisV323: any = {};
           const wideDomainAdjustmentJuknisV321: any = {};
           const wideRedFindingsJuknisV321: string[] = [];
 
@@ -1651,6 +1662,12 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
             const baseScoreWideV321 = value ? scoreCapaskaDirectChoice(param, value) : "";
             const scoreWideV321 = scoreCapaskaExportJuknisV319(stageKeyWideV321, param, value, baseScoreWideV321);
             const scoreDeltaWideV321 = scoreDeltaExportJuknisV319(stageKeyWideV321, param, value, baseScoreWideV321, scoreWideV321);
+            // DASHBOARD_EXPORT_SUM_SCORES_V323_WIDE_SUM_ADD
+            const scoreNumWideV323 = numberFromStatusSheetV179(scoreWideV321);
+            if (scoreNumWideV323 !== null) {
+              wideScoreSumJuknisV323 += scoreNumWideV323;
+              if (stageKeyWideV321) wideDomainScoreSumJuknisV323[stageKeyWideV321] = (wideDomainScoreSumJuknisV323[stageKeyWideV321] || 0) + scoreNumWideV323;
+            }
             wideScoreAdjustmentJuknisV321 += scoreDeltaWideV321;
             if (stageKeyWideV321) wideDomainAdjustmentJuknisV321[stageKeyWideV321] = (wideDomainAdjustmentJuknisV321[stageKeyWideV321] || 0) + scoreDeltaWideV321;
             if (isJuknisRedFlagExportV319(stageKeyWideV321, param, value)) {
@@ -1667,6 +1684,8 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
 
           // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_DOMAIN_HELPER
           const addWideDomainScoreJuknisV321 = (base: any, stageKey: string) => {
+            // DASHBOARD_EXPORT_SUM_SCORES_V323_WIDE_DOMAIN_SUM
+            if (Object.prototype.hasOwnProperty.call(wideDomainScoreSumJuknisV323, stageKey)) return wideDomainScoreSumJuknisV323[stageKey];
             const baseNum = numberFromStatusSheetV179(base);
             const adj = wideDomainAdjustmentJuknisV321[stageKey] || 0;
             return baseNum !== null ? baseNum + adj : (base ?? "");
@@ -1686,7 +1705,8 @@ const stageStaffAssignmentsData = isCapaskaProgram && participantIds.length
           // Sengaja diletakkan paling akhir sesuai request.
           // DASHBOARD_EXPORT_WIDE_JUKNIS_SCORE_V321_TOTAL
           const totalScoreBaseWideV321 = numberFromStatusSheetV179(progressInfo?.["Total Score"]);
-          row["Total Skor Akhir"] = totalScoreBaseWideV321 !== null ? totalScoreBaseWideV321 + wideScoreAdjustmentJuknisV321 : (progressInfo?.["Total Score"] ?? "");
+          // DASHBOARD_EXPORT_SUM_SCORES_V323_WIDE_TOTAL_SUM
+          row["Total Skor Akhir"] = wideScoreSumJuknisV323 > 0 ? wideScoreSumJuknisV323 : (totalScoreBaseWideV321 !== null ? totalScoreBaseWideV321 + wideScoreAdjustmentJuknisV321 : (progressInfo?.["Total Score"] ?? ""));
 
           return row;
         });
