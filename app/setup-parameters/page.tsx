@@ -258,6 +258,161 @@ function validateCapaskaRuleFormV327(form: any) {
   return errors;
 }
 
+
+
+// CAPASKA_SETUP_RULE_SAFETY_WARNINGS_V329
+const CAPASKA_POST_LEGEND_V329 = [
+  { id: 4, key: "mata", label: "Kesehatan Mata", examples: "visus, buta warna, lensa kontak, strabismus" },
+  { id: 5, key: "penyakit_dalam", label: "Penyakit Dalam", examples: "TB/BB, tanda vital, hemoroid, hernia, urogenitalia" },
+  { id: 6, key: "gigi", label: "Gigi", examples: "caries/karies, tumpatan, impaksi, karang gigi, panoramic" },
+  { id: 7, key: "tht", label: "THT", examples: "tonsil, serumen, membran timpani, rhinitis, epistaksis" },
+  { id: 8, key: "jantung", label: "Jantung & Pembuluh Darah", examples: "iskemik, irama, anatomi jantung, varises, arteri" },
+  { id: 9, key: "ortopedi", label: "Ortopedi", examples: "pes planus, hallux valgus, O/X knee, hammer toe, general laxity" },
+  { id: 10, key: "radiologi", label: "Radiologi", examples: "rontgen whole spine, skoliosis/lordosis/kifosis radiologi" },
+];
+
+type RuleSafetyWarningV329 = {
+  level: "warning" | "danger";
+  message: string;
+};
+
+function getSelectedPostLegendV329(postId: any) {
+  const id = Number(postId || 0);
+  return CAPASKA_POST_LEGEND_V329.find((post) => post.id === id) || null;
+}
+
+function ruleTextV329(...values: any[]) {
+  return values
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function expectedPostFromRuleTextV329(form: any) {
+  const text = ruleTextV329(form?.name, form?.parameter_key, form?.category, form?.reference_text);
+
+  if (/\b(caries|karies|tumpatan|impaksi|kehilangan gigi|karang gigi|infeksi gusi|dental panoramic|panoramik|panoramic)\b/.test(text)) return 6;
+  if (/\b(visus|buta warna|lensa|kaca mata|strabismus|juling|ishihara)\b/.test(text)) return 4;
+  if (/\b(hemoroid|haemoroid|tb\b|bb\b|tinggi badan|berat badan|tanda vital|tensi|suhu|nadi|napas|nafas|tato|tindik|hernia|urogenitalia|abdomen|anus|rektum|rectum|paru)\b/.test(text)) return 5;
+  if (/\b(tonsil|serumen|membran timpani|rhinitis|rinitis|epistaksis|garputala|weber|tht)\b/.test(text)) return 7;
+  if (/\b(iskemik|myocard|miokard|irama jantung|anatomi jantung|kongenital jantung|varises|arteri|ekg)\b/.test(text)) return 8;
+  if (/\b(pes planus|kaki datar|hallux|valgus|hammer toe|mallet finger|o\/x|ox knee|o x knee|general laxity|hiperekstensi|sindaktili|polidaktili|polidactily|webbed toe|ortopedi)\b/.test(text)) return 9;
+  if (/\b(radiologi|rontgen|xray|x-ray|whole spine|thoracolumbosacral|thoraco|lumbosacral|keterangan kondisi skoliosis|derajat|cobb)\b/.test(text)) return 10;
+
+  return null;
+}
+
+function ruleStatusLabelV329(status: any) {
+  if (status === "normal") return "Normal";
+  if (status === "dengan_catatan") return "Dengan Catatan";
+  if (status === "tidak_direkomendasikan") return "Tidak Direkomendasikan";
+  return "Belum dipilih";
+}
+
+function isNormalLookingOptionV329(option: any) {
+  const text = ruleTextV329(option?.label, option?.value, option?.option_key);
+  if (!text) return false;
+  if (/\b(tidak normal|abnormal|positif|ada kelainan|buta warna|sedang|berat)\b/.test(text)) return false;
+  return /\b(normal|tidak ada|negative|negatif|\(-\)|ta|0 caries|0 karies|0 tumpatan|0 gigi|0 impaksi|tidak buta warna|tidak menggunakan)\b/.test(text);
+}
+
+function isProblemLookingOptionV329(option: any) {
+  const text = ruleTextV329(option?.label, option?.value, option?.option_key);
+  if (!text || isNormalLookingOptionV329(option)) return false;
+  return /\b(ada|positif|\(\+\)|tidak normal|abnormal|kelainan|buta warna|caries|karies|tumpatan|impaksi|kehilangan|ringan|sedang|berat|tidak sesuai|hernia|hemoroid)\b|>\s*\d+/.test(text);
+}
+
+function buildCapaskaRuleSafetyWarningsV329(form: any, posts: Post[]) {
+  const warnings: RuleSafetyWarningV329[] = [];
+  const selectedPostId = Number(form?.post_id || 0);
+  const selectedPost = posts.find((post) => Number(post.id) === selectedPostId);
+  const parameterKey = makeRuleKeyV326(form?.parameter_key || form?.name || "");
+
+  if (!selectedPostId) {
+    warnings.push({ level: "danger", message: "Post Pemeriksaan wajib dipilih agar mapping tidak salah." });
+  }
+
+  if (!parameterKey) {
+    warnings.push({ level: "danger", message: "Stable Parameter Key wajib diisi. Label boleh berubah, tetapi key harus stabil." });
+  } else if (parameterKey.length < 4) {
+    warnings.push({ level: "warning", message: "Stable Parameter Key terlalu pendek. Gunakan key deskriptif seperti caries_dentis atau hemoroid_eksterna." });
+  }
+
+  const expectedPostId = expectedPostFromRuleTextV329(form);
+  const expectedPost = expectedPostId ? CAPASKA_POST_LEGEND_V329.find((post) => post.id === expectedPostId) : null;
+  if (expectedPost && selectedPostId && selectedPostId !== expectedPostId) {
+    warnings.push({
+      level: "danger",
+      message: "Parameter ini terlihat seperti " + expectedPost.label + ", tetapi Post Pemeriksaan yang dipilih adalah " + (selectedPost?.name || selectedPostId) + ". Periksa mapping post_id sebelum simpan.",
+    });
+  }
+
+  if (form?.input_type === "number" || form?.input_type === "text" || form?.input_type === "textarea") {
+    warnings.push({ level: "warning", message: "Field text/number belum punya threshold/range rule. Untuk TB/BB, tanda vital, atau derajat radiologi, isi panduan/reference dengan jelas dan pastikan export/backend punya rule pendukung." });
+  }
+
+  if (!isRuleInputTypeV327(form?.input_type)) return warnings;
+
+  const options = Array.isArray(form?.scoring_options) ? form.scoring_options : [];
+  const seenOptionKeys = new Set<string>();
+
+  options.forEach((option: ScoringOptionForm, index: number) => {
+    const row = index + 1;
+    const label = String(option?.label || option?.value || ("Baris " + row)).trim();
+    const optionKey = makeRuleKeyV326(option?.option_key || option?.value || option?.label || "");
+    const status = String(option?.status_level || "").trim();
+    const score = numberFromRuleV327(option?.score);
+
+    if (!optionKey) {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Option Key wajib diisi." });
+    } else {
+      if (seenOptionKeys.has(optionKey)) warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Option Key '" + optionKey + "' duplikat." });
+      seenOptionKeys.add(optionKey);
+      const allowedShortKeys = new Set(["ada", "ta"]);
+      if (optionKey.length < 4 && !allowedShortKeys.has(optionKey)) {
+        warnings.push({ level: "warning", message: "Opsi " + row + " (" + label + "): Option Key '" + optionKey + "' terlalu pendek/terpotong. Gunakan key lengkap seperti tidak_buta_warna atau buta_warna_total." });
+      }
+    }
+
+    if (!RULE_STATUS_OPTIONS_V327.has(status)) {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Status Rule wajib dipilih." });
+    }
+
+    if (status === "normal" && score !== null && score < 0) {
+      warnings.push({ level: "warning", message: "Opsi " + row + " (" + label + "): Status Normal tetapi skor negatif. Periksa kembali." });
+    }
+
+    if (status === "normal" && (option?.is_redflag || option?.is_critical)) {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Normal tidak boleh dicentang Tidak Direkomendasikan." });
+    }
+
+    if (status === "tidak_direkomendasikan" && !(option?.is_redflag || option?.is_critical)) {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Status Tidak Direkomendasikan harus mencentang Tidak Direkomendasikan." });
+    }
+
+    if ((option?.is_redflag || option?.is_critical) && status !== "tidak_direkomendasikan") {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): checkbox Tidak Direkomendasikan aktif, tetapi Status Rule bukan Tidak Direkomendasikan." });
+    }
+
+    if (status === "tidak_direkomendasikan" && score !== null && score > -10) {
+      warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Tidak Direkomendasikan sebaiknya skor -10 atau lebih rendah." });
+    }
+
+    if (isNormalLookingOptionV329(option) && status && status !== "normal") {
+      warnings.push({ level: "warning", message: "Opsi " + row + " (" + label + "): value terlihat normal, tetapi Status Rule adalah " + ruleStatusLabelV329(status) + "." });
+    }
+
+    if (isProblemLookingOptionV329(option) && status === "normal") {
+      warnings.push({ level: "warning", message: "Opsi " + row + " (" + label + "): value terlihat bermasalah, tetapi Status Rule masih Normal." });
+    }
+  });
+
+  return warnings;
+}
+
 function SetupParameters({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
   const [posts, setPosts] = useState<Post[]>([]);
@@ -291,6 +446,16 @@ function SetupParameters({ user }: { user: any }) {
 
     return groups;
   }, [activeParameters]);
+
+  // CAPASKA_SETUP_RULE_SAFETY_WARNINGS_V329_STATE
+  const selectedPostRuleV329 = useMemo(() => {
+    return posts.find((post) => Number(post.id) === Number(form.post_id || 0)) || null;
+  }, [posts, form.post_id]);
+
+  const ruleSafetyWarningsV329 = useMemo(() => {
+    if (programType !== "capaska") return [];
+    return buildCapaskaRuleSafetyWarningsV329(form, posts);
+  }, [form, posts, programType]);
 
   if (user.role !== "admin") {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat setup parameter.</div>;
@@ -756,6 +921,27 @@ function SetupParameters({ user }: { user: any }) {
                 <option key={post.id} value={post.id}>{post.name}</option>
               ))}
             </select>
+            {programType === "capaska" && (
+              <div className="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-3 text-xs text-indigo-900">
+                {/* CAPASKA_SETUP_RULE_SAFETY_WARNINGS_V329_POST_LEGEND */}
+                <div className="font-black">Identitas Rule Aktif</div>
+                <div className="mt-1">
+                  Post terpilih: <b>{selectedPostRuleV329 ? ("ID " + selectedPostRuleV329.id + " - " + selectedPostRuleV329.name) : "Belum dipilih"}</b>
+                </div>
+                <div className="mt-1">Stable Parameter Key: <b>{form.parameter_key || makeRuleKeyV326(form.name) || "Belum diisi"}</b></div>
+                <div className="mt-2 grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                  {CAPASKA_POST_LEGEND_V329.map((post) => (
+                    <div key={post.id} className="rounded-xl bg-white/70 px-2 py-1">
+                      <b>ID {post.id}</b> = {post.label}
+                      <span className="block text-[10px] text-indigo-700">{post.examples}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-[11px] text-indigo-800">
+                  Label dan urutan boleh berubah. Yang harus stabil: Post Pemeriksaan, Stable Parameter Key, Option Key, Skor, Status Rule, dan Tidak Direkomendasikan.
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -869,6 +1055,28 @@ function SetupParameters({ user }: { user: any }) {
               {/* CAPASKA_SETUP_RULE_VALIDATION_V327_PREVIEW */}
               <b>Validasi aturan:</b> Status Rule wajib dipilih untuk setiap opsi. Normal tidak masuk catatan, Dengan Catatan masuk ringkasan catatan, dan Tidak Direkomendasikan otomatis menjadi temuan merah dengan skor minimal -10.
             </div>
+
+            {ruleSafetyWarningsV329.length > 0 && (
+              <div className={
+                "mt-3 rounded-xl border p-3 text-xs " +
+                (ruleSafetyWarningsV329.some((item) => item.level === "danger")
+                  ? "border-red-200 bg-red-50 text-red-900"
+                  : "border-amber-200 bg-amber-50 text-amber-900")
+              }>
+                {/* CAPASKA_SETUP_RULE_SAFETY_WARNINGS_V329_PANEL */}
+                <div className="font-black">Warning perubahan rule</div>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {ruleSafetyWarningsV329.slice(0, 8).map((item, index) => (
+                    <li key={index}>
+                      <b>{item.level === "danger" ? "Perlu diperbaiki" : "Perlu dicek"}:</b> {item.message}
+                    </li>
+                  ))}
+                </ul>
+                {ruleSafetyWarningsV329.length > 8 && (
+                  <div className="mt-2 font-semibold">+ {ruleSafetyWarningsV329.length - 8} warning lain.</div>
+                )}
+              </div>
+            )}
 
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
