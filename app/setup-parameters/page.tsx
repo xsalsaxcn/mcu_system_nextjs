@@ -517,6 +517,13 @@ function SetupParameters({ user }: { user: any }) {
     return buildCapaskaRuleSafetyWarningsV329(form, posts);
   }, [form, posts, programType]);
 
+  // CAPASKA_SETUP_PACKAGE_REQUIRED_V331
+  function requirePackageSelectionV331(action = "mengatur mapping parameter") {
+    if (selectedPackageId) return true;
+    setMessage("Pilih paket pemeriksaan/instansi terlebih dahulu sebelum " + action + ".");
+    return false;
+  }
+
   if (user.role !== "admin") {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat setup parameter.</div>;
   }
@@ -538,10 +545,8 @@ function SetupParameters({ user }: { user: any }) {
       setPackages(json.packages || []);
       setParameters(json.parameters || []);
       setMappings(json.mappings || []);
-
-      if (json.packages?.length && !selectedPackageId) {
-        setSelectedPackageId(String(json.packages[0].id));
-      }
+      // CAPASKA_SETUP_PACKAGE_REQUIRED_V331_NO_DEFAULT_SELECTION
+      // Jangan auto-pilih paket. User wajib memilih paket/instansi agar mapping tidak salah.
     } catch (error: any) {
       setMessage(error?.message || "Gagal memuat data.");
     } finally {
@@ -724,10 +729,8 @@ function SetupParameters({ user }: { user: any }) {
   }
 
   async function saveMapping() {
-    if (!selectedPackageId) {
-      setMessage("Pilih paket pemeriksaan/instansi dulu.");
-      return;
-    }
+    // CAPASKA_SETUP_PACKAGE_REQUIRED_V331_SAVE_GUARD
+    if (!requirePackageSelectionV331("menyimpan mapping parameter")) return;
 
     const parameterIds = Object.entries(selectedParamIds)
       .filter(([, checked]) => checked)
@@ -764,6 +767,8 @@ function SetupParameters({ user }: { user: any }) {
   }
 
   function selectAllProgram(checked: boolean) {
+    // CAPASKA_SETUP_PACKAGE_REQUIRED_V331_SELECT_GUARD
+    if (!requirePackageSelectionV331(checked ? "memilih semua parameter" : "mengosongkan mapping parameter")) return;
     const next: Record<number, boolean> = {};
 
     activeParameters.forEach((param) => {
@@ -1333,6 +1338,21 @@ function SetupParameters({ user }: { user: any }) {
           )}
         </div>
 
+        {/* CAPASKA_SETUP_PACKAGE_REQUIRED_V331_PANEL */}
+        {!selectedPackageId && (
+          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <b>Paket belum dipilih.</b> Pilih paket/instansi terlebih dahulu sebelum checklist, pilih semua, kosongkan, atau simpan mapping parameter.
+            Ini mencegah mapping CAPASKA tersimpan ke paket yang salah.
+          </div>
+        )}
+        {selectedPackageId && (
+          <div className="mt-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+            Paket aktif: <b>{packages.find((pkg) => String(pkg.id) === String(selectedPackageId))?.name || selectedPackageId}</b>
+            {" - "}
+            <span>{packages.find((pkg) => String(pkg.id) === String(selectedPackageId))?.company_name || "-"}</span>
+          </div>
+        )}
+
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Object.entries(groupedParameters).map(([postName, params]) => (
             <div key={postName} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1352,7 +1372,11 @@ function SetupParameters({ user }: { user: any }) {
                       type="checkbox"
                       className="mt-1"
                       checked={!!selectedParamIds[param.id]}
-                      onChange={(e) => setSelectedParamIds({ ...selectedParamIds, [param.id]: e.target.checked })}
+                      onChange={(e) => {
+                        // CAPASKA_SETUP_PACKAGE_REQUIRED_V331_CHECKBOX_GUARD
+                        if (!requirePackageSelectionV331("mengubah checklist parameter")) return;
+                        setSelectedParamIds({ ...selectedParamIds, [param.id]: e.target.checked });
+                      }}
                     />
                     <button type="button" className="flex-1 text-left" onClick={() => editParameter(param)}>
                       <span className="font-bold">☰ {param.name}</span>
