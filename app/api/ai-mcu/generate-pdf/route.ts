@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
 
     const modeRaw = String(body.mode || "single");
     const uploadDrive = Boolean(body.uploadDrive);
-    const mergePdf = Boolean(body.mergePdf);
+    const mergePdfRequested = Boolean(body.mergePdf);
     const participantIds = Array.isArray(body.participantIds)
       ? body.participantIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
       : [];
@@ -204,6 +204,9 @@ export async function POST(req: NextRequest) {
     if (!participantIds.length) {
       return fail("Pilih minimal 1 peserta untuk generate PDF.");
     }
+
+    // CAPASKA_GENERATE_PDF_SINGLE_FAST_V335
+    const mergePdf = mergePdfRequested && participantIds.length > 1;
 
     const engineUrl = normalizeEngineUrl();
 

@@ -116,7 +116,7 @@ export default function AiMcuGeneratePage() {
   });
   const [mode, setMode] = useState("single");
   const [uploadDrive, setUploadDrive] = useState(false);
-  const [mergePdf, setMergePdf] = useState(true);
+  const [mergePdf, setMergePdf] = useState(false);
 
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [sourceId, setSourceId] = useState("");
@@ -140,6 +140,15 @@ export default function AiMcuGeneratePage() {
     () => sources.find((source) => String(source.id) === sourceId),
     [sources, sourceId]
   );
+
+  // CAPASKA_GENERATE_PDF_SINGLE_FAST_V335
+  const canMergePdfV335 = selectedIds.size > 1;
+
+  useEffect(() => {
+    if (selectedIds.size <= 1 && mergePdf) {
+      setMergePdf(false);
+    }
+  }, [selectedIds.size, mergePdf]);
 
   const allLoadedSelected =
     participants.length > 0 && participants.every((p) => selectedIds.has(p.id));
@@ -375,7 +384,8 @@ export default function AiMcuGeneratePage() {
           sourceId,
           mode: effectiveMode,
           uploadDrive,
-          mergePdf,
+          // CAPASKA_GENERATE_PDF_SINGLE_FAST_V335
+          mergePdf: mergePdf && ids.length > 1,
           participantIds: ids
         })
       });
@@ -674,15 +684,21 @@ export default function AiMcuGeneratePage() {
                 ) : null}
               </div>
 
+              {/* CAPASKA_GENERATE_PDF_SINGLE_FAST_V335 */}
               <label className="mt-4 flex items-center gap-3 rounded-xl border bg-white p-4 text-sm font-semibold text-slate-700">
                 <input
                   type="checkbox"
-                  checked={mergePdf}
-                  disabled={loading || polling}
+                  checked={mergePdf && canMergePdfV335}
+                  disabled={loading || polling || !canMergePdfV335}
                   onChange={(e) => setMergePdf(e.target.checked)}
                 />
                 Merge PDF untuk print
               </label>
+              {!canMergePdfV335 ? (
+                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+                  Mode cepat aktif: untuk 1 peserta, merge PDF dimatikan otomatis agar generate lebih ringan.
+                </div>
+              ) : null}
 
               <label className="mt-3 flex items-center gap-3 rounded-xl border bg-white p-4 text-sm font-semibold text-slate-700">
                 <input
