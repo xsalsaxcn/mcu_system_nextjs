@@ -28,6 +28,12 @@ export type CapaskaScoringOption = {
   score?: number | null;
   is_critical?: boolean;
   note?: string;
+  // CAPASKA_SETUP_RULE_METADATA_SHARED_V326
+  option_key?: string;
+  status_level?: string;
+  is_normal?: boolean;
+  is_note?: boolean;
+  is_redflag?: boolean;
 };
 
 export type CapaskaScoringConfig = {
@@ -389,8 +395,14 @@ function normalizeScoringOption(option: any): CapaskaScoringOption | null {
     label,
     value,
     score,
-    is_critical: Boolean(option.is_critical ?? option.critical ?? false),
+    is_critical: Boolean(option.is_critical ?? option.critical ?? option.is_redflag ?? false),
     note: String(option.note ?? option.recommendation_text ?? "").trim(),
+    // CAPASKA_SETUP_RULE_METADATA_SHARED_V326
+    option_key: String(option.option_key ?? option.key ?? "").trim(),
+    status_level: String(option.status_level ?? option.status ?? "").trim(),
+    is_normal: Boolean(option.is_normal ?? false),
+    is_note: Boolean(option.is_note ?? false),
+    is_redflag: Boolean(option.is_redflag ?? option.is_critical ?? option.critical ?? false),
   };
 }
 

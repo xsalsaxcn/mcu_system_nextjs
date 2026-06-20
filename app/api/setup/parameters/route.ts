@@ -21,6 +21,17 @@ function parseNumber(value: any) {
   return Number.isFinite(n) ? n : null;
 }
 
+// CAPASKA_SETUP_RULE_METADATA_API_V326
+function normalizeRuleKeyV326(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
 function normalizeScoringOptions(value: any, fallbackText: any) {
   const source = Array.isArray(value)
     ? value
@@ -34,12 +45,23 @@ function normalizeScoringOptions(value: any, fallbackText: any) {
       const optionValue = String(item?.value ?? item?.option_value ?? label).trim() || label;
       const score = parseNumber(item?.score);
 
+      const statusLevel = String(item?.status_level ?? item?.status ?? "").trim();
+      const isRedflag = Boolean(item?.is_redflag ?? item?.is_critical ?? item?.critical ?? statusLevel === "tidak_direkomendasikan");
+      const isNormal = Boolean(item?.is_normal ?? statusLevel === "normal");
+      const isNote = item?.is_note !== undefined ? Boolean(item.is_note) : (statusLevel === "dengan_catatan" || isRedflag);
+
       return {
         label,
         value: optionValue,
         score: score ?? 0,
-        is_critical: Boolean(item?.is_critical ?? item?.critical ?? false),
-        note: String(item?.note ?? item?.recommendation_text ?? "").trim()
+        is_critical: isRedflag,
+        note: String(item?.note ?? item?.recommendation_text ?? "").trim(),
+        // CAPASKA_SETUP_RULE_METADATA_API_V326
+        option_key: normalizeRuleKeyV326(item?.option_key ?? item?.key ?? optionValue ?? label),
+        status_level: statusLevel || (isRedflag ? "tidak_direkomendasikan" : isNormal ? "normal" : isNote ? "dengan_catatan" : ""),
+        is_normal: isNormal,
+        is_note: isNote || isRedflag,
+        is_redflag: isRedflag
       };
     })
     .filter(Boolean);

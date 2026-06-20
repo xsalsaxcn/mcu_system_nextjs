@@ -40,12 +40,20 @@ type ScoringOptionForm = {
   score: string;
   is_critical: boolean;
   note: string;
+  // CAPASKA_SETUP_RULE_METADATA_V326
+  option_key: string;
+  status_level: string;
+  is_normal: boolean;
+  is_note: boolean;
+  is_redflag: boolean;
 };
 
 const emptyForm = {
   id: "",
   post_id: "",
   name: "",
+  // CAPASKA_SETUP_RULE_METADATA_V326
+  parameter_key: "",
   category: "",
   unit: "",
   input_type: "text",
@@ -70,7 +78,36 @@ export default function SetupParametersPage() {
   );
 }
 
+// CAPASKA_SETUP_RULE_METADATA_V326
+function makeRuleKeyV326(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function readConfigObjectV326(configJson?: string) {
+  try {
+    const parsed = JSON.parse(configJson || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function statusFromOptionV326(option: any) {
+  if (option?.status_level) return String(option.status_level);
+  if (option?.is_redflag || option?.is_critical) return "tidak_direkomendasikan";
+  if (option?.is_note) return "dengan_catatan";
+  if (option?.is_normal) return "normal";
+  return "";
+}
+
 function getParameterScoringForm(param: Parameter) {
+  const configRawV326 = readConfigObjectV326(param.config_json);
   const config = parseCapaskaScoringConfig(param.config_json);
   const options = config.options.map((option) => {
     const fallbackScore = scoreCapaskaDirectChoice(param, option.label);
@@ -80,8 +117,14 @@ function getParameterScoringForm(param: Parameter) {
       label: option.label,
       value: option.value || option.label,
       score: Number.isFinite(score) ? String(score) : "0",
-      is_critical: !!option.is_critical,
+      is_critical: !!((option as any).is_redflag || option.is_critical),
       note: option.note || "",
+      // CAPASKA_SETUP_RULE_METADATA_V326
+      option_key: (option as any).option_key || makeRuleKeyV326(option.value || option.label),
+      status_level: statusFromOptionV326(option),
+      is_normal: !!(option as any).is_normal,
+      is_note: !!(option as any).is_note,
+      is_redflag: !!((option as any).is_redflag || option.is_critical),
     };
   });
 
@@ -90,6 +133,8 @@ function getParameterScoringForm(param: Parameter) {
     : Math.max(0, ...options.map((option) => Number(option.score || 0)).filter((score) => Number.isFinite(score)));
 
   return {
+    // CAPASKA_SETUP_RULE_METADATA_V326
+    parameter_key: configRawV326.parameter_key || makeRuleKeyV326(param.name || ""),
     options_text: options.map((option) => option.label).join("\n"),
     max_score: maxScore ? String(maxScore) : "",
     scoring_type: config.scoring_type || "by_option",
@@ -115,6 +160,12 @@ function createBlankOption(): ScoringOptionForm {
     score: "0",
     is_critical: false,
     note: "",
+    // CAPASKA_SETUP_RULE_METADATA_V326
+    option_key: "",
+    status_level: "",
+    is_normal: false,
+    is_note: false,
+    is_redflag: false,
   };
 }
 
@@ -126,13 +177,23 @@ function normalizeFormScoringOptions(options: ScoringOptionForm[]) {
 
       const value = String(option.value || label).trim() || label;
       const score = Number(String(option.score ?? "0").replace(",", "."));
+      const statusLevel = String(option.status_level || "").trim();
+      const isRedflag = !!option.is_redflag || !!option.is_critical || statusLevel === "tidak_direkomendasikan";
+      const isNormal = !!option.is_normal || statusLevel === "normal";
+      const isNote = !!option.is_note || statusLevel === "dengan_catatan" || isRedflag;
 
       return {
         label,
         value,
         score: Number.isFinite(score) ? score : 0,
-        is_critical: !!option.is_critical,
+        is_critical: isRedflag,
         note: String(option.note || "").trim(),
+        // CAPASKA_SETUP_RULE_METADATA_V326
+        option_key: makeRuleKeyV326(option.option_key || value || label),
+        status_level: statusLevel || (isRedflag ? "tidak_direkomendasikan" : isNormal ? "normal" : isNote ? "dengan_catatan" : ""),
+        is_normal: isNormal,
+        is_note: isNote,
+        is_redflag: isRedflag,
       };
     })
     .filter(Boolean);
@@ -433,6 +494,29 @@ function SetupParameters({ user }: { user: any }) {
     if (field === "label" && !options[index].value) {
       options[index].value = String(value || "");
     }
+    // CAPASKA_SETUP_RULE_METADATA_V326
+    if (field === "label" && !options[index].option_key) {
+      options[index].option_key = makeRuleKeyV326(value);
+    }
+    if (field === "status_level") {
+      const status = String(value || "");
+      options[index].is_normal = status === "normal";
+      options[index].is_note = status === "dengan_catatan" || status === "tidak_direkomendasikan";
+      options[index].is_redflag = status === "tidak_direkomendasikan";
+      options[index].is_critical = status === "tidak_direkomendasikan";
+      if (status === "tidak_direkomendasikan" && (!options[index].score || Number(options[index].score) === 0)) {
+        options[index].score = "-10";
+      }
+    }
+    if (field === "is_critical" || field === "is_redflag") {
+      options[index].is_redflag = Boolean(value);
+      options[index].is_critical = Boolean(value);
+      if (value) {
+        options[index].status_level = "tidak_direkomendasikan";
+        options[index].is_note = true;
+        options[index].is_normal = false;
+      }
+    }
 
     setForm({
       ...form,
@@ -577,6 +661,9 @@ function SetupParameters({ user }: { user: any }) {
             <div className="mt-1 text-sm text-slate-500">
               Parameter akan tampil di form operator sesuai post pemeriksaan.
             </div>
+            <div className="mt-3 rounded-2xl border border-cyan-100 bg-cyan-50 p-3 text-xs text-cyan-800">
+              <b>Rule engine aktif:</b> pilih Post Pemeriksaan, isi Stable Parameter Key, lalu atur Option Key, Skor, dan Status Rule. Label dan urutan boleh berubah, tetapi key sebaiknya tetap stabil.
+            </div>
           </div>
 
           <div>
@@ -598,6 +685,18 @@ function SetupParameters({ user }: { user: any }) {
             <div>
               <label className="label">Nama Parameter</label>
               <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            </div>
+
+            <div>
+              <label className="label">Stable Parameter Key</label>
+              <input
+                className="input"
+                value={form.parameter_key || ""}
+                onChange={(e) => setForm({ ...form, parameter_key: makeRuleKeyV326(e.target.value) })}
+                onBlur={() => setForm((prev: any) => ({ ...prev, parameter_key: prev.parameter_key || makeRuleKeyV326(prev.name) }))}
+                placeholder="contoh: caries_dentis"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">Key stabil untuk rule engine. Label boleh berubah, key sebaiknya tetap.</div>
             </div>
 
             <div>
@@ -695,7 +794,9 @@ function SetupParameters({ user }: { user: any }) {
                   <tr className="text-left text-xs text-slate-500">
                     <th className="p-2">Opsi Jawaban</th>
                     <th className="p-2">Value</th>
+                    <th className="p-2">Option Key</th>
                     <th className="p-2">Skor</th>
+                    <th className="p-2">Status Rule</th>
                     <th className="p-2">Tidak Direkomendasikan</th>
                     <th className="p-2">Catatan</th>
                     <th className="p-2"></th>
@@ -722,6 +823,14 @@ function SetupParameters({ user }: { user: any }) {
                       </td>
                       <td className="p-2">
                         <input
+                          className="input"
+                          value={option.option_key || ""}
+                          onChange={(e) => updateScoringOption(index, "option_key", makeRuleKeyV326(e.target.value))}
+                          placeholder="normal / tidak_normal"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
                           type="number"
                           step="any"
                           className="input"
@@ -729,6 +838,18 @@ function SetupParameters({ user }: { user: any }) {
                           onChange={(e) => updateScoringOption(index, "score", e.target.value)}
                           placeholder="1 / -10"
                         />
+                      </td>
+                      <td className="p-2">
+                        <select
+                          className="input"
+                          value={option.status_level || ""}
+                          onChange={(e) => updateScoringOption(index, "status_level", e.target.value)}
+                        >
+                          <option value="">- pilih -</option>
+                          <option value="normal">Normal</option>
+                          <option value="dengan_catatan">Dengan Catatan</option>
+                          <option value="tidak_direkomendasikan">Tidak Direkomendasikan</option>
+                        </select>
                       </td>
                       <td className="p-2 text-center">
                         <input
@@ -754,7 +875,7 @@ function SetupParameters({ user }: { user: any }) {
                   ))}
                   {!(form.scoring_options || []).length && (
                     <tr>
-                      <td colSpan={6} className="p-4 text-center text-xs text-slate-500">
+                      <td colSpan={8} className="p-4 text-center text-xs text-slate-500">
                         Belum ada opsi. Klik Tambah Opsi untuk parameter radio/dropdown.
                       </td>
                     </tr>
