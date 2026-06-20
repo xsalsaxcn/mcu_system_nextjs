@@ -325,6 +325,60 @@ function isProblemLookingOptionV329(option: any) {
   return /\b(ada|positif|\(\+\)|tidak normal|abnormal|kelainan|buta warna|caries|karies|tumpatan|impaksi|kehilangan|ringan|sedang|berat|tidak sesuai|hernia|hemoroid)\b|>\s*\d+/.test(text);
 }
 
+
+
+// CAPASKA_SETUP_VALUE_AUTOFILL_V330
+function recommendedOptionValueV330(option: any, form: any) {
+  const label = String(option?.label || "").trim();
+  const value = String(option?.value || "").trim();
+  const optionKey = String(option?.option_key || "").trim();
+  const parameterText = ruleTextV329(form?.post_id, form?.name, form?.parameter_key, form?.category, form?.reference_text);
+  const text = ruleTextV329(label, value, optionKey);
+  const keyText = makeRuleKeyV326(optionKey || label || value);
+
+  if (!text && !keyText) return "";
+
+  const isJuknisContext = /\b(juknis|tb\b|bb\b|tinggi badan|berat badan|bmi|imt)\b/.test(parameterText + " " + text + " " + keyText);
+
+  if (/\btidak\s+sesuai\b/.test(text) || keyText === "tidak_sesuai" || keyText === "tidak_sesuai_juknis") {
+    return isJuknisContext ? "Tidak Sesuai Juknis" : "Tidak Sesuai";
+  }
+  if ((/\bsesuai\b/.test(text) || keyText === "sesuai" || keyText === "sesuai_juknis") && !/\btidak\s+sesuai\b/.test(text)) {
+    return isJuknisContext ? "Sesuai Juknis" : "Sesuai";
+  }
+  if (/\btidak\s+normal\b/.test(text) || keyText === "tidak_normal") return "Tidak Normal";
+  if (/\bnormal\b/.test(text) && !/\btidak\s+normal\b/.test(text)) return "Normal";
+  if (/\btidak\s+ada\b/.test(text) || keyText === "tidak_ada") return "Tidak Ada";
+  if ((/\bada\b/.test(text) || keyText === "ada") && !/\btidak\s+ada\b/.test(text)) return "Ada";
+  if (/\b(tidak buta warna|tidak_buta_warna)\b/.test(text + " " + keyText)) return "Tidak buta warna";
+  if (/\b(buta warna parsial|buta_warna_parsial)\b/.test(text + " " + keyText)) return "Buta warna parsial";
+  if (/\b(buta warna total|buta_warna_total)\b/.test(text + " " + keyText)) return "Buta warna total";
+  if (/\b(negative|negatif)\b/.test(text) || keyText === "negative" || keyText === "negatif") return "Negative";
+  if (/\b(positive|positif)\b/.test(text) || keyText === "positive" || keyText === "positif") return "Positive";
+
+  const cariesMatch = text.match(/(^|\s)(>\s*3|0|1|2|3)\s*(caries|karies)\b/);
+  if (cariesMatch) return cariesMatch[2].replace(/\s+/g, "") + " caries";
+
+  const tumpatanMatch = text.match(/(^|\s)(0|<\s*5|>\s*5)\s*tumpatan\b/);
+  if (tumpatanMatch) return tumpatanMatch[2].replace(/\s+/g, "") + " tumpatan";
+
+  const gigiMatch = text.match(/(^|\s)(0|1|2|>\s*2|>\s*4)\s*gigi\b/);
+  if (gigiMatch) return gigiMatch[2].replace(/\s+/g, "") + " gigi";
+
+  return label || value;
+}
+
+function shouldWarnValueRecommendationV330(option: any, form: any) {
+  const recommended = recommendedOptionValueV330(option, form);
+  const currentValue = String(option?.value || "").trim();
+  if (!recommended) return "";
+  if (!currentValue) return "Value kosong. Rekomendasi: " + recommended + ".";
+  if (makeRuleKeyV326(currentValue) !== makeRuleKeyV326(recommended)) {
+    return "Value berbeda dari rekomendasi. Saat ini: " + currentValue + ". Rekomendasi: " + recommended + ".";
+  }
+  return "";
+}
+
 function buildCapaskaRuleSafetyWarningsV329(form: any, posts: Post[]) {
   const warnings: RuleSafetyWarningV329[] = [];
   const selectedPostId = Number(form?.post_id || 0);
@@ -379,6 +433,12 @@ function buildCapaskaRuleSafetyWarningsV329(form: any, posts: Post[]) {
 
     if (!RULE_STATUS_OPTIONS_V327.has(status)) {
       warnings.push({ level: "danger", message: "Opsi " + row + " (" + label + "): Status Rule wajib dipilih." });
+    }
+
+    // CAPASKA_SETUP_VALUE_AUTOFILL_V330_WARNING
+    const valueRecommendationWarningV330 = shouldWarnValueRecommendationV330(option, form);
+    if (valueRecommendationWarningV330) {
+      warnings.push({ level: "warning", message: "Opsi " + row + " (" + label + "): " + valueRecommendationWarningV330 });
     }
 
     if (status === "normal" && score !== null && score < 0) {
@@ -725,7 +785,9 @@ function SetupParameters({ user }: { user: any }) {
     options[index] = { ...options[index], [field]: value };
 
     if (field === "label" && !options[index].value) {
-      options[index].value = String(value || "");
+      // CAPASKA_SETUP_VALUE_AUTOFILL_V330_LABEL
+      const recommendedValueV330 = recommendedOptionValueV330({ ...options[index], label: String(value || "") }, form);
+      options[index].value = recommendedValueV330 || String(value || "");
     }
     // CAPASKA_SETUP_RULE_METADATA_V326
     if (field === "label" && !options[index].option_key) {
@@ -759,6 +821,27 @@ function SetupParameters({ user }: { user: any }) {
         options[index].is_normal = false;
       }
     }
+
+    setForm({
+      ...form,
+      scoring_options: options,
+      options_text: options.map((option) => option.label).filter(Boolean).join("\n")
+    });
+  }
+
+  // CAPASKA_SETUP_VALUE_AUTOFILL_V330_APPLY_FUNCTION
+  function applyRecommendedOptionValueV330(index: number) {
+    const options = [...(form.scoring_options || [])];
+    const current = options[index];
+    if (!current) return;
+    const recommendedValue = recommendedOptionValueV330(current, form);
+    if (!recommendedValue) return;
+
+    options[index] = {
+      ...current,
+      value: recommendedValue,
+      option_key: current.option_key || makeRuleKeyV326(recommendedValue || current.label)
+    };
 
     setForm({
       ...form,
@@ -1110,6 +1193,15 @@ function SetupParameters({ user }: { user: any }) {
                           onChange={(e) => updateScoringOption(index, "value", e.target.value)}
                           placeholder="auto sama dengan opsi"
                         />
+                        {/* CAPASKA_SETUP_VALUE_AUTOFILL_V330_BUTTON */}
+                        <button
+                          type="button"
+                          className="mt-1 rounded-lg border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-bold text-cyan-800 hover:bg-cyan-100"
+                          onClick={() => applyRecommendedOptionValueV330(index)}
+                          title={recommendedOptionValueV330(option, form) ? "Rekomendasi: " + recommendedOptionValueV330(option, form) : "Isi value dari label"}
+                        >
+                          Auto isi value
+                        </button>
                       </td>
                       <td className="p-2">
                         <input
