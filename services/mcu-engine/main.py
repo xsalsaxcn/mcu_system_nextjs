@@ -400,7 +400,7 @@ def _capaska_status_from_rows_v341(rows: List[Dict[str, Any]]) -> Tuple[str, int
     return "Direkomendasikan", total, notes, reds
 
 
-def _build_capaska_pdf_bytes_v341(nama: str, rekap_rows: pd.DataFrame, capaska_rows: pd.DataFrame) -> bytes:
+def _build_capaska_pdf_bytes_v343(nama: str, rekap_rows: pd.DataFrame, capaska_rows: pd.DataFrame) -> bytes:
     import io
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -506,6 +506,310 @@ def _build_capaska_pdf_bytes_v341(nama: str, rekap_rows: pd.DataFrame, capaska_r
     doc.build(story)
     return buf.getvalue()
 
+
+# CAPASKA_PDF_EXCEL_STYLE_V343
+# Format PDF khusus CAPASKA seperti rekap tabel seleksi kesehatan.
+# Corporate/basic MCU tetap memakai template lama.
+def _capaska_clean_v343(value: Any) -> str:
+    text = str(value if value is not None else "").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text or text.lower() in {"-", "nan", "none", "null", "undefined"}:
+        return ""
+    return text
+
+
+def _capaska_num_v343(value: Any) -> Optional[float]:
+    text = _capaska_clean_v343(value).replace(",", ".")
+    m = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except Exception:
+        return None
+
+
+def _is_capaska_payload_v343(payload: Dict[str, Any], rekap_df: pd.DataFrame) -> bool:
+    pieces: List[str] = [
+        str(payload.get("template") or ""),
+        str(payload.get("program") or ""),
+        str(payload.get("company") or ""),
+    ]
+    if rekap_df is not None and not rekap_df.empty:
+        for col in ["KATEGORI", "Kategori", "PAKET", "Paket", "PERUSAHAAN", "Perusahaan", "Nama PT"]:
+            if col in rekap_df.columns:
+                pieces.extend([str(x) for x in rekap_df[col].head(20).tolist()])
+    return any("capaska" in p.lower() for p in pieces)
+
+
+def _capaska_pick_from_rekap_v343(row: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = _capaska_clean_v343(row.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _capaska_identity_v343(nama: str, rekap_rows: pd.DataFrame) -> Dict[str, str]:
+    row = rekap_rows.iloc[0].to_dict() if rekap_rows is not None and not rekap_rows.empty else {}
+    return {
+        "Nama": _capaska_pick_from_rekap_v343(row, "NAMA", "Nama") or _capaska_clean_v343(nama),
+        "No MCU": _capaska_pick_from_rekap_v343(row, "NOMCU", "NO MCU", "NO.MCU", "No MCU"),
+        "NIK/ID": _capaska_pick_from_rekap_v343(row, "NIK/NRP/ID", "NIK", "NRP", "ID"),
+        "Perusahaan": _capaska_pick_from_rekap_v343(row, "PERUSAHAAN", "Perusahaan", "Nama PT") or "BPIP / CAPASKA",
+        "Tanggal MCU": _capaska_pick_from_rekap_v343(row, "Tanggal MCU", "TANGGAL_MCU", "TGL MCU"),
+        "Jenis Kelamin": _capaska_pick_from_rekap_v343(row, "JK", "Gender", "JENIS KELAMIN"),
+        "Usia": _capaska_pick_from_rekap_v343(row, "USIA", "Usia", "Age"),
+        "Tanggal Lahir": _capaska_pick_from_rekap_v343(row, "TGLLAHIR", "Tanggal Lahir", "TANGGAL LAHIR"),
+        "Paket": _capaska_pick_from_rekap_v343(row, "PAKET", "Paket"),
+    }
+
+
+def _filter_capaska_rows_v343(capaska_df: pd.DataFrame, nama: str, rekap_rows: pd.DataFrame) -> pd.DataFrame:
+    if capaska_df is None or capaska_df.empty:
+        return pd.DataFrame()
+    name = _capaska_clean_v343(nama).lower()
+    mcu_values: List[str] = []
+    if rekap_rows is not None and not rekap_rows.empty:
+        for col in ["NOMCU", "NO MCU", "NO.MCU", "No MCU"]:
+            if col in rekap_rows.columns:
+                mcu_values.extend([_capaska_clean_v343(x).lower() for x in rekap_rows[col].dropna().tolist() if _capaska_clean_v343(x)])
+    df = capaska_df.copy()
+    masks = []
+    for col in ["name", "Nama", "NAMA"]:
+        if col in df.columns and name:
+            masks.append(df[col].astype(str).str.strip().str.lower().eq(name))
+    for col in ["mcuId", "No MCU", "NOMCU", "NO MCU"]:
+        if col in df.columns and mcu_values:
+            masks.append(df[col].astype(str).str.strip().str.lower().isin(mcu_values))
+    if not masks:
+        return df
+    mask = masks[0]
+    for m in masks[1:]:
+        mask = mask | m
+    return df.loc[mask].copy()
+
+
+def _capaska_stage_key_v343(row: Dict[str, Any]) -> str:
+    post_id = int(_capaska_num_v343(row.get("postId")) or _capaska_num_v343(row.get("post_id")) or 0)
+    mapping = {4: "mata", 7: "tht", 6: "gigi", 5: "penyakit_dalam", 8: "jantung", 9: "ortopedi", 10: "radiologi"}
+    if post_id in mapping:
+        return mapping[post_id]
+    text = " ".join([_capaska_clean_v343(row.get(k)) for k in ["postName", "category", "parameter"]]).lower()
+    if "radiologi" in text or "rontgen" in text or "whole spine" in text:
+        return "radiologi"
+    if "ortopedi" in text or "orthop" in text or "pes planus" in text or "hallux" in text or "hammer" in text:
+        return "ortopedi"
+    if "gigi" in text or "caries" in text or "karies" in text or "panor" in text:
+        return "gigi"
+    if "tht" in text or "tonsil" in text or "serumen" in text:
+        return "tht"
+    if "jantung" in text or "ekg" in text:
+        return "jantung"
+    if "mata" in text or "visus" in text or "buta warna" in text:
+        return "mata"
+    if "penyakit dalam" in text or "hemoroid" in text or "tanda vital" in text:
+        return "penyakit_dalam"
+    return "lainnya"
+
+
+def _capaska_is_normal_value_v343(parameter: str, value: str, score: Optional[float]) -> bool:
+    p = parameter.lower()
+    v = value.lower().strip()
+    compact = re.sub(r"\s+", "", v)
+    if not v or v in {"-", "normal", "ta", "t/a", "sesuai", "sesuai juknis", "intak", "tidak", "tidak ada", "negative", "negatif", "(-)"}:
+        return True
+    if "tidak ada" in v and "catatan" not in p:
+        return True
+    if "0 caries" in v or "0 karies" in v or "0 tumpatan" in v or "0 gigi" in v or "0 impaksi" in v:
+        return True
+    if ("catatan" in p or "kondisi khusus" in p) and v in {"tidak", "tidak ada", "negative", "negatif"}:
+        return True
+    if score is not None and score > 0:
+        red_words = ["tidak normal", "tidak sesuai", "ada", "positif", "buta warna", "caries", "karies", "kelainan", "t2", "t3", "ringan", "sedang", "berat"]
+        if not any(x in v for x in red_words):
+            return True
+    return False
+
+
+def _capaska_stage_summaries_v343(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int, str, List[str]]:
+    stage_defs = [
+        ("mata", "Mata", 12),
+        ("tht", "THT", 10),
+        ("gigi", "Gigi", 16),
+        ("penyakit_dalam", "Penyakit Dalam", 28),
+        ("jantung", "Jantung", 12),
+        ("ortopedi", "Ortopedi", 16),
+        ("radiologi", "Radiologi", 6),
+    ]
+    grouped: Dict[str, List[Dict[str, Any]]] = {k: [] for k, _, _ in stage_defs}
+    for r in rows:
+        key = _capaska_stage_key_v343(r)
+        if key in grouped:
+            grouped[key].append(r)
+
+    stage_rows: List[Dict[str, Any]] = []
+    total_score = 0
+    all_reds: List[str] = []
+    all_notes: List[str] = []
+    for key, label, max_score in stage_defs:
+        items = grouped.get(key, [])
+        score_sum = 0
+        notes: List[str] = []
+        reds: List[str] = []
+        for it in items:
+            param = _capaska_clean_v343(it.get("parameter"))
+            value = _capaska_clean_v343(it.get("value"))
+            if not param or not value:
+                continue
+            score = _capaska_num_v343(it.get("score"))
+            if score is not None:
+                score_sum += int(score)
+            is_red = False
+            lower = value.lower()
+            if score is not None and score <= -10:
+                is_red = True
+            if "tidak direkom" in lower:
+                is_red = True
+            if key == "radiologi" and ("sedang" in lower or "berat" in lower):
+                is_red = True
+            if not _capaska_is_normal_value_v343(param, value, score):
+                note = f"{param}: {value}"
+                if is_red:
+                    reds.append(note)
+                    all_reds.append(f"{label}: {note}")
+                else:
+                    notes.append(note)
+                    all_notes.append(f"{label}: {note}")
+        if score_sum == 0 and not items:
+            # Jika tidak ada data, tampilkan kosong/0 agar terlihat belum ada hasil.
+            result_text = ""
+        elif reds:
+            result_text = "\n".join(reds + notes)
+        elif notes:
+            result_text = "\n".join(notes)
+        else:
+            result_text = "Normal"
+        total_score += score_sum
+        stage_rows.append({
+            "key": key,
+            "label": label,
+            "result": result_text,
+            "score": score_sum,
+            "max": max_score,
+            "red": bool(reds),
+            "note": bool(notes),
+        })
+    status = "Tidak Direkomendasikan" if all_reds else ("Dengan Catatan" if all_notes else "Direkomendasikan")
+    reasons = all_reds if all_reds else all_notes
+    return stage_rows, total_score, status, reasons
+
+
+def _capaska_height_weight_v343(rows: List[Dict[str, Any]]) -> Tuple[str, str]:
+    tinggi = ""
+    berat = ""
+    for it in rows:
+        name = _capaska_clean_v343(it.get("parameter")).lower()
+        value = _capaska_clean_v343(it.get("value"))
+        if not value:
+            continue
+        if not tinggi and ("tinggi" in name or name in {"tb", "tb (cm)", "tb. (cm)"} or "tb" == name.replace(".", "").strip()):
+            tinggi = value
+        if not berat and ("berat" in name or name in {"bb", "bb (kg)", "bb. (kg)"}):
+            berat = value
+    return tinggi, berat
+
+
+def _build_capaska_pdf_bytes_v343(nama: str, rekap_rows: pd.DataFrame, capaska_rows: pd.DataFrame) -> bytes:
+    import io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=10*mm, leftMargin=10*mm, topMargin=10*mm, bottomMargin=9*mm)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("capaska-v343-title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=12, leading=14, alignment=1)
+    small = ParagraphStyle("capaska-v343-small", parent=styles["Normal"], fontName="Helvetica", fontSize=7.5, leading=8.8)
+    small_bold = ParagraphStyle("capaska-v343-small-bold", parent=small, fontName="Helvetica-Bold")
+    white = ParagraphStyle("capaska-v343-white", parent=small, fontName="Helvetica-Bold", textColor=colors.white)
+
+    def P(value: Any, st=small):
+        txt = _capaska_clean_v343(value).replace("\n", "<br/>")
+        return Paragraph(html.escape(txt).replace("&lt;br/&gt;", "<br/>"), st)
+
+    identity = _capaska_identity_v343(nama, rekap_rows)
+    rows = capaska_rows.to_dict("records") if capaska_rows is not None and not capaska_rows.empty else []
+    stage_rows, total_score, status, reasons = _capaska_stage_summaries_v343(rows)
+    tinggi, berat = _capaska_height_weight_v343(rows)
+
+    story: List[Any] = []
+    story.append(Paragraph("HASIL SELEKSI KESEHATAN CAPASKA", title))
+    story.append(Spacer(1, 4))
+
+    header_rows = [
+        [P("Nama", small_bold), P(identity.get("Nama"), small_bold), P("No MCU", small_bold), P(identity.get("No MCU"), small_bold)],
+        [P("NIK/ID", small_bold), P(identity.get("NIK/ID")), P("Tanggal MCU", small_bold), P(identity.get("Tanggal MCU"))],
+        [P("Perusahaan", small_bold), P(identity.get("Perusahaan")), P("JK / Usia", small_bold), P((identity.get("Jenis Kelamin") + " / " + identity.get("Usia")).strip(" /"))],
+    ]
+    ht = Table(header_rows, colWidths=[26*mm, 72*mm, 30*mm, 48*mm])
+    ht.setStyle(TableStyle([
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("BACKGROUND", (0,0), (0,-1), colors.whitesmoke),
+        ("BACKGROUND", (2,0), (2,-1), colors.whitesmoke),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+    ]))
+    story.append(ht)
+    story.append(Spacer(1, 6))
+
+    table_data: List[List[Any]] = [[P("No", small_bold), P("Item Pemeriksaan", small_bold), P("Hasil", small_bold), P("Skor", small_bold), P("Skor Max", small_bold)]]
+    table_data.append([P("1"), P("Nama"), P(identity.get("Nama")), P(""), P("")])
+    table_data.append([P("2"), P("Tinggi Badan"), P(tinggi), P(""), P("")])
+    table_data.append([P("3"), P("Berat Badan"), P(berat), P(""), P("")])
+    idx = 4
+    for st in stage_rows:
+        para_style = white if st.get("red") else small
+        table_data.append([P(str(idx)), P(st["label"], small_bold), P(st["result"], para_style), P(str(st["score"])), P(str(st["max"]))])
+        idx += 1
+    table_data.append([P(""), P("Total Score", small_bold), P(""), P(str(total_score), small_bold), P("100", small_bold)])
+    status_style = white if status == "Tidak Direkomendasikan" else small_bold
+    table_data.append([P(""), P("Kesimpulan Kesehatan", small_bold), P(status, status_style), P(""), P("")])
+    table_data.append([P(""), P("Alasan", small_bold), P("; ".join(reasons[:20]), status_style if status == "Tidak Direkomendasikan" else small), P(""), P("")])
+
+    tbl = Table(table_data, colWidths=[10*mm, 42*mm, 92*mm, 18*mm, 18*mm], repeatRows=1)
+    style_cmds = [
+        ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 3),
+        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("ALIGN", (0,0), (0,-1), "CENTER"),
+        ("ALIGN", (3,0), (4,-1), "CENTER"),
+    ]
+    # Stage rows start at index 4 in table_data.
+    for i, st in enumerate(stage_rows, start=4):
+        if st.get("red"):
+            style_cmds.append(("BACKGROUND", (2,i), (2,i), colors.red))
+            style_cmds.append(("TEXTCOLOR", (2,i), (2,i), colors.white))
+        elif st.get("note"):
+            style_cmds.append(("BACKGROUND", (2,i), (2,i), colors.Color(1, 0.94, 0.55)))
+    status_row_idx = len(table_data) - 2
+    reason_row_idx = len(table_data) - 1
+    if status == "Tidak Direkomendasikan":
+        style_cmds.append(("BACKGROUND", (2,status_row_idx), (2,reason_row_idx), colors.red))
+        style_cmds.append(("TEXTCOLOR", (2,status_row_idx), (2,reason_row_idx), colors.white))
+    tbl.setStyle(TableStyle(style_cmds))
+    story.append(tbl)
+    story.append(Spacer(1, 5))
+    story.append(Paragraph("Keterangan: PDF ini memakai template khusus CAPASKA. Template corporate tidak diubah.", small))
+    doc.build(story)
+    return buf.getvalue()
+
+
 def _build_mcu_pdf_bytes(nama: str, rekap_rows: pd.DataFrame, abn_rows: Optional[pd.DataFrame] = None, cond_rows: Optional[pd.DataFrame] = None) -> bytes:
     return build_mcu_pdf_bytes_gs_port(
         nama=nama,
@@ -588,7 +892,13 @@ def generate_pdf(payload: Dict[str, Any]):
             # CAPASKA_PDF_DETAILED_TEMPLATE_V341
             if is_capaska_pdf_v341:
                 capaska_rows = _filter_capaska_rows_v341(capaska_df, str(nm), rekap_rows)
-                pdf_bytes = _build_capaska_pdf_bytes_v341(str(nm), rekap_rows, capaska_rows)
+                pdf_bytes = _build_capaska_pdf_bytes_v343(str(nm), rekap_rows, capaska_rows)
+            else:
+                # CAPASKA_PDF_EXCEL_STYLE_V343_DIRECT_CALL
+            if _is_capaska_payload_v343(payload, rekap_df):
+                capaska_df_v343 = _as_records_df(payload.get("capaskaRows"))
+                capaska_rows_v343 = _filter_capaska_rows_v343(capaska_df_v343, str(nm), rekap_rows)
+                pdf_bytes = _build_capaska_pdf_bytes_v343(str(nm), rekap_rows, capaska_rows_v343)
             else:
                 pdf_bytes = _build_mcu_pdf_bytes(str(nm), rekap_rows, abn_rows, cond_rows)
             if not pdf_bytes or len(pdf_bytes) < 1000:
