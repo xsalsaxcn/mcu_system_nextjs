@@ -628,10 +628,55 @@ function isNormalValueExportJuknisV319(value: any) {
   if (raw.includes("tidak ada") && !raw.includes("tidak ada catatan tambahan")) return true;
   if (raw.includes("normal") && !raw.includes("tidak normal") && !raw.includes("abnormal")) return true;
   if (/^0(?:[s-]*(caries|karies|tumpatan|gigi|impaksi))?$/i.test(text)) return true;
+  // DASHBOARD_EXPORT_CLEAN_ZERO_CARIES_V320_NORMAL_VALUE_PATCH
   if (raw.includes("0 caries") || raw.includes("0 karies") || raw.includes("0 tumpatan") || raw.includes("0 gigi") || raw.includes("0 impaksi")) return true;
+  const zeroDentalCompactV320 = raw.replace(/[^0-9a-z]/g, "");
+  if (["0caries", "0karies", "0tumpatan", "0gigi", "0impaksi"].includes(zeroDentalCompactV320)) return true;
   return false;
 }
 
+
+
+// DASHBOARD_EXPORT_CLEAN_ZERO_CARIES_V320
+// Extra note cleanup for normal dental values and boolean-only special-note fields.
+function isNormalNoteByParamExportJuknisV320(param: any, value: any) {
+  const postId = Number(param?.post_id ?? 0);
+  const name = paramNameExportJuknisV319(param);
+  const text = textExportJuknisV319(value);
+  const raw = rawExportJuknisV319(value);
+  const compact = raw.replace(/[\s.;:_/\-]+/g, "");
+  const num = numericValueExportJuknisV319(value);
+
+  if (!text) return true;
+
+  // Yes/no fields that only indicate whether a separate note exists should not be rendered as notes.
+  const isBooleanOnlyNoteQuestion =
+    name.includes("apakah terdapat catatan") ||
+    name.includes("catatan untuk kondisi khusus") ||
+    name.includes("ada catatan") ||
+    name.includes("kondisi khusus ?") ||
+    name.includes("kondisi khusus?");
+  if (isBooleanOnlyNoteQuestion) {
+    const booleanLike = new Set(["ada", "ya", "yes", "true", "tidak", "tidak ada", "no", "false", "negative", "negatif", "-"]);
+    if (booleanLike.has(text) || booleanLike.has(raw) || booleanLike.has(compact)) return true;
+  }
+
+  if (postId === 6) {
+    // Gigi normal values: these must never be included in CATATAN/RINGKASAN.
+    if ((name.includes("caries") || name.includes("karies") || name.includes("caries dentis")) &&
+        (num === 0 || raw.includes("0 caries") || raw.includes("0 karies") || compact.includes("0caries") || compact.includes("0karies"))) return true;
+    if (name.includes("tumpatan") &&
+        (num === 0 || raw.includes("0 tumpatan") || compact.includes("0tumpatan"))) return true;
+    if (name.includes("impaksi") &&
+        (num === 0 || raw.includes("0 gigi") || raw.includes("0 impaksi") || compact.includes("0gigi") || compact.includes("0impaksi"))) return true;
+    if ((name.includes("kehilangan") || name.includes("gigi depan") || name.includes("bagian depan")) &&
+        (num === 0 || raw.includes("0 gigi") || compact.includes("0gigi"))) return true;
+    if ((name.includes("karang") || name.includes("infeksi")) &&
+        (text === "negative" || text === "negatif" || text === "(-)" || text === "tidak" || text === "tidak ada" || compact === "-" || compact === "()")) return true;
+  }
+
+  return false;
+}
 function isTbBbRedFlagExportJuknisV319(value: any) {
   const text = textExportJuknisV319(value);
   return text.includes("tidak sesuai juknis") || text.includes("tidak sesuai") || text.includes("tidak memenuhi juknis");
@@ -717,6 +762,8 @@ function scoreDeltaExportJuknisV319(stageKey: any, param: any, value: any, baseS
 }
 
 function noteDecisionExportJuknisV319(stageKey: any, param: any, value: any, score: any, baseDecision: any) {
+  // DASHBOARD_EXPORT_CLEAN_ZERO_CARIES_V320_NOTE_DECISION_PATCH
+  if (isNormalNoteByParamExportJuknisV320(param, value)) return { include: false, red: false };
   if (isNormalValueExportJuknisV319(value)) return { include: false, red: false };
   if (isJuknisRedFlagExportV319(stageKey, param, value)) return { include: true, red: true };
   if (stageKey === "gigi" && isDentalProblemExportJuknisV319(param, value)) return { include: true, red: false };
