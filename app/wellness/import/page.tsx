@@ -4,11 +4,15 @@ import { useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 export default function WellnessImportPage() {
+
   return <AuthGate>{() => <WellnessImport />}</AuthGate>;
 }
 
 function WellnessImport() {
   const [file, setFile] = useState<File | null>(null);
+  // WELLNESS_IMPORT_COMPANY_GROUP_TYPE_FIX_V349: keep company state inside Wellness import component scope.
+
+  const [wellnessCompanyNameV348, setWellnessCompanyNameV348] = useState("");
   const [groupName, setGroupName] = useState("Wellness Default");
   const [sheetName, setSheetName] = useState("");
   const [message, setMessage] = useState("Upload Excel peserta. No Karyawan akan menjadi kunci signup peserta.");
@@ -26,6 +30,11 @@ function WellnessImport() {
     setResult(null);
     setMessage("Mengimport peserta Wellness...");
     const form = new FormData();
+    // WELLNESS_IMPORT_COMPANY_GROUP_TYPE_FIX_V349_PAYLOAD
+    const companyNameV348Payload = wellnessCompanyNameV348.trim();
+    form.append("companyName", companyNameV348Payload);
+    form.append("wellnessCompanyName", companyNameV348Payload);
+    form.append("entityCompanyName", companyNameV348Payload);
     form.set("file", file);
     form.set("group_name", groupName);
     if (sheetName.trim()) form.set("sheet_name", sheetName.trim());
@@ -61,7 +70,19 @@ function WellnessImport() {
               <input type="file" accept=".xlsx,.xls,.csv" className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
             </label>
             <label className="grid gap-2 text-sm font-black text-slate-700">
-              Nama Kelompok Default
+              {/* WELLNESS_IMPORT_COMPANY_GROUP_V348 */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-700">Company Name (Entitas Perusahaan)</label>
+                <input
+                  value={wellnessCompanyNameV348}
+                  onChange={(e) => setWellnessCompanyNameV348(e.target.value)}
+                  placeholder="Contoh: PT Harmony Wellness"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
+                />
+                <p className="text-xs text-slate-500">Dipakai sebagai entitas perusahaan khusus peserta Wellness yang di-import.</p>
+              </div>
+
+              Add Group - Input Group Name
               <input className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-black text-slate-700">
