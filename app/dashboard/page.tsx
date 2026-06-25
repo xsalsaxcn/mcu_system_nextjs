@@ -653,9 +653,18 @@ function AdminDashboard() {
   const [selectedOperatorProgressV269, setSelectedOperatorProgressV269] = useState<any>(null); // DASHBOARD_OPERATOR_CLICK_DETAIL_V269
   // DASHBOARD_RESET_SELECTED_RESULTS_V221
   const [selectedMcuIds, setSelectedMcuIds] = useState<Set<string>>(new Set());
-  const [message, setMessage] = useState("Pilih modul dan database, lalu klik Tampilkan Dashboard.");
+  const [message, setMessage] = useState("Pilih salah satu entitas layanan, lalu tampilkan dashboard khusus entitas tersebut.");
 
   const activeModule = MODULES.find((m) => m.key === moduleKey) || MODULES[0];
+  // DASHBOARD_FOUR_ENTITY_ISOLATION_V344
+  // UI-only isolation: one active business entity controls the dashboard view.
+  const entityHintV344 = moduleKey === "mcu_capaska"
+    ? "Mode CAPASKA: hanya database, progres, skor, kelulusan, dan detail pemeriksaan CAPASKA yang ditampilkan."
+    : moduleKey === "mcu_corporate"
+    ? "Mode Corporate: hanya database dan hasil MCU Corporate yang ditampilkan. Fitur skor/kelulusan CAPASKA disembunyikan."
+    : moduleKey === "vaccination"
+    ? "Mode Vaksinasi: hanya session, antrian, status vaksin, dokter, dan export vaksinasi yang ditampilkan."
+    : "Mode Wellness: hanya data monitoring wellness yang ditampilkan.";
   const isVaccination = moduleKey === "vaccination";
   const isWellness = moduleKey === "wellness";
   const mcuProgram = moduleKey === "mcu_capaska" ? "capaska" : "corporate";
@@ -1033,7 +1042,7 @@ function AdminDashboard() {
             <div>
               <div className="text-3xl font-black">Dashboard Operasional</div>
               <div className="mt-2 max-w-3xl text-sm font-medium opacity-90">
-                Pilih layanan yang ingin ditampilkan, pilih database/session, lalu retrieve dashboard card dan tabel.
+                Pilih satu entitas layanan. Setelah dipilih, dashboard hanya menampilkan data dan kontrol untuk entitas tersebut.
               </div>
             </div>
 
@@ -1050,8 +1059,16 @@ function AdminDashboard() {
             type="button"
             key={item.key}
             onClick={() => {
+              setRows([]);
+              setSummary({});
+              setLoaded(false);
+              setSearch("");
+              setSelectedMcuRow(null);
+              setSelectedMcuIds(new Set());
+              setMcuStatus("Semua");
+              setVaccStatus("all");
               setModuleKey(item.key);
-              setMessage(`Modul ${item.title} dipilih. Pilih database/session lalu tampilkan dashboard.`);
+              setMessage(`Entitas ${item.title} dipilih. Tampilan dibatasi khusus ${item.title}.`);
             }}
             className={`rounded-3xl border p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
               moduleKey === item.key
@@ -1068,18 +1085,11 @@ function AdminDashboard() {
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-3 lg:grid-cols-[220px_1fr_1fr_auto]">
-          <select
-            className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            value={moduleKey}
-            onChange={(e) => setModuleKey(e.target.value as ModuleKey)}
-          >
-            {MODULES.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.title}
-              </option>
-            ))}
-          </select>
+        <div className="grid gap-3 lg:grid-cols-[240px_1fr_1fr_auto]">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-black text-blue-900">
+            <div className="text-[10px] uppercase tracking-wide text-blue-500">Entitas aktif</div>
+            <div>{activeModule.title}</div>
+          </div>
 
           {isWellness ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">
@@ -1139,9 +1149,13 @@ function AdminDashboard() {
               <option value="Semua">Semua</option>
               <option value="Belum Selesai">Belum Selesai</option>
               <option value="Selesai">Selesai</option>
-              <option value="Lulus">Lulus</option>
-              <option value="Tidak Lulus">Tidak Lulus</option>
-              <option value="Belum Dinilai">Belum Dinilai</option>
+              {mcuProgram === "capaska" ? (
+                <>
+                  <option value="Lulus">Lulus</option>
+                  <option value="Tidak Lulus">Tidak Lulus</option>
+                  <option value="Belum Dinilai">Belum Dinilai</option>
+                </>
+              ) : null}
             </select>
           )}
 
@@ -1156,7 +1170,8 @@ function AdminDashboard() {
         </div>
 
         <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">
-          {message}
+          <div>{message}</div>
+          <div className="mt-1 text-xs font-black uppercase tracking-wide text-slate-400">{entityHintV344}</div>
         </div>
       </section>
 
@@ -1502,7 +1517,7 @@ function AdminDashboard() {
         <section className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center">
           <div className="text-xl font-black text-slate-900">Belum ada dashboard ditampilkan</div>
           <p className="mt-2 text-sm font-medium text-slate-500">
-            Pilih salah satu layanan, tentukan database/session, lalu klik Tampilkan Dashboard.
+            Pilih salah satu entitas layanan, lalu klik Tampilkan Dashboard untuk menampilkan tampilan khusus entitas tersebut.
           </p>
         </section>
       )}
