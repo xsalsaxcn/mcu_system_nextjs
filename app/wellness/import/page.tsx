@@ -19,6 +19,7 @@ function WellnessImport() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("Memuat perusahaan dari Setting Wellness...");
   const [companies, setCompanies] = useState<any[]>([]);
   const [groupUnits, setGroupUnits] = useState<any[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
@@ -28,18 +29,24 @@ function WellnessImport() {
   async function loadSettings() {
     try {
       const json = await fetch("/api/wellness/settings", { cache: "no-store" }).then((r) => r.json());
-      if (!json.ok) return;
+      if (!json.ok) {
+        setSettingsReady(false);
+        setSettingsMessage(json.message || "Setting Wellness belum siap. Jalankan SQL setting Wellness atau tambah perusahaan di /wellness/settings.");
+        return;
+      }
       const loadedCompanies = json.companies || [];
       const loadedGroups = json.groupUnits || [];
       setCompanies(loadedCompanies);
       setGroupUnits(loadedGroups);
       setSettingsReady(true);
+      setSettingsMessage(loadedCompanies.length ? "Pilih perusahaan/kelompok/group yang sudah ada agar upload peserta masuk ke scope yang tepat." : "Belum ada perusahaan di Setting Wellness. Tambahkan dulu di /wellness/settings atau input nama perusahaan baru manual.");
       if (!selectedCompanyId && loadedCompanies[0]?.id) {
         setSelectedCompanyId(String(loadedCompanies[0].id));
         setWellnessCompanyNameV348(loadedCompanies[0].name || "");
       }
     } catch {
       setSettingsReady(false);
+      setSettingsMessage("Gagal memuat daftar perusahaan. Kamu masih bisa input nama perusahaan manual, tetapi pilihan kelompok/group dari setting tidak akan muncul.");
     }
   }
 
@@ -55,6 +62,7 @@ function WellnessImport() {
     setSelectedGroupUnitId("");
     const company = companies.find((item) => String(item.id) === String(value));
     setWellnessCompanyNameV348(company?.name || "");
+    setGroupName("Wellness Default");
   }
 
   function handleKelompokChange(value: string) {
@@ -133,35 +141,43 @@ function WellnessImport() {
               <input type="file" accept=".xlsx,.xls,.csv" className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
             </label>
 
-            {settingsReady ? (
-              <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
-                <div className="text-sm font-black text-blue-950">Ambil dari Setting Wellness</div>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  <label className="grid gap-2 text-xs font-black text-blue-900">
-                    Main Entity
-                    <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedCompanyId} onChange={(e) => handleCompanyChange(e.target.value)}>
-                      <option value="">Pilih perusahaan</option>
-                      {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="grid gap-2 text-xs font-black text-blue-900">
-                    Kelompok
-                    <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedKelompokId} onChange={(e) => handleKelompokChange(e.target.value)}>
-                      <option value="">Pilih kelompok</option>
-                      {kelompokList.map((item) => <option key={item.id} value={item.id}>{item.name} {item.coach_name ? `- Coach ${item.coach_name}` : ""}</option>)}
-                    </select>
-                  </label>
-                  <label className="grid gap-2 text-xs font-black text-blue-900">
-                    Group
-                    <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedGroupUnitId} onChange={(e) => handleGroupUnitChange(e.target.value)}>
-                      <option value="">Pilih group</option>
-                      {childGroupList.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                  </label>
+            <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
+              {/* WELLNESS_IMPORT_EXISTING_COMPANY_V355 */}
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="text-sm font-black text-blue-950">Target Upload Peserta per Grup</div>
+                  <div className="mt-1 text-xs font-bold leading-5 text-blue-700">{settingsMessage}</div>
                 </div>
-                <div className="mt-3 text-xs font-bold text-blue-700">Kosongkan Kelompok/Group bila ingin memakai kolom Kelompok/Divisi dari Excel. Untuk history pemeriksaan lama, gunakan Import History MCU.</div>
+                <a href="/wellness/settings" className="rounded-2xl bg-white px-3 py-2 text-xs font-black text-blue-700 ring-1 ring-blue-100">Kelola Setting</a>
               </div>
-            ) : null}
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <label className="grid gap-2 text-xs font-black text-blue-900">
+                  Pilih Perusahaan yang Sudah Ada
+                  <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedCompanyId} onChange={(e) => handleCompanyChange(e.target.value)}>
+                    <option value="">Input perusahaan baru / tidak pakai setting</option>
+                    {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black text-blue-900">
+                  Pilih Kelompok
+                  <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={selectedKelompokId} onChange={(e) => handleKelompokChange(e.target.value)} disabled={!selectedCompanyId || !kelompokList.length}>
+                    <option value="">{selectedCompanyId ? "Pilih kelompok" : "Pilih perusahaan dulu"}</option>
+                    {kelompokList.map((item) => <option key={item.id} value={item.id}>{item.name} {item.coach_name ? `- Coach ${item.coach_name}` : ""}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black text-blue-900">
+                  Pilih Group Upload
+                  <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={selectedGroupUnitId} onChange={(e) => handleGroupUnitChange(e.target.value)} disabled={!selectedCompanyId || !childGroupList.length}>
+                    <option value="">{selectedKelompokId ? "Pilih group" : "Pilih kelompok dulu"}</option>
+                    {childGroupList.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3 rounded-2xl bg-white/70 px-4 py-3 text-xs font-bold leading-5 text-blue-800">
+                Untuk upload per grup, pilih Perusahaan → Kelompok → Group. Sistem akan mengirim <b>company_id</b>, <b>kelompok_id</b>, dan <b>group_unit_id</b> agar peserta tersimpan di scope Wellness yang benar.
+              </div>
+              {!settingsReady ? <div className="mt-2 text-xs font-bold text-amber-700">Pilihan existing company belum aktif karena setting belum terbaca. Pastikan SQL setting Wellness sudah dijalankan.</div> : null}
+            </div>
 
             <label className="grid gap-2 text-sm font-black text-slate-700">
               {/* WELLNESS_IMPORT_COMPANY_GROUP_V348 */}
@@ -170,13 +186,14 @@ function WellnessImport() {
                 <input
                   value={wellnessCompanyNameV348}
                   onChange={(e) => setWellnessCompanyNameV348(e.target.value)}
-                  placeholder="Contoh: PT Harmony Wellness"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
+                  placeholder={selectedCompanyId ? "Otomatis dari perusahaan yang dipilih" : "Contoh: PT Harmony Wellness"}
+                  readOnly={!!selectedCompanyId}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 read-only:bg-slate-50 read-only:text-slate-500"
                 />
-                <p className="text-xs text-slate-500">Dipakai sebagai entitas perusahaan khusus peserta Wellness yang di-import.</p>
+                <p className="text-xs text-slate-500">Jika memilih perusahaan yang sudah ada, field ini dikunci agar tidak typo. Pilih opsi input perusahaan baru bila ingin membuat entitas baru.</p>
               </div>
 
-              Add Group - Input Group Name
+              Add Group - Input Group Name / otomatis dari Group Upload
               <input className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-black text-slate-700">
