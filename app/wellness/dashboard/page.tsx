@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 import { WELLNESS_FOCUS_ITEMS, WELLNESS_GROUPS } from "@/lib/wellness/riskRules";
 
+// WELLNESS_PARTICIPANT_CHARTS_V351
+
 type RoleKey = "participant" | "leader" | "medical" | "company";
 
 type Tone = "slate" | "emerald" | "blue" | "amber" | "rose" | "purple";
@@ -73,6 +75,182 @@ function riskTone(level: string): Tone {
   return "slate";
 }
 
+
+type TrendPoint = {
+  label?: string;
+  date?: string | null;
+  source?: string | null;
+  [key: string]: any;
+};
+
+type TrendSeries = {
+  key: string;
+  label: string;
+  unit?: string;
+};
+
+function toNumber(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function lastValue(points: TrendPoint[] = [], key = "value") {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const value = toNumber(points[index]?.[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function firstValue(points: TrendPoint[] = [], key = "value") {
+  for (const point of points || []) {
+    const value = toNumber(point?.[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function deltaText(points: TrendPoint[] = [], key = "value", unit = "") {
+  const first = firstValue(points, key);
+  const last = lastValue(points, key);
+  if (first === null || last === null || points.length < 2) return "Belum cukup data trend";
+  const delta = Math.round((last - first) * 10) / 10;
+  const sign = delta > 0 ? "+" : "";
+  return `Delta ${sign}${delta}${unit ? ` ${unit}` : ""}`;
+}
+
+function TrendChart({ title, caption, points = [], series, height = 150 }: { title: string; caption?: string; points?: TrendPoint[]; series: TrendSeries[]; height?: number }) {
+  const chartPoints = Array.isArray(points) ? points : [];
+  const values = chartPoints
+    .flatMap((point) => series.map((item) => toNumber(point?.[item.key])))
+    .filter((value): value is number => value !== null);
+  const primary = series[0];
+  const primaryDelta = deltaText(chartPoints, primary?.key || "value", primary?.unit || "");
+
+  if (!values.length) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="text-sm font-black text-slate-900">{title}</div>
+        <div className="mt-1 text-xs font-semibold text-slate-400">{caption || "Belum ada data"}</div>
+        <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">Belum ada data grafik.</div>
+      </div>
+    );
+  }
+
+  const minRaw = Math.min(...values);
+  const maxRaw = Math.max(...values);
+  const range = maxRaw - minRaw;
+  const pad = range === 0 ? Math.max(1, Math.abs(maxRaw) * 0.08) : range * 0.12;
+  const min = minRaw - pad;
+  const max = maxRaw + pad;
+  const width = 360;
+  const top = 14;
+  const bottom = 26;
+  const left = 30;
+  const right = 16;
+  const innerWidth = width - left - right;
+  const innerHeight = height - top - bottom;
+  const xFor = (index: number) => left + (chartPoints.length <= 1 ? innerWidth / 2 : (index / (chartPoints.length - 1)) * innerWidth);
+  const yFor = (value: number) => top + ((max - value) / Math.max(0.0001, max - min)) * innerHeight;
+  const seriesColors = ["#2563eb", "#e11d48", "#16a34a", "#9333ea"];
+
+  function pathFor(key: string) {
+    const segments: string[] = [];
+    chartPoints.forEach((point, index) => {
+      const value = toNumber(point?.[key]);
+      if (value === null) return;
+      const command = segments.length ? "L" : "M";
+      segments.push(`${command}${xFor(index)},${yFor(value)}`);
+    });
+    return segments.join(" ");
+  }
+
+  const firstLabel = chartPoints[0]?.label || "Awal";
+  const lastLabel = chartPoints[chartPoints.length - 1]?.label || "Terakhir";
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-900">{title}</div>
+          <div className="mt-1 text-xs font-semibold text-slate-400">{caption || primaryDelta}</div>
+        </div>
+        <div className="rounded-2xl bg-slate-50 px-3 py-2 text-right text-xs font-black text-slate-700">
+          {primary?.label}: {fmt(lastValue(chartPoints, primary?.key || "value"), primary?.unit ? ` ${primary.unit}` : "")}
+        </div>
+      </div>
+      <svg className="mt-4 h-[170px] w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        <line x1={left} x2={width - right} y1={top + innerHeight} y2={top + innerHeight} stroke="#e2e8f0" strokeWidth="1" />
+        <line x1={left} x2={width - right} y1={top} y2={top} stroke="#f1f5f9" strokeWidth="1" />
+        {series.map((item, seriesIndex) => {
+          const path = pathFor(item.key);
+          const color = seriesColors[seriesIndex % seriesColors.length];
+          return (
+            <g key={item.key}>
+              {path ? <path d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
+              {chartPoints.map((point, index) => {
+                const value = toNumber(point?.[item.key]);
+                if (value === null) return null;
+                return <circle key={`${item.key}-${index}`} cx={xFor(index)} cy={yFor(value)} r="3.5" fill={color} />;
+              })}
+            </g>
+          );
+        })}
+        <text x={left} y={height - 6} fontSize="10" fontWeight="700" fill="#64748b">{firstLabel}</text>
+        <text x={width - right} y={height - 6} fontSize="10" fontWeight="700" textAnchor="end" fill="#64748b">{lastLabel}</text>
+      </svg>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {series.map((item, index) => (
+          <span key={item.key} className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-black text-slate-600">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: seriesColors[index % seriesColors.length] }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ParticipantChartPanel({ participant }: { participant: any }) {
+  const charts = participant?.parameter_charts || {};
+  if (!participant) {
+    return (
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 text-sm font-semibold text-slate-500 shadow-sm">
+        Pilih peserta untuk melihat grafik parameter.
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-[2rem] border border-slate-200 bg-slate-50 p-6 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="text-xl font-black text-slate-900">Grafik Parameter Per Peserta</div>
+          <div className="mt-1 text-sm font-semibold text-slate-500">
+            {participant.name} · {participant.code || "Tanpa kode"} · {participant.risk_group_name || "Monitoring"}
+          </div>
+        </div>
+        <div className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm">
+          Latest upload: {participant.latest_upload_date || "-"}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <TrendChart title="Berat badan" points={charts.weight_kg} series={[{ key: "value", label: "BB", unit: "kg" }]} />
+        <TrendChart title="BMI" points={charts.bmi} series={[{ key: "value", label: "BMI" }]} />
+        <TrendChart title="Tekanan darah" points={charts.blood_pressure} series={[{ key: "sbp", label: "Sistolik", unit: "mmHg" }, { key: "dbp", label: "Diastolik", unit: "mmHg" }]} />
+        <TrendChart title="HbA1c" points={charts.hba1c} series={[{ key: "value", label: "HbA1c", unit: "%" }]} />
+        <TrendChart title="Gula darah" points={charts.glucose} series={[{ key: "value", label: "Gula", unit: "mg/dL" }]} />
+        <TrendChart title="Lingkar perut" points={charts.waist_cm} series={[{ key: "value", label: "LP", unit: "cm" }]} />
+        <TrendChart title="Nutrisi harian" caption="Total kalori dari food log" points={charts.nutrition_calories} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
+        <TrendChart title="Workout calories" caption="Kalori terbakar dari activity log" points={charts.activity_calories} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
+        <TrendChart title="Workout duration" caption="Total durasi aktivitas per hari" points={charts.workout_minutes} series={[{ key: "value", label: "Durasi", unit: "menit" }]} />
+      </div>
+    </section>
+  );
+}
+
 export default function WellnessDashboardPage() {
   return <AuthGate>{() => <WellnessDashboard />}</AuthGate>;
 }
@@ -81,6 +259,7 @@ function WellnessDashboard() {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>({});
   const [rows, setRows] = useState<any[]>([]);
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
   const [search, setSearch] = useState("");
   const [activeRole, setActiveRole] = useState<RoleKey>("medical");
   const [message, setMessage] = useState("Memuat dashboard Wellness...");
@@ -116,6 +295,20 @@ function WellnessDashboard() {
     if (!keyword) return rows;
     return rows.filter((row) => [row.name, row.code, row.group_name, row.risk_group_name, row.risk_label, row.bmi_status].filter(Boolean).join(" ").toLowerCase().includes(keyword));
   }, [rows, search]);
+
+  useEffect(() => {
+    if (!rows.length) {
+      setSelectedParticipantId("");
+      return;
+    }
+    if (!rows.some((row) => String(row.id) === String(selectedParticipantId))) {
+      setSelectedParticipantId(String(rows[0].id));
+    }
+  }, [rows, selectedParticipantId]);
+
+  const selectedParticipant = useMemo(() => {
+    return rows.find((row) => String(row.id) === String(selectedParticipantId)) || rows[0] || null;
+  }, [rows, selectedParticipantId]);
 
   const activeRoleCard = roleCards.find((item) => item.key === activeRole) || roleCards[0];
 
@@ -161,6 +354,26 @@ function WellnessDashboard() {
           </div>
         ))}
       </section>
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-lg font-black text-slate-900">Pilih Peserta untuk Grafik</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">Grafik menampilkan baseline MCU dibandingkan input berkala, mini MCU, nutrisi, dan workout.</div>
+          </div>
+          <select
+            className="min-w-[280px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            value={selectedParticipantId}
+            onChange={(event) => setSelectedParticipantId(event.target.value)}
+          >
+            {rows.map((row) => (
+              <option key={row.id} value={String(row.id)}>{row.name} {row.code ? `· ${row.code}` : ""}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <ParticipantChartPanel participant={selectedParticipant} />
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -221,6 +434,7 @@ function WellnessDashboard() {
                 <th className="px-4 py-3 text-left">Risiko</th>
                 <th className="px-4 py-3 text-left">Upload</th>
                 <th className="px-4 py-3 text-left">Follow-up</th>
+                <th className="px-4 py-3 text-left">Grafik</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -251,6 +465,15 @@ function WellnessDashboard() {
                   <td className="px-4 py-3"><Badge tone={riskTone(row.risk_level)}>{row.risk_label || "Monitoring"}</Badge></td>
                   <td className="px-4 py-3 text-slate-600">{row.compliance_status || "-"}</td>
                   <td className="px-4 py-3 font-black text-slate-800">{row.need_followup ? "Ya" : "Tidak"}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedParticipantId(String(row.id))}
+                      className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-blue-700"
+                    >
+                      Lihat grafik
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

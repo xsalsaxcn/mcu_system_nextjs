@@ -6,7 +6,8 @@ import { calculateBmi, interpretBmi, weightDelta } from "@/lib/wellness/bmi";
 import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules";
 import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness/_utils";
 
-// WELLNESS_SETTINGS_PARAMETER_V350_DASHBOARD
+// WELLNESS_PARTICIPANT_CHARTS_V351_DASHBOARD
+// Wellness-only: grafik parameter per peserta diambil dari baseline, weight logs, food logs, activity logs, dan mini MCU logs.
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -41,6 +42,149 @@ function roundedDelta(current: any, baseline: any) {
 function latestDate(...values: any[]): string | null {
   const valid = values.filter(Boolean).map(String).sort();
   return valid.length ? valid[valid.length - 1] : null;
+}
+
+
+function dateLabel(value: any, fallback = "-") {
+  if (!value) return fallback;
+  const text = String(value).slice(0, 10);
+  const parts = text.split("-");
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
+  return text || fallback;
+}
+
+function round1(value: any): number | null {
+  const numeric = pickNumber(value);
+  if (numeric === null) return null;
+  return Math.round(numeric * 10) / 10;
+}
+
+function sortedByDate(rows: any[] = [], field = "log_date") {
+  return [...(rows || [])].sort((a: any, b: any) => String(a?.[field] || "").localeCompare(String(b?.[field] || "")));
+}
+
+function addChartPoint(points: any[], point: any) {
+  const hasNumber = Object.entries(point).some(([key, value]) => key !== "label" && key !== "date" && key !== "source" && pickNumber(value) !== null);
+  if (!hasNumber) return;
+  const normalized: any = {
+    label: point.label || dateLabel(point.date),
+    date: point.date || null,
+    source: point.source || null,
+  };
+  for (const [key, value] of Object.entries(point)) {
+    if (["label", "date", "source"].includes(key)) continue;
+    normalized[key] = round1(value);
+  }
+  points.push(normalized);
+}
+
+function compactChart(points: any[], maxPoints = 14) {
+  const clean = (points || []).filter(Boolean);
+  if (clean.length <= maxPoints) return clean;
+  const first = clean[0];
+  const tail = clean.slice(-(maxPoints - 1));
+  if (tail.some((item) => item === first)) return tail;
+  return [first, ...tail];
+}
+
+function aggregateCaloriesByDate(rows: any[] = [], dateField = "log_date", valueField = "total_calories") {
+  const map = new Map<string, number>();
+  for (const row of rows || []) {
+    const date = String(row?.[dateField] || "").slice(0, 10);
+    if (!date) continue;
+    const value = Number(row?.[valueField] || 0);
+    if (!Number.isFinite(value)) continue;
+    map.set(date, (map.get(date) || 0) + value);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Log harian" }));
+}
+
+function aggregateDurationByDate(rows: any[] = []) {
+  const map = new Map<string, number>();
+  for (const row of rows || []) {
+    const date = String(row?.log_date || "").slice(0, 10);
+    if (!date) continue;
+    const value = Number(row?.duration_minutes || 0);
+    if (!Number.isFinite(value)) continue;
+    map.set(date, (map.get(date) || 0) + value);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Workout harian" }));
+}
+
+function buildParticipantCharts(args: {
+  participant: any;
+  weightRows: any[];
+  foodRows: any[];
+  activityRows: any[];
+  miniMcuRows: any[];
+  baselineWeight: any;
+  baselineBmi: any;
+  baselineSbp: any;
+  baselineDbp: any;
+  baselineHba1c: any;
+  baselineGlucose: any;
+  baselineWaist: any;
+}) {
+  const {
+    participant,
+    weightRows,
+    foodRows,
+    activityRows,
+    miniMcuRows,
+    baselineWeight,
+    baselineBmi,
+    baselineSbp,
+    baselineDbp,
+    baselineHba1c,
+    baselineGlucose,
+    baselineWaist,
+  } = args;
+
+  const baselineDate = participant.baseline_mcu_date || participant.program_start_date || participant.created_at;
+  const weightChart: any[] = [];
+  const bmiChart: any[] = [];
+  const waistChart: any[] = [];
+  const bpChart: any[] = [];
+  const hba1cChart: any[] = [];
+  const glucoseChart: any[] = [];
+
+  addChartPoint(weightChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineWeight });
+  addChartPoint(bmiChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineBmi });
+  addChartPoint(waistChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineWaist });
+  addChartPoint(bpChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", sbp: baselineSbp, dbp: baselineDbp });
+  addChartPoint(hba1cChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineHba1c });
+  addChartPoint(glucoseChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineGlucose });
+
+  for (const row of sortedByDate(weightRows)) {
+    addChartPoint(weightChart, { label: dateLabel(row.log_date), date: row.log_date, source: "Input BB", value: row.weight_kg });
+    addChartPoint(bmiChart, { label: dateLabel(row.log_date), date: row.log_date, source: "Input BB", value: row.bmi });
+    addChartPoint(waistChart, { label: dateLabel(row.log_date), date: row.log_date, source: "Input BB", value: row.waist_cm });
+  }
+
+  for (const row of sortedByDate(miniMcuRows, "exam_date")) {
+    addChartPoint(weightChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", value: row.weight_kg });
+    addChartPoint(bmiChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", value: row.bmi });
+    addChartPoint(waistChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", value: row.waist_cm });
+    addChartPoint(bpChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", sbp: row.sbp, dbp: row.dbp });
+    addChartPoint(hba1cChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", value: row.hba1c });
+    addChartPoint(glucoseChart, { label: dateLabel(row.exam_date), date: row.exam_date, source: "Mini MCU", value: row.glucose });
+  }
+
+  return {
+    weight_kg: compactChart(weightChart),
+    bmi: compactChart(bmiChart),
+    waist_cm: compactChart(waistChart),
+    blood_pressure: compactChart(bpChart),
+    hba1c: compactChart(hba1cChart),
+    glucose: compactChart(glucoseChart),
+    nutrition_calories: compactChart(aggregateCaloriesByDate(foodRows, "log_date", "total_calories")),
+    activity_calories: compactChart(aggregateCaloriesByDate(activityRows, "log_date", "calories")),
+    workout_minutes: compactChart(aggregateDurationByDate(activityRows)),
+  };
 }
 
 async function safeSelect(supabase: any, table: string, queryBuilder: (query: any) => any) {
@@ -131,6 +275,20 @@ export async function GET(req: NextRequest) {
       const baselineHba1c = pickNumber(participant.baseline_hba1c, participant.initial_hba1c, participant.hba1c_initial, participant.hba1c);
       const baselineGlucose = pickNumber(participant.baseline_glucose, participant.initial_glucose, participant.glucose, participant.gula_darah);
       const baselineWaist = pickNumber(participant.baseline_waist_cm, participant.initial_waist_cm, participant.waist_cm, participant.lingkar_perut);
+      const parameterCharts = buildParticipantCharts({
+        participant,
+        weightRows,
+        foodRows,
+        activityRows,
+        miniMcuRows: miniMcuParticipantRows,
+        baselineWeight,
+        baselineBmi,
+        baselineSbp,
+        baselineDbp,
+        baselineHba1c,
+        baselineGlucose,
+        baselineWaist,
+      });
 
       return {
         id: participant.id,
@@ -184,6 +342,7 @@ export async function GET(req: NextRequest) {
         mini_mcu_logs_count: miniMcuParticipantRows.length,
         calories_today: sumCalories(foodRows.filter((row) => row.log_date === today)),
         activity_calories_today: sumCalories(activityRows.filter((row) => row.log_date === today)),
+        parameter_charts: parameterCharts,
       };
     });
 
