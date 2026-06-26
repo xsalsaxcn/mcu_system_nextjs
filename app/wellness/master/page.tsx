@@ -90,7 +90,8 @@ function WellnessMaster() {
 
       <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-600">{message}</div>
 
-      <section className="grid gap-3 md:grid-cols-2">
+      <section className="grid gap-3 md:grid-cols-3">
+        <a href="/wellness/settings" className="rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white">Setting Parameter Wellness</a>
         <a href="/wellness/import" className="rounded-2xl bg-blue-600 px-4 py-3 text-center text-sm font-black text-white">Import Peserta Wellness</a>
         <a href="/wellness/signup" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-black text-blue-700">Link Signup Peserta</a>
       </section>

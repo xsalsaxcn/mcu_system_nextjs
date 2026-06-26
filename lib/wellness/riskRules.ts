@@ -15,18 +15,20 @@ export type WellnessRiskResult = {
 };
 
 export const WELLNESS_FOCUS_ITEMS = [
-  { title: "HbA1c / Gula Darah", description: "Pantau risiko pre-diabetes, diabetes-range, dan kebutuhan recheck HbA1c 3 bulan." },
-  { title: "BMI / Obesitas", description: "Pantau berat badan, BMI, lingkar perut, dan target penurunan berat badan." },
-  { title: "Tekanan Darah", description: "Catat tekanan darah sistolik/diastolik dan alert bila tetap tinggi." },
-  { title: "Aktivitas dan Kepatuhan", description: "Pantau upload rutin, aktivitas fisik, edukasi, challenge, dan follow-up." },
+  { title: "Baseline MCU", description: "Data MCU awal menjadi alasan peserta masuk program: HbA1c/gula darah, BMI/BB, lingkar perut, dan tekanan darah." },
+  { title: "Monitoring Harian", description: "Nutrisi dan workout diisi harian oleh peserta untuk melihat kepatuhan dan perubahan perilaku." },
+  { title: "Monitoring Berkala", description: "BB, BMI, lingkar perut, dan tekanan darah dipantau berkala sebagai indikator progress." },
+  { title: "Mini MCU Nakes", description: "Nakes perusahaan mengisi follow-up klinis untuk membandingkan before-after program." },
 ] as const;
 
 export const WELLNESS_GROUPS = [
-  { name: "Kelompok 1", criteria: "Triple Risk / Glucose + Hypertension", focus: "Dokter okupasi, edukasi diabetes-range, BP control, weight loss intensif, recheck HbA1c 3 bulan.", priority: "high" },
-  { name: "Kelompok 2", criteria: "Glucose + Obesity / Pre-DM + Obesity", focus: "Nutrition coaching, activity plan, monitoring berat badan dan lingkar perut, recheck HbA1c.", priority: "high" },
-  { name: "Kelompok 3", criteria: "Obesity + Hypertension", focus: "BP control, weight management, edukasi garam, aktivitas fisik bertahap.", priority: "medium" },
-  { name: "Kelompok 4", criteria: "Glucose Dominant", focus: "Edukasi diabetes-range, pola makan, aktivitas fisik, recheck HbA1c, validasi dokter bila tetap tinggi.", priority: "medium" },
-  { name: "Kelompok 5", criteria: "Hypertension Dominant", focus: "Repeat BP, home/onsite BP log, edukasi garam/kafein/rokok, reminder pengukuran.", priority: "medium" },
+  { name: "Grup A - Triple Risk", criteria: "Glucose + Obesity + Hypertension", focus: "Prioritas dokter okupasi, BP control, edukasi diabetes-range, weight loss intensif, recheck klinis berkala.", priority: "high" },
+  { name: "Grup B - Glucose + Obesity", criteria: "HbA1c/gula tinggi + obesitas", focus: "Nutrition coaching intensif, defisit kalori aman, workout bertahap, recheck HbA1c/gula darah.", priority: "high" },
+  { name: "Grup C - Glucose + Hypertension", criteria: "HbA1c/gula tinggi + tekanan darah tinggi", focus: "Kontrol tekanan darah, edukasi garam/gula sederhana, aktivitas fisik aman, follow-up nakes.", priority: "high" },
+  { name: "Grup D - Obesity + Hypertension", criteria: "Obesitas + tekanan darah tinggi", focus: "Weight management, edukasi garam, monitoring BP, lingkar perut, dan aktivitas bertahap.", priority: "medium" },
+  { name: "Grup E - PreHT/HT + Glucose Dominant", criteria: "Glucose risk dominan dengan tekanan darah mulai meningkat", focus: "Edukasi diabetes-range, pola makan, aktivitas fisik, BP log, dan validasi klinis bila menetap.", priority: "medium" },
+  { name: "Grup F - Hypertension Dominant", criteria: "Tekanan darah dominan", focus: "Repeat BP, home/onsite BP log, edukasi garam/kafein/rokok, dan reminder pengukuran.", priority: "medium" },
+  { name: "Grup G - Pre DM + Obesity Dominant", criteria: "Pre-DM + obesitas", focus: "Pencegahan progresi diabetes dengan weight loss, nutrisi, aktivitas, dan recheck metabolik.", priority: "medium" },
 ] as const;
 
 function toNumber(value: number | string | null | undefined): number | null {
@@ -36,6 +38,7 @@ function toNumber(value: number | string | null | undefined): number | null {
 }
 
 export function classifyWellnessRisk(input: WellnessRiskInput): WellnessRiskResult {
+  // WELLNESS_SETTINGS_PARAMETER_V350_RISK_RULES
   const hba1c = toNumber(input.hba1c);
   const glucose = toNumber(input.glucose);
   const bmi = toNumber(input.bmi);
@@ -43,28 +46,41 @@ export function classifyWellnessRisk(input: WellnessRiskInput): WellnessRiskResu
   const dbp = toNumber(input.dbp);
 
   const flags: string[] = [];
-  if ((hba1c !== null && hba1c > 6.4) || (glucose !== null && glucose >= 126)) flags.push("glucose");
-  if (bmi !== null && bmi > 30) flags.push("obesity");
-  if ((sbp !== null && sbp > 150) || (dbp !== null && dbp > 100)) flags.push("hypertension");
+  const hasDiabetesRange = (hba1c !== null && hba1c > 6.4) || (glucose !== null && glucose >= 126);
+  const hasPreGlucose = !hasDiabetesRange && ((hba1c !== null && hba1c >= 5.7) || (glucose !== null && glucose >= 100));
+  const hasObesity = bmi !== null && bmi >= 30;
+  const hasHypertension = (sbp !== null && sbp > 150) || (dbp !== null && dbp > 100);
+  const hasBpElevation = !hasHypertension && ((sbp !== null && sbp >= 130) || (dbp !== null && dbp >= 80));
 
-  const hasGlucose = flags.includes("glucose");
-  const hasObesity = flags.includes("obesity");
-  const hasHypertension = flags.includes("hypertension");
+  if (hasDiabetesRange) flags.push("glucose");
+  if (hasPreGlucose) flags.push("pre_glucose");
+  if (hasObesity) flags.push("obesity");
+  if (hasHypertension) flags.push("hypertension");
+  if (hasBpElevation) flags.push("bp_elevation");
 
-  if (flags.length >= 3 || (hasGlucose && hasHypertension)) {
-    return { level: "high", label: "High Risk", group: "Kelompok 1", flags, needFollowup: true };
+  if (hasDiabetesRange && hasObesity && hasHypertension) {
+    return { level: "high", label: "Triple Risk", group: "Grup A - Triple Risk", flags, needFollowup: true };
   }
-  if (hasGlucose && hasObesity) {
-    return { level: "high", label: "Metabolic Risk", group: "Kelompok 2", flags, needFollowup: true };
+  if (hasDiabetesRange && hasObesity) {
+    return { level: "high", label: "Glucose + Obesity", group: "Grup B - Glucose + Obesity", flags, needFollowup: true };
+  }
+  if (hasDiabetesRange && hasHypertension) {
+    return { level: "high", label: "Glucose + Hypertension", group: "Grup C - Glucose + Hypertension", flags, needFollowup: true };
   }
   if (hasObesity && hasHypertension) {
-    return { level: "medium", label: "Obesity + Hypertension", group: "Kelompok 3", flags, needFollowup: true };
+    return { level: "medium", label: "Obesity + Hypertension", group: "Grup D - Obesity + Hypertension", flags, needFollowup: true };
   }
-  if (hasGlucose) {
-    return { level: "medium", label: "Glucose Dominant", group: "Kelompok 4", flags, needFollowup: true };
+  if ((hasDiabetesRange || hasPreGlucose) && hasBpElevation) {
+    return { level: "medium", label: "Glucose Dominant", group: "Grup E - PreHT/HT + Glucose Dominant", flags, needFollowup: true };
   }
-  if (hasHypertension) {
-    return { level: "medium", label: "Hypertension Dominant", group: "Kelompok 5", flags, needFollowup: true };
+  if (hasHypertension || hasBpElevation) {
+    return { level: "medium", label: "Hypertension Dominant", group: "Grup F - Hypertension Dominant", flags, needFollowup: true };
+  }
+  if (hasPreGlucose && hasObesity) {
+    return { level: "medium", label: "Pre-DM + Obesity", group: "Grup G - Pre DM + Obesity Dominant", flags, needFollowup: true };
+  }
+  if (hasDiabetesRange || hasPreGlucose || hasObesity) {
+    return { level: "medium", label: "Metabolic Monitoring", group: "Wellness Monitoring", flags, needFollowup: true };
   }
   return { level: "low", label: "Monitoring", group: "Wellness Monitoring", flags, needFollowup: false };
 }

@@ -135,8 +135,9 @@ function WellnessDashboard() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <a href="/wellness/input" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-800 shadow-sm">Input Monitoring</a>
-              <a href="/wellness/import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import MCU</a>
+              <a href="/wellness/settings" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-800 shadow-sm">Setting Parameter</a>
+              <a href="/wellness/input" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Input Monitoring</a>
+              <a href="/wellness/import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import Baseline MCU</a>
               <button onClick={load} disabled={loading} className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black text-white shadow-sm disabled:opacity-60">{loading ? "Memuat..." : "Refresh"}</button>
             </div>
           </div>
@@ -149,7 +150,7 @@ function WellnessDashboard() {
         <StatCard label="Perlu Follow-up" value={summary.need_followup || 0} tone="amber" caption="Alert medis" />
         <StatCard label="Kepatuhan" value={`${summary.compliance_rate || 0}%`} tone="emerald" caption="Upload mingguan" />
         <StatCard label="Rata-rata BMI" value={summary.avg_bmi || 0} tone="blue" caption="Baseline/progress" />
-        <StatCard label="Kalori Hari Ini" value={summary.total_food_calories_today || 0} tone="purple" caption="Input makanan" />
+        <StatCard label="Avg Delta BB" value={fmt(summary.avg_weight_delta_kg, " kg")} tone="purple" caption={`${summary.improved_weight_count || 0} peserta turun BB`} />
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -212,11 +213,11 @@ function WellnessDashboard() {
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 text-left">Nama</th>
-                <th className="px-4 py-3 text-left">Kelompok</th>
+                <th className="px-4 py-3 text-left">Entity/Kelompok</th>
                 <th className="px-4 py-3 text-left">HbA1c/Gula</th>
-                <th className="px-4 py-3 text-left">BMI</th>
-                <th className="px-4 py-3 text-left">Tekanan Darah</th>
-                <th className="px-4 py-3 text-left">BB Saat Ini</th>
+                <th className="px-4 py-3 text-left">BMI Before → Now</th>
+                <th className="px-4 py-3 text-left">TD Before → Now</th>
+                <th className="px-4 py-3 text-left">BB Before → Now</th>
                 <th className="px-4 py-3 text-left">Risiko</th>
                 <th className="px-4 py-3 text-left">Upload</th>
                 <th className="px-4 py-3 text-left">Follow-up</th>
@@ -226,11 +227,27 @@ function WellnessDashboard() {
               {filteredRows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 font-black text-slate-900">{row.name}<div className="text-xs font-semibold text-slate-400">{row.code || "-"}</div></td>
-                  <td className="px-4 py-3 text-slate-600">{row.risk_group_name || row.group_name || "-"}</td>
-                  <td className="px-4 py-3 text-slate-600">HbA1c {fmt(row.hba1c)}<div className="text-xs text-slate-400">Gula {fmt(row.glucose)}</div></td>
-                  <td className="px-4 py-3"><span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">{fmt(row.bmi)} · {row.bmi_status || "-"}</span></td>
-                  <td className="px-4 py-3 font-bold">{fmt(row.sbp)}/{fmt(row.dbp)}</td>
-                  <td className="px-4 py-3 font-bold">{fmt(row.current_weight_kg, " kg")}<div className={`text-xs font-black ${Number(row.weight_delta_kg || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>{fmt(row.weight_delta_kg, " kg")}</div></td>
+                  <td className="px-4 py-3 text-slate-600">
+                    <div className="font-bold text-slate-800">{row.company_name || "-"}</div>
+                    <div className="text-xs text-slate-400">{row.group_name || "-"}</div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    <div>HbA1c {fmt(row.baseline_hba1c)} → {fmt(row.hba1c)}</div>
+                    <div className={`text-xs font-black ${Number(row.hba1c_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.hba1c_delta)}</div>
+                    <div className="text-xs text-slate-400">Gula {fmt(row.baseline_glucose)} → {fmt(row.glucose)}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">{fmt(row.baseline_bmi)} → {fmt(row.bmi)} · {row.bmi_status || "-"}</span>
+                    <div className={`mt-1 text-xs font-black ${Number(row.bmi_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.bmi_delta)}</div>
+                  </td>
+                  <td className="px-4 py-3 font-bold">
+                    <div>{fmt(row.baseline_sbp)}/{fmt(row.baseline_dbp)} → {fmt(row.sbp)}/{fmt(row.dbp)}</div>
+                    <div className={`text-xs font-black ${Number(row.sbp_delta || 0) <= 0 && Number(row.dbp_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.sbp_delta)}/{fmt(row.dbp_delta)}</div>
+                  </td>
+                  <td className="px-4 py-3 font-bold">
+                    <div>{fmt(row.baseline_weight_kg, " kg")} → {fmt(row.current_weight_kg, " kg")}</div>
+                    <div className={`text-xs font-black ${Number(row.weight_delta_kg || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.weight_delta_kg, " kg")}</div>
+                  </td>
                   <td className="px-4 py-3"><Badge tone={riskTone(row.risk_level)}>{row.risk_label || "Monitoring"}</Badge></td>
                   <td className="px-4 py-3 text-slate-600">{row.compliance_status || "-"}</td>
                   <td className="px-4 py-3 font-black text-slate-800">{row.need_followup ? "Ya" : "Tidak"}</td>
@@ -242,7 +259,7 @@ function WellnessDashboard() {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-5">
+      <section className="grid gap-4 lg:grid-cols-4">
         {WELLNESS_GROUPS.map((group) => (
           <div key={group.name} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="font-black text-slate-950">{group.name}</div>
