@@ -124,6 +124,21 @@ function parseBloodPressure(raw: any) {
   return { sbp: toNumber(match[1]), dbp: toNumber(match[2]) };
 }
 
+
+
+function looksLikeRiskClusterName(value: any) {
+  // WELLNESS_INPUT_PRO_SELECTOR_V359_IMPORT_GUARD
+  const text = norm(value);
+  if (!text) return false;
+  return /^grup\s+[a-z0-9]+\s*[-–]/i.test(clean(value))
+    || text.includes("triple risk")
+    || text.includes("glucose + hypertension")
+    || text.includes("glucose + obesity")
+    || text.includes("obesity + hypertension")
+    || text.includes("hypertension dominant")
+    || text.includes("risk cluster");
+}
+
 function isMissingWellnessColumn(error: any) {
   const message = String(error?.message || error?.details || "").toLowerCase();
   return message.includes("column") || message.includes("schema cache") || message.includes("could not find");
@@ -176,25 +191,35 @@ async function maybeGetOrCreateCompany(supabase: any, companyId: any, companyNam
 }
 
 async function findExistingParticipantScoped(supabase: any, employeeNo: string, companyId: any, kelompokId: any, groupUnitId: any) {
-  // WELLNESS_IMPORT_EXISTING_COMPANY_V355_API: match peserta by KODE + selected company/kelompok/group when available.
+  // WELLNESS_INPUT_PRO_SELECTOR_V359_IMPORT_GUARD: code is unique in wellness_participants.
+  // First try selected scope, then fallback to global KODE to prevent duplicate-key errors.
   const code = clean(employeeNo);
   const companyIdNum = toNumber(companyId);
   const kelompokIdNum = toNumber(kelompokId);
   const groupUnitIdNum = toNumber(groupUnitId);
 
   try {
-    let query = supabase.from("wellness_participants").select("id").eq("code", code);
+    let query = supabase.from("wellness_participants").select("id,name,code").eq("code", code);
     if (companyIdNum) query = query.eq("wellness_company_id", companyIdNum);
     if (kelompokIdNum) query = query.eq("wellness_kelompok_id", kelompokIdNum);
     if (groupUnitIdNum) query = query.eq("wellness_group_unit_id", groupUnitIdNum);
     const { data, error } = await query.limit(1).maybeSingle();
     if (error) throw error;
-    return data;
+    if (data?.id) return data;
+
+    const { data: globalData, error: globalError } = await supabase
+      .from("wellness_participants")
+      .select("id,name,code")
+      .eq("code", code)
+      .limit(1)
+      .maybeSingle();
+    if (globalError) throw globalError;
+    return globalData;
   } catch (error: any) {
     if (!isMissingWellnessColumn(error)) throw error;
     const { data, error: fallbackError } = await supabase
       .from("wellness_participants")
-      .select("id")
+      .select("id,name,code")
       .eq("code", code)
       .limit(1)
       .maybeSingle();
@@ -258,6 +283,7 @@ export async function POST(req: NextRequest) {
     let baselineRows = 0;
     let fallbackRows = 0;
     const errors: string[] = [];
+    const seenCodes = new Map<string, { rowNumber: number; name: string }>();
 
     for (const [offset, row] of dataRows.entries()) {
       const rowNumber = headerRowIndex + offset + 2;
@@ -268,6 +294,20 @@ export async function POST(req: NextRequest) {
         errors.push(`Baris ${rowNumber}: dilewati karena ${!employeeNo ? "KODE/No Karyawan kosong" : "Nama Karyawan kosong"}.`);
         continue;
       }
+
+      if (looksLikeRiskClusterName(name)) {
+        skipped += 1;
+        errors.push(`Baris ${rowNumber}: kolom nama terbaca sebagai risk cluster (${name}). Pastikan kolom nama peserta memakai header Nama Karyawan.`);
+        continue;
+      }
+
+      const seen = seenCodes.get(employeeNo.toLowerCase());
+      if (seen) {
+        skipped += 1;
+        errors.push(`Baris ${rowNumber}: KODE ${employeeNo} duplikat dengan baris ${seen.rowNumber}. Import peserta memakai KODE sebagai kunci signup, jadi baris ini dilewati.`);
+        continue;
+      }
+      seenCodes.set(employeeNo.toLowerCase(), { rowNumber, name });
 
       // If Group Upload is selected, do not let Excel Department/Divisi override upload scope.
       const excelGroupName = requestedGroupUnitId ? "" : clean(pick(row, headers, ["Kelompok", "Group", "Divisi", "Department", "Departemen", "Unit", "Shift"]));
@@ -331,6 +371,11 @@ export async function POST(req: NextRequest) {
       });
 
       const existing = await findExistingParticipantScoped(supabase, employeeNo, companyId, requestedKelompokId, requestedGroupUnitId);
+      if (existing?.id && clean(existing.name) && norm(existing.name) !== norm(name) && !looksLikeRiskClusterName(existing.name)) {
+        skipped += 1;
+        errors.push(`Baris ${rowNumber}: KODE ${employeeNo} sudah terdaftar untuk ${existing.name}, sedangkan file berisi ${name}. Baris dilewati agar tidak menimpa peserta lain.`);
+        continue;
+      }
 
       try {
         const saved = await saveParticipant(supabase, existing?.id, basePayload, extendedPayload);
