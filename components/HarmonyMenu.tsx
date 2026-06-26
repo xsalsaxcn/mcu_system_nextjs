@@ -28,12 +28,15 @@ const menuGroups = [
   {
     title: "Wellness",
     items: [
-      { label: "Dashboard Wellness", href: "/wellness/dashboard" },
-      { label: "Input Harian Wellness", href: "/wellness/input" },
-      { label: "Profil Wellness", href: "/wellness/profile" },
-      { label: "Signup Peserta Wellness", href: "/wellness/signup" },
-      { label: "Master Wellness", href: "/wellness/master" },
-      { label: "Import Peserta Wellness", href: "/wellness/import" },
+      // WELLNESS_PRO_WORKSPACE_V357_MENU
+      { label: "01 Dashboard Wellness", href: "/wellness/dashboard" },
+      { label: "02 Setting Parameter", href: "/wellness/settings" },
+      { label: "03 Import Peserta", href: "/wellness/import" },
+      { label: "04 Import History MCU", href: "/wellness/history-import" },
+      { label: "05 Input Harian", href: "/wellness/input" },
+      { label: "06 Master Kalori", href: "/wellness/master" },
+      { label: "07 Signup Peserta", href: "/wellness/signup" },
+      { label: "08 Profil Wellness", href: "/wellness/profile" },
     ],
   },
   {

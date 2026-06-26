@@ -258,6 +258,31 @@ function StatusPill({ children, tone = "slate" }: { children: any; tone?: "slate
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${cls}`}>{children}</span>;
 }
 
+function wellnessDisplay(value: any, suffix = "") {
+  if (value === null || value === undefined || value === "") return "-";
+  return `${value}${suffix}`;
+}
+
+function wellnessPair(a: any, b: any) {
+  const left = wellnessDisplay(a);
+  const right = wellnessDisplay(b);
+  if (left === "-" && right === "-") return "-";
+  return `${left}/${right}`;
+}
+
+function wellnessRiskTone(level: string): "slate" | "blue" | "emerald" | "amber" | "red" {
+  if (level === "high") return "red";
+  if (level === "medium") return "amber";
+  if (level === "low") return "emerald";
+  return "blue";
+}
+
+function wellnessDeltaClass(value: any) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return "text-slate-500";
+  return numeric < 0 ? "text-emerald-700" : "text-rose-700";
+}
+
 function buildCapaskaAdminFormUrl(row: any, stage: any) {
   const params = new URLSearchParams();
   params.set("participant_id", String(row.participant_id || ""));
@@ -1092,8 +1117,8 @@ function AdminDashboard() {
           </div>
 
           {isWellness ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">
-              Data Wellness semua peserta sesuai akses akun
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800">
+              Wellness Workspace: gunakan menu khusus untuk setting, import, history, dashboard, dan input harian.
             </div>
           ) : isVaccination ? (
             <select
@@ -1125,8 +1150,11 @@ function AdminDashboard() {
 
           {isWellness ? (
             <div className="flex flex-wrap gap-2">
-              <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input Harian</a>
-              <a href="/wellness/master" className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700">Master</a>
+              <a href="/wellness/dashboard" className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">Dashboard Wellness</a>
+              <a href="/wellness/settings" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700">Setting</a>
+              <a href="/wellness/import" className="rounded-2xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm font-black text-purple-700">Import</a>
+              <a href="/wellness/history-import" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">History MCU</a>
+              <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input</a>
             </div>
           ) : isVaccination ? (
             <select
@@ -1326,6 +1354,7 @@ function AdminDashboard() {
 
                 {isWellness ? (
                   <>
+                    <a href="/wellness/dashboard" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700">Buka Workspace</a>
                     <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input Harian</a>
                     <button className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => exportData("all")}>Export Wellness</button>
                   </>
@@ -1368,33 +1397,60 @@ function AdminDashboard() {
 
             <div className="overflow-x-auto">
               {isWellness ? (
-                <table className="min-w-full text-sm">
+                // WELLNESS_PRO_WORKSPACE_V357_GLOBAL_TABLE
+                <table className="min-w-[1120px] w-full text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="w-12 px-4 py-3 text-left">
-                        <span className="sr-only">Pilih peserta untuk reset hasil form</span>
-                      </th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="Nama" sortKey="name" sortConfig={sortConfig} onSort={handleSort} /></th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="Kelompok" sortKey="group_name" sortConfig={sortConfig} onSort={handleSort} /></th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="BB Awal" sortKey="initial_weight_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="BB Kini" sortKey="current_weight_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="Delta" sortKey="weight_delta_kg" sortConfig={sortConfig} onSort={handleSort} /></th>
-                      <th className="px-4 py-3 text-left"><SortHeader label="BMI" sortKey="bmi" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Peserta" sortKey="name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left"><SortHeader label="Scope Program" sortKey="group_name" sortConfig={sortConfig} onSort={handleSort} /></th>
+                      <th className="px-4 py-3 text-left">Baseline MCU</th>
+                      <th className="px-4 py-3 text-left">Progress Terakhir</th>
+                      <th className="px-4 py-3 text-left">Risiko & Follow-up</th>
                       <th className="px-4 py-3 text-left"><SortHeader label="Kalori" sortKey="calories_today" sortConfig={sortConfig} onSort={handleSort} /></th>
                       <th className="px-4 py-3 text-left">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRows.map((row: any) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-black text-slate-900">{row.name}<div className="text-xs font-semibold text-slate-400">{row.code || "-"}</div></td>
-                        <td className="px-4 py-3 text-slate-600">{row.group_name || "-"}</td>
-                        <td className="px-4 py-3 font-bold">{row.initial_weight_kg ? `${row.initial_weight_kg} kg` : "-"}</td>
-                        <td className="px-4 py-3 font-bold">{row.current_weight_kg ? `${row.current_weight_kg} kg` : "-"}</td>
-                        <td className={`px-4 py-3 font-black ${Number(row.weight_delta_kg || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>{row.weight_delta_kg !== null && row.weight_delta_kg !== undefined ? `${row.weight_delta_kg} kg` : "-"}</td>
-                        <td className="px-4 py-3"><StatusPill tone="blue">{row.bmi || "-"} · {row.bmi_status || "-"}</StatusPill></td>
-                        <td className="px-4 py-3 text-slate-600">Makan {row.calories_today || 0} / Aktivitas {row.activity_calories_today || 0}</td>
-                        <td className="px-4 py-3"><a href="/wellness/input" className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white">Input</a></td>
+                      <tr key={row.id} className="align-top hover:bg-slate-50">
+                        <td className="px-4 py-4">
+                          <div className="font-black text-slate-950">{row.name || "-"}</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-400">Kode: {row.code || "-"}</div>
+                          <div className="mt-2"><StatusPill tone={wellnessRiskTone(row.risk_level)}>{row.risk_group_name || row.risk_label || "Monitoring"}</StatusPill></div>
+                        </td>
+                        <td className="px-4 py-4 text-slate-600">
+                          <div className="font-black text-slate-900">{row.company_name || "-"}</div>
+                          <div className="mt-1 text-xs font-bold text-slate-500">Kelompok/Group: {row.group_name || "-"}</div>
+                          {row.old_group_name && row.old_group_name !== "-" && row.old_group_name !== row.group_name ? (
+                            <div className="mt-1 text-xs font-bold text-slate-400">Divisi/legacy: {row.old_group_name}</div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-4 text-slate-600">
+                          <div className="font-bold text-slate-900">BB {wellnessDisplay(row.baseline_weight_kg, " kg")} · BMI {wellnessDisplay(row.baseline_bmi)}</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">TD {wellnessPair(row.baseline_sbp, row.baseline_dbp)}</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">HbA1c {wellnessDisplay(row.baseline_hba1c, "%")} · Gula {wellnessDisplay(row.baseline_glucose)}</div>
+                        </td>
+                        <td className="px-4 py-4 text-slate-600">
+                          <div className="font-bold text-slate-900">BB {wellnessDisplay(row.current_weight_kg, " kg")} <span className={wellnessDeltaClass(row.weight_delta_kg)}>({wellnessDisplay(row.weight_delta_kg, " kg")})</span></div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">BMI {wellnessDisplay(row.bmi)} <span className={wellnessDeltaClass(row.bmi_delta)}>Δ {wellnessDisplay(row.bmi_delta)}</span></div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">TD {wellnessPair(row.sbp, row.dbp)} · HbA1c {wellnessDisplay(row.hba1c, "%")}</div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="space-y-2">
+                            <StatusPill tone={wellnessRiskTone(row.risk_level)}>{row.risk_label || "Monitoring"}</StatusPill>
+                            <div><StatusPill tone={row.need_followup ? "red" : "emerald"}>{row.need_followup ? "Perlu follow-up" : "Tidak urgent"}</StatusPill></div>
+                            <div className="text-xs font-bold text-slate-500">Kepatuhan: {row.compliance_status || "-"}</div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-slate-600">
+                          <div className="font-bold">Makan {row.calories_today || 0} kkal</div>
+                          <div className="font-bold">Aktivitas {row.activity_calories_today || 0} kkal</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-400">Latest: {row.latest_upload_date || "-"}</div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <a href="/wellness/dashboard" className="block rounded-xl bg-blue-600 px-3 py-2 text-center text-xs font-black text-white">Dashboard</a>
+                          <a href="/wellness/input" className="mt-2 block rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-center text-xs font-black text-rose-700">Input</a>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

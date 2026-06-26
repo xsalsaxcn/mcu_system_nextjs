@@ -194,8 +194,9 @@ function WellnessImport() {
                 <p className="text-xs text-slate-500">Jika memilih perusahaan yang sudah ada, field ini dikunci agar tidak typo. Pilih opsi input perusahaan baru bila ingin membuat entitas baru.</p>
               </div>
 
-              <label className="text-sm font-black text-slate-700">Add Group - Input Group Name / otomatis dari Group Upload</label>
+              <label className="text-sm font-black text-slate-700">Risk Cluster / Label Risiko Default (opsional)</label>
               <input className="w-full min-w-0 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+              <p className="text-xs font-semibold leading-5 text-slate-500">Ini bukan Group Upload. Group Upload tetap dipilih dari dropdown biru di atas. Field ini hanya label risiko/default bila Excel tidak punya Risk Cluster.</p>
             </div>
             <label className="grid gap-2 text-sm font-black text-slate-700">
               Nama Sheet, opsional
@@ -209,9 +210,9 @@ function WellnessImport() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-lg font-black text-slate-900">Format Kolom yang Didukung</div>
             <div className="mt-3 text-sm font-semibold leading-6 text-slate-600">
-              Minimal: <b>No Karyawan</b> dan <b>Nama</b>. Opsional identitas: Email, No HP, Jenis Kelamin, Tanggal Lahir, Kelompok/Divisi.
+              Minimal: <b>No Karyawan/KODE</b> dan <b>Nama Karyawan</b>. Opsional identitas: Email, No HP, Jenis Kelamin, Tanggal Lahir, Departemen/Divisi.
               <br /><br />
-              Baseline MCU: <b>TB</b>, <b>BB Awal</b>, <b>BMI</b>, <b>Lingkar Perut</b>, <b>HbA1c</b>, <b>Gula Darah</b>, <b>Sistol</b>, <b>Diastol</b>, <b>Tekanan Darah</b>, <b>Tanggal MCU</b>, <b>Catatan MCU</b>, <b>Risk Cluster</b>.
+              Baseline MCU: <b>TB</b>, <b>BB Awal</b>, <b>BMI</b>, <b>Lingkar Perut</b>, <b>HbA1c</b>, <b>Gula Darah</b>, <b>Sistol</b>, <b>Diastol</b>, <b>Tekanan Darah</b>, <b>Tanggal Periksa/MCU</b>, <b>Catatan MCU</b>, <b>Risk Cluster/Nama Grup</b>.
             </div>
           </div>
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
@@ -239,6 +240,16 @@ function WellnessImport() {
             <div className="rounded-2xl bg-slate-50 p-4"><div className="text-xs font-black uppercase text-slate-500">Skipped</div><div className="mt-1 text-3xl font-black text-slate-900">{result.skipped}</div></div>
             <div className="rounded-2xl bg-purple-50 p-4"><div className="text-xs font-black uppercase text-purple-600">Baseline</div><div className="mt-1 text-3xl font-black text-purple-900">{result.baselineRows || 0}</div></div>
             <div className="rounded-2xl bg-amber-50 p-4"><div className="text-xs font-black uppercase text-amber-600">Errors</div><div className="mt-1 text-3xl font-black text-amber-900">{result.errors?.length || 0}</div></div>
+          </div>
+        ) : null}
+        {result?.errors?.length ? (
+          <div className="mt-4 rounded-3xl border border-amber-200 bg-amber-50 p-4">
+            <div className="text-sm font-black text-amber-900">Detail Error / Baris Dilewati</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-amber-700">Periksa kolom KODE/No Karyawan dan Nama Karyawan. Sistem sekarang mencegah kolom Nama Grup terbaca sebagai nama peserta.</div>
+            <div className="mt-3 max-h-56 overflow-auto rounded-2xl bg-white/70 p-3 text-xs font-bold leading-6 text-amber-900">
+              {result.errors.slice(0, 50).map((item: string, index: number) => <div key={`${index}-${item}`}>• {item}</div>)}
+              {result.errors.length > 50 ? <div>• Dan {result.errors.length - 50} error lain...</div> : null}
+            </div>
           </div>
         ) : null}
       </section>

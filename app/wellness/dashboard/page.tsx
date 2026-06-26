@@ -3,78 +3,10 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
-import { WELLNESS_FOCUS_ITEMS, WELLNESS_GROUPS } from "@/lib/wellness/riskRules";
 
-// WELLNESS_PARTICIPANT_CHARTS_V351
+// WELLNESS_PRO_WORKSPACE_V357
 
-type RoleKey = "participant" | "leader" | "medical" | "company";
-
-type Tone = "slate" | "emerald" | "blue" | "amber" | "rose" | "purple";
-
-const roleCards: Array<{ key: RoleKey; title: string; subtitle: string; focus: string[] }> = [
-  {
-    key: "participant",
-    title: "Peserta",
-    subtitle: "Peserta hanya melihat data wellness miliknya sendiri.",
-    focus: ["Profil wellness pribadi", "Input monitoring", "Grafik progres", "Reminder edukasi"],
-  },
-  {
-    key: "leader",
-    title: "Ketua Kelompok",
-    subtitle: "Fokus pada kepatuhan dan progress anggota, bukan diagnosis klinis penuh.",
-    focus: ["Status upload anggota", "Progress kelompok", "Reminder anggota", "Catatan kendala"],
-  },
-  {
-    key: "medical",
-    title: "Tim Medis / Admin Wellness",
-    subtitle: "Role operasional lengkap untuk validasi, risiko, dan follow-up.",
-    focus: ["Import data MCU", "Validasi upload", "Monitoring risiko", "Follow-up medis"],
-  },
-  {
-    key: "company",
-    title: "Perusahaan / HR",
-    subtitle: "Melihat ringkasan agregat program tanpa detail medis sensitif.",
-    focus: ["Executive summary", "Progress per kelompok", "Kepatuhan upload", "Export laporan agregat"],
-  },
-];
-
-function fmt(value: any, suffix = "") {
-  if (value === null || value === undefined || value === "") return "-";
-  return `${value}${suffix}`;
-}
-
-function toneClass(tone: Tone) {
-  return {
-    slate: "border-slate-200 bg-white text-slate-950",
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-950",
-    blue: "border-blue-100 bg-blue-50 text-blue-950",
-    amber: "border-amber-100 bg-amber-50 text-amber-950",
-    rose: "border-rose-100 bg-rose-50 text-rose-950",
-    purple: "border-purple-100 bg-purple-50 text-purple-950",
-  }[tone];
-}
-
-function StatCard({ label, value, tone = "slate", caption }: { label: string; value: any; tone?: Tone; caption?: string }) {
-  return (
-    <div className={`rounded-3xl border p-5 shadow-sm ${toneClass(tone)}`}>
-      <div className="text-xs font-black uppercase tracking-wide opacity-60">{label}</div>
-      <div className="mt-2 text-3xl font-black">{value ?? 0}</div>
-      {caption ? <div className="mt-1 text-xs font-semibold opacity-60">{caption}</div> : null}
-    </div>
-  );
-}
-
-function Badge({ children, tone = "blue" }: { children: ReactNode; tone?: Tone }) {
-  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-black ${toneClass(tone)}`}>{children}</span>;
-}
-
-function riskTone(level: string): Tone {
-  if (level === "high") return "rose";
-  if (level === "medium") return "amber";
-  if (level === "low") return "emerald";
-  return "slate";
-}
-
+type Tone = "slate" | "emerald" | "blue" | "amber" | "rose" | "purple" | "indigo";
 
 type TrendPoint = {
   label?: string;
@@ -88,6 +20,52 @@ type TrendSeries = {
   label: string;
   unit?: string;
 };
+
+const workspaceMenu = [
+  { label: "1. Setting Program", href: "/wellness/settings", description: "Perusahaan, kelompok, group, parameter" },
+  { label: "2. Import Peserta", href: "/wellness/import", description: "Identitas peserta per group upload" },
+  { label: "3. Import History MCU", href: "/wellness/history-import", description: "Baseline, mini MCU, final MCU" },
+  { label: "4. Dashboard", href: "/wellness/dashboard", description: "Before-after dan grafik" },
+  { label: "5. Input Harian", href: "/wellness/input", description: "Nutrisi, workout, BB" },
+  { label: "6. Master", href: "/wellness/master", description: "Kalori makanan dan aktivitas" },
+  { label: "7. Signup Peserta", href: "/wellness/signup", description: "Portal peserta" },
+];
+
+function fmt(value: any, suffix = "") {
+  if (value === null || value === undefined || value === "" || Number.isNaN(value)) return "-";
+  return `${value}${suffix}`;
+}
+
+function fmtPair(a: any, b: any, sep = "/") {
+  if ((a === null || a === undefined || a === "") && (b === null || b === undefined || b === "")) return "-";
+  return `${fmt(a)}${sep}${fmt(b)}`;
+}
+
+function toneClass(tone: Tone) {
+  return {
+    slate: "border-slate-200 bg-white text-slate-950",
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-950",
+    blue: "border-blue-100 bg-blue-50 text-blue-950",
+    amber: "border-amber-100 bg-amber-50 text-amber-950",
+    rose: "border-rose-100 bg-rose-50 text-rose-950",
+    purple: "border-purple-100 bg-purple-50 text-purple-950",
+    indigo: "border-indigo-100 bg-indigo-50 text-indigo-950",
+  }[tone];
+}
+
+function riskTone(level: string): Tone {
+  if (level === "high") return "rose";
+  if (level === "medium") return "amber";
+  if (level === "low") return "emerald";
+  return "slate";
+}
+
+function deltaTone(value: any, lowerIsBetter = true) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return "text-slate-500";
+  const good = lowerIsBetter ? numeric < 0 : numeric > 0;
+  return good ? "text-emerald-700" : "text-rose-700";
+}
 
 function toNumber(value: any): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -118,6 +96,30 @@ function deltaText(points: TrendPoint[] = [], key = "value", unit = "") {
   const delta = Math.round((last - first) * 10) / 10;
   const sign = delta > 0 ? "+" : "";
   return `Delta ${sign}${delta}${unit ? ` ${unit}` : ""}`;
+}
+
+function Badge({ children, tone = "blue" }: { children: ReactNode; tone?: Tone }) {
+  return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-black ${toneClass(tone)}`}>{children}</span>;
+}
+
+function StatCard({ label, value, tone = "slate", caption }: { label: string; value: any; tone?: Tone; caption?: string }) {
+  return (
+    <div className={`rounded-3xl border p-5 shadow-sm ${toneClass(tone)}`}>
+      <div className="text-xs font-black uppercase tracking-wide opacity-60">{label}</div>
+      <div className="mt-2 text-3xl font-black">{value ?? 0}</div>
+      {caption ? <div className="mt-1 text-xs font-semibold opacity-60">{caption}</div> : null}
+    </div>
+  );
+}
+
+function MiniMetric({ label, before, after, delta, suffix = "" }: { label: string; before: any; after: any; delta?: any; suffix?: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1 text-sm font-black text-slate-900">{fmt(before, suffix)} → {fmt(after, suffix)}</div>
+      {delta !== undefined ? <div className={`text-[11px] font-black ${deltaTone(delta)}`}>Δ {fmt(delta, suffix)}</div> : null}
+    </div>
+  );
 }
 
 function TrendChart({ title, caption, points = [], series, height = 150 }: { title: string; caption?: string; points?: TrendPoint[]; series: TrendSeries[]; height?: number }) {
@@ -224,16 +226,25 @@ function ParticipantChartPanel({ participant }: { participant: any }) {
 
   return (
     <section className="rounded-[2rem] border border-slate-200 bg-slate-50 p-6 shadow-sm">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-xl font-black text-slate-900">Grafik Parameter Per Peserta</div>
           <div className="mt-1 text-sm font-semibold text-slate-500">
-            {participant.name} · {participant.code || "Tanpa kode"} · {participant.risk_group_name || "Monitoring"}
+            {participant.name} · {participant.code || "Tanpa kode"} · {participant.company_name || "-"} · {participant.group_name || "-"}
           </div>
         </div>
-        <div className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm">
-          Latest upload: {participant.latest_upload_date || "-"}
+        <div className="flex flex-wrap gap-2">
+          <Badge tone={riskTone(participant.risk_level)}>{participant.risk_group_name || participant.risk_label || "Monitoring"}</Badge>
+          <Badge tone={participant.need_followup ? "rose" : "emerald"}>{participant.need_followup ? "Perlu follow-up" : "Stabil"}</Badge>
+          <Badge tone="blue">Latest: {participant.latest_upload_date || "-"}</Badge>
         </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MiniMetric label="BB" before={participant.baseline_weight_kg} after={participant.current_weight_kg} delta={participant.weight_delta_kg} suffix=" kg" />
+        <MiniMetric label="BMI" before={participant.baseline_bmi} after={participant.bmi} delta={participant.bmi_delta} />
+        <MiniMetric label="Tekanan Darah" before={fmtPair(participant.baseline_sbp, participant.baseline_dbp)} after={fmtPair(participant.sbp, participant.dbp)} delta={participant.sbp_delta} />
+        <MiniMetric label="HbA1c" before={participant.baseline_hba1c} after={participant.hba1c} delta={participant.hba1c_delta} suffix="%" />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -261,8 +272,8 @@ function WellnessDashboard() {
   const [rows, setRows] = useState<any[]>([]);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
   const [search, setSearch] = useState("");
-  const [activeRole, setActiveRole] = useState<RoleKey>("medical");
   const [message, setMessage] = useState("Memuat dashboard Wellness...");
+  const [riskFilter, setRiskFilter] = useState("all");
 
   async function load() {
     setLoading(true);
@@ -292,9 +303,12 @@ function WellnessDashboard() {
 
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return rows;
-    return rows.filter((row) => [row.name, row.code, row.group_name, row.risk_group_name, row.risk_label, row.bmi_status].filter(Boolean).join(" ").toLowerCase().includes(keyword));
-  }, [rows, search]);
+    return rows.filter((row) => {
+      const matchKeyword = !keyword || [row.name, row.code, row.company_name, row.group_name, row.old_group_name, row.risk_group_name, row.risk_label, row.bmi_status].filter(Boolean).join(" ").toLowerCase().includes(keyword);
+      const matchRisk = riskFilter === "all" || row.risk_level === riskFilter || (riskFilter === "followup" && row.need_followup);
+      return matchKeyword && matchRisk;
+    });
+  }, [rows, search, riskFilter]);
 
   useEffect(() => {
     if (!rows.length) {
@@ -310,8 +324,6 @@ function WellnessDashboard() {
     return rows.find((row) => String(row.id) === String(selectedParticipantId)) || rows[0] || null;
   }, [rows, selectedParticipantId]);
 
-  const activeRoleCard = roleCards.find((item) => item.key === activeRole) || roleCards[0];
-
   return (
     <div className="space-y-6">
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-blue-950 to-emerald-900 shadow-sm">
@@ -319,161 +331,145 @@ function WellnessDashboard() {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="mb-3 flex flex-wrap gap-2">
-                <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-black uppercase tracking-wide ring-1 ring-white/20">WELLNESS ONLY</span>
-                <span className="rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-100 ring-1 ring-emerald-200/20">Isolated from MCU Corporate, CAPASKA, Vaksinasi</span>
+                <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-black uppercase tracking-wide ring-1 ring-white/20">Wellness Workspace</span>
+                <span className="rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-100 ring-1 ring-emerald-200/20">Isolated from MCU, CAPASKA, Vaksinasi</span>
               </div>
-              <div className="text-3xl font-black">Wellness Risk Monitoring</div>
+              <div className="text-3xl font-black">Wellness Command Center</div>
               <div className="mt-2 max-w-3xl text-sm font-medium text-blue-50">
-                Monitoring HbA1c/gula darah, BMI, tekanan darah, berat badan, lingkar perut, aktivitas fisik, kepatuhan follow-up, dan edukasi.
+                Satu workspace khusus Wellness untuk setting program, import peserta per group, history MCU, before-after, grafik per peserta, dan follow-up.
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <a href="/wellness/settings" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-800 shadow-sm">Setting Parameter</a>
-              <a href="/wellness/input" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Input Monitoring</a>
-              <a href="/wellness/import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import Peserta</a>
-              <a href="/wellness/history-import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import History MCU</a>
-              <button onClick={load} disabled={loading} className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black text-white shadow-sm disabled:opacity-60">{loading ? "Memuat..." : "Refresh"}</button>
-            </div>
+            <button onClick={load} disabled={loading} className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-white shadow-sm disabled:opacity-60">
+              {loading ? "Memuat..." : "Refresh Dashboard"}
+            </button>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <StatCard label="Peserta" value={summary.total || 0} caption="Total program" />
-        <StatCard label="High Risk" value={summary.high_risk || 0} tone="rose" caption="Perlu prioritas" />
-        <StatCard label="Perlu Follow-up" value={summary.need_followup || 0} tone="amber" caption="Alert medis" />
-        <StatCard label="Kepatuhan" value={`${summary.compliance_rate || 0}%`} tone="emerald" caption="Upload mingguan" />
-        <StatCard label="Rata-rata BMI" value={summary.avg_bmi || 0} tone="blue" caption="Baseline/progress" />
-        <StatCard label="Avg Delta BB" value={fmt(summary.avg_weight_delta_kg, " kg")} tone="purple" caption={`${summary.improved_weight_count || 0} peserta turun BB`} />
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {WELLNESS_FOCUS_ITEMS.map((item) => (
-          <div key={item.title} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-sm font-black text-slate-900">{item.title}</div>
-            <div className="mt-2 text-sm leading-6 text-slate-600">{item.description}</div>
-          </div>
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+        {workspaceMenu.map((item) => (
+          <a key={item.href} href={item.href} className={`rounded-3xl border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${item.href === "/wellness/dashboard" ? "border-blue-500 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-900 hover:border-blue-200"}`}>
+            <div className="text-sm font-black">{item.label}</div>
+            <div className={`mt-1 text-xs font-semibold leading-5 ${item.href === "/wellness/dashboard" ? "text-blue-50" : "text-slate-500"}`}>{item.description}</div>
+          </a>
         ))}
       </section>
 
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <StatCard label="Peserta" value={summary.total || 0} caption="Total program" />
+        <StatCard label="High Risk" value={summary.high_risk || 0} tone="rose" caption="Prioritas follow-up" />
+        <StatCard label="Medium Risk" value={summary.medium_risk || 0} tone="amber" caption="Pantau berkala" />
+        <StatCard label="Perlu Follow-up" value={summary.need_followup || 0} tone="purple" caption="Alert klinis/program" />
+        <StatCard label="Kepatuhan" value={`${summary.compliance_rate || 0}%`} tone="emerald" caption="Upload aktif" />
+        <StatCard label="Avg Delta BB" value={fmt(summary.avg_weight_delta_kg, " kg")} tone="blue" caption={`${summary.improved_weight_count || 0} peserta turun BB`} />
+      </section>
+
       <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <div className="text-lg font-black text-slate-900">Pilih Peserta untuk Grafik</div>
-            <div className="mt-1 text-sm font-semibold text-slate-500">Grafik menampilkan baseline MCU, history MCU, input berkala, mini MCU, nutrisi, dan workout.</div>
+            <div className="text-xl font-black text-slate-900">Pilih Peserta untuk Grafik Before-After</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">{message}</div>
           </div>
-          <select
-            className="min-w-[280px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            value={selectedParticipantId}
-            onChange={(event) => setSelectedParticipantId(event.target.value)}
-          >
-            {rows.map((row) => (
-              <option key={row.id} value={String(row.id)}>{row.name} {row.code ? `· ${row.code}` : ""}</option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <input
+              className="min-w-[260px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              placeholder="Cari nama, kode, perusahaan, risiko..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              value={riskFilter}
+              onChange={(event) => setRiskFilter(event.target.value)}
+            >
+              <option value="all">Semua Risiko</option>
+              <option value="high">High Risk</option>
+              <option value="medium">Medium Risk</option>
+              <option value="low">Low Risk</option>
+              <option value="followup">Perlu Follow-up</option>
+            </select>
+            <select
+              className="min-w-[300px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              value={selectedParticipantId}
+              onChange={(event) => setSelectedParticipantId(event.target.value)}
+            >
+              {filteredRows.map((row) => (
+                <option key={row.id} value={String(row.id)}>{row.name} {row.code ? `· ${row.code}` : ""}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </section>
 
       <ParticipantChartPanel participant={selectedParticipant} />
 
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="text-xl font-black text-slate-900">Role Workspace</div>
-            <div className="mt-1 text-sm font-semibold text-slate-500">Hak akses Wellness dipisah berdasarkan role program.</div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 md:flex">
-            {roleCards.map((role) => (
-              <button
-                key={role.key}
-                onClick={() => setActiveRole(role.key)}
-                className={
-                  "rounded-2xl px-4 py-3 text-sm font-black transition " +
-                  (activeRole === role.key ? "bg-blue-600 text-white shadow-lg shadow-blue-100" : "bg-slate-100 text-slate-700 hover:bg-slate-200")
-                }
-              >
-                {role.title}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mt-5 rounded-3xl border border-blue-100 bg-blue-50 p-5">
-          <div className="text-lg font-black text-blue-950">{activeRoleCard.title}</div>
-          <div className="mt-1 text-sm font-semibold text-blue-700">{activeRoleCard.subtitle}</div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {activeRoleCard.focus.map((item) => (
-              <div key={item} className="rounded-2xl bg-white p-4 text-sm font-black text-slate-800 shadow-sm">{item}</div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="text-xl font-black text-slate-900">Monitoring Risiko Peserta</div>
-            <div className="mt-1 text-sm font-semibold text-slate-500">{message}</div>
+            <div className="text-xl font-black text-slate-900">Daftar Peserta Wellness</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">{filteredRows.length} dari {rows.length} peserta ditampilkan</div>
           </div>
-          <input
-            className="min-w-[260px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-            placeholder="Cari peserta / kelompok / risiko"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div className="flex flex-wrap gap-2">
+            <a href="/wellness/import" className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700">Import Peserta</a>
+            <a href="/wellness/history-import" className="rounded-2xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm font-black text-purple-700">Import History MCU</a>
+            <a href="/wellness/input" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700">Input Harian</a>
+            <a href="/api/wellness/export" className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">Export Wellness</a>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left">Nama</th>
-                <th className="px-4 py-3 text-left">Entity/Kelompok</th>
-                <th className="px-4 py-3 text-left">HbA1c/Gula</th>
-                <th className="px-4 py-3 text-left">BMI Before → Now</th>
-                <th className="px-4 py-3 text-left">TD Before → Now</th>
-                <th className="px-4 py-3 text-left">BB Before → Now</th>
+                <th className="px-4 py-3 text-left">Peserta</th>
+                <th className="px-4 py-3 text-left">Scope Program</th>
+                <th className="px-4 py-3 text-left">Baseline MCU</th>
+                <th className="px-4 py-3 text-left">Progress Terakhir</th>
                 <th className="px-4 py-3 text-left">Risiko</th>
-                <th className="px-4 py-3 text-left">Upload</th>
-                <th className="px-4 py-3 text-left">Follow-up</th>
-                <th className="px-4 py-3 text-left">Grafik</th>
+                <th className="px-4 py-3 text-left">Aktivitas Hari Ini</th>
+                <th className="px-4 py-3 text-left">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredRows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-black text-slate-900">{row.name}<div className="text-xs font-semibold text-slate-400">{row.code || "-"}</div></td>
-                  <td className="px-4 py-3 text-slate-600">
-                    <div className="font-bold text-slate-800">{row.company_name || "-"}</div>
-                    <div className="text-xs text-slate-400">{row.group_name || "-"}</div>
+                <tr key={row.id} className="align-top hover:bg-slate-50">
+                  <td className="px-4 py-4">
+                    <div className="font-black text-slate-950">{row.name || "-"}</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-400">Kode: {row.code || "-"}</div>
+                    <div className="mt-2"><Badge tone={riskTone(row.risk_level)}>{row.risk_group_name || row.risk_label || "Monitoring"}</Badge></div>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    <div>HbA1c {fmt(row.baseline_hba1c)} → {fmt(row.hba1c)}</div>
-                    <div className={`text-xs font-black ${Number(row.hba1c_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.hba1c_delta)}</div>
-                    <div className="text-xs text-slate-400">Gula {fmt(row.baseline_glucose)} → {fmt(row.glucose)}</div>
+                  <td className="px-4 py-4 text-sm text-slate-600">
+                    <div className="font-black text-slate-900">{row.company_name || "-"}</div>
+                    <div className="mt-1 text-xs font-bold text-slate-500">Kelompok/Group: {row.group_name || "-"}</div>
+                    {row.old_group_name && row.old_group_name !== "-" && row.old_group_name !== row.group_name ? <div className="mt-1 text-xs font-bold text-slate-400">Divisi/legacy: {row.old_group_name}</div> : null}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">{fmt(row.baseline_bmi)} → {fmt(row.bmi)} · {row.bmi_status || "-"}</span>
-                    <div className={`mt-1 text-xs font-black ${Number(row.bmi_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.bmi_delta)}</div>
+                  <td className="px-4 py-4">
+                    <div className="grid gap-2">
+                      <MiniMetric label="BB/BMI" before={row.baseline_weight_kg} after={row.baseline_bmi} suffix="" />
+                      <div className="text-xs font-bold text-slate-500">TD {fmtPair(row.baseline_sbp, row.baseline_dbp)} · HbA1c {fmt(row.baseline_hba1c, "%")} · Gula {fmt(row.baseline_glucose)}</div>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 font-bold">
-                    <div>{fmt(row.baseline_sbp)}/{fmt(row.baseline_dbp)} → {fmt(row.sbp)}/{fmt(row.dbp)}</div>
-                    <div className={`text-xs font-black ${Number(row.sbp_delta || 0) <= 0 && Number(row.dbp_delta || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.sbp_delta)}/{fmt(row.dbp_delta)}</div>
+                  <td className="px-4 py-4">
+                    <div className="grid gap-2">
+                      <MiniMetric label="BB" before={row.baseline_weight_kg} after={row.current_weight_kg} delta={row.weight_delta_kg} suffix=" kg" />
+                      <div className="text-xs font-bold text-slate-500">BMI {fmt(row.bmi)} · TD {fmtPair(row.sbp, row.dbp)} · HbA1c {fmt(row.hba1c, "%")}</div>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 font-bold">
-                    <div>{fmt(row.baseline_weight_kg, " kg")} → {fmt(row.current_weight_kg, " kg")}</div>
-                    <div className={`text-xs font-black ${Number(row.weight_delta_kg || 0) <= 0 ? "text-emerald-700" : "text-rose-700"}`}>Δ {fmt(row.weight_delta_kg, " kg")}</div>
+                  <td className="px-4 py-4">
+                    <div className="space-y-2">
+                      <Badge tone={riskTone(row.risk_level)}>{row.risk_label || "Monitoring"}</Badge>
+                      <div><Badge tone={row.need_followup ? "rose" : "emerald"}>{row.need_followup ? "Perlu follow-up" : "Tidak urgent"}</Badge></div>
+                      <div className="text-xs font-bold text-slate-500">Kepatuhan: {row.compliance_status || "-"}</div>
+                    </div>
                   </td>
-                  <td className="px-4 py-3"><Badge tone={riskTone(row.risk_level)}>{row.risk_label || "Monitoring"}</Badge></td>
-                  <td className="px-4 py-3 text-slate-600">{row.compliance_status || "-"}</td>
-                  <td className="px-4 py-3 font-black text-slate-800">{row.need_followup ? "Ya" : "Tidak"}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedParticipantId(String(row.id))}
-                      className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-blue-700"
-                    >
-                      Lihat grafik
-                    </button>
+                  <td className="px-4 py-4 text-sm font-bold text-slate-600">
+                    <div>Makan: {row.calories_today || 0} kkal</div>
+                    <div>Aktivitas: {row.activity_calories_today || 0} kkal</div>
+                    <div className="mt-1 text-xs text-slate-400">Latest: {row.latest_upload_date || "-"}</div>
+                  </td>
+                  <td className="px-4 py-4">
+                    <button type="button" onClick={() => setSelectedParticipantId(String(row.id))} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-blue-700">Lihat Grafik</button>
+                    <a href="/wellness/input" className="mt-2 block rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-center text-xs font-black text-rose-700">Input</a>
                   </td>
                 </tr>
               ))}
@@ -481,16 +477,6 @@ function WellnessDashboard() {
           </table>
           {!filteredRows.length ? <div className="p-8 text-center text-sm font-semibold text-slate-500">Belum ada data Wellness.</div> : null}
         </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-4">
-        {WELLNESS_GROUPS.map((group) => (
-          <div key={group.name} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="font-black text-slate-950">{group.name}</div>
-            <div className="mt-2 text-xs font-bold text-slate-500">{group.criteria}</div>
-            <div className="mt-3 text-sm leading-6 text-slate-600">{group.focus}</div>
-          </div>
-        ))}
       </section>
     </div>
   );

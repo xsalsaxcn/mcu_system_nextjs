@@ -61,16 +61,36 @@ function normalizePhone(value: any) {
   return text;
 }
 
+function isBadLooseMatch(header: string, candidate: string) {
+  // WELLNESS_PRO_WORKSPACE_V357_MAPPING_FIX
+  // Prevent generic candidate "Nama" from matching "Nama Grup" / "Nama Kelompok".
+  // This was the reason Risk Cluster appeared as participant name after import.
+  if (candidate === "nama" && header !== "nama") {
+    return ["grup", "group", "kelompok", "divisi", "departemen", "department", "unit", "risk"].some((word) => header.includes(word));
+  }
+  if (candidate === "group" && ["risk", "risiko", "cluster"].some((word) => header.includes(word))) return true;
+  return false;
+}
+
 function findColumn(headers: any[], candidates: string[]) {
   const normalized = headers.map(norm);
-  const normalizedCandidates = candidates.map(norm);
+  const normalizedCandidates = candidates.map(norm).filter(Boolean);
 
+  // 1) Exact match, candidate order matters.
   for (const c of normalizedCandidates) {
     const idx = normalized.findIndex((h) => h === c);
     if (idx >= 0) return idx;
   }
+
+  // 2) Prefer header starts with candidate, but block known ambiguous names.
   for (const c of normalizedCandidates) {
-    const idx = normalized.findIndex((h) => h.includes(c) || c.includes(h));
+    const idx = normalized.findIndex((h) => !isBadLooseMatch(h, c) && (h.startsWith(`${c} `) || h.startsWith(`${c}:`)));
+    if (idx >= 0) return idx;
+  }
+
+  // 3) Loose contains as last fallback.
+  for (const c of normalizedCandidates) {
+    const idx = normalized.findIndex((h) => !isBadLooseMatch(h, c) && (h.includes(c) || c.includes(h)));
     if (idx >= 0) return idx;
   }
   return -1;
@@ -241,14 +261,16 @@ export async function POST(req: NextRequest) {
 
     for (const [offset, row] of dataRows.entries()) {
       const rowNumber = headerRowIndex + offset + 2;
-      const employeeNo = clean(pick(row, headers, ["No Karyawan", "Nomor Karyawan", "Employee No", "Employee ID", "NIK", "Kode", "ID Peserta", "Nomor Induk"]));
-      const name = clean(pick(row, headers, ["Nama", "Nama Peserta", "Nama Lengkap", "Name"]));
+      const employeeNo = clean(pick(row, headers, ["No Karyawan", "Nomor Karyawan", "Employee No", "Employee ID", "Employee Code", "NIK", "KODE", "Kode", "ID Peserta", "Nomor Induk"]));
+      const name = clean(pick(row, headers, ["Nama Karyawan", "Nama Peserta", "Nama Lengkap", "Employee Name", "Full Name", "Name", "Nama"]));
       if (!employeeNo || !name) {
         skipped += 1;
+        errors.push(`Baris ${rowNumber}: dilewati karena ${!employeeNo ? "KODE/No Karyawan kosong" : "Nama Karyawan kosong"}.`);
         continue;
       }
 
-      const excelGroupName = clean(pick(row, headers, ["Kelompok", "Group", "Divisi", "Department", "Departemen", "Unit", "Shift"]));
+      // If Group Upload is selected, do not let Excel Department/Divisi override upload scope.
+      const excelGroupName = requestedGroupUnitId ? "" : clean(pick(row, headers, ["Kelompok", "Group", "Divisi", "Department", "Departemen", "Unit", "Shift"]));
       const groupName = excelGroupName || defaultGroupName;
       const groupId = groupName === defaultGroupName ? defaultGroupId : await getOrCreateGroup(supabase, groupName);
       const heightCm = toNumber(pick(row, headers, ["Tinggi Badan", "TB", "Height", "Height Cm"]));
@@ -261,9 +283,9 @@ export async function POST(req: NextRequest) {
       const baselineHba1c = toNumber(pick(row, headers, ["HbA1c", "HBA1C", "A1C", "Hb A1c"]));
       const baselineGlucose = toNumber(pick(row, headers, ["Gula Darah", "Glucose", "GDP", "GDS", "Fasting Glucose", "Random Glucose", "Blood Glucose"]));
       const baselineWaist = toNumber(pick(row, headers, ["Lingkar Perut", "Waist", "Waist Cm", "Waist Circumference"]));
-      const baselineMcuDate = parseDateValue(pick(row, headers, ["Tanggal MCU", "MCU Date", "Tanggal Pemeriksaan", "Exam Date"]));
-      const notes = clean(pick(row, headers, ["Catatan MCU", "Catatan", "Notes", "Remark", "Keterangan"]));
-      const importedRisk = clean(pick(row, headers, ["Risk Cluster", "Risk Group", "Kelompok Risiko", "Kategori Risiko", "Risk"]));
+      const baselineMcuDate = parseDateValue(pick(row, headers, ["Tanggal Periksa", "Tanggal MCU", "MCU Date", "Tanggal Pemeriksaan", "Exam Date"]));
+      const notes = clean(pick(row, headers, ["Catatan Validasi Medis", "Catatan MCU", "Catatan", "Notes", "Remark", "Keterangan"]));
+      const importedRisk = clean(pick(row, headers, ["Nama Grup", "Risk Cluster", "Risk Group", "Kelompok Risiko", "Kategori Risiko", "Risk", "Fokus Intervensi"]));
       const risk = classifyWellnessRisk({ hba1c: baselineHba1c, glucose: baselineGlucose, bmi: baselineBmi, sbp: baselineSbp, dbp: baselineDbp });
       const baselineRiskGroup = importedRisk || risk.group;
 
