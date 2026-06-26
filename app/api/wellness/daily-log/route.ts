@@ -6,9 +6,53 @@ import { matchCalories } from "@/lib/wellness/calorieMatcher";
 import { calculateBmi, interpretBmi, toNumber } from "@/lib/wellness/bmi";
 import { ensureParticipantAccess, getAllowedWellnessParticipants, todayIso } from "@/app/api/wellness/_utils";
 
+// WELLNESS_DAILY_INPUT_PRO_V360_API
+
+function cleanText(value: any) {
+  return String(value ?? "").trim();
+}
+
 function activityCalories(weightKg: number | null, durationMinutes: number | null, met: number | null) {
   if (!weightKg || !durationMinutes || !met) return null;
   return Math.round((met * 3.5 * weightKg / 200 * durationMinutes) * 10) / 10;
+}
+
+async function safeInsertSingle(supabase: any, table: string, payload: Record<string, any>) {
+  try {
+    const { data, error } = await supabase.from(table).insert(payload).select("*").single();
+    if (error) return { data: null, error };
+    return { data, error: null };
+  } catch (error: any) {
+    return { data: null, error };
+  }
+}
+
+async function addEvidence(supabase: any, payload: Record<string, any>, warnings: string[]) {
+  const { data, error } = await safeInsertSingle(supabase, "wellness_daily_evidence", payload);
+  if (error) warnings.push(`Evidence belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
+  return data;
+}
+
+async function addPoint(supabase: any, payload: Record<string, any>, warnings: string[]) {
+  const { data, error } = await safeInsertSingle(supabase, "wellness_point_logs", payload);
+  if (error) warnings.push(`Point belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
+  return data;
+}
+
+async function recordPoints({ supabase, participantId, companyId, logDate, createdBy, sourceType, sourceId, points, pointKey, description, warnings }: any) {
+  if (!points || points <= 0) return null;
+  return addPoint(supabase, {
+    participant_id: participantId,
+    company_id: companyId || null,
+    log_date: logDate,
+    point_key: pointKey,
+    source_type: sourceType,
+    source_id: sourceId || null,
+    points,
+    description,
+    status: "approved",
+    created_by: createdBy,
+  }, warnings);
 }
 
 export async function POST(req: NextRequest) {
@@ -17,7 +61,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const participantId = Number(body.participant_id || 0);
-  const logDate = String(body.log_date || todayIso()).slice(0, 10);
+  const logDate = cleanText(body.log_date || todayIso()).slice(0, 10);
+  const logType = cleanText(body.log_type || "daily");
+  const warnings: string[] = [];
 
   try {
     const supabase = getSupabaseAdmin();
@@ -33,23 +79,62 @@ export async function POST(req: NextRequest) {
     if (activityRefRes.error) throw activityRefRes.error;
 
     const saved: Record<string, any> = {};
+    const pointLogs: any[] = [];
+    const evidenceLogs: any[] = [];
+    let pointsTotal = 0;
+    const companyId = Number(participant.wellness_company_id || body.company_id || 0) || null;
 
-    const mealText = String(body.meal_text || "").trim();
+    const mealText = cleanText(body.meal_text);
     if (mealText) {
       const matched = matchCalories(mealText, foodRefRes.data || []);
       const { data, error } = await supabase.from("wellness_food_logs").insert({
         participant_id: participant.id,
         log_date: logDate,
-        meal_time: String(body.meal_time || "").trim() || null,
+        meal_time: cleanText(body.meal_time) || null,
         meal_text: mealText,
         detected_foods: matched.detectedFoods.join(", "),
         total_calories: matched.totalCalories || null,
-        photo_url: String(body.photo_url || "").trim() || null,
+        photo_url: cleanText(body.photo_url) || null,
         created_by: user.id,
       }).select("*").single();
       if (error) throw error;
       saved.food_log = data;
       saved.calorie_result = matched;
+
+      const nutritionPoints = 5;
+      pointsTotal += nutritionPoints;
+      const point = await recordPoints({
+        supabase,
+        participantId: participant.id,
+        companyId,
+        logDate,
+        createdBy: user.id,
+        sourceType: "food_log",
+        sourceId: data.id,
+        points: nutritionPoints,
+        pointKey: "nutrition_log",
+        description: `Input nutrisi ${cleanText(body.meal_time) || "harian"}`,
+        warnings,
+      });
+      if (point) pointLogs.push(point);
+
+      const photoUrl = cleanText(body.photo_url);
+      if (photoUrl) {
+        const evidence = await addEvidence(supabase, {
+          participant_id: participant.id,
+          company_id: companyId,
+          log_date: logDate,
+          evidence_type: "food_photo",
+          source_type: "food_log",
+          source_id: data.id,
+          title: `Foto makanan ${cleanText(body.meal_time) || ""}`.trim(),
+          evidence_url: photoUrl,
+          notes: cleanText(body.food_notes) || null,
+          status: "pending",
+          created_by: user.id,
+        }, warnings);
+        if (evidence) evidenceLogs.push(evidence);
+      }
     }
 
     const weight = toNumber(body.weight_kg);
@@ -63,21 +148,39 @@ export async function POST(req: NextRequest) {
         waist_cm: waist,
         bmi,
         bmi_status: interpretBmi(bmi),
-        notes: String(body.weight_notes || "").trim() || null,
+        notes: cleanText(body.weight_notes) || null,
         created_by: user.id,
       }).select("*").single();
       if (error) throw error;
       saved.weight_log = data;
+
+      const weightPoints = 5;
+      pointsTotal += weightPoints;
+      const point = await recordPoints({
+        supabase,
+        participantId: participant.id,
+        companyId,
+        logDate,
+        createdBy: user.id,
+        sourceType: "weight_log",
+        sourceId: data.id,
+        points: weightPoints,
+        pointKey: "weight_log",
+        description: "Input BB / lingkar perut",
+        warnings,
+      });
+      if (point) pointLogs.push(point);
     }
 
-    const activityName = String(body.activity_type || "").trim();
+    const activityName = cleanText(body.activity_type);
     const duration = toNumber(body.duration_minutes);
     if (activityName || duration !== null) {
       const refs = activityRefRes.data || [];
-      const activityRef = refs.find((item: any) => String(item.activity_name || "").toLowerCase() === activityName.toLowerCase()) || null;
+      const activityRef = refs.find((item: any) => cleanText(item.activity_name).toLowerCase() === activityName.toLowerCase()) || null;
       const met = toNumber(activityRef?.met) || toNumber(body.met);
       const distanceKm = toNumber(body.distance_km);
       const calories = toNumber(body.activity_calories) ?? activityCalories(weight ?? toNumber(participant.initial_weight_kg), duration, met);
+      const activityEvidenceUrl = cleanText(body.activity_evidence_url);
 
       const { data, error } = await supabase.from("wellness_activity_logs").insert({
         participant_id: participant.id,
@@ -87,14 +190,126 @@ export async function POST(req: NextRequest) {
         duration_minutes: duration,
         distance_km: distanceKm,
         calories,
-        notes: String(body.activity_notes || "").trim() || null,
+        notes: cleanText(body.activity_notes) || null,
+        raw_payload: activityEvidenceUrl ? { evidence_url: activityEvidenceUrl, log_type: logType } : { log_type: logType },
         created_by: user.id,
       }).select("*").single();
       if (error) throw error;
       saved.activity_log = data;
+
+      const activityPoints = duration && duration >= 30 ? 10 : 5;
+      pointsTotal += activityPoints;
+      const point = await recordPoints({
+        supabase,
+        participantId: participant.id,
+        companyId,
+        logDate,
+        createdBy: user.id,
+        sourceType: "activity_log",
+        sourceId: data.id,
+        points: activityPoints,
+        pointKey: duration && duration >= 30 ? "activity_30_min" : "activity_log",
+        description: duration && duration >= 30 ? "Aktivitas minimal 30 menit" : "Input aktivitas",
+        warnings,
+      });
+      if (point) pointLogs.push(point);
+
+      if (activityEvidenceUrl) {
+        const evidence = await addEvidence(supabase, {
+          participant_id: participant.id,
+          company_id: companyId,
+          log_date: logDate,
+          evidence_type: "activity_proof",
+          source_type: "activity_log",
+          source_id: data.id,
+          title: `Bukti aktivitas ${activityName || "manual"}`,
+          evidence_url: activityEvidenceUrl,
+          notes: cleanText(body.activity_notes) || null,
+          status: "pending",
+          created_by: user.id,
+        }, warnings);
+        if (evidence) evidenceLogs.push(evidence);
+
+        const proofPoints = 5;
+        pointsTotal += proofPoints;
+        const proofPoint = await recordPoints({
+          supabase,
+          participantId: participant.id,
+          companyId,
+          logDate,
+          createdBy: user.id,
+          sourceType: "activity_evidence",
+          sourceId: evidence?.id || data.id,
+          points: proofPoints,
+          pointKey: "activity_evidence",
+          description: "Upload/link bukti aktivitas",
+          warnings,
+        });
+        if (proofPoint) pointLogs.push(proofPoint);
+      }
     }
 
-    return ok({ participant, saved });
+    const healthtalkTitle = cleanText(body.healthtalk_title);
+    if (healthtalkTitle) {
+      const attendanceType = cleanText(body.healthtalk_type || "Online");
+      const healthtalkDate = cleanText(body.healthtalk_date || logDate).slice(0, 10);
+      const evidenceUrl = cleanText(body.healthtalk_evidence_url);
+      const { data, error } = await safeInsertSingle(supabase, "wellness_healthtalk_logs", {
+        participant_id: participant.id,
+        company_id: companyId,
+        event_date: healthtalkDate,
+        title: healthtalkTitle,
+        attendance_type: attendanceType,
+        evidence_url: evidenceUrl || null,
+        notes: cleanText(body.healthtalk_notes) || null,
+        status: "pending",
+        created_by: user.id,
+      });
+      if (error) {
+        warnings.push(`Healthtalk belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
+      } else {
+        saved.healthtalk_log = data;
+        const healthtalkPoints = attendanceType.toLowerCase() === "offline" ? 15 : 10;
+        pointsTotal += healthtalkPoints;
+        const point = await recordPoints({
+          supabase,
+          participantId: participant.id,
+          companyId,
+          logDate: healthtalkDate,
+          createdBy: user.id,
+          sourceType: "healthtalk_log",
+          sourceId: data.id,
+          points: healthtalkPoints,
+          pointKey: attendanceType.toLowerCase() === "offline" ? "healthtalk_offline" : "healthtalk_online",
+          description: `Mengikuti healthtalk ${attendanceType}`,
+          warnings,
+        });
+        if (point) pointLogs.push(point);
+
+        if (evidenceUrl) {
+          const evidence = await addEvidence(supabase, {
+            participant_id: participant.id,
+            company_id: companyId,
+            log_date: healthtalkDate,
+            evidence_type: "healthtalk_proof",
+            source_type: "healthtalk_log",
+            source_id: data.id,
+            title: `Bukti healthtalk: ${healthtalkTitle}`,
+            evidence_url: evidenceUrl,
+            notes: cleanText(body.healthtalk_notes) || null,
+            status: "pending",
+            created_by: user.id,
+          }, warnings);
+          if (evidence) evidenceLogs.push(evidence);
+        }
+      }
+    }
+
+    if (!Object.keys(saved).length) return fail("Tidak ada data yang disimpan. Isi minimal salah satu: nutrisi, BB, aktivitas, atau healthtalk.", 400);
+
+    saved.point_logs = pointLogs;
+    saved.evidence_logs = evidenceLogs;
+    return ok({ participant, saved, points_total: pointsTotal, warnings });
   } catch (error: any) {
     return fail(error?.message || "Gagal menyimpan log Wellness.", 500);
   }

@@ -4,9 +4,12 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
-// WELLNESS_INPUT_PRO_SELECTOR_V359
+// WELLNESS_DAILY_INPUT_PRO_V360
+
+type TabKey = "nutrition" | "weight" | "activity" | "healthtalk";
 
 const MEAL_TIMES = ["Sarapan", "Makan Siang", "Makan Malam", "Cemilan"];
+const HEALTH_TALK_TYPES = ["Online", "Offline"];
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -54,6 +57,10 @@ function matchesSearch(participant: any, query: string) {
   return haystack.includes(q);
 }
 
+function inputClass(extra = "") {
+  return `w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${extra}`;
+}
+
 function InfoPill({ label, value, tone = "slate" }: { label: string; value: any; tone?: "slate" | "blue" | "emerald" | "amber" | "rose" | "purple" }) {
   const toneClass = {
     slate: "border-slate-200 bg-slate-50 text-slate-700",
@@ -71,6 +78,19 @@ function InfoPill({ label, value, tone = "slate" }: { label: string; value: any;
   );
 }
 
+function TabButton({ active, label, helper, onClick }: { active: boolean; label: string; helper: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-3xl border p-4 text-left transition ${active ? "border-blue-200 bg-blue-600 text-white shadow-lg shadow-blue-100" : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"}`}
+    >
+      <div className="text-sm font-black">{label}</div>
+      <div className={`mt-1 text-xs font-bold ${active ? "text-blue-50" : "text-slate-500"}`}>{helper}</div>
+    </button>
+  );
+}
+
 export default function WellnessInputPage() {
   return <AuthGate>{() => <WellnessInput />}</AuthGate>;
 }
@@ -80,7 +100,9 @@ function WellnessInput() {
   const [activities, setActivities] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState("Isi form lalu simpan. Point akan dihitung otomatis bila tabel point sudah tersedia.");
+  const [lastResult, setLastResult] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<TabKey>("nutrition");
   const [search, setSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
   const [kelompokFilter, setKelompokFilter] = useState("");
@@ -88,6 +110,7 @@ function WellnessInput() {
   const [form, setForm] = useState<any>({
     log_date: new Date().toISOString().slice(0, 10),
     meal_time: "Sarapan",
+    healthtalk_type: "Online",
   });
 
   async function load() {
@@ -132,26 +155,83 @@ function WellnessInput() {
     setForm((previous: any) => ({ ...previous, [key]: value }));
   }
 
+  function payloadForActiveTab() {
+    const base: any = {
+      participant_id: form.participant_id,
+      log_date: form.log_date,
+      log_type: activeTab,
+    };
+    if (activeTab === "nutrition") {
+      return {
+        ...base,
+        meal_time: form.meal_time,
+        meal_text: form.meal_text,
+        photo_url: form.photo_url,
+        food_notes: form.food_notes,
+      };
+    }
+    if (activeTab === "weight") {
+      return {
+        ...base,
+        weight_kg: form.weight_kg,
+        waist_cm: form.waist_cm,
+        weight_notes: form.weight_notes,
+      };
+    }
+    if (activeTab === "activity") {
+      return {
+        ...base,
+        activity_type: form.activity_type,
+        duration_minutes: form.duration_minutes,
+        distance_km: form.distance_km,
+        activity_calories: form.activity_calories,
+        activity_notes: form.activity_notes,
+        activity_evidence_url: form.activity_evidence_url,
+      };
+    }
+    return {
+      ...base,
+      healthtalk_title: form.healthtalk_title,
+      healthtalk_type: form.healthtalk_type,
+      healthtalk_date: form.healthtalk_date || form.log_date,
+      healthtalk_evidence_url: form.healthtalk_evidence_url,
+      healthtalk_notes: form.healthtalk_notes,
+    };
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
+    setLastResult(null);
     setMessage("Menyimpan log Wellness...");
     try {
       const json = await fetch("/api/wellness/daily-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payloadForActiveTab()),
       }).then((r) => r.json());
 
       if (!json.ok) {
         setMessage(json.message || "Gagal menyimpan log Wellness.");
+        setLastResult(json);
         return;
       }
 
+      const points = Number(json.points_total || 0);
       const detected = json.saved?.calorie_result?.detectedFoods?.join(", ");
       const calories = json.saved?.calorie_result?.totalCalories;
-      setMessage(`Berhasil disimpan${calories ? ` · ${calories} kalori` : ""}${detected ? ` · Terdeteksi: ${detected}` : ""}`);
-      setForm((previous: any) => ({ ...previous, meal_text: "", photo_url: "", weight_kg: "", waist_cm: "", duration_minutes: "", distance_km: "", activity_notes: "", activity_calories: "" }));
+      const parts = ["Berhasil disimpan"];
+      if (calories) parts.push(`${calories} kalori`);
+      if (detected) parts.push(`Terdeteksi: ${detected}`);
+      if (points) parts.push(`Point +${points}`);
+      if (json.warnings?.length) parts.push(`Catatan: ${json.warnings.join("; ")}`);
+      setMessage(parts.join(" · "));
+      setLastResult(json);
+
+      if (activeTab === "nutrition") setForm((previous: any) => ({ ...previous, meal_text: "", photo_url: "", food_notes: "" }));
+      if (activeTab === "weight") setForm((previous: any) => ({ ...previous, weight_kg: "", waist_cm: "", weight_notes: "" }));
+      if (activeTab === "activity") setForm((previous: any) => ({ ...previous, duration_minutes: "", distance_km: "", activity_notes: "", activity_calories: "", activity_evidence_url: "" }));
+      if (activeTab === "healthtalk") setForm((previous: any) => ({ ...previous, healthtalk_title: "", healthtalk_evidence_url: "", healthtalk_notes: "" }));
     } finally {
       setSaving(false);
     }
@@ -164,7 +244,7 @@ function WellnessInput() {
           <div>
             <div className="text-3xl font-black">Input Harian Wellness</div>
             <div className="mt-2 max-w-3xl text-sm font-medium text-rose-50">
-              Pilih peserta dengan nama, kode, perusahaan, kelompok, dan risk cluster yang jelas. Input makanan, berat badan, dan aktivitas harian.
+              Input dibuat bertahap seperti form monitoring: nutrisi, berat badan, aktivitas, dan healthtalk. Peserta dipilih dengan KODE, nama, risk cluster, dan scope program yang jelas.
             </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -174,6 +254,13 @@ function WellnessInput() {
         </div>
       </section>
 
+      <div className="grid gap-3 md:grid-cols-4">
+        <TabButton active={activeTab === "nutrition"} label="Nutrisi" helper="Makanan, foto/link bukti, kalori" onClick={() => setActiveTab("nutrition")} />
+        <TabButton active={activeTab === "weight"} label="BB & Lingkar Perut" helper="Input berkala mingguan" onClick={() => setActiveTab("weight")} />
+        <TabButton active={activeTab === "activity"} label="Aktivitas" helper="Workout manual atau bukti smartwatch" onClick={() => setActiveTab("activity")} />
+        <TabButton active={activeTab === "healthtalk"} label="Healthtalk" helper="Seminar online/offline dan bukti" onClick={() => setActiveTab("healthtalk")} />
+      </div>
+
       <form onSubmit={submit} className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <section className="space-y-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
@@ -181,7 +268,7 @@ function WellnessInput() {
               <div>
                 <div className="text-lg font-black text-slate-950">1. Pilih Peserta</div>
                 <div className="mt-1 text-xs font-bold text-slate-500">
-                  Gunakan filter agar tidak salah pilih peserta. Dropdown sekarang menampilkan KODE, nama, risk cluster, dan scope program.
+                  Filter dulu agar tidak salah pilih peserta. Pilihan peserta menampilkan KODE, nama, risk cluster, dan scope program.
                 </div>
               </div>
               <button type="button" onClick={load} className="rounded-2xl bg-white px-4 py-2 text-xs font-black text-blue-700 shadow-sm ring-1 ring-blue-100">
@@ -190,51 +277,35 @@ function WellnessInput() {
             </div>
 
             <div className="mt-4 grid gap-3 lg:grid-cols-4">
-              <input className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 lg:col-span-4" placeholder="Cari nama, KODE, risk cluster, kelompok..." value={search} onChange={(e) => setSearch(e.target.value)} />
-              <select className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm font-bold text-slate-800" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setKelompokFilter(""); setGroupFilter(""); }}>
+              <input className={`${inputClass()} lg:col-span-4`} placeholder="Cari nama, KODE, risk cluster, kelompok..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <select className={inputClass()} value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setKelompokFilter(""); setGroupFilter(""); }}>
                 <option value="">Semua perusahaan</option>
                 {companyOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
-              <select className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm font-bold text-slate-800" value={kelompokFilter} onChange={(e) => { setKelompokFilter(e.target.value); setGroupFilter(""); }}>
+              <select className={inputClass()} value={kelompokFilter} onChange={(e) => { setKelompokFilter(e.target.value); setGroupFilter(""); }}>
                 <option value="">Semua kelompok</option>
                 {kelompokOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
-              <select className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm font-bold text-slate-800" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+              <select className={inputClass()} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
                 <option value="">Semua group</option>
                 {groupOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
-              <div className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-600 ring-1 ring-blue-100">
-                {loading ? "Memuat..." : `${filteredParticipants.length} peserta tampil`}
-              </div>
-            </div>
-
-            <label className="mt-4 grid gap-2 text-sm font-bold text-slate-700">
-              Peserta
-              <select className="w-full rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-black text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" value={form.participant_id || ""} onChange={(e) => setValue("participant_id", e.target.value)} required>
+              <select className={`${inputClass()} lg:col-span-4`} value={form.participant_id || ""} onChange={(e) => setValue("participant_id", e.target.value)} required>
                 {!filteredParticipants.length ? <option value="">Tidak ada peserta sesuai filter</option> : null}
                 {filteredParticipants.map((participant) => <option key={participant.id} value={participant.id}>{participantLabel(participant)}</option>)}
               </select>
-            </label>
+            </div>
 
             {selectedParticipant ? (
-              <div className="mt-4 rounded-3xl border border-blue-100 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <div className="text-xs font-black uppercase tracking-wide text-slate-400">Peserta terpilih</div>
-                    <div className="mt-1 text-2xl font-black text-slate-950">{participantName(selectedParticipant)}</div>
-                    <div className="mt-1 text-sm font-bold text-slate-500">KODE: {clean(selectedParticipant.code) || "-"}</div>
-                  </div>
-                  <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 ring-1 ring-rose-100">
-                    {clean(selectedParticipant.risk_cluster || selectedParticipant.baseline_risk_group) || "Risk cluster belum ada"}
-                  </div>
-                </div>
+              <div className="mt-4 space-y-3">
                 {selectedParticipant.name_warning ? (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800">
-                    {selectedParticipant.name_warning} Data lama seperti ini sebaiknya dibersihkan lalu diimport ulang dengan mapping terbaru.
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+                    {selectedParticipant.name_warning}
                   </div>
                 ) : null}
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <InfoPill label="Perusahaan" value={selectedParticipant.company_name} tone="blue" />
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <InfoPill label="Peserta" value={`${clean(selectedParticipant.code) ? `${selectedParticipant.code} - ` : ""}${participantName(selectedParticipant)}`} tone="blue" />
+                  <InfoPill label="Risk Cluster" value={selectedParticipant.risk_cluster || selectedParticipant.baseline_risk_group} tone="amber" />
                   <InfoPill label="Kelompok" value={selectedParticipant.kelompok_name || selectedParticipant.old_group_name} tone="purple" />
                   <InfoPill label="Group Upload" value={selectedParticipant.group_unit_name} tone="emerald" />
                 </div>
@@ -244,63 +315,166 @@ function WellnessInput() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Tanggal
-              <input type="date" className="rounded-2xl border border-slate-300 px-4 py-3" value={form.log_date || ""} onChange={(e) => setValue("log_date", e.target.value)} required />
+              Tanggal log
+              <input type="date" className={inputClass()} value={form.log_date || ""} onChange={(e) => setValue("log_date", e.target.value)} required />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Waktu Makan
-              <select className="rounded-2xl border border-slate-300 px-4 py-3" value={form.meal_time || ""} onChange={(e) => setValue("meal_time", e.target.value)}>
-                {MEAL_TIMES.map((time) => <option key={time}>{time}</option>)}
-              </select>
+              Tipe input aktif
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-800">
+                {activeTab === "nutrition" ? "Nutrisi" : activeTab === "weight" ? "BB & Lingkar Perut" : activeTab === "activity" ? "Aktivitas" : "Healthtalk / Seminar"}
+              </div>
             </label>
           </div>
 
-          <div className="rounded-3xl border border-amber-100 bg-amber-50 p-4">
-            <div className="text-sm font-black text-amber-900">2. Makanan Harian</div>
-            <div className="mt-3 grid gap-4">
-              <textarea className="min-h-[140px] rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100" placeholder="Contoh: nasi merah, dada ayam filet, telur rebus, sayur pokcay" value={form.meal_text || ""} onChange={(e) => setValue("meal_text", e.target.value)} />
-              <input className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="URL foto makanan, opsional" value={form.photo_url || ""} onChange={(e) => setValue("photo_url", e.target.value)} />
+          {activeTab === "nutrition" ? (
+            <div className="rounded-3xl border border-amber-100 bg-amber-50 p-4">
+              <div className="text-sm font-black text-amber-900">2. Nutrisi Harian</div>
+              <div className="mt-3 grid gap-4">
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Waktu makan
+                  <select className={inputClass()} value={form.meal_time || ""} onChange={(e) => setValue("meal_time", e.target.value)}>
+                    {MEAL_TIMES.map((time) => <option key={time}>{time}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Deskripsi makanan
+                  <textarea className={`${inputClass()} min-h-[120px]`} placeholder="Contoh: nasi merah, ayam panggang, telur rebus, sayur pokcay" value={form.meal_text || ""} onChange={(e) => setValue("meal_text", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Link foto makanan / bukti upload, opsional
+                  <input className={inputClass()} placeholder="Tempel link Google Drive, WhatsApp media, atau URL bukti" value={form.photo_url || ""} onChange={(e) => setValue("photo_url", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Catatan nutrisi, opsional
+                  <input className={inputClass()} placeholder="Contoh: porsi kecil, tanpa gula, makan terlambat" value={form.food_notes || ""} onChange={(e) => setValue("food_notes", e.target.value)} />
+                </label>
+              </div>
             </div>
-          </div>
+          ) : null}
 
-          <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
-            <div className="text-sm font-black text-blue-900">3. Berat Badan & Lingkar Perut</div>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <input className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="BB hari ini (kg)" value={form.weight_kg || ""} onChange={(e) => setValue("weight_kg", e.target.value)} />
-              <input className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="Lingkar perut (cm), opsional" value={form.waist_cm || ""} onChange={(e) => setValue("waist_cm", e.target.value)} />
+          {activeTab === "weight" ? (
+            <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
+              <div className="text-sm font-black text-blue-900">2. BB & Lingkar Perut</div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Berat badan sekarang (kg)
+                  <input className={inputClass()} type="number" step="0.1" placeholder="Contoh: 82.5" value={form.weight_kg || ""} onChange={(e) => setValue("weight_kg", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Lingkar perut (cm), opsional
+                  <input className={inputClass()} type="number" step="0.1" placeholder="Contoh: 96" value={form.waist_cm || ""} onChange={(e) => setValue("waist_cm", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Catatan BB / lingkar perut
+                  <input className={inputClass()} placeholder="Contoh: timbang pagi sebelum sarapan" value={form.weight_notes || ""} onChange={(e) => setValue("weight_notes", e.target.value)} />
+                </label>
+              </div>
             </div>
-          </div>
+          ) : null}
 
-          <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
-            <div className="text-sm font-black text-emerald-900">4. Aktivitas / Workout</div>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <select className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold" value={form.activity_type || ""} onChange={(e) => setValue("activity_type", e.target.value)}>
-                <option value="">Pilih aktivitas</option>
-                {activities.map((activity) => <option key={activity.id || activity.activity_name} value={activity.activity_name}>{activity.activity_name}</option>)}
-              </select>
-              <input className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="Durasi menit" value={form.duration_minutes || ""} onChange={(e) => setValue("duration_minutes", e.target.value)} />
-              <input className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="Jarak km, opsional" value={form.distance_km || ""} onChange={(e) => setValue("distance_km", e.target.value)} />
-              <input className="rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold" placeholder="Kalori aktivitas manual, opsional" value={form.activity_calories || ""} onChange={(e) => setValue("activity_calories", e.target.value)} />
+          {activeTab === "activity" ? (
+            <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
+              <div className="text-sm font-black text-emerald-900">2. Aktivitas / Workout</div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Jenis aktivitas
+                  <select className={inputClass()} value={form.activity_type || ""} onChange={(e) => setValue("activity_type", e.target.value)}>
+                    <option value="">Pilih aktivitas</option>
+                    {activities.map((activity: any) => <option key={activity.id || activity.activity_name}>{activity.activity_name}</option>)}
+                    <option>Jalan kaki</option>
+                    <option>Senam</option>
+                    <option>Gym</option>
+                    <option>Aktivitas lain</option>
+                  </select>
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Durasi menit
+                  <input className={inputClass()} type="number" step="1" placeholder="Contoh: 30" value={form.duration_minutes || ""} onChange={(e) => setValue("duration_minutes", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Jarak km, opsional
+                  <input className={inputClass()} type="number" step="0.1" placeholder="Contoh: 2.5" value={form.distance_km || ""} onChange={(e) => setValue("distance_km", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Kalori manual, opsional
+                  <input className={inputClass()} type="number" step="1" placeholder="Isi bila ada dari smartwatch" value={form.activity_calories || ""} onChange={(e) => setValue("activity_calories", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Link bukti aktivitas, opsional
+                  <input className={inputClass()} placeholder="Tempel link screenshot Strava/smartwatch/Google Drive" value={form.activity_evidence_url || ""} onChange={(e) => setValue("activity_evidence_url", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Catatan aktivitas
+                  <input className={inputClass()} placeholder="Contoh: jalan pagi sebelum kerja" value={form.activity_notes || ""} onChange={(e) => setValue("activity_notes", e.target.value)} />
+                </label>
+              </div>
             </div>
-          </div>
+          ) : null}
 
-          <button disabled={saving || !form.participant_id} className="w-full rounded-2xl bg-rose-600 px-5 py-4 text-sm font-black text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-60">
+          {activeTab === "healthtalk" ? (
+            <div className="rounded-3xl border border-purple-100 bg-purple-50 p-4">
+              <div className="text-sm font-black text-purple-900">2. Healthtalk / Seminar Kesehatan</div>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Judul healthtalk / seminar
+                  <input className={inputClass()} placeholder="Contoh: Sindrom Metabolik dan Pencegahannya" value={form.healthtalk_title || ""} onChange={(e) => setValue("healthtalk_title", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Jenis kehadiran
+                  <select className={inputClass()} value={form.healthtalk_type || "Online"} onChange={(e) => setValue("healthtalk_type", e.target.value)}>
+                    {HEALTH_TALK_TYPES.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Tanggal healthtalk
+                  <input type="date" className={inputClass()} value={form.healthtalk_date || form.log_date || ""} onChange={(e) => setValue("healthtalk_date", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Link bukti kehadiran, opsional
+                  <input className={inputClass()} placeholder="Tempel link screenshot Zoom/foto absensi/bukti hadir" value={form.healthtalk_evidence_url || ""} onChange={(e) => setValue("healthtalk_evidence_url", e.target.value)} />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
+                  Catatan healthtalk
+                  <input className={inputClass()} placeholder="Contoh: hadir sampai selesai" value={form.healthtalk_notes || ""} onChange={(e) => setValue("healthtalk_notes", e.target.value)} />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          <button disabled={saving || loading || !form.participant_id} className="w-full rounded-3xl bg-rose-600 px-6 py-4 text-sm font-black text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-300">
             {saving ? "Menyimpan..." : "Simpan Log Harian"}
           </button>
         </section>
 
         <aside className="space-y-4">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-lg font-black text-slate-900">Status</div>
-            <div className="mt-3 rounded-2xl bg-slate-50 p-4 text-sm font-semibold leading-6 text-slate-600">{message || "Pilih peserta, isi form, lalu simpan."}</div>
+            <div className="text-lg font-black text-slate-950">Status</div>
+            <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-4 text-sm font-bold text-slate-700">{message}</div>
+            {lastResult?.points_total ? (
+              <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">
+                Point tersimpan: +{lastResult.points_total}
+              </div>
+            ) : null}
           </div>
+
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-lg font-black text-slate-900">Tips Operasional</div>
-            <ul className="mt-3 space-y-2 text-sm font-semibold leading-6 text-slate-600">
-              <li>Peserta yang namanya muncul sebagai risk cluster berarti data lama pernah salah import.</li>
-              <li>Gunakan filter Company, Kelompok, dan Group agar input tidak masuk peserta yang salah.</li>
-              <li>Untuk data MCU lama, gunakan menu Import History MCU, bukan Input Harian.</li>
-            </ul>
+            <div className="text-lg font-black text-slate-950">Panduan Point</div>
+            <div className="mt-4 space-y-3 text-sm font-bold text-slate-600">
+              <div className="flex justify-between gap-3"><span>Nutrisi lengkap</span><b>+5</b></div>
+              <div className="flex justify-between gap-3"><span>BB / lingkar perut</span><b>+5</b></div>
+              <div className="flex justify-between gap-3"><span>Aktivitas &ge; 30 menit</span><b>+10</b></div>
+              <div className="flex justify-between gap-3"><span>Bukti aktivitas</span><b>+5</b></div>
+              <div className="flex justify-between gap-3"><span>Healthtalk online</span><b>+10</b></div>
+              <div className="flex justify-between gap-3"><span>Healthtalk offline</span><b>+15</b></div>
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-lg font-black text-slate-950">Catatan</div>
+            <div className="mt-4 space-y-3 text-sm font-medium leading-6 text-slate-600">
+              <p>Upload file asli belum disimpan ke storage. Untuk saat ini tempel link bukti dari Google Drive, WhatsApp media, Strava, atau folder perusahaan.</p>
+              <p>Admin/coach dapat memvalidasi bukti dari tabel evidence/point bila SQL v360 sudah dijalankan.</p>
+            </div>
           </div>
         </aside>
       </form>
