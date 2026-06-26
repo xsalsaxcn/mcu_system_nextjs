@@ -330,7 +330,8 @@ function WellnessDashboard() {
             <div className="flex flex-wrap gap-2">
               <a href="/wellness/settings" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-800 shadow-sm">Setting Parameter</a>
               <a href="/wellness/input" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Input Monitoring</a>
-              <a href="/wellness/import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import Baseline MCU</a>
+              <a href="/wellness/import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import Peserta</a>
+              <a href="/wellness/history-import" className="rounded-2xl bg-white/15 px-4 py-3 text-sm font-black text-white ring-1 ring-white/25">Import History MCU</a>
               <button onClick={load} disabled={loading} className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black text-white shadow-sm disabled:opacity-60">{loading ? "Memuat..." : "Refresh"}</button>
             </div>
           </div>
@@ -359,7 +360,7 @@ function WellnessDashboard() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="text-lg font-black text-slate-900">Pilih Peserta untuk Grafik</div>
-            <div className="mt-1 text-sm font-semibold text-slate-500">Grafik menampilkan baseline MCU dibandingkan input berkala, mini MCU, nutrisi, dan workout.</div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">Grafik menampilkan baseline MCU, history MCU, input berkala, mini MCU, nutrisi, dan workout.</div>
           </div>
           <select
             className="min-w-[280px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"

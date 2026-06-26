@@ -117,7 +117,10 @@ function WellnessImport() {
               <div className="text-3xl font-black">Import Peserta Wellness</div>
               <div className="mt-2 max-w-3xl text-sm font-medium text-rose-50">Import identitas peserta + baseline MCU sebagai dasar treatment dan before-after program.</div>
             </div>
-            <a href="/wellness/settings" className="rounded-2xl bg-white px-4 py-3 text-center text-sm font-black text-rose-700 shadow-sm">Setting Parameter</a>
+            <div className="flex flex-wrap gap-2">
+              <a href="/wellness/settings" className="rounded-2xl bg-white px-4 py-3 text-center text-sm font-black text-rose-700 shadow-sm">Setting Parameter</a>
+              <a href="/wellness/history-import" className="rounded-2xl bg-white/15 px-4 py-3 text-center text-sm font-black text-white ring-1 ring-white/25">Import History MCU</a>
+            </div>
           </div>
         </div>
       </section>
@@ -156,7 +159,7 @@ function WellnessImport() {
                     </select>
                   </label>
                 </div>
-                <div className="mt-3 text-xs font-bold text-blue-700">Kosongkan Kelompok/Group bila ingin memakai kolom Kelompok/Divisi dari Excel.</div>
+                <div className="mt-3 text-xs font-bold text-blue-700">Kosongkan Kelompok/Group bila ingin memakai kolom Kelompok/Divisi dari Excel. Untuk history pemeriksaan lama, gunakan Import History MCU.</div>
               </div>
             ) : null}
 

@@ -7,7 +7,8 @@ import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules
 import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness/_utils";
 
 // WELLNESS_PARTICIPANT_CHARTS_V351_DASHBOARD
-// Wellness-only: grafik parameter per peserta diambil dari baseline, weight logs, food logs, activity logs, dan mini MCU logs.
+// Wellness-only: grafik parameter per peserta diambil dari baseline, history MCU, weight logs, food logs, activity logs, dan mini MCU logs.
+// WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -61,6 +62,21 @@ function round1(value: any): number | null {
 
 function sortedByDate(rows: any[] = [], field = "log_date") {
   return [...(rows || [])].sort((a: any, b: any) => String(a?.[field] || "").localeCompare(String(b?.[field] || "")));
+}
+
+function historySource(row: any) {
+  return row?.visit_label || {
+    baseline_mcu: "Baseline MCU",
+    mini_mcu: "Mini MCU",
+    mini_mcu_week_4: "Mini MCU Week 4",
+    mini_mcu_week_8: "Mini MCU Week 8",
+    final_mcu: "Final MCU",
+  }[String(row?.history_type || "")] || "History MCU";
+}
+
+function firstClinicalHistory(rows: any[] = []) {
+  const sorted = sortedByDate(rows, "checkup_date");
+  return sorted.find((row) => String(row?.history_type || "") === "baseline_mcu") || sorted[0] || null;
 }
 
 function addChartPoint(points: any[], point: any) {
@@ -121,6 +137,7 @@ function buildParticipantCharts(args: {
   foodRows: any[];
   activityRows: any[];
   miniMcuRows: any[];
+  historyRows: any[];
   baselineWeight: any;
   baselineBmi: any;
   baselineSbp: any;
@@ -135,6 +152,7 @@ function buildParticipantCharts(args: {
     foodRows,
     activityRows,
     miniMcuRows,
+    historyRows,
     baselineWeight,
     baselineBmi,
     baselineSbp,
@@ -158,6 +176,17 @@ function buildParticipantCharts(args: {
   addChartPoint(bpChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", sbp: baselineSbp, dbp: baselineDbp });
   addChartPoint(hba1cChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineHba1c });
   addChartPoint(glucoseChart, { label: "Baseline", date: baselineDate, source: "Baseline MCU", value: baselineGlucose });
+
+  for (const row of sortedByDate(historyRows, "checkup_date")) {
+    const label = row.visit_label || dateLabel(row.checkup_date);
+    const source = historySource(row);
+    addChartPoint(weightChart, { label, date: row.checkup_date, source, value: row.weight_kg });
+    addChartPoint(bmiChart, { label, date: row.checkup_date, source, value: row.bmi });
+    addChartPoint(waistChart, { label, date: row.checkup_date, source, value: row.waist_cm });
+    addChartPoint(bpChart, { label, date: row.checkup_date, source, sbp: row.systolic, dbp: row.diastolic });
+    addChartPoint(hba1cChart, { label, date: row.checkup_date, source, value: row.hba1c_percent });
+    addChartPoint(glucoseChart, { label, date: row.checkup_date, source, value: row.glucose_value });
+  }
 
   for (const row of sortedByDate(weightRows)) {
     addChartPoint(weightChart, { label: dateLabel(row.log_date), date: row.log_date, source: "Input BB", value: row.weight_kg });
@@ -226,12 +255,13 @@ export async function GET(req: NextRequest) {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, companies, groupUnits] = await Promise.all([
+    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, historyRows, companies, groupUnits] = await Promise.all([
       supabase.from("wellness_weight_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_food_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_activity_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_groups").select("*"),
       safeSelect(supabase, "wellness_mini_mcu_logs", (query) => query.in("participant_id", participantIds)),
+      safeSelect(supabase, "wellness_checkup_history", (query) => query.in("participant_id", participantIds)),
       safeSelect(supabase, "wellness_companies", (query) => query.order("name", { ascending: true })),
       safeSelect(supabase, "wellness_group_units", (query) => query.order("name", { ascending: true })),
     ]);
@@ -244,6 +274,7 @@ export async function GET(req: NextRequest) {
     const foodsByParticipant = groupByParticipant(foodRes.data || []);
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
+    const historyByParticipant = groupByParticipant(historyRows || []);
     const groupName = new Map((groupRes.data || []).map((g: any) => [Number(g.id), g.name || "-"]));
     const companyName = new Map((companies || []).map((company: any) => [Number(company.id), company.name || "-"]));
     const groupUnitName = new Map((groupUnits || []).map((unit: any) => [Number(unit.id), unit.name || "-"]));
@@ -253,34 +284,38 @@ export async function GET(req: NextRequest) {
       const foodRows = foodsByParticipant.get(Number(participant.id)) || [];
       const activityRows = activitiesByParticipant.get(Number(participant.id)) || [];
       const miniMcuParticipantRows = miniMcuByParticipant.get(Number(participant.id)) || [];
+      const historyParticipantRows = historyByParticipant.get(Number(participant.id)) || [];
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;
       const latestActivity = latestByDate(activityRows) || null;
       const latestMiniMcu = latestByDate(miniMcuParticipantRows, "exam_date") || null;
-      const baselineWeight = participant.initial_weight_kg;
-      const baselineBmi = pickNumber(participant.baseline_bmi, calculateBmi(participant.initial_weight_kg, participant.height_cm));
-      const currentWeight = pickNumber(latestMiniMcu?.weight_kg, latestWeight?.weight_kg, participant.initial_weight_kg);
-      const bmi = pickNumber(latestMiniMcu?.bmi, latestWeight?.bmi, calculateBmi(currentWeight, participant.height_cm), baselineBmi);
+      const latestHistory = latestByDate(historyParticipantRows, "checkup_date") || null;
+      const baselineHistory = firstClinicalHistory(historyParticipantRows);
+      const baselineWeight = pickNumber(participant.initial_weight_kg, baselineHistory?.weight_kg);
+      const baselineBmi = pickNumber(participant.baseline_bmi, baselineHistory?.bmi, calculateBmi(baselineWeight, participant.height_cm));
+      const currentWeight = pickNumber(latestHistory?.weight_kg, latestMiniMcu?.weight_kg, latestWeight?.weight_kg, baselineWeight);
+      const bmi = pickNumber(latestHistory?.bmi, latestMiniMcu?.bmi, latestWeight?.bmi, calculateBmi(currentWeight, participant.height_cm), baselineBmi);
       const delta = weightDelta(currentWeight, baselineWeight);
-      const hba1c = pickNumber(latestMiniMcu?.hba1c, participant.hba1c, participant.initial_hba1c, participant.hba1c_initial, participant.baseline_hba1c);
-      const glucose = pickNumber(latestMiniMcu?.glucose, participant.glucose, participant.gula_darah, participant.initial_glucose, participant.baseline_glucose);
-      const sbp = pickNumber(latestMiniMcu?.sbp, participant.sbp, participant.systolic_bp, participant.initial_sbp, participant.baseline_sbp, participant.blood_pressure_systolic);
-      const dbp = pickNumber(latestMiniMcu?.dbp, participant.dbp, participant.diastolic_bp, participant.initial_dbp, participant.baseline_dbp, participant.blood_pressure_diastolic);
-      const waist = pickNumber(latestMiniMcu?.waist_cm, participant.waist_cm, participant.lingkar_perut, participant.initial_waist_cm, participant.baseline_waist_cm);
+      const hba1c = pickNumber(latestHistory?.hba1c_percent, latestMiniMcu?.hba1c, participant.hba1c, participant.initial_hba1c, participant.hba1c_initial, participant.baseline_hba1c);
+      const glucose = pickNumber(latestHistory?.glucose_value, latestMiniMcu?.glucose, participant.glucose, participant.gula_darah, participant.initial_glucose, participant.baseline_glucose);
+      const sbp = pickNumber(latestHistory?.systolic, latestMiniMcu?.sbp, participant.sbp, participant.systolic_bp, participant.initial_sbp, participant.baseline_sbp, participant.blood_pressure_systolic);
+      const dbp = pickNumber(latestHistory?.diastolic, latestMiniMcu?.dbp, participant.dbp, participant.diastolic_bp, participant.initial_dbp, participant.baseline_dbp, participant.blood_pressure_diastolic);
+      const waist = pickNumber(latestHistory?.waist_cm, latestMiniMcu?.waist_cm, participant.waist_cm, participant.lingkar_perut, participant.initial_waist_cm, participant.baseline_waist_cm);
       const risk = classifyWellnessRisk({ hba1c, glucose, bmi, sbp, dbp });
-      const lastUploadDate = latestDate(latestWeight?.log_date, latestFood?.log_date, latestActivity?.log_date, latestMiniMcu?.exam_date);
+      const lastUploadDate = latestDate(latestWeight?.log_date, latestFood?.log_date, latestActivity?.log_date, latestMiniMcu?.exam_date, latestHistory?.checkup_date);
       const compliance = complianceStatus(lastUploadDate);
-      const baselineSbp = pickNumber(participant.baseline_sbp, participant.initial_sbp, participant.sbp);
-      const baselineDbp = pickNumber(participant.baseline_dbp, participant.initial_dbp, participant.dbp);
-      const baselineHba1c = pickNumber(participant.baseline_hba1c, participant.initial_hba1c, participant.hba1c_initial, participant.hba1c);
-      const baselineGlucose = pickNumber(participant.baseline_glucose, participant.initial_glucose, participant.glucose, participant.gula_darah);
-      const baselineWaist = pickNumber(participant.baseline_waist_cm, participant.initial_waist_cm, participant.waist_cm, participant.lingkar_perut);
+      const baselineSbp = pickNumber(participant.baseline_sbp, baselineHistory?.systolic, participant.initial_sbp, participant.sbp);
+      const baselineDbp = pickNumber(participant.baseline_dbp, baselineHistory?.diastolic, participant.initial_dbp, participant.dbp);
+      const baselineHba1c = pickNumber(participant.baseline_hba1c, baselineHistory?.hba1c_percent, participant.initial_hba1c, participant.hba1c_initial, participant.hba1c);
+      const baselineGlucose = pickNumber(participant.baseline_glucose, baselineHistory?.glucose_value, participant.initial_glucose, participant.glucose, participant.gula_darah);
+      const baselineWaist = pickNumber(participant.baseline_waist_cm, baselineHistory?.waist_cm, participant.initial_waist_cm, participant.waist_cm, participant.lingkar_perut);
       const parameterCharts = buildParticipantCharts({
         participant,
         weightRows,
         foodRows,
         activityRows,
         miniMcuRows: miniMcuParticipantRows,
+        historyRows: historyParticipantRows,
         baselineWeight,
         baselineBmi,
         baselineSbp,
@@ -335,11 +370,13 @@ export async function GET(req: NextRequest) {
         latest_food_date: latestFood?.log_date || null,
         latest_activity_date: latestActivity?.log_date || null,
         latest_mini_mcu_date: latestMiniMcu?.exam_date || null,
+        latest_history_date: latestHistory?.checkup_date || null,
         latest_upload_date: lastUploadDate,
         food_logs_count: foodRows.length,
         weight_logs_count: weightRows.length,
         activity_logs_count: activityRows.length,
         mini_mcu_logs_count: miniMcuParticipantRows.length,
+        history_logs_count: historyParticipantRows.length,
         calories_today: sumCalories(foodRows.filter((row) => row.log_date === today)),
         activity_calories_today: sumCalories(activityRows.filter((row) => row.log_date === today)),
         parameter_charts: parameterCharts,
