@@ -6,6 +6,7 @@ import AuthGate from "@/components/AuthGate";
 
 // WELLNESS_HISTORY_IMPORT_V352_PAGE
 // WELLNESS_HISTORY_AUTO_MAPPING_V353_PAGE
+// WELLNESS_HISTORY_GROUP_FILTER_V354_PAGE
 
 const requiredColumns = [
   ["KODE", "Kunci cocok ke peserta Wellness. Bisa juga No Karyawan / Employee ID."],
@@ -146,6 +147,9 @@ function WellnessHistoryImport() {
   const [checkupDate, setCheckupDate] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [companies, setCompanies] = useState<any[]>([]);
+  const [groupUnits, setGroupUnits] = useState<any[]>([]);
+  const [selectedKelompokId, setSelectedKelompokId] = useState("");
+  const [selectedGroupUnitId, setSelectedGroupUnitId] = useState("");
   const [createMissing, setCreateMissing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mappingLoading, setMappingLoading] = useState(false);
@@ -163,7 +167,9 @@ function WellnessHistoryImport() {
       const json = await fetch("/api/wellness/settings", { cache: "no-store" }).then((res) => res.json());
       if (json.ok) {
         const loaded = json.companies || [];
+        const loadedGroups = json.groupUnits || [];
         setCompanies(loaded);
+        setGroupUnits(loadedGroups);
         if (!companyId && loaded[0]?.id) setCompanyId(String(loaded[0].id));
       }
     } catch {
@@ -172,6 +178,27 @@ function WellnessHistoryImport() {
   }
 
   useEffect(() => { loadSettings(); }, []);
+
+  const kelompokList = useMemo(
+    () => groupUnits.filter((item) => String(item.company_id) === String(companyId) && item.unit_type === "kelompok"),
+    [groupUnits, companyId]
+  );
+
+  const childGroupList = useMemo(
+    () => groupUnits.filter((item) => String(item.company_id) === String(companyId) && item.unit_type === "group" && (!selectedKelompokId || String(item.parent_id) === String(selectedKelompokId))),
+    [groupUnits, companyId, selectedKelompokId]
+  );
+
+  function handleCompanyChange(value: string) {
+    setCompanyId(value);
+    setSelectedKelompokId("");
+    setSelectedGroupUnitId("");
+  }
+
+  function handleKelompokChange(value: string) {
+    setSelectedKelompokId(value);
+    setSelectedGroupUnitId("");
+  }
 
   function resetMapping() {
     setAvailableHeaders([]);
@@ -267,6 +294,8 @@ function WellnessHistoryImport() {
     if (sheetName.trim()) form.set("sheet_name", sheetName.trim());
     if (checkupDate) form.set("checkup_date", checkupDate);
     if (companyId) form.set("company_id", companyId);
+    if (selectedKelompokId) form.set("kelompok_id", selectedKelompokId);
+    if (selectedGroupUnitId) form.set("group_unit_id", selectedGroupUnitId);
     if (createMissing) form.set("create_missing_participants", "1");
     if (Object.keys(columnMapping).length) form.set("column_mapping", JSON.stringify(columnMapping));
 
@@ -318,7 +347,7 @@ function WellnessHistoryImport() {
             <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-2 text-sm font-black text-slate-700">
                 Company / Main Entity
-                <select className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" value={companyId} onChange={(event) => setCompanyId(event.target.value)}>
+                <select className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" value={companyId} onChange={(event) => handleCompanyChange(event.target.value)}>
                   <option value="">Tanpa filter company</option>
                   {companies.map((company) => <option key={company.id} value={String(company.id)}>{company.name}</option>)}
                 </select>
@@ -334,6 +363,27 @@ function WellnessHistoryImport() {
                   <option value="other">Pemeriksaan lain</option>
                 </select>
               </label>
+            </div>
+
+            <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
+              <div className="text-sm font-black text-blue-950">Filter pencocokan peserta</div>
+              <div className="mt-2 text-xs font-bold leading-5 text-blue-700">Pilih Kelompok dan Group supaya KODE peserta dicocokkan hanya ke peserta di struktur tersebut. Ini membantu mencegah history baseline masuk ke peserta yang salah bila ada KODE mirip/duplikat antar program.</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="grid gap-2 text-xs font-black text-blue-900">
+                  Kelompok
+                  <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedKelompokId} onChange={(event) => handleKelompokChange(event.target.value)} disabled={!companyId}>
+                    <option value="">Semua kelompok</option>
+                    {kelompokList.map((item) => <option key={item.id} value={String(item.id)}>{item.name} {item.coach_name ? `- Coach ${item.coach_name}` : ""}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black text-blue-900">
+                  Group
+                  <select className="rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-bold text-slate-900" value={selectedGroupUnitId} onChange={(event) => setSelectedGroupUnitId(event.target.value)} disabled={!companyId}>
+                    <option value="">Semua group</option>
+                    {childGroupList.map((item) => <option key={item.id} value={String(item.id)}>{item.name}</option>)}
+                  </select>
+                </label>
+              </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">
@@ -376,6 +426,7 @@ function WellnessHistoryImport() {
               <li>Import peserta dulu di /wellness/import.</li>
               <li>Upload file history MCU di halaman ini.</li>
               <li>Klik Auto Mapping untuk membaca kolom Excel.</li>
+              <li>Pilih Kelompok/Group bila ingin pencocokan peserta lebih spesifik.</li>
               <li>Cek mapping kolom wajib dan parameter klinis.</li>
               <li>Klik Import History MCU.</li>
             </ol>

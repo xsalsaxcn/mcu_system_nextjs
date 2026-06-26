@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 // WELLNESS_HISTORY_IMPORT_V352_API
 // WELLNESS_HISTORY_AUTO_MAPPING_V353_API
+// WELLNESS_HISTORY_GROUP_FILTER_V354_API
 // Wellness-only import untuk history pemeriksaan MCU / Mini MCU / Final MCU.
 
 function clean(value: any) {
@@ -188,17 +189,24 @@ async function getOrCreateGroup(supabase: any, name = "Wellness Default") {
   return data.id;
 }
 
-async function findParticipant(supabase: any, employeeCode: string, companyId: number | null) {
+async function findParticipant(supabase: any, employeeCode: string, companyId: number | null, kelompokId: number | null, groupUnitId: number | null) {
   if (!employeeCode) return null;
-  if (companyId) {
-    const withCompany = await supabase
-      .from("wellness_participants")
-      .select("*")
-      .eq("code", employeeCode)
-      .eq("wellness_company_id", companyId)
-      .maybeSingle();
-    if (!withCompany.error && withCompany.data) return withCompany.data;
+
+  const buildQuery = () => {
+    let query = supabase.from("wellness_participants").select("*").eq("code", employeeCode);
+    if (companyId) query = query.eq("wellness_company_id", companyId);
+    if (kelompokId) query = query.eq("wellness_kelompok_id", kelompokId);
+    if (groupUnitId) query = query.eq("wellness_group_unit_id", groupUnitId);
+    return query;
+  };
+
+  if (companyId || kelompokId || groupUnitId) {
+    const scoped = await buildQuery().maybeSingle();
+    if (scoped.error) throw scoped.error;
+    if (scoped.data) return scoped.data;
+    return null;
   }
+
   const anyCompany = await supabase.from("wellness_participants").select("*").eq("code", employeeCode).maybeSingle();
   if (anyCompany.error) throw anyCompany.error;
   return anyCompany.data || null;
@@ -219,6 +227,8 @@ async function createParticipantFromHistory(supabase: any, payload: any) {
   };
 
   if (payload.company_id) participantPayload.wellness_company_id = payload.company_id;
+  if (payload.kelompok_id) participantPayload.wellness_kelompok_id = payload.kelompok_id;
+  if (payload.group_unit_id) participantPayload.wellness_group_unit_id = payload.group_unit_id;
   if (payload.checkup_date && payload.history_type === "baseline_mcu") participantPayload.baseline_mcu_date = payload.checkup_date;
   if (payload.history_type === "baseline_mcu") {
     participantPayload.baseline_hba1c = payload.hba1c_percent;
@@ -273,6 +283,8 @@ export async function POST(req: NextRequest) {
   if (!file) return fail("File Excel history MCU wajib diupload.");
 
   const companyId = toInteger(form.get("company_id"));
+  const kelompokId = toInteger(form.get("kelompok_id"));
+  const groupUnitId = toInteger(form.get("group_unit_id"));
   const defaultHistoryType = normalizeHistoryType(form.get("history_type") || "baseline_mcu");
   const defaultVisitLabel = clean(form.get("visit_label")) || historyTypeLabel(defaultHistoryType);
   const createMissingParticipants = clean(form.get("create_missing_participants")) === "1";
@@ -321,7 +333,7 @@ export async function POST(req: NextRequest) {
       const checkupDate = parseDateValue(get("checkup_date", ["Tanggal Periksa", "Tanggal Pemeriksaan", "Tanggal MCU", "MCU Date", "Exam Date", "Checkup Date"])) || parseDateValue(form.get("checkup_date"));
       const visitLabel = clean(get("visit_label", ["Visit Label", "Label Pemeriksaan", "Periode", "Week", "Minggu"])) || defaultVisitLabel;
 
-      let participant = await findParticipant(supabase, employeeCode, companyId);
+      let participant = await findParticipant(supabase, employeeCode, companyId, kelompokId, groupUnitId);
       if (!participant && createMissingParticipants) {
         try {
           participant = await createParticipantFromHistory(supabase, {
@@ -334,6 +346,8 @@ export async function POST(req: NextRequest) {
             checkup_date: checkupDate,
             history_type: historyType,
             company_id: companyId,
+            kelompok_id: kelompokId,
+            group_unit_id: groupUnitId,
             group_name: clean(get("group_name", ["Kelompok", "Group", "Nama Grup", "Divisi", "Departemen"])),
           });
           createdParticipants += 1;
@@ -424,6 +438,7 @@ export async function POST(req: NextRequest) {
       sheetName,
       headerRow: headerRowIndex + 1,
       historyType: defaultHistoryType,
+      matchScope: { companyId, kelompokId, groupUnitId },
       mappedColumns: Object.keys(columnMapping).length,
       message: inserted
         ? "Import history MCU selesai. Auto mapping sudah dipakai bila tersedia, dan data akan muncul di grafik peserta sebagai titik pemeriksaan."
