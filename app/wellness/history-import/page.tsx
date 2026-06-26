@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import AuthGate from "@/components/AuthGate";
 
 // WELLNESS_HISTORY_IMPORT_V352_PAGE
+// WELLNESS_HISTORY_AUTO_MAPPING_V353_PAGE
 
 const requiredColumns = [
   ["KODE", "Kunci cocok ke peserta Wellness. Bisa juga No Karyawan / Employee ID."],
@@ -33,6 +35,105 @@ const clinicalColumns = [
   ["Status Program", "Status awal/final program."],
 ];
 
+type MappingTarget = {
+  key: string;
+  label: string;
+  required?: boolean;
+  aliases: string[];
+};
+
+const mappingTargets: MappingTarget[] = [
+  { key: "employee_code", label: "KODE / No Karyawan", required: true, aliases: ["KODE", "Kode", "No Karyawan", "Nomor Karyawan", "Employee No", "Employee ID", "NIK", "Nomor Induk"] },
+  { key: "participant_name", label: "Nama Karyawan", required: true, aliases: ["Nama Karyawan", "Nama", "Nama Peserta", "Nama Lengkap", "Name"] },
+  { key: "checkup_date", label: "Tanggal Periksa", required: true, aliases: ["Tanggal Periksa", "Tanggal Pemeriksaan", "Tanggal MCU", "MCU Date", "Exam Date", "Checkup Date"] },
+  { key: "lab_no", label: "NO. LAB", aliases: ["NO. LAB", "No Lab", "Nomor Lab", "Lab No"] },
+  { key: "sex", label: "Jenis Kelamin", aliases: ["Sex", "Jenis Kelamin", "Gender"] },
+  { key: "department", label: "Departemen / Divisi", aliases: ["Departemen", "Department", "Divisi", "Unit"] },
+  { key: "position", label: "Jabatan", aliases: ["Jabatan", "Position", "Job Title"] },
+  { key: "group_name", label: "Group saat create peserta", aliases: ["Kelompok", "Group", "Nama Grup", "Divisi", "Departemen"] },
+  { key: "history_type", label: "Jenis History", aliases: ["Jenis History", "History Type", "Visit Type", "Tipe Pemeriksaan"] },
+  { key: "visit_label", label: "Visit Label", aliases: ["Visit Label", "Label Pemeriksaan", "Periode", "Week", "Minggu"] },
+  { key: "risk_cluster", label: "Risk Cluster / Nama Grup", aliases: ["Nama Grup", "Risk Cluster", "Risk Group", "Kelompok Risiko", "Kategori Risiko"] },
+  { key: "risk_level", label: "Risk Level", aliases: ["Risk Level", "Level Risiko", "Prioritas"] },
+  { key: "selection_reason", label: "Selection Reason", aliases: ["Selection Reason", "Alasan Seleksi", "Alasan Masuk Program"] },
+  { key: "hba1c_raw", label: "HbA1c Raw", aliases: ["HbA1c Raw", "HBA1C Raw", "A1C Raw"] },
+  { key: "hba1c_percent", label: "HbA1c %", aliases: ["HbA1c %", "HbA1c", "HBA1C", "A1C", "Hb A1c"] },
+  { key: "hba1c_flag", label: "HbA1c >6.4?", aliases: ["HbA1c >6.4?", "HbA1c Tinggi", "A1C High"] },
+  { key: "bp_raw", label: "Tensi Raw", aliases: ["Tensi Raw", "Tekanan Darah", "Tensi", "BP", "Blood Pressure"] },
+  { key: "systolic", label: "Sistolik", aliases: ["Sistolik", "Sistol", "SBP", "Systolic", "Systolic BP"] },
+  { key: "diastolic", label: "Diastolik", aliases: ["Diastolik", "Diastol", "DBP", "Diastolic", "Diastolic BP"] },
+  { key: "height_cm", label: "TB / Tinggi Badan", aliases: ["Tinggi Badan", "TB", "Height", "Height Cm"] },
+  { key: "weight_kg", label: "BB / Berat Badan", aliases: ["Berat Badan", "BB", "BB Awal", "Berat Badan Awal", "Weight", "Initial Weight"] },
+  { key: "bmi", label: "BMI / IMT", aliases: ["BMI", "IMT", "Body Mass Index"] },
+  { key: "bmi_flag", label: "BMI >30?", aliases: ["BMI >30?", "BMI Tinggi", "Obesity"] },
+  { key: "waist_cm", label: "Lingkar Perut", aliases: ["Lingkar Perut", "Waist", "Waist Cm", "Waist Circumference"] },
+  { key: "glucose_value", label: "Gula Darah", aliases: ["Gula Darah", "Glucose", "GDP", "GDS", "Fasting Glucose", "Random Glucose", "Blood Glucose"] },
+  { key: "bp_flag", label: "Tensi >150/100?", aliases: ["Tensi >150/100?", "Tekanan Darah Tinggi", "BP High"] },
+  { key: "criteria_count", label: "Jumlah Kriteria", aliases: ["Jumlah Kriteria", "Criteria Count", "Jumlah Risk"] },
+  { key: "risk_score", label: "Risk Score", aliases: ["Risk Score", "Skor Risiko"] },
+  { key: "intervention_focus", label: "Fokus Intervensi", aliases: ["Fokus Intervensi", "Intervention Focus", "Treatment Plan"] },
+  { key: "monitoring_plan", label: "Monitoring Day-by-Day", aliases: ["Monitoring Day-by-Day", "Monitoring Plan", "Rencana Monitoring"] },
+  { key: "medical_validation_notes", label: "Catatan Validasi Medis", aliases: ["Catatan Validasi Medis", "Catatan MCU", "Catatan", "Notes", "Remark"] },
+  { key: "program_status", label: "Status Program", aliases: ["Status Program", "Program Status", "Status"] },
+];
+
+const knownHeaderWords = [
+  "kode",
+  "no lab",
+  "nama karyawan",
+  "tanggal periksa",
+  "hba1c",
+  "sistolik",
+  "diastolik",
+  "tensi",
+  "bmi",
+  "risk score",
+  "fokus intervensi",
+];
+
+function clean(value: any) {
+  return String(value ?? "").trim();
+}
+
+function norm(value: any) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/[._\-\/()]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function chooseHeaderRow(rows: any[][]) {
+  let bestIndex = 0;
+  let bestScore = -1;
+  rows.slice(0, 25).forEach((row, index) => {
+    const values = row.map(norm);
+    const score = values.reduce((sum, value) => sum + (knownHeaderWords.some((item) => value.includes(item)) ? 1 : 0), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function detectColumn(headers: string[], aliases: string[]) {
+  const normalizedHeaders = headers.map(norm);
+  const normalizedAliases = aliases.map(norm);
+
+  for (const alias of normalizedAliases) {
+    const index = normalizedHeaders.findIndex((header) => header === alias);
+    if (index >= 0) return { header: headers[index], confidence: "Exact" };
+  }
+
+  for (const alias of normalizedAliases) {
+    const index = normalizedHeaders.findIndex((header) => header.includes(alias) || alias.includes(header));
+    if (index >= 0) return { header: headers[index], confidence: "Mirip" };
+  }
+
+  return { header: "", confidence: "Belum ketemu" };
+}
+
 export default function WellnessHistoryImportPage() {
   return <AuthGate>{() => <WellnessHistoryImport />}</AuthGate>;
 }
@@ -47,8 +148,15 @@ function WellnessHistoryImport() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [createMissing, setCreateMissing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mappingLoading, setMappingLoading] = useState(false);
   const [message, setMessage] = useState("Upload history pemeriksaan MCU agar baseline/mini MCU/final MCU terbaca di grafik before-after peserta.");
   const [result, setResult] = useState<any>(null);
+  const [availableHeaders, setAvailableHeaders] = useState<string[]>([]);
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
+  const [autoMapInfo, setAutoMapInfo] = useState<any>(null);
+
+  const requiredMappedCount = useMemo(() => mappingTargets.filter((target) => target.required && columnMapping[target.key]).length, [columnMapping]);
+  const totalMappedCount = useMemo(() => Object.values(columnMapping).filter(Boolean).length, [columnMapping]);
 
   async function loadSettings() {
     try {
@@ -65,6 +173,12 @@ function WellnessHistoryImport() {
 
   useEffect(() => { loadSettings(); }, []);
 
+  function resetMapping() {
+    setAvailableHeaders([]);
+    setColumnMapping({});
+    setAutoMapInfo(null);
+  }
+
   function handleHistoryType(value: string) {
     setHistoryType(value);
     const labelMap: Record<string, string> = {
@@ -76,6 +190,64 @@ function WellnessHistoryImport() {
       other: "Pemeriksaan Lain",
     };
     setVisitLabel(labelMap[value] || value);
+  }
+
+  async function autoMapping() {
+    if (!file) {
+      setMessage("Pilih file Excel history MCU dulu, lalu klik Auto Mapping.");
+      return;
+    }
+
+    setMappingLoading(true);
+    setResult(null);
+    setMessage("Membaca header Excel dan membuat auto mapping...");
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const selectedSheetName = sheetName.trim() || workbook.SheetNames[0];
+      const sheet = workbook.Sheets[selectedSheetName];
+      if (!sheet) {
+        setMessage(`Sheet ${selectedSheetName} tidak ditemukan.`);
+        return;
+      }
+
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as any[][];
+      if (!rows.length) {
+        setMessage("Sheet kosong, tidak bisa auto mapping.");
+        return;
+      }
+
+      const headerRowIndex = chooseHeaderRow(rows);
+      const headers = (rows[headerRowIndex] || []).map((item, index) => clean(item) || `Column ${index + 1}`);
+      const nonEmptyHeaders = headers.filter((header) => clean(header));
+      const nextMapping: Record<string, string> = {};
+      const confidence: Record<string, string> = {};
+
+      mappingTargets.forEach((target) => {
+        const detected = detectColumn(nonEmptyHeaders, target.aliases);
+        if (detected.header) nextMapping[target.key] = detected.header;
+        confidence[target.key] = detected.confidence;
+      });
+
+      setSheetName(selectedSheetName);
+      setAvailableHeaders(nonEmptyHeaders);
+      setColumnMapping(nextMapping);
+      setAutoMapInfo({
+        sheetName: selectedSheetName,
+        headerRow: headerRowIndex + 1,
+        dataRows: Math.max(rows.length - headerRowIndex - 1, 0),
+        confidence,
+      });
+
+      const requiredOk = mappingTargets.filter((target) => target.required && nextMapping[target.key]).length;
+      const totalOk = Object.values(nextMapping).filter(Boolean).length;
+      setMessage(`Auto mapping selesai. ${requiredOk}/3 kolom wajib dan ${totalOk} total parameter berhasil dikenali.`);
+    } catch (error: any) {
+      setMessage(error?.message || "Auto mapping gagal. Pastikan file Excel valid.");
+    } finally {
+      setMappingLoading(false);
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -96,6 +268,7 @@ function WellnessHistoryImport() {
     if (checkupDate) form.set("checkup_date", checkupDate);
     if (companyId) form.set("company_id", companyId);
     if (createMissing) form.set("create_missing_participants", "1");
+    if (Object.keys(columnMapping).length) form.set("column_mapping", JSON.stringify(columnMapping));
 
     const json = await fetch("/api/wellness/history/import", { method: "POST", body: form })
       .then((res) => res.json())
@@ -128,7 +301,18 @@ function WellnessHistoryImport() {
           <div className="grid gap-4">
             <label className="grid gap-2 text-sm font-black text-slate-700">
               File Excel history MCU
-              <input type="file" accept=".xlsx,.xls,.csv" className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" onChange={(event) => setFile(event.target.files?.[0] || null)} required />
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold"
+                onChange={(event) => {
+                  setFile(event.target.files?.[0] || null);
+                  resetMapping();
+                  setResult(null);
+                  setMessage("File dipilih. Klik Auto Mapping agar sistem membaca kolom baseline/history MCU.");
+                }}
+                required
+              />
             </label>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -163,7 +347,7 @@ function WellnessHistoryImport() {
               </label>
               <label className="grid gap-2 text-sm font-black text-slate-700">
                 Nama Sheet, opsional
-                <input className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" placeholder="Kosongkan untuk sheet pertama" value={sheetName} onChange={(event) => setSheetName(event.target.value)} />
+                <input className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" placeholder="Kosongkan untuk sheet pertama" value={sheetName} onChange={(event) => { setSheetName(event.target.value); resetMapping(); }} />
               </label>
             </div>
 
@@ -172,9 +356,16 @@ function WellnessHistoryImport() {
               <span>Buat peserta baru bila KODE belum ditemukan. Default sebaiknya tidak dicentang supaya history tidak salah masuk peserta.</span>
             </label>
 
-            <button disabled={loading} className="rounded-2xl bg-blue-600 px-4 py-4 text-sm font-black text-white shadow-sm disabled:opacity-60">
-              {loading ? "Mengimport..." : "Import History MCU"}
-            </button>
+            <div className="grid gap-3 md:grid-cols-2">
+              <button type="button" disabled={!file || mappingLoading || loading} onClick={autoMapping} className="rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-black text-white shadow-sm disabled:opacity-60">
+                {mappingLoading ? "Auto mapping..." : "Auto Mapping"}
+              </button>
+              <button disabled={loading} className="rounded-2xl bg-blue-600 px-4 py-4 text-sm font-black text-white shadow-sm disabled:opacity-60">
+                {loading ? "Mengimport..." : "Import History MCU"}
+              </button>
+            </div>
+
+            <div className="rounded-3xl bg-slate-100 px-5 py-4 text-sm font-bold text-slate-700">{message}</div>
           </div>
         </form>
 
@@ -183,10 +374,10 @@ function WellnessHistoryImport() {
             <div className="text-lg font-black text-slate-900">Mekanisme</div>
             <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm font-semibold leading-6 text-slate-600">
               <li>Import peserta dulu di /wellness/import.</li>
-              <li>Upload history MCU di halaman ini.</li>
-              <li>Sistem mencocokkan data via KODE / No Karyawan.</li>
-              <li>History akan muncul sebagai titik grafik peserta.</li>
-              <li>Baseline MCU akan mengisi data before peserta.</li>
+              <li>Upload file history MCU di halaman ini.</li>
+              <li>Klik Auto Mapping untuk membaca kolom Excel.</li>
+              <li>Cek mapping kolom wajib dan parameter klinis.</li>
+              <li>Klik Import History MCU.</li>
             </ol>
           </div>
 
@@ -200,6 +391,68 @@ function WellnessHistoryImport() {
           </div>
         </aside>
       </section>
+
+      {autoMapInfo ? (
+        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="text-xl font-black text-slate-900">Auto Mapping Kolom Baseline / History MCU</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">
+                Sheet: <b>{autoMapInfo.sheetName}</b> · Header row: <b>{autoMapInfo.headerRow}</b> · Data rows: <b>{autoMapInfo.dataRows}</b>
+              </div>
+            </div>
+            <div className="grid gap-2 text-sm font-black md:grid-cols-2">
+              <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-emerald-900">Kolom wajib: {requiredMappedCount}/3</div>
+              <div className="rounded-2xl bg-blue-50 px-4 py-3 text-blue-900">Total mapped: {totalMappedCount}</div>
+            </div>
+          </div>
+
+          <div className="mt-5 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 text-left">Field Sistem</th>
+                  <th className="px-4 py-3 text-left">Kolom Excel Terbaca</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {mappingTargets.map((target) => {
+                  const mapped = columnMapping[target.key] || "";
+                  const confidence = autoMapInfo.confidence?.[target.key] || (mapped ? "Manual" : "Belum ketemu");
+                  const isMissingRequired = target.required && !mapped;
+                  return (
+                    <tr key={target.key}>
+                      <td className="px-4 py-3 font-black text-slate-900">
+                        {target.label} {target.required ? <span className="text-rose-600">*</span> : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700"
+                          value={mapped}
+                          onChange={(event) => setColumnMapping((current) => ({ ...current, [target.key]: event.target.value }))}
+                        >
+                          <option value="">Tidak dipetakan</option>
+                          {availableHeaders.map((header) => <option key={`${target.key}-${header}`} value={header}>{header}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${isMissingRequired ? "bg-rose-50 text-rose-700" : mapped ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                          {isMissingRequired ? "Wajib belum ketemu" : mapped ? confidence : "Opsional kosong"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-900">
+            Mapping ini akan dikirim ke API saat Import History MCU. Jadi kalau nama kolom Excel tidak standar, pilih kolom yang benar secara manual sebelum import.
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="text-xl font-black text-slate-900">Format Kolom yang Didukung</div>
@@ -219,15 +472,16 @@ function WellnessHistoryImport() {
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="rounded-3xl bg-slate-100 px-5 py-4 text-sm font-bold text-slate-700">{message}</div>
         {result ? (
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-black text-emerald-900">Imported: {result.inserted || 0}</div>
             <div className="rounded-2xl bg-blue-50 p-4 text-sm font-black text-blue-900">Baseline updated: {result.updatedBaseline || 0}</div>
             <div className="rounded-2xl bg-purple-50 p-4 text-sm font-black text-purple-900">Peserta baru: {result.createdParticipants || 0}</div>
             <div className="rounded-2xl bg-amber-50 p-4 text-sm font-black text-amber-900">Skipped: {result.skipped || 0}</div>
           </div>
-        ) : null}
+        ) : (
+          <div className="rounded-3xl bg-slate-100 px-5 py-4 text-sm font-bold text-slate-700">Hasil import akan muncul di sini setelah proses selesai.</div>
+        )}
         {result?.missingParticipants?.length ? (
           <div className="mt-4 rounded-3xl border border-amber-100 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
             <div className="font-black">Peserta belum ditemukan, contoh:</div>

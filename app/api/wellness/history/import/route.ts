@@ -10,6 +10,7 @@ import { classifyWellnessRisk } from "@/lib/wellness/riskRules";
 export const runtime = "nodejs";
 
 // WELLNESS_HISTORY_IMPORT_V352_API
+// WELLNESS_HISTORY_AUTO_MAPPING_V353_API
 // Wellness-only import untuk history pemeriksaan MCU / Mini MCU / Final MCU.
 
 function clean(value: any) {
@@ -104,6 +105,33 @@ function findColumn(headers: any[], candidates: string[]) {
 function pick(row: any[], headers: any[], candidates: string[]) {
   const index = findColumn(headers, candidates);
   return index >= 0 ? row[index] : "";
+}
+
+function parseColumnMapping(value: any) {
+  if (!value) return {} as Record<string, string>;
+  try {
+    const parsed = JSON.parse(clean(value));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {} as Record<string, string>;
+    const mapping: Record<string, string> = {};
+    Object.entries(parsed).forEach(([key, header]) => {
+      const cleanKey = clean(key);
+      const cleanHeader = clean(header);
+      if (cleanKey && cleanHeader) mapping[cleanKey] = cleanHeader;
+    });
+    return mapping;
+  } catch {
+    return {} as Record<string, string>;
+  }
+}
+
+function pickMapped(row: any[], headers: any[], mapping: Record<string, string>, key: string, candidates: string[]) {
+  const mappedHeader = clean(mapping[key]);
+  if (mappedHeader) {
+    const mappedNorm = norm(mappedHeader);
+    const index = headers.findIndex((header) => norm(header) === mappedNorm || clean(header) === mappedHeader);
+    if (index >= 0) return row[index];
+  }
+  return pick(row, headers, candidates);
 }
 
 function chooseHeaderRow(rows: any[][]) {
@@ -248,6 +276,7 @@ export async function POST(req: NextRequest) {
   const defaultHistoryType = normalizeHistoryType(form.get("history_type") || "baseline_mcu");
   const defaultVisitLabel = clean(form.get("visit_label")) || historyTypeLabel(defaultHistoryType);
   const createMissingParticipants = clean(form.get("create_missing_participants")) === "1";
+  const columnMapping = parseColumnMapping(form.get("column_mapping"));
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -273,23 +302,24 @@ export async function POST(req: NextRequest) {
 
     for (const [offset, row] of dataRows.entries()) {
       const rowNumber = headerRowIndex + offset + 2;
-      const employeeCode = clean(pick(row, headers, ["KODE", "Kode", "No Karyawan", "Nomor Karyawan", "Employee No", "Employee ID", "NIK", "Nomor Induk"]));
-      const participantName = clean(pick(row, headers, ["Nama Karyawan", "Nama", "Nama Peserta", "Nama Lengkap", "Name"]));
+      const get = (key: string, candidates: string[]) => pickMapped(row, headers, columnMapping, key, candidates);
+      const employeeCode = clean(get("employee_code", ["KODE", "Kode", "No Karyawan", "Nomor Karyawan", "Employee No", "Employee ID", "NIK", "Nomor Induk"]));
+      const participantName = clean(get("participant_name", ["Nama Karyawan", "Nama", "Nama Peserta", "Nama Lengkap", "Name"]));
       if (!employeeCode || !participantName) {
         skipped += 1;
         continue;
       }
 
-      const rawBp = pick(row, headers, ["Tensi Raw", "Tekanan Darah", "Tensi", "BP", "Blood Pressure"]);
+      const rawBp = get("bp_raw", ["Tensi Raw", "Tekanan Darah", "Tensi", "BP", "Blood Pressure"]);
       const bp = parseBloodPressure(rawBp);
-      const heightCm = toNumber(pick(row, headers, ["Tinggi Badan", "TB", "Height", "Height Cm"]));
-      const weightKg = toNumber(pick(row, headers, ["Berat Badan", "BB", "BB Awal", "Berat Badan Awal", "Weight", "Initial Weight"]));
-      const importedBmi = toNumber(pick(row, headers, ["BMI", "IMT", "Body Mass Index"]));
-      const systolic = toNumber(pick(row, headers, ["Sistolik", "Sistol", "SBP", "Systolic", "Systolic BP"])) ?? bp.systolic;
-      const diastolic = toNumber(pick(row, headers, ["Diastolik", "Diastol", "DBP", "Diastolic", "Diastolic BP"])) ?? bp.diastolic;
-      const historyType = normalizeHistoryType(pick(row, headers, ["Jenis History", "History Type", "Visit Type", "Tipe Pemeriksaan"]) || defaultHistoryType);
-      const checkupDate = parseDateValue(pick(row, headers, ["Tanggal Periksa", "Tanggal Pemeriksaan", "Tanggal MCU", "MCU Date", "Exam Date", "Checkup Date"])) || parseDateValue(form.get("checkup_date"));
-      const visitLabel = clean(pick(row, headers, ["Visit Label", "Label Pemeriksaan", "Periode", "Week", "Minggu"])) || defaultVisitLabel;
+      const heightCm = toNumber(get("height_cm", ["Tinggi Badan", "TB", "Height", "Height Cm"]));
+      const weightKg = toNumber(get("weight_kg", ["Berat Badan", "BB", "BB Awal", "Berat Badan Awal", "Weight", "Initial Weight"]));
+      const importedBmi = toNumber(get("bmi", ["BMI", "IMT", "Body Mass Index"]));
+      const systolic = toNumber(get("systolic", ["Sistolik", "Sistol", "SBP", "Systolic", "Systolic BP"])) ?? bp.systolic;
+      const diastolic = toNumber(get("diastolic", ["Diastolik", "Diastol", "DBP", "Diastolic", "Diastolic BP"])) ?? bp.diastolic;
+      const historyType = normalizeHistoryType(get("history_type", ["Jenis History", "History Type", "Visit Type", "Tipe Pemeriksaan"]) || defaultHistoryType);
+      const checkupDate = parseDateValue(get("checkup_date", ["Tanggal Periksa", "Tanggal Pemeriksaan", "Tanggal MCU", "MCU Date", "Exam Date", "Checkup Date"])) || parseDateValue(form.get("checkup_date"));
+      const visitLabel = clean(get("visit_label", ["Visit Label", "Label Pemeriksaan", "Periode", "Week", "Minggu"])) || defaultVisitLabel;
 
       let participant = await findParticipant(supabase, employeeCode, companyId);
       if (!participant && createMissingParticipants) {
@@ -297,14 +327,14 @@ export async function POST(req: NextRequest) {
           participant = await createParticipantFromHistory(supabase, {
             employee_code: employeeCode,
             participant_name: participantName,
-            sex: normalizeGender(pick(row, headers, ["Sex", "Jenis Kelamin", "Gender"])),
+            sex: normalizeGender(get("sex", ["Sex", "Jenis Kelamin", "Gender"])),
             height_cm: heightCm,
             weight_kg: weightKg,
             bmi: importedBmi,
             checkup_date: checkupDate,
             history_type: historyType,
             company_id: companyId,
-            group_name: clean(pick(row, headers, ["Kelompok", "Group", "Nama Grup", "Divisi", "Departemen"])),
+            group_name: clean(get("group_name", ["Kelompok", "Group", "Nama Grup", "Divisi", "Departemen"])),
           });
           createdParticipants += 1;
         } catch (error: any) {
@@ -320,8 +350,8 @@ export async function POST(req: NextRequest) {
       }
 
       const bmi = importedBmi ?? calculateBmi(weightKg, heightCm ?? participant.height_cm);
-      const hba1cPercent = toNumber(pick(row, headers, ["HbA1c %", "HbA1c", "HBA1C", "A1C", "Hb A1c"]));
-      const glucoseValue = toNumber(pick(row, headers, ["Gula Darah", "Glucose", "GDP", "GDS", "Fasting Glucose", "Random Glucose", "Blood Glucose"]));
+      const hba1cPercent = toNumber(get("hba1c_percent", ["HbA1c %", "HbA1c", "HBA1C", "A1C", "Hb A1c"]));
+      const glucoseValue = toNumber(get("glucose_value", ["Gula Darah", "Glucose", "GDP", "GDS", "Fasting Glucose", "Random Glucose", "Blood Glucose"]));
       const risk = classifyWellnessRisk({ hba1c: hba1cPercent, glucose: glucoseValue, bmi, sbp: systolic, dbp: diastolic });
 
       const historyPayload: any = {
@@ -329,35 +359,35 @@ export async function POST(req: NextRequest) {
         company_id: companyId || participant.wellness_company_id || null,
         employee_code: employeeCode,
         participant_name: participantName,
-        lab_no: clean(pick(row, headers, ["NO. LAB", "No Lab", "Nomor Lab", "Lab No"])),
-        sex: normalizeGender(pick(row, headers, ["Sex", "Jenis Kelamin", "Gender"])),
-        department: clean(pick(row, headers, ["Departemen", "Department", "Divisi", "Unit"])),
-        position: clean(pick(row, headers, ["Jabatan", "Position", "Job Title"])),
+        lab_no: clean(get("lab_no", ["NO. LAB", "No Lab", "Nomor Lab", "Lab No"])),
+        sex: normalizeGender(get("sex", ["Sex", "Jenis Kelamin", "Gender"])),
+        department: clean(get("department", ["Departemen", "Department", "Divisi", "Unit"])),
+        position: clean(get("position", ["Jabatan", "Position", "Job Title"])),
         checkup_date: checkupDate,
         history_type: historyType,
         visit_label: visitLabel,
-        risk_cluster: clean(pick(row, headers, ["Nama Grup", "Risk Cluster", "Risk Group", "Kelompok Risiko", "Kategori Risiko"])) || risk.group,
-        risk_level: clean(pick(row, headers, ["Risk Level", "Level Risiko", "Prioritas"])),
-        selection_reason: clean(pick(row, headers, ["Selection Reason", "Alasan Seleksi", "Alasan Masuk Program"])),
-        hba1c_raw: clean(pick(row, headers, ["HbA1c Raw", "HBA1C Raw", "A1C Raw"])),
+        risk_cluster: clean(get("risk_cluster", ["Nama Grup", "Risk Cluster", "Risk Group", "Kelompok Risiko", "Kategori Risiko"])) || risk.group,
+        risk_level: clean(get("risk_level", ["Risk Level", "Level Risiko", "Prioritas"])),
+        selection_reason: clean(get("selection_reason", ["Selection Reason", "Alasan Seleksi", "Alasan Masuk Program"])),
+        hba1c_raw: clean(get("hba1c_raw", ["HbA1c Raw", "HBA1C Raw", "A1C Raw"])),
         hba1c_percent: hba1cPercent,
-        hba1c_flag: toBool(pick(row, headers, ["HbA1c >6.4?", "HbA1c Tinggi", "A1C High"])),
+        hba1c_flag: toBool(get("hba1c_flag", ["HbA1c >6.4?", "HbA1c Tinggi", "A1C High"])),
         bp_raw: clean(rawBp),
         systolic,
         diastolic,
-        bp_flag: toBool(pick(row, headers, ["Tensi >150/100?", "Tekanan Darah Tinggi", "BP High"])),
+        bp_flag: toBool(get("bp_flag", ["Tensi >150/100?", "Tekanan Darah Tinggi", "BP High"])),
         height_cm: heightCm,
         weight_kg: weightKg,
         bmi,
-        bmi_flag: toBool(pick(row, headers, ["BMI >30?", "BMI Tinggi", "Obesity"])),
-        waist_cm: toNumber(pick(row, headers, ["Lingkar Perut", "Waist", "Waist Cm", "Waist Circumference"])),
+        bmi_flag: toBool(get("bmi_flag", ["BMI >30?", "BMI Tinggi", "Obesity"])),
+        waist_cm: toNumber(get("waist_cm", ["Lingkar Perut", "Waist", "Waist Cm", "Waist Circumference"])),
         glucose_value: glucoseValue,
-        criteria_count: toInteger(pick(row, headers, ["Jumlah Kriteria", "Criteria Count", "Jumlah Risk"])),
-        risk_score: toNumber(pick(row, headers, ["Risk Score", "Skor Risiko"])),
-        intervention_focus: clean(pick(row, headers, ["Fokus Intervensi", "Intervention Focus", "Treatment Plan"])),
-        monitoring_plan: clean(pick(row, headers, ["Monitoring Day-by-Day", "Monitoring Plan", "Rencana Monitoring"])),
-        medical_validation_notes: clean(pick(row, headers, ["Catatan Validasi Medis", "Catatan MCU", "Catatan", "Notes", "Remark"])),
-        program_status: clean(pick(row, headers, ["Status Program", "Program Status", "Status"])),
+        criteria_count: toInteger(get("criteria_count", ["Jumlah Kriteria", "Criteria Count", "Jumlah Risk"])),
+        risk_score: toNumber(get("risk_score", ["Risk Score", "Skor Risiko"])),
+        intervention_focus: clean(get("intervention_focus", ["Fokus Intervensi", "Intervention Focus", "Treatment Plan"])),
+        monitoring_plan: clean(get("monitoring_plan", ["Monitoring Day-by-Day", "Monitoring Plan", "Rencana Monitoring"])),
+        medical_validation_notes: clean(get("medical_validation_notes", ["Catatan Validasi Medis", "Catatan MCU", "Catatan", "Notes", "Remark"])),
+        program_status: clean(get("program_status", ["Status Program", "Program Status", "Status"])),
         raw_payload: rowPayload(row, headers),
         created_by: user.id || null,
         updated_at: new Date().toISOString(),
@@ -394,9 +424,10 @@ export async function POST(req: NextRequest) {
       sheetName,
       headerRow: headerRowIndex + 1,
       historyType: defaultHistoryType,
+      mappedColumns: Object.keys(columnMapping).length,
       message: inserted
-        ? "Import history MCU selesai. Data akan muncul di grafik peserta sebagai titik pemeriksaan."
-        : "Tidak ada history MCU yang terimport. Pastikan KODE peserta sudah ada di Import Peserta Wellness.",
+        ? "Import history MCU selesai. Auto mapping sudah dipakai bila tersedia, dan data akan muncul di grafik peserta sebagai titik pemeriksaan."
+        : "Tidak ada history MCU yang terimport. Pastikan KODE peserta sudah ada di Import Peserta Wellness dan mapping kolom sudah benar.",
     });
   } catch (error: any) {
     return fail(error?.message || "Import history MCU gagal. Pastikan sql/wellness_history_v352.sql sudah dijalankan.", 500);
