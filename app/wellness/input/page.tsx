@@ -7,6 +7,7 @@ import AuthGate from "@/components/AuthGate";
 // WELLNESS_DAILY_INPUT_PRO_V360
 // WELLNESS_GOOGLE_SHEET_RESPONSE_V362
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_INPUT_COPY
+// WELLNESS_INLINE_IMAGE_SHEET_V366_INPUT
 
 type TabKey = "nutrition" | "weight" | "activity" | "healthtalk";
 
@@ -63,10 +64,21 @@ function inputClass(extra = "") {
   return `w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${extra}`;
 }
 
-function isPreviewableImageUrl(value: any) {
+function normalizeEvidenceUrl(value: any) {
   const url = clean(value);
+  if (!url) return "";
+  const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/i) || url.match(/[?&]id=([^&]+)/i);
+  if (driveMatch?.[1] && /drive\.google\.com/i.test(url)) {
+    return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+  }
+  return url;
+}
+
+function isPreviewableImageUrl(value: any) {
+  const url = normalizeEvidenceUrl(value);
   if (!url) return false;
   if (url.startsWith("data:image/")) return true;
+  if (/drive\.google\.com\/uc\?/i.test(url)) return true;
   return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(url);
 }
 
@@ -104,17 +116,17 @@ function EvidenceUploadField({
         onChange={(event) => onChange(event.target.value)}
       />
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-800">
-        Upload foto/bukti dilakukan di Google Drive/Jotform/WhatsApp media, lalu tempel link di sini. Aplikasi hanya menyimpan URL dan mengirim baris response ke Google Sheet, bukan menyimpan file gambar di Supabase Storage.
+        Lampirkan bukti sebagai link gambar publik, Google Drive, Jotform, atau WhatsApp media. Aplikasi hanya menyimpan URL dan menampilkan gambar bila link bisa dipreview; file tidak disimpan di Supabase Storage.
       </div>
       {helper ? <div className="text-xs font-bold text-slate-500">{helper}</div> : null}
       {hasValue ? (
         <div className="rounded-3xl border border-slate-200 bg-white p-3">
-          <div className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Preview bukti</div>
+          <div className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Preview gambar bukti</div>
           {isPreviewableImageUrl(value) ? (
-            <img src={value} alt="Preview bukti Wellness" className="max-h-64 w-full rounded-2xl object-contain ring-1 ring-slate-100" />
+            <img src={normalizeEvidenceUrl(value)} alt="Preview gambar bukti Wellness" className="max-h-72 w-full rounded-2xl object-contain ring-1 ring-slate-100" />
           ) : (
             <div className="rounded-2xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600">
-              Link bukti sudah tersimpan. Untuk Google Drive, pastikan akses link minimal “Anyone with the link can view”. Preview gambar langsung hanya muncul untuk URL gambar publik.
+              Link bukti sudah tersimpan. Untuk Google Drive, set akses file menjadi “Anyone with the link can view”. Jika link bukan gambar langsung, dashboard akan menampilkan tombol buka bukti.
             </div>
           )}
         </div>
@@ -159,7 +171,8 @@ export default function WellnessInputPage() {
 
 function WellnessInput() {
   // WELLNESS_GOOGLE_SHEET_RESPONSE_V362
-// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_INPUT_COPY_UI
+// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_INPUT_COPY
+// WELLNESS_INLINE_IMAGE_SHEET_V366_INPUT_UI
   const [participants, setParticipants] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
@@ -270,6 +283,10 @@ function WellnessInput() {
     setLastResult(null);
     setMessage("Menyimpan log Wellness...");
     try {
+      if (activeTab === "healthtalk" && !clean(form.healthtalk_evidence_url)) {
+        setMessage("Lampirkan link gambar bukti healthtalk terlebih dahulu agar gambar bisa muncul di dashboard dan Google Sheet.");
+        return;
+      }
       const json = await fetch("/api/wellness/daily-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -506,11 +523,11 @@ function WellnessInput() {
                 </label>
                 <div className="md:col-span-2">
                   <EvidenceUploadField
-                    label="Bukti kehadiran, opsional"
+                    label="Lampirkan gambar bukti healthtalk"
                     fieldKey="healthtalk_evidence_url"
                     value={form.healthtalk_evidence_url || ""}
-                    placeholder="Tempel link screenshot Zoom/foto absensi atau URL bukti"
-                    helper="Bukti healthtalk hanya disimpan sebagai URL dan tetap masuk status validasi pending."
+                    placeholder="Tempel link gambar bukti healthtalk / screenshot Zoom / foto absensi"
+                    helper="Wajib untuk healthtalk. Aplikasi akan menampilkan gambar langsung bila link Google Drive/URL gambar dapat dipreview."
                     onChange={(value) => setValue("healthtalk_evidence_url", value)}
                   />
                 </div>
@@ -553,7 +570,7 @@ function WellnessInput() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-lg font-black text-slate-950">Catatan</div>
             <div className="mt-4 space-y-3 text-sm font-medium leading-6 text-slate-600">
-              <p>File gambar tidak disimpan di Supabase Storage. Tempel link bukti dari Google Drive, WhatsApp media, Strava, atau folder perusahaan.</p>
+              <p>File gambar tidak disimpan di Supabase Storage. Tempel link gambar dari Google Drive, WhatsApp media, Jotform, Strava, atau folder perusahaan; aplikasi akan mencoba menampilkan preview langsung.</p>
               <p>Jika webhook Google Sheet sudah diatur, setiap submit akan menambah baris response di Google Sheet seperti form response.</p>
             </div>
           </div>

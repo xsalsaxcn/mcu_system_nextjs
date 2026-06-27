@@ -146,7 +146,7 @@ function EvidencePreview({ item }: { item: any }) {
           <img src={previewUrl} alt={item?.title || "Bukti Wellness"} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center px-5 text-center text-xs font-black text-slate-400">
-            Preview tidak tersedia. Buka link bukti untuk melihat file.
+            Preview langsung belum tersedia. Buka bukti bila link bukan gambar publik.
           </div>
         )}
       </div>
@@ -156,7 +156,7 @@ function EvidencePreview({ item }: { item: any }) {
             <div className="text-sm font-black text-slate-900">{item?.title || item?.type || "Bukti Wellness"}</div>
             <div className="mt-1 text-xs font-bold text-slate-400">{item?.date || "-"} · {item?.type || "Evidence"}</div>
           </div>
-          <Badge tone={String(item?.status || "").toLowerCase() === "pending" ? "amber" : "emerald"}>{item?.status || "saved"}</Badge>
+          <Badge tone="emerald">Gambar tersimpan sebagai URL</Badge>
         </div>
         {item?.notes ? <div className="line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{item.notes}</div> : null}
         {url ? <a href={url} target="_blank" rel="noreferrer" className="inline-flex rounded-2xl bg-blue-600 px-4 py-2 text-xs font-black text-white">Buka bukti</a> : null}
@@ -172,7 +172,7 @@ function EvidenceGallery({ items = [] }: { items?: any[] }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-lg font-black text-slate-900">Gallery Bukti / Foto</div>
-          <div className="mt-1 text-xs font-bold text-slate-500">Foto makanan, bukti aktivitas, dan bukti healthtalk. File tetap di URL/Google Drive, aplikasi hanya membaca link.</div>
+          <div className="mt-1 text-xs font-bold text-slate-500">Foto makanan, bukti aktivitas, dan gambar healthtalk. File tetap di URL/Google Drive; aplikasi mencoba menampilkan gambar langsung.</div>
         </div>
         <Badge tone="blue">{evidenceItems.length} bukti</Badge>
       </div>
@@ -353,7 +353,7 @@ function ParticipantChartPanel({ participant }: { participant: any }) {
         <MiniMetric label="Tekanan Darah" before={fmtPair(participant.baseline_sbp, participant.baseline_dbp)} after={fmtPair(participant.sbp, participant.dbp)} delta={participant.sbp_delta} />
         <MiniMetric label="HbA1c" before={participant.baseline_hba1c} after={participant.hba1c} delta={participant.hba1c_delta} suffix="%" />
         <MiniMetric label="Point" before={0} after={participant.total_points || 0} delta={participant.total_points || 0} />
-        <MiniMetric label="Bukti" before={0} after={participant.evidence_count || 0} delta={participant.pending_evidence_count || 0} />
+        <MiniMetric label="Bukti" before={0} after={participant.evidence_count || 0} delta={0} />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -478,7 +478,7 @@ function WellnessDashboard() {
         <StatCard label="Kepatuhan" value={`${summary.compliance_rate || 0}%`} tone="emerald" caption="Upload aktif" />
         <StatCard label="Avg Delta BB" value={fmt(summary.avg_weight_delta_kg, " kg")} tone="blue" caption={`${summary.improved_weight_count || 0} peserta turun BB`} />
         <StatCard label="Total Point" value={summary.total_points || 0} tone="purple" caption="Akumulasi engagement" />
-        <StatCard label="Bukti Pending" value={summary.pending_evidence_count || 0} tone="amber" caption={`${summary.evidence_count || 0} link bukti`} />
+        <StatCard label="Bukti Gambar" value={summary.evidence_count || 0} tone="amber" caption="URL bukti tampil di gallery" />
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">

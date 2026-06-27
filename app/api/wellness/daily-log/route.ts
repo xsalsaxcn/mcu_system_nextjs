@@ -7,6 +7,9 @@ import { calculateBmi, interpretBmi, toNumber } from "@/lib/wellness/bmi";
 import { ensureParticipantAccess, getAllowedWellnessParticipants, todayIso } from "@/app/api/wellness/_utils";
 
 // WELLNESS_DAILY_INPUT_PRO_V360_API
+// WELLNESS_GOOGLE_SHEET_RESPONSE_V362_API
+// WELLNESS_GOOGLE_SHEET_FORM_RESPONSE_V363_API
+// WELLNESS_INLINE_IMAGE_SHEET_V366_API
 
 function cleanText(value: any) {
   return String(value ?? "").trim();
@@ -50,9 +53,158 @@ async function recordPoints({ supabase, participantId, companyId, logDate, creat
     source_id: sourceId || null,
     points,
     description,
-    status: "approved",
+    status: "saved",
     created_by: createdBy,
   }, warnings);
+}
+
+
+function publicParticipantName(participant: any) {
+  return cleanText(participant?.participant_display_name) || cleanText(participant?.name) || `Peserta #${participant?.id || ""}`;
+}
+
+function formatSubmissionDate(date = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const get = (type: string) => parts.find((part) => part.type === type)?.value || "";
+    return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function getClientIp(req: NextRequest) {
+  return cleanText(req.headers.get("x-forwarded-for")?.split(",")?.[0])
+    || cleanText(req.headers.get("x-real-ip"))
+    || cleanText(req.headers.get("cf-connecting-ip"))
+    || "";
+}
+
+function joinNonEmpty(parts: any[], separator = " - ") {
+  return parts.map(cleanText).filter(Boolean).join(separator);
+}
+
+function participantChoiceLabel(participant: any) {
+  const scope = joinNonEmpty([
+    participant?.company_name,
+    participant?.kelompok_name,
+    participant?.group_unit_name,
+  ], " > ");
+  const name = publicParticipantName(participant);
+  const code = cleanText(participant?.code);
+  const risk = cleanText(participant?.risk_cluster || participant?.baseline_risk_group);
+  return joinNonEmpty([
+    scope || risk || "Wellness",
+    name,
+    code ? `KODE ${code}` : "",
+  ], " - ");
+}
+
+function yesNo(value: boolean) {
+  return value ? "Ya" : "Tidak";
+}
+
+function buildGoogleSheetResponse({ body, participant, saved, pointsTotal, user, logDate, logType, req }: any) {
+  // WELLNESS_GOOGLE_SHEET_FORM_RESPONSE_V363_MAPPING
+  const food = saved?.food_log || null;
+  const weight = saved?.weight_log || null;
+  const activity = saved?.activity_log || null;
+  const healthtalk = saved?.healthtalk_log || null;
+  const evidence = saved?.evidence_logs || [];
+  const mealText = cleanText(body?.meal_text || food?.meal_text);
+  const activityDone = !!activity || !!cleanText(body?.activity_type) || !!cleanText(body?.duration_minutes);
+  const activityAchievement = joinNonEmpty([
+    cleanText(body?.activity_notes || activity?.notes),
+    cleanText(body?.distance_km || activity?.distance_km) ? `${cleanText(body?.distance_km || activity?.distance_km)} km` : "",
+    cleanText(body?.activity_evidence_url) ? `Bukti: ${cleanText(body?.activity_evidence_url)}` : "",
+  ], " | ");
+  const participantName = publicParticipantName(participant);
+  const initialWeight = participant?.initial_weight_kg || participant?.baseline_weight_kg || body?.initial_weight_kg || "";
+  const currentWeight = weight?.weight_kg || body?.weight_kg || "";
+
+  return {
+    "Submission Date": formatSubmissionDate(new Date()),
+    "Pilih Nama Anda": participantChoiceLabel(participant),
+    "Nama Peserta": participantName ? String(participantName).toUpperCase() : "",
+    "Waktu Makan": cleanText(body?.meal_time || food?.meal_time),
+    "Add Options": mealText,
+    "Upload Foto Makanan": cleanText(body?.photo_url || food?.photo_url),
+    "Melakukan Workout/Aktifitas Ringan?": yesNo(activityDone),
+    "Jenis Workout/Aktifitas": cleanText(body?.activity_type || activity?.activity_type),
+    "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)": activityAchievement,
+    "Submission IP": getClientIp(req),
+    "Berapa Menit anda melakukan nya ?": activity?.duration_minutes || body?.duration_minutes || "",
+    "Berat badan Awal": initialWeight,
+    "BB anda per hari ini (diisi sekali saja perminggu)": currentWeight,
+    "Helper column BB jangan diubah": currentWeight ? "FIRST" : "",
+    "BB Monitoring terbaru": currentWeight,
+    "Lingkar Perut (cm)": weight?.waist_cm || body?.waist_cm || "",
+    "BMI": weight?.bmi || "",
+    "Catatan Nutrisi": cleanText(body?.food_notes),
+    "Kalori Makanan": food?.total_calories || saved?.calorie_result?.totalCalories || "",
+    "Detected Foods": cleanText(food?.detected_foods || saved?.calorie_result?.detectedFoods?.join(", ")),
+    "Kalori Aktivitas": activity?.calories || body?.activity_calories || "",
+    "Bukti Aktivitas": cleanText(body?.activity_evidence_url),
+    "Healthtalk/Seminar": cleanText(body?.healthtalk_title || healthtalk?.title),
+    "Jenis Healthtalk": cleanText(body?.healthtalk_type || healthtalk?.attendance_type),
+    "Tanggal Healthtalk": cleanText(body?.healthtalk_date || healthtalk?.event_date),
+    "Bukti Healthtalk": cleanText(body?.healthtalk_evidence_url || healthtalk?.evidence_url),
+    "Total Point": pointsTotal || 0,
+    "Company": cleanText(participant?.company_name),
+    "Kelompok": cleanText(participant?.kelompok_name || participant?.old_group_name),
+    "Group Upload": cleanText(participant?.group_unit_name),
+    "Risk Cluster": cleanText(participant?.risk_cluster || participant?.baseline_risk_group),
+    "KODE": cleanText(participant?.code),
+    "Participant ID": participant?.id || "",
+    "Log Date": logDate,
+    "Log Type": logType,
+    "Evidence Count": Array.isArray(evidence) ? evidence.length : 0,
+    "Created By": cleanText(user?.id),
+    "Preview Foto Makanan": cleanText(body?.photo_url || food?.photo_url),
+    "Preview Bukti Aktivitas": cleanText(body?.activity_evidence_url),
+    "Preview Bukti Healthtalk": cleanText(body?.healthtalk_evidence_url || healthtalk?.evidence_url),
+    "Marker": "WELLNESS_INLINE_IMAGE_SHEET_V366",
+  };
+}
+
+async function appendGoogleSheetResponse(row: Record<string, any>, warnings: string[]) {
+  const webhookUrl = cleanText(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+  if (!webhookUrl) {
+    warnings.push("Google Sheet belum disinkronkan: env WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi.");
+    return { synced: false, skipped: true };
+  }
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sheet: process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME || "Form Responses",
+        secret: process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET || "",
+        row,
+      }),
+      cache: "no-store",
+    });
+    const text = await response.text().catch(() => "");
+    if (!response.ok) {
+      warnings.push(`Google Sheet belum tersinkron (${response.status}: ${text.slice(0, 160) || "no response"}).`);
+      return { synced: false, status: response.status, response: text };
+    }
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    return { synced: true, status: response.status, response: json || text };
+  } catch (error: any) {
+    warnings.push(`Google Sheet belum tersinkron (${error?.message || "network error"}).`);
+    return { synced: false, error: error?.message || String(error) };
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -130,7 +282,7 @@ export async function POST(req: NextRequest) {
           title: `Foto makanan ${cleanText(body.meal_time) || ""}`.trim(),
           evidence_url: photoUrl,
           notes: cleanText(body.food_notes) || null,
-          status: "pending",
+          status: "saved",
           created_by: user.id,
         }, warnings);
         if (evidence) evidenceLogs.push(evidence);
@@ -225,7 +377,7 @@ export async function POST(req: NextRequest) {
           title: `Bukti aktivitas ${activityName || "manual"}`,
           evidence_url: activityEvidenceUrl,
           notes: cleanText(body.activity_notes) || null,
-          status: "pending",
+          status: "saved",
           created_by: user.id,
         }, warnings);
         if (evidence) evidenceLogs.push(evidence);
@@ -254,6 +406,7 @@ export async function POST(req: NextRequest) {
       const attendanceType = cleanText(body.healthtalk_type || "Online");
       const healthtalkDate = cleanText(body.healthtalk_date || logDate).slice(0, 10);
       const evidenceUrl = cleanText(body.healthtalk_evidence_url);
+      if (!evidenceUrl) return fail("Lampirkan link gambar bukti healthtalk terlebih dahulu.", 400);
       const { data, error } = await safeInsertSingle(supabase, "wellness_healthtalk_logs", {
         participant_id: participant.id,
         company_id: companyId,
@@ -262,7 +415,7 @@ export async function POST(req: NextRequest) {
         attendance_type: attendanceType,
         evidence_url: evidenceUrl || null,
         notes: cleanText(body.healthtalk_notes) || null,
-        status: "pending",
+        status: "saved",
         created_by: user.id,
       });
       if (error) {
@@ -297,7 +450,7 @@ export async function POST(req: NextRequest) {
             title: `Bukti healthtalk: ${healthtalkTitle}`,
             evidence_url: evidenceUrl,
             notes: cleanText(body.healthtalk_notes) || null,
-            status: "pending",
+            status: "saved",
             created_by: user.id,
           }, warnings);
           if (evidence) evidenceLogs.push(evidence);
@@ -309,7 +462,12 @@ export async function POST(req: NextRequest) {
 
     saved.point_logs = pointLogs;
     saved.evidence_logs = evidenceLogs;
-    return ok({ participant, saved, points_total: pointsTotal, warnings });
+
+    const googleSheetRow = buildGoogleSheetResponse({ body, participant, saved, pointsTotal, user, logDate, logType, req });
+    const googleSheet = await appendGoogleSheetResponse(googleSheetRow, warnings);
+    saved.google_sheet_row = googleSheetRow;
+
+    return ok({ participant, saved, points_total: pointsTotal, google_sheet: googleSheet, warnings });
   } catch (error: any) {
     return fail(error?.message || "Gagal menyimpan log Wellness.", 500);
   }

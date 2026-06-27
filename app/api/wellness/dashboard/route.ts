@@ -10,6 +10,7 @@ import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness
 // Wellness-only: grafik parameter per peserta diambil dari baseline, history MCU, weight logs, food logs, activity logs, dan mini MCU logs.
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
+// WELLNESS_INLINE_IMAGE_SHEET_V366_API_NO_APPROVAL
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -180,7 +181,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       original_url: item.evidence_url || item.url || item.photo_url || url,
       image_preview_url: isImageEvidence(url) ? url : "",
       date: String(item.date || item.log_date || item.event_date || item.created_at || "").slice(0, 10),
-      status: item.status || "pending",
+      status: "saved",
       notes: item.notes || "",
       source_type: item.source_type || item.source || "manual",
     });
@@ -193,7 +194,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       title: row.title,
       evidence_url: row.evidence_url,
       date: row.log_date || row.created_at,
-      status: row.status,
+      status: "saved",
       notes: row.notes,
       source_type: row.source_type,
     });
@@ -230,7 +231,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       title: row.title || "Healthtalk / seminar",
       evidence_url: row.evidence_url,
       date: row.event_date || row.created_at,
-      status: row.status || "pending",
+      status: "saved",
       notes: row.notes,
       source_type: "healthtalk_log",
     });
@@ -291,7 +292,7 @@ function buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRo
       date: row.event_date,
       type: "Healthtalk",
       title: row.title || "Healthtalk / seminar",
-      description: [row.attendance_type || "", row.status || "", row.notes || ""].filter(Boolean).join(" · "),
+      description: [row.attendance_type || "", row.notes || ""].filter(Boolean).join(" · "),
       calories: null,
       evidence_url: normalizeEvidenceUrl(row.evidence_url),
       points: pointMap.get(`healthtalk_log|${row.id}`) || 0,
@@ -511,8 +512,6 @@ export async function GET(req: NextRequest) {
       const evidenceGallery = buildEvidenceGallery({ evidenceRows: evidenceParticipantRows, foodRows, activityRows, healthtalkRows: healthtalkParticipantRows });
       const recentResponses = buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRows: healthtalkParticipantRows, pointRows: pointParticipantRows });
       const totalPoints = Math.round(pointParticipantRows.reduce((sum: number, row: any) => sum + Number(row.points || 0), 0) * 10) / 10;
-      const pendingEvidence = evidenceGallery.filter((item: any) => String(item.status || "").toLowerCase() === "pending").length;
-
       return {
         id: participant.id,
         participant_id: participant.id,
@@ -572,7 +571,6 @@ export async function GET(req: NextRequest) {
         recent_responses: recentResponses,
         total_points: totalPoints,
         evidence_count: evidenceGallery.length,
-        pending_evidence_count: pendingEvidence,
         latest_evidence_date: latestEvidence?.log_date || latestHealthtalk?.event_date || null,
       };
     });
@@ -596,7 +594,6 @@ export async function GET(req: NextRequest) {
         improved_weight_count: rows.filter((row) => Number(row.weight_delta_kg) < 0).length,
         total_points: Math.round(rows.reduce((sum, row) => sum + Number(row.total_points || 0), 0) * 10) / 10,
         evidence_count: rows.reduce((sum, row) => sum + Number(row.evidence_count || 0), 0),
-        pending_evidence_count: rows.reduce((sum, row) => sum + Number(row.pending_evidence_count || 0), 0),
       },
       rows,
     });
