@@ -118,6 +118,21 @@ function WellnessImport() {
 
   return (
     <div className="space-y-6">
+      {/* WELLNESS_NAKES_MENU_BUTTON_V373 */}
+      <div className="rounded-[2rem] border border-blue-100 bg-blue-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-sm font-black uppercase tracking-wide text-blue-700">Menu Wellness</div>
+            <div className="mt-1 text-sm font-semibold text-slate-600">Gunakan Input NAKES untuk pemeriksaan klinis, mini MCU, follow-up, dan evaluasi program.</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a href="/wellness/dashboard" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50">Dashboard</a>
+            <a href="/wellness/input" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50">Input Harian</a>
+            <a href="/wellness/nakes-input" className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700">Input NAKES</a>
+            <a href="/wellness/history-import" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50">Import History MCU</a>
+          </div>
+        </div>
+      </div>
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-fuchsia-600 via-rose-600 to-orange-500 shadow-sm">
         <div className="p-7 text-white">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
