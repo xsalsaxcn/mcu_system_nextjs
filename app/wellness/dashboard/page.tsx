@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 // WELLNESS_PRO_WORKSPACE_V357
+// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364
 
 type Tone = "slate" | "emerald" | "blue" | "amber" | "rose" | "purple" | "indigo";
 
@@ -118,6 +119,112 @@ function MiniMetric({ label, before, after, delta, suffix = "" }: { label: strin
       <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</div>
       <div className="mt-1 text-sm font-black text-slate-900">{fmt(before, suffix)} → {fmt(after, suffix)}</div>
       {delta !== undefined ? <div className={`text-[11px] font-black ${deltaTone(delta)}`}>Δ {fmt(delta, suffix)}</div> : null}
+    </div>
+  );
+}
+
+
+
+function cleanText(value: any) {
+  return String(value ?? "").trim();
+}
+
+function isPreviewableImageUrl(value: any) {
+  const url = cleanText(value);
+  if (!url) return false;
+  if (url.startsWith("data:image/")) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(url) || /drive\.google\.com\/uc\?/i.test(url);
+}
+
+function EvidencePreview({ item }: { item: any }) {
+  const url = cleanText(item?.url || item?.evidence_url);
+  const previewUrl = cleanText(item?.image_preview_url || url);
+  return (
+    <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="aspect-[4/3] bg-slate-100">
+        {isPreviewableImageUrl(previewUrl) ? (
+          <img src={previewUrl} alt={item?.title || "Bukti Wellness"} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center px-5 text-center text-xs font-black text-slate-400">
+            Preview tidak tersedia. Buka link bukti untuk melihat file.
+          </div>
+        )}
+      </div>
+      <div className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-black text-slate-900">{item?.title || item?.type || "Bukti Wellness"}</div>
+            <div className="mt-1 text-xs font-bold text-slate-400">{item?.date || "-"} · {item?.type || "Evidence"}</div>
+          </div>
+          <Badge tone={String(item?.status || "").toLowerCase() === "pending" ? "amber" : "emerald"}>{item?.status || "saved"}</Badge>
+        </div>
+        {item?.notes ? <div className="line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{item.notes}</div> : null}
+        {url ? <a href={url} target="_blank" rel="noreferrer" className="inline-flex rounded-2xl bg-blue-600 px-4 py-2 text-xs font-black text-white">Buka bukti</a> : null}
+      </div>
+    </article>
+  );
+}
+
+function EvidenceGallery({ items = [] }: { items?: any[] }) {
+  const evidenceItems = Array.isArray(items) ? items : [];
+  return (
+    <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-lg font-black text-slate-900">Gallery Bukti / Foto</div>
+          <div className="mt-1 text-xs font-bold text-slate-500">Foto makanan, bukti aktivitas, dan bukti healthtalk. File tetap di URL/Google Drive, aplikasi hanya membaca link.</div>
+        </div>
+        <Badge tone="blue">{evidenceItems.length} bukti</Badge>
+      </div>
+      {evidenceItems.length ? (
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {evidenceItems.slice(0, 9).map((item: any) => <EvidencePreview key={item.key || item.id || item.url} item={item} />)}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">Belum ada link bukti untuk peserta ini.</div>
+      )}
+    </div>
+  );
+}
+
+function RecentResponses({ items = [] }: { items?: any[] }) {
+  const rows = Array.isArray(items) ? items : [];
+  return (
+    <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 p-5">
+        <div className="text-lg font-black text-slate-900">Riwayat Input Harian</div>
+        <div className="mt-1 text-xs font-bold text-slate-500">Tampilan ringkas seperti form response, tetapi tetap berasal dari data aplikasi.</div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[900px] w-full text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3 text-left">Tanggal</th>
+              <th className="px-4 py-3 text-left">Tipe</th>
+              <th className="px-4 py-3 text-left">Isi Response</th>
+              <th className="px-4 py-3 text-left">Kalori</th>
+              <th className="px-4 py-3 text-left">Point</th>
+              <th className="px-4 py-3 text-left">Bukti</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((row: any) => (
+              <tr key={row.id} className="align-top hover:bg-slate-50">
+                <td className="px-4 py-3 font-bold text-slate-700">{row.date || "-"}</td>
+                <td className="px-4 py-3"><Badge tone={row.type === "Nutrisi" ? "amber" : row.type === "Aktivitas" ? "emerald" : row.type === "Healthtalk" ? "purple" : "blue"}>{row.type}</Badge></td>
+                <td className="px-4 py-3">
+                  <div className="font-black text-slate-900">{row.title || "-"}</div>
+                  <div className="mt-1 max-w-xl text-xs font-semibold leading-5 text-slate-500">{row.description || "-"}</div>
+                </td>
+                <td className="px-4 py-3 font-bold text-slate-600">{row.calories ? `${row.calories} kkal` : "-"}</td>
+                <td className="px-4 py-3 font-black text-emerald-700">{Number(row.points || 0) ? `+${row.points}` : "-"}</td>
+                <td className="px-4 py-3">{row.evidence_url ? <a href={row.evidence_url} target="_blank" rel="noreferrer" className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Buka bukti</a> : <span className="text-xs font-bold text-slate-400">-</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length ? <div className="p-8 text-center text-sm font-bold text-slate-400">Belum ada input harian untuk peserta ini.</div> : null}
+      </div>
     </div>
   );
 }
@@ -245,6 +352,8 @@ function ParticipantChartPanel({ participant }: { participant: any }) {
         <MiniMetric label="BMI" before={participant.baseline_bmi} after={participant.bmi} delta={participant.bmi_delta} />
         <MiniMetric label="Tekanan Darah" before={fmtPair(participant.baseline_sbp, participant.baseline_dbp)} after={fmtPair(participant.sbp, participant.dbp)} delta={participant.sbp_delta} />
         <MiniMetric label="HbA1c" before={participant.baseline_hba1c} after={participant.hba1c} delta={participant.hba1c_delta} suffix="%" />
+        <MiniMetric label="Point" before={0} after={participant.total_points || 0} delta={participant.total_points || 0} />
+        <MiniMetric label="Bukti" before={0} after={participant.evidence_count || 0} delta={participant.pending_evidence_count || 0} />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -257,6 +366,12 @@ function ParticipantChartPanel({ participant }: { participant: any }) {
         <TrendChart title="Nutrisi harian" caption="Total kalori dari food log" points={charts.nutrition_calories} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
         <TrendChart title="Workout calories" caption="Kalori terbakar dari activity log" points={charts.activity_calories} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
         <TrendChart title="Workout duration" caption="Total durasi aktivitas per hari" points={charts.workout_minutes} series={[{ key: "value", label: "Durasi", unit: "menit" }]} />
+        <TrendChart title="Point harian" caption="Total point yang tercatat per tanggal" points={charts.points} series={[{ key: "value", label: "Point" }]} />
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <EvidenceGallery items={participant.evidence_gallery || []} />
+        <RecentResponses items={participant.recent_responses || []} />
       </div>
     </section>
   );
@@ -355,13 +470,15 @@ function WellnessDashboard() {
         ))}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         <StatCard label="Peserta" value={summary.total || 0} caption="Total program" />
         <StatCard label="High Risk" value={summary.high_risk || 0} tone="rose" caption="Prioritas follow-up" />
         <StatCard label="Medium Risk" value={summary.medium_risk || 0} tone="amber" caption="Pantau berkala" />
         <StatCard label="Perlu Follow-up" value={summary.need_followup || 0} tone="purple" caption="Alert klinis/program" />
         <StatCard label="Kepatuhan" value={`${summary.compliance_rate || 0}%`} tone="emerald" caption="Upload aktif" />
         <StatCard label="Avg Delta BB" value={fmt(summary.avg_weight_delta_kg, " kg")} tone="blue" caption={`${summary.improved_weight_count || 0} peserta turun BB`} />
+        <StatCard label="Total Point" value={summary.total_points || 0} tone="purple" caption="Akumulasi engagement" />
+        <StatCard label="Bukti Pending" value={summary.pending_evidence_count || 0} tone="amber" caption={`${summary.evidence_count || 0} link bukti`} />
       </section>
 
       <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
@@ -394,7 +511,7 @@ function WellnessDashboard() {
               onChange={(event) => setSelectedParticipantId(event.target.value)}
             >
               {filteredRows.map((row) => (
-                <option key={row.id} value={String(row.id)}>{row.name} {row.code ? `· ${row.code}` : ""}</option>
+                <option key={row.id} value={String(row.id)}>{row.code ? `${row.code} - ` : ""}{row.name} · {row.risk_group_name || row.risk_label || "Monitoring"} · {row.company_name || "-"} &gt; {row.group_name || "-"}</option>
               ))}
             </select>
           </div>

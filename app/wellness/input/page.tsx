@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 // WELLNESS_DAILY_INPUT_PRO_V360
+// WELLNESS_GOOGLE_SHEET_RESPONSE_V362
+// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_INPUT_COPY
 
 type TabKey = "nutrition" | "weight" | "activity" | "healthtalk";
 
@@ -61,6 +63,66 @@ function inputClass(extra = "") {
   return `w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${extra}`;
 }
 
+function isPreviewableImageUrl(value: any) {
+  const url = clean(value);
+  if (!url) return false;
+  if (url.startsWith("data:image/")) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(url);
+}
+
+function EvidenceUploadField({
+  label,
+  value,
+  placeholder,
+  helper,
+  onChange,
+}: {
+  label: string;
+  fieldKey: string;
+  value: string;
+  placeholder: string;
+  helper?: string;
+  uploading?: boolean;
+  onChange: (value: string) => void;
+  onUpload?: (file: File) => void;
+}) {
+  const hasValue = Boolean(clean(value));
+  return (
+    <div className="grid gap-2 text-sm font-bold text-slate-700">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span>{label}</span>
+        {hasValue ? (
+          <a href={value} target="_blank" rel="noreferrer" className="rounded-2xl bg-white px-4 py-2 text-xs font-black text-blue-700 ring-1 ring-blue-100">
+            Buka bukti
+          </a>
+        ) : null}
+      </div>
+      <input
+        className={inputClass()}
+        placeholder={placeholder}
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-800">
+        Upload foto/bukti dilakukan di Google Drive/Jotform/WhatsApp media, lalu tempel link di sini. Aplikasi hanya menyimpan URL dan mengirim baris response ke Google Sheet, bukan menyimpan file gambar di Supabase Storage.
+      </div>
+      {helper ? <div className="text-xs font-bold text-slate-500">{helper}</div> : null}
+      {hasValue ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-3">
+          <div className="mb-2 text-[10px] font-black uppercase tracking-wide text-slate-400">Preview bukti</div>
+          {isPreviewableImageUrl(value) ? (
+            <img src={value} alt="Preview bukti Wellness" className="max-h-64 w-full rounded-2xl object-contain ring-1 ring-slate-100" />
+          ) : (
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600">
+              Link bukti sudah tersimpan. Untuk Google Drive, pastikan akses link minimal “Anyone with the link can view”. Preview gambar langsung hanya muncul untuk URL gambar publik.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function InfoPill({ label, value, tone = "slate" }: { label: string; value: any; tone?: "slate" | "blue" | "emerald" | "amber" | "rose" | "purple" }) {
   const toneClass = {
     slate: "border-slate-200 bg-slate-50 text-slate-700",
@@ -96,6 +158,8 @@ export default function WellnessInputPage() {
 }
 
 function WellnessInput() {
+  // WELLNESS_GOOGLE_SHEET_RESPONSE_V362
+// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_INPUT_COPY_UI
   const [participants, setParticipants] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
@@ -154,6 +218,7 @@ function WellnessInput() {
   function setValue(key: string, value: any) {
     setForm((previous: any) => ({ ...previous, [key]: value }));
   }
+
 
   function payloadForActiveTab() {
     const base: any = {
@@ -244,7 +309,7 @@ function WellnessInput() {
           <div>
             <div className="text-3xl font-black">Input Harian Wellness</div>
             <div className="mt-2 max-w-3xl text-sm font-medium text-rose-50">
-              Input dibuat bertahap seperti form monitoring: nutrisi, berat badan, aktivitas, dan healthtalk. Peserta dipilih dengan KODE, nama, risk cluster, dan scope program yang jelas.
+              Input dibuat bertahap seperti form monitoring: nutrisi, berat badan, aktivitas, dan healthtalk. Hasil input tersimpan untuk dashboard dan dapat dikirim sebagai baris response ke Google Sheet.
             </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -340,10 +405,14 @@ function WellnessInput() {
                   Deskripsi makanan
                   <textarea className={`${inputClass()} min-h-[120px]`} placeholder="Contoh: nasi merah, ayam panggang, telur rebus, sayur pokcay" value={form.meal_text || ""} onChange={(e) => setValue("meal_text", e.target.value)} />
                 </label>
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Link foto makanan / bukti upload, opsional
-                  <input className={inputClass()} placeholder="Tempel link Google Drive, WhatsApp media, atau URL bukti" value={form.photo_url || ""} onChange={(e) => setValue("photo_url", e.target.value)} />
-                </label>
+                <EvidenceUploadField
+                  label="Foto makanan / bukti upload, opsional"
+                  fieldKey="photo_url"
+                  value={form.photo_url || ""}
+                  placeholder="Tempel link Google Drive, Jotform, WhatsApp media, Strava, atau URL gambar"
+                  helper="Aplikasi tidak menyimpan gambar di Supabase. Tempel link bukti; preview akan muncul di dashboard bila link gambar dapat dibaca."
+                  onChange={(value) => setValue("photo_url", value)}
+                />
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   Catatan nutrisi, opsional
                   <input className={inputClass()} placeholder="Contoh: porsi kecil, tanpa gula, makan terlambat" value={form.food_notes || ""} onChange={(e) => setValue("food_notes", e.target.value)} />
@@ -399,10 +468,16 @@ function WellnessInput() {
                   Kalori manual, opsional
                   <input className={inputClass()} type="number" step="1" placeholder="Isi bila ada dari smartwatch" value={form.activity_calories || ""} onChange={(e) => setValue("activity_calories", e.target.value)} />
                 </label>
-                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  Link bukti aktivitas, opsional
-                  <input className={inputClass()} placeholder="Tempel link screenshot Strava/smartwatch/Google Drive" value={form.activity_evidence_url || ""} onChange={(e) => setValue("activity_evidence_url", e.target.value)} />
-                </label>
+                <div className="md:col-span-2">
+                  <EvidenceUploadField
+                    label="Bukti aktivitas, opsional"
+                    fieldKey="activity_evidence_url"
+                    value={form.activity_evidence_url || ""}
+                    placeholder="Tempel link screenshot Strava/smartwatch atau URL bukti"
+                    helper="Bukti aktivitas cukup berupa URL Google Drive/Strava/smartwatch. File tetap di luar Supabase."
+                    onChange={(value) => setValue("activity_evidence_url", value)}
+                  />
+                </div>
                 <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
                   Catatan aktivitas
                   <input className={inputClass()} placeholder="Contoh: jalan pagi sebelum kerja" value={form.activity_notes || ""} onChange={(e) => setValue("activity_notes", e.target.value)} />
@@ -429,10 +504,16 @@ function WellnessInput() {
                   Tanggal healthtalk
                   <input type="date" className={inputClass()} value={form.healthtalk_date || form.log_date || ""} onChange={(e) => setValue("healthtalk_date", e.target.value)} />
                 </label>
-                <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
-                  Link bukti kehadiran, opsional
-                  <input className={inputClass()} placeholder="Tempel link screenshot Zoom/foto absensi/bukti hadir" value={form.healthtalk_evidence_url || ""} onChange={(e) => setValue("healthtalk_evidence_url", e.target.value)} />
-                </label>
+                <div className="md:col-span-2">
+                  <EvidenceUploadField
+                    label="Bukti kehadiran, opsional"
+                    fieldKey="healthtalk_evidence_url"
+                    value={form.healthtalk_evidence_url || ""}
+                    placeholder="Tempel link screenshot Zoom/foto absensi atau URL bukti"
+                    helper="Bukti healthtalk hanya disimpan sebagai URL dan tetap masuk status validasi pending."
+                    onChange={(value) => setValue("healthtalk_evidence_url", value)}
+                  />
+                </div>
                 <label className="grid gap-2 text-sm font-bold text-slate-700 md:col-span-2">
                   Catatan healthtalk
                   <input className={inputClass()} placeholder="Contoh: hadir sampai selesai" value={form.healthtalk_notes || ""} onChange={(e) => setValue("healthtalk_notes", e.target.value)} />
@@ -472,8 +553,8 @@ function WellnessInput() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-lg font-black text-slate-950">Catatan</div>
             <div className="mt-4 space-y-3 text-sm font-medium leading-6 text-slate-600">
-              <p>Upload file asli belum disimpan ke storage. Untuk saat ini tempel link bukti dari Google Drive, WhatsApp media, Strava, atau folder perusahaan.</p>
-              <p>Admin/coach dapat memvalidasi bukti dari tabel evidence/point bila SQL v360 sudah dijalankan.</p>
+              <p>File gambar tidak disimpan di Supabase Storage. Tempel link bukti dari Google Drive, WhatsApp media, Strava, atau folder perusahaan.</p>
+              <p>Jika webhook Google Sheet sudah diatur, setiap submit akan menambah baris response di Google Sheet seperti form response.</p>
             </div>
           </div>
         </aside>

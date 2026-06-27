@@ -9,6 +9,7 @@ import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness
 // WELLNESS_PARTICIPANT_CHARTS_V351_DASHBOARD
 // Wellness-only: grafik parameter per peserta diambil dari baseline, history MCU, weight logs, food logs, activity logs, dan mini MCU logs.
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
+// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -131,6 +132,174 @@ function aggregateDurationByDate(rows: any[] = []) {
     .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Workout harian" }));
 }
 
+
+
+function aggregatePointsByDate(rows: any[] = []) {
+  const map = new Map<string, number>();
+  for (const row of rows || []) {
+    const date = String(row?.log_date || row?.created_at || "").slice(0, 10);
+    if (!date) continue;
+    const value = Number(row?.points || 0);
+    if (!Number.isFinite(value)) continue;
+    map.set(date, (map.get(date) || 0) + value);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Point harian" }));
+}
+
+function isImageEvidence(url: any) {
+  const text = String(url || "").trim();
+  if (!text) return false;
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(text)) return true;
+  if (/drive\.google\.com\/uc\?/i.test(text)) return true;
+  return false;
+}
+
+function normalizeEvidenceUrl(url: any) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  const match = text.match(/drive\.google\.com\/file\/d\/([^/]+)/i) || text.match(/[?&]id=([^&]+)/i);
+  if (match?.[1]) return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+  return text;
+}
+
+function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalkRows }: any) {
+  const items: any[] = [];
+  const add = (item: any) => {
+    const url = normalizeEvidenceUrl(item?.evidence_url || item?.url || item?.photo_url);
+    if (!url) return;
+    const key = `${item.type || item.evidence_type || "evidence"}|${url}|${item.date || item.log_date || item.created_at || ""}`;
+    if (items.some((existing) => existing.key === key || existing.url === url)) return;
+    items.push({
+      key,
+      id: item.id || key,
+      type: item.type || item.evidence_type || "Bukti",
+      title: item.title || "Bukti Wellness",
+      url,
+      original_url: item.evidence_url || item.url || item.photo_url || url,
+      image_preview_url: isImageEvidence(url) ? url : "",
+      date: String(item.date || item.log_date || item.event_date || item.created_at || "").slice(0, 10),
+      status: item.status || "pending",
+      notes: item.notes || "",
+      source_type: item.source_type || item.source || "manual",
+    });
+  };
+
+  for (const row of evidenceRows || []) {
+    add({
+      id: row.id,
+      type: row.evidence_type === "food_photo" ? "Foto makanan" : row.evidence_type === "activity_proof" ? "Bukti aktivitas" : row.evidence_type === "healthtalk_proof" ? "Bukti healthtalk" : row.evidence_type || "Bukti",
+      title: row.title,
+      evidence_url: row.evidence_url,
+      date: row.log_date || row.created_at,
+      status: row.status,
+      notes: row.notes,
+      source_type: row.source_type,
+    });
+  }
+  for (const row of foodRows || []) {
+    add({
+      id: `food-${row.id}`,
+      type: "Foto makanan",
+      title: row.meal_time ? `Foto makanan ${row.meal_time}` : "Foto makanan",
+      evidence_url: row.photo_url,
+      date: row.log_date || row.created_at,
+      status: "saved",
+      notes: row.meal_text,
+      source_type: "food_log",
+    });
+  }
+  for (const row of activityRows || []) {
+    const raw = row.raw_payload || {};
+    add({
+      id: `activity-${row.id}`,
+      type: "Bukti aktivitas",
+      title: row.activity_type ? `Bukti ${row.activity_type}` : "Bukti aktivitas",
+      evidence_url: raw.evidence_url,
+      date: row.log_date || row.created_at,
+      status: "saved",
+      notes: row.notes,
+      source_type: "activity_log",
+    });
+  }
+  for (const row of healthtalkRows || []) {
+    add({
+      id: `healthtalk-${row.id}`,
+      type: "Bukti healthtalk",
+      title: row.title || "Healthtalk / seminar",
+      evidence_url: row.evidence_url,
+      date: row.event_date || row.created_at,
+      status: row.status || "pending",
+      notes: row.notes,
+      source_type: "healthtalk_log",
+    });
+  }
+
+  return items
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, 24);
+}
+
+function buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRows, pointRows }: any) {
+  const pointMap = new Map<string, number>();
+  for (const row of pointRows || []) {
+    const key = `${row.source_type || ""}|${row.source_id || ""}`;
+    pointMap.set(key, (pointMap.get(key) || 0) + Number(row.points || 0));
+  }
+  const items: any[] = [];
+  for (const row of foodRows || []) {
+    items.push({
+      id: `food-${row.id}`,
+      date: row.log_date,
+      type: "Nutrisi",
+      title: row.meal_time || "Input makanan",
+      description: row.meal_text || "-",
+      calories: row.total_calories || null,
+      evidence_url: normalizeEvidenceUrl(row.photo_url),
+      points: pointMap.get(`food_log|${row.id}`) || 0,
+    });
+  }
+  for (const row of weightRows || []) {
+    items.push({
+      id: `weight-${row.id}`,
+      date: row.log_date,
+      type: "BB / Lingkar Perut",
+      title: row.weight_kg ? `${row.weight_kg} kg` : "Input BB",
+      description: [row.waist_cm ? `LP ${row.waist_cm} cm` : "", row.bmi ? `BMI ${row.bmi}` : "", row.notes || ""].filter(Boolean).join(" · "),
+      calories: null,
+      evidence_url: "",
+      points: pointMap.get(`weight_log|${row.id}`) || 0,
+    });
+  }
+  for (const row of activityRows || []) {
+    const raw = row.raw_payload || {};
+    items.push({
+      id: `activity-${row.id}`,
+      date: row.log_date,
+      type: "Aktivitas",
+      title: row.activity_type || "Aktivitas",
+      description: [row.duration_minutes ? `${row.duration_minutes} menit` : "", row.distance_km ? `${row.distance_km} km` : "", row.notes || ""].filter(Boolean).join(" · "),
+      calories: row.calories || null,
+      evidence_url: normalizeEvidenceUrl(raw.evidence_url),
+      points: (pointMap.get(`activity_log|${row.id}`) || 0) + (pointMap.get(`activity_evidence|${row.id}`) || 0),
+    });
+  }
+  for (const row of healthtalkRows || []) {
+    items.push({
+      id: `healthtalk-${row.id}`,
+      date: row.event_date,
+      type: "Healthtalk",
+      title: row.title || "Healthtalk / seminar",
+      description: [row.attendance_type || "", row.status || "", row.notes || ""].filter(Boolean).join(" · "),
+      calories: null,
+      evidence_url: normalizeEvidenceUrl(row.evidence_url),
+      points: pointMap.get(`healthtalk_log|${row.id}`) || 0,
+    });
+  }
+  return items.sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))).slice(0, 18);
+}
+
 function buildParticipantCharts(args: {
   participant: any;
   weightRows: any[];
@@ -138,6 +307,7 @@ function buildParticipantCharts(args: {
   activityRows: any[];
   miniMcuRows: any[];
   historyRows: any[];
+  pointRows?: any[];
   baselineWeight: any;
   baselineBmi: any;
   baselineSbp: any;
@@ -213,6 +383,7 @@ function buildParticipantCharts(args: {
     nutrition_calories: compactChart(aggregateCaloriesByDate(foodRows, "log_date", "total_calories")),
     activity_calories: compactChart(aggregateCaloriesByDate(activityRows, "log_date", "calories")),
     workout_minutes: compactChart(aggregateDurationByDate(activityRows)),
+    points: compactChart(aggregatePointsByDate((args as any).pointRows || [])),
   };
 }
 
@@ -255,7 +426,7 @@ export async function GET(req: NextRequest) {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, historyRows, companies, groupUnits] = await Promise.all([
+    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, historyRows, companies, groupUnits, evidenceRows, pointRows, healthtalkRows] = await Promise.all([
       supabase.from("wellness_weight_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_food_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_activity_logs").select("*").in("participant_id", participantIds),
@@ -264,6 +435,9 @@ export async function GET(req: NextRequest) {
       safeSelect(supabase, "wellness_checkup_history", (query) => query.in("participant_id", participantIds)),
       safeSelect(supabase, "wellness_companies", (query) => query.order("name", { ascending: true })),
       safeSelect(supabase, "wellness_group_units", (query) => query.order("name", { ascending: true })),
+      safeSelect(supabase, "wellness_daily_evidence", (query) => query.in("participant_id", participantIds).order("log_date", { ascending: false })),
+      safeSelect(supabase, "wellness_point_logs", (query) => query.in("participant_id", participantIds).order("log_date", { ascending: true })),
+      safeSelect(supabase, "wellness_healthtalk_logs", (query) => query.in("participant_id", participantIds).order("event_date", { ascending: false })),
     ]);
 
     if (weightRes.error) throw weightRes.error;
@@ -275,6 +449,9 @@ export async function GET(req: NextRequest) {
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
     const historyByParticipant = groupByParticipant(historyRows || []);
+    const evidenceByParticipant = groupByParticipant(evidenceRows || []);
+    const pointsByParticipant = groupByParticipant(pointRows || []);
+    const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
     const groupName = new Map((groupRes.data || []).map((g: any) => [Number(g.id), g.name || "-"]));
     const companyName = new Map((companies || []).map((company: any) => [Number(company.id), company.name || "-"]));
     const groupUnitName = new Map((groupUnits || []).map((unit: any) => [Number(unit.id), unit.name || "-"]));
@@ -285,6 +462,9 @@ export async function GET(req: NextRequest) {
       const activityRows = activitiesByParticipant.get(Number(participant.id)) || [];
       const miniMcuParticipantRows = miniMcuByParticipant.get(Number(participant.id)) || [];
       const historyParticipantRows = historyByParticipant.get(Number(participant.id)) || [];
+      const evidenceParticipantRows = evidenceByParticipant.get(Number(participant.id)) || [];
+      const pointParticipantRows = pointsByParticipant.get(Number(participant.id)) || [];
+      const healthtalkParticipantRows = healthtalkByParticipant.get(Number(participant.id)) || [];
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;
       const latestActivity = latestByDate(activityRows) || null;
@@ -302,7 +482,9 @@ export async function GET(req: NextRequest) {
       const dbp = pickNumber(latestHistory?.diastolic, latestMiniMcu?.dbp, participant.dbp, participant.diastolic_bp, participant.initial_dbp, participant.baseline_dbp, participant.blood_pressure_diastolic);
       const waist = pickNumber(latestHistory?.waist_cm, latestMiniMcu?.waist_cm, participant.waist_cm, participant.lingkar_perut, participant.initial_waist_cm, participant.baseline_waist_cm);
       const risk = classifyWellnessRisk({ hba1c, glucose, bmi, sbp, dbp });
-      const lastUploadDate = latestDate(latestWeight?.log_date, latestFood?.log_date, latestActivity?.log_date, latestMiniMcu?.exam_date, latestHistory?.checkup_date);
+      const latestEvidence = latestByDate(evidenceParticipantRows, "log_date") || null;
+      const latestHealthtalk = latestByDate(healthtalkParticipantRows, "event_date") || null;
+      const lastUploadDate = latestDate(latestWeight?.log_date, latestFood?.log_date, latestActivity?.log_date, latestMiniMcu?.exam_date, latestHistory?.checkup_date, latestEvidence?.log_date, latestHealthtalk?.event_date);
       const compliance = complianceStatus(lastUploadDate);
       const baselineSbp = pickNumber(participant.baseline_sbp, baselineHistory?.systolic, participant.initial_sbp, participant.sbp);
       const baselineDbp = pickNumber(participant.baseline_dbp, baselineHistory?.diastolic, participant.initial_dbp, participant.dbp);
@@ -316,6 +498,7 @@ export async function GET(req: NextRequest) {
         activityRows,
         miniMcuRows: miniMcuParticipantRows,
         historyRows: historyParticipantRows,
+        pointRows: pointParticipantRows,
         baselineWeight,
         baselineBmi,
         baselineSbp,
@@ -324,6 +507,11 @@ export async function GET(req: NextRequest) {
         baselineGlucose,
         baselineWaist,
       });
+
+      const evidenceGallery = buildEvidenceGallery({ evidenceRows: evidenceParticipantRows, foodRows, activityRows, healthtalkRows: healthtalkParticipantRows });
+      const recentResponses = buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRows: healthtalkParticipantRows, pointRows: pointParticipantRows });
+      const totalPoints = Math.round(pointParticipantRows.reduce((sum: number, row: any) => sum + Number(row.points || 0), 0) * 10) / 10;
+      const pendingEvidence = evidenceGallery.filter((item: any) => String(item.status || "").toLowerCase() === "pending").length;
 
       return {
         id: participant.id,
@@ -380,6 +568,12 @@ export async function GET(req: NextRequest) {
         calories_today: sumCalories(foodRows.filter((row) => row.log_date === today)),
         activity_calories_today: sumCalories(activityRows.filter((row) => row.log_date === today)),
         parameter_charts: parameterCharts,
+        evidence_gallery: evidenceGallery,
+        recent_responses: recentResponses,
+        total_points: totalPoints,
+        evidence_count: evidenceGallery.length,
+        pending_evidence_count: pendingEvidence,
+        latest_evidence_date: latestEvidence?.log_date || latestHealthtalk?.event_date || null,
       };
     });
 
@@ -400,6 +594,9 @@ export async function GET(req: NextRequest) {
         total_activity_calories_today: sumCalories(rows.map((row) => ({ calories: row.activity_calories_today }))),
         avg_weight_delta_kg: weightDeltaValues.length ? Math.round((weightDeltaValues.reduce((a, b) => a + b, 0) / weightDeltaValues.length) * 10) / 10 : 0,
         improved_weight_count: rows.filter((row) => Number(row.weight_delta_kg) < 0).length,
+        total_points: Math.round(rows.reduce((sum, row) => sum + Number(row.total_points || 0), 0) * 10) / 10,
+        evidence_count: rows.reduce((sum, row) => sum + Number(row.evidence_count || 0), 0),
+        pending_evidence_count: rows.reduce((sum, row) => sum + Number(row.pending_evidence_count || 0), 0),
       },
       rows,
     });
