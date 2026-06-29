@@ -1,6 +1,6 @@
 "use client";
 
-// WELLNESS_WORKOUT_LOG_RESPONSIVE_V384
+// WELLNESS_WORKOUT_LOG_RESPONSIVE_V385
 // Mobile: card layout, no horizontal slide.
 // Desktop: full table layout.
 
@@ -178,13 +178,7 @@ function sourceBadgeClass(source: string) {
   return "bg-slate-100 text-slate-700 ring-slate-200";
 }
 
-function WorkoutMobileCard({
-  item,
-  index,
-}: {
-  item: ActivityItem;
-  index: number;
-}) {
+function WorkoutMobileCard({ item }: { item: ActivityItem }) {
   const source = getSource(item);
   const badgeClass = sourceBadgeClass(source);
 
@@ -286,11 +280,7 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
     <div className="w-full">
       <div className="space-y-3 md:hidden">
         {rows.map((item, index) => (
-          <WorkoutMobileCard
-            key={`${getExternalId(item)}-${index}`}
-            item={item}
-            index={index}
-          />
+          <WorkoutMobileCard key={`${getExternalId(item)}-${index}`} item={item} />
         ))}
       </div>
 
