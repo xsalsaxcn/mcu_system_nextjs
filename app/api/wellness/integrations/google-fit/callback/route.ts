@@ -1,72 +1,226 @@
-// WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376
-
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { encryptToken, verifySignedState } from "@/lib/wellness/portalAuth";
+import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-export const runtime = "nodejs";
+// WELLNESS_GOOGLE_FIT_CALLBACK_V388
+// Callback Google Fit menyimpan token ke wellness_integrations provider google_fit.
+
+function clean(value: any) {
+  return String(value ?? "").trim();
+}
+
+function appSecret() {
+  return clean(process.env.APP_SECRET);
+}
+
+function signState(payload: string) {
+  return crypto.createHmac("sha256", appSecret()).update(payload).digest("hex");
+}
+
+function portalUrl(req: NextRequest, notice: string) {
+  const url = new URL("/wellness/portal", req.nextUrl.origin);
+  url.searchParams.set("notice", notice);
+  return url;
+}
+
+function decodeState(state: string) {
+  const [encoded, sig] = clean(state).split(".");
+  if (!encoded || !sig) return null;
+
+  const expected = signState(encoded);
+  if (sig !== expected) return null;
+
+  const json = Buffer.from(encoded, "base64url").toString("utf8");
+  const payload = JSON.parse(json);
+
+  const ageMs = Date.now() - Number(payload.ts || 0);
+  if (!Number.isFinite(ageMs) || ageMs > 30 * 60 * 1000) return null;
+
+  return payload;
+}
+
+async function exchangeGoogleToken(req: NextRequest, code: string) {
+  const clientId =
+    clean(process.env.GOOGLE_FIT_CLIENT_ID) ||
+    clean(process.env.GOOGLE_CLIENT_ID);
+
+  const clientSecret =
+    clean(process.env.GOOGLE_FIT_CLIENT_SECRET) ||
+    clean(process.env.GOOGLE_CLIENT_SECRET);
+
+  const callbackUrl = `${req.nextUrl.origin}/api/wellness/integrations/google-fit/callback`;
+
+  if (!clientId || !clientSecret) {
+    throw new Error("GOOGLE_FIT_ENV_MISSING");
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: callbackUrl,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error_description ||
+        data?.error ||
+        "GOOGLE_FIT_TOKEN_EXCHANGE_FAILED"
+    );
+  }
+
+  return data;
+}
+
+async function fetchGoogleProfile(accessToken: string) {
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) return null;
+
+  return data;
+}
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const origin = url.origin;
-  const redirect = new URL("/wellness/portal", origin);
-  const code = url.searchParams.get("code") || "";
-  const state = verifySignedState(url.searchParams.get("state") || "");
-  const error = url.searchParams.get("error") || "";
+  const code = clean(req.nextUrl.searchParams.get("code"));
+  const state = clean(req.nextUrl.searchParams.get("state"));
+  const error = clean(req.nextUrl.searchParams.get("error"));
 
   if (error) {
-    redirect.searchParams.set("notice", `GOOGLE_FIT_${error}`);
-    return NextResponse.redirect(redirect);
-  }
-  if (!code || !state?.participant_id) {
-    redirect.searchParams.set("notice", "GOOGLE_FIT_CALLBACK_INVALID");
-    return NextResponse.redirect(redirect);
+    return NextResponse.redirect(portalUrl(req, `GOOGLE_FIT_DENIED_${error}`));
   }
 
-  try {
-    const clientId = process.env.GOOGLE_FIT_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_FIT_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
-    if (!clientId || !clientSecret) throw new Error("GOOGLE_FIT_CLIENT_ID/GOOGLE_FIT_CLIENT_SECRET belum diisi.");
-
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: `${origin}/api/wellness/integrations/google-fit/callback`,
-      }),
-    });
-    const tokenJson = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(tokenJson?.error_description || tokenJson?.error || "Gagal exchange token Google Fit.");
-
-    const profileRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-      headers: { Authorization: `Bearer ${tokenJson.access_token}` },
-    });
-    const profile = await profileRes.json().catch(() => ({}));
-
-    const supabase = getSupabaseAdmin();
-    const { error: upsertError } = await supabase.from("wellness_integrations").upsert({
-      participant_id: state.participant_id,
-      provider: "google_fit",
-      provider_user_id: String(profile.id || profile.email || ""),
-      access_token_encrypted: encryptToken(tokenJson.access_token),
-      refresh_token_encrypted: encryptToken(tokenJson.refresh_token),
-      expires_at: tokenJson.expires_in ? new Date(Date.now() + Number(tokenJson.expires_in) * 1000).toISOString() : null,
-      scope: tokenJson.scope || "https://www.googleapis.com/auth/fitness.activity.read",
-      is_active: true,
-      connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      raw_profile: profile,
-    }, { onConflict: "participant_id,provider" });
-    if (upsertError) throw upsertError;
-
-    redirect.searchParams.set("notice", "GOOGLE_FIT_CONNECTED");
-    return NextResponse.redirect(redirect);
-  } catch (err: any) {
-    redirect.searchParams.set("notice", err?.message || "GOOGLE_FIT_CALLBACK_ERROR");
-    return NextResponse.redirect(redirect);
+  if (!code || !state) {
+    return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_CALLBACK_INVALID"));
   }
+
+  if (!appSecret()) {
+    return NextResponse.redirect(portalUrl(req, "APP_SECRET_MISSING"));
+  }
+
+  const payload = decodeState(state);
+
+  if (!payload?.participant_id) {
+    return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_STATE_INVALID"));
+  }
+
+  const participantId = Number(payload.participant_id);
+
+  if (!Number.isFinite(participantId) || participantId <= 0) {
+    return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_PARTICIPANT_INVALID"));
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  const sessionParticipant = await getParticipantFromPortalSession(
+    supabase,
+    req
+  ).catch(() => null);
+
+  const { data: existing } = await supabase
+    .from("wellness_integrations")
+    .select("*")
+    .eq("participant_id", participantId)
+    .eq("provider", "google_fit")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const tokenData = await exchangeGoogleToken(req, code).catch((err) => {
+    console.error("GOOGLE_FIT_TOKEN_ERROR", err);
+    return null;
+  });
+
+  if (!tokenData?.access_token) {
+    return NextResponse.redirect(
+      portalUrl(req, "GOOGLE_FIT_TOKEN_EXCHANGE_FAILED")
+    );
+  }
+
+  const refreshToken = clean(tokenData.refresh_token) || clean(existing?.refresh_token);
+
+  if (!refreshToken) {
+    return NextResponse.redirect(
+      portalUrl(req, "GOOGLE_FIT_REFRESH_TOKEN_MISSING")
+    );
+  }
+
+  const profile = await fetchGoogleProfile(tokenData.access_token).catch(() => null);
+
+  const expiresAt = tokenData.expires_in
+    ? new Date(Date.now() + Number(tokenData.expires_in) * 1000).toISOString()
+    : null;
+
+  const providerUserId =
+    clean(profile?.sub) ||
+    clean(profile?.email) ||
+    `participant_${participantId}`;
+
+  await supabase
+    .from("wellness_integrations")
+    .delete()
+    .eq("participant_id", participantId)
+    .eq("provider", "google_fit");
+
+  if (providerUserId) {
+    await supabase
+      .from("wellness_integrations")
+      .delete()
+      .eq("provider", "google_fit")
+      .eq("provider_user_id", providerUserId);
+  }
+
+  const insertPayload: any = {
+    participant_id: participantId,
+    provider: "google_fit",
+    provider_user_id: providerUserId,
+    scope: clean(tokenData.scope),
+    access_token: tokenData.access_token,
+    refresh_token: refreshToken,
+    expires_at: expiresAt,
+    token_type: clean(tokenData.token_type) || "Bearer",
+    is_active: 1,
+    connected_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    raw_payload: {
+      profile,
+      scope: tokenData.scope || null,
+      token_type: tokenData.token_type || null,
+      expires_in: tokenData.expires_in || null,
+    },
+  };
+
+  const { error: insertError } = await supabase
+    .from("wellness_integrations")
+    .insert(insertPayload);
+
+  if (insertError) {
+    console.error("GOOGLE_FIT_INTEGRATION_INSERT_ERROR", insertError);
+
+    return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_SAVE_FAILED"));
+  }
+
+  const url = portalUrl(req, "GOOGLE_FIT_CONNECTED");
+  url.searchParams.set("participant_id", String(participantId));
+
+  if (sessionParticipant?.id && Number(sessionParticipant.id) !== participantId) {
+    url.searchParams.set("session_warning", "DIFFERENT_PORTAL_SESSION");
+  }
+
+  return NextResponse.redirect(url);
 }

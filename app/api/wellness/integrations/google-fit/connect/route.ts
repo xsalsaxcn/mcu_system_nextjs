@@ -1,43 +1,90 @@
-// WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376
-// Google Fit legacy OAuth starter. Google Fit APIs are deprecated in 2026;
-// this remains for existing projects that already have Fit access.
-
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { getParticipantFromPortalSession, signedState } from "@/lib/wellness/portalAuth";
+import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-export const runtime = "nodejs";
+// WELLNESS_GOOGLE_FIT_CONNECT_V388
+// Google Fit connect memakai session portal peserta OTP, bukan session admin.
+
+function clean(value: any) {
+  return String(value ?? "").trim();
+}
+
+function appSecret() {
+  return clean(process.env.APP_SECRET);
+}
+
+function base64url(input: string) {
+  return Buffer.from(input, "utf8").toString("base64url");
+}
+
+function signState(payload: string) {
+  return crypto.createHmac("sha256", appSecret()).update(payload).digest("hex");
+}
+
+function makeState(participant: any) {
+  const payload = JSON.stringify({
+    participant_id: participant.id,
+    code: participant.code || null,
+    provider: "google_fit",
+    ts: Date.now(),
+  });
+
+  const encoded = base64url(payload);
+  const sig = signState(encoded);
+
+  return `${encoded}.${sig}`;
+}
+
+function portalUrl(req: NextRequest, notice?: string) {
+  const url = new URL("/wellness/portal", req.nextUrl.origin);
+  if (notice) url.searchParams.set("notice", notice);
+  return url;
+}
 
 export async function GET(req: NextRequest) {
-  const origin = new URL(req.url).origin;
-  const failBack = new URL("/wellness/portal", origin);
+  const clientId =
+    clean(process.env.GOOGLE_FIT_CLIENT_ID) ||
+    clean(process.env.GOOGLE_CLIENT_ID);
 
-  try {
-    const supabase = getSupabaseAdmin();
-    const participant = await getParticipantFromPortalSession(supabase, req);
-    if (!participant) {
-      failBack.searchParams.set("notice", "OTP_REQUIRED");
-      return NextResponse.redirect(failBack);
-    }
-
-    const clientId = process.env.GOOGLE_FIT_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
-    if (!clientId) {
-      failBack.searchParams.set("notice", "GOOGLE_FIT_CLIENT_ID_NOT_SET");
-      return NextResponse.redirect(failBack);
-    }
-
-    const authorizeUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    authorizeUrl.searchParams.set("client_id", clientId);
-    authorizeUrl.searchParams.set("response_type", "code");
-    authorizeUrl.searchParams.set("redirect_uri", `${origin}/api/wellness/integrations/google-fit/callback`);
-    authorizeUrl.searchParams.set("access_type", "offline");
-    authorizeUrl.searchParams.set("prompt", "consent");
-    authorizeUrl.searchParams.set("scope", "https://www.googleapis.com/auth/fitness.activity.read");
-    authorizeUrl.searchParams.set("state", signedState({ provider: "google_fit", participant_id: participant.id, ts: Date.now() }));
-
-    return NextResponse.redirect(authorizeUrl);
-  } catch (error: any) {
-    failBack.searchParams.set("notice", error?.message || "GOOGLE_FIT_CONNECT_ERROR");
-    return NextResponse.redirect(failBack);
+  if (!clientId) {
+    return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_CLIENT_ID_MISSING"));
   }
+
+  if (!appSecret()) {
+    return NextResponse.redirect(portalUrl(req, "APP_SECRET_MISSING"));
+  }
+
+  const supabase = getSupabaseAdmin();
+  const participant = await getParticipantFromPortalSession(supabase, req);
+
+  if (!participant?.id) {
+    return NextResponse.redirect(portalUrl(req, "PORTAL_SESSION_REQUIRED"));
+  }
+
+  const callbackUrl = `${req.nextUrl.origin}/api/wellness/integrations/google-fit/callback`;
+  const state = makeState(participant);
+
+  const scopes = [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/fitness.activity.read",
+    "https://www.googleapis.com/auth/fitness.location.read",
+  ].join(" ");
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: callbackUrl,
+    response_type: "code",
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: "true",
+    scope: scopes,
+    state,
+  });
+
+  return NextResponse.redirect(
+    `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
+  );
 }
