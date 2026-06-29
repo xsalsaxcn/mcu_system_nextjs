@@ -10,7 +10,7 @@ import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness
 // Wellness-only: grafik parameter per peserta diambil dari baseline, history MCU, weight logs, food logs, activity logs, dan mini MCU logs.
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
-// WELLNESS_INLINE_IMAGE_SHEET_V366_API_NO_APPROVAL
+// WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V377_API
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -73,7 +73,34 @@ function historySource(row: any) {
     mini_mcu_week_4: "Mini MCU Week 4",
     mini_mcu_week_8: "Mini MCU Week 8",
     final_mcu: "Final MCU",
-  }[String(row?.history_type || "")] || "History MCU";
+    baseline_checkup: "Pemeriksaan Awal",
+    periodic_checkup: "Pemeriksaan Berkala",
+    final_evaluation: "Evaluasi Akhir",
+    clinical_follow_up: "Follow-up Klinis",
+    custom_checkup: "Pemeriksaan NAKES",
+  }[String(row?.history_type || "")] || "Input NAKES / History MCU";
+}
+
+function groupByEmployeeCode(rows: any[] = []) {
+  const map = new Map<string, any[]>();
+  for (const row of rows || []) {
+    const code = String(row.employee_code || row.code || row.no_karyawan || "").trim();
+    if (!code) continue;
+    if (!map.has(code)) map.set(code, []);
+    map.get(code)!.push(row);
+  }
+  return map;
+}
+
+function mergeUniqueRows(...lists: any[][]) {
+  const map = new Map<string, any>();
+  for (const list of lists || []) {
+    for (const row of list || []) {
+      const key = row?.id ? `id:${row.id}` : JSON.stringify([row?.employee_code, row?.checkup_date, row?.history_type, row?.visit_label]);
+      map.set(key, row);
+    }
+  }
+  return [...map.values()];
 }
 
 function firstClinicalHistory(rows: any[] = []) {
@@ -119,13 +146,83 @@ function aggregateCaloriesByDate(rows: any[] = [], dateField = "log_date", value
     .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Log harian" }));
 }
 
+function getActivityDate(row: any) {
+  return String(row?.log_date || row?.started_at || row?.start_date_local || row?.raw_payload?.start_date_local || row?.raw_payload?.start_date || row?.created_at || "").slice(0, 10);
+}
+
+function getActivityName(row: any) {
+  return String(row?.activity_name || row?.activity_type || row?.raw_payload?.sport_type || row?.raw_payload?.type || row?.raw_payload?.name || "Aktivitas").trim();
+}
+
+function getActivityDuration(row: any) {
+  const raw = row?.raw_payload || {};
+  return pickNumber(
+    row?.duration_minutes,
+    row?.elapsed_minutes,
+    raw?.duration_minutes,
+    raw?.moving_time ? Number(raw.moving_time) / 60 : null,
+    raw?.elapsed_time ? Number(raw.elapsed_time) / 60 : null
+  );
+}
+
+function getActivityDistance(row: any) {
+  const raw = row?.raw_payload || {};
+  return pickNumber(row?.distance_km, raw?.distance_km, raw?.distance ? Number(raw.distance) / 1000 : null);
+}
+
+function defaultMet(activityName: any) {
+  const name = String(activityName || "").toLowerCase();
+  if (/run|lari|jog/.test(name)) return 7;
+  if (/walk|jalan|brisk/.test(name)) return 3.8;
+  if (/bike|cycling|sepeda/.test(name)) return 6;
+  if (/swim|renang/.test(name)) return 7;
+  if (/badminton/.test(name)) return 5.5;
+  if (/strength|gym|workout|angkat|weight/.test(name)) return 4.5;
+  if (/yoga|stretch/.test(name)) return 2.5;
+  return 4;
+}
+
+function estimateCalories(row: any, participant: any) {
+  const raw = row?.raw_payload || {};
+  const direct = pickNumber(
+    row?.calories,
+    row?.activity_calories,
+    row?.calories_burned,
+    raw?.calories,
+    raw?.activity_calories,
+    raw?.calories_burned,
+    raw?.kilocalories,
+    raw?.active_kilocalories
+  );
+  if (direct !== null) return direct;
+  const duration = getActivityDuration(row);
+  const weight = pickNumber(participant?.current_weight_kg, participant?.initial_weight_kg, participant?.weight_kg, participant?.baseline_weight_kg, 70);
+  if (duration === null || weight === null) return null;
+  const met = pickNumber(row?.met, raw?.met) || defaultMet(getActivityName(row));
+  return Math.round((met * 3.5 * weight / 200 * duration) * 10) / 10;
+}
+
+function aggregateActivityCaloriesByDate(rows: any[] = [], participant: any = {}) {
+  const map = new Map<string, number>();
+  for (const row of rows || []) {
+    const date = getActivityDate(row);
+    if (!date) continue;
+    const value = estimateCalories(row, participant);
+    if (value === null || !Number.isFinite(value)) continue;
+    map.set(date, (map.get(date) || 0) + value);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Workout log" }));
+}
+
 function aggregateDurationByDate(rows: any[] = []) {
   const map = new Map<string, number>();
   for (const row of rows || []) {
-    const date = String(row?.log_date || "").slice(0, 10);
+    const date = getActivityDate(row);
     if (!date) continue;
-    const value = Number(row?.duration_minutes || 0);
-    if (!Number.isFinite(value)) continue;
+    const value = getActivityDuration(row);
+    if (value === null || !Number.isFinite(value)) continue;
     map.set(date, (map.get(date) || 0) + value);
   }
   return [...map.entries()]
@@ -133,7 +230,45 @@ function aggregateDurationByDate(rows: any[] = []) {
     .map(([date, value]) => ({ label: dateLabel(date), date, value: Math.round(value * 10) / 10, source: "Workout harian" }));
 }
 
-
+function buildActivitySummary(rows: any[] = [], participant: any = {}) {
+  const map = new Map<string, any>();
+  for (const row of rows || []) {
+    const date = getActivityDate(row);
+    if (!date) continue;
+    const name = getActivityName(row);
+    const key = `${date}|${name.toLowerCase()}`;
+    const current = map.get(key) || {
+      date,
+      activity_name: name,
+      count: 0,
+      duration_minutes: 0,
+      calories: 0,
+      distance_km: 0,
+      sources: new Set<string>(),
+    };
+    current.count += 1;
+    current.duration_minutes += getActivityDuration(row) || 0;
+    current.calories += estimateCalories(row, participant) || 0;
+    current.distance_km += getActivityDistance(row) || 0;
+    current.sources.add(String(row?.source || row?.raw_payload?.source || "manual"));
+    map.set(key, current);
+  }
+  return [...map.values()]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.activity_name).localeCompare(String(b.activity_name)))
+    .map((item) => ({
+      tanggal: item.date,
+      date: item.date,
+      nama_activities: item.activity_name,
+      activity_name: item.activity_name,
+      jumlah: item.count,
+      count: item.count,
+      duration_minutes: Math.round(item.duration_minutes * 10) / 10,
+      calories: Math.round(item.calories * 10) / 10,
+      distance_km: Math.round(item.distance_km * 100) / 100,
+      source: [...item.sources].join(", "),
+    }))
+    .slice(0, 100);
+}
 
 function aggregatePointsByDate(rows: any[] = []) {
   const map = new Map<string, number>();
@@ -181,7 +316,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       original_url: item.evidence_url || item.url || item.photo_url || url,
       image_preview_url: isImageEvidence(url) ? url : "",
       date: String(item.date || item.log_date || item.event_date || item.created_at || "").slice(0, 10),
-      status: "saved",
+      status: item.status || "pending",
       notes: item.notes || "",
       source_type: item.source_type || item.source || "manual",
     });
@@ -194,7 +329,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       title: row.title,
       evidence_url: row.evidence_url,
       date: row.log_date || row.created_at,
-      status: "saved",
+      status: row.status,
       notes: row.notes,
       source_type: row.source_type,
     });
@@ -231,7 +366,7 @@ function buildEvidenceGallery({ evidenceRows, foodRows, activityRows, healthtalk
       title: row.title || "Healthtalk / seminar",
       evidence_url: row.evidence_url,
       date: row.event_date || row.created_at,
-      status: "saved",
+      status: row.status || "pending",
       notes: row.notes,
       source_type: "healthtalk_log",
     });
@@ -292,7 +427,7 @@ function buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRo
       date: row.event_date,
       type: "Healthtalk",
       title: row.title || "Healthtalk / seminar",
-      description: [row.attendance_type || "", row.notes || ""].filter(Boolean).join(" · "),
+      description: [row.attendance_type || "", row.status || "", row.notes || ""].filter(Boolean).join(" · "),
       calories: null,
       evidence_url: normalizeEvidenceUrl(row.evidence_url),
       points: pointMap.get(`healthtalk_log|${row.id}`) || 0,
@@ -382,7 +517,7 @@ function buildParticipantCharts(args: {
     hba1c: compactChart(hba1cChart),
     glucose: compactChart(glucoseChart),
     nutrition_calories: compactChart(aggregateCaloriesByDate(foodRows, "log_date", "total_calories")),
-    activity_calories: compactChart(aggregateCaloriesByDate(activityRows, "log_date", "calories")),
+    activity_calories: compactChart(aggregateActivityCaloriesByDate(activityRows, participant)),
     workout_minutes: compactChart(aggregateDurationByDate(activityRows)),
     points: compactChart(aggregatePointsByDate((args as any).pointRows || [])),
   };
@@ -450,6 +585,7 @@ export async function GET(req: NextRequest) {
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
     const historyByParticipant = groupByParticipant(historyRows || []);
+    const historyByEmployeeCode = groupByEmployeeCode(historyRows || []);
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
     const pointsByParticipant = groupByParticipant(pointRows || []);
     const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
@@ -462,7 +598,7 @@ export async function GET(req: NextRequest) {
       const foodRows = foodsByParticipant.get(Number(participant.id)) || [];
       const activityRows = activitiesByParticipant.get(Number(participant.id)) || [];
       const miniMcuParticipantRows = miniMcuByParticipant.get(Number(participant.id)) || [];
-      const historyParticipantRows = historyByParticipant.get(Number(participant.id)) || [];
+      const historyParticipantRows = mergeUniqueRows(historyByParticipant.get(Number(participant.id)) || [], historyByEmployeeCode.get(String(participant.code || "").trim()) || []);
       const evidenceParticipantRows = evidenceByParticipant.get(Number(participant.id)) || [];
       const pointParticipantRows = pointsByParticipant.get(Number(participant.id)) || [];
       const healthtalkParticipantRows = healthtalkByParticipant.get(Number(participant.id)) || [];
@@ -511,7 +647,10 @@ export async function GET(req: NextRequest) {
 
       const evidenceGallery = buildEvidenceGallery({ evidenceRows: evidenceParticipantRows, foodRows, activityRows, healthtalkRows: healthtalkParticipantRows });
       const recentResponses = buildRecentResponses({ foodRows, weightRows, activityRows, healthtalkRows: healthtalkParticipantRows, pointRows: pointParticipantRows });
+      const activitySummary = buildActivitySummary(activityRows, { ...participant, current_weight_kg: currentWeight, baseline_weight_kg: baselineWeight });
       const totalPoints = Math.round(pointParticipantRows.reduce((sum: number, row: any) => sum + Number(row.points || 0), 0) * 10) / 10;
+      const pendingEvidence = evidenceGallery.filter((item: any) => String(item.status || "").toLowerCase() === "pending").length;
+
       return {
         id: participant.id,
         participant_id: participant.id,
@@ -565,12 +704,15 @@ export async function GET(req: NextRequest) {
         mini_mcu_logs_count: miniMcuParticipantRows.length,
         history_logs_count: historyParticipantRows.length,
         calories_today: sumCalories(foodRows.filter((row) => row.log_date === today)),
-        activity_calories_today: sumCalories(activityRows.filter((row) => row.log_date === today)),
+        activity_calories_today: Math.round(activityRows.filter((row) => getActivityDate(row) === today).reduce((sum, row) => sum + Number(estimateCalories(row, { ...participant, current_weight_kg: currentWeight, baseline_weight_kg: baselineWeight }) || 0), 0) * 10) / 10,
         parameter_charts: parameterCharts,
         evidence_gallery: evidenceGallery,
         recent_responses: recentResponses,
+        activity_summary: activitySummary,
+        activity_history: activitySummary,
         total_points: totalPoints,
         evidence_count: evidenceGallery.length,
+        pending_evidence_count: pendingEvidence,
         latest_evidence_date: latestEvidence?.log_date || latestHealthtalk?.event_date || null,
       };
     });
@@ -594,6 +736,7 @@ export async function GET(req: NextRequest) {
         improved_weight_count: rows.filter((row) => Number(row.weight_delta_kg) < 0).length,
         total_points: Math.round(rows.reduce((sum, row) => sum + Number(row.total_points || 0), 0) * 10) / 10,
         evidence_count: rows.reduce((sum, row) => sum + Number(row.evidence_count || 0), 0),
+        pending_evidence_count: rows.reduce((sum, row) => sum + Number(row.pending_evidence_count || 0), 0),
       },
       rows,
     });

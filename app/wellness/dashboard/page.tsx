@@ -677,6 +677,56 @@ function TrendChart({
   );
 }
 
+
+// WELLNESS_DASHBOARD_ACTIVITY_SUMMARY_TABLE_V378
+function ActivityLogSummaryTable({ items = [] }: { items?: any[] }) {
+  const rows = items || [];
+  return (
+    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black text-slate-900">Log Activities</h2>
+          <p className="text-xs font-bold text-slate-400">Rekap aktivitas dari input manual, Strava, dan Google Fit.</p>
+        </div>
+        <span className="rounded-full bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">{rows.length} jenis</span>
+      </div>
+
+      {!rows.length ? (
+        <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
+          Belum ada aktivitas tercatat.
+        </div>
+      ) : (
+        <div className="mt-4 overflow-auto rounded-3xl border border-slate-100">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-4 py-3">Tanggal</th>
+                <th className="px-4 py-3">Nama Activities</th>
+                <th className="px-4 py-3">Jumlah</th>
+                <th className="px-4 py-3">Durasi</th>
+                <th className="px-4 py-3">Kalori</th>
+                <th className="px-4 py-3">Sumber</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.slice(0, 40).map((item: any, index: number) => (
+                <tr key={`${item.date || item.tanggal || index}-${item.activity_name || item.nama_activities || index}`} className="bg-white">
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-700">{item.tanggal || item.date || "-"}</td>
+                  <td className="min-w-[180px] px-4 py-3 font-black text-slate-900">{item.nama_activities || item.activity_name || "Aktivitas"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-black text-blue-700">{item.jumlah || item.count || 0}x</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-600">{item.duration_minutes !== undefined && item.duration_minutes !== null ? `${item.duration_minutes} menit` : "-"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-600">{item.calories !== undefined && item.calories !== null ? `${item.calories} kkal` : "-"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-500">{item.source || "manual"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ParticipantChartPanel({ participant }: { participant: any }) {
   const charts =
     participant?.parameter_charts ||
@@ -741,6 +791,8 @@ function ParticipantChartPanel({ participant }: { participant: any }) {
       </div>
 
       <div className="mt-5 grid gap-5">
+        <ActivityLogSummaryTable items={participant.activity_summary || participant.activity_history || []} />
+
         <EvidenceGallery items={participant?.evidence_gallery || participant?.evidence || participant?.daily_evidence || []} />
         <RecentResponses items={participant?.recent_responses || participant?.daily_logs || participant?.responses || []} />
       </div>
