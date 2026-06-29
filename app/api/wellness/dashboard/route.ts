@@ -10,7 +10,7 @@ import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness
 // Wellness-only: grafik parameter per peserta diambil dari baseline, history MCU, weight logs, food logs, activity logs, dan mini MCU logs.
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
-// WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V377_API
+// WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V379_API
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -541,6 +541,7 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseAdmin();
     const participants = await getAllowedWellnessParticipants(supabase, user);
     const participantIds = participants.map((p: any) => Number(p.id)).filter(Boolean);
+    const participantCodes = participants.map((p: any) => String(p.code || p.employee_code || "").trim()).filter(Boolean);
 
     if (!participantIds.length) {
       return ok({
@@ -562,13 +563,14 @@ export async function GET(req: NextRequest) {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, historyRows, companies, groupUnits, evidenceRows, pointRows, healthtalkRows] = await Promise.all([
+    const [weightRes, foodRes, activityRes, groupRes, miniMcuRows, historyRows, historyRowsByCode, companies, groupUnits, evidenceRows, pointRows, healthtalkRows] = await Promise.all([
       supabase.from("wellness_weight_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_food_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_activity_logs").select("*").in("participant_id", participantIds),
       supabase.from("wellness_groups").select("*"),
       safeSelect(supabase, "wellness_mini_mcu_logs", (query) => query.in("participant_id", participantIds)),
-      safeSelect(supabase, "wellness_checkup_history", (query) => query.in("participant_id", participantIds)),
+      safeSelect(supabase, "wellness_checkup_history", (query) => query.in("participant_id", participantIds).order("checkup_date", { ascending: true })),
+      participantCodes.length ? safeSelect(supabase, "wellness_checkup_history", (query) => query.in("employee_code", participantCodes).order("checkup_date", { ascending: true })) : [],
       safeSelect(supabase, "wellness_companies", (query) => query.order("name", { ascending: true })),
       safeSelect(supabase, "wellness_group_units", (query) => query.order("name", { ascending: true })),
       safeSelect(supabase, "wellness_daily_evidence", (query) => query.in("participant_id", participantIds).order("log_date", { ascending: false })),
@@ -584,8 +586,9 @@ export async function GET(req: NextRequest) {
     const foodsByParticipant = groupByParticipant(foodRes.data || []);
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
-    const historyByParticipant = groupByParticipant(historyRows || []);
-    const historyByEmployeeCode = groupByEmployeeCode(historyRows || []);
+    const combinedHistoryRows = mergeUniqueRows(historyRows || [], historyRowsByCode || []);
+    const historyByParticipant = groupByParticipant(combinedHistoryRows);
+    const historyByEmployeeCode = groupByEmployeeCode(combinedHistoryRows);
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
     const pointsByParticipant = groupByParticipant(pointRows || []);
     const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
@@ -629,7 +632,7 @@ export async function GET(req: NextRequest) {
       const baselineGlucose = pickNumber(participant.baseline_glucose, baselineHistory?.glucose_value, participant.initial_glucose, participant.glucose, participant.gula_darah);
       const baselineWaist = pickNumber(participant.baseline_waist_cm, baselineHistory?.waist_cm, participant.initial_waist_cm, participant.waist_cm, participant.lingkar_perut);
       const parameterCharts = buildParticipantCharts({
-        participant,
+        participant: { ...participant, current_weight_kg: currentWeight, baseline_weight_kg: baselineWeight, weight_kg: currentWeight },
         weightRows,
         foodRows,
         activityRows,
