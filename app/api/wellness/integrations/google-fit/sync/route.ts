@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_GOOGLE_FIT_SYNC_V388
-// Sync existing Google Fit daily activity into wellness_activity_logs.
+// WELLNESS_GOOGLE_FIT_SYNC_V389_CHUNKED_30_DAYS
+// Fix: Google Fit aggregate duration too large.
+// Sync dipecah per 30 hari agar tidak ditolak Google Fit API.
 
 type DailyBucket = {
   date: string;
@@ -36,16 +37,12 @@ function round(value: number, digits = 1) {
 
 function valueNumber(value: any) {
   if (!value) return 0;
-
   if (typeof value.intVal !== "undefined") return Number(value.intVal || 0);
   if (typeof value.fpVal !== "undefined") return Number(value.fpVal || 0);
-
   return 0;
 }
 
 function isInactiveActivityCode(code: number) {
-  // Common Google Fit activity codes:
-  // 3 = still, 72 = sleeping, 108 = sleeping.
   return code === 3 || code === 72 || code === 108;
 }
 
@@ -124,10 +121,11 @@ async function getValidAccessToken(supabase: any, integration: any) {
   return clean(refreshed.access_token);
 }
 
-async function fetchGoogleFitAggregate(accessToken: string, days = 180) {
-  const endTimeMillis = Date.now();
-  const startTimeMillis = endTimeMillis - days * 24 * 60 * 60 * 1000;
-
+async function fetchGoogleFitAggregateRange(
+  accessToken: string,
+  startTimeMillis: number,
+  endTimeMillis: number
+) {
   const response = await fetch(
     "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
     {
@@ -158,6 +156,7 @@ async function fetchGoogleFitAggregate(accessToken: string, days = 180) {
     throw new Error(
       data?.error?.message ||
         data?.error_description ||
+        data?.message ||
         "GOOGLE_FIT_AGGREGATE_FAILED"
     );
   }
@@ -167,7 +166,6 @@ async function fetchGoogleFitAggregate(accessToken: string, days = 180) {
 
 function parseGoogleFitBuckets(data: any): DailyBucket[] {
   const buckets = Array.isArray(data?.bucket) ? data.bucket : [];
-
   const rows: DailyBucket[] = [];
 
   for (const bucket of buckets) {
@@ -232,6 +230,61 @@ function parseGoogleFitBuckets(data: any): DailyBucket[] {
   return rows;
 }
 
+function mergeRows(rows: DailyBucket[]) {
+  const map = new Map<string, DailyBucket>();
+
+  for (const row of rows) {
+    const existing = map.get(row.date);
+
+    if (!existing) {
+      map.set(row.date, row);
+      continue;
+    }
+
+    existing.steps += row.steps;
+    existing.calories += row.calories;
+    existing.distanceM += row.distanceM;
+    existing.activeMillis += row.activeMillis;
+    existing.raw = {
+      merged: true,
+      rows: [existing.raw, row.raw],
+    };
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.startMs - a.startMs);
+}
+
+async function fetchGoogleFitAggregateChunked(accessToken: string, days = 30) {
+  const safeDays = Math.min(Math.max(days || 30, 1), 365);
+  const chunkDays = 30;
+
+  const endMs = Date.now();
+  const startMs = endMs - safeDays * 24 * 60 * 60 * 1000;
+
+  let cursorStart = startMs;
+  const allRows: DailyBucket[] = [];
+
+  while (cursorStart < endMs) {
+    const cursorEnd = Math.min(
+      cursorStart + chunkDays * 24 * 60 * 60 * 1000,
+      endMs
+    );
+
+    const aggregate = await fetchGoogleFitAggregateRange(
+      accessToken,
+      cursorStart,
+      cursorEnd
+    );
+
+    const rows = parseGoogleFitBuckets(aggregate);
+    allRows.push(...rows);
+
+    cursorStart = cursorEnd;
+  }
+
+  return mergeRows(allRows);
+}
+
 async function saveDailyActivity(
   supabase: any,
   participantId: number,
@@ -266,6 +319,7 @@ async function saveDailyActivity(
       calories: row.calories,
       distance_m: row.distanceM,
       active_millis: row.activeMillis,
+      synced_at: new Date().toISOString(),
       bucket: row.raw,
     },
   };
@@ -303,14 +357,13 @@ async function saveDailyActivity(
 async function getRequestedDays(req: NextRequest) {
   if (req.method === "GET") {
     const queryDays = num(req.nextUrl.searchParams.get("days"));
-    return Math.min(Math.max(queryDays || 180, 30), 365);
+    return Math.min(Math.max(queryDays || 30, 1), 365);
   }
 
   const body = await req.json().catch(() => ({}));
   const bodyDays = num(body?.days);
 
-  // Minimal 180 hari supaya existing Google Fit lebih mudah ikut tertarik.
-  return Math.min(Math.max(bodyDays || 180, 180), 365);
+  return Math.min(Math.max(bodyDays || 30, 1), 365);
 }
 
 async function handleSync(req: NextRequest) {
@@ -361,8 +414,7 @@ async function handleSync(req: NextRequest) {
   try {
     const days = await getRequestedDays(req);
     const accessToken = await getValidAccessToken(supabase, integration);
-    const aggregate = await fetchGoogleFitAggregate(accessToken, days);
-    const rows = parseGoogleFitBuckets(aggregate);
+    const rows = await fetchGoogleFitAggregateChunked(accessToken, days);
 
     let inserted = 0;
     let updated = 0;
