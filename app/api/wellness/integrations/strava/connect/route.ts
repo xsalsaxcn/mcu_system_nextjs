@@ -1,40 +1,76 @@
-// WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376
-
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
-import { getParticipantFromPortalSession, signedState } from "@/lib/wellness/portalAuth";
+import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-export const runtime = "nodejs";
+// WELLNESS_STRAVA_PORTAL_SESSION_FIX_V382_CONNECT
+// Strava connect harus pakai session portal peserta OTP, bukan session admin/internal.
+
+function appSecret() {
+  return String(process.env.APP_SECRET || "").trim();
+}
+
+function base64url(input: string) {
+  return Buffer.from(input, "utf8").toString("base64url");
+}
+
+function signState(payload: string) {
+  const secret = appSecret();
+  return crypto.createHmac("sha256", secret).update(payload).digest("hex");
+}
+
+function makeState(participant: any) {
+  const payload = JSON.stringify({
+    participant_id: participant.id,
+    code: participant.code || null,
+    ts: Date.now(),
+    scope: "read,activity:read_all",
+  });
+
+  const encoded = base64url(payload);
+  const sig = signState(encoded);
+
+  return `${encoded}.${sig}`;
+}
+
+function portalUrl(req: NextRequest, notice?: string) {
+  const url = new URL("/wellness/portal", req.nextUrl.origin);
+  if (notice) url.searchParams.set("notice", notice);
+  return url;
+}
 
 export async function GET(req: NextRequest) {
-  const origin = new URL(req.url).origin;
-  const failBack = new URL("/wellness/portal", origin);
+  const clientId = String(process.env.STRAVA_CLIENT_ID || "").trim();
+  const secret = appSecret();
 
-  try {
-    const supabase = getSupabaseAdmin();
-    const participant = await getParticipantFromPortalSession(supabase, req);
-    if (!participant) {
-      failBack.searchParams.set("notice", "OTP_REQUIRED");
-      return NextResponse.redirect(failBack);
-    }
-
-    const clientId = process.env.STRAVA_CLIENT_ID || process.env.NEXT_PUBLIC_STRAVA_CLIENT_ID;
-    if (!clientId) {
-      failBack.searchParams.set("notice", "STRAVA_CLIENT_ID_NOT_SET");
-      return NextResponse.redirect(failBack);
-    }
-
-    const authorizeUrl = new URL("https://www.strava.com/oauth/authorize");
-    authorizeUrl.searchParams.set("client_id", clientId);
-    authorizeUrl.searchParams.set("response_type", "code");
-    authorizeUrl.searchParams.set("redirect_uri", `${origin}/api/wellness/integrations/strava/callback`);
-    authorizeUrl.searchParams.set("approval_prompt", "auto");
-    authorizeUrl.searchParams.set("scope", "read,activity:read_all");
-    authorizeUrl.searchParams.set("state", signedState({ provider: "strava", participant_id: participant.id, ts: Date.now() }));
-
-    return NextResponse.redirect(authorizeUrl);
-  } catch (error: any) {
-    failBack.searchParams.set("notice", error?.message || "STRAVA_CONNECT_ERROR");
-    return NextResponse.redirect(failBack);
+  if (!clientId) {
+    return NextResponse.redirect(portalUrl(req, "STRAVA_CLIENT_ID_MISSING"));
   }
+
+  if (!secret) {
+    return NextResponse.redirect(portalUrl(req, "APP_SECRET_MISSING"));
+  }
+
+  const supabase = getSupabaseAdmin();
+  const participant = await getParticipantFromPortalSession(supabase, req);
+
+  if (!participant?.id) {
+    return NextResponse.redirect(portalUrl(req, "PORTAL_SESSION_REQUIRED"));
+  }
+
+  const callbackUrl = `${req.nextUrl.origin}/api/wellness/integrations/strava/callback`;
+  const state = makeState(participant);
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: callbackUrl,
+    response_type: "code",
+    approval_prompt: "force",
+    scope: "read,activity:read_all",
+    state,
+  });
+
+  return NextResponse.redirect(
+    `https://www.strava.com/oauth/authorize?${params.toString()}`
+  );
 }
