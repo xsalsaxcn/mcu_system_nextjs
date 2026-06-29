@@ -1,5 +1,5 @@
 "use client";
-
+import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376_PORTAL
