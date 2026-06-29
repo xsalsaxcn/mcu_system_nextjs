@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_GOOGLE_FIT_SYNC_V389_CHUNKED_30_DAYS
-// Fix: Google Fit aggregate duration too large.
-// Sync dipecah per 30 hari agar tidak ditolak Google Fit API.
+// WELLNESS_GOOGLE_FIT_SYNC_V390_AGGREGATE_AND_SESSIONS
+// Sync Google Fit daily aggregate + workout sessions.
+// Fix: activity yang muncul sebagai record/session di Google Fit ikut masuk log workout.
 
 type DailyBucket = {
   date: string;
@@ -16,6 +16,8 @@ type DailyBucket = {
   activeMillis: number;
   raw: any;
 };
+
+type FitSession = Record<string, any>;
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -44,6 +46,112 @@ function valueNumber(value: any) {
 
 function isInactiveActivityCode(code: number) {
   return code === 3 || code === 72 || code === 108;
+}
+
+function activityNameFromCode(code: any) {
+  const n = Number(code);
+
+  const map: Record<number, string> = {
+    0: "In vehicle",
+    1: "Biking",
+    2: "On foot",
+    3: "Still",
+    7: "Walking",
+    8: "Running",
+    9: "Aerobics",
+    10: "Badminton",
+    11: "Baseball",
+    12: "Basketball",
+    13: "Biathlon",
+    14: "Handbiking",
+    15: "Mountain biking",
+    16: "Road biking",
+    17: "Spinning",
+    18: "Stationary biking",
+    19: "Utility biking",
+    20: "Boxing",
+    21: "Calisthenics",
+    22: "Circuit training",
+    23: "Cricket",
+    24: "Dancing",
+    25: "Elliptical",
+    26: "Fencing",
+    27: "Football",
+    28: "Gardening",
+    29: "Golf",
+    30: "Gymnastics",
+    31: "Handball",
+    32: "Hiking",
+    33: "Hockey",
+    34: "Horseback riding",
+    35: "Housework",
+    36: "Jump rope",
+    37: "Kayaking",
+    38: "Kettlebell training",
+    39: "Kickboxing",
+    40: "Kitesurfing",
+    41: "Martial arts",
+    42: "Meditation",
+    43: "Mixed martial arts",
+    44: "P90X",
+    45: "Paragliding",
+    46: "Pilates",
+    47: "Polo",
+    48: "Racquetball",
+    49: "Rock climbing",
+    50: "Rowing",
+    51: "Rowing machine",
+    52: "Rugby",
+    53: "Jogging",
+    54: "Running on sand",
+    55: "Running treadmill",
+    56: "Sailing",
+    57: "Scuba diving",
+    58: "Skateboarding",
+    59: "Skating",
+    60: "Cross skating",
+    61: "Indoor skating",
+    62: "Inline skating",
+    63: "Skiing",
+    64: "Back-country skiing",
+    65: "Cross-country skiing",
+    66: "Downhill skiing",
+    67: "Kite skiing",
+    68: "Roller skiing",
+    69: "Sledding",
+    70: "Sleeping",
+    71: "Snowboarding",
+    72: "Snowmobile",
+    73: "Snowshoeing",
+    74: "Squash",
+    75: "Stair climbing",
+    76: "Stair-climbing machine",
+    77: "Stand-up paddleboarding",
+    78: "Strength training",
+    79: "Surfing",
+    80: "Swimming",
+    81: "Swimming pool",
+    82: "Swimming open water",
+    83: "Table tennis",
+    84: "Team sports",
+    85: "Tennis",
+    86: "Treadmill",
+    87: "Volleyball",
+    88: "Volleyball beach",
+    89: "Volleyball indoor",
+    90: "Wakeboarding",
+    91: "Walking fitness",
+    92: "Nording walking",
+    93: "Walking treadmill",
+    94: "Waterpolo",
+    95: "Weightlifting",
+    96: "Wheelchair",
+    97: "Windsurfing",
+    98: "Yoga",
+    108: "Sleeping",
+  };
+
+  return map[n] || `Google Fit Activity ${Number.isFinite(n) ? n : ""}`.trim();
 }
 
 async function refreshGoogleToken(integration: any) {
@@ -162,6 +270,36 @@ async function fetchGoogleFitAggregateRange(
   }
 
   return data;
+}
+
+async function fetchGoogleFitSessions(
+  accessToken: string,
+  startTimeMillis: number,
+  endTimeMillis: number
+) {
+  const url = new URL("https://www.googleapis.com/fitness/v1/users/me/sessions");
+  url.searchParams.set("startTime", new Date(startTimeMillis).toISOString());
+  url.searchParams.set("endTime", new Date(endTimeMillis).toISOString());
+  url.searchParams.set("includeDeleted", "false");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ||
+        data?.error_description ||
+        data?.message ||
+        "GOOGLE_FIT_SESSIONS_FAILED"
+    );
+  }
+
+  return Array.isArray(data?.session) ? data.session : [];
 }
 
 function parseGoogleFitBuckets(data: any): DailyBucket[] {
@@ -290,14 +428,14 @@ async function saveDailyActivity(
   participantId: number,
   row: DailyBucket
 ) {
-  const externalId = `google_fit_${participantId}_${row.date}`;
+  const externalId = `google_fit_daily_${participantId}_${row.date}`;
   const distanceKm = row.distanceM > 0 ? round(row.distanceM / 1000, 2) : null;
   const durationMinutes =
     row.activeMillis > 0 ? round(row.activeMillis / 60000, 1) : null;
 
   const activityName =
     row.steps > 0
-      ? `Google Fit - ${new Intl.NumberFormat("id-ID").format(row.steps)} steps`
+      ? `Google Fit Daily - ${new Intl.NumberFormat("id-ID").format(row.steps)} steps`
       : "Google Fit Daily Activity";
 
   const payload: any = {
@@ -314,6 +452,7 @@ async function saveDailyActivity(
     distance_km: distanceKm,
     steps: Math.round(row.steps || 0),
     raw_payload: {
+      kind: "daily_aggregate",
       date: row.date,
       steps: row.steps,
       calories: row.calories,
@@ -321,6 +460,87 @@ async function saveDailyActivity(
       active_millis: row.activeMillis,
       synced_at: new Date().toISOString(),
       bucket: row.raw,
+    },
+  };
+
+  const { data: existing, error: existingError } = await supabase
+    .from("wellness_activity_logs")
+    .select("id")
+    .eq("participant_id", participantId)
+    .eq("source", "google_fit")
+    .eq("external_activity_id", externalId)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+
+  if (existing?.id) {
+    const { error } = await supabase
+      .from("wellness_activity_logs")
+      .update(payload)
+      .eq("id", existing.id);
+
+    if (error) throw error;
+
+    return { updated: true };
+  }
+
+  const { error } = await supabase
+    .from("wellness_activity_logs")
+    .insert(payload);
+
+  if (error) throw error;
+
+  return { inserted: true };
+}
+
+async function saveWorkoutSession(
+  supabase: any,
+  participantId: number,
+  session: FitSession
+) {
+  const sessionId =
+    clean(session?.id) ||
+    clean(session?.name) ||
+    `${clean(session?.startTimeMillis)}_${clean(session?.endTimeMillis)}`;
+
+  if (!sessionId) {
+    return { skipped: true };
+  }
+
+  const startMs = Number(session?.startTimeMillis || 0);
+  const endMs = Number(session?.endTimeMillis || 0);
+
+  if (!startMs || !endMs || endMs <= startMs) {
+    return { skipped: true };
+  }
+
+  const activityType = activityNameFromCode(session?.activityType);
+  const activityName =
+    clean(session?.name) ||
+    clean(session?.description) ||
+    `Google Fit - ${activityType}`;
+
+  const durationMinutes = round((endMs - startMs) / 60000, 1);
+  const date = dateOnlyFromMs(startMs);
+  const externalId = `google_fit_session_${participantId}_${sessionId}`;
+
+  const payload: any = {
+    participant_id: participantId,
+    source: "google_fit",
+    external_activity_id: externalId,
+    provider_activity_id: sessionId,
+    activity_type: activityType,
+    activity_name: activityName,
+    log_date: date,
+    started_at: new Date(startMs).toISOString(),
+    duration_minutes: durationMinutes,
+    calories: null,
+    distance_km: null,
+    steps: null,
+    raw_payload: {
+      kind: "session",
+      session,
+      synced_at: new Date().toISOString(),
     },
   };
 
@@ -414,11 +634,28 @@ async function handleSync(req: NextRequest) {
   try {
     const days = await getRequestedDays(req);
     const accessToken = await getValidAccessToken(supabase, integration);
+
+    const endMs = Date.now();
+    const startMs = endMs - days * 24 * 60 * 60 * 1000;
+
     const rows = await fetchGoogleFitAggregateChunked(accessToken, days);
+    const sessions = await fetchGoogleFitSessions(accessToken, startMs, endMs);
 
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
+
+    for (const session of sessions) {
+      const result = await saveWorkoutSession(
+        supabase,
+        Number(participant.id),
+        session
+      );
+
+      if (result.inserted) inserted += 1;
+      else if (result.updated) updated += 1;
+      else skipped += 1;
+    }
 
     for (const row of rows) {
       const result = await saveDailyActivity(
@@ -445,12 +682,14 @@ async function handleSync(req: NextRequest) {
       source: "google_fit",
       participant_id: participant.id,
       days,
-      fetched: rows.length,
+      fetched_sessions: sessions.length,
+      fetched_daily: rows.length,
+      fetched: sessions.length + rows.length,
       inserted,
       updated,
       skipped,
       message:
-        rows.length > 0
+        sessions.length + rows.length > 0
           ? "Sync Google Fit berhasil."
           : "Sync berhasil, tetapi belum ada activity Google Fit yang bisa ditarik.",
     });
