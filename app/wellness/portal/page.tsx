@@ -375,13 +375,13 @@ export default function WellnessParticipantPortalPage() {
     setSyncing("");
   }
 
-  async function saveNutrition() {
+    async function saveNutrition() {
     if (!clean(nutritionForm.food_name)) {
       setMessage("Nama makanan wajib diisi.");
       return;
     }
 
-    setMessage("Menyimpan nutrisi harian dan menghitung kalori dari master...");
+    setMessage("Menyimpan nutrisi ke Google Sheet...");
 
     const body = new FormData();
     body.append("log_date", nutritionForm.log_date);
@@ -389,7 +389,10 @@ export default function WellnessParticipantPortalPage() {
     body.append("food_name", nutritionForm.food_name);
     body.append("portion", nutritionForm.portion);
     body.append("notes", nutritionForm.notes);
-    if (nutritionPhoto) body.append("photo", nutritionPhoto);
+
+    if (nutritionPhoto) {
+      body.append("photo", nutritionPhoto);
+    }
 
     const result = await fetch("/api/wellness/participant/nutrition", {
       method: "POST",
@@ -402,19 +405,25 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      setMessage(result.message || "Nutrisi harian berhasil disimpan.");
+      setMessage(result.message || "Nutrisi harian berhasil masuk Google Sheet.");
+
+      if (result.log) {
+        setNutritionLogs((previous) => [result.log, ...previous]);
+      }
+
       setNutritionForm((previous) => ({
         ...previous,
         food_name: "",
         portion: "",
         notes: "",
       }));
+
       setNutritionPhoto(null);
-      await Promise.all([loadNutrition(), loadHealthtalk()]);
       setActiveTab("home");
-    } else {
-      setMessage(result.message || "Gagal menyimpan nutrisi.");
+      return;
     }
+
+    setMessage(result.message || result.detail || "Gagal menyimpan nutrisi.");
   }
 
   async function saveWorkout() {
