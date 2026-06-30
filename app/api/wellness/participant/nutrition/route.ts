@@ -1,7 +1,12 @@
-// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V401
+// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
 // Nutrition submission is stored ONLY in existing Google Sheet + Google Drive.
-// Supabase is used only for participant session and master calorie lookup.
-// No insert into wellness_food_logs.
+// V402:
+// - support comma-separated foods
+// - each food item is matched to wellness_food_calories
+// - total calories = sum of all matched items
+// - Detected Foods contains item-by-item breakdown
+// - Supabase is used only for participant session and master calorie lookup.
+// - No insert into wellness_food_logs.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -50,6 +55,13 @@ function splitAliases(value: any) {
   return clean(value)
     .split(/[;,|]/g)
     .map((item) => normalizeText(item))
+    .filter(Boolean);
+}
+
+function splitFoodItems(value: any) {
+  return clean(value)
+    .split(/[,;\n]+/g)
+    .map((item) => clean(item))
     .filter(Boolean);
 }
 
@@ -217,14 +229,11 @@ async function uploadNutritionPhoto(params: {
     fieldKey: "food_photo",
     logDate: params.logDate,
 
-    marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V401",
+    marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
   });
 }
 
-async function findFoodCalories(supabase: any, foodName: string) {
-  const keyword = normalizeText(foodName);
-  if (!keyword) return null;
-
+async function loadFoodMaster(supabase: any) {
   const { data, error } = await supabase
     .from("wellness_food_calories")
     .select("id,food_name,calories,category,aliases")
@@ -233,7 +242,12 @@ async function findFoodCalories(supabase: any, foodName: string) {
 
   if (error) throw error;
 
-  const foods = Array.isArray(data) ? data : [];
+  return Array.isArray(data) ? data : [];
+}
+
+function matchOneFoodFromMaster(foods: any[], foodName: string) {
+  const keyword = normalizeText(foodName);
+  if (!keyword) return null;
 
   let best: any = null;
   let bestScore = 0;
@@ -264,12 +278,90 @@ async function findFoodCalories(supabase: any, foodName: string) {
   if (!best) return null;
 
   return {
+    input_name: foodName,
     id: best.id,
     food_name: best.food_name,
     calories: toNumberOrNull(best.calories),
     category: best.category || null,
     aliases: best.aliases || null,
     match_score: bestScore,
+  };
+}
+
+async function calculateMultiFoodCalories(supabase: any, foodName: string) {
+  const foodItems = splitFoodItems(foodName);
+  const items = foodItems.length ? foodItems : [clean(foodName)];
+
+  const foods = await loadFoodMaster(supabase);
+
+  const breakdown = items.map((item) => {
+    const matched = matchOneFoodFromMaster(foods, item);
+
+    if (!matched) {
+      return {
+        input_name: item,
+        matched: false,
+        matched_name: null,
+        calories: null,
+        reference_id: null,
+        category: null,
+        status: "not_found_master",
+      };
+    }
+
+    return {
+      input_name: item,
+      matched: true,
+      matched_name: matched.food_name,
+      calories: matched.calories,
+      reference_id: matched.id,
+      category: matched.category,
+      status: "matched_master",
+    };
+  });
+
+  let totalCalories = 0;
+  let matchedCount = 0;
+  let unmatchedCount = 0;
+
+  for (const item of breakdown) {
+    if (item.matched && Number.isFinite(Number(item.calories))) {
+      totalCalories += Number(item.calories);
+      matchedCount += 1;
+    } else {
+      unmatchedCount += 1;
+    }
+  }
+
+  const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+  const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+  const noneMatched = matchedCount === 0;
+
+  const detectedFoodsText = breakdown
+    .map((item) => {
+      if (item.matched) {
+        return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+      }
+
+      return `${item.input_name}: belum match`;
+    })
+    .join(" | ");
+
+  return {
+    original_food_name: clean(foodName),
+    items,
+    breakdown,
+    total_calories: matchedCount > 0 ? totalCalories : null,
+    matched_count: matchedCount,
+    unmatched_count: unmatchedCount,
+    calorie_match_status: allMatched
+      ? "matched_master"
+      : partiallyMatched
+        ? "partial_match_master"
+        : noneMatched
+          ? "not_found_master"
+          : "not_found_master",
+    detected_foods_text: detectedFoodsText,
   };
 }
 
@@ -281,8 +373,7 @@ function buildSheetRow(params: {
   foodName: string;
   portion: string | null;
   notes: string | null;
-  calories: number | null;
-  matchedFood: any;
+  calorieResult: any;
   photoResult: any;
 }) {
   const participant = params.participant || {};
@@ -304,6 +395,12 @@ function buildSheetRow(params: {
         params.body.company ||
         params.body.company_name
     ) || "";
+
+  const calories = params.calorieResult?.total_calories ?? "";
+  const detectedFoods =
+    params.calorieResult?.detected_foods_text ||
+    params.calorieResult?.original_food_name ||
+    params.foodName;
 
   return {
     "Submission Date": new Date().toISOString(),
@@ -330,8 +427,8 @@ function buildSheetRow(params: {
     "BMI": participant.bmi || "",
 
     "Catatan Nutrisi": params.notes || "",
-    "Kalori Makanan": params.calories ?? "",
-    "Detected Foods": params.matchedFood?.food_name || params.foodName,
+    "Kalori Makanan": calories,
+    "Detected Foods": detectedFoods,
 
     "Kalori Aktivitas": "",
     "Bukti Aktivitas": "",
@@ -355,7 +452,7 @@ function buildSheetRow(params: {
     "Log Type": "nutrition",
     "Evidence Count": driveUrl ? 1 : 0,
     "Created By": "participant_portal",
-    "Marker": "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V401",
+    "Marker": "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
   };
 }
 
@@ -425,9 +522,7 @@ export async function POST(req: NextRequest) {
           body?.company_name
       ) || "Tanpa Perusahaan";
 
-    const matchedFood = await findFoodCalories(supabase, foodName);
-    const calories = matchedFood?.calories ?? null;
-    const calorieMatchStatus = matchedFood ? "matched_master" : "not_found_master";
+    const calorieResult = await calculateMultiFoodCalories(supabase, foodName);
 
     const photoResult = await uploadNutritionPhoto({
       photo,
@@ -444,15 +539,14 @@ export async function POST(req: NextRequest) {
       foodName,
       portion,
       notes,
-      calories,
-      matchedFood,
+      calorieResult,
       photoResult,
     });
 
     const sheetResult = await postToWebhook({
       sheet: getSheetName(),
       row: sheetRow,
-      marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V401",
+      marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
     });
 
     const returnedLog = {
@@ -462,7 +556,7 @@ export async function POST(req: NextRequest) {
       meal_type: mealType,
       food_name: foodName,
       portion,
-      calories,
+      calories: calorieResult.total_calories,
       protein_g: null,
       carbs_g: null,
       fat_g: null,
@@ -474,30 +568,37 @@ export async function POST(req: NextRequest) {
         photoResult?.publicUrl ||
         photoResult?.driveUrl ||
         null,
-      calorie_source: matchedFood ? "wellness_food_calories" : "not_found",
-      calorie_match_status: calorieMatchStatus,
+      calorie_source: "wellness_food_calories",
+      calorie_match_status: calorieResult.calorie_match_status,
+      detected_foods_text: calorieResult.detected_foods_text,
+      food_breakdown: calorieResult.breakdown,
       google_sheet_row_number: sheetResult?.rowNumber || null,
       google_drive: photoResult || null,
       google_sheet: sheetResult || null,
     };
 
+    const total = calorieResult.total_calories;
+    const breakdownText = calorieResult.detected_foods_text;
+
     return NextResponse.json({
       ok: true,
       mode: "google_sheet_only",
-      message: matchedFood
-        ? `Berhasil masuk Google Sheet · ${calories} kalori · Terdeteksi: ${matchedFood.food_name} · Point +5`
-        : "Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Point +5",
+      message:
+        total !== null
+          ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+          : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
       log: returnedLog,
-      calories,
+      calories: total,
       point: 5,
-      calorie_match_status: calorieMatchStatus,
-      matched_food: matchedFood,
+      calorie_match_status: calorieResult.calorie_match_status,
+      detected_foods_text: calorieResult.detected_foods_text,
+      food_breakdown: calorieResult.breakdown,
       google_drive: photoResult,
       google_sheet: sheetResult,
     });
   } catch (error: any) {
     console.error(
-      "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V401_ERROR",
+      "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
       error
     );
 
