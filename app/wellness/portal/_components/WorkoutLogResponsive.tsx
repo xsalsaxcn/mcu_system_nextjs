@@ -1,8 +1,9 @@
 "use client";
 
-// WELLNESS_WORKOUT_LOG_RESPONSIVE_V385
+// WELLNESS_WORKOUT_LOG_RESPONSIVE_V393
 // Mobile: card layout, no horizontal slide.
 // Desktop: full table layout.
+// Supports manual, Strava, and Google Fit fields including steps.
 
 type ActivityItem = Record<string, any>;
 
@@ -155,6 +156,14 @@ function getCalories(item: ActivityItem) {
   );
 }
 
+function getSteps(item: ActivityItem) {
+  return (
+    toNumber(item.steps) ??
+    toNumber(item.total_steps) ??
+    null
+  );
+}
+
 function getExternalId(item: ActivityItem) {
   return (
     clean(item.external_activity_id) ||
@@ -185,6 +194,7 @@ function WorkoutMobileCard({ item }: { item: ActivityItem }) {
   const duration = getDurationMinutes(item);
   const distance = getDistanceKm(item);
   const calories = getCalories(item);
+  const steps = getSteps(item);
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -244,14 +254,23 @@ function WorkoutMobileCard({ item }: { item: ActivityItem }) {
               : "-"}
           </div>
         </div>
-      </div>
 
-      <div className="mt-3 rounded-2xl bg-slate-50 p-3">
-        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-          Waktu Aktivitas
+        <div className="rounded-2xl bg-slate-50 p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            Steps
+          </div>
+          <div className="mt-1 text-sm font-black text-slate-900">
+            {steps !== null ? formatNumber(Math.round(steps), 0) : "-"}
+          </div>
         </div>
-        <div className="mt-1 text-xs font-bold text-slate-700">
-          {formatDateTime(getStartedAt(item))}
+
+        <div className="rounded-2xl bg-slate-50 p-3">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            Waktu
+          </div>
+          <div className="mt-1 text-xs font-bold text-slate-700">
+            {formatDateTime(getStartedAt(item))}
+          </div>
         </div>
       </div>
     </div>
@@ -269,8 +288,8 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
         </div>
 
         <div className="mt-1 text-xs font-semibold text-slate-500">
-          Data akan muncul setelah peserta mengisi aktivitas manual atau melakukan
-          Sync Strava.
+          Data akan muncul setelah peserta input workout manual atau melakukan
+          Sync Strava/Google Fit.
         </div>
       </div>
     );
@@ -285,7 +304,7 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
       </div>
 
       <div className="hidden overflow-x-auto rounded-3xl border border-slate-200 bg-white md:block">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[960px] text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
               <th className="px-4 py-3">Tanggal</th>
@@ -294,6 +313,7 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
               <th className="px-4 py-3">Durasi</th>
               <th className="px-4 py-3">Jarak</th>
               <th className="px-4 py-3">Kalori</th>
+              <th className="px-4 py-3">Steps</th>
               <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Waktu Aktivitas</th>
             </tr>
@@ -305,6 +325,7 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
               const duration = getDurationMinutes(item);
               const distance = getDistanceKm(item);
               const calories = getCalories(item);
+              const steps = getSteps(item);
 
               return (
                 <tr
@@ -341,6 +362,10 @@ export default function WorkoutLogResponsive({ items = [] }: Props) {
                     {calories !== null
                       ? `${formatNumber(Math.round(calories), 0)} kkal`
                       : "-"}
+                  </td>
+
+                  <td className="px-4 py-3 font-semibold text-slate-700">
+                    {steps !== null ? formatNumber(Math.round(steps), 0) : "-"}
                   </td>
 
                   <td className="px-4 py-3">
