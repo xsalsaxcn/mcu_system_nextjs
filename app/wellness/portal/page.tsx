@@ -4,14 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
-// WELLNESS_PARTICIPANT_PORTAL_V393
-// Participant-only portal UX:
-// - employee code + username + email + phone + OTP flow
-// - participant-only hamburger menu
-// - daily nutrition input
-// - manual workout input
-// - Strava + Google Fit sync
-// - mobile-first workout history cards
+// WELLNESS_PARTICIPANT_AUTO_CALORIE_CHART_V395
+// Participant-only portal UX.
+// V395 scope:
+// - keep OTP, Strava, Google Fit, and existing session flow unchanged
+// - nutrition form hides calorie/macro fields from participant
+// - nutrition calories are calculated by API from master KaloriData
+// - manual workout calories are calculated by API from master KaloriOlahraga / MET fallback
+// - participant dashboard shows Calories In and health progress charts
 
 type Step = "request" | "verify" | "portal";
 type PortalTab = "home" | "nutrition" | "workout" | "history" | "devices" | "profile";
@@ -112,6 +112,9 @@ const activityOptions = [
   "Other",
 ];
 
+const fieldClass =
+  "rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100";
+
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
   const [activeTab, setActiveTab] = useState<PortalTab>("home");
@@ -139,12 +142,9 @@ export default function WellnessParticipantPortalPage() {
     meal_type: "breakfast",
     food_name: "",
     portion: "",
-    calories: "",
-    protein_g: "",
-    carbs_g: "",
-    fat_g: "",
     notes: "",
   });
+  const [nutritionPhoto, setNutritionPhoto] = useState<File | null>(null);
 
   const [workoutForm, setWorkoutForm] = useState({
     log_date: todayDate(),
@@ -152,8 +152,8 @@ export default function WellnessParticipantPortalPage() {
     activity_type: "Walking",
     activity_name: "",
     duration_minutes: "",
-    calories: "",
     distance_km: "",
+    steps: "",
     notes: "",
   });
 
@@ -354,12 +354,19 @@ export default function WellnessParticipantPortalPage() {
       return;
     }
 
-    setMessage("Menyimpan nutrisi harian...");
+    setMessage("Menyimpan nutrisi harian dan menghitung kalori dari master...");
+
+    const body = new FormData();
+    body.append("log_date", nutritionForm.log_date);
+    body.append("meal_type", nutritionForm.meal_type);
+    body.append("food_name", nutritionForm.food_name);
+    body.append("portion", nutritionForm.portion);
+    body.append("notes", nutritionForm.notes);
+    if (nutritionPhoto) body.append("photo", nutritionPhoto);
 
     const result = await fetch("/api/wellness/participant/nutrition", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nutritionForm),
+      body,
     })
       .then((response) => response.json())
       .catch((error) => ({
@@ -368,17 +375,14 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      setMessage("Nutrisi harian berhasil disimpan.");
+      setMessage(result.message || "Nutrisi harian berhasil disimpan.");
       setNutritionForm((previous) => ({
         ...previous,
         food_name: "",
         portion: "",
-        calories: "",
-        protein_g: "",
-        carbs_g: "",
-        fat_g: "",
         notes: "",
       }));
+      setNutritionPhoto(null);
       await loadNutrition();
       setActiveTab("home");
     } else {
@@ -397,7 +401,7 @@ export default function WellnessParticipantPortalPage() {
       return;
     }
 
-    setMessage("Menyimpan workout manual...");
+    setMessage("Menyimpan workout manual dan menghitung kalori otomatis...");
 
     const result = await fetch("/api/wellness/participant/workout", {
       method: "POST",
@@ -411,14 +415,14 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      setMessage("Workout manual berhasil disimpan.");
+      setMessage(result.message || "Workout manual berhasil disimpan.");
       setWorkoutForm((previous) => ({
         ...previous,
         started_at: "",
         activity_name: "",
         duration_minutes: "",
-        calories: "",
         distance_km: "",
+        steps: "",
         notes: "",
       }));
       await loadMe({ keepMessage: true });
@@ -454,6 +458,7 @@ export default function WellnessParticipantPortalPage() {
     let protein = 0;
     let carbs = 0;
     let fat = 0;
+    let pendingCalories = 0;
 
     for (const item of workoutItems || []) {
       workoutMinutes += asNumber(item.duration_minutes || item.total_duration_minutes);
@@ -462,7 +467,10 @@ export default function WellnessParticipantPortalPage() {
     }
 
     for (const item of todayNutrition || []) {
-      foodCalories += asNumber(item.calories);
+      const calories = Number(item.calories);
+      if (Number.isFinite(calories)) foodCalories += calories;
+      else pendingCalories += 1;
+
       protein += asNumber(item.protein_g);
       carbs += asNumber(item.carbs_g);
       fat += asNumber(item.fat_g);
@@ -478,6 +486,7 @@ export default function WellnessParticipantPortalPage() {
       carbs,
       fat,
       foodCount: todayNutrition.length,
+      pendingCalories,
     };
   }, [workoutItems, todayNutrition]);
 
@@ -548,7 +557,7 @@ export default function WellnessParticipantPortalPage() {
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   Kode Karyawan
                   <input
-                    className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className={fieldClass}
                     value={form.code}
                     onChange={(e) => setValue("code", e.target.value)}
                     placeholder="Contoh: 278"
@@ -558,7 +567,7 @@ export default function WellnessParticipantPortalPage() {
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   Buat Username
                   <input
-                    className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className={fieldClass}
                     value={form.username}
                     onChange={(e) => setValue("username", e.target.value)}
                     placeholder="Contoh: samsul278"
@@ -569,7 +578,7 @@ export default function WellnessParticipantPortalPage() {
                   Email
                   <input
                     type="email"
-                    className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className={fieldClass}
                     value={form.email}
                     onChange={(e) => setValue("email", e.target.value)}
                     placeholder="nama@email.com"
@@ -579,7 +588,7 @@ export default function WellnessParticipantPortalPage() {
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   Nomor HP
                   <input
-                    className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className={fieldClass}
                     value={form.phone}
                     onChange={(e) => setValue("phone", e.target.value)}
                     placeholder="08xxxx"
@@ -590,7 +599,7 @@ export default function WellnessParticipantPortalPage() {
                   <label className="grid gap-2 text-sm font-bold text-slate-700">
                     OTP
                     <input
-                      className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                      className={fieldClass}
                       value={form.otp}
                       onChange={(e) => setValue("otp", e.target.value)}
                       placeholder="6 digit OTP"
@@ -635,9 +644,8 @@ export default function WellnessParticipantPortalPage() {
                 <p>Portal ini khusus peserta program wellness.</p>
                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
                 <p>Peserta juga bisa menghubungkan Strava dan Google Fit untuk sinkronisasi otomatis.</p>
-                <p className="rounded-2xl bg-amber-50 p-3 text-amber-900">
-                  Untuk OTP asli, pastikan backend request-otp sudah tersambung
-                  ke email/WhatsApp gateway dan <code>WELLNESS_OTP_DEBUG</code> dimatikan.
+                <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+                  Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
                 </p>
               </div>
             </aside>
@@ -648,7 +656,11 @@ export default function WellnessParticipantPortalPage() {
               <SummaryCard
                 label="Calories In"
                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
-                note={`${totals.foodCount} input nutrisi hari ini`}
+                note={
+                  totals.pendingCalories > 0
+                    ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+                    : `${totals.foodCount} input nutrisi hari ini`
+                }
                 tone="blue"
               />
 
@@ -686,12 +698,15 @@ export default function WellnessParticipantPortalPage() {
                 setActiveTab={setActiveTab}
                 stravaConnected={!!stravaConnected}
                 googleFitConnected={!!googleFitConnected}
+                clinicalHistory={clinicalHistory}
               />
             ) : null}
 
             {activeTab === "nutrition" ? (
               <NutritionTab
                 form={nutritionForm}
+                photo={nutritionPhoto}
+                setPhoto={setNutritionPhoto}
                 setValue={setNutritionValue}
                 saveNutrition={saveNutrition}
                 logs={nutritionLogs}
@@ -775,6 +790,7 @@ function HomeTab({
   setActiveTab,
   stravaConnected,
   googleFitConnected,
+  clinicalHistory,
 }: {
   participant: any;
   nutritionLogs: any[];
@@ -782,102 +798,94 @@ function HomeTab({
   setActiveTab: (tab: PortalTab) => void;
   stravaConnected: boolean;
   googleFitConnected: boolean;
+  clinicalHistory: any[];
 }) {
   return (
-    <section className="grid gap-5 lg:grid-cols-[1fr_360px]">
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
-          Halo Peserta
-        </div>
+    <section className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+            Halo Peserta
+          </div>
 
-        <h2 className="mt-2 text-2xl font-black text-slate-950">
-          {participant?.name || "Peserta Wellness"}
-        </h2>
+          <h2 className="mt-2 text-2xl font-black text-slate-950">
+            {participant?.name || "Peserta Wellness"}
+          </h2>
 
-        <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-          Hari ini kamu sudah mencatat {totals.foodCount} nutrisi dan memiliki
-          {` ${totals.workoutCount}`} catatan workout/device di history.
-        </p>
+          <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+            Hari ini kamu sudah mencatat {totals.foodCount} nutrisi dan memiliki
+            {` ${totals.workoutCount}`} catatan workout/device di history.
+          </p>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <button
-            type="button"
-            onClick={() => setActiveTab("nutrition")}
-            className="rounded-3xl bg-blue-600 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-blue-100"
-          >
-            + Input Nutrisi
-            <div className="mt-1 text-xs font-bold text-white/80">
-              Catat makan harian
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("workout")}
-            className="rounded-3xl bg-emerald-600 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-emerald-100"
-          >
-            + Input Workout
-            <div className="mt-1 text-xs font-bold text-white/80">
-              Catat olahraga manual
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("devices")}
-            className="rounded-3xl bg-slate-900 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-slate-200"
-          >
-            Connect Device
-            <div className="mt-1 text-xs font-bold text-white/70">
-              Strava/Fit status: {stravaConnected || googleFitConnected ? "ada" : "belum"}
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-black">Nutrisi Hari Ini</h3>
-
-        <div className="mt-4 space-y-3">
-          {nutritionLogs.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
-              Belum ada input nutrisi hari ini.
-            </div>
-          ) : (
-            nutritionLogs.slice(0, 4).map((item, index) => (
-              <div
-                key={`${item.id || index}-${index}`}
-                className="rounded-2xl bg-slate-50 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-black text-slate-900">
-                      {item.food_name || "-"}
-                    </div>
-                    <div className="mt-0.5 text-xs font-bold capitalize text-slate-500">
-                      {item.meal_type || "-"} • {item.portion || "-"}
-                    </div>
-                  </div>
-                  <div className="text-sm font-black text-blue-700">
-                    {fmt(item.calories, "kkal")}
-                  </div>
-                </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab("nutrition")}
+              className="rounded-3xl bg-blue-600 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-blue-100"
+            >
+              + Input Nutrisi
+              <div className="mt-1 text-xs font-bold text-white/80">
+                Nama makanan + foto
               </div>
-            ))
-          )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("workout")}
+              className="rounded-3xl bg-emerald-600 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-emerald-100"
+            >
+              + Input Workout
+              <div className="mt-1 text-xs font-bold text-white/80">
+                Kalori otomatis
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("devices")}
+              className="rounded-3xl bg-slate-900 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-slate-200"
+            >
+              Connect Device
+              <div className="mt-1 text-xs font-bold text-white/70">
+                Strava/Fit status: {stravaConnected || googleFitConnected ? "ada" : "belum"}
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-black">Nutrisi Hari Ini</h3>
+
+          <div className="mt-4 space-y-3">
+            {nutritionLogs.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
+                Belum ada input nutrisi hari ini.
+              </div>
+            ) : (
+              nutritionLogs.slice(0, 4).map((item, index) => (
+                <NutritionMiniCard key={`${item.id || index}-${index}`} item={item} />
+              ))
+            )}
+          </div>
         </div>
       </div>
+
+      <HealthProgressSection clinicalHistory={clinicalHistory} participant={participant} />
     </section>
   );
 }
 
 function NutritionTab({
   form,
+  photo,
+  setPhoto,
   setValue,
   saveNutrition,
   logs,
 }: {
   form: any;
+  photo: File | null;
+  setPhoto: (file: File | null) => void;
   setValue: (key: string, value: string) => void;
   saveNutrition: () => void;
   logs: any[];
@@ -887,7 +895,7 @@ function NutritionTab({
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-xl font-black">Input Nutrisi Harian</h2>
         <p className="mt-1 text-sm font-bold text-slate-500">
-          Catat makanan harian peserta. Kalori dan makro boleh diisi manual.
+          Peserta cukup isi nama makanan, waktu makan, porsi, dan foto. Kalori otomatis diambil dari Master KaloriData.
         </p>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -896,7 +904,7 @@ function NutritionTab({
               type="date"
               value={form.log_date}
               onChange={(e) => setValue("log_date", e.target.value)}
-              className="field"
+              className={fieldClass}
             />
           </Input>
 
@@ -904,7 +912,7 @@ function NutritionTab({
             <select
               value={form.meal_type}
               onChange={(e) => setValue("meal_type", e.target.value)}
-              className="field"
+              className={fieldClass}
             >
               {mealOptions.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -918,8 +926,8 @@ function NutritionTab({
             <input
               value={form.food_name}
               onChange={(e) => setValue("food_name", e.target.value)}
-              className="field"
-              placeholder="Contoh: Nasi ayam, salad, telur rebus"
+              className={fieldClass}
+              placeholder="Contoh: ubi ungu, ayam bakar, apel"
             />
           </Input>
 
@@ -927,61 +935,41 @@ function NutritionTab({
             <input
               value={form.portion}
               onChange={(e) => setValue("portion", e.target.value)}
-              className="field"
+              className={fieldClass}
               placeholder="Contoh: 1 porsi / 150 gram / 1 mangkuk"
             />
           </Input>
 
-          <Input label="Kalori">
-            <input
-              type="number"
-              value={form.calories}
-              onChange={(e) => setValue("calories", e.target.value)}
-              className="field"
-              placeholder="kkal"
-            />
-          </Input>
-
-          <Input label="Protein">
-            <input
-              type="number"
-              value={form.protein_g}
-              onChange={(e) => setValue("protein_g", e.target.value)}
-              className="field"
-              placeholder="gram"
-            />
-          </Input>
-
-          <Input label="Karbohidrat">
-            <input
-              type="number"
-              value={form.carbs_g}
-              onChange={(e) => setValue("carbs_g", e.target.value)}
-              className="field"
-              placeholder="gram"
-            />
-          </Input>
-
-          <Input label="Lemak">
-            <input
-              type="number"
-              value={form.fat_g}
-              onChange={(e) => setValue("fat_g", e.target.value)}
-              className="field"
-              placeholder="gram"
-            />
-          </Input>
+          <div className="md:col-span-2">
+            <Input label="Foto Makanan">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(event) => setPhoto(event.target.files?.[0] || null)}
+                className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-600 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              />
+            </Input>
+            {photo ? (
+              <div className="mt-2 text-xs font-bold text-blue-700">
+                Foto dipilih: {photo.name}
+              </div>
+            ) : null}
+          </div>
 
           <div className="md:col-span-2">
             <Input label="Catatan">
               <textarea
                 value={form.notes}
                 onChange={(e) => setValue("notes", e.target.value)}
-                className="field min-h-[100px]"
+                className={`${fieldClass} min-h-[100px]`}
                 placeholder="Catatan tambahan, misalnya makan di luar, minuman manis, dll."
               />
             </Input>
           </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-900">
+          Peserta tidak perlu mengisi kalori, protein, karbohidrat, atau lemak. Sistem akan mencari nama makanan pada Master KaloriData.
         </div>
 
         <button
@@ -1003,21 +991,7 @@ function NutritionTab({
             </div>
           ) : (
             logs.slice(0, 8).map((item, index) => (
-              <div
-                key={`${item.id || index}-${index}`}
-                className="rounded-2xl bg-slate-50 p-4"
-              >
-                <div className="text-sm font-black text-slate-900">
-                  {item.food_name || "-"}
-                </div>
-                <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-                  {item.log_date} • {item.meal_type || "-"} • {item.portion || "-"}
-                </div>
-                <div className="mt-2 text-xs font-black text-blue-700">
-                  {fmt(item.calories, "kkal")} • P {fmt(item.protein_g, "g")} • C{" "}
-                  {fmt(item.carbs_g, "g")} • F {fmt(item.fat_g, "g")}
-                </div>
-              </div>
+              <NutritionLogCard key={`${item.id || index}-${index}`} item={item} />
             ))
           )}
         </div>
@@ -1039,8 +1013,7 @@ function WorkoutTab({
     <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-black">Input Workout Manual</h2>
       <p className="mt-1 text-sm font-bold text-slate-500">
-        Untuk aktivitas yang tidak tercatat di Strava/Google Fit, peserta dapat
-        input manual.
+        Peserta cukup isi jenis aktivitas dan durasi. Kalori dihitung otomatis dari Master KaloriOlahraga / MET.
       </p>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -1049,7 +1022,7 @@ function WorkoutTab({
             type="date"
             value={form.log_date}
             onChange={(e) => setValue("log_date", e.target.value)}
-            className="field"
+            className={fieldClass}
           />
         </Input>
 
@@ -1058,7 +1031,7 @@ function WorkoutTab({
             type="datetime-local"
             value={form.started_at}
             onChange={(e) => setValue("started_at", e.target.value)}
-            className="field"
+            className={fieldClass}
           />
         </Input>
 
@@ -1066,7 +1039,7 @@ function WorkoutTab({
           <select
             value={form.activity_type}
             onChange={(e) => setValue("activity_type", e.target.value)}
-            className="field"
+            className={fieldClass}
           >
             {activityOptions.map((item) => (
               <option key={item} value={item}>
@@ -1080,7 +1053,7 @@ function WorkoutTab({
           <input
             value={form.activity_name}
             onChange={(e) => setValue("activity_name", e.target.value)}
-            className="field"
+            className={fieldClass}
             placeholder="Contoh: Jalan pagi, gym upper body"
           />
         </Input>
@@ -1090,18 +1063,8 @@ function WorkoutTab({
             type="number"
             value={form.duration_minutes}
             onChange={(e) => setValue("duration_minutes", e.target.value)}
-            className="field"
+            className={fieldClass}
             placeholder="menit"
-          />
-        </Input>
-
-        <Input label="Kalori">
-          <input
-            type="number"
-            value={form.calories}
-            onChange={(e) => setValue("calories", e.target.value)}
-            className="field"
-            placeholder="kkal, opsional"
           />
         </Input>
 
@@ -1110,8 +1073,18 @@ function WorkoutTab({
             type="number"
             value={form.distance_km}
             onChange={(e) => setValue("distance_km", e.target.value)}
-            className="field"
+            className={fieldClass}
             placeholder="km, opsional"
+          />
+        </Input>
+
+        <Input label="Steps">
+          <input
+            type="number"
+            value={form.steps}
+            onChange={(e) => setValue("steps", e.target.value)}
+            className={fieldClass}
+            placeholder="opsional"
           />
         </Input>
 
@@ -1119,10 +1092,14 @@ function WorkoutTab({
           <input
             value={form.notes}
             onChange={(e) => setValue("notes", e.target.value)}
-            className="field"
+            className={fieldClass}
             placeholder="Opsional"
           />
         </Input>
+      </div>
+
+      <div className="mt-5 rounded-2xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
+        Field kalori disembunyikan dari peserta. Kalori manual workout akan dihitung otomatis oleh sistem.
       </div>
 
       <button
@@ -1180,21 +1157,7 @@ function HistoryTab({
             </div>
           ) : (
             nutritionLogs.map((item, index) => (
-              <div
-                key={`${item.id || index}-${index}`}
-                className="rounded-3xl border border-slate-100 bg-slate-50 p-4"
-              >
-                <div className="text-sm font-black text-slate-900">
-                  {item.food_name || "-"}
-                </div>
-                <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-                  {item.log_date} • {item.meal_type || "-"} • {item.portion || "-"}
-                </div>
-                <div className="mt-2 text-xs font-black text-blue-700">
-                  {fmt(item.calories, "kkal")} • P {fmt(item.protein_g, "g")} • C{" "}
-                  {fmt(item.carbs_g, "g")} • F {fmt(item.fat_g, "g")}
-                </div>
-              </div>
+              <NutritionLogCard key={`${item.id || index}-${index}`} item={item} />
             ))
           )}
         </div>
@@ -1364,5 +1327,300 @@ function Input({
       {label}
       {children}
     </label>
+  );
+}
+
+function NutritionMiniCard({ item }: { item: any }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-900">
+            {item.food_name || "-"}
+          </div>
+          <div className="mt-0.5 text-xs font-bold capitalize text-slate-500">
+            {item.meal_type || "-"} • {item.portion || "-"}
+          </div>
+          {item.photo_url ? (
+            <img
+              src={item.photo_url}
+              alt="Foto makanan"
+              className="mt-3 h-20 w-20 rounded-2xl object-cover"
+            />
+          ) : null}
+        </div>
+        <div className="text-right">
+          <div className="text-sm font-black text-blue-700">
+            {Number.isFinite(Number(item.calories))
+              ? `${fmtNumber(item.calories, 0)} kkal`
+              : "Belum match"}
+          </div>
+          <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">
+            {item.calorie_match_status || item.calorie_source || "master"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NutritionLogCard({ item }: { item: any }) {
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex gap-3">
+        {item.photo_url ? (
+          <img
+            src={item.photo_url}
+            alt="Foto makanan"
+            className="h-20 w-20 shrink-0 rounded-2xl object-cover"
+          />
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-black text-slate-900">
+            {item.food_name || "-"}
+          </div>
+          <div className="mt-1 text-xs font-bold capitalize text-slate-500">
+            {item.log_date} • {item.meal_type || "-"} • {item.portion || "-"}
+          </div>
+          <div className="mt-2 text-xs font-black text-blue-700">
+            {Number.isFinite(Number(item.calories))
+              ? `${fmtNumber(item.calories, 0)} kkal`
+              : "Kalori belum terhitung"}
+          </div>
+          <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">
+            {item.calorie_match_status || item.calorie_source || "master"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getDateValue(item: any) {
+  return clean(
+    item?.log_date ||
+      item?.exam_date ||
+      item?.checkup_date ||
+      item?.measurement_date ||
+      item?.created_at ||
+      item?.date
+  ).slice(0, 10);
+}
+
+function getNumeric(item: any, keys: string[]) {
+  for (const key of keys) {
+    const value = Number(item?.[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function buildSeries(rows: any[], keys: string[]) {
+  const mapped = (rows || [])
+    .map((row) => ({
+      date: getDateValue(row),
+      value: getNumeric(row, keys),
+    }))
+    .filter((row) => row.date && row.value !== null) as Array<{
+      date: string;
+      value: number;
+    }>;
+
+  const unique = new Map<string, { date: string; value: number }>();
+  for (const row of mapped) unique.set(row.date, row);
+
+  return Array.from(unique.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function HealthProgressSection({
+  clinicalHistory,
+  participant,
+}: {
+  clinicalHistory: any[];
+  participant: any;
+}) {
+  const sourceRows = Array.isArray(clinicalHistory) ? clinicalHistory : [];
+
+  const weightSeries = buildSeries(sourceRows, [
+    "weight_kg",
+    "weight",
+    "body_weight",
+    "bb",
+    "berat_badan",
+  ]);
+
+  const bmiSeries = buildSeries(sourceRows, ["bmi", "imt"]);
+  const waistSeries = buildSeries(sourceRows, [
+    "waist_cm",
+    "waist",
+    "abdominal_circumference",
+    "lingkar_perut",
+  ]);
+  const hba1cSeries = buildSeries(sourceRows, ["hba1c", "hbA1c", "hb_a1c"]);
+  const glucoseSeries = buildSeries(sourceRows, [
+    "glucose",
+    "gula_darah",
+    "fasting_glucose",
+    "blood_glucose",
+  ]);
+  const systolicSeries = buildSeries(sourceRows, [
+    "systolic",
+    "systolic_bp",
+    "td_sistolik",
+    "blood_pressure_systolic",
+  ]);
+  const diastolicSeries = buildSeries(sourceRows, [
+    "diastolic",
+    "diastolic_bp",
+    "td_diastolik",
+    "blood_pressure_diastolic",
+  ]);
+
+  return (
+    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-xl font-black">Grafik Perkembangan Kesehatan</h2>
+          <p className="mt-1 text-sm font-bold text-slate-500">
+            Menampilkan parameter yang tersedia dari data peserta / input nakes.
+          </p>
+        </div>
+        <div className="rounded-full bg-slate-50 px-4 py-2 text-xs font-black text-slate-500">
+          {participant?.code ? `Kode ${participant.code}` : "Peserta"}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <MiniLineChart title="Berat Badan" unit="kg" series={weightSeries} />
+        <MiniLineChart title="BMI / IMT" unit="" series={bmiSeries} />
+        <MiniLineChart title="Lingkar Perut" unit="cm" series={waistSeries} />
+        <MiniLineChart title="HbA1c" unit="%" series={hba1cSeries} />
+        <MiniLineChart title="Gula Darah" unit="mg/dL" series={glucoseSeries} />
+        <BloodPressureChart systolic={systolicSeries} diastolic={diastolicSeries} />
+      </div>
+    </section>
+  );
+}
+
+function MiniLineChart({
+  title,
+  unit,
+  series,
+}: {
+  title: string;
+  unit: string;
+  series: Array<{ date: string; value: number }>;
+}) {
+  const latest = series.length ? series[series.length - 1] : null;
+  const points = series.slice(-8);
+
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-900">{title}</div>
+          <div className="mt-1 text-xs font-bold text-slate-500">
+            {latest ? `${latest.date}` : "Belum ada data"}
+          </div>
+        </div>
+        <div className="text-right text-lg font-black text-slate-950">
+          {latest ? `${fmtNumber(latest.value, 1)}${unit ? ` ${unit}` : ""}` : "-"}
+        </div>
+      </div>
+
+      <SimpleSvgLine series={points} />
+
+      {points.length < 2 ? (
+        <div className="mt-2 text-xs font-bold text-slate-400">
+          Butuh minimal 2 data untuk melihat tren.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BloodPressureChart({
+  systolic,
+  diastolic,
+}: {
+  systolic: Array<{ date: string; value: number }>;
+  diastolic: Array<{ date: string; value: number }>;
+}) {
+  const latestSys = systolic.length ? systolic[systolic.length - 1] : null;
+  const latestDia = diastolic.length ? diastolic[diastolic.length - 1] : null;
+
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-900">Tekanan Darah</div>
+          <div className="mt-1 text-xs font-bold text-slate-500">
+            {latestSys?.date || latestDia?.date || "Belum ada data"}
+          </div>
+        </div>
+        <div className="text-right text-lg font-black text-slate-950">
+          {latestSys || latestDia
+            ? `${latestSys?.value || "-"}/${latestDia?.value || "-"}`
+            : "-"}
+        </div>
+      </div>
+
+      <SimpleSvgLine series={systolic.slice(-8)} />
+      <div className="mt-2 text-xs font-bold text-slate-500">
+        Sistolik ditampilkan sebagai garis tren utama.
+      </div>
+    </div>
+  );
+}
+
+function SimpleSvgLine({ series }: { series: Array<{ date: string; value: number }> }) {
+  if (!series || series.length < 2) {
+    return (
+      <div className="mt-4 h-24 rounded-2xl border border-dashed border-slate-200 bg-white" />
+    );
+  }
+
+  const width = 280;
+  const height = 90;
+  const padding = 10;
+  const values = series.map((item) => item.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = max - min || 1;
+
+  const points = series.map((item, index) => {
+    const x =
+      padding +
+      (index / Math.max(series.length - 1, 1)) * (width - padding * 2);
+    const y =
+      height -
+      padding -
+      ((item.value - min) / spread) * (height - padding * 2);
+    return { x, y };
+  });
+
+  const path = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="mt-4 h-24 w-full rounded-2xl bg-white"
+      role="img"
+      aria-label="Grafik tren"
+    >
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="4" className="text-blue-600" />
+      {points.map((point, index) => (
+        <circle
+          key={`${point.x}-${point.y}-${index}`}
+          cx={point.x}
+          cy={point.y}
+          r="4"
+          className="fill-blue-600"
+        />
+      ))}
+    </svg>
   );
 }
