@@ -1,26 +1,16 @@
-// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_NUTRITION
-// Participant nutrition route using the existing Apps Script v370:
-// - food photo -> Google Drive by action=uploadEvidence
-// - submission row -> Google Sheet Form Responses
-// - mirror -> wellness_food_logs so the participant dashboard still works
+// WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399
+// Robust participant nutrition route:
+// - uses existing Apps Script v370 webhook
+// - uploads food photo to Google Drive with action=uploadEvidence
+// - appends row to Google Sheet Form Responses
+// - mirrors to wellness_food_logs using only safe/base columns so missing optional columns do not break saving
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
-import {
-  buildBaseFormRow,
-  getCompanyName,
-  getDriveUrl,
-  getPreviewUrl,
-  getWellnessSheetName,
-  postToWellnessWebhook,
-  safeLogDate,
-  uploadEvidenceToDrive,
-} from "@/lib/wellness/googleSheetWebhook";
 
 export const runtime = "nodejs";
-
-const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_NUTRITION";
+export const dynamic = "force-dynamic";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -31,6 +21,18 @@ function toNumberOrNull(value: any) {
   if (!text) return null;
   const n = Number(text.replace(",", "."));
   return Number.isFinite(n) ? n : null;
+}
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function safeIsoDate(value: any) {
+  const text = clean(value);
+  if (!text) return todayDate();
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text.slice(0, 10) || todayDate();
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeText(value: any) {
@@ -49,6 +51,22 @@ function splitAliases(value: any) {
     .filter(Boolean);
 }
 
+function getWebhookUrl() {
+  return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+}
+
+function getWebhookSecret() {
+  return clean(
+    process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET ||
+      process.env.WELLNESS_WEBHOOK_SECRET ||
+      ""
+  );
+}
+
+function getSheetName() {
+  return clean(process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME) || "Form Responses";
+}
+
 function mealLabel(value: any) {
   const text = clean(value).toLowerCase();
   const map: Record<string, string> = {
@@ -60,6 +78,30 @@ function mealLabel(value: any) {
     meal: "Meal",
   };
   return map[text] || clean(value) || "Meal";
+}
+
+function mapLogForUi(item: any) {
+  const raw = item?.raw_payload || {};
+  const drive = raw?.google_drive || {};
+  const matched = raw?.master_food || {};
+
+  return {
+    ...item,
+    photo_url:
+      item?.photo_url ||
+      drive?.previewUrl ||
+      drive?.thumbnailUrl ||
+      drive?.publicUrl ||
+      drive?.driveUrl ||
+      null,
+    google_drive_url: item?.google_drive_url || drive?.driveUrl || drive?.publicUrl || null,
+    google_drive_preview_url:
+      item?.google_drive_preview_url || drive?.previewUrl || drive?.thumbnailUrl || null,
+    calorie_source: item?.calorie_source || (matched?.id ? "wellness_food_calories" : "not_found"),
+    calorie_reference_id: item?.calorie_reference_id || matched?.id || null,
+    calorie_match_status:
+      item?.calorie_match_status || raw?.calorie_match_status || (matched?.id ? "matched_master" : "not_found_master"),
+  };
 }
 
 async function getParticipant(req: NextRequest) {
@@ -91,6 +133,89 @@ async function parseRequestBody(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   return { body: body || {}, photo: null };
+}
+
+async function fileToBase64(fileLike: any) {
+  if (!fileLike || typeof fileLike !== "object") return null;
+  if (typeof fileLike.arrayBuffer !== "function") return null;
+
+  const arrayBuffer = await fileLike.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (!buffer.length) return null;
+
+  // Keep Apps Script payload stable. Photos above 4 MB can fail because base64 becomes larger.
+  const maxBytes = 4 * 1024 * 1024;
+  if (buffer.length > maxBytes) {
+    throw new Error("Ukuran foto terlalu besar. Maksimal 4 MB. Kompres foto lalu coba lagi.");
+  }
+
+  return {
+    dataBase64: buffer.toString("base64"),
+    filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+    contentType: clean(fileLike.type) || "application/octet-stream",
+    size: buffer.length,
+  };
+}
+
+async function postToWebhook(payload: any) {
+  const url = getWebhookUrl();
+  if (!url) throw new Error("WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diatur di Vercel Production.");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      secret: getWebhookSecret(),
+      ...payload,
+    }),
+  });
+
+  const text = await response.text();
+  let json: any = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { ok: false, message: text || "Invalid webhook response" };
+  }
+
+  if (!response.ok || json?.ok === false) {
+    throw new Error(json?.message || `Webhook Google Sheet gagal: HTTP ${response.status}`);
+  }
+
+  return json;
+}
+
+async function uploadNutritionPhoto(params: {
+  photo: any;
+  participant: any;
+  companyName: string;
+  logDate: string;
+}) {
+  const converted = await fileToBase64(params.photo);
+  if (!converted) return null;
+
+  return await postToWebhook({
+    action: "uploadEvidence",
+    filename: converted.filename,
+    originalFilename: converted.filename,
+    contentType: converted.contentType,
+    dataBase64: converted.dataBase64,
+    folderName: "wellness program",
+    companyName: params.companyName || "Tanpa Perusahaan",
+    company_name: params.companyName || "Tanpa Perusahaan",
+    participantId: params.participant?.id,
+    participant_id: params.participant?.id,
+    participantCode: params.participant?.code,
+    participant_code: params.participant?.code,
+    participantName: params.participant?.name,
+    participant_name: params.participant?.name,
+    evidenceCategory: "Nutrisi",
+    evidence_category: "Nutrisi",
+    activeTab: "nutrition",
+    fieldKey: "food_photo",
+    logDate: params.logDate,
+    marker: "WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399",
+  });
 }
 
 async function findFoodCalories(supabase: any, foodName: string) {
@@ -139,7 +264,7 @@ async function findFoodCalories(supabase: any, foodName: string) {
   };
 }
 
-function buildNutritionRow(params: {
+function buildSheetRow(params: {
   participant: any;
   body: any;
   logDate: string;
@@ -151,27 +276,55 @@ function buildNutritionRow(params: {
   matchedFood: any;
   photoResult: any;
 }) {
-  const row: any = buildBaseFormRow({
-    participant: params.participant,
-    body: params.body,
-    logDate: params.logDate,
-    logType: "nutrition",
-    marker: MARKER,
-  });
+  const participant = params.participant || {};
+  const photo = params.photoResult || {};
+  const previewUrl = photo.previewUrl || photo.thumbnailUrl || photo.publicUrl || photo.driveUrl || "";
+  const driveUrl = photo.driveUrl || photo.publicUrl || "";
+  const company = clean(participant.company || participant.company_name || params.body.company) || "";
 
-  const driveUrl = getDriveUrl(params.photoResult);
-  const previewUrl = getPreviewUrl(params.photoResult);
-
-  row["Waktu Makan"] = mealLabel(params.mealType);
-  row["Add Options"] = [params.foodName, params.portion].filter(Boolean).join(" - ");
-  row["Upload Foto Makanan"] = driveUrl;
-  row["Preview Foto Makanan"] = previewUrl;
-  row["Catatan Nutrisi"] = params.notes || "";
-  row["Kalori Makanan"] = params.calories ?? "";
-  row["Detected Foods"] = params.matchedFood?.food_name || params.foodName;
-  row["Evidence Count"] = driveUrl ? 1 : 0;
-
-  return row;
+  return {
+    "Submission Date": new Date().toISOString(),
+    "Pilih Nama Anda": participant.name || "",
+    "Nama Peserta": participant.name || "",
+    "Waktu Makan": mealLabel(params.mealType),
+    "Add Options": [params.foodName, params.portion].filter(Boolean).join(" - "),
+    "Upload Foto Makanan": driveUrl,
+    "Preview Foto Makanan": previewUrl,
+    "Melakukan Workout/Aktifitas Ringan?": "",
+    "Jenis Workout/Aktifitas": "",
+    "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)": "",
+    "Submission IP": "Harmony Health App",
+    "Berapa Menit anda melakukan nya ?": "",
+    "Berat badan Awal": participant.baseline_weight_kg || participant.weight_kg || "",
+    "BB anda per hari ini (diisi sekali saja perminggu)": "",
+    "Helper column BB jangan diubah": "",
+    "BB Monitoring terbaru": "",
+    "Lingkar Perut (cm)": participant.waist_cm || "",
+    "BMI": participant.bmi || "",
+    "Catatan Nutrisi": params.notes || "",
+    "Kalori Makanan": params.calories ?? "",
+    "Detected Foods": params.matchedFood?.food_name || params.foodName,
+    "Kalori Aktivitas": "",
+    "Bukti Aktivitas": "",
+    "Preview Bukti Aktivitas": "",
+    "Healthtalk/Seminar": "",
+    "Jenis Healthtalk": "",
+    "Tanggal Healthtalk": "",
+    "Bukti Healthtalk": "",
+    "Preview Bukti Healthtalk": "",
+    "Total Point": "",
+    "Company": company,
+    "Kelompok": participant.group_name || participant.kelompok || "",
+    "Group Upload": "Portal Peserta",
+    "Risk Cluster": participant.risk_cluster || "",
+    "KODE": participant.code || "",
+    "Participant ID": participant.id || "",
+    "Log Date": params.logDate,
+    "Log Type": "nutrition",
+    "Evidence Count": driveUrl ? 1 : 0,
+    "Created By": "participant_portal",
+    "Marker": "WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399",
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -202,7 +355,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     participant_id: participant.id,
-    logs: data || [],
+    logs: (data || []).map(mapLogForUi),
   });
 }
 
@@ -227,28 +380,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const logDate = safeLogDate(body?.log_date || body?.logDate);
+    const logDate = safeIsoDate(body?.log_date || body?.logDate);
     const mealType = clean(body?.meal_type || body?.mealType) || "meal";
     const portion = clean(body?.portion || body?.porsi) || null;
     const notes = clean(body?.notes || body?.catatan) || null;
-    const companyName = getCompanyName(participant, body);
+    const companyName = clean(participant?.company || participant?.company_name || body?.company) || "Tanpa Perusahaan";
 
     const matchedFood = await findFoodCalories(supabase, foodName);
     const calories = matchedFood?.calories ?? null;
     const calorieMatchStatus = matchedFood ? "matched_master" : "not_found_master";
 
-    const photoResult = await uploadEvidenceToDrive({
-      file: photo,
+    const photoResult = await uploadNutritionPhoto({
+      photo,
       participant,
       companyName,
-      category: "Nutrisi",
-      activeTab: "nutrition",
-      fieldKey: "food_photo",
       logDate,
-      marker: MARKER,
     });
 
-    const sheetRow = buildNutritionRow({
+    const sheetRow = buildSheetRow({
       participant,
       body,
       logDate,
@@ -261,12 +410,14 @@ export async function POST(req: NextRequest) {
       photoResult,
     });
 
-    const sheetResult = await postToWellnessWebhook({
-      sheet: getWellnessSheetName(),
+    const sheetResult = await postToWebhook({
+      sheet: getSheetName(),
       row: sheetRow,
-      marker: MARKER,
+      marker: "WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399",
     });
 
+    // IMPORTANT: only insert columns that already existed in the safe V393 route.
+    // Extra Google Drive/Sheet metadata is stored inside raw_payload so missing optional columns cannot break saving.
     const payload: any = {
       participant_id: Number(participant.id),
       log_date: logDate,
@@ -284,22 +435,10 @@ export async function POST(req: NextRequest) {
         master_food: matchedFood,
         google_drive: photoResult || null,
         google_sheet: sheetResult || null,
+        calorie_match_status: calorieMatchStatus,
         saved_at: new Date().toISOString(),
-        marker: MARKER,
+        marker: "WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399",
       },
-      photo_url: getPreviewUrl(photoResult) || null,
-      photo_path: photoResult?.folderPath || null,
-      google_drive_file_id: photoResult?.fileId || null,
-      google_drive_url: getDriveUrl(photoResult) || null,
-      google_drive_preview_url: getPreviewUrl(photoResult) || null,
-      calorie_source: matchedFood ? "wellness_food_calories" : "not_found",
-      calorie_reference_id: matchedFood?.id || null,
-      calorie_match_status: calorieMatchStatus,
-      google_sheet_synced_at: new Date().toISOString(),
-      google_sheet_row_number: sheetResult?.rowNumber || null,
-      sync_status: "synced",
-      sync_error: null,
-      updated_at: new Date().toISOString(),
     };
 
     const { data, error } = await supabase
@@ -310,12 +449,14 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
+    const mappedLog = mapLogForUi(data);
+
     return NextResponse.json({
       ok: true,
       message: matchedFood
-        ? `Nutrisi berhasil disimpan ke Google Sheet. Kalori otomatis: ${calories} kkal.`
-        : "Nutrisi berhasil disimpan ke Google Sheet. Kalori belum ditemukan di Master KaloriData.",
-      log: data,
+        ? `Nutrisi berhasil disimpan. Kalori otomatis: ${calories} kkal.`
+        : "Nutrisi berhasil disimpan. Kalori belum ditemukan di Master KaloriData.",
+      log: mappedLog,
       calories,
       calorie_match_status: calorieMatchStatus,
       matched_food: matchedFood,
@@ -323,13 +464,14 @@ export async function POST(req: NextRequest) {
       google_sheet: sheetResult,
     });
   } catch (error: any) {
-    console.error("WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_NUTRITION_ERROR", error);
+    console.error("WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399_ERROR", error);
 
     return NextResponse.json(
       {
         ok: false,
         message: "Gagal menyimpan nutrisi.",
         detail: error?.message || String(error),
+        marker: "WELLNESS_PARTICIPANT_NUTRITION_EXISTING_GS_SAFE_MIRROR_V399",
       },
       { status: 500 }
     );
