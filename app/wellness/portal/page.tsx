@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
-// WELLNESS_PARTICIPANT_AUTO_CALORIE_CHART_V395
+// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_PORTAL
 // Participant-only portal UX.
 // V395 scope:
 // - keep OTP, Strava, Google Fit, and existing session flow unchanged
@@ -14,7 +14,7 @@ import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 // - participant dashboard shows Calories In and health progress charts
 
 type Step = "request" | "verify" | "portal";
-type PortalTab = "home" | "nutrition" | "workout" | "history" | "devices" | "profile";
+type PortalTab = "home" | "nutrition" | "workout" | "healthtalk" | "history" | "devices" | "profile";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -135,6 +135,7 @@ export default function WellnessParticipantPortalPage() {
   const [activitySummary, setActivitySummary] = useState<any[]>([]);
   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
+  const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
   const [syncing, setSyncing] = useState("");
 
   const [nutritionForm, setNutritionForm] = useState({
@@ -156,6 +157,15 @@ export default function WellnessParticipantPortalPage() {
     steps: "",
     notes: "",
   });
+  const [workoutEvidence, setWorkoutEvidence] = useState<File | null>(null);
+
+  const [healthtalkForm, setHealthtalkForm] = useState({
+    log_date: todayDate(),
+    healthtalk_type: "Healthtalk/Seminar",
+    healthtalk_title: "",
+    notes: "",
+  });
+  const [healthtalkEvidence, setHealthtalkEvidence] = useState<File | null>(null);
 
   async function loadNutrition() {
     const result = await fetch("/api/wellness/participant/nutrition", {
@@ -166,6 +176,18 @@ export default function WellnessParticipantPortalPage() {
 
     if (result.ok) {
       setNutritionLogs(result.logs || []);
+    }
+  }
+
+  async function loadHealthtalk() {
+    const result = await fetch("/api/wellness/participant/healthtalk", {
+      cache: "no-store",
+    })
+      .then((response) => response.json())
+      .catch(() => ({ ok: false, logs: [] }));
+
+    if (result.ok) {
+      setHealthtalkLogs(result.logs || []);
     }
   }
 
@@ -193,7 +215,7 @@ export default function WellnessParticipantPortalPage() {
         setMessage("Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device.");
       }
 
-      await loadNutrition();
+      await Promise.all([loadNutrition(), loadHealthtalk()]);
     }
 
     setLoading(false);
@@ -222,6 +244,10 @@ export default function WellnessParticipantPortalPage() {
 
   function setWorkoutValue(key: string, value: string) {
     setWorkoutForm((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function setHealthtalkValue(key: string, value: string) {
+    setHealthtalkForm((previous) => ({ ...previous, [key]: value }));
   }
 
   async function requestOtp() {
@@ -309,6 +335,7 @@ export default function WellnessParticipantPortalPage() {
     setActivitySummary([]);
     setClinicalHistory([]);
     setNutritionLogs([]);
+    setHealthtalkLogs([]);
     setStep("request");
     setActiveTab("home");
     setMessage("Session peserta keluar. Masuk ulang dengan OTP.");
@@ -383,7 +410,7 @@ export default function WellnessParticipantPortalPage() {
         notes: "",
       }));
       setNutritionPhoto(null);
-      await loadNutrition();
+      await Promise.all([loadNutrition(), loadHealthtalk()]);
       setActiveTab("home");
     } else {
       setMessage(result.message || "Gagal menyimpan nutrisi.");
@@ -401,12 +428,22 @@ export default function WellnessParticipantPortalPage() {
       return;
     }
 
-    setMessage("Menyimpan workout manual dan menghitung kalori otomatis...");
+    setMessage("Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...");
+
+    const body = new FormData();
+    body.append("log_date", workoutForm.log_date);
+    body.append("started_at", workoutForm.started_at);
+    body.append("activity_type", workoutForm.activity_type);
+    body.append("activity_name", workoutForm.activity_name);
+    body.append("duration_minutes", workoutForm.duration_minutes);
+    body.append("distance_km", workoutForm.distance_km);
+    body.append("steps", workoutForm.steps);
+    body.append("notes", workoutForm.notes);
+    if (workoutEvidence) body.append("activity_evidence", workoutEvidence);
 
     const result = await fetch("/api/wellness/participant/workout", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(workoutForm),
+      body,
     })
       .then((response) => response.json())
       .catch((error) => ({
@@ -425,10 +462,51 @@ export default function WellnessParticipantPortalPage() {
         steps: "",
         notes: "",
       }));
+      setWorkoutEvidence(null);
       await loadMe({ keepMessage: true });
       setActiveTab("history");
     } else {
-      setMessage(result.message || "Gagal menyimpan workout.");
+      setMessage(result.detail || result.message || "Gagal menyimpan workout.");
+    }
+  }
+
+  async function saveHealthtalk() {
+    if (!clean(healthtalkForm.healthtalk_title)) {
+      setMessage("Jenis atau judul Health Talk wajib diisi.");
+      return;
+    }
+
+    setMessage("Menyimpan Health Talk ke Google Sheet...");
+
+    const body = new FormData();
+    body.append("log_date", healthtalkForm.log_date);
+    body.append("healthtalk_type", healthtalkForm.healthtalk_type);
+    body.append("healthtalk_title", healthtalkForm.healthtalk_title);
+    body.append("notes", healthtalkForm.notes);
+    if (healthtalkEvidence) body.append("healthtalk_evidence", healthtalkEvidence);
+
+    const result = await fetch("/api/wellness/participant/healthtalk", {
+      method: "POST",
+      body,
+    })
+      .then((response) => response.json())
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
+
+    if (result.ok) {
+      setMessage(result.message || "Health Talk berhasil disimpan.");
+      setHealthtalkForm((previous) => ({
+        ...previous,
+        healthtalk_title: "",
+        notes: "",
+      }));
+      setHealthtalkEvidence(null);
+      await loadHealthtalk();
+      setActiveTab("history");
+    } else {
+      setMessage(result.detail || result.message || "Gagal menyimpan Health Talk.");
     }
   }
 
@@ -716,8 +794,21 @@ export default function WellnessParticipantPortalPage() {
             {activeTab === "workout" ? (
               <WorkoutTab
                 form={workoutForm}
+                evidence={workoutEvidence}
+                setEvidence={setWorkoutEvidence}
                 setValue={setWorkoutValue}
                 saveWorkout={saveWorkout}
+              />
+            ) : null}
+
+            {activeTab === "healthtalk" ? (
+              <HealthtalkTab
+                form={healthtalkForm}
+                evidence={healthtalkEvidence}
+                setEvidence={setHealthtalkEvidence}
+                setValue={setHealthtalkValue}
+                saveHealthtalk={saveHealthtalk}
+                logs={healthtalkLogs}
               />
             ) : null}
 
@@ -725,6 +816,7 @@ export default function WellnessParticipantPortalPage() {
               <HistoryTab
                 workoutItems={workoutItems}
                 nutritionLogs={nutritionLogs}
+                healthtalkLogs={healthtalkLogs}
                 refresh={() => loadMe()}
               />
             ) : null}
@@ -817,7 +909,7 @@ function HomeTab({
             {` ${totals.workoutCount}`} catatan workout/device di history.
           </p>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
             <button
               type="button"
               onClick={() => setActiveTab("nutrition")}
@@ -837,6 +929,17 @@ function HomeTab({
               + Input Workout
               <div className="mt-1 text-xs font-bold text-white/80">
                 Kalori otomatis
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("healthtalk")}
+              className="rounded-3xl bg-violet-600 px-5 py-4 text-left text-sm font-black text-white shadow-lg shadow-violet-100"
+            >
+              + Health Talk
+              <div className="mt-1 text-xs font-bold text-white/80">
+                Bukti seminar
               </div>
             </button>
 
@@ -1002,10 +1105,14 @@ function NutritionTab({
 
 function WorkoutTab({
   form,
+  evidence,
+  setEvidence,
   setValue,
   saveWorkout,
 }: {
   form: any;
+  evidence: File | null;
+  setEvidence: (file: File | null) => void;
   setValue: (key: string, value: string) => void;
   saveWorkout: () => void;
 }) {
@@ -1088,6 +1195,20 @@ function WorkoutTab({
           />
         </Input>
 
+        <Input label="Bukti Aktivitas, opsional">
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            onChange={(event) => setEvidence(event.target.files?.[0] || null)}
+            className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-600 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+          />
+          {evidence ? (
+            <div className="mt-2 text-xs font-bold text-emerald-700">
+              File dipilih: {evidence.name}
+            </div>
+          ) : null}
+        </Input>
+
         <Input label="Catatan">
           <input
             value={form.notes}
@@ -1116,10 +1237,12 @@ function WorkoutTab({
 function HistoryTab({
   workoutItems,
   nutritionLogs,
+  healthtalkLogs,
   refresh,
 }: {
   workoutItems: any[];
   nutritionLogs: any[];
+  healthtalkLogs: any[];
   refresh: () => void;
 }) {
   return (
@@ -1158,6 +1281,135 @@ function HistoryTab({
           ) : (
             nutritionLogs.map((item, index) => (
               <NutritionLogCard key={`${item.id || index}-${index}`} item={item} />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <h2 className="text-xl font-black">History Health Talk</h2>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {healthtalkLogs.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 md:col-span-2">
+              Belum ada input Health Talk.
+            </div>
+          ) : (
+            healthtalkLogs.map((item, index) => (
+              <HealthtalkLogCard key={`${item.id || index}-${index}`} item={item} />
+            ))
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HealthtalkTab({
+  form,
+  evidence,
+  setEvidence,
+  setValue,
+  saveHealthtalk,
+  logs,
+}: {
+  form: any;
+  evidence: File | null;
+  setEvidence: (file: File | null) => void;
+  setValue: (key: string, value: string) => void;
+  saveHealthtalk: () => void;
+  logs: any[];
+}) {
+  return (
+    <section className="grid gap-5 lg:grid-cols-[1fr_380px]">
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-black">Input Health Talk / Seminar</h2>
+        <p className="mt-1 text-sm font-bold text-slate-500">
+          Catat seminar/health talk yang peserta ikuti. Bukti akan masuk ke Google Drive dan row masuk ke Form Responses.
+        </p>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <Input label="Tanggal Health Talk">
+            <input
+              type="date"
+              value={form.log_date}
+              onChange={(e) => setValue("log_date", e.target.value)}
+              className={fieldClass}
+            />
+          </Input>
+
+          <Input label="Jenis Kegiatan">
+            <select
+              value={form.healthtalk_type}
+              onChange={(e) => setValue("healthtalk_type", e.target.value)}
+              className={fieldClass}
+            >
+              <option value="Healthtalk/Seminar">Healthtalk/Seminar</option>
+              <option value="Webinar">Webinar</option>
+              <option value="Coaching">Coaching</option>
+              <option value="Edukasi Kesehatan">Edukasi Kesehatan</option>
+            </select>
+          </Input>
+
+          <div className="md:col-span-2">
+            <Input label="Judul / Topik Health Talk">
+              <input
+                value={form.healthtalk_title}
+                onChange={(e) => setValue("healthtalk_title", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: Seminar olahraga, edukasi nutrisi, webinar diabetes"
+              />
+            </Input>
+          </div>
+
+          <div className="md:col-span-2">
+            <Input label="Bukti Health Talk">
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(event) => setEvidence(event.target.files?.[0] || null)}
+                className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-600 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+              />
+            </Input>
+            {evidence ? (
+              <div className="mt-2 text-xs font-bold text-violet-700">
+                File dipilih: {evidence.name}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="md:col-span-2">
+            <Input label="Catatan">
+              <textarea
+                value={form.notes}
+                onChange={(e) => setValue("notes", e.target.value)}
+                className={`${fieldClass} min-h-[100px]`}
+                placeholder="Catatan tambahan, misalnya nama pembicara, lokasi, atau insight penting."
+              />
+            </Input>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={saveHealthtalk}
+          className="mt-5 w-full rounded-2xl bg-violet-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-violet-100 md:w-auto"
+        >
+          Simpan Health Talk
+        </button>
+      </div>
+
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-black">Riwayat Health Talk</h3>
+
+        <div className="mt-4 space-y-3">
+          {logs.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
+              Belum ada input Health Talk.
+            </div>
+          ) : (
+            logs.slice(0, 8).map((item, index) => (
+              <HealthtalkLogCard key={`${item.id || index}-${index}`} item={item} />
             ))
           )}
         </div>
@@ -1391,6 +1643,37 @@ function NutritionLogCard({ item }: { item: any }) {
           <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">
             {item.calorie_match_status || item.calorie_source || "master"}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HealthtalkLogCard({ item }: { item: any }) {
+  const evidenceUrl = item.evidence_preview_url || item.evidence_url;
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+      <div className="flex gap-3">
+        {evidenceUrl ? (
+          <img
+            src={evidenceUrl}
+            alt="Bukti Health Talk"
+            className="h-20 w-20 shrink-0 rounded-2xl object-cover"
+          />
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-black text-slate-900">
+            {item.healthtalk_title || item.healthtalk_type || "Health Talk"}
+          </div>
+          <div className="mt-1 text-xs font-bold capitalize text-slate-500">
+            {item.log_date || "-"} • {item.healthtalk_type || "-"}
+          </div>
+          {item.notes ? (
+            <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
+              {item.notes}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

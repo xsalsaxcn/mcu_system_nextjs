@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 
-// WELLNESS_PARTICIPANT_PORTAL_MENU_V393
+// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_MENU
 // Participant-only hamburger menu. No admin/internal links.
+// V398 adds Health Talk because the old Jotform flow also collected health talk evidence.
 
-type PortalTab = "home" | "nutrition" | "workout" | "history" | "devices" | "profile";
+type PortalTab = "home" | "nutrition" | "workout" | "healthtalk" | "history" | "devices" | "profile";
 
 type MenuItem = {
   id: PortalTab;
@@ -34,9 +35,15 @@ const menuItems: MenuItem[] = [
     badge: "Move",
   },
   {
+    id: "healthtalk",
+    label: "Health Talk",
+    description: "Catat seminar/edukasi kesehatan",
+    badge: "Talk",
+  },
+  {
     id: "history",
     label: "History",
-    description: "Riwayat nutrisi dan workout",
+    description: "Riwayat nutrisi, workout, health talk",
     badge: "Log",
   },
   {

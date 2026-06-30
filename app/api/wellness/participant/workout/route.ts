@@ -1,13 +1,26 @@
+// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT
+// Manual workout route using the existing Apps Script v370:
+// - optional workout evidence -> Google Drive by action=uploadEvidence
+// - workout submission row -> Google Sheet Form Responses
+// - mirror -> wellness_activity_logs so dashboard/history stay working
+
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import {
+  buildBaseFormRow,
+  getCompanyName,
+  getDriveUrl,
+  getPreviewUrl,
+  getWellnessSheetName,
+  postToWellnessWebhook,
+  safeLogDate,
+  uploadEvidenceToDrive,
+} from "@/lib/wellness/googleSheetWebhook";
 
-// WELLNESS_PARTICIPANT_AUTO_WORKOUT_API_V395
-// Manual workout input for participant portal.
-// V395:
-// - participant does not input calories manually
-// - calories are calculated using wellness_activity_calories master KaloriOlahraga when available
-// - fallback uses MET-style estimate with participant weight/default 70 kg
+export const runtime = "nodejs";
+
+const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -17,7 +30,7 @@ function toNumberOrNull(value: any) {
   const text = clean(value);
   if (!text) return null;
 
-  const n = Number(text);
+  const n = Number(text.replace(",", "."));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -43,6 +56,32 @@ function normalizeText(value: any) {
     .trim();
 }
 
+async function parseRequestBody(req: NextRequest) {
+  const contentType = clean(req.headers.get("content-type")).toLowerCase();
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    const body: Record<string, any> = {};
+
+    for (const [key, value] of formData.entries()) {
+      if (typeof value === "string") body[key] = value;
+    }
+
+    const evidence =
+      formData.get("activity_evidence") ||
+      formData.get("workout_evidence") ||
+      formData.get("evidence") ||
+      formData.get("photo") ||
+      formData.get("file") ||
+      null;
+
+    return { body, evidence };
+  }
+
+  const body = await req.json().catch(() => ({}));
+  return { body: body || {}, evidence: null };
+}
+
 async function getParticipant(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const participant = await getParticipantFromPortalSession(supabase, req);
@@ -64,7 +103,7 @@ function fallbackMet(activityType: string) {
   return 5.0;
 }
 
-function getWeightFromParticipant(participant: any) {
+function getWeightFromObject(value: any) {
   const candidateKeys = [
     "weight_kg",
     "baseline_weight_kg",
@@ -77,15 +116,15 @@ function getWeightFromParticipant(participant: any) {
   ];
 
   for (const key of candidateKeys) {
-    const value = toNumberOrNull(participant?.[key]);
-    if (value && value > 0) return value;
+    const n = toNumberOrNull(value?.[key]);
+    if (n && n > 0) return n;
   }
 
   return null;
 }
 
 async function getLatestWeightKg(supabase: any, participant: any) {
-  const fromParticipant = getWeightFromParticipant(participant);
+  const fromParticipant = getWeightFromObject(participant);
   if (fromParticipant) return fromParticipant;
 
   const { data } = await supabase
@@ -96,7 +135,7 @@ async function getLatestWeightKg(supabase: any, participant: any) {
     .limit(1)
     .maybeSingle();
 
-  const fromLog = getWeightFromParticipant(data);
+  const fromLog = getWeightFromObject(data);
   if (fromLog) return fromLog;
 
   return 70;
@@ -140,7 +179,6 @@ async function findActivityReference(supabase: any, activityType: string, activi
 
 function calculateCalories(params: {
   activityType: string;
-  activityName: string;
   durationMinutes: number;
   distanceKm: number | null;
   weightKg: number;
@@ -167,6 +205,49 @@ function calculateCalories(params: {
     met,
     calories_per_km: caloriesPerKm || null,
   };
+}
+
+function buildWorkoutRow(params: {
+  participant: any;
+  body: any;
+  logDate: string;
+  activityType: string;
+  activityName: string;
+  durationMinutes: number;
+  distanceKm: number | null;
+  steps: number | null;
+  notes: string | null;
+  calories: number;
+  evidenceResult: any;
+}) {
+  const row: any = buildBaseFormRow({
+    participant: params.participant,
+    body: params.body,
+    logDate: params.logDate,
+    logType: "workout",
+    marker: MARKER,
+  });
+
+  const driveUrl = getDriveUrl(params.evidenceResult);
+  const previewUrl = getPreviewUrl(params.evidenceResult);
+  const achievements = [
+    params.notes,
+    params.steps ? `${params.steps} langkah` : "",
+    params.distanceKm ? `${params.distanceKm} km` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  row["Melakukan Workout/Aktifitas Ringan?"] = "Ya";
+  row["Jenis Workout/Aktifitas"] = params.activityName || params.activityType;
+  row["Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"] = achievements;
+  row["Berapa Menit anda melakukan nya ?"] = params.durationMinutes;
+  row["Kalori Aktivitas"] = params.calories;
+  row["Bukti Aktivitas"] = driveUrl;
+  row["Preview Bukti Aktivitas"] = previewUrl;
+  row["Evidence Count"] = driveUrl ? 1 : 0;
+
+  return row;
 }
 
 export async function GET(req: NextRequest) {
@@ -213,10 +294,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const { body, evidence } = await parseRequestBody(req);
 
-    const activityType = clean(body?.activity_type) || "Workout";
-    const durationMinutes = toNumberOrNull(body?.duration_minutes);
+    const activityType = clean(body?.activity_type || body?.activityType) || "Workout";
+    const durationMinutes = toNumberOrNull(body?.duration_minutes || body?.durationMinutes);
 
     if (!durationMinutes || durationMinutes <= 0) {
       return NextResponse.json(
@@ -225,21 +306,53 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const logDate = clean(body?.log_date) || todayDate();
+    const logDate = safeLogDate(body?.log_date || body?.logDate) || todayDate();
     const startedAt = isoFromLocal(body?.started_at) || `${logDate}T00:00:00.000Z`;
-    const activityName = clean(body?.activity_name) || activityType;
-    const distanceKm = toNumberOrNull(body?.distance_km);
+    const activityName = clean(body?.activity_name || body?.activityName) || activityType;
+    const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);
+    const notes = clean(body?.notes || body?.catatan) || null;
+    const companyName = getCompanyName(participant, body);
 
     const weightKg = await getLatestWeightKg(supabase, participant);
     const activityRef = await findActivityReference(supabase, activityType, activityName);
     const calculated = calculateCalories({
       activityType,
-      activityName,
       durationMinutes,
       distanceKm,
       weightKg,
       activityRef,
+    });
+
+    const evidenceResult = await uploadEvidenceToDrive({
+      file: evidence,
+      participant,
+      companyName,
+      category: "Workout",
+      activeTab: "activity",
+      fieldKey: "activity_evidence",
+      logDate,
+      marker: MARKER,
+    });
+
+    const sheetRow = buildWorkoutRow({
+      participant,
+      body,
+      logDate,
+      activityType,
+      activityName,
+      durationMinutes,
+      distanceKm,
+      steps,
+      notes,
+      calories: calculated.calories,
+      evidenceResult,
+    });
+
+    const sheetResult = await postToWellnessWebhook({
+      sheet: getWellnessSheetName(),
+      row: sheetRow,
+      marker: MARKER,
     });
 
     const externalId = `manual_${participant.id}_${Date.now()}`;
@@ -259,7 +372,7 @@ export async function POST(req: NextRequest) {
       steps,
       raw_payload: {
         ...body,
-        notes: clean(body?.notes) || null,
+        notes,
         participant_weight_kg_used: weightKg,
         activity_reference_id: activityRef?.id || null,
         activity_reference_name: activityRef?.activity_name || null,
@@ -267,7 +380,10 @@ export async function POST(req: NextRequest) {
         met_used: calculated.met,
         calories_per_km_used: calculated.calories_per_km,
         calorie_match_status: activityRef?.match_status || "not_found",
+        google_drive: evidenceResult || null,
+        google_sheet: sheetResult || null,
         saved_at: new Date().toISOString(),
+        marker: MARKER,
       },
     };
 
@@ -277,21 +393,24 @@ export async function POST(req: NextRequest) {
       .select("*")
       .single();
 
-    if (error) {
-      return NextResponse.json(
-        { ok: false, message: "Gagal menyimpan workout.", detail: error.message },
-        { status: 500 }
-      );
-    }
+    if (error) throw error;
 
     return NextResponse.json({
       ok: true,
-      message: `Workout berhasil disimpan. Kalori otomatis: ${calculated.calories} kkal.`,
+      message: `Workout berhasil disimpan ke Google Sheet. Kalori otomatis: ${calculated.calories} kkal.`,
       log: data,
+      google_drive: evidenceResult,
+      google_sheet: sheetResult,
     });
   } catch (error: any) {
+    console.error("WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT_ERROR", error);
+
     return NextResponse.json(
-      { ok: false, message: error?.message || "Gagal menyimpan workout." },
+      {
+        ok: false,
+        message: "Gagal menyimpan workout.",
+        detail: error?.message || String(error),
+      },
       { status: 500 }
     );
   }
