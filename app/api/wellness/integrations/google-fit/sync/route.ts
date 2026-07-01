@@ -1,662 +1,556 @@
+// WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY
+// Fix Google Fit daily sync:
+// - skip cumulative step sources
+// - do not use Google Fit daily calories as workout calories because it may include total daily/BMR calories
+// - pick daily steps from delta sources only
+// - estimate daily calories from steps/distance + participant weight
+// - update existing google_fit_daily rows instead of duplicating
+// - keep session/workout data separate when available
+
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_GOOGLE_FIT_SYNC_V392_DIRECT_DATASOURCES
-// Fix: aggregate_summary Google Fit bisa 0 walaupun data sources ada.
-// Sync membaca langsung dari dataSources/datasets Google Fit.
-
-type DailyRow = {
-  date: string;
-  startMs: number;
-  endMs: number;
-  steps: number;
-  calories: number;
-  distanceM: number;
-  activeMinutes: number;
-  raw: any[];
-};
-
-type FitSession = Record<string, any>;
+export const runtime = "nodejs";
 
 function clean(value: any) {
   return String(value ?? "").trim();
 }
 
-function num(value: any) {
-  const n = Number(value);
+function toNumberOrNull(value: any) {
+  const text = clean(value);
+  if (!text) return null;
+
+  const n = Number(text);
   return Number.isFinite(n) ? n : null;
 }
 
-function dateOnlyFromMs(ms: number) {
-  return new Date(ms).toISOString().slice(0, 10);
+function jakartaDateKey(ms: number) {
+  const offsetMs = 7 * 60 * 60 * 1000;
+  return new Date(ms + offsetMs).toISOString().slice(0, 10);
 }
 
-function round(value: number, digits = 1) {
-  const factor = Math.pow(10, digits);
-  return Math.round(value * factor) / factor;
+function jakartaTodayKey() {
+  return jakartaDateKey(Date.now());
+}
+
+function jakartaDayStartUtc(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, -7, 0, 0, 0));
+}
+
+function addDays(dateKey: string, days: number) {
+  const start = jakartaDayStartUtc(dateKey);
+  const next = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+  return jakartaDateKey(next.getTime());
+}
+
+function nanos(date: Date) {
+  return `${date.getTime()}000000`;
+}
+
+function nanosToMs(value: any) {
+  const text = String(value || "").trim();
+
+  if (!text) return Date.now();
+
+  if (text.length > 6) {
+    const msText = text.slice(0, -6);
+    const ms = Number(msText);
+    return Number.isFinite(ms) ? ms : Date.now();
+  }
+
+  const n = Number(text);
+  return Number.isFinite(n) ? Math.floor(n / 1000000) : Date.now();
+}
+
+function pointStartMs(point: any) {
+  if (point?.startTimeNanos) {
+    return nanosToMs(point.startTimeNanos);
+  }
+
+  const value = point?.modifiedTimeMillis || null;
+  return Number(value) || Date.now();
+}
+
+function pointEndMs(point: any) {
+  if (point?.endTimeNanos) {
+    return nanosToMs(point.endTimeNanos);
+  }
+
+  return pointStartMs(point);
 }
 
 function valueNumber(value: any) {
   if (!value) return 0;
-  if (typeof value.intVal !== "undefined") return Number(value.intVal || 0);
-  if (typeof value.fpVal !== "undefined") return Number(value.fpVal || 0);
+
+  if (value.intVal !== undefined && value.intVal !== null) {
+    return Number(value.intVal) || 0;
+  }
+
+  if (value.fpVal !== undefined && value.fpVal !== null) {
+    return Number(value.fpVal) || 0;
+  }
+
+  if (value.stringVal !== undefined && value.stringVal !== null) {
+    return Number(value.stringVal) || 0;
+  }
+
   return 0;
 }
+function isStepDeltaSource(source: any) {
+  const id = clean(source?.dataStreamId).toLowerCase();
+  const type = clean(source?.dataType?.name).toLowerCase();
 
-function pointStartMs(point: any) {
-  return Number(point?.startTimeNanos || 0) / 1000000;
+  if (type !== "com.google.step_count.delta") return false;
+  if (id.includes("cumulative")) return false;
+
+  return true;
 }
 
-function pointEndMs(point: any) {
-  return Number(point?.endTimeNanos || 0) / 1000000;
+function isDistanceDeltaSource(source: any) {
+  const type = clean(source?.dataType?.name).toLowerCase();
+  return type === "com.google.distance.delta";
 }
 
-function dateKeyFromPoint(point: any) {
-  const ms = pointEndMs(point) || pointStartMs(point);
-  if (!ms) return null;
-  return dateOnlyFromMs(ms);
+function isActiveMinutesSource(source: any) {
+  const type = clean(source?.dataType?.name).toLowerCase();
+  return type === "com.google.active_minutes";
 }
 
-function getOrCreateDaily(map: Map<string, DailyRow>, date: string, ms: number) {
-  const existing = map.get(date);
-  if (existing) return existing;
+function sourcePriority(sourceId: string) {
+  const id = clean(sourceId).toLowerCase();
 
-  const start = new Date(`${date}T00:00:00.000Z`).getTime();
-  const end = start + 24 * 60 * 60 * 1000 - 1;
+  let score = 0;
 
-  const row: DailyRow = {
-    date,
-    startMs: start || ms,
-    endMs: end || ms,
-    steps: 0,
-    calories: 0,
-    distanceM: 0,
-    activeMinutes: 0,
-    raw: [],
-  };
+  if (id.startsWith("derived:")) score += 100;
+  if (id.includes("estimated_steps")) score += 80;
+  if (id.includes("com.google.android.gms")) score += 70;
+  if (id.includes("com.google.android.fit")) score += 60;
+  if (id.includes("samsung")) score += 40;
+  if (id.startsWith("raw:")) score += 20;
+  if (id.includes("user_input")) score -= 100;
+  if (id.includes("cumulative")) score -= 1000;
 
-  map.set(date, row);
-  return row;
+  return score;
 }
 
-function activityNameFromCode(code: any) {
-  const n = Number(code);
+function safeDurationFromSteps(steps: number, activeMinutes: number) {
+  if (!steps || steps <= 0) return 0;
 
-  const map: Record<number, string> = {
-    1: "Biking",
-    2: "On foot",
-    7: "Walking",
-    8: "Running",
-    9: "Aerobics",
-    10: "Badminton",
-    12: "Basketball",
-    21: "Calisthenics",
-    22: "Circuit training",
-    24: "Dancing",
-    32: "Hiking",
-    50: "Rowing",
-    53: "Jogging",
-    55: "Running treadmill",
-    75: "Stair climbing",
-    78: "Strength training",
-    80: "Swimming",
-    86: "Treadmill",
-    91: "Walking fitness",
-    93: "Walking treadmill",
-    95: "Weightlifting",
-    98: "Yoga",
-  };
+  const estimatedBySteps = steps / 100;
 
-  return map[n] || `Google Fit Activity ${Number.isFinite(n) ? n : ""}`.trim();
-}
+  if (activeMinutes > 0) {
+    const upperReasonable = Math.max(5, steps / 50);
 
-function isInactiveActivityCode(code: number) {
-  return code === 3 || code === 70 || code === 72 || code === 108;
-}
-
-async function refreshGoogleToken(integration: any) {
-  const clientId =
-    clean(process.env.GOOGLE_FIT_CLIENT_ID) ||
-    clean(process.env.GOOGLE_CLIENT_ID);
-
-  const clientSecret =
-    clean(process.env.GOOGLE_FIT_CLIENT_SECRET) ||
-    clean(process.env.GOOGLE_CLIENT_SECRET);
-
-  const refreshToken = clean(integration?.refresh_token);
-
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error("GOOGLE_FIT_REFRESH_ENV_MISSING");
+    if (activeMinutes <= upperReasonable) {
+      return Math.round(activeMinutes * 10) / 10;
+    }
   }
 
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      data?.error_description || data?.error || "GOOGLE_FIT_REFRESH_FAILED"
-    );
-  }
-
-  return data;
+  return Math.round(estimatedBySteps * 10) / 10;
 }
 
-async function getValidAccessToken(supabase: any, integration: any) {
-  const accessToken = clean(integration?.access_token);
+function estimateDistanceFromSteps(steps: number) {
+  if (!steps || steps <= 0) return 0;
+
+  return Math.round(steps * 0.0007 * 100) / 100;
+}
+
+function estimateActiveCalories(params: {
+  steps: number;
+  distanceKm: number;
+  weightKg: number;
+}) {
+  const steps = Number(params.steps || 0);
+  const weightKg = Number(params.weightKg || 70);
+  const distanceKm =
+    Number(params.distanceKm || 0) > 0
+      ? Number(params.distanceKm)
+      : estimateDistanceFromSteps(steps);
+
+  if (!steps || steps <= 0) return 0;
+
+  const calories = distanceKm * weightKg * 0.53;
+
+  return Math.max(1, Math.round(calories));
+}
+
+function getWeightKg(participant: any) {
+  const keys = [
+    "current_weight_kg",
+    "latest_weight_kg",
+    "weight_kg",
+    "baseline_weight_kg",
+    "initial_weight_kg",
+    "bb",
+    "berat_badan",
+  ];
+
+  for (const key of keys) {
+    const value = toNumberOrNull(participant?.[key]);
+    if (value && value > 0) return value;
+  }
+
+  return 70;
+}
+
+async function readLatestWeight(supabase: any, participant: any) {
+  const fromParticipant = getWeightKg(participant);
+  if (fromParticipant) return fromParticipant;
+
+  const { data } = await supabase
+    .from("wellness_weight_logs")
+    .select("*")
+    .eq("participant_id", participant.id)
+    .order("log_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return getWeightKg(data);
+}
+
+async function refreshAccessTokenIfNeeded(supabase: any, integration: any) {
   const expiresAt = integration?.expires_at
     ? new Date(integration.expires_at).getTime()
     : 0;
 
-  if (accessToken && expiresAt && expiresAt > Date.now() + 60 * 1000) {
-    return accessToken;
+  const stillValid = expiresAt && expiresAt > Date.now() + 60 * 1000;
+
+  if (integration?.access_token && stillValid) {
+    return integration.access_token;
   }
 
-  const refreshed = await refreshGoogleToken(integration);
+  const refreshToken = clean(integration?.refresh_token);
+  if (!refreshToken) throw new Error("Google Fit refresh_token tidak tersedia.");
 
-  const newExpiresAt = refreshed.expires_in
-    ? new Date(Date.now() + Number(refreshed.expires_in) * 1000).toISOString()
-    : null;
+  const clientId =
+    clean(process.env.GOOGLE_FIT_CLIENT_ID) || clean(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret =
+    clean(process.env.GOOGLE_FIT_CLIENT_SECRET) ||
+    clean(process.env.GOOGLE_CLIENT_SECRET);
+
+  if (!clientId || !clientSecret) {
+    throw new Error("GOOGLE_FIT_CLIENT_ID / GOOGLE_FIT_CLIENT_SECRET belum diatur.");
+  }
+
+  const params = new URLSearchParams();
+  params.set("client_id", clientId);
+  params.set("client_secret", clientSecret);
+  params.set("refresh_token", refreshToken);
+  params.set("grant_type", "refresh_token");
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const json: any = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(json?.error_description || json?.error || "Gagal refresh Google token.");
+  }
+
+  const accessToken = clean(json.access_token);
+  const expiresIn = Number(json.expires_in || 3600);
+  const newExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
   await supabase
     .from("wellness_integrations")
     .update({
-      access_token: refreshed.access_token,
+      access_token: accessToken,
       expires_at: newExpiresAt,
-      token_type: clean(refreshed.token_type) || "Bearer",
-      scope: clean(refreshed.scope || integration.scope),
       updated_at: new Date().toISOString(),
-      raw_payload: {
-        ...(integration.raw_payload || {}),
-        refreshed_at: new Date().toISOString(),
-        token_type: refreshed.token_type || null,
-        expires_in: refreshed.expires_in || null,
-        scope: refreshed.scope || integration.scope || null,
-      },
     })
     .eq("id", integration.id);
 
-  return clean(refreshed.access_token);
+  return accessToken;
 }
 
-async function fetchDataSources(accessToken: string) {
-  const response = await fetch(
-    "https://www.googleapis.com/fitness/v1/users/me/dataSources",
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    }
-  );
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      data?.error?.message || data?.error_description || "GOOGLE_FIT_DATASOURCES_FAILED"
-    );
-  }
-
-  return Array.isArray(data?.dataSource) ? data.dataSource : [];
-}
-
-async function fetchDataset(
-  accessToken: string,
-  dataSourceId: string,
-  startMs: number,
-  endMs: number
-) {
-  const startNanos = Math.floor(startMs * 1000000);
-  const endNanos = Math.floor(endMs * 1000000);
-
-  const encodedSource = encodeURIComponent(dataSourceId);
-  const datasetId = `${startNanos}-${endNanos}`;
-
-  const url = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encodedSource}/datasets/${datasetId}`;
-
+async function googleGet(accessToken: string, url: string) {
   const response = await fetch(url, {
+    method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
 
-  const data = await response.json().catch(() => ({}));
+  const json: any = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
-      data?.error?.message ||
-        data?.error_description ||
-        `GOOGLE_FIT_DATASET_FAILED_${dataSourceId}`
-    );
+    throw new Error(json?.error?.message || json?.error || `Google Fit HTTP ${response.status}`);
   }
 
-  return data;
+  return json;
 }
 
-async function fetchGoogleFitSessions(
-  accessToken: string,
-  startMs: number,
-  endMs: number
-) {
-  const url = new URL("https://www.googleapis.com/fitness/v1/users/me/sessions");
-  url.searchParams.set("startTime", new Date(startMs).toISOString());
-  url.searchParams.set("endTime", new Date(endMs).toISOString());
-  url.searchParams.set("includeDeleted", "false");
+async function readDataset(params: {
+  accessToken: string;
+  dataStreamId: string;
+  start: Date;
+  end: Date;
+}) {
+  const encoded = encodeURIComponent(params.dataStreamId);
+  const datasetId = `${nanos(params.start)}-${nanos(params.end)}`;
+  const url = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encoded}/datasets/${datasetId}`;
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      data?.error?.message ||
-        data?.error_description ||
-        data?.message ||
-        "GOOGLE_FIT_SESSIONS_FAILED"
-    );
-  }
-
-  return Array.isArray(data?.session) ? data.session : [];
+  const json = await googleGet(params.accessToken, url);
+  return Array.isArray(json.point) ? json.point : [];
 }
 
-function parseDatasetIntoDailyRows(
-  map: Map<string, DailyRow>,
-  dataSource: any,
-  dataset: any
-) {
-  const dataSourceId = clean(dataSource?.dataStreamId || dataSource?.dataSourceId);
-  const dataTypeName = clean(dataSource?.dataType?.name);
-  const points = Array.isArray(dataset?.point) ? dataset.point : [];
-
-  if (!points.length) return;
-
-  const cumulativeByDate = new Map<string, number[]>();
-
-  for (const point of points) {
-    const date = dateKeyFromPoint(point);
-    if (!date) continue;
-
-    const values = Array.isArray(point?.value) ? point.value : [];
-    const firstValue = values[0] || {};
-    const value = valueNumber(firstValue);
-    const startMs = pointStartMs(point);
-    const endMs = pointEndMs(point);
-    const row = getOrCreateDaily(map, date, endMs || startMs || Date.now());
-
-    row.raw.push({
-      source: dataSourceId,
-      type: dataTypeName,
-      startTimeNanos: point?.startTimeNanos || null,
-      endTimeNanos: point?.endTimeNanos || null,
-      value: firstValue,
-    });
-
-    if (dataTypeName === "com.google.step_count.delta") {
-      row.steps += value;
-    } else if (dataTypeName === "com.google.step_count.cumulative") {
-      const list = cumulativeByDate.get(date) || [];
-      list.push(value);
-      cumulativeByDate.set(date, list);
-    } else if (dataTypeName === "com.google.calories.expended") {
-      row.calories += value;
-    } else if (dataTypeName === "com.google.distance.delta") {
-      row.distanceM += value;
-    } else if (dataTypeName === "com.google.active_minutes") {
-      row.activeMinutes += value;
-    } else if (dataTypeName === "com.google.activity.segment") {
-      const code = Number(firstValue?.intVal || 0);
-
-      if (
-        startMs &&
-        endMs &&
-        endMs > startMs &&
-        !isInactiveActivityCode(code)
-      ) {
-        row.activeMinutes += (endMs - startMs) / 60000;
-      }
-    }
-  }
-
-  for (const [date, values] of cumulativeByDate.entries()) {
-    const cleanValues = values.filter((value) => Number.isFinite(value));
-
-    if (!cleanValues.length) continue;
-
-    const min = Math.min(...cleanValues);
-    const max = Math.max(...cleanValues);
-
-    // Untuk beberapa device, cumulative harian hanya muncul 1 point.
-    // Kalau max-min = 0, pakai max sebagai fallback.
-    const delta = max - min > 0 ? max - min : max;
-
-    const row = getOrCreateDaily(map, date, Date.now());
-
-    if (row.steps <= 0 && delta > 0) {
-      row.steps = delta;
-    }
-  }
-}
-
-async function fetchDailyRowsFromDataSources(
-  accessToken: string,
-  days: number
-) {
-  const safeDays = Math.min(Math.max(days || 30, 1), 365);
-  const endMs = Date.now();
-  const startMs = endMs - safeDays * 24 * 60 * 60 * 1000;
-
-  const dataSources = await fetchDataSources(accessToken);
-
-  const allowedTypes = new Set([
-    "com.google.step_count.delta",
-    "com.google.step_count.cumulative",
-    "com.google.calories.expended",
-    "com.google.distance.delta",
-    "com.google.active_minutes",
-    "com.google.activity.segment",
-  ]);
-
-  const selectedSources = dataSources.filter((source: any) => {
-    const type = clean(source?.dataType?.name);
-    return allowedTypes.has(type);
-  });
-
-  const map = new Map<string, DailyRow>();
-  let datasetsRead = 0;
-  let datasetsWithPoints = 0;
-
-  for (const source of selectedSources) {
-    const dataSourceId = clean(source?.dataStreamId || source?.dataSourceId);
-    if (!dataSourceId) continue;
-
-    const dataset = await fetchDataset(accessToken, dataSourceId, startMs, endMs);
-    datasetsRead += 1;
-
-    if (Array.isArray(dataset?.point) && dataset.point.length > 0) {
-      datasetsWithPoints += 1;
-    }
-
-    parseDatasetIntoDailyRows(map, source, dataset);
-  }
-
-  const rows = Array.from(map.values())
-    .filter((row) => {
-      return (
-        row.steps > 0 ||
-        row.calories > 0 ||
-        row.distanceM > 0 ||
-        row.activeMinutes > 0
-      );
-    })
-    .sort((a, b) => b.startMs - a.startMs);
-
-  return {
-    rows,
-    dataSourcesCount: dataSources.length,
-    selectedSourcesCount: selectedSources.length,
-    datasetsRead,
-    datasetsWithPoints,
-  };
-}
-
-async function saveDailyActivity(
-  supabase: any,
-  participantId: number,
-  row: DailyRow
-) {
-  const externalId = `google_fit_daily_${participantId}_${row.date}`;
-  const distanceKm = row.distanceM > 0 ? round(row.distanceM / 1000, 2) : null;
-  const durationMinutes =
-    row.activeMinutes > 0 ? round(row.activeMinutes, 1) : null;
-
-  const formattedSteps = new Intl.NumberFormat("id-ID").format(
-    Math.round(row.steps || 0)
-  );
-
-  const activityName =
-    row.steps > 0
-      ? `Google Fit Daily - ${formattedSteps} steps`
-      : "Google Fit Daily Activity";
+async function upsertDailyRow(params: {
+  supabase: any;
+  participant: any;
+  row: any;
+}) {
+  const externalId = `google_fit_daily_${params.participant.id}_${params.row.date}`;
 
   const payload: any = {
-    participant_id: participantId,
+    participant_id: Number(params.participant.id),
     source: "google_fit",
     external_activity_id: externalId,
     provider_activity_id: externalId,
     activity_type: "Google Fit Daily",
-    activity_name: activityName,
-    log_date: row.date,
-    started_at: new Date(row.startMs).toISOString(),
-    duration_minutes: durationMinutes,
-    calories: row.calories > 0 ? Math.round(row.calories) : null,
-    distance_km: distanceKm,
-    steps: Math.round(row.steps || 0),
+    activity_name: `Google Fit Daily - ${params.row.steps} steps`,
+    log_date: params.row.date,
+    started_at: `${params.row.date}T00:00:00.000Z`,
+    duration_minutes: params.row.duration_minutes,
+    calories: params.row.calories,
+    distance_km: params.row.distance_km,
+    steps: params.row.steps,
     raw_payload: {
-      kind: "direct_datasource_daily",
-      date: row.date,
-      steps: row.steps,
-      calories: row.calories,
-      distance_m: row.distanceM,
-      active_minutes: row.activeMinutes,
-      synced_at: new Date().toISOString(),
-      raw: row.raw,
-    },
-  };
-
-  const { data: existing, error: existingError } = await supabase
-    .from("wellness_activity_logs")
-    .select("id")
-    .eq("participant_id", participantId)
-    .eq("source", "google_fit")
-    .eq("external_activity_id", externalId)
-    .maybeSingle();
-
-  if (existingError) throw existingError;
-
-  if (existing?.id) {
-    const { error } = await supabase
-      .from("wellness_activity_logs")
-      .update(payload)
-      .eq("id", existing.id);
-
-    if (error) throw error;
-
-    return { updated: true };
-  }
-
-  const { error } = await supabase.from("wellness_activity_logs").insert(payload);
-
-  if (error) throw error;
-
-  return { inserted: true };
-}
-
-async function saveWorkoutSession(
-  supabase: any,
-  participantId: number,
-  session: FitSession
-) {
-  const sessionId =
-    clean(session?.id) ||
-    clean(session?.name) ||
-    `${clean(session?.startTimeMillis)}_${clean(session?.endTimeMillis)}`;
-
-  if (!sessionId) return { skipped: true };
-
-  const startMs = Number(session?.startTimeMillis || 0);
-  const endMs = Number(session?.endTimeMillis || 0);
-
-  if (!startMs || !endMs || endMs <= startMs) {
-    return { skipped: true };
-  }
-
-  const activityType = activityNameFromCode(session?.activityType);
-  const activityName =
-    clean(session?.name) ||
-    clean(session?.description) ||
-    `Google Fit - ${activityType}`;
-
-  const durationMinutes = round((endMs - startMs) / 60000, 1);
-  const date = dateOnlyFromMs(startMs);
-  const externalId = `google_fit_session_${participantId}_${sessionId}`;
-
-  const payload: any = {
-    participant_id: participantId,
-    source: "google_fit",
-    external_activity_id: externalId,
-    provider_activity_id: sessionId,
-    activity_type: activityType,
-    activity_name: activityName,
-    log_date: date,
-    started_at: new Date(startMs).toISOString(),
-    duration_minutes: durationMinutes,
-    calories: null,
-    distance_km: null,
-    steps: null,
-    raw_payload: {
-      kind: "session",
-      session,
+      marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
+      selected_step_source: params.row.selected_step_source,
+      selected_distance_source: params.row.selected_distance_source,
+      selected_active_minutes_source: params.row.selected_active_minutes_source,
+      calculation_note:
+        "Daily calories estimated from steps/distance. Google Fit total daily calories are not used to avoid BMR/total-calorie overcount.",
       synced_at: new Date().toISOString(),
     },
   };
 
-  const { data: existing, error: existingError } = await supabase
+  const existing = await params.supabase
     .from("wellness_activity_logs")
     .select("id")
-    .eq("participant_id", participantId)
+    .eq("participant_id", params.participant.id)
     .eq("source", "google_fit")
     .eq("external_activity_id", externalId)
     .maybeSingle();
 
-  if (existingError) throw existingError;
+  if (existing.error) throw existing.error;
 
-  if (existing?.id) {
-    const { error } = await supabase
+  if (existing.data?.id) {
+    const updated = await params.supabase
       .from("wellness_activity_logs")
       .update(payload)
-      .eq("id", existing.id);
+      .eq("id", existing.data.id)
+      .select("*")
+      .single();
 
-    if (error) throw error;
-
-    return { updated: true };
+    if (updated.error) throw updated.error;
+    return { action: "updated", row: updated.data };
   }
 
-  const { error } = await supabase.from("wellness_activity_logs").insert(payload);
+  const inserted = await params.supabase
+    .from("wellness_activity_logs")
+    .insert(payload)
+    .select("*")
+    .single();
 
-  if (error) throw error;
-
-  return { inserted: true };
+  if (inserted.error) throw inserted.error;
+  return { action: "inserted", row: inserted.data };
 }
 
-async function getRequestedDays(req: NextRequest) {
-  if (req.method === "GET") {
-    const queryDays = num(req.nextUrl.searchParams.get("days"));
-    return Math.min(Math.max(queryDays || 30, 1), 365);
-  }
-
-  const body = await req.json().catch(() => ({}));
-  const bodyDays = num(body?.days);
-
-  return Math.min(Math.max(bodyDays || 30, 1), 365);
-}
-
-async function handleSync(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const participant = await getParticipantFromPortalSession(supabase, req);
 
   if (!participant?.id) {
     return NextResponse.json(
-      {
-        ok: false,
-        message: "OTP/session peserta belum aktif.",
-      },
+      { ok: false, message: "OTP/session peserta belum aktif." },
       { status: 401 }
     );
   }
 
-  const { data: integration, error: integrationError } = await supabase
-    .from("wellness_integrations")
-    .select("*")
-    .eq("participant_id", participant.id)
-    .eq("provider", "google_fit")
-    .eq("is_active", 1)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (integrationError) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "Gagal membaca koneksi Google Fit.",
-        detail: integrationError.message,
-      },
-      { status: 500 }
-    );
-  }
-
-  if (!integration?.id) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message: "Google Fit belum connected untuk peserta ini.",
-      },
-      { status: 400 }
-    );
-  }
-
   try {
-    const days = await getRequestedDays(req);
-    const accessToken = await getValidAccessToken(supabase, integration);
+    const body = await req.json().catch(() => ({}));
+    const days = Math.min(Math.max(Number(body?.days || 2), 1), 30);
 
-    const endMs = Date.now();
-    const startMs = endMs - days * 24 * 60 * 60 * 1000;
+    const { data: integration, error: integrationError } = await supabase
+      .from("wellness_integrations")
+      .select("*")
+      .eq("participant_id", participant.id)
+      .eq("provider", "google_fit")
+      .neq("is_active", 0)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const dailyResult = await fetchDailyRowsFromDataSources(accessToken, days);
-    const sessions = await fetchGoogleFitSessions(accessToken, startMs, endMs);
+    if (integrationError) throw integrationError;
+    if (!integration) {
+      return NextResponse.json(
+        { ok: false, message: "Google Fit belum terkoneksi." },
+        { status: 400 }
+      );
+    }
+
+    const accessToken = await refreshAccessTokenIfNeeded(supabase, integration);
+    const weightKg = await readLatestWeight(supabase, participant);
+
+    const today = jakartaTodayKey();
+    const startKey = addDays(today, -(days - 1));
+    const start = jakartaDayStartUtc(startKey);
+    const end = jakartaDayStartUtc(addDays(today, 1));
+
+    const dataSourcesJson = await googleGet(
+      accessToken,
+      "https://www.googleapis.com/fitness/v1/users/me/dataSources"
+    );
+
+    const dataSources = Array.isArray(dataSourcesJson.dataSource)
+      ? dataSourcesJson.dataSource
+      : [];
+
+    const stepSources = dataSources.filter(isStepDeltaSource);
+    const distanceSources = dataSources.filter(isDistanceDeltaSource);
+    const activeMinuteSources = dataSources.filter(isActiveMinutesSource);
+
+    const dailyByDate = new Map<string, any>();
+
+    function ensureDay(date: string) {
+      const existing = dailyByDate.get(date);
+      if (existing) return existing;
+
+      const row = {
+        date,
+        stepCandidates: new Map<string, any>(),
+        distanceCandidates: new Map<string, any>(),
+        activeMinuteCandidates: new Map<string, any>(),
+      };
+
+      dailyByDate.set(date, row);
+      return row;
+    }
+
+    for (const source of stepSources) {
+      const sourceId = source.dataStreamId;
+      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
+
+      for (const point of points) {
+        const ms = pointEndMs(point);
+        const date = jakartaDateKey(ms);
+        const value = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
+
+        if (!value || value < 0) continue;
+
+        const day = ensureDay(date);
+        const current = day.stepCandidates.get(sourceId) || {
+          sourceId,
+          value: 0,
+          priority: sourcePriority(sourceId),
+        };
+
+        current.value += value;
+        day.stepCandidates.set(sourceId, current);
+      }
+    }
+
+    for (const source of distanceSources) {
+      const sourceId = source.dataStreamId;
+      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
+
+      for (const point of points) {
+        const ms = pointEndMs(point);
+        const date = jakartaDateKey(ms);
+        const meters = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
+
+        if (!meters || meters < 0) continue;
+
+        const day = ensureDay(date);
+        const current = day.distanceCandidates.get(sourceId) || {
+          sourceId,
+          value: 0,
+          priority: sourcePriority(sourceId),
+        };
+
+        current.value += meters / 1000;
+        day.distanceCandidates.set(sourceId, current);
+      }
+    }
+
+    for (const source of activeMinuteSources) {
+      const sourceId = source.dataStreamId;
+      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
+
+      for (const point of points) {
+        const ms = pointEndMs(point);
+        const date = jakartaDateKey(ms);
+        const minutes = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
+
+        if (!minutes || minutes < 0) continue;
+
+        const day = ensureDay(date);
+        const current = day.activeMinuteCandidates.get(sourceId) || {
+          sourceId,
+          value: 0,
+          priority: sourcePriority(sourceId),
+        };
+
+        current.value += minutes;
+        day.activeMinuteCandidates.set(sourceId, current);
+      }
+    }
+
+    function pickBest(candidates: Map<string, any>) {
+      const rows = [...candidates.values()].filter((item) => Number(item.value || 0) > 0);
+
+      rows.sort((a, b) => {
+        if (b.priority !== a.priority) return b.priority - a.priority;
+        return Number(b.value || 0) - Number(a.value || 0);
+      });
+
+      return rows[0] || null;
+    }
+
+    const dailyRows = [...dailyByDate.values()]
+      .map((day) => {
+        const stepPick = pickBest(day.stepCandidates);
+        const distancePick = pickBest(day.distanceCandidates);
+        const activePick = pickBest(day.activeMinuteCandidates);
+
+        const steps = Math.round(Number(stepPick?.value || 0));
+        const distanceKmRaw = Number(distancePick?.value || 0);
+        const distanceKm =
+          distanceKmRaw > 0
+            ? Math.round(distanceKmRaw * 100) / 100
+            : estimateDistanceFromSteps(steps);
+
+        const activeMinutesRaw = Number(activePick?.value || 0);
+        const durationMinutes = safeDurationFromSteps(steps, activeMinutesRaw);
+        const calories = estimateActiveCalories({ steps, distanceKm, weightKg });
+
+        return {
+          date: day.date,
+          steps,
+          distance_km: distanceKm,
+          duration_minutes: durationMinutes,
+          calories,
+          selected_step_source: stepPick?.sourceId || null,
+          selected_distance_source: distancePick?.sourceId || null,
+          selected_active_minutes_source: activePick?.sourceId || null,
+        };
+      })
+      .filter((row) => row.steps > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
 
     let inserted = 0;
     let updated = 0;
-    let skipped = 0;
 
-    for (const session of sessions) {
-      const result = await saveWorkoutSession(
-        supabase,
-        Number(participant.id),
-        session
-      );
-
-      if (result.inserted) inserted += 1;
-      else if (result.updated) updated += 1;
-      else skipped += 1;
-    }
-
-    for (const row of dailyResult.rows) {
-      const result = await saveDailyActivity(
-        supabase,
-        Number(participant.id),
-        row
-      );
-
-      if (result.inserted) inserted += 1;
-      else if (result.updated) updated += 1;
-      else skipped += 1;
+    for (const row of dailyRows) {
+      const saved = await upsertDailyRow({ supabase, participant, row });
+      if (saved.action === "inserted") inserted += 1;
+      if (saved.action === "updated") updated += 1;
     }
 
     await supabase
@@ -669,42 +563,27 @@ async function handleSync(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      source: "google_fit",
-      participant_id: participant.id,
-      days,
-      data_sources_count: dailyResult.dataSourcesCount,
-      selected_sources_count: dailyResult.selectedSourcesCount,
-      datasets_read: dailyResult.datasetsRead,
-      datasets_with_points: dailyResult.datasetsWithPoints,
-      fetched_sessions: sessions.length,
-      fetched_daily: dailyResult.rows.length,
-      fetched: sessions.length + dailyResult.rows.length,
+      marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
+      message: `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
+      data_sources_count: dataSources.length,
+      step_sources_count: stepSources.length,
+      distance_sources_count: distanceSources.length,
+      active_minutes_sources_count: activeMinuteSources.length,
+      fetched_daily: dailyRows.length,
       inserted,
       updated,
-      skipped,
-      message:
-        sessions.length + dailyResult.rows.length > 0
-          ? "Sync Google Fit berhasil."
-          : "Sync berhasil, tetapi belum ada activity Google Fit yang bisa ditarik dari dataSources.",
+      daily: dailyRows,
     });
-  } catch (err: any) {
-    console.error("GOOGLE_FIT_SYNC_ERROR", err);
+  } catch (error: any) {
+    console.error("WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY_ERROR", error);
 
     return NextResponse.json(
       {
         ok: false,
-        message: "Sync Google Fit gagal.",
-        detail: err?.message || String(err),
+        marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
+        message: error?.message || "Gagal sync Google Fit.",
       },
       { status: 500 }
     );
   }
-}
-
-export async function GET(req: NextRequest) {
-  return handleSync(req);
-}
-
-export async function POST(req: NextRequest) {
-  return handleSync(req);
 }
