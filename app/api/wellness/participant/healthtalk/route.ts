@@ -1,8 +1,18 @@
-// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_HEALTHTALK
-// Participant health talk route using the existing Apps Script v370:
+// WELLNESS_PARTICIPANT_HEALTHTALK_GOOGLE_SHEET_ONLY_V406
+// Participant Health Talk route using the existing Apps Script v370.
+// Storage:
 // - evidence -> Google Drive by action=uploadEvidence
 // - health talk row -> Google Sheet Form Responses
-// - mirror -> wellness_healthtalk_logs for participant history
+// - no insert into wellness_healthtalk_logs
+//
+// UI support:
+// - GET reads participant Health Talk logs from Google Sheet
+// - POST returns a log object so frontend can display immediately
+//
+// POINT RULES:
+// - Online / Daring Health Talk = +10
+// - Offline / Luring Health Talk + evidence photo = +20
+// - Offline / Luring without evidence = 0
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -17,18 +27,89 @@ import {
   safeLogDate,
   uploadEvidenceToDrive,
 } from "@/lib/wellness/googleSheetWebhook";
+import {
+  fetchWellnessGoogleSheetRows,
+  googleSheetRowsToHealthtalkLogs,
+} from "@/lib/wellness/googleSheetResponses";
 
 export const runtime = "nodejs";
 
-const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_HEALTHTALK";
+const MARKER = "WELLNESS_PARTICIPANT_HEALTHTALK_GOOGLE_SHEET_ONLY_V406";
 
 function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+function normalizeText(value: any) {
+  return clean(value).toLowerCase();
+}
+
+function hasEvidenceResult(evidenceResult: any) {
+  return Boolean(
+    getDriveUrl(evidenceResult) ||
+      getPreviewUrl(evidenceResult) ||
+      evidenceResult?.fileId ||
+      evidenceResult?.publicUrl ||
+      evidenceResult?.driveUrl ||
+      evidenceResult?.previewUrl ||
+      evidenceResult?.thumbnailUrl
+  );
+}
+
+function calculateHealthtalkPoint(params: {
+  healthtalkType: string;
+  hasEvidence: boolean;
+}) {
+  const type = normalizeText(params.healthtalkType);
+
+  if (
+    type.includes("offline") ||
+    type.includes("luring") ||
+    type.includes("onsite") ||
+    type.includes("tatap muka")
+  ) {
+    return params.hasEvidence ? 20 : 0;
+  }
+
+  if (
+    type.includes("online") ||
+    type.includes("daring") ||
+    type.includes("webinar") ||
+    type.includes("zoom")
+  ) {
+    return 10;
+  }
+
+  return 0;
+}
+
+function pointMessage(params: {
+  healthtalkType: string;
+  point: number;
+  hasEvidence: boolean;
+}) {
+  const type = normalizeText(params.healthtalkType);
+
+  if (params.point > 0) {
+    return `Health Talk berhasil masuk Google Sheet · Point +${params.point}`;
+  }
+
+  if (
+    type.includes("offline") ||
+    type.includes("luring") ||
+    type.includes("onsite") ||
+    type.includes("tatap muka")
+  ) {
+    return "Health Talk berhasil masuk Google Sheet, tetapi point belum diberikan karena bukti offline belum dilampirkan.";
+  }
+
+  return "Health Talk berhasil masuk Google Sheet.";
+}
+
 async function getParticipant(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const participant = await getParticipantFromPortalSession(supabase, req);
+
   return { supabase, participant };
 }
 
@@ -54,7 +135,11 @@ async function parseRequestBody(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  return { body: body || {}, evidence: null };
+
+  return {
+    body: body || {},
+    evidence: null,
+  };
 }
 
 function buildHealthtalkRow(params: {
@@ -65,6 +150,7 @@ function buildHealthtalkRow(params: {
   healthtalkTitle: string;
   notes: string | null;
   evidenceResult: any;
+  calculatedPoint: number;
 }) {
   const row: any = buildBaseFormRow({
     participant: params.participant,
@@ -78,83 +164,198 @@ function buildHealthtalkRow(params: {
   const previewUrl = getPreviewUrl(params.evidenceResult);
 
   row["Healthtalk/Seminar"] = "Ya";
-  row["Jenis Healthtalk"] = params.healthtalkTitle || params.healthtalkType;
+  row["Jenis Healthtalk"] = params.healthtalkType;
   row["Tanggal Healthtalk"] = params.logDate;
   row["Bukti Healthtalk"] = driveUrl;
   row["Preview Bukti Healthtalk"] = previewUrl;
-  row["Add Options"] = [params.healthtalkType, params.healthtalkTitle].filter(Boolean).join(" - ");
+
+  row["Add Options"] = [params.healthtalkType, params.healthtalkTitle]
+    .filter(Boolean)
+    .join(" - ");
+
   row["Catatan Nutrisi"] = params.notes || "";
   row["Evidence Count"] = driveUrl ? 1 : 0;
+  row["Total Point"] = params.calculatedPoint;
+  row["Marker"] = MARKER;
 
   return row;
 }
 
+function buildReturnedLog(params: {
+  participant: any;
+  logDate: string;
+  healthtalkType: string;
+  healthtalkTitle: string;
+  notes: string | null;
+  evidenceResult: any;
+  sheetResult: any;
+  calculatedPoint: number;
+  body: any;
+}) {
+  return {
+    id: `sheet-healthtalk-${params.sheetResult?.rowNumber || Date.now()}`,
+    participant_id: Number(params.participant.id),
+    participant_code: params.participant.code || "",
+    log_date: params.logDate,
+    event_date: params.logDate,
+    log_time: new Date().toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    created_at: new Date().toISOString(),
+    healthtalk_type: params.healthtalkType,
+    attendance_type: params.healthtalkType,
+    healthtalk_title: params.healthtalkTitle,
+    title: params.healthtalkTitle,
+    notes: params.notes,
+    evidence_url: getDriveUrl(params.evidenceResult) || null,
+    evidence_preview_url: getPreviewUrl(params.evidenceResult) || null,
+    points: params.calculatedPoint,
+    point: params.calculatedPoint,
+    total_points: params.calculatedPoint,
+    source: "google_sheet",
+    google_drive: params.evidenceResult || null,
+    google_sheet: params.sheetResult || null,
+    raw_payload: {
+      ...params.body,
+      "Total Point": params.calculatedPoint,
+      point_rule:
+        "Online/Daring = +10. Offline/Luring with evidence = +20. Offline without evidence = 0.",
+      has_evidence: hasEvidenceResult(params.evidenceResult),
+      marker: MARKER,
+    },
+  };
+}
+
 export async function GET(req: NextRequest) {
-  const { supabase, participant } = await getParticipant(req);
+  const { participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
-      { ok: false, message: "OTP/session peserta belum aktif." },
+      {
+        ok: false,
+        message: "OTP/session peserta belum aktif.",
+      },
       { status: 401 }
     );
   }
 
-  const { data, error } = await supabase
-    .from("wellness_healthtalk_logs")
-    .select("*")
-    .eq("participant_id", participant.id)
-    .order("log_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(100);
+  try {
+    const sheetResult = await fetchWellnessGoogleSheetRows({
+      participantId: participant.id,
+      code: participant.code,
+      logType: "healthtalk",
+      limit: 1000,
+    });
 
-  if (error) {
+    if (!sheetResult.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          mode: "google_sheet_only",
+          message: sheetResult.message || "Gagal membaca Health Talk dari Google Sheet.",
+          logs: [],
+        },
+        { status: 500 }
+      );
+    }
+
+    const logs = googleSheetRowsToHealthtalkLogs(sheetResult.rows || [])
+      .filter((row: any) => {
+        const id = Number(row.participant_id);
+        const code = String(row.participant_code || "").trim();
+
+        return id === Number(participant.id) || code === String(participant.code || "").trim();
+      })
+      .sort((a: any, b: any) =>
+        String(b.created_at || b.log_date || "").localeCompare(
+          String(a.created_at || a.log_date || "")
+        )
+      )
+      .slice(0, 100);
+
+    return NextResponse.json({
+      ok: true,
+      mode: "google_sheet_only",
+      participant_id: participant.id,
+      logs,
+    });
+  } catch (error: any) {
     return NextResponse.json(
-      { ok: false, message: "Gagal membaca health talk peserta.", detail: error.message },
+      {
+        ok: false,
+        mode: "google_sheet_only",
+        message: "Gagal membaca Health Talk dari Google Sheet.",
+        detail: error?.message || String(error),
+        logs: [],
+      },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({
-    ok: true,
-    participant_id: participant.id,
-    logs: data || [],
-  });
 }
 
 export async function POST(req: NextRequest) {
-  const { supabase, participant } = await getParticipant(req);
+  const { participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
-      { ok: false, message: "OTP/session peserta belum aktif." },
+      {
+        ok: false,
+        message: "OTP/session peserta belum aktif.",
+      },
       { status: 401 }
     );
   }
 
   try {
     const { body, evidence } = await parseRequestBody(req);
-    const logDate = safeLogDate(body?.log_date || body?.logDate || body?.healthtalk_date);
-    const healthtalkType = clean(body?.healthtalk_type || body?.healthtalkType) || "Healthtalk/Seminar";
-    const healthtalkTitle = clean(body?.healthtalk_title || body?.healthtalkTitle || body?.title || body?.topic) || healthtalkType;
+
+    const logDate = safeLogDate(
+      body?.log_date || body?.logDate || body?.healthtalk_date
+    );
+
+    const healthtalkType =
+      clean(body?.healthtalk_type || body?.healthtalkType) || "Online";
+
+    const healthtalkTitle =
+      clean(
+        body?.healthtalk_title ||
+          body?.healthtalkTitle ||
+          body?.title ||
+          body?.topic
+      ) || "Health Talk / Seminar";
+
     const notes = clean(body?.notes || body?.catatan) || null;
     const companyName = getCompanyName(participant, body);
 
     if (!healthtalkTitle) {
       return NextResponse.json(
-        { ok: false, message: "Jenis Health Talk wajib diisi." },
+        {
+          ok: false,
+          message: "Judul / Topik Health Talk wajib diisi.",
+        },
         { status: 400 }
       );
     }
 
-    const evidenceResult = await uploadEvidenceToDrive({
-      file: evidence,
-      participant,
-      companyName,
-      category: "Health Talk",
-      activeTab: "healthtalk",
-      fieldKey: "healthtalk_evidence",
-      logDate,
-      marker: MARKER,
+    const evidenceResult = evidence
+      ? await uploadEvidenceToDrive({
+          file: evidence,
+          participant,
+          companyName,
+          category: "Health Talk",
+          activeTab: "healthtalk",
+          fieldKey: "healthtalk_evidence",
+          logDate,
+          marker: MARKER,
+        })
+      : null;
+
+    const hasEvidence = hasEvidenceResult(evidenceResult);
+
+    const calculatedPoint = calculateHealthtalkPoint({
+      healthtalkType,
+      hasEvidence,
     });
 
     const sheetRow = buildHealthtalkRow({
@@ -165,6 +366,7 @@ export async function POST(req: NextRequest) {
       healthtalkTitle,
       notes,
       evidenceResult,
+      calculatedPoint,
     });
 
     const sheetResult = await postToWellnessWebhook({
@@ -173,51 +375,40 @@ export async function POST(req: NextRequest) {
       marker: MARKER,
     });
 
-    const payload: any = {
-      participant_id: Number(participant.id),
-      log_date: logDate,
-      healthtalk_type: healthtalkType,
-      healthtalk_title: healthtalkTitle,
+    const log = buildReturnedLog({
+      participant,
+      logDate,
+      healthtalkType,
+      healthtalkTitle,
       notes,
-      evidence_url: getDriveUrl(evidenceResult) || null,
-      evidence_preview_url: getPreviewUrl(evidenceResult) || null,
-      google_drive_file_id: evidenceResult?.fileId || null,
-      google_drive_folder_path: evidenceResult?.folderPath || null,
-      google_sheet_row_number: sheetResult?.rowNumber || null,
-      sync_status: "synced",
-      sync_error: null,
-      raw_payload: {
-        ...body,
-        google_drive: evidenceResult || null,
-        google_sheet: sheetResult || null,
-        saved_at: new Date().toISOString(),
-        marker: MARKER,
-      },
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data, error } = await supabase
-      .from("wellness_healthtalk_logs")
-      .insert(payload)
-      .select("*")
-      .single();
-
-    if (error) throw error;
+      evidenceResult,
+      sheetResult,
+      calculatedPoint,
+      body,
+    });
 
     return NextResponse.json({
       ok: true,
-      message: "Health Talk berhasil disimpan ke Google Sheet.",
-      log: data,
+      mode: "google_sheet_only",
+      message: pointMessage({
+        healthtalkType,
+        point: calculatedPoint,
+        hasEvidence,
+      }),
+      point: calculatedPoint,
+      points: calculatedPoint,
+      log,
       google_drive: evidenceResult,
       google_sheet: sheetResult,
     });
   } catch (error: any) {
-    console.error("WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_HEALTHTALK_ERROR", error);
+    console.error("WELLNESS_PARTICIPANT_HEALTHTALK_GOOGLE_SHEET_ONLY_V406_ERROR", error);
 
     return NextResponse.json(
       {
         ok: false,
-        message: "Gagal menyimpan Health Talk.",
+        mode: "google_sheet_only",
+        message: "Gagal menyimpan Health Talk ke Google Sheet.",
         detail: error?.message || String(error),
       },
       { status: 500 }

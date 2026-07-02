@@ -3,26 +3,28 @@ import { fail, ok } from "@/lib/server/response";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { calculateBmi, interpretBmi, weightDelta } from "@/lib/wellness/bmi";
+import {
+  fetchWellnessGoogleSheetRows,
+  googleSheetRowsToFoodLogs,
+  googleSheetRowsToHealthtalkLogs,
+} from "@/lib/wellness/googleSheetResponses";
 import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules";
 import {
   getAllowedWellnessParticipants,
   latestByDate,
 } from "@/app/api/wellness/_utils";
-import {
-  fetchWellnessGoogleSheetRows,
-  googleSheetRowsToFoodLogs,
-} from "@/lib/wellness/googleSheetResponses";
 
-// WELLNESS_PARTICIPANT_CHARTS_V351_DASHBOARD
-// WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
-// WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
-// WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V379_API
-// WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_V403
-// V403:
-// - Dashboard admin reads nutrition from Google Sheet Form Responses.
-// - Data Wellness column "Makan kkal" includes Google Sheet calories.
-// - Recent responses include time, detail, calories, and point.
-// - Supabase food logs remain supported for backward compatibility.
+// WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_HEALTHTALK_V407
+// Dashboard admin reads Nutrition + Health Talk from existing Google Sheet Form Responses.
+// Nutrition:
+// - Google Sheet-only supported.
+// - Every nutrition submission gets +5 point unless explicit Total Point exists.
+// Health Talk:
+// - Google Sheet-only supported.
+// - Online / Daring = +10.
+// - Offline / Luring + evidence = +20.
+// - Offline / Luring without evidence = 0.
+// Supabase logs remain supported for backward compatibility.
 
 function groupByParticipant(rows: any[] = []) {
   const map = new Map<number, any[]>();
@@ -75,7 +77,6 @@ function roundedDelta(current: any, baseline: any) {
 
 function latestDate(...values: any[]): string | null {
   const valid = values.filter(Boolean).map(String).sort();
-
   return valid.length ? valid[valid.length - 1] : null;
 }
 
@@ -177,6 +178,8 @@ function mergeFoodRows(...lists: any[][]) {
             row?.log_time,
             row?.food_name,
             row?.meal_text,
+            row?.healthtalk_title,
+            row?.title,
           ]);
 
       map.set(key, row);
@@ -224,6 +227,77 @@ function getFoodCalories(row: any) {
     row?.raw_payload?.calories,
     row?.raw_payload?.total_calories
   );
+}
+
+function getNutritionPoint(row: any) {
+  const raw = row?.raw_payload || {};
+
+  const explicitPoint = pickNumber(
+    row?.points,
+    row?.point,
+    row?.total_points,
+    raw?.["Total Point"],
+    raw?.points,
+    raw?.point,
+    raw?.total_points
+  );
+
+  return explicitPoint !== null ? explicitPoint : 5;
+}
+
+function getHealthtalkPoint(row: any) {
+  const raw = row?.raw_payload || {};
+
+  const explicitPoint = pickNumber(
+    row?.points,
+    row?.point,
+    row?.total_points,
+    raw?.["Total Point"],
+    raw?.points,
+    raw?.point,
+    raw?.total_points
+  );
+
+  if (explicitPoint !== null) return explicitPoint;
+
+  const typeText = String(
+    row?.healthtalk_type ||
+      row?.attendance_type ||
+      row?.type ||
+      raw?.["Jenis Healthtalk"] ||
+      raw?.healthtalk_type ||
+      ""
+  ).toLowerCase();
+
+  const evidenceUrl = String(
+    row?.evidence_url ||
+      row?.evidence_preview_url ||
+      row?.google_drive_url ||
+      row?.google_drive_preview_url ||
+      raw?.["Bukti Healthtalk"] ||
+      raw?.["Preview Bukti Healthtalk"] ||
+      ""
+  ).trim();
+
+  if (
+    typeText.includes("offline") ||
+    typeText.includes("luring") ||
+    typeText.includes("onsite") ||
+    typeText.includes("tatap muka")
+  ) {
+    return evidenceUrl ? 20 : 0;
+  }
+
+  if (
+    typeText.includes("online") ||
+    typeText.includes("daring") ||
+    typeText.includes("webinar") ||
+    typeText.includes("zoom")
+  ) {
+    return 10;
+  }
+
+  return 0;
 }
 
 function mergeUniqueRows(...lists: any[][]) {
@@ -510,7 +584,7 @@ function aggregatePointsByDate(rows: any[] = []) {
   const map = new Map<string, number>();
 
   for (const row of rows || []) {
-    const date = String(row?.log_date || row?.created_at || "").slice(0, 10);
+    const date = String(row?.log_date || row?.event_date || row?.created_at || "").slice(0, 10);
     if (!date) continue;
 
     const value = Number(row?.points || 0);
@@ -638,12 +712,12 @@ function buildEvidenceGallery({
     add({
       id: `healthtalk-${row.id}`,
       type: "Bukti healthtalk",
-      title: row.title || "Healthtalk / seminar",
-      evidence_url: row.evidence_url,
-      date: row.event_date || row.created_at,
-      status: row.status || "pending",
+      title: row.title || row.healthtalk_title || "Healthtalk / seminar",
+      evidence_url: row.evidence_url || row.evidence_preview_url,
+      date: row.event_date || row.log_date || row.created_at,
+      status: row.status || "saved",
       notes: row.notes,
-      source_type: "healthtalk_log",
+      source_type: row.source || "healthtalk_log",
     });
   }
 
@@ -672,10 +746,17 @@ function buildRecentResponses({
     const calories = getFoodCalories(row);
     const detail = getFoodDetail(row);
     const time = getResponseTime(row);
+    const date = row.log_date || String(row.created_at || "").slice(0, 10);
+
+    const mappedPoint = pointMap.get(`food_log|${row.id}`);
+    const finalPoint =
+      mappedPoint !== undefined && mappedPoint !== null
+        ? Number(mappedPoint)
+        : getNutritionPoint(row);
 
     items.push({
       id: `food-${row.id}`,
-      date: row.log_date || String(row.created_at || "").slice(0, 10),
+      date,
       time,
       type: "Nutrisi",
       title: row.meal_time || row.meal_type || "Input makanan",
@@ -683,7 +764,7 @@ function buildRecentResponses({
       detail,
       calories,
       evidence_url: normalizeEvidenceUrl(row.photo_url),
-      points: Number(row.points || 0) || pointMap.get(`food_log|${row.id}`) || 0,
+      points: finalPoint,
       source: row.source || "food_log",
     });
   }
@@ -747,24 +828,30 @@ function buildRecentResponses({
     const time = getResponseTime(row);
 
     const detail = [
-      row.attendance_type || "",
+      row.healthtalk_type || row.attendance_type || "",
       row.status || "",
       row.notes || "",
     ]
       .filter(Boolean)
       .join(" · ");
 
+    const mappedPoint = pointMap.get(`healthtalk_log|${row.id}`);
+    const finalPoint =
+      mappedPoint !== undefined && mappedPoint !== null
+        ? Number(mappedPoint)
+        : getHealthtalkPoint(row);
+
     items.push({
       id: `healthtalk-${row.id}`,
       date: row.event_date || row.log_date,
       time,
       type: "Healthtalk",
-      title: row.title || "Healthtalk / seminar",
+      title: row.title || row.healthtalk_title || "Healthtalk / seminar",
       description: detail,
       detail,
       calories: null,
-      evidence_url: normalizeEvidenceUrl(row.evidence_url),
-      points: pointMap.get(`healthtalk_log|${row.id}`) || 0,
+      evidence_url: normalizeEvidenceUrl(row.evidence_url || row.evidence_preview_url),
+      points: finalPoint,
       source: row.source || "healthtalk_log",
     });
   }
@@ -773,7 +860,6 @@ function buildRecentResponses({
     .sort((a, b) => {
       const aDate = `${a.date || ""} ${a.time || ""}`;
       const bDate = `${b.date || ""} ${b.time || ""}`;
-
       return bDate.localeCompare(aDate);
     })
     .slice(0, 18);
@@ -1048,6 +1134,13 @@ export async function GET(req: NextRequest) {
           pending_evidence_count: 0,
         },
         rows: [],
+        google_sheet: {
+          ok: false,
+          count: 0,
+          food_count: 0,
+          healthtalk_count: 0,
+          message: "Tidak ada peserta.",
+        },
       });
     }
 
@@ -1139,17 +1232,31 @@ export async function GET(req: NextRequest) {
       return participantIds.includes(id) || participantCodes.includes(code);
     });
 
+    const googleSheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(
+      googleSheetResult.rows || []
+    ).filter((row: any) => {
+      const id = Number(row.participant_id);
+      const code = String(row.participant_code || "").trim();
+
+      return participantIds.includes(id) || participantCodes.includes(code);
+    });
+
     const googleSheetFoodGrouped =
       groupFoodRowsByParticipantOrCode(googleSheetFoodRows);
+
+    const googleSheetHealthtalkGrouped =
+      groupFoodRowsByParticipantOrCode(googleSheetHealthtalkRows);
 
     const weightsByParticipant = groupByParticipant(weightRes.data || []);
     const foodsByParticipant = groupByParticipant(foodRes.data || []);
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
+
     const combinedHistoryRows = mergeUniqueRows(
       historyRows || [],
       historyRowsByCode || []
     );
+
     const historyByParticipant = groupByParticipant(combinedHistoryRows);
     const historyByEmployeeCode = groupByEmployeeCode(combinedHistoryRows);
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
@@ -1159,12 +1266,14 @@ export async function GET(req: NextRequest) {
     const groupName = new Map(
       (groupRes.data || []).map((g: any) => [Number(g.id), g.name || "-"])
     );
+
     const companyName = new Map(
       (companies || []).map((company: any) => [
         Number(company.id),
         company.name || "-",
       ])
     );
+
     const groupUnitName = new Map(
       (groupUnits || []).map((unit: any) => [
         Number(unit.id),
@@ -1174,6 +1283,7 @@ export async function GET(req: NextRequest) {
 
     const rows = participants.map((participant: any) => {
       const weightRows = weightsByParticipant.get(Number(participant.id)) || [];
+
       const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
       const sheetFoodRowsById =
         googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
@@ -1189,18 +1299,37 @@ export async function GET(req: NextRequest) {
 
       const activityRows =
         activitiesByParticipant.get(Number(participant.id)) || [];
+
       const miniMcuParticipantRows =
         miniMcuByParticipant.get(Number(participant.id)) || [];
+
       const historyParticipantRows = mergeUniqueRows(
         historyByParticipant.get(Number(participant.id)) || [],
         historyByEmployeeCode.get(String(participant.code || "").trim()) || []
       );
+
       const evidenceParticipantRows =
         evidenceByParticipant.get(Number(participant.id)) || [];
+
       const pointParticipantRows =
         pointsByParticipant.get(Number(participant.id)) || [];
-      const healthtalkParticipantRows =
+
+      const dbHealthtalkRows =
         healthtalkByParticipant.get(Number(participant.id)) || [];
+
+      const sheetHealthtalkRowsById =
+        googleSheetHealthtalkGrouped.byId.get(Number(participant.id)) || [];
+
+      const sheetHealthtalkRowsByCode =
+        googleSheetHealthtalkGrouped.byCode.get(
+          String(participant.code || "").trim()
+        ) || [];
+
+      const healthtalkParticipantRows = mergeFoodRows(
+        dbHealthtalkRows,
+        sheetHealthtalkRowsById,
+        sheetHealthtalkRowsByCode
+      );
 
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;
@@ -1215,17 +1344,20 @@ export async function GET(req: NextRequest) {
         participant.initial_weight_kg,
         baselineHistory?.weight_kg
       );
+
       const baselineBmi = pickNumber(
         participant.baseline_bmi,
         baselineHistory?.bmi,
         calculateBmi(baselineWeight, participant.height_cm)
       );
+
       const currentWeight = pickNumber(
         latestHistory?.weight_kg,
         latestMiniMcu?.weight_kg,
         latestWeight?.weight_kg,
         baselineWeight
       );
+
       const bmi = pickNumber(
         latestHistory?.bmi,
         latestMiniMcu?.bmi,
@@ -1233,6 +1365,7 @@ export async function GET(req: NextRequest) {
         calculateBmi(currentWeight, participant.height_cm),
         baselineBmi
       );
+
       const delta = weightDelta(currentWeight, baselineWeight);
 
       const hba1c = pickNumber(
@@ -1243,6 +1376,7 @@ export async function GET(req: NextRequest) {
         participant.hba1c_initial,
         participant.baseline_hba1c
       );
+
       const glucose = pickNumber(
         latestHistory?.glucose_value,
         latestMiniMcu?.glucose,
@@ -1251,6 +1385,7 @@ export async function GET(req: NextRequest) {
         participant.initial_glucose,
         participant.baseline_glucose
       );
+
       const sbp = pickNumber(
         latestHistory?.systolic,
         latestMiniMcu?.sbp,
@@ -1260,6 +1395,7 @@ export async function GET(req: NextRequest) {
         participant.baseline_sbp,
         participant.blood_pressure_systolic
       );
+
       const dbp = pickNumber(
         latestHistory?.diastolic,
         latestMiniMcu?.dbp,
@@ -1269,6 +1405,7 @@ export async function GET(req: NextRequest) {
         participant.baseline_dbp,
         participant.blood_pressure_diastolic
       );
+
       const waist = pickNumber(
         latestHistory?.waist_cm,
         latestMiniMcu?.waist_cm,
@@ -1279,8 +1416,10 @@ export async function GET(req: NextRequest) {
       );
 
       const risk = classifyWellnessRisk({ hba1c, glucose, bmi, sbp, dbp });
+
       const latestEvidence =
         latestByDate(evidenceParticipantRows, "log_date") || null;
+
       const latestHealthtalk =
         latestByDate(healthtalkParticipantRows, "event_date") || null;
 
@@ -1291,7 +1430,8 @@ export async function GET(req: NextRequest) {
         latestMiniMcu?.exam_date,
         latestHistory?.checkup_date,
         latestEvidence?.log_date,
-        latestHealthtalk?.event_date
+        latestHealthtalk?.event_date,
+        latestHealthtalk?.log_date
       );
 
       const compliance = complianceStatus(lastUploadDate);
@@ -1302,12 +1442,14 @@ export async function GET(req: NextRequest) {
         participant.initial_sbp,
         participant.sbp
       );
+
       const baselineDbp = pickNumber(
         participant.baseline_dbp,
         baselineHistory?.diastolic,
         participant.initial_dbp,
         participant.dbp
       );
+
       const baselineHba1c = pickNumber(
         participant.baseline_hba1c,
         baselineHistory?.hba1c_percent,
@@ -1315,6 +1457,7 @@ export async function GET(req: NextRequest) {
         participant.hba1c_initial,
         participant.hba1c
       );
+
       const baselineGlucose = pickNumber(
         participant.baseline_glucose,
         baselineHistory?.glucose_value,
@@ -1322,6 +1465,7 @@ export async function GET(req: NextRequest) {
         participant.glucose,
         participant.gula_darah
       );
+
       const baselineWaist = pickNumber(
         participant.baseline_waist_cm,
         baselineHistory?.waist_cm,
@@ -1337,6 +1481,41 @@ export async function GET(req: NextRequest) {
         weight_kg: currentWeight,
       };
 
+      const sheetFoodPoints = foodRows
+        .filter((row: any) => row.source === "google_sheet")
+        .reduce((sum: number, row: any) => sum + getNutritionPoint(row), 0);
+
+      const sheetHealthtalkPoints = healthtalkParticipantRows
+        .filter((row: any) => row.source === "google_sheet")
+        .reduce((sum: number, row: any) => sum + getHealthtalkPoint(row), 0);
+
+      const totalPoints =
+        Math.round(
+          (pointParticipantRows.reduce(
+            (sum: number, row: any) => sum + Number(row.points || 0),
+            0
+          ) +
+            sheetFoodPoints +
+            sheetHealthtalkPoints) *
+            10
+        ) / 10;
+
+      const pointRowsForChart = [
+        ...pointParticipantRows,
+        ...foodRows
+          .filter((row: any) => row.source === "google_sheet")
+          .map((row: any) => ({
+            log_date: row.log_date,
+            points: getNutritionPoint(row),
+          })),
+        ...healthtalkParticipantRows
+          .filter((row: any) => row.source === "google_sheet")
+          .map((row: any) => ({
+            log_date: row.event_date || row.log_date,
+            points: getHealthtalkPoint(row),
+          })),
+      ];
+
       const parameterCharts = buildParticipantCharts({
         participant: participantForCalc,
         weightRows,
@@ -1344,7 +1523,7 @@ export async function GET(req: NextRequest) {
         activityRows,
         miniMcuRows: miniMcuParticipantRows,
         historyRows: historyParticipantRows,
-        pointRows: pointParticipantRows,
+        pointRows: pointRowsForChart,
         baselineWeight,
         baselineBmi,
         baselineSbp,
@@ -1360,6 +1539,7 @@ export async function GET(req: NextRequest) {
         activityRows,
         healthtalkRows: healthtalkParticipantRows,
       });
+
       const recentResponses = buildRecentResponses({
         foodRows,
         weightRows,
@@ -1367,28 +1547,17 @@ export async function GET(req: NextRequest) {
         healthtalkRows: healthtalkParticipantRows,
         pointRows: pointParticipantRows,
       });
+
       const activitySummary = buildActivitySummary(activityRows, participantForCalc);
-
-      const sheetFoodPoints = foodRows
-        .filter((row: any) => row.source === "google_sheet")
-        .reduce((sum: number, row: any) => sum + Number(row.points || 0), 0);
-
-      const totalPoints =
-        Math.round(
-          (pointParticipantRows.reduce(
-            (sum: number, row: any) => sum + Number(row.points || 0),
-            0
-          ) +
-            sheetFoodPoints) *
-            10
-        ) / 10;
 
       const pendingEvidence = evidenceGallery.filter(
         (item: any) => String(item.status || "").toLowerCase() === "pending"
       ).length;
 
       const caloriesToday = sumCalories(
-        foodRows.filter((row: any) => String(row.log_date || "").slice(0, 10) === today)
+        foodRows.filter(
+          (row: any) => String(row.log_date || "").slice(0, 10) === today
+        )
       );
 
       const activityCaloriesToday =
@@ -1460,6 +1629,7 @@ export async function GET(req: NextRequest) {
         food_logs_count: foodRows.length,
         weight_logs_count: weightRows.length,
         activity_logs_count: activityRows.length,
+        healthtalk_logs_count: healthtalkParticipantRows.length,
         mini_mcu_logs_count: miniMcuParticipantRows.length,
         history_logs_count: historyParticipantRows.length,
         calories_today: caloriesToday,
@@ -1473,16 +1643,21 @@ export async function GET(req: NextRequest) {
         evidence_count: evidenceGallery.length,
         pending_evidence_count: pendingEvidence,
         latest_evidence_date:
-          latestEvidence?.log_date || latestHealthtalk?.event_date || null,
+          latestEvidence?.log_date ||
+          latestHealthtalk?.event_date ||
+          latestHealthtalk?.log_date ||
+          null,
       };
     });
 
     const bmiValues = rows
       .map((row) => Number(row.bmi || 0))
       .filter((value) => value > 0);
+
     const compliantRows = rows.filter(
       (row) => row.compliance_status === "Baik"
     ).length;
+
     const weightDeltaValues = rows
       .map((row) => Number(row.weight_delta_kg))
       .filter((value) => Number.isFinite(value));
@@ -1535,7 +1710,9 @@ export async function GET(req: NextRequest) {
       rows,
       google_sheet: {
         ok: googleSheetResult.ok,
-        count: googleSheetFoodRows.length,
+        count: googleSheetFoodRows.length + googleSheetHealthtalkRows.length,
+        food_count: googleSheetFoodRows.length,
+        healthtalk_count: googleSheetHealthtalkRows.length,
         message: googleSheetResult.message || "",
       },
     });

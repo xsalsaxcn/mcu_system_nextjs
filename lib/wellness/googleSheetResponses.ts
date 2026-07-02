@@ -1,7 +1,7 @@
-// WELLNESS_GOOGLE_SHEET_RESPONSES_V403
-// Read-only helper untuk dashboard admin membaca Form Responses Google Sheet.
-// Nutrition detail tetap Google Sheet-only.
-// Supabase hanya untuk peserta, master kalori, aktivitas, device, dan dashboard analytics.
+// WELLNESS_GOOGLE_SHEET_RESPONSES_V406
+// Read-only helper untuk dashboard/admin/portal membaca Form Responses Google Sheet.
+// Nutrition dan Health Talk detail disimpan Google Sheet-only.
+// Supabase tetap dipakai untuk session, peserta, master kalori, aktivitas, device.
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -72,6 +72,38 @@ function normalizeDrivePreview(value: any) {
   return text;
 }
 
+function normalizeDriveView(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const match =
+    text.match(/drive\.google\.com\/file\/d\/([^/]+)/i) ||
+    text.match(/[?&]id=([^&]+)/i);
+
+  if (match?.[1]) {
+    return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+  }
+
+  return text;
+}
+
+function splitHealthtalkAddOptions(value: any) {
+  const text = clean(value);
+  if (!text) {
+    return {
+      type: "",
+      title: "",
+    };
+  }
+
+  const parts = text.split(" - ").map((item) => clean(item)).filter(Boolean);
+
+  return {
+    type: parts[0] || "",
+    title: parts.slice(1).join(" - ") || parts[0] || "",
+  };
+}
+
 export async function fetchWellnessGoogleSheetRows(params?: {
   code?: string;
   participantId?: string | number;
@@ -92,7 +124,7 @@ export async function fetchWellnessGoogleSheetRows(params?: {
   query.set("action", "listRows");
   query.set("secret", getWebhookSecret());
   query.set("sheet", getSheetName());
-  query.set("limit", String(params?.limit || 2000));
+  query.set("limit", String(params?.limit || 3000));
 
   if (params?.code) query.set("code", clean(params.code));
   if (params?.participantId) {
@@ -184,6 +216,75 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
         total_calories: calories,
         calories,
         photo_url: photoUrl,
+        points: point || 0,
+        source: "google_sheet",
+        raw_payload: row,
+      };
+    });
+}
+
+export function googleSheetRowsToHealthtalkLogs(rows: any[] = []) {
+  return rows
+    .filter((row: any) => {
+      const logType = clean(row["Log Type"]).toLowerCase();
+
+      const hasHealthtalk =
+        clean(row["Healthtalk/Seminar"]) ||
+        clean(row["Jenis Healthtalk"]) ||
+        clean(row["Tanggal Healthtalk"]) ||
+        clean(row["Bukti Healthtalk"]) ||
+        clean(row["Preview Bukti Healthtalk"]);
+
+      return logType === "healthtalk" || Boolean(hasHealthtalk);
+    })
+    .map((row: any) => {
+      const submissionDate = row["Submission Date"];
+      const addOptions = splitHealthtalkAddOptions(row["Add Options"]);
+
+      const logDate = toIsoDate(
+        row["Tanggal Healthtalk"] ||
+          row["Log Date"] ||
+          submissionDate
+      );
+
+      const logTime = toTime(submissionDate);
+
+      const type =
+        clean(row["Jenis Healthtalk"]) ||
+        addOptions.type ||
+        "Health Talk";
+
+      const title =
+        addOptions.title ||
+        clean(row["Healthtalk/Seminar"]) ||
+        type ||
+        "Health Talk / Seminar";
+
+      const evidenceUrl =
+        normalizeDriveView(row["Bukti Healthtalk"]) ||
+        normalizeDriveView(row["Preview Bukti Healthtalk"]);
+
+      const evidencePreviewUrl =
+        normalizeDrivePreview(row["Preview Bukti Healthtalk"]) ||
+        normalizeDrivePreview(row["Bukti Healthtalk"]);
+
+      const point = toNumberOrNull(row["Total Point"]);
+
+      return {
+        id: `sheet-healthtalk-${row._rowNumber || `${row["Participant ID"]}-${submissionDate}`}`,
+        participant_id: toNumberOrNull(row["Participant ID"]),
+        participant_code: clean(row["KODE"]),
+        log_date: logDate,
+        event_date: logDate,
+        log_time: logTime,
+        created_at: submissionDate || row["Log Date"] || "",
+        healthtalk_type: type,
+        attendance_type: type,
+        healthtalk_title: title,
+        title,
+        notes: clean(row["Catatan Nutrisi"]) || "",
+        evidence_url: evidenceUrl,
+        evidence_preview_url: evidencePreviewUrl,
         points: point || 0,
         source: "google_sheet",
         raw_payload: row,
