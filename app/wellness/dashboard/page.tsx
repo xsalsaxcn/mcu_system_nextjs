@@ -5,8 +5,8 @@ import AuthGate from "@/components/AuthGate";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-// WELLNESS_DASHBOARD_LOOKER_STYLE_DAILY_EXPORT_V409
-// Redesign lanjutan dari V408:
+// WELLNESS_DASHBOARD_LOOKER_STYLE_DAILY_EXPORT_PERIOD_V410
+// Redesign lanjutan dari V409:
 // - Dashboard tetap list-first seperti Looker Studio.
 // - Nama peserta bisa diklik untuk masuk detail 1 peserta saja.
 // - Detail peserta menampilkan kalori harian, bukan akumulasi.
@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 // - Export CSV tersedia untuk peserta individu.
 // - Export CSV tersedia untuk ringkasan kelompok dan riwayat harian kelompok.
 // - Filter kelompok ditambahkan agar export bisa per kelompok.
+// - Semua MiniLineChart otomatis menampilkan periode grafik di bawah chart.
 
 type Tone = "slate" | "blue" | "emerald" | "amber" | "rose" | "purple";
 type MainView = "overview" | "daily" | "ranking" | "clinical" | "points";
@@ -33,6 +34,9 @@ type TrendPoint = {
   sbp?: any;
   dbp?: any;
   source?: string;
+  log_date?: string;
+  tanggal?: string;
+  created_at?: string;
   [key: string]: any;
 };
 
@@ -113,6 +117,69 @@ function shortTime(value: any) {
   }
 
   return "-";
+}
+
+function parseChartDate(value: any): Date | null {
+  const text = cleanText(value);
+  if (!text) return null;
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const date = new Date(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const slashWithYear = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (slashWithYear) {
+    const day = slashWithYear[1].padStart(2, "0");
+    const month = slashWithYear[2].padStart(2, "0");
+    const year = slashWithYear[3];
+    const date = new Date(`${year}-${month}-${day}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) return date;
+
+  return null;
+}
+
+function formatPeriodDate(value: Date) {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(value);
+}
+
+function chartPointDate(point: any) {
+  return (
+    parseChartDate(point?.date) ||
+    parseChartDate(point?.log_date) ||
+    parseChartDate(point?.tanggal) ||
+    parseChartDate(point?.created_at) ||
+    parseChartDate(point?.checkup_date) ||
+    null
+  );
+}
+
+function buildChartPeriodLabel(points: TrendPoint[] = []) {
+  const dates = (points || [])
+    .map(chartPointDate)
+    .filter((date): date is Date => Boolean(date))
+    .sort((a, b) => a.getTime() - b.getTime());
+
+  if (!dates.length) return "Periode: data tanggal belum tersedia";
+
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+
+  const firstText = formatPeriodDate(first);
+  const lastText = formatPeriodDate(last);
+
+  if (firstText === lastText) return `Periode: ${firstText}`;
+
+  return `Periode: ${firstText} - ${lastText}`;
 }
 
 function toneClass(tone: Tone) {
@@ -748,12 +815,17 @@ function MiniLineChart({
     .map((point) => toNumber((point as any)?.[valueKey]))
     .filter((value): value is number => value !== null);
 
+  const periodLabel = buildChartPeriodLabel(safePoints);
+
   if (!safePoints.length || !values.length) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <div className="text-sm font-black text-slate-900">{title}</div>
         <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
           Belum ada data grafik.
+        </div>
+        <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-center text-[11px] font-black text-slate-500">
+          {periodLabel}
         </div>
       </div>
     );
@@ -816,6 +888,10 @@ function MiniLineChart({
           </circle>
         ))}
       </svg>
+
+      <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-center text-[11px] font-black text-slate-500">
+        {periodLabel}
+      </div>
     </div>
   );
 }
