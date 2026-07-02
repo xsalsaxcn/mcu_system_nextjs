@@ -1,20 +1,17 @@
 "use client";
 
-import WellnessQuickNav from "@/components/wellness/WellnessQuickNav";
 import AuthGate from "@/components/AuthGate";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-// WELLNESS_DASHBOARD_LOOKER_STYLE_DAILY_EXPORT_PERIOD_V410
-// Redesign lanjutan dari V409:
-// - Dashboard tetap list-first seperti Looker Studio.
-// - Nama peserta bisa diklik untuk masuk detail 1 peserta saja.
-// - Detail peserta menampilkan kalori harian, bukan akumulasi.
-// - Tabel nutrisi/aktivitas punya grafik harian di bawahnya.
-// - Export CSV tersedia untuk peserta individu.
-// - Export CSV tersedia untuk ringkasan kelompok dan riwayat harian kelompok.
-// - Filter kelompok ditambahkan agar export bisa per kelompok.
-// - Semua MiniLineChart otomatis menampilkan periode grafik di bawah chart.
+// WELLNESS_DASHBOARD_PROFESSIONAL_POLISHED_LAYOUT_V416
+// Lanjutan dari V410:
+// - Tidak mengubah logic data, export, detail peserta, grafik, point, dan filter.
+// - Menghilangkan layer Menu Wellness agar dashboard tidak terlihat bertumpuk.
+// - Header dashboard dibuat lebih profesional dan compact.
+// - Tombol Input Harian, Input NAKES, Import History MCU, Refresh, Export tetap tersedia.
+// - Tab/filter dibuat clean tanpa scrollbar tebal.
+// - Card styling dirapikan agar lebih corporate dan nyaman dibaca.
 
 type Tone = "slate" | "blue" | "emerald" | "amber" | "rose" | "purple";
 type MainView = "overview" | "daily" | "ranking" | "clinical" | "points";
@@ -651,7 +648,7 @@ function Card({
   className?: string;
 }) {
   return (
-    <section className={`rounded-[1.5rem] border border-slate-200 bg-white shadow-sm ${className}`}>
+    <section className={`rounded-3xl border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.05)] ${className}`}>
       {children}
     </section>
   );
@@ -689,7 +686,7 @@ function StatCard({
   tone?: Tone;
 }) {
   return (
-    <div className={`rounded-[1.25rem] border p-4 ${toneClass(tone)}`}>
+    <div className={`rounded-2xl border p-4 shadow-[0_8px_24px_rgba(15,23,42,0.03)] ${toneClass(tone)}`}>
       <div className="text-[10px] font-black uppercase tracking-[0.16em] opacity-70">
         {label}
       </div>
@@ -712,7 +709,7 @@ function NavButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2 text-xs font-black transition ${
+      className={`rounded-2xl px-4 py-3 text-xs font-black transition ${
         active
           ? "bg-blue-600 text-white shadow-lg shadow-blue-100"
           : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
@@ -1893,69 +1890,90 @@ function WellnessDashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 md:px-8">
-      <div className="mx-auto max-w-[1500px] space-y-5">
-        <WellnessQuickNav />
+    <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 md:px-8">
+      <div className="mx-auto max-w-[1360px] space-y-5">
+        <Card className="overflow-hidden">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-blue-50/60 to-emerald-50/60 px-6 py-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.22em] text-blue-600">
+                  Wellness Monitoring
+                </div>
 
-        <Card className="p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.22em] text-blue-600">
-                Wellness Monitoring
+                <h1 className="mt-2 text-3xl font-black text-slate-950">
+                  Dashboard Wellness
+                </h1>
+
+                <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-500">
+                  Pantau progress peserta, aktivitas harian, nutrisi, point, dan monitoring klinis dalam satu dashboard.
+                </p>
               </div>
-              <h1 className="mt-2 text-3xl font-black text-slate-950">
-                Dashboard Wellness
-              </h1>
-              <p className="mt-1 text-sm font-bold text-slate-500">
-                Tampilan list-first: pilih peserta dari tabel, lalu lihat detail peserta secara fokus.
-              </p>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <a href="/wellness/input" className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white">
-                Input Harian
-              </a>
-              <a href="/wellness/nakes-input" className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white">
-                Input NAKES
-              </a>
-              <button
-                type="button"
-                onClick={load}
-                className="rounded-full bg-white px-5 py-3 text-xs font-black text-slate-700 ring-1 ring-slate-200"
-              >
-                {loading ? "Memuat..." : "Refresh"}
-              </button>
-              <button
-                type="button"
-                onClick={() => exportGroupSummaryCsv(filteredParticipants)}
-                className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white"
-              >
-                Export Ringkasan Kelompok
-              </button>
-              <button
-                type="button"
-                onClick={() => exportGroupDailyCsv(filteredParticipants)}
-                className="rounded-full bg-amber-500 px-5 py-3 text-xs font-black text-white"
-              >
-                Export Riwayat Kelompok
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="/wellness/input"
+                  className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-sm hover:bg-blue-700"
+                >
+                  Input Harian
+                </a>
+
+                <a
+                  href="/wellness/nakes-input"
+                  className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white shadow-sm hover:bg-slate-800"
+                >
+                  Input NAKES
+                </a>
+
+                <a
+                  href="/wellness/import-history"
+                  className="rounded-full border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Import History MCU
+                </a>
+
+                <button
+                  type="button"
+                  onClick={load}
+                  className="rounded-full border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  {loading ? "Memuat..." : "Refresh"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => exportGroupSummaryCsv(filteredParticipants)}
+                  className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white shadow-sm hover:bg-emerald-700"
+                >
+                  Export Ringkasan
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => exportGroupDailyCsv(filteredParticipants)}
+                  className="rounded-full bg-orange-500 px-5 py-3 text-xs font-black text-white shadow-sm hover:bg-orange-600"
+                >
+                  Export Riwayat
+                </button>
+              </div>
             </div>
           </div>
-        </Card>
 
-        {!selectedParticipant ? (
-          <>
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          {!selectedParticipant ? (
+            <div className="grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-5">
               <StatCard label="Peserta" value={fmtNumber(totalParticipants)} tone="blue" caption="Total peserta" />
               <StatCard label="Aktif" value={fmtNumber(activeParticipants)} tone="emerald" caption="Peserta dengan input" />
               <StatCard label="Kalori Makan Hari Ini" value={fmtKkal(totalFoodCaloriesToday)} tone="blue" caption="Akumulasi harian" />
               <StatCard label="Kalori Aktivitas Hari Ini" value={fmtKkal(totalActivityCaloriesToday)} tone="purple" caption="Workout/device/manual" />
               <StatCard label="Point" value={fmtPoint(totalPoints)} tone="amber" caption="Akumulasi point" />
-            </section>
+            </div>
+          ) : null}
+        </Card>
 
+        {!selectedParticipant ? (
+          <>
             <Card className="p-4">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex gap-2 overflow-x-auto pb-1">
+                <div className="flex flex-wrap gap-2">
                   <NavButton active={mainView === "overview"} label="Dashboard Utama" onClick={() => setMainView("overview")} />
                   <NavButton active={mainView === "daily"} label="Activities Harian" onClick={() => setMainView("daily")} />
                   <NavButton active={mainView === "ranking"} label="Ranking" onClick={() => setMainView("ranking")} />
@@ -1963,9 +1981,9 @@ function WellnessDashboard() {
                   <NavButton active={mainView === "points"} label="Capaian Point" onClick={() => setMainView("points")} />
                 </div>
 
-                <div className="grid gap-3 xl:grid-cols-[240px_420px]">
+                <div className="grid gap-3 md:grid-cols-[240px_420px]">
                   <select
-                    className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     value={groupFilter}
                     onChange={(event) => setGroupFilter(event.target.value)}
                   >
@@ -1978,7 +1996,7 @@ function WellnessDashboard() {
                   </select>
 
                   <input
-                    className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     placeholder="Cari nama, kode, kelompok, perusahaan..."
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
