@@ -1284,18 +1284,26 @@ export async function GET(req: NextRequest) {
     const rows = participants.map((participant: any) => {
       const weightRows = weightsByParticipant.get(Number(participant.id)) || [];
 
-      const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
-      const sheetFoodRowsById =
-        googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
-      const sheetFoodRowsByCode =
-        googleSheetFoodGrouped.byCode.get(String(participant.code || "").trim()) ||
-        [];
+const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
 
-      const foodRows = mergeFoodRows(
-        dbFoodRows,
-        sheetFoodRowsById,
-        sheetFoodRowsByCode
-      );
+const sheetFoodRowsById =
+  googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
+
+const sheetFoodRowsByCode =
+  googleSheetFoodGrouped.byCode.get(String(participant.code || "").trim()) ||
+  [];
+
+const sheetFoodRows = mergeFoodRows(
+  sheetFoodRowsById,
+  sheetFoodRowsByCode
+);
+
+// SOURCE OF TRUTH NUTRISI:
+// Kalau Google Sheet sudah punya data nutrisi peserta,
+// dashboard pakai Google Sheet saja.
+// Supabase wellness_food_logs hanya fallback untuk data lama,
+// supaya 1 input tidak muncul dobel di tanggal berbeda.
+const foodRows = sheetFoodRows.length ? sheetFoodRows : dbFoodRows;
 
       const activityRows =
         activitiesByParticipant.get(Number(participant.id)) || [];
@@ -1325,11 +1333,17 @@ export async function GET(req: NextRequest) {
           String(participant.code || "").trim()
         ) || [];
 
-      const healthtalkParticipantRows = mergeFoodRows(
-        dbHealthtalkRows,
-        sheetHealthtalkRowsById,
-        sheetHealthtalkRowsByCode
-      );
+    const sheetHealthtalkRows = mergeFoodRows(
+  sheetHealthtalkRowsById,
+  sheetHealthtalkRowsByCode
+);
+
+// SOURCE OF TRUTH HEALTHTALK:
+// Health Talk terbaru pakai Google Sheet.
+// Supabase healthtalk hanya fallback data lama.
+const healthtalkParticipantRows = sheetHealthtalkRows.length
+  ? sheetHealthtalkRows
+  : dbHealthtalkRows;
 
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;

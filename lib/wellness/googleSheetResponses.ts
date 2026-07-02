@@ -1,7 +1,10 @@
-// WELLNESS_GOOGLE_SHEET_RESPONSES_V406
+// WELLNESS_GOOGLE_SHEET_RESPONSES_V411_NORMAL_LOCAL_DATE
 // Read-only helper untuk dashboard/admin/portal membaca Form Responses Google Sheet.
-// Nutrition dan Health Talk detail disimpan Google Sheet-only.
-// Supabase tetap dipakai untuk session, peserta, master kalori, aktivitas, device.
+// Fix utama:
+// - tanggal dibaca sebagai local date, bukan UTC/toISOString agar tidak geser H-1
+// - nutrition rows tidak lagi terdeteksi hanya dari Add Options
+// - healthtalk rows dipisah jelas dari nutrition
+// - dashboard dapat memakai Google Sheet sebagai source of truth
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -11,50 +14,150 @@ function toNumberOrNull(value: any) {
   const text = clean(value);
   if (!text) return null;
 
-  const numeric = Number(text.replace(",", "."));
+  const normalized = text
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .replace(/[^\d.-]/g, "");
+
+  const numeric = Number(normalized);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function getWebhookUrl() {
-  return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+function pad2(value: any) {
+  return String(value).padStart(2, "0");
 }
 
-function getWebhookSecret() {
-  return clean(
-    process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET ||
-      process.env.WELLNESS_WEBHOOK_SECRET ||
-      ""
+function dateKeyFromParts(year: any, month: any, day: any) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return "";
+  if (y < 1900 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+function localDateKeyFromDate(date: Date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+
+  return dateKeyFromParts(
+    date.getFullYear(),
+    date.getMonth() + 1,
+    date.getDate()
   );
 }
 
-function getSheetName() {
-  return clean(process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME) || "Form Responses";
+function monthNameToNumber(value: string) {
+  const text = clean(value).toLowerCase();
+
+  const map: Record<string, number> = {
+    jan: 1,
+    januari: 1,
+    january: 1,
+    feb: 2,
+    februari: 2,
+    february: 2,
+    mar: 3,
+    maret: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    mei: 5,
+    may: 5,
+    jun: 6,
+    juni: 6,
+    june: 6,
+    jul: 7,
+    juli: 7,
+    july: 7,
+    agu: 8,
+    ags: 8,
+    agustus: 8,
+    august: 8,
+    sep: 9,
+    september: 9,
+    okt: 10,
+    oktober: 10,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    des: 12,
+    desember: 12,
+    dec: 12,
+    december: 12,
+  };
+
+  return map[text] || 0;
 }
 
 function toIsoDate(value: any) {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    return localDateKeyFromDate(value);
+  }
+
   const text = clean(value);
   if (!text) return "";
 
-  const date = new Date(text);
-  if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return dateKeyFromParts(isoMatch[1], isoMatch[2], isoMatch[3]);
+  }
 
-  return text.slice(0, 10);
+  const idDateMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (idDateMatch) {
+    // Untuk dashboard Indonesia, default parsing angka adalah DD/MM/YYYY.
+    // Ini menghindari 02/07 dibaca sebagai Feb 07.
+    return dateKeyFromParts(idDateMatch[3], idDateMatch[2], idDateMatch[1]);
+  }
+
+  const monthNameMatch = text.match(
+    /^(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})/i
+  );
+  if (monthNameMatch) {
+    const month = monthNameToNumber(monthNameMatch[2]);
+    if (month) {
+      return dateKeyFromParts(monthNameMatch[3], month, monthNameMatch[1]);
+    }
+  }
+
+  const date = new Date(text);
+
+  // Penting: jangan pakai date.toISOString().slice(0, 10).
+  // Itu akan menggeser tanggal saat data Google Sheet berada di timezone Asia/Jakarta.
+  return localDateKeyFromDate(date);
 }
 
 function toTime(value: any) {
-  const text = clean(value);
-  if (!text) return "";
+  if (!value) return "";
 
-  const date = new Date(text);
-  if (!Number.isNaN(date.getTime())) {
-    return date.toLocaleTimeString("id-ID", {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+
+    return value.toLocaleTimeString("id-ID", {
       hour: "2-digit",
       minute: "2-digit",
+      hour12: false,
     });
   }
 
+  const text = clean(value);
+  if (!text) return "";
+
   const match = text.match(/(\d{1,2}):(\d{2})/);
-  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : "";
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function normalizeDrivePreview(value: any) {
@@ -87,6 +190,22 @@ function normalizeDriveView(value: any) {
   return text;
 }
 
+function getWebhookUrl() {
+  return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+}
+
+function getWebhookSecret() {
+  return clean(
+    process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET ||
+      process.env.WELLNESS_WEBHOOK_SECRET ||
+      ""
+  );
+}
+
+function getSheetName() {
+  return clean(process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME) || "Form Responses";
+}
+
 function splitHealthtalkAddOptions(value: any) {
   const text = clean(value);
   if (!text) {
@@ -96,12 +215,57 @@ function splitHealthtalkAddOptions(value: any) {
     };
   }
 
-  const parts = text.split(" - ").map((item) => clean(item)).filter(Boolean);
+  const parts = text
+    .split(" - ")
+    .map((item) => clean(item))
+    .filter(Boolean);
 
   return {
     type: parts[0] || "",
     title: parts.slice(1).join(" - ") || parts[0] || "",
   };
+}
+
+function rowLogType(row: any) {
+  return clean(row?.["Log Type"] || row?.log_type).toLowerCase();
+}
+
+function isNutritionSheetRow(row: any) {
+  const logType = rowLogType(row);
+
+  if (logType === "healthtalk") return false;
+  if (logType === "activity") return false;
+  if (logType === "workout") return false;
+
+  if (logType === "nutrition") return true;
+
+  const hasNutritionSpecificField =
+    clean(row["Waktu Makan"]) ||
+    clean(row["Kalori Makanan"]) ||
+    clean(row["Detected Foods"]) ||
+    clean(row["Upload Foto Makanan"]) ||
+    clean(row["Preview Foto Makanan"]);
+
+  return Boolean(hasNutritionSpecificField);
+}
+
+function isHealthtalkSheetRow(row: any) {
+  const logType = rowLogType(row);
+
+  if (logType === "nutrition") return false;
+  if (logType === "activity") return false;
+  if (logType === "workout") return false;
+
+  if (logType === "healthtalk") return true;
+
+  const hasHealthtalkSpecificField =
+    clean(row["Healthtalk/Seminar"]) ||
+    clean(row["Jenis Healthtalk"]) ||
+    clean(row["Tanggal Healthtalk"]) ||
+    clean(row["Bukti Healthtalk"]) ||
+    clean(row["Preview Bukti Healthtalk"]);
+
+  return Boolean(hasHealthtalkSpecificField);
 }
 
 export async function fetchWellnessGoogleSheetRows(params?: {
@@ -168,20 +332,10 @@ export async function fetchWellnessGoogleSheetRows(params?: {
 
 export function googleSheetRowsToFoodLogs(rows: any[] = []) {
   return rows
-    .filter((row: any) => {
-      const logType = clean(row["Log Type"]).toLowerCase();
-
-      const hasFood =
-        clean(row["Add Options"]) ||
-        clean(row["Detected Foods"]) ||
-        clean(row["Waktu Makan"]) ||
-        clean(row["Kalori Makanan"]);
-
-      return logType === "nutrition" || Boolean(hasFood);
-    })
+    .filter(isNutritionSheetRow)
     .map((row: any) => {
       const submissionDate = row["Submission Date"];
-      const logDate = toIsoDate(row["Log Date"] || submissionDate);
+      const logDate = toIsoDate(row["Log Date"] || row["Tanggal"] || submissionDate);
       const logTime = toTime(submissionDate);
 
       const foodDetail =
@@ -216,7 +370,7 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
         total_calories: calories,
         calories,
         photo_url: photoUrl,
-        points: point || 0,
+        points: point !== null ? point : 5,
         source: "google_sheet",
         raw_payload: row,
       };
@@ -225,18 +379,7 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
 
 export function googleSheetRowsToHealthtalkLogs(rows: any[] = []) {
   return rows
-    .filter((row: any) => {
-      const logType = clean(row["Log Type"]).toLowerCase();
-
-      const hasHealthtalk =
-        clean(row["Healthtalk/Seminar"]) ||
-        clean(row["Jenis Healthtalk"]) ||
-        clean(row["Tanggal Healthtalk"]) ||
-        clean(row["Bukti Healthtalk"]) ||
-        clean(row["Preview Bukti Healthtalk"]);
-
-      return logType === "healthtalk" || Boolean(hasHealthtalk);
-    })
+    .filter(isHealthtalkSheetRow)
     .map((row: any) => {
       const submissionDate = row["Submission Date"];
       const addOptions = splitHealthtalkAddOptions(row["Add Options"]);
