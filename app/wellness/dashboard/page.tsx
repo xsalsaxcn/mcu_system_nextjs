@@ -5,17 +5,26 @@ import AuthGate from "@/components/AuthGate";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-// WELLNESS_DASHBOARD_LOOKER_STYLE_V408
-// Redesign:
-// - Dashboard dibuat lebih mirip Looker Studio: list/table sebagai pusat monitoring.
+// WELLNESS_DASHBOARD_LOOKER_STYLE_DAILY_EXPORT_V409
+// Redesign lanjutan dari V408:
+// - Dashboard tetap list-first seperti Looker Studio.
 // - Nama peserta bisa diklik untuk masuk detail 1 peserta saja.
-// - Activities Harian menampilkan Riwayat Activities, Riwayat Nutrisi, dan Trend Aktivitas Terbanyak.
-// - Capaian Point dibuat ranking table + chart sederhana.
-// - Grafik klinis tetap ada, tetapi tidak mendominasi tampilan utama.
+// - Detail peserta menampilkan kalori harian, bukan akumulasi.
+// - Tabel nutrisi/aktivitas punya grafik harian di bawahnya.
+// - Export CSV tersedia untuk peserta individu.
+// - Export CSV tersedia untuk ringkasan kelompok dan riwayat harian kelompok.
+// - Filter kelompok ditambahkan agar export bisa per kelompok.
 
 type Tone = "slate" | "blue" | "emerald" | "amber" | "rose" | "purple";
 type MainView = "overview" | "daily" | "ranking" | "clinical" | "points";
-type DetailTab = "summary" | "history" | "nutrition" | "activity" | "healthtalk" | "evidence" | "clinical";
+type DetailTab =
+  | "summary"
+  | "history"
+  | "nutrition"
+  | "activity"
+  | "healthtalk"
+  | "evidence"
+  | "clinical";
 
 type TrendPoint = {
   label?: string;
@@ -237,7 +246,14 @@ function isNutrition(item: any) {
 
 function isActivity(item: any) {
   const text = `${responseType(item)} ${responseDetail(item)}`.toLowerCase();
-  return text.includes("aktivitas") || text.includes("activity") || text.includes("workout") || text.includes("jalan") || text.includes("run") || text.includes("walk");
+  return (
+    text.includes("aktivitas") ||
+    text.includes("activity") ||
+    text.includes("workout") ||
+    text.includes("jalan") ||
+    text.includes("run") ||
+    text.includes("walk")
+  );
 }
 
 function isHealthtalk(item: any) {
@@ -286,6 +302,14 @@ function totalActivityCalories(participant: any) {
     return chart.reduce((sum: number, item: any) => sum + Number(item?.value || 0), 0);
   }
 
+  return toNumber(participant?.activity_calories_today) || 0;
+}
+
+function dailyNutritionCalories(participant: any) {
+  return toNumber(participant?.calories_today) || 0;
+}
+
+function dailyActivityCalories(participant: any) {
   return toNumber(participant?.activity_calories_today) || 0;
 }
 
@@ -368,9 +392,18 @@ function buildActivityTrend(participants: any[] = []) {
 function buildPointBreakdown(participant: any) {
   const responses = safeResponses(participant);
 
-  const nutrition = responses.filter(isNutrition).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
-  const activity = responses.filter(isActivity).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
-  const healthtalk = responses.filter(isHealthtalk).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const nutrition = responses
+    .filter(isNutrition)
+    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+
+  const activity = responses
+    .filter(isActivity)
+    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+
+  const healthtalk = responses
+    .filter(isHealthtalk)
+    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+
   const total = toNumber(participant?.total_points) || nutrition + activity + healthtalk;
 
   return {
@@ -397,6 +430,142 @@ function googleDrivePreviewUrl(value: any) {
   if (idMatch?.[1]) return `https://drive.google.com/uc?export=view&id=${idMatch[1]}`;
 
   return url;
+}
+
+function safeFileName(value: any) {
+  return cleanText(value)
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "_")
+    .slice(0, 80);
+}
+
+function csvCell(value: any) {
+  const text = cleanText(value);
+  const escaped = text.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+function downloadCsv(filename: string, rows: Record<string, any>[]) {
+  if (!rows.length) {
+    alert("Belum ada data untuk diexport.");
+    return;
+  }
+
+  const headerSet = new Set<string>();
+
+  rows.forEach((row) => {
+    Object.keys(row || {}).forEach((key) => {
+      headerSet.add(key);
+    });
+  });
+
+  const headers = Array.from(headerSet);
+
+  const csv = [
+    headers.map((header) => csvCell(header)).join(","),
+    ...rows.map((row) =>
+      headers.map((header) => csvCell(row?.[header] ?? "")).join(",")
+    ),
+  ].join("\n");
+
+  const blob = new Blob(["\ufeff" + csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function participantDailyExportRows(participant: any) {
+  return safeResponses(participant).map((item: any, index: number) => ({
+    no: index + 1,
+    participant_id: participant?.id || "",
+    kode: participantCode(participant),
+    nama_peserta: participantName(participant),
+    perusahaan: participantCompany(participant),
+    kelompok: participantGroup(participant),
+    risk_group: participantRisk(participant),
+    tanggal: responseDate(item),
+    jam: responseTime(item),
+    tipe: responseType(item),
+    detail: responseDetail(item),
+    kalori: responseCalories(item) || "",
+    point: responsePoints(item) || "",
+  }));
+}
+
+function groupSummaryExportRows(participants: any[]) {
+  return participants.map((participant: any, index: number) => ({
+    no: index + 1,
+    participant_id: participant?.id || "",
+    kode: participantCode(participant),
+    nama_peserta: participantName(participant),
+    perusahaan: participantCompany(participant),
+    kelompok: participantGroup(participant),
+    risk_group: participantRisk(participant),
+    status_kepatuhan: participant?.compliance_status || "",
+    bmi: participant?.bmi || "",
+    tensi: participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "",
+    kalori_makan_hari_ini: dailyNutritionCalories(participant),
+    kalori_aktivitas_hari_ini: dailyActivityCalories(participant),
+    total_kalori_makan_program: Math.round(totalNutritionCalories(participant) * 10) / 10,
+    total_kalori_aktivitas_program: Math.round(totalActivityCalories(participant) * 10) / 10,
+    total_point: participant?.total_points || 0,
+    jumlah_input_nutrisi: nutritionCount(participant),
+    jumlah_aktivitas: activityCount(participant),
+    tanggal_input_terakhir: participant?.latest_upload_date || "",
+  }));
+}
+
+function groupDailyExportRows(participants: any[]) {
+  return participants.flatMap((participant: any) =>
+    participantDailyExportRows(participant)
+  );
+}
+
+function exportParticipantDailyCsv(participant: any) {
+  const filename = `wellness_peserta_${safeFileName(participantName(participant))}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+
+  downloadCsv(filename, participantDailyExportRows(participant));
+}
+
+function exportGroupSummaryCsv(participants: any[]) {
+  const groupName =
+    participants.length === 1
+      ? participantGroup(participants[0])
+      : participants.length
+        ? "filtered"
+        : "empty";
+
+  const filename = `wellness_ringkasan_kelompok_${safeFileName(groupName)}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+
+  downloadCsv(filename, groupSummaryExportRows(participants));
+}
+
+function exportGroupDailyCsv(participants: any[]) {
+  const groupName =
+    participants.length === 1
+      ? participantGroup(participants[0])
+      : participants.length
+        ? "filtered"
+        : "empty";
+
+  const filename = `wellness_riwayat_harian_kelompok_${safeFileName(groupName)}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+
+  downloadCsv(filename, groupDailyExportRows(participants));
 }
 
 function Badge({ children, tone = "blue" }: { children: ReactNode; tone?: Tone }) {
@@ -671,8 +840,8 @@ function ParticipantsTable({
               <th className="min-w-[120px] px-4 py-3">Kelompok</th>
               <th className="px-4 py-3">BMI</th>
               <th className="px-4 py-3">Tensi</th>
-              <th className="px-4 py-3">Makan</th>
-              <th className="px-4 py-3">Aktivitas</th>
+              <th className="px-4 py-3">Makan Hari Ini</th>
+              <th className="px-4 py-3">Aktivitas Hari Ini</th>
               <th className="px-4 py-3">Point</th>
               <th className="px-4 py-3">Status</th>
             </tr>
@@ -698,8 +867,8 @@ function ParticipantsTable({
                 <td className="px-4 py-3 font-bold text-slate-600">
                   {participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"}
                 </td>
-                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(participant?.calories_today)}</td>
-                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(participant?.activity_calories_today)}</td>
+                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(dailyNutritionCalories(participant))}</td>
+                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(dailyActivityCalories(participant))}</td>
                 <td className="px-4 py-3 font-black text-violet-700">{fmtPoint(participant?.total_points)}</td>
                 <td className="px-4 py-3">
                   <Badge tone={riskTone(participantRisk(participant))}>
@@ -952,41 +1121,91 @@ function ParticipantDetail({
 }) {
   const responses = safeResponses(participant);
   const point = buildPointBreakdown(participant);
+  const charts = participant?.parameter_charts || {};
 
   return (
     <div className="space-y-5">
       <Card className="p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <button
-              type="button"
-              onClick={onBack}
-              className="mb-4 rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-200"
-            >
-              ← Kembali ke semua peserta
-            </button>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-200"
+              >
+                ← Kembali ke semua peserta
+              </button>
+
+              <button
+                type="button"
+                onClick={() => exportParticipantDailyCsv(participant)}
+                className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-black text-white hover:bg-emerald-700"
+              >
+                Export Data Peserta
+              </button>
+            </div>
 
             <div className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
               Detail Peserta
             </div>
-            <h1 className="mt-2 text-3xl font-black text-slate-950">{participantName(participant)}</h1>
+
+            <h1 className="mt-2 text-3xl font-black text-slate-950">
+              {participantName(participant)}
+            </h1>
+
             <p className="mt-2 text-sm font-bold text-slate-500">
               {participantCode(participant) || "-"} • {participantCompany(participant)} • {participantGroup(participant)}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Badge tone={riskTone(participantRisk(participant))}>{participantRisk(participant)}</Badge>
+            <Badge tone={riskTone(participantRisk(participant))}>
+              {participantRisk(participant)}
+            </Badge>
             <Badge tone="blue">{participant?.compliance_status || "Status -"}</Badge>
           </div>
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard label="Total Point" value={fmtPoint(participant?.total_points)} tone="amber" caption="Akumulasi point" />
-          <StatCard label="Kalori Makan" value={fmtKkal(totalNutritionCalories(participant))} tone="blue" caption="Akumulasi dari log" />
-          <StatCard label="Kalori Aktivitas" value={fmtKkal(totalActivityCalories(participant))} tone="emerald" caption="Workout/device/manual" />
-          <StatCard label="BMI" value={fmt(participant?.bmi)} tone={riskTone(participantRisk(participant))} caption={participant?.bmi_status || "Status BMI"} />
-          <StatCard label="Tensi" value={participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"} tone="purple" caption="mmHg" />
+          <StatCard
+            label="Total Point"
+            value={fmtPoint(participant?.total_points)}
+            tone="amber"
+            caption="Akumulasi point"
+          />
+
+          <StatCard
+            label="Kalori Makan Hari Ini"
+            value={fmtKkal(dailyNutritionCalories(participant))}
+            tone="blue"
+            caption="Data harian, bukan akumulasi"
+          />
+
+          <StatCard
+            label="Kalori Aktivitas Hari Ini"
+            value={fmtKkal(dailyActivityCalories(participant))}
+            tone="emerald"
+            caption="Workout/device/manual hari ini"
+          />
+
+          <StatCard
+            label="BMI"
+            value={fmt(participant?.bmi)}
+            tone={riskTone(participantRisk(participant))}
+            caption={participant?.bmi_status || "Status BMI"}
+          />
+
+          <StatCard
+            label="Tensi"
+            value={
+              participant?.sbp || participant?.dbp
+                ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}`
+                : "-"
+            }
+            tone="purple"
+            caption="mmHg"
+          />
         </div>
 
         <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
@@ -1001,39 +1220,158 @@ function ParticipantDetail({
       </Card>
 
       {activeTab === "summary" ? (
-        <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-          <Card className="p-5">
-            <SectionHeader title="Breakdown Point" subtitle="Membantu mengecek sumber point peserta." />
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <StatCard label="Nutrisi" value={fmtPoint(point.nutrition)} tone="blue" caption="+5 setiap laporan nutrisi" />
-              <StatCard label="Aktivitas" value={fmtPoint(point.activity)} tone="emerald" caption="Point dari aktivitas/evidence" />
-              <StatCard label="Health Talk" value={fmtPoint(point.healthtalk)} tone="purple" caption="Online +10, Offline +20 dengan bukti" />
-              <StatCard label="Total" value={fmtPoint(point.total)} tone="amber" caption="Total point peserta" />
-            </div>
-          </Card>
+        <div className="space-y-5">
+          <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+            <Card className="p-5">
+              <SectionHeader title="Breakdown Point" subtitle="Membantu mengecek sumber point peserta." />
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <StatCard label="Nutrisi" value={fmtPoint(point.nutrition)} tone="blue" caption="+5 setiap laporan nutrisi" />
+                <StatCard label="Aktivitas" value={fmtPoint(point.activity)} tone="emerald" caption="Point dari aktivitas/evidence" />
+                <StatCard label="Health Talk" value={fmtPoint(point.healthtalk)} tone="purple" caption="Online +10, Offline +20 dengan bukti" />
+                <StatCard label="Total" value={fmtPoint(point.total)} tone="amber" caption="Total point peserta" />
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionHeader title="Aktivitas Peserta" subtitle="Jenis aktivitas yang paling sering dilakukan." />
+              <div className="mt-5">
+                <HorizontalBars
+                  items={(participant?.activity_summary || participant?.activity_history || []).map((item: any) => ({
+                    label: item?.activity_name || item?.nama_activities || "Aktivitas",
+                    value: item?.count || item?.jumlah || 1,
+                  })).slice(0, 8)}
+                  labelKey="label"
+                  valueKey="value"
+                  suffix="x"
+                />
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card className="p-5">
+              <SectionHeader
+                title="Grafik Kalori Makanan Harian"
+                subtitle="Naik-turun kalori makanan yang dikonsumsi per tanggal."
+              />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Kalori Makanan per Hari"
+                  points={charts.nutrition_calories || []}
+                  suffix="kkal"
+                />
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionHeader
+                title="Grafik Kalori Aktivitas Harian"
+                subtitle="Naik-turun kalori yang dibakar dari aktivitas per tanggal."
+              />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Kalori Aktivitas per Hari"
+                  points={charts.activity_calories || []}
+                  suffix="kkal"
+                />
+              </div>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "history" ? (
+        <div className="space-y-5">
+          <RecentTable title="Riwayat Input Harian Peserta" items={responses} type="all" />
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card className="p-5">
+              <SectionHeader title="Grafik Kalori Makanan Harian" />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Kalori Makanan per Hari"
+                  points={charts.nutrition_calories || []}
+                  suffix="kkal"
+                />
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionHeader title="Grafik Kalori Aktivitas Harian" />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Kalori Aktivitas per Hari"
+                  points={charts.activity_calories || []}
+                  suffix="kkal"
+                />
+              </div>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "nutrition" ? (
+        <div className="space-y-5">
+          <RecentTable title="Riwayat Nutrisi Peserta" items={responses} type="nutrition" />
 
           <Card className="p-5">
-            <SectionHeader title="Aktivitas Peserta" subtitle="Jenis aktivitas yang paling sering dilakukan." />
-            <div className="mt-5">
-              <HorizontalBars
-                items={(participant?.activity_summary || participant?.activity_history || []).map((item: any) => ({
-                  label: item?.activity_name || item?.nama_activities || "Aktivitas",
-                  value: item?.count || item?.jumlah || 1,
-                })).slice(0, 8)}
-                labelKey="label"
-                valueKey="value"
-                suffix="x"
+            <SectionHeader
+              title="Grafik Kalori Makanan Harian"
+              subtitle="Grafik ini membaca total kalori makanan per tanggal, bukan akumulasi keseluruhan."
+            />
+            <div className="mt-4">
+              <MiniLineChart
+                title="Kalori Makanan per Hari"
+                points={charts.nutrition_calories || []}
+                suffix="kkal"
               />
             </div>
           </Card>
         </div>
       ) : null}
 
-      {activeTab === "history" ? <RecentTable title="Riwayat Input Harian Peserta" items={responses} type="all" /> : null}
-      {activeTab === "nutrition" ? <RecentTable title="Riwayat Nutrisi Peserta" items={responses} type="nutrition" /> : null}
-      {activeTab === "activity" ? <RecentTable title="Riwayat Aktivitas Peserta" items={responses} type="activity" /> : null}
-      {activeTab === "healthtalk" ? <RecentTable title="Riwayat Health Talk Peserta" items={responses} type="healthtalk" /> : null}
+      {activeTab === "activity" ? (
+        <div className="space-y-5">
+          <RecentTable title="Riwayat Aktivitas Peserta" items={responses} type="activity" />
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card className="p-5">
+              <SectionHeader
+                title="Grafik Kalori Aktivitas Harian"
+                subtitle="Kalori yang dibakar per tanggal."
+              />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Kalori Aktivitas per Hari"
+                  points={charts.activity_calories || []}
+                  suffix="kkal"
+                />
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <SectionHeader
+                title="Grafik Durasi Aktivitas Harian"
+                subtitle="Total menit aktivitas per tanggal."
+              />
+              <div className="mt-4">
+                <MiniLineChart
+                  title="Durasi Aktivitas per Hari"
+                  points={charts.workout_minutes || []}
+                  suffix="menit"
+                />
+              </div>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "healthtalk" ? (
+        <RecentTable title="Riwayat Health Talk Peserta" items={responses} type="healthtalk" />
+      ) : null}
+
       {activeTab === "clinical" ? <ClinicalPanel participant={participant} /> : null}
+
       {activeTab === "evidence" ? <EvidenceGallery participant={participant} /> : null}
     </div>
   );
@@ -1387,6 +1725,7 @@ function WellnessDashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Memuat dashboard Wellness...");
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("");
   const [mainView, setMainView] = useState<MainView>("overview");
   const [selectedId, setSelectedId] = useState<any>("");
   const [detailTab, setDetailTab] = useState<DetailTab>("summary");
@@ -1415,12 +1754,30 @@ function WellnessDashboard() {
     return data?.participants || data?.rows || data?.data || [];
   }, [data]);
 
+  const groupOptions = useMemo(() => {
+    const values = new Set<string>();
+
+    for (const participant of participants || []) {
+      const group = participantGroup(participant);
+      if (group && group !== "-") values.add(group);
+    }
+
+    return [...values].sort((a, b) => a.localeCompare(b));
+  }, [participants]);
+
   const filteredParticipants = useMemo(() => {
     const q = cleanText(search).toLowerCase();
-
-    if (!q) return participants;
+    const selectedGroup = cleanText(groupFilter).toLowerCase();
 
     return participants.filter((participant: any) => {
+      const participantGroupText = participantGroup(participant).toLowerCase();
+
+      if (selectedGroup && participantGroupText !== selectedGroup) {
+        return false;
+      }
+
+      if (!q) return true;
+
       const haystack = [
         participantName(participant),
         participantCode(participant),
@@ -1435,7 +1792,7 @@ function WellnessDashboard() {
 
       return haystack.includes(q);
     });
-  }, [participants, search]);
+  }, [participants, search, groupFilter]);
 
   const selectedParticipant = useMemo(() => {
     if (!selectedId) return null;
@@ -1492,6 +1849,20 @@ function WellnessDashboard() {
               >
                 {loading ? "Memuat..." : "Refresh"}
               </button>
+              <button
+                type="button"
+                onClick={() => exportGroupSummaryCsv(filteredParticipants)}
+                className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white"
+              >
+                Export Ringkasan Kelompok
+              </button>
+              <button
+                type="button"
+                onClick={() => exportGroupDailyCsv(filteredParticipants)}
+                className="rounded-full bg-amber-500 px-5 py-3 text-xs font-black text-white"
+              >
+                Export Riwayat Kelompok
+              </button>
             </div>
           </div>
         </Card>
@@ -1516,16 +1887,32 @@ function WellnessDashboard() {
                   <NavButton active={mainView === "points"} label="Capaian Point" onClick={() => setMainView("points")} />
                 </div>
 
-                <input
-                  className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 xl:w-[420px]"
-                  placeholder="Cari nama, kode, kelompok, perusahaan..."
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
+                <div className="grid gap-3 xl:grid-cols-[240px_420px]">
+                  <select
+                    className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    value={groupFilter}
+                    onChange={(event) => setGroupFilter(event.target.value)}
+                  >
+                    <option value="">Semua kelompok</option>
+                    {groupOptions.map((group) => (
+                      <option key={group} value={group}>
+                        {group}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    placeholder="Cari nama, kode, kelompok, perusahaan..."
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </div>
               </div>
 
               <div className="mt-3 text-xs font-bold text-slate-400">
                 {message} • Data tampil: {filteredParticipants.length} peserta
+                {groupFilter ? ` • Kelompok: ${groupFilter}` : ""}
               </div>
             </Card>
 
