@@ -4,17 +4,24 @@ import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
-// WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_PORTAL
-// Participant-only portal UX.
-// V395 scope:
-// - keep OTP, Strava, Google Fit, and existing session flow unchanged
-// - nutrition form hides calorie/macro fields from participant
-// - nutrition calories are calculated by API from master KaloriData
-// - manual workout calories are calculated by API from master KaloriOlahraga / MET fallback
-// - participant dashboard shows Calories In and health progress charts
+// WELLNESS_PARTICIPANT_PORTAL_DAILY_SUMMARY_GOOGLE_FIT_FIX_V415
+// Fix dari file V398:
+// - Perbaiki syntax error isGoogleFitDailyRow.
+// - Summary card Workout Calories dan Steps hanya menghitung HARI INI.
+// - History Workout tetap menampilkan semua riwayat.
+// - Google Fit Daily pada tanggal yang sama dipilih row terbaru.
+// - todayDate dan activity date key pakai Asia/Jakarta.
+// - Auto sync Google Fit tetap setiap 10 menit saat portal terbuka.
 
 type Step = "request" | "verify" | "portal";
-type PortalTab = "home" | "nutrition" | "workout" | "healthtalk" | "history" | "devices" | "profile";
+type PortalTab =
+  | "home"
+  | "nutrition"
+  | "workout"
+  | "healthtalk"
+  | "history"
+  | "devices"
+  | "profile";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -42,7 +49,169 @@ function fmtNumber(value: any, digits = 0) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find((item) => item.type === "year")?.value || "";
+  const month = parts.find((item) => item.type === "month")?.value || "";
+  const day = parts.find((item) => item.type === "day")?.value || "";
+
+  if (!year || !month || !day) return new Date().toISOString().slice(0, 10);
+
+  return `${year}-${month}-${day}`;
+}
+
+function jakartaDateFromAny(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const isoDateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnly) return `${isoDateOnly[1]}-${isoDateOnly[2]}-${isoDateOnly[3]}`;
+
+  const localDateTime = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+\d{1,2}:\d{2}/);
+  if (localDateTime) return `${localDateTime[1]}-${localDateTime[2]}-${localDateTime[3]}`;
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text.slice(0, 10);
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((item) => item.type === "year")?.value || "";
+  const month = parts.find((item) => item.type === "month")?.value || "";
+  const day = parts.find((item) => item.type === "day")?.value || "";
+
+  if (!year || !month || !day) return text.slice(0, 10);
+
+  return `${year}-${month}-${day}`;
+}
+
+function activityDateKey(item: any) {
+  return (
+    clean(item?.log_date).slice(0, 10) ||
+    clean(item?.date).slice(0, 10) ||
+    clean(item?.tanggal).slice(0, 10) ||
+    clean(item?.raw_payload?.log_date).slice(0, 10) ||
+    jakartaDateFromAny(
+      item?.started_at ||
+        item?.start_date_local ||
+        item?.raw_payload?.start_date_local ||
+        item?.raw_payload?.last_sync_at ||
+        item?.updated_at ||
+        item?.created_at
+    )
+  );
+}
+
+function activityUpdatedAtMs(item: any) {
+  const raw =
+    item?.raw_payload?.last_sync_at ||
+    item?.updated_at ||
+    item?.started_at ||
+    item?.created_at ||
+    item?.raw_payload?.synced_at ||
+    "";
+
+  const date = new Date(raw);
+
+  if (!Number.isNaN(date.getTime())) return date.getTime();
+
+  return 0;
+}
+
+function isGoogleFitDailyRow(item: any) {
+  const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
+
+  const name = clean(
+    item?.activity_name ||
+      item?.activity_type ||
+      item?.nama_activities ||
+      item?.raw_payload?.provider ||
+      item?.raw_payload?.sync_mode ||
+      ""
+  ).toLowerCase();
+
+  return (
+    source === "google_fit" ||
+    source === "google-fit" ||
+    name.includes("google fit daily") ||
+    name.includes("google_fit") ||
+    name.includes("aggregate_daily")
+  );
+}
+
+function normalizeTodayWorkoutItems(items: any[] = []) {
+  const today = todayDate();
+  const result = new Map<string, any>();
+
+  for (const item of items || []) {
+    const date = activityDateKey(item);
+    if (date !== today) continue;
+
+    const googleFitDaily = isGoogleFitDailyRow(item);
+
+    const key = googleFitDaily
+      ? `google_fit_daily_${date}`
+      : String(
+          item?.id ||
+            item?.external_activity_id ||
+            item?.provider_activity_id ||
+            `${date}-${result.size}`
+        );
+
+    const previous = result.get(key);
+
+    if (!previous) {
+      result.set(key, item);
+      continue;
+    }
+
+    const previousTime = activityUpdatedAtMs(previous);
+    const currentTime = activityUpdatedAtMs(item);
+
+    if (currentTime >= previousTime) {
+      result.set(key, item);
+    }
+  }
+
+  return [...result.values()].sort((a, b) => {
+    return activityUpdatedAtMs(b) - activityUpdatedAtMs(a);
+  });
+}
+
+function activityCaloriesValue(item: any) {
+  return asNumber(
+    item?.calories ??
+      item?.total_calories ??
+      item?.activity_calories ??
+      item?.raw_payload?.google_fit_calories_expended ??
+      item?.raw_payload?.calories
+  );
+}
+
+function activityMinutesValue(item: any) {
+  return asNumber(
+    item?.duration_minutes ??
+      item?.total_duration_minutes ??
+      item?.raw_payload?.google_fit_active_minutes ??
+      item?.raw_payload?.active_minutes
+  );
+}
+
+function activityStepsValue(item: any) {
+  return asNumber(
+    item?.steps ??
+      item?.total_steps ??
+      item?.raw_payload?.google_fit_steps
+  );
 }
 
 function providerStatus(integrations: any[], provider: string) {
@@ -212,7 +381,9 @@ export default function WellnessParticipantPortalPage() {
       setStep("portal");
 
       if (!options?.keepMessage) {
-        setMessage("Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device.");
+        setMessage(
+          "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device."
+        );
       }
 
       await Promise.all([loadNutrition(), loadHealthtalk()]);
@@ -341,14 +512,22 @@ export default function WellnessParticipantPortalPage() {
     setMessage("Session peserta keluar. Masuk ulang dengan OTP.");
   }
 
-  async function syncProvider(provider: "strava" | "google-fit") {
+  async function syncProvider(
+    provider: "strava" | "google-fit",
+    options?: { silent?: boolean; days?: number }
+  ) {
     setSyncing(provider);
-    setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
+
+    if (!options?.silent) {
+      setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
+    }
 
     const result = await fetch(`/api/wellness/integrations/${provider}/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ days: 30 }),
+      body: JSON.stringify({
+        days: options?.days || (provider === "google-fit" ? 2 : 30),
+      }),
     })
       .then((response) => response.json())
       .catch((error) => ({
@@ -357,25 +536,27 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      const fetched = Number(result.fetched || 0);
-      const inserted = Number(result.inserted || result.synced || 0);
-      const updated = Number(result.updated || 0);
-      const skipped = Number(result.skipped || 0);
+      if (!options?.silent) {
+        const fetched = Number(result.fetched || result.fetched_daily || 0);
+        const inserted = Number(result.inserted || result.synced || 0);
+        const updated = Number(result.updated || 0);
+        const skipped = Number(result.skipped || 0);
 
-      setMessage(
-        result.message ||
-          `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`
-      );
+        setMessage(
+          result.message ||
+            `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`
+        );
+      }
 
       await loadMe({ keepMessage: true });
-    } else {
+    } else if (!options?.silent) {
       setMessage(result.message || "Gagal sync activity.");
     }
 
     setSyncing("");
   }
 
-    async function saveNutrition() {
+  async function saveNutrition() {
     if (!clean(nutritionForm.food_name)) {
       setMessage("Nama makanan wajib diisi.");
       return;
@@ -522,6 +703,17 @@ export default function WellnessParticipantPortalPage() {
   const stravaConnected = providerStatus(integrations, "strava");
   const googleFitConnected = providerStatus(integrations, "google_fit");
 
+  useEffect(() => {
+    if (step !== "portal") return;
+    if (!googleFitConnected) return;
+
+    const intervalId = window.setInterval(() => {
+      syncProvider("google-fit", { silent: true, days: 2 });
+    }, 10 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [step, googleFitConnected]);
+
   const workoutItems = useMemo(() => {
     if (Array.isArray(activities) && activities.length > 0) return activities;
 
@@ -531,6 +723,10 @@ export default function WellnessParticipantPortalPage() {
 
     return [];
   }, [activities, activitySummary]);
+
+  const todayWorkoutItems = useMemo(() => {
+    return normalizeTodayWorkoutItems(workoutItems);
+  }, [workoutItems]);
 
   const todayNutrition = useMemo(() => {
     const today = todayDate();
@@ -547,10 +743,10 @@ export default function WellnessParticipantPortalPage() {
     let fat = 0;
     let pendingCalories = 0;
 
-    for (const item of workoutItems || []) {
-      workoutMinutes += asNumber(item.duration_minutes || item.total_duration_minutes);
-      workoutCalories += asNumber(item.calories || item.total_calories);
-      steps += asNumber(item.steps || item.total_steps);
+    for (const item of todayWorkoutItems || []) {
+      workoutMinutes += activityMinutesValue(item);
+      workoutCalories += activityCaloriesValue(item);
+      steps += activityStepsValue(item);
     }
 
     for (const item of todayNutrition || []) {
@@ -567,7 +763,7 @@ export default function WellnessParticipantPortalPage() {
       workoutMinutes,
       workoutCalories,
       steps,
-      workoutCount: workoutItems?.length || 0,
+      workoutCount: todayWorkoutItems?.length || 0,
       foodCalories,
       protein,
       carbs,
@@ -575,11 +771,12 @@ export default function WellnessParticipantPortalPage() {
       foodCount: todayNutrition.length,
       pendingCalories,
     };
-  }, [workoutItems, todayNutrition]);
+  }, [todayWorkoutItems, todayNutrition]);
 
-  const lastClinical = Array.isArray(clinicalHistory) && clinicalHistory.length > 0
-    ? clinicalHistory[0]
-    : null;
+  const lastClinical =
+    Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+      ? clinicalHistory[0]
+      : null;
 
   const isWarningMessage =
     message.toLowerCase().includes("gagal") ||
@@ -754,14 +951,14 @@ export default function WellnessParticipantPortalPage() {
               <SummaryCard
                 label="Workout Calories"
                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
-                note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas`}
+                note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
                 tone="emerald"
               />
 
               <SummaryCard
                 label="Steps"
                 value={fmtNumber(totals.steps, 0)}
-                note="dari manual/device bila tersedia"
+                note="hari ini dari manual/device bila tersedia"
                 tone="amber"
               />
 
@@ -915,7 +1112,7 @@ function HomeTab({
 
           <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
             Hari ini kamu sudah mencatat {totals.foodCount} nutrisi dan memiliki
-            {` ${totals.workoutCount}`} catatan workout/device di history.
+            {` ${totals.workoutCount}`} catatan workout/device hari ini.
           </p>
 
           <div className="mt-5 grid gap-3 md:grid-cols-4">
