@@ -1,10 +1,13 @@
-// WELLNESS_GOOGLE_SHEET_RESPONSES_V411_NORMAL_LOCAL_DATE
+// WELLNESS_GOOGLE_SHEET_RESPONSES_V412_JAKARTA_DATE_NORMAL_FORM
 // Read-only helper untuk dashboard/admin/portal membaca Form Responses Google Sheet.
 // Fix utama:
-// - tanggal dibaca sebagai local date, bukan UTC/toISOString agar tidak geser H-1
-// - nutrition rows tidak lagi terdeteksi hanya dari Add Options
-// - healthtalk rows dipisah jelas dari nutrition
-// - dashboard dapat memakai Google Sheet sebagai source of truth
+// - semua Date dari Google Sheet dipaksa Asia/Jakarta
+// - nutrition memakai Submission Date sebagai tanggal utama agar input hari ini tidak loncat H-1
+// - healthtalk tetap memakai Tanggal Healthtalk jika tersedia
+// - nutrition dan healthtalk dipisah jelas supaya tidak saling kebaca
+// - menghindari data tiba-tiba muncul di tanggal lain karena UTC conversion
+
+const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -38,14 +41,21 @@ function dateKeyFromParts(year: any, month: any, day: any) {
   return `${y}-${pad2(m)}-${pad2(d)}`;
 }
 
-function localDateKeyFromDate(date: Date) {
+function jakartaDateKeyFromDate(date: Date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
 
-  return dateKeyFromParts(
-    date.getFullYear(),
-    date.getMonth() + 1,
-    date.getDate()
-  );
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: JAKARTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((item) => item.type === "year")?.value;
+  const month = parts.find((item) => item.type === "month")?.value;
+  const day = parts.find((item) => item.type === "day")?.value;
+
+  return dateKeyFromParts(year, month, day);
 }
 
 function monthNameToNumber(value: string) {
@@ -96,24 +106,47 @@ function toIsoDate(value: any) {
   if (!value) return "";
 
   if (value instanceof Date) {
-    return localDateKeyFromDate(value);
+    return jakartaDateKeyFromDate(value);
   }
 
   const text = clean(value);
   if (!text) return "";
 
-  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (isoMatch) {
-    return dateKeyFromParts(isoMatch[1], isoMatch[2], isoMatch[3]);
+  // Format dari Apps Script baru: 2026-07-02 11:35:19
+  const localDateTimeMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\s+\d{1,2}:\d{2}/);
+  if (localDateTimeMatch) {
+    return dateKeyFromParts(
+      localDateTimeMatch[1],
+      localDateTimeMatch[2],
+      localDateTimeMatch[3]
+    );
   }
 
+  // Format tanggal murni: 2026-07-02
+  const isoDateOnlyMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoDateOnlyMatch) {
+    return dateKeyFromParts(
+      isoDateOnlyMatch[1],
+      isoDateOnlyMatch[2],
+      isoDateOnlyMatch[3]
+    );
+  }
+
+  // Format ISO UTC dari Apps Script lama: 2026-07-02T04:35:19.000Z
+  // Wajib dikonversi ke Asia/Jakarta, bukan timezone server Vercel.
+  const isoDateTimeMatch = text.match(/^\d{4}-\d{2}-\d{2}T/);
+  if (isoDateTimeMatch) {
+    const date = new Date(text);
+    return jakartaDateKeyFromDate(date);
+  }
+
+  // Format Indonesia: 02/07/2026
   const idDateMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
   if (idDateMatch) {
-    // Untuk dashboard Indonesia, default parsing angka adalah DD/MM/YYYY.
-    // Ini menghindari 02/07 dibaca sebagai Feb 07.
     return dateKeyFromParts(idDateMatch[3], idDateMatch[2], idDateMatch[1]);
   }
 
+  // Format: 02 Jul 2026
   const monthNameMatch = text.match(
     /^(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})/i
   );
@@ -125,10 +158,7 @@ function toIsoDate(value: any) {
   }
 
   const date = new Date(text);
-
-  // Penting: jangan pakai date.toISOString().slice(0, 10).
-  // Itu akan menggeser tanggal saat data Google Sheet berada di timezone Asia/Jakarta.
-  return localDateKeyFromDate(date);
+  return jakartaDateKeyFromDate(date);
 }
 
 function toTime(value: any) {
@@ -138,6 +168,7 @@ function toTime(value: any) {
     if (Number.isNaN(value.getTime())) return "";
 
     return value.toLocaleTimeString("id-ID", {
+      timeZone: JAKARTA_TIME_ZONE,
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
@@ -147,13 +178,22 @@ function toTime(value: any) {
   const text = clean(value);
   if (!text) return "";
 
-  const match = text.match(/(\d{1,2}):(\d{2})/);
-  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
+  // Format dari Apps Script baru: 2026-07-02 11:35:19
+  const localMatch = text.match(/\s(\d{1,2}):(\d{2})/);
+  if (localMatch) {
+    return `${localMatch[1].padStart(2, "0")}:${localMatch[2]}`;
+  }
+
+  const simpleMatch = text.match(/^(\d{1,2}):(\d{2})/);
+  if (simpleMatch) {
+    return `${simpleMatch[1].padStart(2, "0")}:${simpleMatch[2]}`;
+  }
 
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return "";
 
   return date.toLocaleTimeString("id-ID", {
+    timeZone: JAKARTA_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -335,7 +375,11 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
     .filter(isNutritionSheetRow)
     .map((row: any) => {
       const submissionDate = row["Submission Date"];
-      const logDate = toIsoDate(row["Log Date"] || row["Tanggal"] || submissionDate);
+      const explicitLogDate = row["Log Date"] || row["Tanggal"];
+
+      // Untuk form nutrisi normal, tanggal utama adalah Submission Date.
+      // Ini mencegah row input 02 Juli terbaca sebagai 01 Juli akibat field Log Date lama / UTC.
+      const logDate = toIsoDate(submissionDate || explicitLogDate);
       const logTime = toTime(submissionDate);
 
       const foodDetail =
@@ -362,7 +406,7 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
         participant_code: clean(row["KODE"]),
         log_date: logDate,
         log_time: logTime,
-        created_at: submissionDate || row["Log Date"] || "",
+        created_at: submissionDate || explicitLogDate || "",
         meal_time: clean(row["Waktu Makan"]),
         meal_type: clean(row["Waktu Makan"]),
         meal_text: foodDetail,

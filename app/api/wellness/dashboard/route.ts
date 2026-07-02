@@ -14,16 +14,18 @@ import {
   latestByDate,
 } from "@/app/api/wellness/_utils";
 
-// WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_HEALTHTALK_V407
+// WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_HEALTHTALK_V413
 // Dashboard admin reads Nutrition + Health Talk from existing Google Sheet Form Responses.
 // Nutrition:
 // - Google Sheet-only supported.
 // - Every nutrition submission gets +5 point unless explicit Total Point exists.
+// - Google Sheet is source of truth when available.
 // Health Talk:
 // - Google Sheet-only supported.
 // - Online / Daring = +10.
 // - Offline / Luring + evidence = +20.
 // - Offline / Luring without evidence = 0.
+// - Google Sheet is source of truth when available.
 // Supabase logs remain supported for backward compatibility.
 
 function groupByParticipant(rows: any[] = []) {
@@ -36,6 +38,23 @@ function groupByParticipant(rows: any[] = []) {
   }
 
   return map;
+}
+
+function jakartaDateKey(value: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+
+  const year = parts.find((item) => item.type === "year")?.value || "";
+  const month = parts.find((item) => item.type === "month")?.value || "";
+  const day = parts.find((item) => item.type === "day")?.value || "";
+
+  if (!year || !month || !day) return value.toISOString().slice(0, 10);
+
+  return `${year}-${month}-${day}`;
 }
 
 function sumCalories(rows: any[] = []) {
@@ -200,6 +219,7 @@ function getResponseTime(row: any) {
   if (Number.isNaN(date.getTime())) return "";
 
   return date.toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -1144,7 +1164,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = jakartaDateKey();
 
     const [
       weightRes,
@@ -1284,26 +1304,26 @@ export async function GET(req: NextRequest) {
     const rows = participants.map((participant: any) => {
       const weightRows = weightsByParticipant.get(Number(participant.id)) || [];
 
-const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
+      const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
 
-const sheetFoodRowsById =
-  googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
+      const sheetFoodRowsById =
+        googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
 
-const sheetFoodRowsByCode =
-  googleSheetFoodGrouped.byCode.get(String(participant.code || "").trim()) ||
-  [];
+      const sheetFoodRowsByCode =
+        googleSheetFoodGrouped.byCode.get(String(participant.code || "").trim()) ||
+        [];
 
-const sheetFoodRows = mergeFoodRows(
-  sheetFoodRowsById,
-  sheetFoodRowsByCode
-);
+      const sheetFoodRows = mergeFoodRows(
+        sheetFoodRowsById,
+        sheetFoodRowsByCode
+      );
 
-// SOURCE OF TRUTH NUTRISI:
-// Kalau Google Sheet sudah punya data nutrisi peserta,
-// dashboard pakai Google Sheet saja.
-// Supabase wellness_food_logs hanya fallback untuk data lama,
-// supaya 1 input tidak muncul dobel di tanggal berbeda.
-const foodRows = sheetFoodRows.length ? sheetFoodRows : dbFoodRows;
+      // SOURCE OF TRUTH NUTRISI:
+      // Jika Google Sheet sudah punya data nutrisi peserta,
+      // dashboard pakai Google Sheet saja.
+      // Supabase wellness_food_logs hanya fallback data lama,
+      // supaya 1 input tidak muncul dobel di tanggal berbeda.
+      const foodRows = sheetFoodRows.length ? sheetFoodRows : dbFoodRows;
 
       const activityRows =
         activitiesByParticipant.get(Number(participant.id)) || [];
@@ -1333,17 +1353,17 @@ const foodRows = sheetFoodRows.length ? sheetFoodRows : dbFoodRows;
           String(participant.code || "").trim()
         ) || [];
 
-    const sheetHealthtalkRows = mergeFoodRows(
-  sheetHealthtalkRowsById,
-  sheetHealthtalkRowsByCode
-);
+      const sheetHealthtalkRows = mergeFoodRows(
+        sheetHealthtalkRowsById,
+        sheetHealthtalkRowsByCode
+      );
 
-// SOURCE OF TRUTH HEALTHTALK:
-// Health Talk terbaru pakai Google Sheet.
-// Supabase healthtalk hanya fallback data lama.
-const healthtalkParticipantRows = sheetHealthtalkRows.length
-  ? sheetHealthtalkRows
-  : dbHealthtalkRows;
+      // SOURCE OF TRUTH HEALTHTALK:
+      // Health Talk terbaru pakai Google Sheet.
+      // Supabase healthtalk hanya fallback data lama.
+      const healthtalkParticipantRows = sheetHealthtalkRows.length
+        ? sheetHealthtalkRows
+        : dbHealthtalkRows;
 
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;
