@@ -1,17 +1,24 @@
-// WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY
-// Fix Google Fit daily sync:
-// - skip cumulative step sources
-// - do not use Google Fit daily calories as workout calories because it may include total daily/BMR calories
-// - pick daily steps from delta sources only
-// - estimate daily calories from steps/distance + participant weight
-// - update existing google_fit_daily rows instead of duplicating
-// - keep session/workout data separate when available
+// WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414
+// Google Fit daily sync using Google Fit aggregate API.
+// Goals:
+// - Read daily aggregate numbers closer to Google Fit App.
+// - Steps: com.google.step_count.delta
+// - Distance: com.google.distance.delta
+// - Calories: com.google.calories.expended
+// - Move minutes: com.google.active_minutes
+// - One Google Fit Daily row per participant per date.
+// - Update same date row, do not duplicate.
+// - started_at uses latest sync time, so UI no longer shows 07.00 bucket time.
+// - log_date remains the wellness daily date in Asia/Jakarta.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
 export const runtime = "nodejs";
+
+const MARKER = "WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414";
+const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -21,64 +28,8 @@ function toNumberOrNull(value: any) {
   const text = clean(value);
   if (!text) return null;
 
-  const n = Number(text);
-  return Number.isFinite(n) ? n : null;
-}
-
-function jakartaDateKey(ms: number) {
-  const offsetMs = 7 * 60 * 60 * 1000;
-  return new Date(ms + offsetMs).toISOString().slice(0, 10);
-}
-
-function jakartaTodayKey() {
-  return jakartaDateKey(Date.now());
-}
-
-function jakartaDayStartUtc(dateKey: string) {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day, -7, 0, 0, 0));
-}
-
-function addDays(dateKey: string, days: number) {
-  const start = jakartaDayStartUtc(dateKey);
-  const next = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
-  return jakartaDateKey(next.getTime());
-}
-
-function nanos(date: Date) {
-  return `${date.getTime()}000000`;
-}
-
-function nanosToMs(value: any) {
-  const text = String(value || "").trim();
-
-  if (!text) return Date.now();
-
-  if (text.length > 6) {
-    const msText = text.slice(0, -6);
-    const ms = Number(msText);
-    return Number.isFinite(ms) ? ms : Date.now();
-  }
-
-  const n = Number(text);
-  return Number.isFinite(n) ? Math.floor(n / 1000000) : Date.now();
-}
-
-function pointStartMs(point: any) {
-  if (point?.startTimeNanos) {
-    return nanosToMs(point.startTimeNanos);
-  }
-
-  const value = point?.modifiedTimeMillis || null;
-  return Number(value) || Date.now();
-}
-
-function pointEndMs(point: any) {
-  if (point?.endTimeNanos) {
-    return nanosToMs(point.endTimeNanos);
-  }
-
-  return pointStartMs(point);
+  const numeric = Number(text.replace(",", "."));
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function valueNumber(value: any) {
@@ -98,63 +49,65 @@ function valueNumber(value: any) {
 
   return 0;
 }
-function isStepDeltaSource(source: any) {
-  const id = clean(source?.dataStreamId).toLowerCase();
-  const type = clean(source?.dataType?.name).toLowerCase();
 
-  if (type !== "com.google.step_count.delta") return false;
-  if (id.includes("cumulative")) return false;
+function jakartaDateKey(ms: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: JAKARTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ms));
 
-  return true;
-}
+  const year = parts.find((item) => item.type === "year")?.value;
+  const month = parts.find((item) => item.type === "month")?.value;
+  const day = parts.find((item) => item.type === "day")?.value;
 
-function isDistanceDeltaSource(source: any) {
-  const type = clean(source?.dataType?.name).toLowerCase();
-  return type === "com.google.distance.delta";
-}
-
-function isActiveMinutesSource(source: any) {
-  const type = clean(source?.dataType?.name).toLowerCase();
-  return type === "com.google.active_minutes";
-}
-
-function sourcePriority(sourceId: string) {
-  const id = clean(sourceId).toLowerCase();
-
-  let score = 0;
-
-  if (id.startsWith("derived:")) score += 100;
-  if (id.includes("estimated_steps")) score += 80;
-  if (id.includes("com.google.android.gms")) score += 70;
-  if (id.includes("com.google.android.fit")) score += 60;
-  if (id.includes("samsung")) score += 40;
-  if (id.startsWith("raw:")) score += 20;
-  if (id.includes("user_input")) score -= 100;
-  if (id.includes("cumulative")) score -= 1000;
-
-  return score;
-}
-
-function safeDurationFromSteps(steps: number, activeMinutes: number) {
-  if (!steps || steps <= 0) return 0;
-
-  const estimatedBySteps = steps / 100;
-
-  if (activeMinutes > 0) {
-    const upperReasonable = Math.max(5, steps / 50);
-
-    if (activeMinutes <= upperReasonable) {
-      return Math.round(activeMinutes * 10) / 10;
-    }
+  if (!year || !month || !day) {
+    return new Date(ms).toISOString().slice(0, 10);
   }
 
-  return Math.round(estimatedBySteps * 10) / 10;
+  return `${year}-${month}-${day}`;
+}
+
+function jakartaTodayKey() {
+  return jakartaDateKey(Date.now());
+}
+
+function jakartaDayStartUtc(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  // Jakarta midnight = UTC previous day 17:00.
+  return new Date(Date.UTC(year, month - 1, day, -7, 0, 0, 0));
+}
+
+function addDays(dateKey: string, days: number) {
+  const start = jakartaDayStartUtc(dateKey);
+  const next = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+  return jakartaDateKey(next.getTime());
+}
+
+function jakartaNowLabel() {
+  return new Date().toLocaleString("id-ID", {
+    timeZone: JAKARTA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function estimateDistanceFromSteps(steps: number) {
   if (!steps || steps <= 0) return 0;
 
   return Math.round(steps * 0.0007 * 100) / 100;
+}
+
+function estimateActiveMinutesFromSteps(steps: number) {
+  if (!steps || steps <= 0) return 0;
+
+  return Math.round((steps / 100) * 10) / 10;
 }
 
 function estimateActiveCalories(params: {
@@ -268,12 +221,14 @@ async function refreshAccessTokenIfNeeded(supabase: any, integration: any) {
   return accessToken;
 }
 
-async function googleGet(accessToken: string, url: string) {
+async function googlePost(accessToken: string, url: string, body: any) {
   const response = await fetch(url, {
-    method: "GET",
+    method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify(body),
   });
 
   const json: any = await response.json().catch(() => ({}));
@@ -285,18 +240,83 @@ async function googleGet(accessToken: string, url: string) {
   return json;
 }
 
-async function readDataset(params: {
+async function readAggregateByDataType(params: {
   accessToken: string;
-  dataStreamId: string;
+  dataTypeName: string;
   start: Date;
   end: Date;
 }) {
-  const encoded = encodeURIComponent(params.dataStreamId);
-  const datasetId = `${nanos(params.start)}-${nanos(params.end)}`;
-  const url = `https://www.googleapis.com/fitness/v1/users/me/dataSources/${encoded}/datasets/${datasetId}`;
+  const startTimeMillis = params.start.getTime();
+  const endTimeMillis = params.end.getTime();
 
-  const json = await googleGet(params.accessToken, url);
-  return Array.isArray(json.point) ? json.point : [];
+  const body = {
+    aggregateBy: [
+      {
+        dataTypeName: params.dataTypeName,
+      },
+    ],
+    bucketByTime: {
+      durationMillis: 24 * 60 * 60 * 1000,
+    },
+    startTimeMillis,
+    endTimeMillis,
+  };
+
+  const json = await googlePost(
+    params.accessToken,
+    "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
+    body
+  );
+
+  const buckets = Array.isArray(json.bucket) ? json.bucket : [];
+  const rows = new Map<string, number>();
+
+  for (const bucket of buckets) {
+    const startMs = Number(bucket.startTimeMillis || 0);
+    const date = startMs ? jakartaDateKey(startMs) : "";
+
+    if (!date) continue;
+
+    let total = 0;
+
+    for (const dataset of bucket.dataset || []) {
+      for (const point of dataset.point || []) {
+        total += (point.value || []).reduce(
+          (sum: number, item: any) => sum + valueNumber(item),
+          0
+        );
+      }
+    }
+
+    if (total > 0) {
+      rows.set(date, (rows.get(date) || 0) + total);
+    }
+  }
+
+  return rows;
+}
+
+async function safeReadAggregate(params: {
+  accessToken: string;
+  dataTypeName: string;
+  start: Date;
+  end: Date;
+}) {
+  try {
+    return {
+      ok: true,
+      dataTypeName: params.dataTypeName,
+      rows: await readAggregateByDataType(params),
+      message: "",
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      dataTypeName: params.dataTypeName,
+      rows: new Map<string, number>(),
+      message: error?.message || String(error),
+    };
+  }
 }
 
 async function upsertDailyRow(params: {
@@ -304,6 +324,8 @@ async function upsertDailyRow(params: {
   participant: any;
   row: any;
 }) {
+  const nowIso = new Date().toISOString();
+  const nowJakarta = jakartaNowLabel();
   const externalId = `google_fit_daily_${params.participant.id}_${params.row.date}`;
 
   const payload: any = {
@@ -314,19 +336,38 @@ async function upsertDailyRow(params: {
     activity_type: "Google Fit Daily",
     activity_name: `Google Fit Daily - ${params.row.steps} steps`,
     log_date: params.row.date,
-    started_at: `${params.row.date}T00:00:00.000Z`,
+
+    // Important:
+    // This is intentionally latest sync time, not day bucket start.
+    // Portal will no longer display 07.00 as if it were activity time.
+    started_at: nowIso,
+
     duration_minutes: params.row.duration_minutes,
     calories: params.row.calories,
     distance_km: params.row.distance_km,
     steps: params.row.steps,
     raw_payload: {
-      marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
-      selected_step_source: params.row.selected_step_source,
-      selected_distance_source: params.row.selected_distance_source,
-      selected_active_minutes_source: params.row.selected_active_minutes_source,
+      marker: MARKER,
+      log_date: params.row.date,
+      provider: "google_fit",
+      sync_mode: "aggregate_daily",
+      display_time_note:
+        "started_at is latest sync time. log_date is the Google Fit daily date in Asia/Jakarta.",
+      last_sync_at: nowIso,
+      last_sync_at_jakarta: nowJakarta,
+      google_fit_steps: params.row.steps,
+      google_fit_distance_km: params.row.distance_km,
+      google_fit_calories_expended: params.row.google_fit_calories_expended,
+      google_fit_active_minutes: params.row.google_fit_active_minutes,
+      estimated_distance_used: params.row.estimated_distance_used,
+      estimated_active_minutes_used: params.row.estimated_active_minutes_used,
+      estimated_calories_used: params.row.estimated_calories_used,
+      calories_source: params.row.calories_source,
+      distance_source: params.row.distance_source,
+      duration_source: params.row.duration_source,
       calculation_note:
-        "Daily calories estimated from steps/distance. Google Fit total daily calories are not used to avoid BMR/total-calorie overcount.",
-      synced_at: new Date().toISOString(),
+        "Values are read from Google Fit aggregate API where available. Calories are Google Fit calories.expended when available; otherwise estimated.",
+      synced_at: nowIso,
     },
   };
 
@@ -388,6 +429,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (integrationError) throw integrationError;
+
     if (!integration) {
       return NextResponse.json(
         { ok: false, message: "Google Fit belum terkoneksi." },
@@ -403,146 +445,106 @@ export async function POST(req: NextRequest) {
     const start = jakartaDayStartUtc(startKey);
     const end = jakartaDayStartUtc(addDays(today, 1));
 
-    const dataSourcesJson = await googleGet(
-      accessToken,
-      "https://www.googleapis.com/fitness/v1/users/me/dataSources"
-    );
+    const [stepsResult, distanceResult, caloriesResult, activeMinutesResult] =
+      await Promise.all([
+        safeReadAggregate({
+          accessToken,
+          dataTypeName: "com.google.step_count.delta",
+          start,
+          end,
+        }),
+        safeReadAggregate({
+          accessToken,
+          dataTypeName: "com.google.distance.delta",
+          start,
+          end,
+        }),
+        safeReadAggregate({
+          accessToken,
+          dataTypeName: "com.google.calories.expended",
+          start,
+          end,
+        }),
+        safeReadAggregate({
+          accessToken,
+          dataTypeName: "com.google.active_minutes",
+          start,
+          end,
+        }),
+      ]);
 
-    const dataSources = Array.isArray(dataSourcesJson.dataSource)
-      ? dataSourcesJson.dataSource
-      : [];
+    const dateKeys = new Set<string>();
 
-    const stepSources = dataSources.filter(isStepDeltaSource);
-    const distanceSources = dataSources.filter(isDistanceDeltaSource);
-    const activeMinuteSources = dataSources.filter(isActiveMinutesSource);
-
-    const dailyByDate = new Map<string, any>();
-
-    function ensureDay(date: string) {
-      const existing = dailyByDate.get(date);
-      if (existing) return existing;
-
-      const row = {
-        date,
-        stepCandidates: new Map<string, any>(),
-        distanceCandidates: new Map<string, any>(),
-        activeMinuteCandidates: new Map<string, any>(),
-      };
-
-      dailyByDate.set(date, row);
-      return row;
+    for (let index = 0; index < days; index += 1) {
+      dateKeys.add(addDays(startKey, index));
     }
 
-    for (const source of stepSources) {
-      const sourceId = source.dataStreamId;
-      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
+    for (const key of stepsResult.rows.keys()) dateKeys.add(key);
+    for (const key of distanceResult.rows.keys()) dateKeys.add(key);
+    for (const key of caloriesResult.rows.keys()) dateKeys.add(key);
+    for (const key of activeMinutesResult.rows.keys()) dateKeys.add(key);
 
-      for (const point of points) {
-        const ms = pointEndMs(point);
-        const date = jakartaDateKey(ms);
-        const value = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
+    const dailyRows = [...dateKeys]
+      .sort((a, b) => a.localeCompare(b))
+      .map((date) => {
+        const steps = Math.round(Number(stepsResult.rows.get(date) || 0));
 
-        if (!value || value < 0) continue;
+        const distanceKmFromGoogle =
+          Math.round((Number(distanceResult.rows.get(date) || 0) / 1000) * 100) / 100;
 
-        const day = ensureDay(date);
-        const current = day.stepCandidates.get(sourceId) || {
-          sourceId,
-          value: 0,
-          priority: sourcePriority(sourceId),
-        };
-
-        current.value += value;
-        day.stepCandidates.set(sourceId, current);
-      }
-    }
-
-    for (const source of distanceSources) {
-      const sourceId = source.dataStreamId;
-      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
-
-      for (const point of points) {
-        const ms = pointEndMs(point);
-        const date = jakartaDateKey(ms);
-        const meters = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
-
-        if (!meters || meters < 0) continue;
-
-        const day = ensureDay(date);
-        const current = day.distanceCandidates.get(sourceId) || {
-          sourceId,
-          value: 0,
-          priority: sourcePriority(sourceId),
-        };
-
-        current.value += meters / 1000;
-        day.distanceCandidates.set(sourceId, current);
-      }
-    }
-
-    for (const source of activeMinuteSources) {
-      const sourceId = source.dataStreamId;
-      const points = await readDataset({ accessToken, dataStreamId: sourceId, start, end }).catch(() => []);
-
-      for (const point of points) {
-        const ms = pointEndMs(point);
-        const date = jakartaDateKey(ms);
-        const minutes = (point.value || []).reduce((sum: number, item: any) => sum + valueNumber(item), 0);
-
-        if (!minutes || minutes < 0) continue;
-
-        const day = ensureDay(date);
-        const current = day.activeMinuteCandidates.get(sourceId) || {
-          sourceId,
-          value: 0,
-          priority: sourcePriority(sourceId),
-        };
-
-        current.value += minutes;
-        day.activeMinuteCandidates.set(sourceId, current);
-      }
-    }
-
-    function pickBest(candidates: Map<string, any>) {
-      const rows = [...candidates.values()].filter((item) => Number(item.value || 0) > 0);
-
-      rows.sort((a, b) => {
-        if (b.priority !== a.priority) return b.priority - a.priority;
-        return Number(b.value || 0) - Number(a.value || 0);
-      });
-
-      return rows[0] || null;
-    }
-
-    const dailyRows = [...dailyByDate.values()]
-      .map((day) => {
-        const stepPick = pickBest(day.stepCandidates);
-        const distancePick = pickBest(day.distanceCandidates);
-        const activePick = pickBest(day.activeMinuteCandidates);
-
-        const steps = Math.round(Number(stepPick?.value || 0));
-        const distanceKmRaw = Number(distancePick?.value || 0);
+        const estimatedDistanceKm = estimateDistanceFromSteps(steps);
         const distanceKm =
-          distanceKmRaw > 0
-            ? Math.round(distanceKmRaw * 100) / 100
-            : estimateDistanceFromSteps(steps);
+          distanceKmFromGoogle > 0 ? distanceKmFromGoogle : estimatedDistanceKm;
 
-        const activeMinutesRaw = Number(activePick?.value || 0);
-        const durationMinutes = safeDurationFromSteps(steps, activeMinutesRaw);
-        const calories = estimateActiveCalories({ steps, distanceKm, weightKg });
+        const activeMinutesFromGoogle =
+          Math.round(Number(activeMinutesResult.rows.get(date) || 0) * 10) / 10;
+
+        const estimatedActiveMinutes = estimateActiveMinutesFromSteps(steps);
+        const durationMinutes =
+          activeMinutesFromGoogle > 0 ? activeMinutesFromGoogle : estimatedActiveMinutes;
+
+        const googleCalories =
+          Math.round(Number(caloriesResult.rows.get(date) || 0) * 10) / 10;
+
+        const estimatedCalories = estimateActiveCalories({
+          steps,
+          distanceKm,
+          weightKg,
+        });
+
+        const calories = googleCalories > 0 ? googleCalories : estimatedCalories;
 
         return {
-          date: day.date,
+          date,
           steps,
           distance_km: distanceKm,
           duration_minutes: durationMinutes,
           calories,
-          selected_step_source: stepPick?.sourceId || null,
-          selected_distance_source: distancePick?.sourceId || null,
-          selected_active_minutes_source: activePick?.sourceId || null,
+          google_fit_calories_expended: googleCalories,
+          google_fit_active_minutes: activeMinutesFromGoogle,
+          estimated_distance_used: distanceKmFromGoogle <= 0 && steps > 0,
+          estimated_active_minutes_used: activeMinutesFromGoogle <= 0 && steps > 0,
+          estimated_calories_used: googleCalories <= 0 && steps > 0,
+          calories_source:
+            googleCalories > 0
+              ? "google_fit_calories_expended"
+              : "estimated_from_steps_distance_weight",
+          distance_source:
+            distanceKmFromGoogle > 0 ? "google_fit_distance_delta" : "estimated_from_steps",
+          duration_source:
+            activeMinutesFromGoogle > 0
+              ? "google_fit_active_minutes"
+              : "estimated_from_steps",
         };
       })
-      .filter((row) => row.steps > 0)
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .filter((row) => {
+        return (
+          row.steps > 0 ||
+          row.distance_km > 0 ||
+          row.duration_minutes > 0 ||
+          row.calories > 0
+        );
+      });
 
     let inserted = 0;
     let updated = 0;
@@ -553,34 +555,55 @@ export async function POST(req: NextRequest) {
       if (saved.action === "updated") updated += 1;
     }
 
+    const nowIso = new Date().toISOString();
+
     await supabase
       .from("wellness_integrations")
       .update({
-        last_sync_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        last_sync_at: nowIso,
+        updated_at: nowIso,
       })
       .eq("id", integration.id);
 
+    const warningMessages = [
+      stepsResult.ok ? "" : `Steps: ${stepsResult.message}`,
+      distanceResult.ok ? "" : `Distance: ${distanceResult.message}`,
+      caloriesResult.ok ? "" : `Calories: ${caloriesResult.message}`,
+      activeMinutesResult.ok ? "" : `Active minutes: ${activeMinutesResult.message}`,
+    ].filter(Boolean);
+
     return NextResponse.json({
       ok: true,
-      marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
+      marker: MARKER,
       message: `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
-      data_sources_count: dataSources.length,
-      step_sources_count: stepSources.length,
-      distance_sources_count: distanceSources.length,
-      active_minutes_sources_count: activeMinuteSources.length,
+      sync_mode: "aggregate_daily",
+      timezone: JAKARTA_TIME_ZONE,
+      last_sync_at: nowIso,
+      last_sync_at_jakarta: jakartaNowLabel(),
+      date_range: {
+        start: startKey,
+        end: today,
+        days,
+      },
+      aggregate_status: {
+        steps: stepsResult.ok,
+        distance: distanceResult.ok,
+        calories: caloriesResult.ok,
+        active_minutes: activeMinutesResult.ok,
+      },
+      warnings: warningMessages,
       fetched_daily: dailyRows.length,
       inserted,
       updated,
       daily: dailyRows,
     });
   } catch (error: any) {
-    console.error("WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY_ERROR", error);
+    console.error("WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414_ERROR", error);
 
     return NextResponse.json(
       {
         ok: false,
-        marker: "WELLNESS_GOOGLE_FIT_SYNC_V404_REALISTIC_DAILY",
+        marker: MARKER,
         message: error?.message || "Gagal sync Google Fit.",
       },
       { status: 500 }
