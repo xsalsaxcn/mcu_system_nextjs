@@ -1,92 +1,109 @@
 "use client";
 
 import WellnessQuickNav from "@/components/wellness/WellnessQuickNav";
-
+import AuthGate from "@/components/AuthGate";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import AuthGate from "@/components/AuthGate";
 
-// WELLNESS_CHART_HOVER_TOOLTIP_V375_FULL_DASHBOARD
-// Full replacement dashboard Wellness.
-// Includes participant list, evidence gallery, recent responses, before-after charts,
-// and hover tooltip on every chart dot.
+// WELLNESS_DASHBOARD_LOOKER_STYLE_V408
+// Redesign:
+// - Dashboard dibuat lebih mirip Looker Studio: list/table sebagai pusat monitoring.
+// - Nama peserta bisa diklik untuk masuk detail 1 peserta saja.
+// - Activities Harian menampilkan Riwayat Activities, Riwayat Nutrisi, dan Trend Aktivitas Terbanyak.
+// - Capaian Point dibuat ranking table + chart sederhana.
+// - Grafik klinis tetap ada, tetapi tidak mendominasi tampilan utama.
 
 type Tone = "slate" | "blue" | "emerald" | "amber" | "rose" | "purple";
+type MainView = "overview" | "daily" | "ranking" | "clinical" | "points";
+type DetailTab = "summary" | "history" | "nutrition" | "activity" | "healthtalk" | "evidence" | "clinical";
 
 type TrendPoint = {
   label?: string;
   date?: string;
-  date_label?: string;
-  checkup_date?: string;
-  log_date?: string;
-  created_at?: string;
-  visit_label?: string;
-  history_type?: string;
-  source?: string;
-  type?: string;
   value?: any;
   sbp?: any;
   dbp?: any;
+  source?: string;
   [key: string]: any;
-};
-
-type TrendSeries = {
-  key: string;
-  label: string;
-  unit?: string;
 };
 
 function cleanText(value: any) {
   return String(value ?? "").trim();
 }
 
+function toNumber(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(String(value).replace(",", "."));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function fmt(value: any, suffix = "") {
   const text = cleanText(value);
   if (!text || text === "null" || text === "undefined") return "-";
-  const n = Number(String(text).replace(",", "."));
-  if (Number.isFinite(n)) {
-    const display = Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+
+  const numeric = toNumber(text);
+  if (numeric !== null) {
+    const display = Number.isInteger(numeric)
+      ? String(numeric)
+      : String(Math.round(numeric * 10) / 10);
+
     return `${display}${suffix ? ` ${suffix}` : ""}`;
   }
+
   return `${text}${suffix ? ` ${suffix}` : ""}`;
 }
 
-function fmtPair(a: any, b: any, sep = "/") {
-  const left = cleanText(a);
-  const right = cleanText(b);
-  if (!left && !right) return "-";
-  return `${left || "-"}${sep}${right || "-"}`;
+function fmtNumber(value: any) {
+  const numeric = toNumber(value);
+  if (numeric === null) return "-";
+
+  return new Intl.NumberFormat("id-ID", {
+    maximumFractionDigits: 1,
+  }).format(numeric);
 }
 
-function toNumber(value: any): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(String(value).replace(",", "."));
-  return Number.isFinite(n) ? n : null;
+function fmtKkal(value: any) {
+  const numeric = toNumber(value);
+  if (numeric === null || numeric <= 0) return "-";
+
+  return `${fmtNumber(numeric)} kkal`;
 }
 
-function firstValue(points: TrendPoint[] = [], key = "value") {
-  for (const point of points || []) {
-    const n = toNumber((point as any)?.[key]);
-    if (n !== null) return n;
+function fmtPoint(value: any) {
+  const numeric = toNumber(value);
+  if (numeric === null || numeric <= 0) return "-";
+
+  return fmtNumber(numeric);
+}
+
+function shortDate(value: any) {
+  const text = cleanText(value);
+  if (!text) return "-";
+
+  const raw = text.slice(0, 10);
+  const parts = raw.split("-");
+
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+  return raw;
+}
+
+function shortTime(value: any) {
+  const text = cleanText(value);
+  if (!text) return "-";
+
+  const match = text.match(/(\d{1,2}):(\d{2})/);
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
-  return null;
-}
 
-function lastValue(points: TrendPoint[] = [], key = "value") {
-  for (let i = (points || []).length - 1; i >= 0; i -= 1) {
-    const n = toNumber((points[i] as any)?.[key]);
-    if (n !== null) return n;
-  }
-  return null;
-}
-
-function deltaText(points: TrendPoint[] = [], key = "value", unit = "") {
-  const first = firstValue(points, key);
-  const last = lastValue(points, key);
-  if (first === null || last === null) return "-";
-  const delta = Math.round((last - first) * 100) / 100;
-  const prefix = delta > 0 ? "+" : "";
-  return `${prefix}${delta}${unit ? ` ${unit}` : ""}`;
+  return "-";
 }
 
 function toneClass(tone: Tone) {
@@ -98,22 +115,18 @@ function toneClass(tone: Tone) {
     rose: "border-rose-100 bg-rose-50 text-rose-700",
     purple: "border-purple-100 bg-purple-50 text-purple-700",
   };
+
   return map[tone] || map.slate;
 }
 
-function riskTone(level: string): Tone {
-  const text = cleanText(level).toLowerCase();
-  if (text.includes("triple") || text.includes("p1") || text.includes("tinggi")) return "rose";
-  if (text.includes("glucose") || text.includes("hypertension") || text.includes("obesity")) return "amber";
-  if (text.includes("membaik") || text.includes("normal")) return "emerald";
-  return "blue";
-}
+function riskTone(value: any): Tone {
+  const text = cleanText(value).toLowerCase();
 
-function deltaTone(value: any, lowerIsBetter = true): Tone {
-  const n = toNumber(value);
-  if (n === null || n === 0) return "slate";
-  if (lowerIsBetter) return n < 0 ? "emerald" : "rose";
-  return n > 0 ? "emerald" : "rose";
+  if (text.includes("tinggi") || text.includes("high") || text.includes("triple")) return "rose";
+  if (text.includes("medium") || text.includes("sedang") || text.includes("obesity")) return "amber";
+  if (text.includes("baik") || text.includes("normal") || text.includes("low")) return "emerald";
+
+  return "blue";
 }
 
 function participantName(participant: any) {
@@ -129,48 +142,253 @@ function participantCode(participant: any) {
   return cleanText(participant?.code || participant?.employee_code || participant?.no_karyawan);
 }
 
-function participantRisk(participant: any) {
-  return cleanText(
-    participant?.risk_cluster ||
-      participant?.baseline_risk_group ||
-      participant?.risk_group ||
-      participant?.group_name
-  );
-}
-
-function participantScope(participant: any) {
+function participantGroup(participant: any) {
   return (
-    cleanText(participant?.scope_text) ||
-    [participant?.company_name, participant?.kelompok_name, participant?.group_unit_name]
-      .map(cleanText)
-      .filter(Boolean)
-      .join(" › ")
+    cleanText(participant?.group_name) ||
+    cleanText(participant?.kelompok_name) ||
+    cleanText(participant?.group_unit_name) ||
+    cleanText(participant?.old_group_name) ||
+    "-"
   );
 }
 
-function participantLabel(participant: any) {
-  const code = participantCode(participant);
-  const name = participantName(participant);
-  const risk = participantRisk(participant);
-  const scope = participantScope(participant);
-  return [`${code ? `${code} - ` : ""}${name}`, risk, scope].filter(Boolean).join(" | ");
+function participantCompany(participant: any) {
+  return cleanText(participant?.company_name) || "-";
 }
 
-function isPreviewableImageUrl(value: any) {
-  const url = cleanText(value).toLowerCase();
-  if (!url) return false;
-  if (url.match(/\.(jpg|jpeg|png|webp|gif)(\?|#|$)/)) return true;
-  if (url.includes("googleusercontent.com")) return true;
-  if (url.includes("drive.google.com/uc?")) return true;
-  if (url.includes("lh3.googleusercontent.com")) return true;
-  return false;
+function participantRisk(participant: any) {
+  return (
+    cleanText(participant?.risk_group_name) ||
+    cleanText(participant?.baseline_risk_group) ||
+    cleanText(participant?.risk_label) ||
+    cleanText(participant?.risk_level) ||
+    "-"
+  );
+}
+
+function responseDate(item: any) {
+  return (
+    cleanText(item?.date) ||
+    cleanText(item?.log_date) ||
+    cleanText(item?.event_date) ||
+    cleanText(item?.created_at).slice(0, 10) ||
+    "-"
+  );
+}
+
+function responseTime(item: any) {
+  return (
+    cleanText(item?.time) ||
+    cleanText(item?.log_time) ||
+    shortTime(item?.created_at) ||
+    "-"
+  );
+}
+
+function responseType(item: any) {
+  return (
+    cleanText(item?.type) ||
+    cleanText(item?.input_type) ||
+    cleanText(item?.meal_time) ||
+    cleanText(item?.activity_type) ||
+    "-"
+  );
+}
+
+function responseDetail(item: any) {
+  return (
+    cleanText(item?.detail) ||
+    cleanText(item?.description) ||
+    cleanText(item?.title) ||
+    cleanText(item?.meal_text) ||
+    cleanText(item?.food_name) ||
+    cleanText(item?.activity_name) ||
+    cleanText(item?.raw_payload?.["Detected Foods"]) ||
+    cleanText(item?.raw_payload?.["Add Options"]) ||
+    "-"
+  );
+}
+
+function responseCalories(item: any) {
+  return (
+    toNumber(item?.calories) ??
+    toNumber(item?.total_calories) ??
+    toNumber(item?.activity_calories) ??
+    toNumber(item?.raw_payload?.["Kalori Makanan"]) ??
+    toNumber(item?.raw_payload?.["Kalori Aktivitas"]) ??
+    null
+  );
+}
+
+function responsePoints(item: any) {
+  return (
+    toNumber(item?.points) ??
+    toNumber(item?.point) ??
+    toNumber(item?.total_points) ??
+    toNumber(item?.raw_payload?.["Total Point"]) ??
+    null
+  );
+}
+
+function isNutrition(item: any) {
+  const text = `${responseType(item)} ${responseDetail(item)}`.toLowerCase();
+  return text.includes("nutrisi") || text.includes("makan") || text.includes("food");
+}
+
+function isActivity(item: any) {
+  const text = `${responseType(item)} ${responseDetail(item)}`.toLowerCase();
+  return text.includes("aktivitas") || text.includes("activity") || text.includes("workout") || text.includes("jalan") || text.includes("run") || text.includes("walk");
+}
+
+function isHealthtalk(item: any) {
+  const text = `${responseType(item)} ${responseDetail(item)}`.toLowerCase();
+  return text.includes("healthtalk") || text.includes("health talk") || text.includes("seminar");
+}
+
+function safeResponses(participant: any) {
+  return Array.isArray(participant?.recent_responses)
+    ? participant.recent_responses
+    : Array.isArray(participant?.daily_logs)
+      ? participant.daily_logs
+      : Array.isArray(participant?.responses)
+        ? participant.responses
+        : [];
+}
+
+function activityCount(participant: any) {
+  const summary = participant?.activity_summary || participant?.activity_history || [];
+  if (Array.isArray(summary) && summary.length) {
+    return summary.reduce((sum: number, item: any) => {
+      const count = toNumber(item?.count ?? item?.jumlah);
+      return sum + (count || 1);
+    }, 0);
+  }
+
+  return toNumber(participant?.activity_logs_count) || 0;
+}
+
+function nutritionCount(participant: any) {
+  return toNumber(participant?.food_logs_count) || safeResponses(participant).filter(isNutrition).length;
+}
+
+function totalNutritionCalories(participant: any) {
+  const chart = participant?.parameter_charts?.nutrition_calories || [];
+  if (Array.isArray(chart) && chart.length) {
+    return chart.reduce((sum: number, item: any) => sum + Number(item?.value || 0), 0);
+  }
+
+  return toNumber(participant?.calories_today) || 0;
+}
+
+function totalActivityCalories(participant: any) {
+  const chart = participant?.parameter_charts?.activity_calories || [];
+  if (Array.isArray(chart) && chart.length) {
+    return chart.reduce((sum: number, item: any) => sum + Number(item?.value || 0), 0);
+  }
+
+  return toNumber(participant?.activity_calories_today) || 0;
+}
+
+function allResponses(participants: any[] = []) {
+  const list: any[] = [];
+
+  for (const participant of participants || []) {
+    for (const item of safeResponses(participant)) {
+      list.push({
+        ...item,
+        participant_id: participant.id,
+        participant_name: participantName(participant),
+        participant_code: participantCode(participant),
+        group_name: participantGroup(participant),
+      });
+    }
+  }
+
+  return list.sort((a, b) => {
+    const aa = `${responseDate(a)} ${responseTime(a)}`;
+    const bb = `${responseDate(b)} ${responseTime(b)}`;
+    return bb.localeCompare(aa);
+  });
+}
+
+function buildActivityTrend(participants: any[] = []) {
+  const map = new Map<string, any>();
+
+  for (const participant of participants || []) {
+    const summary = participant?.activity_summary || participant?.activity_history || [];
+
+    if (Array.isArray(summary) && summary.length) {
+      for (const item of summary) {
+        const name =
+          cleanText(item?.activity_name) ||
+          cleanText(item?.nama_activities) ||
+          "Aktivitas";
+
+        const key = name.toLowerCase();
+        const current = map.get(key) || {
+          name,
+          count: 0,
+          duration: 0,
+          calories: 0,
+        };
+
+        current.count += toNumber(item?.count ?? item?.jumlah) || 1;
+        current.duration += toNumber(item?.duration_minutes) || 0;
+        current.calories += toNumber(item?.calories) || 0;
+
+        map.set(key, current);
+      }
+    }
+  }
+
+  if (!map.size) {
+    for (const item of allResponses(participants).filter(isActivity)) {
+      const name = responseDetail(item);
+      const key = name.toLowerCase();
+
+      const current = map.get(key) || {
+        name,
+        count: 0,
+        duration: 0,
+        calories: 0,
+      };
+
+      current.count += 1;
+      current.calories += responseCalories(item) || 0;
+
+      map.set(key, current);
+    }
+  }
+
+  return [...map.values()]
+    .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+    .slice(0, 10);
+}
+
+function buildPointBreakdown(participant: any) {
+  const responses = safeResponses(participant);
+
+  const nutrition = responses.filter(isNutrition).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const activity = responses.filter(isActivity).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const healthtalk = responses.filter(isHealthtalk).reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const total = toNumber(participant?.total_points) || nutrition + activity + healthtalk;
+
+  return {
+    nutrition,
+    activity,
+    healthtalk,
+    total,
+  };
 }
 
 function googleDrivePreviewUrl(value: any) {
   const url = cleanText(value);
   if (!url) return "";
 
-  if (isPreviewableImageUrl(url)) return url;
+  if (url.match(/\.(jpg|jpeg|png|webp|gif)(\?|#|$)/i)) return url;
+  if (url.includes("googleusercontent.com")) return url;
+  if (url.includes("drive.google.com/uc?")) return url;
+  if (url.includes("drive.google.com/thumbnail")) return url;
 
   const fileMatch = url.match(/\/file\/d\/([^/]+)/);
   if (fileMatch?.[1]) return `https://drive.google.com/uc?export=view&id=${fileMatch[1]}`;
@@ -183,620 +401,980 @@ function googleDrivePreviewUrl(value: any) {
 
 function Badge({ children, tone = "blue" }: { children: ReactNode; tone?: Tone }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black ${toneClass(tone)}`}>
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black ${toneClass(tone)}`}>
       {children}
     </span>
+  );
+}
+
+function Card({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`rounded-[1.5rem] border border-slate-200 bg-white shadow-sm ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-black text-slate-950">{title}</h2>
+        {subtitle ? <p className="mt-1 text-xs font-bold text-slate-400">{subtitle}</p> : null}
+      </div>
+      {right}
+    </div>
   );
 }
 
 function StatCard({
   label,
   value,
-  tone = "slate",
   caption,
+  tone = "slate",
 }: {
   label: string;
   value: any;
-  tone?: Tone;
   caption?: string;
+  tone?: Tone;
 }) {
   return (
-    <div className={`rounded-3xl border p-4 ${toneClass(tone)}`}>
-      <div className="text-xs font-black uppercase tracking-wide opacity-70">{label}</div>
-      <div className="mt-2 text-3xl font-black">{value ?? "-"}</div>
+    <div className={`rounded-[1.25rem] border p-4 ${toneClass(tone)}`}>
+      <div className="text-[10px] font-black uppercase tracking-[0.16em] opacity-70">
+        {label}
+      </div>
+      <div className="mt-2 text-2xl font-black">{value ?? "-"}</div>
       {caption ? <div className="mt-1 text-xs font-bold opacity-70">{caption}</div> : null}
     </div>
   );
 }
 
-function MiniMetric({
+function NavButton({
+  active,
   label,
-  before,
-  after,
-  delta,
-  suffix = "",
+  onClick,
 }: {
+  active: boolean;
   label: string;
-  before: any;
-  after: any;
-  delta?: any;
-  suffix?: string;
+  onClick: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-2 text-sm font-black text-slate-900">
-        {fmt(before, suffix)} → {fmt(after, suffix)}
-      </div>
-      {delta !== undefined ? (
-        <div className={`mt-1 text-xs font-black ${deltaTone(delta).includes("emerald") ? "text-emerald-600" : "text-slate-500"}`}>
-          Δ {fmt(delta, suffix)}
-        </div>
-      ) : null}
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-4 py-2 text-xs font-black transition ${
+        active
+          ? "bg-blue-600 text-white shadow-lg shadow-blue-100"
+          : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function DetailTabButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-black transition ${
+        active
+          ? "bg-slate-950 text-white"
+          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function EmptyState({ text = "Belum ada data." }: { text?: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-400">
+      {text}
     </div>
   );
 }
 
-function EvidencePreview({ item }: { item: any }) {
-  const title =
-    cleanText(item?.title) ||
-    cleanText(item?.label) ||
-    cleanText(item?.evidence_type) ||
-    cleanText(item?.type) ||
-    "Bukti";
+function HorizontalBars({
+  items = [],
+  valueKey = "value",
+  labelKey = "label",
+  suffix = "",
+}: {
+  items?: any[];
+  valueKey?: string;
+  labelKey?: string;
+  suffix?: string;
+}) {
+  const maxValue = Math.max(...items.map((item) => Number(item?.[valueKey] || 0)), 1);
 
-  const rawUrl =
-    cleanText(item?.url) ||
-    cleanText(item?.file_url) ||
-    cleanText(item?.evidence_url) ||
-    cleanText(item?.photo_url) ||
-    cleanText(item?.image_url);
-
-  const previewUrl = googleDrivePreviewUrl(rawUrl);
-
-  if (!rawUrl) return null;
+  if (!items.length) return <EmptyState text="Belum ada data trend." />;
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-black text-slate-900">{title}</div>
-          <div className="truncate text-xs font-bold text-slate-400">
-            {cleanText(item?.date || item?.log_date || item?.created_at) || "Evidence"}
+    <div className="space-y-3">
+      {items.map((item, index) => {
+        const value = Number(item?.[valueKey] || 0);
+        const width = Math.max(4, Math.round((value / maxValue) * 100));
+
+        return (
+          <div key={`${item?.[labelKey] || index}-${index}`}>
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+              <div className="line-clamp-1 font-black text-slate-700">
+                {index + 1}. {item?.[labelKey] || "-"}
+              </div>
+              <div className="shrink-0 font-black text-slate-900">
+                {fmtNumber(value)}{suffix ? ` ${suffix}` : ""}
+              </div>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-blue-500"
+                style={{ width: `${width}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MiniLineChart({
+  title,
+  points = [],
+  valueKey = "value",
+  suffix = "",
+}: {
+  title: string;
+  points?: TrendPoint[];
+  valueKey?: string;
+  suffix?: string;
+}) {
+  const safePoints = Array.isArray(points) ? points.filter(Boolean).slice(-12) : [];
+  const values = safePoints
+    .map((point) => toNumber((point as any)?.[valueKey]))
+    .filter((value): value is number => value !== null);
+
+  if (!safePoints.length || !values.length) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="text-sm font-black text-slate-900">{title}</div>
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+          Belum ada data grafik.
+        </div>
+      </div>
+    );
+  }
+
+  const width = 360;
+  const height = 110;
+  const padX = 22;
+  const padY = 18;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  function x(index: number) {
+    if (safePoints.length <= 1) return width / 2;
+    return padX + (index / (safePoints.length - 1)) * (width - padX * 2);
+  }
+
+  function y(value: any) {
+    const numeric = toNumber(value);
+    if (numeric === null) return height / 2;
+    return padY + ((max - numeric) / range) * (height - padY * 2);
+  }
+
+  const path = safePoints
+    .map((point, index) => {
+      const px = x(index);
+      const py = y((point as any)?.[valueKey]);
+      return `${index === 0 ? "M" : "L"} ${px} ${py}`;
+    })
+    .join(" ");
+
+  const latest = values[values.length - 1];
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-sm font-black text-slate-900">{title}</div>
+        <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+          {fmt(latest, suffix)}
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-[120px] w-full">
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="#e2e8f0" strokeWidth="2" />
+        <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        {safePoints.map((point, index) => (
+          <circle
+            key={`${index}-${point?.date || point?.label}`}
+            cx={x(index)}
+            cy={y((point as any)?.[valueKey])}
+            r="4.5"
+            fill="#2563eb"
+            stroke="white"
+            strokeWidth="2"
+          >
+            <title>
+              {`${point?.label || point?.date || "Data"}: ${fmt((point as any)?.[valueKey], suffix)}`}
+            </title>
+          </circle>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function ParticipantsTable({
+  participants,
+  onSelect,
+}: {
+  participants: any[];
+  onSelect: (participant: any) => void;
+}) {
+  if (!participants.length) return <EmptyState text="Belum ada peserta." />;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200">
+      <div className="max-h-[520px] overflow-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+            <tr>
+              <th className="w-12 px-4 py-3">No</th>
+              <th className="min-w-[220px] px-4 py-3">Nama Peserta</th>
+              <th className="min-w-[120px] px-4 py-3">Kelompok</th>
+              <th className="px-4 py-3">BMI</th>
+              <th className="px-4 py-3">Tensi</th>
+              <th className="px-4 py-3">Makan</th>
+              <th className="px-4 py-3">Aktivitas</th>
+              <th className="px-4 py-3">Point</th>
+              <th className="px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {participants.map((participant, index) => (
+              <tr key={participant.id || index} className="hover:bg-blue-50/40">
+                <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => onSelect(participant)}
+                    className="text-left font-black text-blue-700 hover:underline"
+                  >
+                    {participantName(participant)}
+                  </button>
+                  <div className="mt-0.5 text-xs font-bold text-slate-400">
+                    {participantCode(participant) || "-"} • {participantCompany(participant)}
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-bold text-slate-600">{participantGroup(participant)}</td>
+                <td className="px-4 py-3 font-black text-slate-900">{fmt(participant?.bmi)}</td>
+                <td className="px-4 py-3 font-bold text-slate-600">
+                  {participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"}
+                </td>
+                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(participant?.calories_today)}</td>
+                <td className="px-4 py-3 font-bold text-slate-700">{fmtKkal(participant?.activity_calories_today)}</td>
+                <td className="px-4 py-3 font-black text-violet-700">{fmtPoint(participant?.total_points)}</td>
+                <td className="px-4 py-3">
+                  <Badge tone={riskTone(participantRisk(participant))}>
+                    {participant?.compliance_status || participantRisk(participant)}
+                  </Badge>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RankingTable({
+  title,
+  participants,
+  valueLabel,
+  valueGetter,
+  onSelect,
+  tone = "blue",
+}: {
+  title: string;
+  participants: any[];
+  valueLabel: string;
+  valueGetter: (participant: any) => number;
+  onSelect: (participant: any) => void;
+  tone?: Tone;
+}) {
+  const rows = [...participants]
+    .map((participant) => ({
+      participant,
+      value: valueGetter(participant) || 0,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 25);
+
+  return (
+    <Card className="p-5">
+      <SectionHeader title={title} right={<Badge tone={tone}>{rows.length} peserta</Badge>} />
+      <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+        <div className="max-h-[440px] overflow-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="sticky top-0 bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+              <tr>
+                <th className="w-12 px-4 py-3">No</th>
+                <th className="px-4 py-3">Nama Peserta</th>
+                <th className="px-4 py-3">{valueLabel}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((row, index) => (
+                <tr key={`${row.participant.id}-${index}`} className="hover:bg-blue-50/40">
+                  <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(row.participant)}
+                      className="text-left font-black text-slate-800 hover:text-blue-700 hover:underline"
+                    >
+                      {participantName(row.participant)}
+                    </button>
+                    <div className="text-xs font-bold text-slate-400">
+                      {participantGroup(row.participant)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-black text-slate-900">{fmtNumber(row.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function RecentTable({
+  title,
+  items,
+  type,
+}: {
+  title: string;
+  items: any[];
+  type: "nutrition" | "activity" | "healthtalk" | "all";
+}) {
+  let rows = items || [];
+  if (type === "nutrition") rows = rows.filter(isNutrition);
+  if (type === "activity") rows = rows.filter(isActivity);
+  if (type === "healthtalk") rows = rows.filter(isHealthtalk);
+
+  rows = rows.slice(0, 100);
+
+  return (
+    <Card className="p-5">
+      <SectionHeader title={title} right={<Badge tone="blue">{rows.length} data</Badge>} />
+
+      {!rows.length ? (
+        <div className="mt-4">
+          <EmptyState text="Belum ada data." />
+        </div>
+      ) : (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="max-h-[440px] overflow-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="sticky top-0 z-10 bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+                <tr>
+                  <th className="w-12 px-4 py-3">No</th>
+                  <th className="px-4 py-3">Tanggal</th>
+                  {"participant_name" in (rows[0] || {}) ? <th className="px-4 py-3">Nama Peserta</th> : null}
+                  <th className="px-4 py-3">Tipe</th>
+                  <th className="min-w-[260px] px-4 py-3">Detail</th>
+                  <th className="px-4 py-3">Kalori</th>
+                  <th className="px-4 py-3">Point</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {rows.map((item, index) => (
+                  <tr key={item?.id || `${responseDate(item)}-${index}`} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-700">
+                      {shortDate(responseDate(item))}
+                      <div className="text-xs text-slate-400">{responseTime(item)}</div>
+                    </td>
+                    {"participant_name" in item ? (
+                      <td className="px-4 py-3 font-black text-slate-800">{item.participant_name}</td>
+                    ) : null}
+                    <td className="whitespace-nowrap px-4 py-3 font-black text-slate-900">{responseType(item)}</td>
+                    <td className="px-4 py-3 font-semibold leading-6 text-slate-600">{responseDetail(item)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-black text-blue-700">{fmtKkal(responseCalories(item))}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-black text-violet-700">{fmtPoint(responsePoints(item))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-        <a
-          href={rawUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 rounded-full bg-blue-50 px-3 py-2 text-xs font-black text-blue-700"
-        >
-          Buka
-        </a>
-      </div>
-
-      {previewUrl ? (
-        <div className="bg-slate-50 p-3">
-          {isPreviewableImageUrl(previewUrl) || previewUrl.includes("drive.google.com/uc?") ? (
-            <img
-              src={previewUrl}
-              alt={title}
-              className="h-44 w-full rounded-2xl object-cover"
-              onError={(event) => {
-                (event.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-            />
-          ) : (
-            <div className="flex h-32 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 text-center text-xs font-bold text-slate-400">
-              Link tersimpan. Preview langsung tersedia bila link gambar dapat dibaca.
-            </div>
-          )}
-        </div>
-      ) : null}
-    </div>
+      )}
+    </Card>
   );
 }
 
-function EvidenceGallery({ items = [] }: { items?: any[] }) {
-  const list = (items || []).filter((item) => {
-    return cleanText(item?.url || item?.file_url || item?.evidence_url || item?.photo_url || item?.image_url);
-  });
+function EvidenceGallery({ participant }: { participant: any }) {
+  const items = Array.isArray(participant?.evidence_gallery)
+    ? participant.evidence_gallery
+    : Array.isArray(participant?.evidence)
+      ? participant.evidence
+      : [];
+
+  const rows = items.filter((item: any) =>
+    cleanText(item?.url || item?.evidence_url || item?.photo_url || item?.image_url)
+  );
 
   return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-slate-900">Evidence Gallery</h2>
-          <p className="text-xs font-bold text-slate-400">Foto makanan, workout, dan healthtalk yang tersimpan sebagai URL.</p>
-        </div>
-        <Badge tone="blue">{list.length} bukti</Badge>
-      </div>
+    <Card className="p-5">
+      <SectionHeader title="Evidence Gallery" subtitle="Foto makanan, workout, dan Health Talk." right={<Badge tone="purple">{rows.length} bukti</Badge>} />
 
-      {!list.length ? (
-        <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
-          Belum ada bukti/foto.
+      {!rows.length ? (
+        <div className="mt-4">
+          <EmptyState text="Belum ada evidence." />
         </div>
       ) : (
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {list.slice(0, 9).map((item, index) => (
-            <EvidencePreview key={`${item?.id || index}-${index}`} item={item} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
+          {rows.slice(0, 12).map((item: any, index: number) => {
+            const rawUrl = cleanText(item?.url || item?.evidence_url || item?.photo_url || item?.image_url);
+            const preview = googleDrivePreviewUrl(rawUrl);
 
-function RecentResponses({ items = [] }: { items?: any[] }) {
-  const list = items || [];
-
-  return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-slate-900">Riwayat Input Harian</h2>
-          <p className="text-xs font-bold text-slate-400">Ringkasan response yang masuk dari aplikasi.</p>
-        </div>
-        <Badge tone="purple">{list.length} response</Badge>
-      </div>
-
-      {!list.length ? (
-        <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
-          Belum ada response harian.
-        </div>
-      ) : (
-        <div className="mt-4 overflow-auto rounded-3xl border border-slate-100">
-          <table className="min-w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Tanggal</th>
-                <th className="px-4 py-3">Tipe</th>
-                <th className="px-4 py-3">Detail</th>
-                <th className="px-4 py-3">Point</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {list.slice(0, 12).map((item, index) => (
-                <tr key={`${item?.id || index}-${index}`} className="bg-white">
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-700">
-                    {cleanText(item?.log_date || item?.date || item?.created_at) || "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-black text-slate-900">
-                    {cleanText(item?.type || item?.input_type || item?.meal_time || item?.activity_type) || "-"}
-                  </td>
-                  <td className="min-w-[220px] px-4 py-3 font-bold text-slate-500">
-                    {cleanText(item?.description || item?.food_description || item?.notes || item?.activity_notes) || "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-black text-blue-700">
-                    {fmt(item?.points || item?.point || item?.total_points)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// WELLNESS_CHART_HOVER_TOOLTIP_V375
-function TrendChart({
-  title,
-  caption,
-  points = [],
-  series,
-  height = 150,
-}: {
-  title: string;
-  caption?: string;
-  points?: TrendPoint[];
-  series: TrendSeries[];
-  height?: number;
-}) {
-  const [hoveredPoint, setHoveredPoint] = useState<any>(null);
-
-  const width = 520;
-  const paddingX = 70;
-  const paddingTop = 26;
-  const paddingBottom = 42;
-  const chartHeight = height;
-  const plotHeight = chartHeight - paddingTop - paddingBottom;
-  const usableWidth = width - paddingX * 2;
-
-  const safePoints = points || [];
-  const values: number[] = [];
-
-  for (const point of safePoints) {
-    for (const item of series || []) {
-      const n = toNumber((point as any)?.[item.key]);
-      if (n !== null) values.push(n);
-    }
-  }
-
-  const minValue = values.length ? Math.min(...values) : 0;
-  const maxValue = values.length ? Math.max(...values) : 1;
-  const range = maxValue - minValue || 1;
-  const pad = range * 0.18;
-  const yMin = minValue - pad;
-  const yMax = maxValue + pad;
-
-  function xFor(index: number) {
-    if (safePoints.length <= 1) return width / 2;
-    return paddingX + (index / (safePoints.length - 1)) * usableWidth;
-  }
-
-  function yFor(value: any) {
-    const n = toNumber(value);
-    if (n === null) return null;
-    return paddingTop + ((yMax - n) / (yMax - yMin || 1)) * plotHeight;
-  }
-
-  function labelForPoint(point: any, index: number) {
-    return (
-      cleanText(point?.visit_label) ||
-      cleanText(point?.label) ||
-      cleanText(point?.history_type) ||
-      cleanText(point?.date_label) ||
-      cleanText(point?.date) ||
-      `Data ${index + 1}`
-    );
-  }
-
-  function dateForPoint(point: any) {
-    return (
-      cleanText(point?.checkup_date) ||
-      cleanText(point?.log_date) ||
-      cleanText(point?.date) ||
-      cleanText(point?.created_at) ||
-      "-"
-    );
-  }
-
-  function sourceForPoint(point: any) {
-    return cleanText(point?.history_type || point?.source || point?.type) || "-";
-  }
-
-  function valueText(value: any, unit?: string) {
-    const n = toNumber(value);
-    if (n === null) return "-";
-    return `${n}${unit ? ` ${unit}` : ""}`;
-  }
-
-  function tooltipTitle(point: any, item: TrendSeries, index: number) {
-    const value = (point as any)?.[item.key];
-    return [
-      `${item.label}: ${valueText(value, item.unit)}`,
-      `Label: ${labelForPoint(point, index)}`,
-      `Tanggal: ${dateForPoint(point)}`,
-      `Sumber: ${sourceForPoint(point)}`,
-    ].join("\n");
-  }
-
-  function pathFor(key: string) {
-    return safePoints
-      .map((point, index) => {
-        const y = yFor((point as any)?.[key]);
-        if (y === null) return "";
-        const x = xFor(index);
-        return `${index === 0 ? "M" : "L"} ${x} ${y}`;
-      })
-      .filter(Boolean)
-      .join(" ");
-  }
-
-  const latest = safePoints?.[safePoints.length - 1] || null;
-
-  return (
-    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-black text-slate-900">{title}</div>
-          {caption ? <div className="mt-1 text-xs font-bold text-slate-400">{caption}</div> : null}
-        </div>
-
-        {latest ? (
-          <div className="rounded-full bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
-            {series
-              .map((item) => {
-                const value = (latest as any)?.[item.key];
-                const n = toNumber(value);
-                if (n === null) return null;
-                return `${item.label}: ${n}${item.unit ? ` ${item.unit}` : ""}`;
-              })
-              .filter(Boolean)
-              .join(" / ")}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="relative mt-4">
-        {!safePoints.length || !values.length ? (
-          <div
-            className="flex items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-xs font-bold text-slate-400"
-            style={{ height }}
-          >
-            Belum ada data grafik
-          </div>
-        ) : (
-          <>
-            <svg
-              viewBox={`0 0 ${width} ${height}`}
-              className="w-full overflow-visible"
-              style={{ height }}
-              role="img"
-              aria-label={`Grafik ${title}`}
-            >
-              <line x1={paddingX} y1={paddingTop} x2={width - paddingX} y2={paddingTop} stroke="#eef2f7" strokeWidth="2" />
-              <line x1={paddingX} y1={height - paddingBottom} x2={width - paddingX} y2={height - paddingBottom} stroke="#e2e8f0" strokeWidth="2" />
-
-              {hoveredPoint ? (
-                <line
-                  x1={hoveredPoint.x}
-                  y1={paddingTop}
-                  x2={hoveredPoint.x}
-                  y2={height - paddingBottom}
-                  stroke="#94a3b8"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 4"
-                  opacity="0.8"
-                />
-              ) : null}
-
-              {series.map((item, seriesIndex) => {
-                const stroke = seriesIndex === 1 ? "#e11d48" : "#2563eb";
-                const path = pathFor(item.key);
-
-                return (
-                  <g key={item.key}>
-                    <path d={path} fill="none" stroke={stroke} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-
-                    {safePoints.map((point, index) => {
-                      const y = yFor((point as any)?.[item.key]);
-                      if (y === null) return null;
-
-                      const x = xFor(index);
-                      const value = (point as any)?.[item.key];
-                      const active =
-                        hoveredPoint &&
-                        hoveredPoint.index === index &&
-                        hoveredPoint.key === item.key;
-
-                      return (
-                        <g key={`${item.key}-${index}`}>
-                          <circle
-                            cx={x}
-                            cy={y}
-                            r={active ? 8 : 5}
-                            fill={stroke}
-                            stroke="white"
-                            strokeWidth="3"
-                            className="cursor-pointer transition-all"
-                            onMouseEnter={() =>
-                              setHoveredPoint({
-                                point,
-                                index,
-                                key: item.key,
-                                label: item.label,
-                                unit: item.unit,
-                                value,
-                                x,
-                                y,
-                              })
-                            }
-                            onMouseLeave={() => setHoveredPoint(null)}
-                          >
-                            <title>{tooltipTitle(point, item, index)}</title>
-                          </circle>
-
-                          <circle
-                            cx={x}
-                            cy={y}
-                            r="15"
-                            fill="transparent"
-                            className="cursor-pointer"
-                            onMouseEnter={() =>
-                              setHoveredPoint({
-                                point,
-                                index,
-                                key: item.key,
-                                label: item.label,
-                                unit: item.unit,
-                                value,
-                                x,
-                                y,
-                              })
-                            }
-                            onMouseLeave={() => setHoveredPoint(null)}
-                          />
-                        </g>
-                      );
-                    })}
-                  </g>
-                );
-              })}
-
-              {safePoints.map((point, index) => {
-                const x = xFor(index);
-                const showLabel = safePoints.length <= 4 || index === 0 || index === safePoints.length - 1;
-                if (!showLabel) return null;
-
-                return (
-                  <text
-                    key={`label-${index}`}
-                    x={x}
-                    y={height - 12}
-                    textAnchor="middle"
-                    className="fill-slate-500 text-[11px] font-bold"
-                  >
-                    {labelForPoint(point, index)}
-                  </text>
-                );
-              })}
-            </svg>
-
-            {hoveredPoint ? (
-              <div
-                className="pointer-events-none absolute z-20 min-w-[220px] rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-xl shadow-slate-200 backdrop-blur"
-                style={{
-                  left: `${Math.min(Math.max((hoveredPoint.x / width) * 100, 18), 72)}%`,
-                  top: `${Math.max(hoveredPoint.y - 88, 8)}px`,
-                  transform: "translateX(-50%)",
-                }}
-              >
-                <div className="font-black text-slate-900">{hoveredPoint.label}</div>
-                <div className="mt-1 text-lg font-black text-blue-700">
-                  {valueText(hoveredPoint.value, hoveredPoint.unit)}
+            return (
+              <div key={`${rawUrl}-${index}`} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <div className="line-clamp-1 text-sm font-black text-slate-900">
+                    {item?.title || item?.type || "Evidence"}
+                  </div>
+                  <div className="text-xs font-bold text-slate-400">
+                    {shortDate(item?.date || item?.log_date || item?.created_at)}
+                  </div>
                 </div>
-                <div className="mt-2 grid gap-1 font-bold text-slate-500">
-                  <div>Label: {labelForPoint(hoveredPoint.point, hoveredPoint.index)}</div>
-                  <div>Tanggal: {dateForPoint(hoveredPoint.point)}</div>
-                  <div>Sumber: {sourceForPoint(hoveredPoint.point)}</div>
+
+                <div className="bg-slate-50 p-3">
+                  {preview ? (
+                    <img
+                      src={preview}
+                      alt={item?.title || "Evidence"}
+                      className="h-44 w-full rounded-xl object-cover"
+                      onError={(event) => {
+                        (event.currentTarget as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-44 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-xs font-bold text-slate-400">
+                      Preview tidak tersedia.
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-4 py-3">
+                  <a
+                    href={rawUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-black text-blue-700 hover:underline"
+                  >
+                    Buka bukti
+                  </a>
                 </div>
               </div>
-            ) : null}
-          </>
-        )}
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ClinicalPanel({ participant }: { participant: any }) {
+  const charts = participant?.parameter_charts || {};
+
+  return (
+    <Card className="p-5">
+      <SectionHeader title="Monitoring Klinis" subtitle="Grafik ringkas per parameter peserta." />
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <MiniLineChart title="Berat Badan" points={charts.weight_kg || []} suffix="kg" />
+        <MiniLineChart title="BMI" points={charts.bmi || []} />
+        <MiniLineChart title="Lingkar Perut" points={charts.waist_cm || []} suffix="cm" />
+        <MiniLineChart title="HbA1c" points={charts.hba1c || []} suffix="%" />
+        <MiniLineChart title="Gula Darah" points={charts.glucose || []} suffix="mg/dL" />
+        <MiniLineChart title="Point Harian" points={charts.points || []} />
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        {series.map((item, index) => (
-          <span
-            key={item.key}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-2 text-xs font-black text-slate-700"
-          >
-            <span
-              className="h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: index === 1 ? "#e11d48" : "#2563eb" }}
-            />
-            {item.label}
-          </span>
-        ))}
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <MiniLineChart title="Kalori Nutrisi" points={charts.nutrition_calories || []} suffix="kkal" />
+        <MiniLineChart title="Kalori Aktivitas" points={charts.activity_calories || []} suffix="kkal" />
+      </div>
+    </Card>
+  );
+}
+
+function ParticipantDetail({
+  participant,
+  activeTab,
+  setActiveTab,
+  onBack,
+}: {
+  participant: any;
+  activeTab: DetailTab;
+  setActiveTab: (tab: DetailTab) => void;
+  onBack: () => void;
+}) {
+  const responses = safeResponses(participant);
+  const point = buildPointBreakdown(participant);
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <button
+              type="button"
+              onClick={onBack}
+              className="mb-4 rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-200"
+            >
+              ← Kembali ke semua peserta
+            </button>
+
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">
+              Detail Peserta
+            </div>
+            <h1 className="mt-2 text-3xl font-black text-slate-950">{participantName(participant)}</h1>
+            <p className="mt-2 text-sm font-bold text-slate-500">
+              {participantCode(participant) || "-"} • {participantCompany(participant)} • {participantGroup(participant)}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Badge tone={riskTone(participantRisk(participant))}>{participantRisk(participant)}</Badge>
+            <Badge tone="blue">{participant?.compliance_status || "Status -"}</Badge>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="Total Point" value={fmtPoint(participant?.total_points)} tone="amber" caption="Akumulasi point" />
+          <StatCard label="Kalori Makan" value={fmtKkal(totalNutritionCalories(participant))} tone="blue" caption="Akumulasi dari log" />
+          <StatCard label="Kalori Aktivitas" value={fmtKkal(totalActivityCalories(participant))} tone="emerald" caption="Workout/device/manual" />
+          <StatCard label="BMI" value={fmt(participant?.bmi)} tone={riskTone(participantRisk(participant))} caption={participant?.bmi_status || "Status BMI"} />
+          <StatCard label="Tensi" value={participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"} tone="purple" caption="mmHg" />
+        </div>
+
+        <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
+          <DetailTabButton active={activeTab === "summary"} label="Ringkasan" onClick={() => setActiveTab("summary")} />
+          <DetailTabButton active={activeTab === "history"} label="Riwayat Harian" onClick={() => setActiveTab("history")} />
+          <DetailTabButton active={activeTab === "nutrition"} label="Nutrisi" onClick={() => setActiveTab("nutrition")} />
+          <DetailTabButton active={activeTab === "activity"} label="Aktivitas" onClick={() => setActiveTab("activity")} />
+          <DetailTabButton active={activeTab === "healthtalk"} label="Health Talk" onClick={() => setActiveTab("healthtalk")} />
+          <DetailTabButton active={activeTab === "clinical"} label="Monitoring Klinis" onClick={() => setActiveTab("clinical")} />
+          <DetailTabButton active={activeTab === "evidence"} label="Evidence" onClick={() => setActiveTab("evidence")} />
+        </div>
+      </Card>
+
+      {activeTab === "summary" ? (
+        <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+          <Card className="p-5">
+            <SectionHeader title="Breakdown Point" subtitle="Membantu mengecek sumber point peserta." />
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <StatCard label="Nutrisi" value={fmtPoint(point.nutrition)} tone="blue" caption="+5 setiap laporan nutrisi" />
+              <StatCard label="Aktivitas" value={fmtPoint(point.activity)} tone="emerald" caption="Point dari aktivitas/evidence" />
+              <StatCard label="Health Talk" value={fmtPoint(point.healthtalk)} tone="purple" caption="Online +10, Offline +20 dengan bukti" />
+              <StatCard label="Total" value={fmtPoint(point.total)} tone="amber" caption="Total point peserta" />
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <SectionHeader title="Aktivitas Peserta" subtitle="Jenis aktivitas yang paling sering dilakukan." />
+            <div className="mt-5">
+              <HorizontalBars
+                items={(participant?.activity_summary || participant?.activity_history || []).map((item: any) => ({
+                  label: item?.activity_name || item?.nama_activities || "Aktivitas",
+                  value: item?.count || item?.jumlah || 1,
+                })).slice(0, 8)}
+                labelKey="label"
+                valueKey="value"
+                suffix="x"
+              />
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
+      {activeTab === "history" ? <RecentTable title="Riwayat Input Harian Peserta" items={responses} type="all" /> : null}
+      {activeTab === "nutrition" ? <RecentTable title="Riwayat Nutrisi Peserta" items={responses} type="nutrition" /> : null}
+      {activeTab === "activity" ? <RecentTable title="Riwayat Aktivitas Peserta" items={responses} type="activity" /> : null}
+      {activeTab === "healthtalk" ? <RecentTable title="Riwayat Health Talk Peserta" items={responses} type="healthtalk" /> : null}
+      {activeTab === "clinical" ? <ClinicalPanel participant={participant} /> : null}
+      {activeTab === "evidence" ? <EvidenceGallery participant={participant} /> : null}
+    </div>
+  );
+}
+
+function OverviewPage({
+  participants,
+  onSelect,
+}: {
+  participants: any[];
+  onSelect: (participant: any) => void;
+}) {
+  const topActivity = [...participants]
+    .map((participant) => ({
+      participant,
+      value: activityCount(participant),
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  const topPoint = [...participants]
+    .map((participant) => ({
+      participant,
+      value: toNumber(participant?.total_points) || 0,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
+      <Card className="p-5">
+        <SectionHeader
+          title="Daftar Peserta Wellness"
+          subtitle="Klik nama peserta untuk melihat seluruh data peserta tersebut saja."
+          right={<Badge tone="blue">{participants.length} peserta</Badge>}
+        />
+        <div className="mt-4">
+          <ParticipantsTable participants={participants} onSelect={onSelect} />
+        </div>
+      </Card>
+
+      <div className="space-y-5">
+        <Card className="p-5">
+          <SectionHeader title="Ranking Olahraga" subtitle="Peserta paling aktif berdasarkan jumlah aktivitas." />
+          <div className="mt-4 space-y-3">
+            {topActivity.map((row, index) => (
+              <button
+                key={`${row.participant.id}-${index}`}
+                type="button"
+                onClick={() => onSelect(row.participant)}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-left hover:bg-blue-50"
+              >
+                <div>
+                  <div className="text-sm font-black text-slate-900">{index + 1}. {participantName(row.participant)}</div>
+                  <div className="text-xs font-bold text-slate-400">{participantGroup(row.participant)}</div>
+                </div>
+                <div className="text-lg font-black text-blue-700">{fmtNumber(row.value)}</div>
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <SectionHeader title="Capaian Point" subtitle="Peserta dengan point tertinggi." />
+          <div className="mt-4 space-y-3">
+            {topPoint.map((row, index) => (
+              <button
+                key={`${row.participant.id}-${index}`}
+                type="button"
+                onClick={() => onSelect(row.participant)}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-left hover:bg-amber-50"
+              >
+                <div>
+                  <div className="text-sm font-black text-slate-900">{index + 1}. {participantName(row.participant)}</div>
+                  <div className="text-xs font-bold text-slate-400">{participantGroup(row.participant)}</div>
+                </div>
+                <div className="text-lg font-black text-amber-700">{fmtPoint(row.value)}</div>
+              </button>
+            ))}
+          </div>
+        </Card>
       </div>
     </div>
   );
 }
 
+function DailyPage({
+  participants,
+}: {
+  participants: any[];
+}) {
+  const responses = allResponses(participants);
+  const activities = responses.filter(isActivity);
+  const nutrition = responses.filter(isNutrition);
+  const trend = buildActivityTrend(participants);
 
-// WELLNESS_DASHBOARD_ACTIVITY_SUMMARY_TABLE_V378
-function ActivityLogSummaryTable({ items = [] }: { items?: any[] }) {
-  const rows = items || [];
   return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-slate-900">Log Activities</h2>
-          <p className="text-xs font-bold text-slate-400">Rekap aktivitas dari input manual, Strava, dan Google Fit.</p>
-        </div>
-        <span className="rounded-full bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">{rows.length} jenis</span>
+    <div className="space-y-5">
+      <div className="grid gap-5 xl:grid-cols-2">
+        <RecentTable title="Riwayat Activities" items={activities} type="all" />
+        <RecentTable title="Riwayat Nutrisi" items={nutrition} type="all" />
       </div>
 
-      {!rows.length ? (
-        <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
-          Belum ada aktivitas tercatat.
-        </div>
-      ) : (
-        <div className="mt-4 overflow-auto rounded-3xl border border-slate-100">
-          <table className="min-w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Tanggal</th>
-                <th className="px-4 py-3">Nama Activities</th>
-                <th className="px-4 py-3">Jumlah</th>
-                <th className="px-4 py-3">Durasi</th>
-                <th className="px-4 py-3">Kalori</th>
-                <th className="px-4 py-3">Sumber</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.slice(0, 40).map((item: any, index: number) => (
-                <tr key={`${item.date || item.tanggal || index}-${item.activity_name || item.nama_activities || index}`} className="bg-white">
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-700">{item.tanggal || item.date || "-"}</td>
-                  <td className="min-w-[180px] px-4 py-3 font-black text-slate-900">{item.nama_activities || item.activity_name || "Aktivitas"}</td>
-                  <td className="whitespace-nowrap px-4 py-3 font-black text-blue-700">{item.jumlah || item.count || 0}x</td>
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-600">{item.duration_minutes !== undefined && item.duration_minutes !== null ? `${item.duration_minutes} menit` : "-"}</td>
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-600">{item.calories !== undefined && item.calories !== null ? `${item.calories} kkal` : "-"}</td>
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-500">{item.source || "manual"}</td>
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+        <Card className="p-5">
+          <SectionHeader
+            title="Trend Aktivitas Terbanyak"
+            subtitle="Jenis aktivitas yang paling sering tercatat dari peserta."
+            right={<Badge tone="emerald">{trend.length} jenis</Badge>}
+          />
+          <div className="mt-5">
+            <HorizontalBars items={trend} labelKey="name" valueKey="count" suffix="x" />
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <SectionHeader
+            title="Durasi & Kalori Aktivitas"
+            subtitle="Ringkasan aktivitas terbanyak, termasuk durasi dan kalori bila tersedia."
+          />
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+                <tr>
+                  <th className="w-12 px-4 py-3">No</th>
+                  <th className="px-4 py-3">Aktivitas</th>
+                  <th className="px-4 py-3">Jumlah</th>
+                  <th className="px-4 py-3">Durasi</th>
+                  <th className="px-4 py-3">Kalori</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {trend.map((item, index) => (
+                  <tr key={`${item.name}-${index}`}>
+                    <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                    <td className="px-4 py-3 font-black text-slate-900">{item.name}</td>
+                    <td className="px-4 py-3 font-black text-blue-700">{fmtNumber(item.count)}x</td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{fmt(item.duration, "menit")}</td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{fmtKkal(item.calories)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
 
-function ParticipantChartPanel({ participant }: { participant: any }) {
-  const charts =
-    participant?.parameter_charts ||
-    participant?.charts ||
-    participant?.chart_data ||
-    participant?.trend_charts ||
-    {};
+function RankingPage({
+  participants,
+  onSelect,
+}: {
+  participants: any[];
+  onSelect: (participant: any) => void;
+}) {
+  return (
+    <div className="grid gap-5 xl:grid-cols-3">
+      <RankingTable
+        title="Ranking Olahraga"
+        participants={participants}
+        valueLabel="Jumlah Aktivitas"
+        valueGetter={activityCount}
+        onSelect={onSelect}
+        tone="emerald"
+      />
 
-  const risk = participantRisk(participant);
-  const code = participantCode(participant);
-  const name = participantName(participant);
-  const scope = participantScope(participant);
+      <RankingTable
+        title="Ranking Nutrisi"
+        participants={participants}
+        valueLabel="Input Nutrisi"
+        valueGetter={nutritionCount}
+        onSelect={onSelect}
+        tone="blue"
+      />
 
-  const weightPoints = charts.weight_kg || charts.weight || [];
-  const bmiPoints = charts.bmi || [];
-  const bpPoints = charts.blood_pressure || charts.bp || [];
-  const hba1cPoints = charts.hba1c || [];
-  const glucosePoints = charts.glucose || charts.gula_darah || [];
-  const waistPoints = charts.waist_cm || charts.waist || [];
-  const nutritionPoints = charts.nutrition_calories || charts.food_calories || [];
-  const activityCaloriesPoints = charts.activity_calories || charts.workout_calories || [];
-  const workoutMinutesPoints = charts.workout_minutes || charts.activity_minutes || [];
-  const pointPoints = charts.points || charts.point || [];
+      <RankingTable
+        title="Ranking Point"
+        participants={participants}
+        valueLabel="Total Point"
+        valueGetter={(participant) => toNumber(participant?.total_points) || 0}
+        onSelect={onSelect}
+        tone="amber"
+      />
+    </div>
+  );
+}
+
+function ClinicalListPage({
+  participants,
+  onSelect,
+}: {
+  participants: any[];
+  onSelect: (participant: any) => void;
+}) {
+  const obesityRows = participants
+    .filter((participant) => {
+      const bmi = toNumber(participant?.bmi);
+      return bmi !== null && bmi >= 30;
+    })
+    .sort((a, b) => Number(b.bmi || 0) - Number(a.bmi || 0));
+
+  const overweightRows = participants
+    .filter((participant) => {
+      const bmi = toNumber(participant?.bmi);
+      return bmi !== null && bmi >= 25 && bmi < 30;
+    })
+    .sort((a, b) => Number(b.bmi || 0) - Number(a.bmi || 0));
+
+  const bpRows = participants
+    .filter((participant) => {
+      const sbp = toNumber(participant?.sbp);
+      const dbp = toNumber(participant?.dbp);
+      return (sbp !== null && sbp >= 140) || (dbp !== null && dbp >= 90);
+    })
+    .sort((a, b) => Number(b.sbp || 0) - Number(a.sbp || 0));
+
+  function ClinicalTable({ title, rows }: { title: string; rows: any[] }) {
+    return (
+      <Card className="p-5">
+        <SectionHeader title={title} right={<Badge tone="rose">{rows.length} peserta</Badge>} />
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="max-h-[360px] overflow-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="sticky top-0 bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+                <tr>
+                  <th className="w-12 px-4 py-3">No</th>
+                  <th className="px-4 py-3">Nama</th>
+                  <th className="px-4 py-3">Kelompok</th>
+                  <th className="px-4 py-3">BMI</th>
+                  <th className="px-4 py-3">Tensi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((participant, index) => (
+                  <tr key={`${participant.id}-${index}`} className="hover:bg-blue-50/40">
+                    <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onSelect(participant)}
+                        className="font-black text-blue-700 hover:underline"
+                      >
+                        {participantName(participant)}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{participantGroup(participant)}</td>
+                    <td className="px-4 py-3 font-black text-slate-900">{fmt(participant?.bmi)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-600">
+                      {participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h2 className="text-xl font-black text-slate-900">Grafik Parameter Per Peserta</h2>
-          <p className="mt-1 text-sm font-bold text-slate-500">
-            {name}
-            {code ? ` • ${code}` : ""}
-            {scope ? ` • ${scope}` : ""}
-          </p>
+    <div className="grid gap-5 xl:grid-cols-3">
+      <ClinicalTable title="Monitoring BMI Obesitas" rows={obesityRows} />
+      <ClinicalTable title="Monitoring BMI Overweight" rows={overweightRows} />
+      <ClinicalTable title="Monitoring Tekanan Darah" rows={bpRows} />
+    </div>
+  );
+}
+
+function PointsPage({
+  participants,
+  onSelect,
+}: {
+  participants: any[];
+  onSelect: (participant: any) => void;
+}) {
+  const rows = [...participants]
+    .map((participant) => ({
+      participant,
+      point: toNumber(participant?.total_points) || 0,
+      breakdown: buildPointBreakdown(participant),
+    }))
+    .sort((a, b) => b.point - a.point);
+
+  const bars = rows.slice(0, 40).map((row) => ({
+    label: participantName(row.participant),
+    value: row.point,
+  }));
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+      <Card className="p-5">
+        <SectionHeader title="Grafik Capaian Point" subtitle="Ranking total point seluruh peserta." />
+        <div className="mt-5">
+          <HorizontalBars items={bars} labelKey="label" valueKey="value" />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {risk ? <Badge tone={riskTone(risk)}>{risk}</Badge> : null}
-          {participant?.program_status ? <Badge tone="rose">{participant.program_status}</Badge> : null}
-          {participant?.latest_date ? <Badge tone="blue">Latest: {participant.latest_date}</Badge> : null}
+      </Card>
+
+      <Card className="p-5">
+        <SectionHeader title="Capaian Point" subtitle="Klik nama untuk melihat detail sumber point." right={<Badge tone="amber">{rows.length} peserta</Badge>} />
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="max-h-[560px] overflow-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="sticky top-0 bg-blue-50 text-xs uppercase tracking-wide text-slate-700">
+                <tr>
+                  <th className="w-12 px-4 py-3">No</th>
+                  <th className="px-4 py-3">Nama Peserta</th>
+                  <th className="px-4 py-3">Nutrisi</th>
+                  <th className="px-4 py-3">Aktivitas</th>
+                  <th className="px-4 py-3">Health Talk</th>
+                  <th className="px-4 py-3">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.map((row, index) => (
+                  <tr key={`${row.participant.id}-${index}`} className="hover:bg-amber-50/50">
+                    <td className="px-4 py-3 font-bold text-slate-500">{index + 1}.</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onSelect(row.participant)}
+                        className="font-black text-blue-700 hover:underline"
+                      >
+                        {participantName(row.participant)}
+                      </button>
+                      <div className="text-xs font-bold text-slate-400">{participantGroup(row.participant)}</div>
+                    </td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{fmtPoint(row.breakdown.nutrition)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{fmtPoint(row.breakdown.activity)}</td>
+                    <td className="px-4 py-3 font-bold text-slate-600">{fmtPoint(row.breakdown.healthtalk)}</td>
+                    <td className="px-4 py-3 font-black text-amber-700">{fmtPoint(row.point)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <MiniMetric label="BB" before={firstValue(weightPoints)} after={lastValue(weightPoints)} delta={deltaText(weightPoints, "value", "kg")} suffix="kg" />
-        <MiniMetric label="BMI" before={firstValue(bmiPoints)} after={lastValue(bmiPoints)} delta={deltaText(bmiPoints)} />
-        <MiniMetric label="Tekanan Darah" before={fmtPair(firstValue(bpPoints, "sbp"), firstValue(bpPoints, "dbp"))} after={fmtPair(lastValue(bpPoints, "sbp"), lastValue(bpPoints, "dbp"))} />
-        <MiniMetric label="HbA1c" before={firstValue(hba1cPoints)} after={lastValue(hba1cPoints)} delta={deltaText(hba1cPoints, "value", "%")} suffix="%" />
-        <MiniMetric label="Point" before={firstValue(pointPoints)} after={lastValue(pointPoints)} delta={deltaText(pointPoints)} />
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
-        <TrendChart title="Berat badan" points={weightPoints} series={[{ key: "value", label: "BB", unit: "kg" }]} />
-        <TrendChart title="BMI" points={bmiPoints} series={[{ key: "value", label: "BMI" }]} />
-        <TrendChart title="Tekanan darah" points={bpPoints} series={[{ key: "sbp", label: "Sistolik", unit: "mmHg" }, { key: "dbp", label: "Diastolik", unit: "mmHg" }]} />
-        <TrendChart title="HbA1c" points={hba1cPoints} series={[{ key: "value", label: "HbA1c", unit: "%" }]} />
-        <TrendChart title="Gula darah" points={glucosePoints} series={[{ key: "value", label: "Gula", unit: "mg/dL" }]} />
-        <TrendChart title="Lingkar perut" points={waistPoints} series={[{ key: "value", label: "LP", unit: "cm" }]} />
-        <TrendChart title="Nutrisi harian" caption="Total kalori dari food log" points={nutritionPoints} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
-        <TrendChart title="Workout calories" caption="Kalori terbakar dari activity log" points={activityCaloriesPoints} series={[{ key: "value", label: "Kalori", unit: "kkal" }]} />
-        <TrendChart title="Workout duration" caption="Total durasi aktivitas per hari" points={workoutMinutesPoints} series={[{ key: "value", label: "Durasi", unit: "menit" }]} />
-        <TrendChart title="Point harian" caption="Total point yang tercatat per tanggal" points={pointPoints} series={[{ key: "value", label: "Point" }]} />
-      </div>
-
-      <div className="mt-5 grid gap-5">
-        <ActivityLogSummaryTable items={participant.activity_summary || participant.activity_history || []} />
-
-        <EvidenceGallery items={participant?.evidence_gallery || participant?.evidence || participant?.daily_evidence || []} />
-        <RecentResponses items={participant?.recent_responses || participant?.daily_logs || participant?.responses || []} />
-      </div>
-    </section>
+      </Card>
+    </div>
   );
 }
 
@@ -809,7 +1387,9 @@ function WellnessDashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Memuat dashboard Wellness...");
   const [search, setSearch] = useState("");
+  const [mainView, setMainView] = useState<MainView>("overview");
   const [selectedId, setSelectedId] = useState<any>("");
+  const [detailTab, setDetailTab] = useState<DetailTab>("summary");
 
   async function load() {
     setLoading(true);
@@ -823,8 +1403,6 @@ function WellnessDashboard() {
       }));
 
     setData(result || {});
-    const list = result?.participants || result?.rows || result?.data || [];
-    if (!selectedId && list?.length) setSelectedId(list[0].id);
     setMessage(result?.message || "Dashboard berhasil dimuat.");
     setLoading(false);
   }
@@ -839,18 +1417,17 @@ function WellnessDashboard() {
 
   const filteredParticipants = useMemo(() => {
     const q = cleanText(search).toLowerCase();
+
     if (!q) return participants;
 
     return participants.filter((participant: any) => {
       const haystack = [
-        participantCode(participant),
         participantName(participant),
+        participantCode(participant),
+        participantGroup(participant),
+        participantCompany(participant),
         participantRisk(participant),
-        participantScope(participant),
-        participant?.company_name,
-        participant?.kelompok_name,
-        participant?.group_unit_name,
-        participant?.program_status,
+        participant?.compliance_status,
       ]
         .map(cleanText)
         .join(" ")
@@ -861,110 +1438,124 @@ function WellnessDashboard() {
   }, [participants, search]);
 
   const selectedParticipant = useMemo(() => {
-    return (
-      participants.find((participant: any) => String(participant.id) === String(selectedId)) ||
-      filteredParticipants?.[0] ||
-      participants?.[0] ||
-      null
-    );
-  }, [participants, filteredParticipants, selectedId]);
+    if (!selectedId) return null;
 
-  useEffect(() => {
-    if (!filteredParticipants.length) return;
-    const exists = filteredParticipants.some((participant: any) => String(participant.id) === String(selectedId));
-    if (!exists) setSelectedId(filteredParticipants[0].id);
-  }, [filteredParticipants, selectedId]);
+    return participants.find((participant: any) => String(participant.id) === String(selectedId)) || null;
+  }, [participants, selectedId]);
 
-  const summary = data?.summary || data?.stats || {};
-  const totalParticipants = summary.total_participants ?? participants.length;
-  const totalEvidence = summary.total_evidence ?? summary.evidence_count ?? "-";
-  const totalPoints = summary.total_points ?? summary.points ?? "-";
-  const activeParticipants = summary.active_participants ?? summary.active ?? "-";
+  const summary = data?.summary || {};
+  const totalParticipants = summary.total ?? summary.total_participants ?? participants.length;
+  const activeParticipants = summary.active ?? summary.active_participants ?? "-";
+  const totalFoodCaloriesToday = summary.total_food_calories_today ?? 0;
+  const totalActivityCaloriesToday = summary.total_activity_calories_today ?? 0;
+  const totalPoints = summary.total_points ?? 0;
+
+  function openParticipant(participant: any) {
+    setSelectedId(participant.id);
+    setDetailTab("summary");
+  }
+
+  function closeParticipant() {
+    setSelectedId("");
+  }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 md:px-8">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 md:px-8">
+      <div className="mx-auto max-w-[1500px] space-y-5">
         <WellnessQuickNav />
 
-        <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-fuchsia-600 via-rose-600 to-orange-500 shadow-sm">
-          <div className="flex flex-col gap-4 p-7 text-white lg:flex-row lg:items-center lg:justify-between">
+        <Card className="p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/70">
-                Wellness Command Center
+              <div className="text-xs font-black uppercase tracking-[0.22em] text-blue-600">
+                Wellness Monitoring
               </div>
-              <h1 className="mt-2 text-3xl font-black md:text-4xl">Dashboard Wellness</h1>
-              <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-white/90">
-                Monitoring peserta, input harian, evidence gallery, point, dan grafik before-after klinis per peserta.
+              <h1 className="mt-2 text-3xl font-black text-slate-950">
+                Dashboard Wellness
+              </h1>
+              <p className="mt-1 text-sm font-bold text-slate-500">
+                Tampilan list-first: pilih peserta dari tabel, lalu lihat detail peserta secara fokus.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <a href="/wellness/input" className="rounded-full bg-white px-5 py-3 text-xs font-black text-rose-700 shadow-sm">
+              <a href="/wellness/input" className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white">
                 Input Harian
               </a>
-              <a href="/wellness/nakes-input" className="rounded-full bg-white/15 px-5 py-3 text-xs font-black text-white ring-1 ring-white/30">
+              <a href="/wellness/nakes-input" className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white">
                 Input NAKES
               </a>
-              <a href="/wellness/history-import" className="rounded-full bg-white/15 px-5 py-3 text-xs font-black text-white ring-1 ring-white/30">
-                Import History MCU
-              </a>
+              <button
+                type="button"
+                onClick={load}
+                className="rounded-full bg-white px-5 py-3 text-xs font-black text-slate-700 ring-1 ring-slate-200"
+              >
+                {loading ? "Memuat..." : "Refresh"}
+              </button>
             </div>
           </div>
-        </section>
+        </Card>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Peserta" value={totalParticipants} tone="blue" caption="Total peserta Wellness" />
-          <StatCard label="Aktif" value={activeParticipants} tone="emerald" caption="Peserta dengan aktivitas/input" />
-          <StatCard label="Evidence" value={totalEvidence} tone="purple" caption="URL bukti/foto tersimpan" />
-          <StatCard label="Point" value={totalPoints} tone="amber" caption="Akumulasi point tercatat" />
-        </section>
+        {!selectedParticipant ? (
+          <>
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <StatCard label="Peserta" value={fmtNumber(totalParticipants)} tone="blue" caption="Total peserta" />
+              <StatCard label="Aktif" value={fmtNumber(activeParticipants)} tone="emerald" caption="Peserta dengan input" />
+              <StatCard label="Kalori Makan Hari Ini" value={fmtKkal(totalFoodCaloriesToday)} tone="blue" caption="Akumulasi harian" />
+              <StatCard label="Kalori Aktivitas Hari Ini" value={fmtKkal(totalActivityCaloriesToday)} tone="purple" caption="Workout/device/manual" />
+              <StatCard label="Point" value={fmtPoint(totalPoints)} tone="amber" caption="Akumulasi point" />
+            </section>
 
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-lg font-black text-slate-900">Pilih Peserta</h2>
-              <p className="mt-1 text-xs font-bold text-slate-400">{message}</p>
-            </div>
+            <Card className="p-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  <NavButton active={mainView === "overview"} label="Dashboard Utama" onClick={() => setMainView("overview")} />
+                  <NavButton active={mainView === "daily"} label="Activities Harian" onClick={() => setMainView("daily")} />
+                  <NavButton active={mainView === "ranking"} label="Ranking" onClick={() => setMainView("ranking")} />
+                  <NavButton active={mainView === "clinical"} label="Monitoring Klinis" onClick={() => setMainView("clinical")} />
+                  <NavButton active={mainView === "points"} label="Capaian Point" onClick={() => setMainView("points")} />
+                </div>
 
-            <button
-              type="button"
-              onClick={load}
-              className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
-            >
-              {loading ? "Memuat..." : "Refresh Dashboard"}
-            </button>
-          </div>
+                <input
+                  className="w-full rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 xl:w-[420px]"
+                  placeholder="Cari nama, kode, kelompok, perusahaan..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.3fr]">
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-              placeholder="Cari nama, KODE, risk cluster, perusahaan, kelompok..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
+              <div className="mt-3 text-xs font-bold text-slate-400">
+                {message} • Data tampil: {filteredParticipants.length} peserta
+              </div>
+            </Card>
 
-            <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-              value={selectedParticipant?.id || ""}
-              onChange={(event) => setSelectedId(event.target.value)}
-              disabled={!filteredParticipants.length}
-            >
-              {!filteredParticipants.length ? <option value="">Tidak ada peserta</option> : null}
-              {filteredParticipants.map((participant: any) => (
-                <option key={participant.id} value={participant.id}>
-                  {participantLabel(participant)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </section>
+            {mainView === "overview" ? (
+              <OverviewPage participants={filteredParticipants} onSelect={openParticipant} />
+            ) : null}
 
-        {selectedParticipant ? (
-          <ParticipantChartPanel participant={selectedParticipant} />
+            {mainView === "daily" ? (
+              <DailyPage participants={filteredParticipants} />
+            ) : null}
+
+            {mainView === "ranking" ? (
+              <RankingPage participants={filteredParticipants} onSelect={openParticipant} />
+            ) : null}
+
+            {mainView === "clinical" ? (
+              <ClinicalListPage participants={filteredParticipants} onSelect={openParticipant} />
+            ) : null}
+
+            {mainView === "points" ? (
+              <PointsPage participants={filteredParticipants} onSelect={openParticipant} />
+            ) : null}
+          </>
         ) : (
-          <section className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-400">
-            Belum ada data peserta Wellness.
-          </section>
+          <ParticipantDetail
+            participant={selectedParticipant}
+            activeTab={detailTab}
+            setActiveTab={setDetailTab}
+            onBack={closeParticipant}
+          />
         )}
       </div>
     </main>
