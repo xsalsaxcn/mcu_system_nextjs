@@ -3,8 +3,14 @@ import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_STRAVA_PORTAL_SESSION_FIX_V382_CONNECT
-// Strava connect harus pakai session portal peserta OTP, bukan session admin/internal.
+// WELLNESS_STRAVA_CONNECT_SCOPE_FIX_V418
+// Fix:
+// - Strava connect tetap pakai session portal peserta OTP.
+// - Request scope dibuat eksplisit: read, activity:read, activity:read_all.
+// - approval_prompt tetap force agar user benar-benar authorize ulang.
+// - Setelah deploy, peserta WAJIB klik Reconnect Strava agar token lama terganti.
+
+const STRAVA_SCOPE = "read,activity:read,activity:read_all";
 
 function appSecret() {
   return String(process.env.APP_SECRET || "").trim();
@@ -24,7 +30,8 @@ function makeState(participant: any) {
     participant_id: participant.id,
     code: participant.code || null,
     ts: Date.now(),
-    scope: "read,activity:read_all",
+    scope: STRAVA_SCOPE,
+    marker: "WELLNESS_STRAVA_CONNECT_SCOPE_FIX_V418",
   });
 
   const encoded = base64url(payload);
@@ -66,7 +73,7 @@ export async function GET(req: NextRequest) {
     redirect_uri: callbackUrl,
     response_type: "code",
     approval_prompt: "force",
-    scope: "read,activity:read_all",
+    scope: STRAVA_SCOPE,
     state,
   });
 
