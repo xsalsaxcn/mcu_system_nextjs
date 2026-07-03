@@ -4,7 +4,7 @@ import AuthGate from "@/components/AuthGate";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-// WELLNESS_DASHBOARD_PROFESSIONAL_POLISHED_LAYOUT_V416
+// WELLNESS_DASHBOARD_PROFESSIONAL_POLISHED_LAYOUT_V417_LAYERED_FILTER_FIX
 // Lanjutan dari V410:
 // - Tidak mengubah logic data, export, detail peserta, grafik, point, dan filter.
 // - Menghilangkan layer Menu Wellness agar dashboard tidak terlihat bertumpuk.
@@ -222,6 +222,27 @@ function participantGroup(participant: any) {
     cleanText(participant?.group_unit_name) ||
     cleanText(participant?.old_group_name) ||
     "-"
+  );
+}
+
+function participantKelompokLevel(participant: any) {
+  return (
+    cleanText(participant?.kelompok_level_name) ||
+    cleanText(participant?.wellness_kelompok_name) ||
+    cleanText(participant?.kelompok_name) ||
+    cleanText(participant?.group_unit_name) ||
+    cleanText(participant?.old_group_name) ||
+    "Tanpa Kelompok"
+  );
+}
+
+function participantGroupLevel(participant: any) {
+  return (
+    cleanText(participant?.group_name) ||
+    cleanText(participant?.risk_group_name) ||
+    cleanText(participant?.baseline_risk_group) ||
+    cleanText(participant?.group) ||
+    "Tanpa Group"
   );
 }
 
@@ -910,7 +931,7 @@ function ParticipantsTable({
             <tr>
               <th className="w-12 px-4 py-3">No</th>
               <th className="min-w-[220px] px-4 py-3">Nama Peserta</th>
-              <th className="min-w-[120px] px-4 py-3">Kelompok</th>
+              <th className="min-w-[160px] px-4 py-3">Kelompok / Group</th>
               <th className="px-4 py-3">BMI</th>
               <th className="px-4 py-3">Tensi</th>
               <th className="px-4 py-3">Makan Hari Ini</th>
@@ -935,7 +956,14 @@ function ParticipantsTable({
                     {participantCode(participant) || "-"} • {participantCompany(participant)}
                   </div>
                 </td>
-                <td className="px-4 py-3 font-bold text-slate-600">{participantGroup(participant)}</td>
+                <td className="px-4 py-3">
+  <div className="font-black text-slate-800">
+    {participantKelompokLevel(participant)}
+  </div>
+  <div className="mt-0.5 text-xs font-bold text-slate-400">
+    {participantGroupLevel(participant)}
+  </div>
+</td>
                 <td className="px-4 py-3 font-black text-slate-900">{fmt(participant?.bmi)}</td>
                 <td className="px-4 py-3 font-bold text-slate-600">
                   {participant?.sbp || participant?.dbp ? `${participant?.sbp || "-"}/${participant?.dbp || "-"}` : "-"}
@@ -1798,6 +1826,7 @@ function WellnessDashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Memuat dashboard Wellness...");
   const [search, setSearch] = useState("");
+  const [kelompokFilter, setKelompokFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [mainView, setMainView] = useState<MainView>("overview");
   const [selectedId, setSelectedId] = useState<any>("");
@@ -1827,25 +1856,57 @@ function WellnessDashboard() {
     return data?.participants || data?.rows || data?.data || [];
   }, [data]);
 
-  const groupOptions = useMemo(() => {
+  const kelompokOptions = useMemo(() => {
     const values = new Set<string>();
 
     for (const participant of participants || []) {
-      const group = participantGroup(participant);
-      if (group && group !== "-") values.add(group);
+      const kelompok = participantKelompokLevel(participant);
+      if (kelompok && kelompok !== "-") values.add(kelompok);
     }
 
     return [...values].sort((a, b) => a.localeCompare(b));
   }, [participants]);
 
+  const groupOptions = useMemo(() => {
+    const values = new Set<string>();
+    const selectedKelompok = cleanText(kelompokFilter).toLowerCase();
+
+    for (const participant of participants || []) {
+      const kelompok = participantKelompokLevel(participant).toLowerCase();
+
+      if (selectedKelompok && kelompok !== selectedKelompok) {
+        continue;
+      }
+
+      const group = participantGroupLevel(participant);
+      if (group && group !== "-") values.add(group);
+    }
+
+    return [...values].sort((a, b) => a.localeCompare(b));
+  }, [participants, kelompokFilter]);
+
+  useEffect(() => {
+    if (!groupFilter) return;
+
+    if (!groupOptions.includes(groupFilter)) {
+      setGroupFilter("");
+    }
+  }, [kelompokFilter, groupFilter, groupOptions]);
+
   const filteredParticipants = useMemo(() => {
     const q = cleanText(search).toLowerCase();
+    const selectedKelompok = cleanText(kelompokFilter).toLowerCase();
     const selectedGroup = cleanText(groupFilter).toLowerCase();
 
     return participants.filter((participant: any) => {
-      const participantGroupText = participantGroup(participant).toLowerCase();
+      const kelompokText = participantKelompokLevel(participant).toLowerCase();
+      const groupText = participantGroupLevel(participant).toLowerCase();
 
-      if (selectedGroup && participantGroupText !== selectedGroup) {
+      if (selectedKelompok && kelompokText !== selectedKelompok) {
+        return false;
+      }
+
+      if (selectedGroup && groupText !== selectedGroup) {
         return false;
       }
 
@@ -1854,6 +1915,8 @@ function WellnessDashboard() {
       const haystack = [
         participantName(participant),
         participantCode(participant),
+        participantKelompokLevel(participant),
+        participantGroupLevel(participant),
         participantGroup(participant),
         participantCompany(participant),
         participantRisk(participant),
@@ -1865,17 +1928,23 @@ function WellnessDashboard() {
 
       return haystack.includes(q);
     });
-  }, [participants, search, groupFilter]);
+  }, [participants, search, kelompokFilter, groupFilter]);
 
   const selectedParticipant = useMemo(() => {
     if (!selectedId) return null;
 
-    return participants.find((participant: any) => String(participant.id) === String(selectedId)) || null;
+    return (
+      participants.find(
+        (participant: any) => String(participant.id) === String(selectedId)
+      ) || null
+    );
   }, [participants, selectedId]);
 
   const summary = data?.summary || {};
-  const totalParticipants = summary.total ?? summary.total_participants ?? participants.length;
-  const activeParticipants = summary.active ?? summary.active_participants ?? "-";
+  const totalParticipants =
+    summary.total ?? summary.total_participants ?? participants.length;
+  const activeParticipants =
+    summary.active ?? summary.active_participants ?? "-";
   const totalFoodCaloriesToday = summary.total_food_calories_today ?? 0;
   const totalActivityCaloriesToday = summary.total_activity_calories_today ?? 0;
   const totalPoints = summary.total_points ?? 0;
@@ -1905,7 +1974,8 @@ function WellnessDashboard() {
                 </h1>
 
                 <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-slate-500">
-                  Pantau progress peserta, aktivitas harian, nutrisi, point, dan monitoring klinis dalam satu dashboard.
+                  Pantau progress peserta, aktivitas harian, nutrisi, point, dan
+                  monitoring klinis dalam satu dashboard.
                 </p>
               </div>
 
@@ -1960,11 +2030,36 @@ function WellnessDashboard() {
 
           {!selectedParticipant ? (
             <div className="grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-5">
-              <StatCard label="Peserta" value={fmtNumber(totalParticipants)} tone="blue" caption="Total peserta" />
-              <StatCard label="Aktif" value={fmtNumber(activeParticipants)} tone="emerald" caption="Peserta dengan input" />
-              <StatCard label="Kalori Makan Hari Ini" value={fmtKkal(totalFoodCaloriesToday)} tone="blue" caption="Akumulasi harian" />
-              <StatCard label="Kalori Aktivitas Hari Ini" value={fmtKkal(totalActivityCaloriesToday)} tone="purple" caption="Workout/device/manual" />
-              <StatCard label="Point" value={fmtPoint(totalPoints)} tone="amber" caption="Akumulasi point" />
+              <StatCard
+                label="Peserta"
+                value={fmtNumber(totalParticipants)}
+                tone="blue"
+                caption="Total peserta"
+              />
+              <StatCard
+                label="Aktif"
+                value={fmtNumber(activeParticipants)}
+                tone="emerald"
+                caption="Peserta dengan input"
+              />
+              <StatCard
+                label="Kalori Makan Hari Ini"
+                value={fmtKkal(totalFoodCaloriesToday)}
+                tone="blue"
+                caption="Akumulasi harian"
+              />
+              <StatCard
+                label="Kalori Aktivitas Hari Ini"
+                value={fmtKkal(totalActivityCaloriesToday)}
+                tone="purple"
+                caption="Workout/device/manual"
+              />
+              <StatCard
+                label="Point"
+                value={fmtPoint(totalPoints)}
+                tone="amber"
+                caption="Akumulasi point"
+              />
             </div>
           ) : null}
         </Card>
@@ -1974,20 +2069,56 @@ function WellnessDashboard() {
             <Card className="p-4">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-wrap gap-2">
-                  <NavButton active={mainView === "overview"} label="Dashboard Utama" onClick={() => setMainView("overview")} />
-                  <NavButton active={mainView === "daily"} label="Activities Harian" onClick={() => setMainView("daily")} />
-                  <NavButton active={mainView === "ranking"} label="Ranking" onClick={() => setMainView("ranking")} />
-                  <NavButton active={mainView === "clinical"} label="Monitoring Klinis" onClick={() => setMainView("clinical")} />
-                  <NavButton active={mainView === "points"} label="Capaian Point" onClick={() => setMainView("points")} />
+                  <NavButton
+                    active={mainView === "overview"}
+                    label="Dashboard Utama"
+                    onClick={() => setMainView("overview")}
+                  />
+                  <NavButton
+                    active={mainView === "daily"}
+                    label="Activities Harian"
+                    onClick={() => setMainView("daily")}
+                  />
+                  <NavButton
+                    active={mainView === "ranking"}
+                    label="Ranking"
+                    onClick={() => setMainView("ranking")}
+                  />
+                  <NavButton
+                    active={mainView === "clinical"}
+                    label="Monitoring Klinis"
+                    onClick={() => setMainView("clinical")}
+                  />
+                  <NavButton
+                    active={mainView === "points"}
+                    label="Capaian Point"
+                    onClick={() => setMainView("points")}
+                  />
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[240px_420px]">
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-[230px_230px_420px]">
+                  <select
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    value={kelompokFilter}
+                    onChange={(event) => {
+                      setKelompokFilter(event.target.value);
+                      setGroupFilter("");
+                    }}
+                  >
+                    <option value="">Tampilkan semua kelompok</option>
+                    {kelompokOptions.map((kelompok) => (
+                      <option key={kelompok} value={kelompok}>
+                        {kelompok}
+                      </option>
+                    ))}
+                  </select>
+
                   <select
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                     value={groupFilter}
                     onChange={(event) => setGroupFilter(event.target.value)}
                   >
-                    <option value="">Semua kelompok</option>
+                    <option value="">Tampilkan semua Group</option>
                     {groupOptions.map((group) => (
                       <option key={group} value={group}>
                         {group}
@@ -1997,7 +2128,7 @@ function WellnessDashboard() {
 
                   <input
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                    placeholder="Cari nama, kode, kelompok, perusahaan..."
+                    placeholder="Cari nama, kode, kelompok, group, perusahaan..."
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                   />
@@ -2006,12 +2137,18 @@ function WellnessDashboard() {
 
               <div className="mt-3 text-xs font-bold text-slate-400">
                 {message} • Data tampil: {filteredParticipants.length} peserta
-                {groupFilter ? ` • Kelompok: ${groupFilter}` : ""}
+                {kelompokFilter
+                  ? ` • Kelompok: ${kelompokFilter}`
+                  : " • Kelompok: Semua"}
+                {groupFilter ? ` • Group: ${groupFilter}` : " • Group: Semua"}
               </div>
             </Card>
 
             {mainView === "overview" ? (
-              <OverviewPage participants={filteredParticipants} onSelect={openParticipant} />
+              <OverviewPage
+                participants={filteredParticipants}
+                onSelect={openParticipant}
+              />
             ) : null}
 
             {mainView === "daily" ? (
@@ -2019,15 +2156,24 @@ function WellnessDashboard() {
             ) : null}
 
             {mainView === "ranking" ? (
-              <RankingPage participants={filteredParticipants} onSelect={openParticipant} />
+              <RankingPage
+                participants={filteredParticipants}
+                onSelect={openParticipant}
+              />
             ) : null}
 
             {mainView === "clinical" ? (
-              <ClinicalListPage participants={filteredParticipants} onSelect={openParticipant} />
+              <ClinicalListPage
+                participants={filteredParticipants}
+                onSelect={openParticipant}
+              />
             ) : null}
 
             {mainView === "points" ? (
-              <PointsPage participants={filteredParticipants} onSelect={openParticipant} />
+              <PointsPage
+                participants={filteredParticipants}
+                onSelect={openParticipant}
+              />
             ) : null}
           </>
         ) : (
