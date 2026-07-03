@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_STRAVA_SYNC_EXISTING_ACTIVITIES_V383
-// Menarik existing activities dari akun Strava peserta yang sudah connected.
+// WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419
+// Fix:
+// - Cek scope sebelum request activities.
+// - Kalau Forbidden/403, tampilkan detail jelas: perlu Reconnect Strava.
+// - Refresh token tetap aman dan menyimpan refresh_token terbaru.
+// - Tidak duplicate activity, update by participant + source + external_activity_id.
+// - Tidak mengganggu Google Fit.
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -12,6 +17,18 @@ function clean(value: any) {
 function num(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeScope(value: any) {
+  return clean(value).replace(/\s+/g, ",");
+}
+
+function hasActivityReadScope(scope: any) {
+  const normalized = `,${normalizeScope(scope)},`.toLowerCase();
+  return (
+    normalized.includes(",activity:read,") ||
+    normalized.includes(",activity:read_all,")
+  );
 }
 
 function dateOnly(value: any) {
@@ -34,20 +51,47 @@ function estimateCalories(activity: any) {
 
   if (type.includes("run")) kcalPerMinute = 10;
   else if (type.includes("walk")) kcalPerMinute = 4;
-  else if (type.includes("ride") || type.includes("cycling") || type.includes("bike")) kcalPerMinute = 8;
-  else if (type.includes("swim")) kcalPerMinute = 9;
-  else if (type.includes("workout") || type.includes("training")) kcalPerMinute = 6;
+  else if (
+    type.includes("ride") ||
+    type.includes("cycling") ||
+    type.includes("bike")
+  ) {
+    kcalPerMinute = 8;
+  } else if (type.includes("swim")) kcalPerMinute = 9;
+  else if (type.includes("workout") || type.includes("training")) {
+    kcalPerMinute = 6;
+  }
 
   return Math.round(minutes * kcalPerMinute);
 }
 
-async function refreshStravaToken(integration: any) {
+function stravaErrorMessage(status: number, data: any) {
+  const message =
+    data?.message ||
+    data?.error ||
+    data?.errors?.[0]?.message ||
+    `HTTP ${status}`;
+
+  if (status === 401) {
+    return "Strava token sudah tidak valid. Silakan Reconnect Strava.";
+  }
+
+  if (status === 403) {
+    return "Strava menolak akses activity. Silakan Reconnect Strava dan pastikan izin activity dicentang.";
+  }
+
+  return `Strava error: ${message}`;
+}
+
+async function refreshStravaToken(supabase: any, integration: any) {
   const clientId = clean(process.env.STRAVA_CLIENT_ID);
   const clientSecret = clean(process.env.STRAVA_CLIENT_SECRET);
   const refreshToken = clean(integration?.refresh_token);
 
   if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error("STRAVA_REFRESH_ENV_MISSING");
+    throw new Error(
+      "STRAVA_REFRESH_ENV_MISSING: STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, atau refresh_token belum tersedia."
+    );
   }
 
   const response = await fetch("https://www.strava.com/oauth/token", {
@@ -66,72 +110,111 @@ async function refreshStravaToken(integration: any) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data?.message || data?.error || "STRAVA_REFRESH_FAILED");
+    throw new Error(
+      data?.message ||
+        data?.error ||
+        "STRAVA_REFRESH_FAILED: Silakan Reconnect Strava."
+    );
   }
 
-  return data;
+  const newExpiresAt = data.expires_at
+    ? new Date(Number(data.expires_at) * 1000).toISOString()
+    : null;
+
+  await supabase
+    .from("wellness_integrations")
+    .update({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || integration.refresh_token,
+      expires_at: newExpiresAt,
+      updated_at: new Date().toISOString(),
+      raw_payload: {
+        ...(integration.raw_payload || {}),
+        marker: "WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419_REFRESH",
+        refreshed_at: new Date().toISOString(),
+        expires_at: data.expires_at || null,
+        token_type: data.token_type || null,
+      },
+    })
+    .eq("id", integration.id);
+
+  return {
+    accessToken: clean(data.access_token),
+    integration: {
+      ...integration,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || integration.refresh_token,
+      expires_at: newExpiresAt,
+    },
+  };
 }
 
 async function getValidAccessToken(supabase: any, integration: any) {
   const accessToken = clean(integration?.access_token);
-  const expiresAt = integration?.expires_at ? new Date(integration.expires_at).getTime() : 0;
+  const expiresAt = integration?.expires_at
+    ? new Date(integration.expires_at).getTime()
+    : 0;
+
   const now = Date.now();
 
   if (accessToken && expiresAt && expiresAt > now + 60 * 1000) {
     return accessToken;
   }
 
-  const refreshed = await refreshStravaToken(integration);
-
-  const newExpiresAt = refreshed.expires_at
-    ? new Date(Number(refreshed.expires_at) * 1000).toISOString()
-    : null;
-
-  await supabase
-    .from("wellness_integrations")
-    .update({
-      access_token: refreshed.access_token,
-      refresh_token: refreshed.refresh_token || integration.refresh_token,
-      expires_at: newExpiresAt,
-      updated_at: new Date().toISOString(),
-      raw_payload: refreshed,
-    })
-    .eq("id", integration.id);
-
-  return clean(refreshed.access_token);
+  const refreshed = await refreshStravaToken(supabase, integration);
+  return refreshed.accessToken;
 }
 
-async function fetchStravaActivities(accessToken: string) {
-  // Ambil existing activity. after dibuat longgar supaya data lama juga ikut terbaca.
-  const after = Math.floor(new Date("2020-01-01T00:00:00Z").getTime() / 1000);
+async function fetchStravaActivities(accessToken: string, days: number) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const afterSeconds =
+    days > 0
+      ? nowSeconds - days * 24 * 60 * 60
+      : Math.floor(new Date("2020-01-01T00:00:00Z").getTime() / 1000);
 
-  const url = new URL("https://www.strava.com/api/v3/athlete/activities");
-  url.searchParams.set("after", String(after));
-  url.searchParams.set("per_page", "100");
-  url.searchParams.set("page", "1");
+  const allActivities: any[] = [];
+  const maxPages = 3;
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = new URL("https://www.strava.com/api/v3/athlete/activities");
+    url.searchParams.set("after", String(afterSeconds));
+    url.searchParams.set("per_page", "100");
+    url.searchParams.set("page", String(page));
 
-  const data = await response.json().catch(() => []);
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(data?.message || data?.error || "STRAVA_ACTIVITIES_FETCH_FAILED");
+    const data = await response.json().catch(() => []);
+
+    if (!response.ok) {
+      throw new Error(stravaErrorMessage(response.status, data));
+    }
+
+    const activities = Array.isArray(data) ? data : [];
+    allActivities.push(...activities);
+
+    if (activities.length < 100) break;
   }
 
-  return Array.isArray(data) ? data : [];
+  return allActivities;
 }
 
-async function saveActivity(supabase: any, participantId: number, activity: any) {
+async function saveActivity(
+  supabase: any,
+  participantId: number,
+  activity: any
+) {
   const externalId = clean(activity?.id);
   if (!externalId) return { skipped: true, reason: "NO_EXTERNAL_ID" };
 
   const startedAt = clean(activity?.start_date || activity?.start_date_local);
   const logDate = dateOnly(activity?.start_date_local || activity?.start_date);
-  const distanceKm = num(activity?.distance) ? Number(activity.distance) / 1000 : null;
+  const distanceKm = num(activity?.distance)
+    ? Math.round((Number(activity.distance) / 1000) * 100) / 100
+    : null;
 
   const durationMinutes = num(activity?.moving_time)
     ? Math.round((Number(activity.moving_time) / 60) * 10) / 10
@@ -150,22 +233,30 @@ async function saveActivity(supabase: any, participantId: number, activity: any)
     external_activity_id: externalId,
     provider_activity_id: externalId,
     activity_type: clean(activity?.sport_type || activity?.type || "Strava"),
-    activity_name: clean(activity?.name || activity?.sport_type || activity?.type || "Strava Activity"),
+    activity_name: clean(
+      activity?.name || activity?.sport_type || activity?.type || "Strava Activity"
+    ),
     log_date: logDate,
     started_at: startedAt || null,
     duration_minutes: durationMinutes,
     calories,
     distance_km: distanceKm,
-    raw_payload: activity,
+    raw_payload: {
+      ...activity,
+      marker: "WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419",
+      synced_at: new Date().toISOString(),
+    },
   };
 
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("wellness_activity_logs")
     .select("id")
     .eq("participant_id", participantId)
     .eq("source", "strava")
     .eq("external_activity_id", externalId)
     .maybeSingle();
+
+  if (existingError) throw existingError;
 
   if (existing?.id) {
     const { error } = await supabase
@@ -196,6 +287,9 @@ async function handleSync(req: NextRequest) {
     );
   }
 
+  const body = await req.json().catch(() => ({}));
+  const days = Math.min(Math.max(Number(body?.days || 30), 1), 365);
+
   const { data: integration, error: integrationError } = await supabase
     .from("wellness_integrations")
     .select("*")
@@ -208,7 +302,11 @@ async function handleSync(req: NextRequest) {
 
   if (integrationError) {
     return NextResponse.json(
-      { ok: false, message: "Gagal membaca koneksi Strava.", detail: integrationError.message },
+      {
+        ok: false,
+        message: "Gagal membaca koneksi Strava.",
+        detail: integrationError.message,
+      },
       { status: 500 }
     );
   }
@@ -220,16 +318,35 @@ async function handleSync(req: NextRequest) {
     );
   }
 
+  const acceptedScope = normalizeScope(integration?.scope);
+
+  if (!hasActivityReadScope(acceptedScope)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Strava belum memberi izin membaca activity. Klik Reconnect Strava, lalu centang izin activity.",
+        detail: `Scope saat ini: ${acceptedScope || "-"}`,
+        action_required: "RECONNECT_STRAVA_WITH_ACTIVITY_SCOPE",
+      },
+      { status: 403 }
+    );
+  }
+
   try {
     const accessToken = await getValidAccessToken(supabase, integration);
-    const activities = await fetchStravaActivities(accessToken);
+    const activities = await fetchStravaActivities(accessToken, days);
 
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
 
     for (const activity of activities) {
-      const result = await saveActivity(supabase, Number(participant.id), activity);
+      const result = await saveActivity(
+        supabase,
+        Number(participant.id),
+        activity
+      );
 
       if (result.inserted) inserted += 1;
       else if (result.updated) updated += 1;
@@ -246,15 +363,17 @@ async function handleSync(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      marker: "WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419",
       participant_id: participant.id,
       fetched: activities.length,
       inserted,
       updated,
       skipped,
+      scope: acceptedScope,
       message:
         activities.length > 0
-          ? "Sync Strava berhasil."
-          : "Sync berhasil, tetapi akun Strava belum memiliki activity yang bisa ditarik.",
+          ? `Sync Strava berhasil. ${inserted} baru, ${updated} update.`
+          : "Sync Strava berhasil, tetapi belum ada activity baru pada periode ini.",
     });
   } catch (err: any) {
     console.error("STRAVA_SYNC_ERROR", err);
@@ -262,8 +381,14 @@ async function handleSync(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        message: "Sync Strava gagal.",
+        marker: "WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419",
+        message: err?.message || "Sync Strava gagal.",
         detail: err?.message || String(err),
+        action_required:
+          String(err?.message || "").toLowerCase().includes("reconnect") ||
+          String(err?.message || "").toLowerCase().includes("izin")
+            ? "RECONNECT_STRAVA"
+            : null,
       },
       { status: 500 }
     );
