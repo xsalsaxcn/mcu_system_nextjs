@@ -4,14 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
-// WELLNESS_PARTICIPANT_PORTAL_DAILY_SUMMARY_GOOGLE_FIT_FIX_V415
-// Fix dari file V398:
-// - Perbaiki syntax error isGoogleFitDailyRow.
-// - Summary card Workout Calories dan Steps hanya menghitung HARI INI.
+// WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
+// Base dari V415:
+// - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
 // - History Workout tetap menampilkan semua riwayat.
 // - Google Fit Daily pada tanggal yang sama dipilih row terbaru.
+// - Health Connect Daily pada tanggal yang sama dipilih row terbaru.
 // - todayDate dan activity date key pakai Asia/Jakarta.
 // - Auto sync Google Fit tetap setiap 10 menit saat portal terbuka.
+// - Strava card diganti menjadi Health Connect.
+// - Health Connect saat ini menunggu Android companion app.
+// - Data Health Connect yang masuk ke wellness_activity_logs akan langsung ikut summary.
 
 type Step = "request" | "verify" | "portal";
 type PortalTab =
@@ -105,6 +108,7 @@ function activityDateKey(item: any) {
         item?.start_date_local ||
         item?.raw_payload?.start_date_local ||
         item?.raw_payload?.last_sync_at ||
+        item?.raw_payload?.health_connect_last_sync_at ||
         item?.updated_at ||
         item?.created_at
     )
@@ -114,6 +118,7 @@ function activityDateKey(item: any) {
 function activityUpdatedAtMs(item: any) {
   const raw =
     item?.raw_payload?.last_sync_at ||
+    item?.raw_payload?.health_connect_last_sync_at ||
     item?.updated_at ||
     item?.started_at ||
     item?.created_at ||
@@ -148,6 +153,27 @@ function isGoogleFitDailyRow(item: any) {
   );
 }
 
+function isHealthConnectDailyRow(item: any) {
+  const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
+
+  const name = clean(
+    item?.activity_name ||
+      item?.activity_type ||
+      item?.nama_activities ||
+      item?.raw_payload?.provider ||
+      item?.raw_payload?.sync_mode ||
+      ""
+  ).toLowerCase();
+
+  return (
+    source === "health_connect" ||
+    source === "health-connect" ||
+    name.includes("health connect daily") ||
+    name.includes("health_connect") ||
+    name.includes("daily_aggregate")
+  );
+}
+
 function normalizeTodayWorkoutItems(items: any[] = []) {
   const today = todayDate();
   const result = new Map<string, any>();
@@ -157,15 +183,18 @@ function normalizeTodayWorkoutItems(items: any[] = []) {
     if (date !== today) continue;
 
     const googleFitDaily = isGoogleFitDailyRow(item);
+    const healthConnectDaily = isHealthConnectDailyRow(item);
 
     const key = googleFitDaily
       ? `google_fit_daily_${date}`
-      : String(
-          item?.id ||
-            item?.external_activity_id ||
-            item?.provider_activity_id ||
-            `${date}-${result.size}`
-        );
+      : healthConnectDaily
+        ? `health_connect_daily_${date}`
+        : String(
+            item?.id ||
+              item?.external_activity_id ||
+              item?.provider_activity_id ||
+              `${date}-${result.size}`
+          );
 
     const previous = result.get(key);
 
@@ -193,6 +222,8 @@ function activityCaloriesValue(item: any) {
       item?.total_calories ??
       item?.activity_calories ??
       item?.raw_payload?.google_fit_calories_expended ??
+      item?.raw_payload?.health_connect_calories ??
+      item?.raw_payload?.health_connect_active_calories ??
       item?.raw_payload?.calories
   );
 }
@@ -202,6 +233,7 @@ function activityMinutesValue(item: any) {
     item?.duration_minutes ??
       item?.total_duration_minutes ??
       item?.raw_payload?.google_fit_active_minutes ??
+      item?.raw_payload?.health_connect_active_minutes ??
       item?.raw_payload?.active_minutes
   );
 }
@@ -210,7 +242,8 @@ function activityStepsValue(item: any) {
   return asNumber(
     item?.steps ??
       item?.total_steps ??
-      item?.raw_payload?.google_fit_steps
+      item?.raw_payload?.google_fit_steps ??
+      item?.raw_payload?.health_connect_steps
   );
 }
 
@@ -700,7 +733,7 @@ export default function WellnessParticipantPortalPage() {
     }
   }
 
-  const stravaConnected = providerStatus(integrations, "strava");
+  const healthConnectConnected = providerStatus(integrations, "health_connect");
   const googleFitConnected = providerStatus(integrations, "google_fit");
 
   useEffect(() => {
@@ -927,7 +960,7 @@ export default function WellnessParticipantPortalPage() {
               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
                 <p>Portal ini khusus peserta program wellness.</p>
                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
-                <p>Peserta juga bisa menghubungkan Strava dan Google Fit untuk sinkronisasi otomatis.</p>
+                <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
                 </p>
@@ -980,7 +1013,7 @@ export default function WellnessParticipantPortalPage() {
                 nutritionLogs={todayNutrition}
                 totals={totals}
                 setActiveTab={setActiveTab}
-                stravaConnected={!!stravaConnected}
+                healthConnectConnected={!!healthConnectConnected}
                 googleFitConnected={!!googleFitConnected}
                 clinicalHistory={clinicalHistory}
               />
@@ -1029,7 +1062,7 @@ export default function WellnessParticipantPortalPage() {
 
             {activeTab === "devices" ? (
               <DevicesTab
-                stravaConnected={!!stravaConnected}
+                healthConnectConnected={!!healthConnectConnected}
                 googleFitConnected={!!googleFitConnected}
                 syncing={syncing}
                 syncProvider={syncProvider}
@@ -1086,7 +1119,7 @@ function HomeTab({
   nutritionLogs,
   totals,
   setActiveTab,
-  stravaConnected,
+  healthConnectConnected,
   googleFitConnected,
   clinicalHistory,
 }: {
@@ -1094,7 +1127,7 @@ function HomeTab({
   nutritionLogs: any[];
   totals: any;
   setActiveTab: (tab: PortalTab) => void;
-  stravaConnected: boolean;
+  healthConnectConnected: boolean;
   googleFitConnected: boolean;
   clinicalHistory: any[];
 }) {
@@ -1156,7 +1189,7 @@ function HomeTab({
             >
               Connect Device
               <div className="mt-1 text-xs font-bold text-white/70">
-                Strava/Fit status: {stravaConnected || googleFitConnected ? "ada" : "belum"}
+                Health Connect/Fit status: {healthConnectConnected || googleFitConnected ? "ada" : "belum"}
               </div>
             </button>
           </div>
@@ -1458,7 +1491,7 @@ function HistoryTab({
           <div>
             <h2 className="text-xl font-black">History Workout</h2>
             <p className="mt-1 text-sm font-bold text-slate-500">
-              Sumber bisa manual, Strava, atau Google Fit.
+              Sumber bisa manual, Health Connect, atau Google Fit.
             </p>
           </div>
 
@@ -1625,12 +1658,12 @@ function HealthtalkTab({
 }
 
 function DevicesTab({
-  stravaConnected,
+  healthConnectConnected,
   googleFitConnected,
   syncing,
   syncProvider,
 }: {
-  stravaConnected: boolean;
+  healthConnectConnected: boolean;
   googleFitConnected: boolean;
   syncing: string;
   syncProvider: (provider: "strava" | "google-fit") => void;
@@ -1640,38 +1673,37 @@ function DevicesTab({
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-black">Strava</h2>
+            <h2 className="text-xl font-black">Health Connect</h2>
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-              Tarik workout GPS, durasi, jarak, dan kalori dari Strava.
+              Health Connect akan menarik steps, exercise, distance, active minutes,
+              dan calories dari HP Android peserta melalui aplikasi pendamping.
             </p>
           </div>
 
           <span
             className={`rounded-full px-3 py-2 text-xs font-black ${
-              stravaConnected
+              healthConnectConnected
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-slate-50 text-slate-500"
             }`}
           >
-            {stravaConnected ? "Connected" : "Not connected"}
+            {healthConnectConnected ? "Connected" : "Android app required"}
           </span>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3">
-          <a
-            href="/api/wellness/integrations/strava/connect"
-            className="rounded-full bg-orange-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-orange-100"
-          >
-            {stravaConnected ? "Reconnect Strava" : "Konek Strava"}
-          </a>
+        <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
+          Receiver Health Connect sudah disiapkan di server. Tahap berikutnya
+          adalah membuat Android companion app agar peserta bisa memberi izin
+          Health Connect dan mengirim data otomatis ke Harmony Health.
+        </div>
 
+        <div className="mt-5 flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={() => syncProvider("strava")}
-            disabled={!stravaConnected || syncing === "strava"}
-            className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white disabled:opacity-40"
+            disabled
+            className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white opacity-50"
           >
-            {syncing === "strava" ? "Sync..." : "Sync Strava"}
+            Harmony Health Connect App Coming Soon
           </button>
         </div>
       </div>
