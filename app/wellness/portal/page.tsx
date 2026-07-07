@@ -1780,11 +1780,27 @@ function ProfileTab({
   integrations: any[];
   logout: () => void;
 }) {
+  const activeProviders = (integrations || [])
+    .filter((item) => {
+      if (item?.is_active === false) return false;
+      if (item?.is_active === 0) return false;
+      return true;
+    })
+    .map((item) => item.provider)
+    .filter(Boolean);
+
+  const participantId =
+    participant?.id ||
+    participant?.participant_id ||
+    participant?.wellness_participant_id ||
+    "-";
+
   return (
     <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-black">Profil Peserta</h2>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <ProfileRow label="Participant ID" value={participantId} />
         <ProfileRow label="Nama" value={participant?.name} />
         <ProfileRow label="Kode Karyawan" value={participant?.code} />
         <ProfileRow label="Gender" value={participant?.gender} />
@@ -1793,11 +1809,24 @@ function ProfileTab({
         <ProfileRow label="Username" value={participant?.portal_username} />
       </div>
 
+      <div className="mt-6 rounded-3xl bg-emerald-50 p-4">
+        <div className="text-sm font-black text-emerald-900">
+          ID untuk Sync Health Connect
+        </div>
+        <div className="mt-2 text-3xl font-black text-emerald-700">
+          {participantId}
+        </div>
+        <div className="mt-2 text-xs font-bold leading-5 text-emerald-900">
+          Masukkan angka ini pada aplikasi Harmony Health Connect di HP Android,
+          bukan Kode Karyawan.
+        </div>
+      </div>
+
       <div className="mt-6 rounded-3xl bg-slate-50 p-4">
         <div className="text-sm font-black text-slate-900">Device Connected</div>
         <div className="mt-2 text-xs font-bold text-slate-500">
-          {integrations.length
-            ? integrations.map((item) => item.provider).join(", ")
+          {activeProviders.length
+            ? activeProviders.join(", ")
             : "Belum ada device terkoneksi."}
         </div>
       </div>
@@ -1812,7 +1841,6 @@ function ProfileTab({
     </section>
   );
 }
-
 function ProfileRow({ label, value }: { label: string; value: any }) {
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
