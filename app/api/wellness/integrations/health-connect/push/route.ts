@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V421
-// Receiver Health Connect:
+// WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO
+// Update dari V421:
 // - Menerima data dari Android companion app.
 // - Menyimpan daily aggregate ke wellness_activity_logs.
 // - Menyimpan workout/session detail ke wellness_activity_logs.
 // - Source = health_connect.
 // - Tidak mengganggu Google Fit.
 // - Tidak butuh Strava API/subscription.
+// - Proteksi baru: jika Health Connect membaca data kosong / hampir nol,
+//   server tidak overwrite row existing agar data bagus tidak ketimpa 0.
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -18,6 +20,11 @@ function clean(value: any) {
 function num(value: any): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function safeNumber(value: any): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function dateOnly(value: any) {
@@ -68,6 +75,32 @@ function activityTypeLabel(value: any) {
   if (lower.includes("workout") || lower.includes("exercise")) return "Workout";
 
   return text;
+}
+
+function isEmptyDailyPayload({
+  steps,
+  calories,
+  activeMinutes,
+  distanceKm,
+  workouts,
+}: {
+  steps: number | null;
+  calories: number | null;
+  activeMinutes: number | null;
+  distanceKm: number | null;
+  workouts: any[];
+}) {
+  const s = safeNumber(steps);
+  const c = safeNumber(calories);
+  const m = safeNumber(activeMinutes);
+  const d = safeNumber(distanceKm);
+
+  // Kalau semua indikator utama kosong, atau calories sangat kecil
+  // tanpa steps/distance/minutes, kemungkinan Health Connect belum menerima
+  // data dari sumber seperti Mi Fitness/Google Fit/Samsung Health.
+  if (workouts.length > 0) return false;
+
+  return s <= 0 && m <= 0 && d <= 0 && c <= 5;
 }
 
 async function findParticipant(supabase: any, req: NextRequest, body: any) {
@@ -121,7 +154,7 @@ async function saveActivityLog(supabase: any, payload: any) {
 
   const { data: existing, error: existingError } = await supabase
     .from("wellness_activity_logs")
-    .select("id")
+    .select("id, calories, duration_minutes, distance_km, raw_payload")
     .eq("participant_id", participantId)
     .eq("source", "health_connect")
     .eq("external_activity_id", externalId)
@@ -162,7 +195,7 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
     `participant_${participantId}`;
 
   const rawPayload = {
-    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V421",
+    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
     device_id: body?.device_id || null,
     android_id: body?.android_id || null,
     app_version: body?.app_version || null,
@@ -234,6 +267,12 @@ async function handlePush(req: NextRequest) {
   let updated = 0;
   let skipped = 0;
 
+  const workouts = Array.isArray(body?.workouts)
+    ? body.workouts
+    : Array.isArray(body?.exercises)
+      ? body.exercises
+      : [];
+
   const steps = num(body?.steps ?? body?.total_steps);
 
   const calories = num(
@@ -257,7 +296,15 @@ async function handlePush(req: NextRequest) {
     activeMinutes !== null ||
     distanceKm !== null;
 
-  if (hasDailyData) {
+  const emptyDailyPayload = isEmptyDailyPayload({
+    steps,
+    calories,
+    activeMinutes,
+    distanceKm,
+    workouts,
+  });
+
+  if (hasDailyData && !emptyDailyPayload) {
     const dailyPayload: any = {
       participant_id: participantId,
       source: "health_connect",
@@ -270,7 +317,7 @@ async function handlePush(req: NextRequest) {
       calories,
       distance_km: distanceKm,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V421",
+        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
         provider: "health_connect",
         sync_mode: "daily_aggregate",
         health_connect_steps: steps,
@@ -287,13 +334,9 @@ async function handlePush(req: NextRequest) {
     if (result.inserted) inserted += 1;
     else if (result.updated) updated += 1;
     else skipped += 1;
+  } else if (hasDailyData && emptyDailyPayload) {
+    skipped += 1;
   }
-
-  const workouts = Array.isArray(body?.workouts)
-    ? body.workouts
-    : Array.isArray(body?.exercises)
-      ? body.exercises
-      : [];
 
   for (const workout of workouts) {
     const workoutDate = normalizeDate(
@@ -324,6 +367,17 @@ async function handlePush(req: NextRequest) {
     const workoutDistance = num(workout?.distance_km);
     const workoutSteps = num(workout?.steps);
 
+    const workoutIsEmpty =
+      safeNumber(duration) <= 0 &&
+      safeNumber(workoutCalories) <= 5 &&
+      safeNumber(workoutDistance) <= 0 &&
+      safeNumber(workoutSteps) <= 0;
+
+    if (workoutIsEmpty) {
+      skipped += 1;
+      continue;
+    }
+
     const payload: any = {
       participant_id: participantId,
       source: "health_connect",
@@ -341,7 +395,7 @@ async function handlePush(req: NextRequest) {
       calories: workoutCalories,
       distance_km: workoutDistance,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V421",
+        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
         provider: "health_connect",
         sync_mode: "exercise_session",
         health_connect_steps: workoutSteps,
@@ -364,13 +418,16 @@ async function handlePush(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V421",
+    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
     participant_id: participantId,
     date,
     inserted,
     updated,
     skipped,
-    message: `Health Connect diterima. ${inserted} baru, ${updated} update, ${skipped} skip.`,
+    skipped_empty_daily_payload: emptyDailyPayload,
+    message: emptyDailyPayload
+      ? `Health Connect terbaca kosong, data tidak dioverwrite. ${inserted} baru, ${updated} update, ${skipped} skip.`
+      : `Health Connect diterima. ${inserted} baru, ${updated} update, ${skipped} skip.`,
   });
 }
 
