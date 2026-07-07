@@ -1675,8 +1675,8 @@ function DevicesTab({
           <div>
             <h2 className="text-xl font-black">Health Connect</h2>
             <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-              Health Connect akan menarik steps, exercise, distance, active minutes,
-              dan calories dari HP Android peserta melalui aplikasi pendamping.
+              Tarik steps, calories, distance, dan durasi aktivitas dari Health
+              Connect melalui aplikasi Harmony Health Connect di HP Android.
             </p>
           </div>
 
@@ -1684,26 +1684,48 @@ function DevicesTab({
             className={`rounded-full px-3 py-2 text-xs font-black ${
               healthConnectConnected
                 ? "bg-emerald-50 text-emerald-700"
-                : "bg-slate-50 text-slate-500"
+                : "bg-amber-50 text-amber-700"
             }`}
           >
-            {healthConnectConnected ? "Connected" : "Android app required"}
+            {healthConnectConnected ? "Connected" : "Belum sync"}
           </span>
         </div>
 
         <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
-          Receiver Health Connect sudah disiapkan di server. Tahap berikutnya
-          adalah membuat Android companion app agar peserta bisa memberi izin
-          Health Connect dan mengirim data otomatis ke Harmony Health.
+          Health Connect sudah siap. Pastikan Mi Fitness / Google Fit / Samsung
+          Health sudah menulis data ke Health Connect, lalu buka aplikasi
+          Harmony Health Connect di HP dan klik Sync Hari Ini.
+        </div>
+
+        <div className="mt-5 grid gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-4">
+          <div className="text-xs font-black uppercase tracking-wide text-slate-400">
+            Cara Sync
+          </div>
+
+          <div className="grid gap-2 text-sm font-bold leading-6 text-slate-600">
+            <div>1. Buka aplikasi Harmony Health Connect di HP Android.</div>
+            <div>2. Isi Participant ID sesuai peserta.</div>
+            <div>3. Klik Cek Permission.</div>
+            <div>4. Klik Sync Hari Ini.</div>
+            <div>5. Refresh portal ini untuk melihat update Steps dan Calories.</div>
+          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button
             type="button"
-            disabled
-            className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white opacity-50"
+            onClick={() => window.location.reload()}
+            className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-emerald-100"
           >
-            Harmony Health Connect App Coming Soon
+            Refresh Portal
+          </button>
+
+          <button
+            type="button"
+            disabled
+            className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500"
+          >
+            Sync dilakukan dari Android App
           </button>
         </div>
       </div>
@@ -1749,7 +1771,6 @@ function DevicesTab({
     </section>
   );
 }
-
 function ProfileTab({
   participant,
   integrations,
