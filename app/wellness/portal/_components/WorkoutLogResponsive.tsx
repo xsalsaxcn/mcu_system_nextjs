@@ -1,60 +1,24 @@
 "use client";
 
-// WELLNESS_WORKOUT_LOG_RESPONSIVE_V393
-// Mobile: card layout, no horizontal slide.
-// Desktop: full table layout.
-// Supports manual, Strava, and Google Fit fields including steps.
-
-type ActivityItem = Record<string, any>;
-
-type Props = {
-  items?: ActivityItem[];
-};
+// WELLNESS_WORKOUT_LOG_RESPONSIVE_HEALTH_CONNECT_V423
+// Fix:
+// - History Workout membaca steps dari Health Connect.
+// - Membaca calories, duration, distance dari Google Fit / Health Connect / manual.
+// - Menampilkan source badge lebih rapi.
+// - Tidak mengubah logic simpan data, hanya tampilan history.
 
 function clean(value: any) {
   return String(value ?? "").trim();
 }
 
-function toNumber(value: any) {
+function asNumber(value: any) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : 0;
 }
 
-function formatDate(value: any) {
-  const text = clean(value);
-  if (!text) return "-";
-
-  const dateText = text.length >= 10 ? text.slice(0, 10) : text;
-  const date = new Date(dateText);
-
-  if (Number.isNaN(date.getTime())) return dateText;
-
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
-}
-
-function formatDateTime(value: any) {
-  const text = clean(value);
-  if (!text) return "-";
-
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return formatDate(text);
-
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatNumber(value: any, digits = 0) {
-  const n = toNumber(value);
-  if (n === null) return "-";
+function fmtNumber(value: any, digits = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
 
   return new Intl.NumberFormat("id-ID", {
     maximumFractionDigits: digits,
@@ -62,330 +26,281 @@ function formatNumber(value: any, digits = 0) {
   }).format(n);
 }
 
-function getDate(item: ActivityItem) {
-  return (
-    item.log_date ||
-    item.date ||
-    item.started_at ||
-    item.start_date_local ||
-    item.start_date ||
-    item.created_at ||
-    null
-  );
+function fmtDate(value: any) {
+  const text = clean(value);
+  if (!text) return "-";
+
+  const dateOnly = text.slice(0, 10);
+  const parts = dateOnly.split("-");
+
+  if (parts.length !== 3) return dateOnly;
+
+  const monthMap: Record<string, string> = {
+    "01": "Jan",
+    "02": "Feb",
+    "03": "Mar",
+    "04": "Apr",
+    "05": "Mei",
+    "06": "Jun",
+    "07": "Jul",
+    "08": "Agu",
+    "09": "Sep",
+    "10": "Okt",
+    "11": "Nov",
+    "12": "Des",
+  };
+
+  return `${parts[2]} ${monthMap[parts[1]] || parts[1]} ${parts[0]}`;
 }
 
-function getStartedAt(item: ActivityItem) {
-  return (
-    item.started_at ||
-    item.start_date_local ||
-    item.start_date ||
-    item.created_at ||
-    null
-  );
-}
+function fmtTime(value: any) {
+  const text = clean(value);
+  if (!text) return "-";
 
-function getName(item: ActivityItem) {
-  return (
-    clean(item.activity_name) ||
-    clean(item.name) ||
-    clean(item.title) ||
-    clean(item.sport_type) ||
-    clean(item.activity_type) ||
-    "Workout"
-  );
-}
-
-function getType(item: ActivityItem) {
-  return (
-    clean(item.activity_type) ||
-    clean(item.sport_type) ||
-    clean(item.type) ||
-    clean(item.workout_type) ||
-    "-"
-  );
-}
-
-function getSource(item: ActivityItem) {
-  return (
-    clean(item.source) ||
-    clean(item.provider) ||
-    clean(item.input_source) ||
-    "manual"
-  );
-}
-
-function getDurationMinutes(item: ActivityItem) {
-  const direct =
-    toNumber(item.duration_minutes) ??
-    toNumber(item.total_duration_minutes) ??
-    toNumber(item.minutes);
-
-  if (direct !== null) return direct;
-
-  const movingTime = toNumber(item.moving_time);
-  if (movingTime !== null) return movingTime / 60;
-
-  const elapsedTime = toNumber(item.elapsed_time);
-  if (elapsedTime !== null) return elapsedTime / 60;
-
-  return null;
-}
-
-function getDistanceKm(item: ActivityItem) {
-  const direct =
-    toNumber(item.distance_km) ??
-    toNumber(item.total_distance_km) ??
-    toNumber(item.km);
-
-  if (direct !== null) return direct;
-
-  const distance = toNumber(item.distance);
-  if (distance === null) return null;
-
-  if (distance > 100) return distance / 1000;
-
-  return distance;
-}
-
-function getCalories(item: ActivityItem) {
-  return (
-    toNumber(item.calories) ??
-    toNumber(item.total_calories) ??
-    toNumber(item.kcal) ??
-    null
-  );
-}
-
-function getSteps(item: ActivityItem) {
-  return (
-    toNumber(item.steps) ??
-    toNumber(item.total_steps) ??
-    null
-  );
-}
-
-function getExternalId(item: ActivityItem) {
-  return (
-    clean(item.external_activity_id) ||
-    clean(item.provider_activity_id) ||
-    clean(item.id) ||
-    "-"
-  );
-}
-
-function sourceBadgeClass(source: string) {
-  const text = source.toLowerCase();
-
-  if (text.includes("strava")) {
-    return "bg-orange-50 text-orange-700 ring-orange-100";
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleString("id-ID", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 
-  if (text.includes("google")) {
-    return "bg-blue-50 text-blue-700 ring-blue-100";
-  }
-
-  return "bg-slate-100 text-slate-700 ring-slate-200";
+  return text.replace("T", " ").slice(0, 16);
 }
 
-function WorkoutMobileCard({ item }: { item: ActivityItem }) {
-  const source = getSource(item);
-  const badgeClass = sourceBadgeClass(source);
+function sourceLabel(item: any) {
+  const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
 
-  const duration = getDurationMinutes(item);
-  const distance = getDistanceKm(item);
-  const calories = getCalories(item);
-  const steps = getSteps(item);
+  if (source === "health_connect" || source === "health-connect") return "Health Connect";
+  if (source === "google_fit" || source === "google-fit") return "Google Fit";
+  if (source === "strava") return "Strava";
+  if (source === "manual") return "Manual";
 
+  const rawProvider = clean(item?.raw_payload?.provider).toLowerCase();
+  if (rawProvider === "health_connect") return "Health Connect";
+  if (rawProvider === "google_fit") return "Google Fit";
+
+  return clean(item?.source || item?.provider || "Manual");
+}
+
+function badgeClass(item: any) {
+  const label = sourceLabel(item).toLowerCase();
+
+  if (label.includes("health connect")) {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (label.includes("google fit")) {
+    return "bg-blue-50 text-blue-700";
+  }
+
+  if (label.includes("strava")) {
+    return "bg-orange-50 text-orange-700";
+  }
+
+  return "bg-slate-50 text-slate-600";
+}
+
+function activityDate(item: any) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-black text-slate-950">
-            {getName(item)}
-          </div>
-
-          <div className="mt-1 text-xs font-semibold text-slate-500">
-            {formatDate(getDate(item))}
-          </div>
-        </div>
-
-        <span
-          className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-black capitalize ring-1 ${badgeClass}`}
-        >
-          {source}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Jenis
-          </div>
-          <div className="mt-1 truncate text-sm font-black text-slate-900">
-            {getType(item)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Durasi
-          </div>
-          <div className="mt-1 text-sm font-black text-slate-900">
-            {duration !== null ? `${formatNumber(duration, 1)} menit` : "-"}
-          </div>
-        </div>
-
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Jarak
-          </div>
-          <div className="mt-1 text-sm font-black text-slate-900">
-            {distance !== null ? `${formatNumber(distance, 2)} km` : "-"}
-          </div>
-        </div>
-
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Kalori
-          </div>
-          <div className="mt-1 text-sm font-black text-slate-900">
-            {calories !== null
-              ? `${formatNumber(Math.round(calories), 0)} kkal`
-              : "-"}
-          </div>
-        </div>
-
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Steps
-          </div>
-          <div className="mt-1 text-sm font-black text-slate-900">
-            {steps !== null ? formatNumber(Math.round(steps), 0) : "-"}
-          </div>
-        </div>
-
-        <div className="rounded-2xl bg-slate-50 p-3">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Waktu
-          </div>
-          <div className="mt-1 text-xs font-bold text-slate-700">
-            {formatDateTime(getStartedAt(item))}
-          </div>
-        </div>
-      </div>
-    </div>
+    clean(item?.log_date).slice(0, 10) ||
+    clean(item?.date).slice(0, 10) ||
+    clean(item?.tanggal).slice(0, 10) ||
+    clean(item?.started_at).slice(0, 10) ||
+    clean(item?.created_at).slice(0, 10)
   );
 }
 
-export default function WorkoutLogResponsive({ items = [] }: Props) {
-  const rows = Array.isArray(items) ? items : [];
+function activityName(item: any) {
+  const raw = item?.raw_payload || {};
 
-  if (rows.length === 0) {
+  return (
+    clean(item?.activity_name) ||
+    clean(item?.nama_activities) ||
+    clean(item?.activity_type) ||
+    clean(raw?.name) ||
+    clean(raw?.sport_type) ||
+    clean(raw?.sync_mode) ||
+    "Aktivitas"
+  );
+}
+
+function activityType(item: any) {
+  const raw = item?.raw_payload || {};
+
+  return (
+    clean(item?.activity_type) ||
+    clean(item?.jenis) ||
+    clean(raw?.provider) ||
+    clean(raw?.type) ||
+    clean(raw?.sport_type) ||
+    sourceLabel(item)
+  );
+}
+
+function activityDuration(item: any) {
+  const raw = item?.raw_payload || {};
+
+  return asNumber(
+    item?.duration_minutes ??
+      item?.total_duration_minutes ??
+      item?.elapsed_minutes ??
+      raw?.health_connect_active_minutes ??
+      raw?.google_fit_active_minutes ??
+      raw?.active_minutes ??
+      raw?.duration_minutes
+  );
+}
+
+function activityCalories(item: any) {
+  const raw = item?.raw_payload || {};
+
+  return asNumber(
+    item?.calories ??
+      item?.total_calories ??
+      item?.activity_calories ??
+      item?.calories_burned ??
+      raw?.health_connect_calories ??
+      raw?.health_connect_active_calories ??
+      raw?.google_fit_calories_expended ??
+      raw?.calories ??
+      raw?.active_calories ??
+      raw?.calories_burned
+  );
+}
+
+function activityDistance(item: any) {
+  const raw = item?.raw_payload || {};
+
+  return asNumber(
+    item?.distance_km ??
+      item?.total_distance_km ??
+      raw?.health_connect_distance_km ??
+      raw?.google_fit_distance_km ??
+      raw?.distance_km ??
+      (raw?.distance ? Number(raw.distance) / 1000 : null)
+  );
+}
+
+function activitySteps(item: any) {
+  const raw = item?.raw_payload || {};
+
+  return asNumber(
+    item?.steps ??
+      item?.total_steps ??
+      raw?.health_connect_steps ??
+      raw?.google_fit_steps ??
+      raw?.steps ??
+      raw?.total_steps
+  );
+}
+
+function activityTime(item: any) {
+  return (
+    clean(item?.started_at) ||
+    clean(item?.start_date_local) ||
+    clean(item?.raw_payload?.start_date_local) ||
+    clean(item?.raw_payload?.health_connect_last_sync_at) ||
+    clean(item?.raw_payload?.google_fit_last_sync_at) ||
+    clean(item?.updated_at) ||
+    clean(item?.created_at) ||
+    clean(item?.log_date)
+  );
+}
+
+function sortKey(item: any) {
+  const raw =
+    clean(item?.started_at) ||
+    clean(item?.updated_at) ||
+    clean(item?.created_at) ||
+    clean(item?.log_date) ||
+    clean(item?.date);
+
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.getTime();
+
+  return 0;
+}
+
+export default function WorkoutLogResponsive({ items }: { items: any[] }) {
+  const rows = Array.isArray(items) ? [...items] : [];
+
+  const sorted = rows.sort((a, b) => {
+    const timeDiff = sortKey(b) - sortKey(a);
+    if (timeDiff !== 0) return timeDiff;
+
+    return String(activityDate(b)).localeCompare(String(activityDate(a)));
+  });
+
+  if (!sorted.length) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
-        <div className="text-sm font-black text-slate-800">
-          Belum ada data workout.
-        </div>
-
-        <div className="mt-1 text-xs font-semibold text-slate-500">
-          Data akan muncul setelah peserta input workout manual atau melakukan
-          Sync Strava/Google Fit.
-        </div>
+      <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
+        Belum ada history workout.
       </div>
     );
   }
 
   return (
-    <div className="w-full">
-      <div className="space-y-3 md:hidden">
-        {rows.map((item, index) => (
-          <WorkoutMobileCard key={`${getExternalId(item)}-${index}`} item={item} />
-        ))}
+    <div className="space-y-4">
+      {sorted.map((item, index) => {
+        const name = activityName(item);
+        const date = activityDate(item);
+        const type = activityType(item);
+        const duration = activityDuration(item);
+        const distance = activityDistance(item);
+        const calories = activityCalories(item);
+        const steps = activitySteps(item);
+        const source = sourceLabel(item);
+
+        return (
+          <div
+            key={`${item?.id || item?.external_activity_id || index}-${index}`}
+            className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-black text-slate-950">
+                  {name}
+                </div>
+                <div className="mt-1 text-xs font-bold text-slate-500">
+                  {fmtDate(date)}
+                </div>
+              </div>
+
+              <div
+                className={`rounded-full px-4 py-2 text-xs font-black ${badgeClass(item)}`}
+              >
+                {source}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <InfoBox label="Jenis" value={type} />
+              <InfoBox label="Durasi" value={`${fmtNumber(duration, 1)} menit`} />
+              <InfoBox label="Jarak" value={`${fmtNumber(distance, 2)} km`} />
+              <InfoBox label="Kalori" value={`${fmtNumber(calories, 0)} kkal`} />
+              <InfoBox label="Steps" value={fmtNumber(steps, 0)} />
+              <InfoBox label="Waktu" value={fmtTime(activityTime(item))} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <div className="text-[11px] font-black uppercase tracking-wide text-slate-400">
+        {label}
       </div>
-
-      <div className="hidden overflow-x-auto rounded-3xl border border-slate-200 bg-white md:block">
-        <table className="w-full min-w-[960px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Tanggal</th>
-              <th className="px-4 py-3">Workout</th>
-              <th className="px-4 py-3">Jenis</th>
-              <th className="px-4 py-3">Durasi</th>
-              <th className="px-4 py-3">Jarak</th>
-              <th className="px-4 py-3">Kalori</th>
-              <th className="px-4 py-3">Steps</th>
-              <th className="px-4 py-3">Source</th>
-              <th className="px-4 py-3">Waktu Aktivitas</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.map((item, index) => {
-              const source = getSource(item);
-              const duration = getDurationMinutes(item);
-              const distance = getDistanceKm(item);
-              const calories = getCalories(item);
-              const steps = getSteps(item);
-
-              return (
-                <tr
-                  key={`${getExternalId(item)}-${index}`}
-                  className="border-b border-slate-100 last:border-b-0"
-                >
-                  <td className="px-4 py-3 font-bold text-slate-700">
-                    {formatDate(getDate(item))}
-                  </td>
-
-                  <td className="max-w-[240px] px-4 py-3">
-                    <div className="truncate font-black text-slate-950">
-                      {getName(item)}
-                    </div>
-
-                    <div className="mt-0.5 truncate text-xs font-semibold text-slate-500">
-                      ID: {getExternalId(item)}
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-3 font-semibold text-slate-700">
-                    {getType(item)}
-                  </td>
-
-                  <td className="px-4 py-3 font-semibold text-slate-700">
-                    {duration !== null ? `${formatNumber(duration, 1)} menit` : "-"}
-                  </td>
-
-                  <td className="px-4 py-3 font-semibold text-slate-700">
-                    {distance !== null ? `${formatNumber(distance, 2)} km` : "-"}
-                  </td>
-
-                  <td className="px-4 py-3 font-black text-slate-950">
-                    {calories !== null
-                      ? `${formatNumber(Math.round(calories), 0)} kkal`
-                      : "-"}
-                  </td>
-
-                  <td className="px-4 py-3 font-semibold text-slate-700">
-                    {steps !== null ? formatNumber(Math.round(steps), 0) : "-"}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-black capitalize ring-1 ${sourceBadgeClass(
-                        source
-                      )}`}
-                    >
-                      {source}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-500">
-                    {formatDateTime(getStartedAt(item))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="mt-1 text-sm font-black text-slate-900">
+        {clean(value) || "-"}
       </div>
     </div>
   );
