@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
@@ -819,7 +819,7 @@ export default function WellnessParticipantPortalPage() {
     message.toLowerCase().includes("wajib");
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="min-h-screen bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
@@ -830,7 +830,7 @@ export default function WellnessParticipantPortalPage() {
       ) : null}
 
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
-        <section className="overflow-hidden rounded-[2rem] bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-500 p-6 text-white shadow-xl shadow-blue-100 md:p-8">
+        <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
           <div className="flex flex-col gap-3 pr-14 md:pr-0">
             <div className="text-xs font-black uppercase tracking-[0.2em] text-white/70">
               Wellness Participant Portal
