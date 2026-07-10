@@ -970,43 +970,6 @@ export default function WellnessParticipantPortalPage() {
           </section>
         ) : (
           <div className="mt-6 space-y-6">
-            <section className="grid gap-4 md:grid-cols-4">
-              <SummaryCard
-                label="Calories In"
-                value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
-                note={
-                  totals.pendingCalories > 0
-                    ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
-                    : `${totals.foodCount} input nutrisi hari ini`
-                }
-                tone="blue"
-              />
-
-              <SummaryCard
-                label="Workout Calories"
-                value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
-                note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
-                tone="emerald"
-              />
-
-              <SummaryCard
-                label="Steps"
-                value={fmtNumber(totals.steps, 0)}
-                note="hari ini dari manual/device bila tersedia"
-                tone="amber"
-              />
-
-              <SummaryCard
-                label="BMI / Tensi"
-                value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
-                note={
-                  lastClinical?.systolic
-                    ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
-                    : "data klinis terakhir"
-                }
-                tone="slate"
-              />
-            </section>
 
             {activeTab === "home" ? (
               <HomeTab
@@ -4190,6 +4153,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
 
 
 
