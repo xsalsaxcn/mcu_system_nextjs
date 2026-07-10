@@ -820,7 +820,7 @@ export default function WellnessParticipantPortalPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
-      <HideOldInvalidSummaryCardV39 />
+      
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
@@ -831,35 +831,7 @@ export default function WellnessParticipantPortalPage() {
       ) : null}
 
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
-        <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
-          <div className="flex flex-col gap-3 pr-14 md:pr-0">
-            <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-600">
-              Wellness Participant Portal
-            </div>
 
-            <h1 className="text-3xl font-black md:text-4xl">
-              {step === "portal" ? "Portal Individu Peserta" : "Aktivasi Portal Peserta"}
-            </h1>
-
-            <p className="max-w-3xl text-sm font-bold leading-6 text-slate-700">
-              {step === "portal"
-                ? "Pantau aktivitas, input nutrisi harian, catat workout manual, dan sinkronkan perangkat wellness kamu."
-                : "Masukkan Kode Karyawan, buat username, lengkapi email/nomor HP, lalu verifikasi OTP untuk masuk."}
-            </p>
-          </div>
-        </section>
-
-        <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-          <div
-            className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
-              isWarningMessage
-                ? "bg-amber-50 text-amber-900"
-                : "bg-blue-50 text-blue-800"
-            }`}
-          >
-            {loading ? "Memuat portal..." : message}
-          </div>
-        </section>
 
         {step !== "portal" ? (
           <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -1365,14 +1337,15 @@ function HomeTab({
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
-      <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+      <CoachNoticeCenter participant={participant} />
+      <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
               Today Wellness
             </div>
 
-            <h2 className="mt-2 text-3xl font-black text-slate-950">
+            <h2 className="mt-2 text-2xl font-black text-slate-950">
               Halo, {participant?.name || "Peserta"}
             </h2>
 
@@ -1425,7 +1398,7 @@ function HomeTab({
         </div>
       </div>
 
-      <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+      <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
@@ -1731,7 +1704,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
 
   return (
     <section
-      className={`overflow-hidden rounded-[2.3rem] border shadow-xl shadow-slate-200/60 ${
+      className={`overflow-hidden rounded-[2rem] border shadow-xl shadow-slate-200/60 ${
         hasAlarm
           ? hasHighPriority
             ? "border-rose-200 bg-rose-50"
@@ -2164,9 +2137,9 @@ function NutritionTab({
 
   return (
     <section className="space-y-5">
-      <div className="grid gap-5 lg:grid-cols-[1fr_390px]">
-        <div className="overflow-hidden rounded-[2.4rem] border border-white bg-white shadow-xl shadow-slate-200/60">
-          <div className="relative overflow-hidden bg-gradient-to-br from-[#e1f3f0] via-[#e7f4fb] to-[#fff0e8] p-6 md:p-7">
+      <div className="grid gap-4">
+        <div className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
+          <div className="relative overflow-hidden bg-gradient-to-br from-[#e1f3f0] via-[#e7f4fb] to-[#fff0e8] p-5 md:p-6">
             <div className="absolute right-[-50px] top-[-40px] h-40 w-40 rounded-full bg-white/45 blur-2xl" />
             <div className="absolute bottom-[-50px] left-[-30px] h-36 w-36 rounded-full bg-teal-200/35 blur-2xl" />
 
@@ -2176,7 +2149,7 @@ function NutritionTab({
                   Food Diary
                 </div>
 
-                <h2 className="mt-3 text-3xl font-black leading-tight text-slate-950 md:text-4xl">
+                <h2 className="mt-3 text-2xl font-black leading-tight text-slate-950 md:text-3xl">
                   Input Nutrisi Harian
                 </h2>
 
@@ -2200,7 +2173,7 @@ function NutritionTab({
           </div>
 
           <div className="p-5 md:p-6">
-            <div className="grid gap-5 md:grid-cols-[250px_1fr]">
+            <div className="grid gap-4">
               <div>
                 <label className="block cursor-pointer rounded-[2rem] border border-dashed border-teal-200 bg-[#f4fbfa] p-5 text-center transition hover:bg-teal-50">
                   <input
@@ -2210,7 +2183,7 @@ function NutritionTab({
                     className="hidden"
                   />
 
-                  <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[2rem] bg-white text-sm font-black text-teal-700 shadow-sm">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[2rem] bg-white text-sm font-black text-teal-700 shadow-sm">
                     {photo ? "PHOTO" : "UPLOAD"}
                   </div>
 
@@ -2308,7 +2281,7 @@ function NutritionTab({
           </div>
         </div>
 
-        <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
@@ -2411,7 +2384,7 @@ function AutoFoodBreakdownV29({
 
                 <div className="mt-1 text-xs font-bold text-slate-500">
                   {item.match_status === "matched"
-                    ? `Match: ${item.matched_name} â€¢ ${item.category || "Umum"} â€¢ ${fmtNumber(item.base_calories, 0)} kkal dasar`
+                    ? `Match: ${item.matched_name} | ${item.category || "Umum"} | ${fmtNumber(item.base_calories, 0)} kkal dasar`
                     : "Belum match di Master KaloriData"}
                 </div>
               </div>
@@ -2469,7 +2442,7 @@ function NutritionHistoryItemV29({ item }: { item: any }) {
           </div>
 
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {item.log_date || "-"} â€¢ {item.meal_time || item.meal_type || "-"}
+            {item.log_date || "-"} | {item.meal_time || item.meal_type || "-"}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2831,13 +2804,13 @@ function HealthtalkTab(props: {
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
-      <div className="overflow-hidden rounded-[2.4rem] border border-white bg-white shadow-xl shadow-slate-200/60">
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#e7f4fb] via-[#e1f3f0] to-[#fff0e8] p-6 md:p-7">
+      <div className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#e7f4fb] via-[#e1f3f0] to-[#fff0e8] p-5 md:p-6">
           <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
             Health Talk
           </div>
 
-          <h2 className="mt-3 text-3xl font-black leading-tight text-slate-950 md:text-4xl">
+          <h2 className="mt-3 text-2xl font-black leading-tight text-slate-950 md:text-3xl">
             Input Health Talk
           </h2>
 
@@ -2856,7 +2829,7 @@ function HealthtalkTab(props: {
                 className="hidden"
               />
 
-              <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[2rem] bg-white text-sm font-black text-teal-700 shadow-sm">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[2rem] bg-white text-sm font-black text-teal-700 shadow-sm">
                 {evidence ? "FILE" : "UPLOAD"}
               </div>
 
@@ -2926,7 +2899,7 @@ function HealthtalkTab(props: {
         </div>
       </div>
 
-      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+      <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
@@ -2972,6 +2945,107 @@ function HealthtalkTab(props: {
       </div>
     </section>
   );
+}
+
+function parseRawPayloadV41(item: any) {
+  const raw = item?.raw_payload;
+
+  if (!raw) return {};
+
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof raw === "object") return raw;
+
+  return {};
+}
+
+function numberFromMixedV41(value: any) {
+  if (value === null || value === undefined) return 0;
+
+  const text = String(value)
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function firstPositiveNumberV41(values: any[]) {
+  for (const value of values) {
+    const n = numberFromMixedV41(value);
+    if (n > 0) return n;
+  }
+
+  return 0;
+}
+
+function numberFromTextPatternV41(text: any, pattern: RegExp) {
+  const raw = clean(text);
+  const match = raw.match(pattern);
+
+  if (!match?.[1]) return 0;
+
+  return numberFromMixedV41(match[1]);
+}
+
+function historyStepsValueV41(item: any) {
+  const raw = parseRawPayloadV41(item);
+  const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
+
+  const direct = firstPositiveNumberV41([
+    item?.steps,
+    item?.total_steps,
+    item?.step_count,
+    item?.health_connect_steps,
+    item?.google_fit_steps,
+    raw?.steps,
+    raw?.total_steps,
+    raw?.step_count,
+    raw?.health_connect_steps,
+    raw?.google_fit_steps,
+    raw?.activity_steps,
+    original?.steps,
+    original?.total_steps,
+    original?.step_count,
+    original?.health_connect_steps,
+    original?.google_fit_steps,
+  ]);
+
+  if (direct > 0) return direct;
+
+  return (
+    numberFromTextPatternV41(item?.activity_name, /([0-9][0-9.,]*)\s*steps/i) ||
+    numberFromTextPatternV41(item?.activity_type, /([0-9][0-9.,]*)\s*steps/i) ||
+    numberFromTextPatternV41(item?.notes, /([0-9][0-9.,]*)\s*steps/i) ||
+    0
+  );
+}
+
+function historyCaloriesValueV41(item: any) {
+  const raw = parseRawPayloadV41(item);
+  const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
+
+  return firstPositiveNumberV41([
+    item?.calories,
+    item?.total_calories,
+    item?.calorie,
+    item?.kcal,
+    raw?.calories,
+    raw?.total_calories,
+    raw?.calorie,
+    raw?.kcal,
+    raw?.active_calories,
+    original?.calories,
+    original?.total_calories,
+    original?.active_calories,
+  ]);
 }
 function HistoryTab({
   participant,
@@ -3124,14 +3198,14 @@ function HistoryTab({
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
-      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+      <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
               Participant History
             </div>
 
-            <h2 className="mt-2 text-3xl font-black text-slate-950">
+            <h2 className="mt-2 text-2xl font-black text-slate-950">
               History Peserta
             </h2>
 
@@ -3244,7 +3318,7 @@ function HistoryTab({
                 key={`${item.id || index}-${index}`}
                 title={item.activity_name || item.activity_type || item.source || "Workout"}
                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
-                note={`${fmtNumber(item.calories || item.total_calories || 0)} kkal | ${fmtNumber(item.steps || item.total_steps || 0)} steps`}
+                note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
               />
             ))}
           </div>
@@ -3316,7 +3390,7 @@ function HistoryAccordionCardV37({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
       <button
         type="button"
         onClick={onClick}
@@ -4153,6 +4227,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
 
 
 
