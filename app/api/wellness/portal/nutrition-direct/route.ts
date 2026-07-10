@@ -25,7 +25,7 @@ function clean(value: unknown) {
 }
 
 function asNumber(value: unknown) {
-  const n = Number(value);
+  const n = Number(String(value ?? "").replace(/\./g, "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -66,8 +66,8 @@ function firstText(...values: any[]) {
 
 function firstNumber(...values: any[]) {
   for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
+    const n = asNumber(value);
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
   return 0;
@@ -119,12 +119,9 @@ function parseCsv(text: string) {
 
     if ((char === "\n" || char === "\r") && !inQuotes) {
       if (char === "\r" && next === "\n") i++;
-
       row.push(current);
 
-      if (row.some((cell) => clean(cell))) {
-        rows.push(row);
-      }
+      if (row.some((cell) => clean(cell))) rows.push(row);
 
       row = [];
       current = "";
@@ -140,6 +137,7 @@ function parseCsv(text: string) {
   if (rows.length === 0) return [];
 
   const headers = rows[0].map((header) => clean(header));
+
   return rows.slice(1).map((cells, index) => {
     const item: Record<string, string> = { __row_index: String(index + 2) };
 
@@ -190,6 +188,39 @@ function normalizeSheetDate(value: unknown) {
   }
 
   return raw.slice(0, 10);
+}
+
+function normalizeGoogleDriveImageUrl(value: unknown) {
+  const raw = clean(value);
+
+  if (!raw) return "";
+
+  const fileMatch = raw.match(/\/file\/d\/([^/]+)/i);
+  if (fileMatch?.[1]) {
+    return `https://drive.google.com/thumbnail?id=${fileMatch[1]}&sz=w600`;
+  }
+
+  const idMatch =
+    raw.match(/[?&]id=([^&]+)/i) ||
+    raw.match(/thumbnail\?id=([^&]+)/i);
+
+  if (idMatch?.[1]) {
+    return `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w600`;
+  }
+
+  return raw;
+}
+
+function extractExplicitCaloriesFromSheetRow(row: Record<string, string>) {
+  const combined = Object.values(row || {}).join(" ");
+
+  const totalMatch =
+    combined.match(/total\s+([0-9.,]+)\s*(?:kalori|kkal|calories|calorie)/i) ||
+    combined.match(/([0-9.,]+)\s*(?:kalori|kkal)\s*[\-â€“â€”â€¢]*\s*breakdown/i);
+
+  if (!totalMatch) return 0;
+
+  return asNumber(totalMatch[1]);
 }
 
 function splitFoodText(value: string) {
@@ -248,7 +279,7 @@ function matchFoodCalories(foodText: string, foodIndex: ReturnType<typeof buildF
 
     if (!normalizedToken) continue;
 
-    let match =
+    const match =
       foodIndex.find((food) => food.normalized === normalizedToken) ||
       foodIndex.find((food) => normalizedToken.includes(food.normalized)) ||
       foodIndex.find((food) => food.normalized.includes(normalizedToken));
@@ -266,6 +297,7 @@ function matchFoodCalories(foodText: string, foodIndex: ReturnType<typeof buildF
   }
 
   return {
+    itemCount: tokens.length,
     totalCalories,
     matched,
     unmatched,
@@ -300,15 +332,19 @@ function normalizeSupabaseFood(row: any) {
     row.total_calories,
     row.total_calorie,
     row.total_kcal,
+    row.estimated_calories,
     raw.calories,
     raw.total_calories,
     raw.total_calorie,
     raw.total_kcal,
+    raw.estimated_calories,
     raw.matched_calories,
     original.calories,
     original.total_calories,
     original.total_kcal
   );
+
+  const tokens = splitFoodText(foodName);
 
   return {
     id: `supabase-${row.id}`,
@@ -323,15 +359,18 @@ function normalizeSupabaseFood(row: any) {
     portion: firstText(row.portion, raw.portion, original.portion, "-"),
     calories,
     total_calories: calories,
-    photo_url: firstText(
-      row.photo_url,
-      row.evidence_url,
-      raw.photo_url,
-      raw.photoUrl,
-      raw.evidence_url,
-      raw.image_url,
-      original.photo_url,
-      original.photoUrl
+    item_count: Math.max(tokens.length, 1),
+    photo_url: normalizeGoogleDriveImageUrl(
+      firstText(
+        row.photo_url,
+        row.evidence_url,
+        raw.photo_url,
+        raw.photoUrl,
+        raw.evidence_url,
+        raw.image_url,
+        original.photo_url,
+        original.photoUrl
+      )
     ),
     source: "supabase",
     created_at: row.created_at,
@@ -391,7 +430,11 @@ function normalizeSheetFood(
     "preview",
   ]);
 
-  const result = matchFoodCalories(mealText, foodIndex);
+  const explicitCalories = extractExplicitCaloriesFromSheetRow(row);
+  const matchedResult = matchFoodCalories(mealText, foodIndex);
+  const finalCalories =
+    explicitCalories > 0 ? explicitCalories : matchedResult.totalCalories;
+
   const logDate = normalizeSheetDate(submissionDate);
 
   return {
@@ -403,18 +446,19 @@ function normalizeSheetFood(
     meal_type: mealTime || "-",
     food_name: mealText || "Food log",
     meal_text: mealText || "Food log",
-    detected_foods: result.matched.map((item) => item.matched_name).join(", "),
+    detected_foods: matchedResult.matched.map((item) => item.matched_name).join(", "),
     portion: "-",
-    calories: result.totalCalories,
-    total_calories: result.totalCalories,
-    photo_url: previewPhoto || uploadPhoto || "",
+    calories: finalCalories,
+    total_calories: finalCalories,
+    item_count: Math.max(matchedResult.itemCount, 1),
+    photo_url: normalizeGoogleDriveImageUrl(previewPhoto || uploadPhoto || ""),
     source: "google_sheet",
     selected_name: selectedName,
     participant_name: participantName,
     created_at: submissionDate,
     updated_at: submissionDate,
-    matched_foods: result.matched,
-    unmatched_foods: result.unmatched,
+    matched_foods: matchedResult.matched,
+    unmatched_foods: matchedResult.unmatched,
     raw_payload: row,
   };
 }
@@ -444,16 +488,28 @@ function sortNewest(a: any, b: any) {
 }
 
 function dedupeLogs(logs: any[]) {
+  const sorted = [...logs].sort((a, b) => {
+    const scoreA =
+      (a.source === "google_sheet" ? 10 : 0) +
+      (a.photo_url ? 2 : 0) +
+      (asNumber(a.calories) > 0 ? 1 : 0);
+
+    const scoreB =
+      (b.source === "google_sheet" ? 10 : 0) +
+      (b.photo_url ? 2 : 0) +
+      (asNumber(b.calories) > 0 ? 1 : 0);
+
+    return scoreB - scoreA;
+  });
+
   const seen = new Set<string>();
   const result: any[] = [];
 
-  for (const log of logs) {
+  for (const log of sorted) {
     const key = [
-      log.source,
       log.log_date,
       normalizeText(log.meal_time),
       normalizeText(log.food_name),
-      normalizeText(log.photo_url),
     ].join("|");
 
     if (seen.has(key)) continue;
@@ -462,7 +518,7 @@ function dedupeLogs(logs: any[]) {
     result.push(log);
   }
 
-  return result;
+  return result.sort(sortNewest);
 }
 
 async function loadSheetLogs(
@@ -565,7 +621,7 @@ export async function GET(request: NextRequest) {
     const logs = dedupeLogs([
       ...supabaseLogs,
       ...(sheetResult.logs || []),
-    ]).sort(sortNewest);
+    ]);
 
     const todayLogs = logs.filter(
       (item: any) => clean(item.log_date).slice(0, 10) === today
@@ -573,6 +629,10 @@ export async function GET(request: NextRequest) {
 
     const todayCalories = todayLogs.reduce((sum: number, item: any) => {
       return sum + asNumber(item.calories || item.total_calories);
+    }, 0);
+
+    const todayItemCount = todayLogs.reduce((sum: number, item: any) => {
+      return sum + Math.max(asNumber(item.item_count), 1);
     }, 0);
 
     return NextResponse.json({
@@ -583,7 +643,8 @@ export async function GET(request: NextRequest) {
       logs,
       today_logs: todayLogs,
       latest_logs: logs.slice(0, 8),
-      today_count: todayLogs.length,
+      today_count: todayItemCount,
+      today_row_count: todayLogs.length,
       today_calories: todayCalories,
       has_today_data: todayLogs.length > 0,
       sources: {
