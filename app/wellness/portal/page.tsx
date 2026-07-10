@@ -820,7 +820,7 @@ export default function WellnessParticipantPortalPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
-      <HideOldInvalidSummaryCardV38 />
+      <HideOldInvalidSummaryCardV39 />
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
@@ -1158,33 +1158,90 @@ function MiniDecorChart({ tone }: { tone: "blue" | "emerald" | "amber" | "slate"
 
 
 
-function HideOldInvalidSummaryCardV38() {
+
+function HideOldInvalidSummaryCardV39() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    function textOf(element: Element | null) {
+    function compactText(element: Element | null) {
       return String(element?.textContent || "").replace(/\s+/g, " ").trim();
     }
 
-    function isCardLike(element: HTMLElement) {
-      const className = element.getAttribute("class") || "";
+    function hide(element: HTMLElement | null, reason: string) {
+      if (!element) return;
+      element.style.display = "none";
+      element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+      element.setAttribute("data-hidden-reason", reason);
+    }
+
+    function isLegacyCaloriesCard(element: HTMLElement) {
+      const text = compactText(element);
 
       return (
-        className.includes("rounded") ||
-        className.includes("shadow") ||
-        className.includes("border") ||
-        className.includes("bg-white") ||
-        className.includes("bg-[#")
+        text.includes("CALORIES IN") &&
+        text.includes("0 kkal") &&
+        text.includes("0 input nutrisi hari ini") &&
+        !text.includes("Halo,")
       );
     }
 
-    function hideElement(element: HTMLElement) {
-      element.style.display = "none";
-      element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV38");
+    function findMetricGridFromCaloriesCard(card: HTMLElement) {
+      let current: HTMLElement | null = card;
+
+      for (let level = 0; current && level < 8; level++) {
+        const text = compactText(current);
+        const className = current.getAttribute("class") || "";
+
+        const hasLegacySummary =
+          text.includes("CALORIES IN") &&
+          text.includes("WORKOUT CALORIES") &&
+          text.includes("STEPS") &&
+          text.includes("BMI / TENSI") &&
+          !text.includes("Halo,");
+
+        const looksLikeLayout =
+          className.includes("grid") ||
+          className.includes("space-y") ||
+          className.includes("rounded") ||
+          className.includes("shadow") ||
+          className.includes("border");
+
+        if (hasLegacySummary && looksLikeLayout) {
+          return current;
+        }
+
+        current = current.parentElement;
+      }
+
+      return card;
     }
 
-    function isBefore(a: HTMLElement, b: HTMLElement) {
-      return Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    function hideEmptyIntroArtifacts() {
+      const candidates = Array.from(
+        document.body.querySelectorAll("section, div, article")
+      ) as HTMLElement[];
+
+      candidates.forEach((element) => {
+        const text = compactText(element);
+        const rect = element.getBoundingClientRect();
+        const className = element.getAttribute("class") || "";
+
+        const cardLike =
+          className.includes("rounded") ||
+          className.includes("shadow") ||
+          className.includes("border") ||
+          className.includes("bg-white");
+
+        if (
+          cardLike &&
+          text.length === 0 &&
+          rect.width > 220 &&
+          rect.height > 20 &&
+          rect.height < 160
+        ) {
+          hide(element, "empty-intro-artifact");
+        }
+      });
     }
 
     function scan() {
@@ -1194,48 +1251,40 @@ function HideOldInvalidSummaryCardV38() {
         document.body.querySelectorAll("section, div, article")
       ) as HTMLElement[];
 
-      const haloElement =
-        all.find((element) => {
-          const text = textOf(element);
-          return (
-            text.includes("Halo,") &&
-            text.includes("Ringkasan aktivitas") &&
-            text.includes("Refresh Nutrisi")
-          );
-        }) || null;
-
       all.forEach((element) => {
-        const text = textOf(element);
-        const rect = element.getBoundingClientRect();
+        if (!isLegacyCaloriesCard(element)) return;
 
-        if (!isCardLike(element)) return;
+        const grid = findMetricGridFromCaloriesCard(element);
+        hide(grid, "legacy-metric-grid");
 
-        const beforeHalo = haloElement ? isBefore(element, haloElement) : true;
+        let parent = grid.parentElement as HTMLElement | null;
 
-        const isIntroHero =
-          text.includes("WELLNESS PARTICIPANT PORTAL") ||
-          text.includes("Portal Individu Peserta") ||
-          text.includes("Portal peserta aktif. Silakan input");
+        if (parent) {
+          const parentText = compactText(parent);
 
-        const isOldSummaryGroup =
-          beforeHalo &&
-          text.includes("CALORIES IN") &&
-          text.includes("WORKOUT CALORIES") &&
-          text.includes("STEPS") &&
-          !text.includes("Halo,") &&
-          text.length < 1200;
+          if (
+            parentText.includes("CALORIES IN") &&
+            parentText.includes("0 input nutrisi hari ini") &&
+            parentText.includes("Halo,") &&
+            parentText.length < 2500
+          ) {
+            Array.from(parent.children).forEach((child) => {
+              const childElement = child as HTMLElement;
+              const childText = compactText(childElement);
 
-        const isEmptyOldCard =
-          beforeHalo &&
-          text.length === 0 &&
-          rect.width > 220 &&
-          rect.height > 24 &&
-          rect.height < 160;
-
-        if (isIntroHero || isOldSummaryGroup || isEmptyOldCard) {
-          hideElement(element);
+              if (
+                childText.includes("CALORIES IN") &&
+                childText.includes("0 input nutrisi hari ini") &&
+                !childText.includes("Halo,")
+              ) {
+                hide(childElement, "legacy-summary-child");
+              }
+            });
+          }
         }
       });
+
+      hideEmptyIntroArtifacts();
     }
 
     scan();
@@ -1247,9 +1296,15 @@ function HideOldInvalidSummaryCardV38() {
     observer.observe(document.body, {
       childList: true,
       subtree: true,
+      characterData: true,
     });
 
-    return () => observer.disconnect();
+    const timer = window.setInterval(scan, 800);
+
+    return () => {
+      observer.disconnect();
+      window.clearInterval(timer);
+    };
   }, []);
 
   return null;
@@ -4135,6 +4190,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
 
 
 
