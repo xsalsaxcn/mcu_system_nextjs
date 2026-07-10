@@ -1,4 +1,4 @@
-// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
+﻿// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
 // Nutrition submission is stored ONLY in existing Google Sheet + Google Drive.
 // V402:
 // - support comma-separated foods
@@ -11,6 +11,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+
+// PORTION_SCOPE_FALLBACK_V24
+// Fallback untuk helper function lama yang berada di luar scope POST.
+// Nilai porsi sebenarnya tetap dikirim dari body POST dan/atau raw_payload.
+const portionGroup = "";
+const portionFraction = "";
+const portionMultiplier = 0;
+
 
 export const runtime = "nodejs";
 
@@ -349,6 +357,13 @@ async function calculateMultiFoodCalories(supabase: any, foodName: string) {
 
   return {
     original_food_name: clean(foodName),
+portion_group: portionGroup || null,
+portion_fraction: portionFraction || null,
+portion_multiplier: portionMultiplier || null,
+plate_group: portionGroup || null,
+plate_fraction: portionFraction || null,
+isi_piringku_group: portionGroup || null,
+isi_piringku_fraction: portionFraction || null,
     items,
     breakdown,
     total_calories: matchedCount > 0 ? totalCalories : null,
@@ -511,6 +526,35 @@ export async function POST(req: NextRequest) {
 
     const logDate = safeIsoDate(body?.log_date || body?.logDate);
     const mealType = clean(body?.meal_type || body?.mealType) || "meal";
+
+// PORTION_PAYLOAD_V21
+const portionGroup = clean(
+  body?.portion_group ||
+    body?.portionGroup ||
+    body?.plate_group ||
+    body?.plateGroup ||
+    body?.isi_piringku_group
+);
+
+const portionFraction = clean(
+  body?.portion_fraction ||
+    body?.portionFraction ||
+    body?.plate_fraction ||
+    body?.plateFraction ||
+    body?.isi_piringku_fraction
+);
+
+const portionMultiplierRaw = Number(
+  body?.portion_multiplier ||
+    body?.portionMultiplier ||
+    body?.plate_multiplier ||
+    body?.plateMultiplier ||
+    0
+);
+
+const portionMultiplier = Number.isFinite(portionMultiplierRaw)
+  ? portionMultiplierRaw
+  : 0;
     const portion = clean(body?.portion || body?.porsi) || null;
     const notes = clean(body?.notes || body?.catatan) || null;
 
