@@ -1052,7 +1052,7 @@ export default function WellnessParticipantPortalPage() {
             ) : null}
 
             {activeTab === "history" ? (
-              <HistoryTab
+              <HistoryTab participant={participant}
                 workoutItems={workoutItems}
                 nutritionLogs={nutritionLogs}
                 healthtalkLogs={healthtalkLogs}
@@ -1181,6 +1181,7 @@ function HomeTab({
 
   const [directNutrition, setDirectNutrition] = useState<any>({
     ok: false,
+    today: todayDate(),
     logs: [],
     today_logs: [],
     latest_logs: [],
@@ -1247,8 +1248,6 @@ function HomeTab({
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
-      <CoachNoticeCenter participant={participant} />
-
       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
@@ -1275,28 +1274,28 @@ function HomeTab({
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-4">
-          <HomeMetricCardV33
+          <PortalMetricCardV34
             label="Calories In"
             value={`${fmtNumber(todayCalories, 0)} kkal`}
             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
             tone="sky"
           />
 
-          <HomeMetricCardV33
+          <PortalMetricCardV34
             label="Workout Calories"
             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
             tone="teal"
           />
 
-          <HomeMetricCardV33
+          <PortalMetricCardV34
             label="Steps"
             value={fmtNumber(totals.steps || 0)}
             note="hari ini dari manual/device bila tersedia"
             tone="peach"
           />
 
-          <HomeMetricCardV33
+          <PortalMetricCardV34
             label="BMI / Tensi"
             value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
             note={
@@ -1354,7 +1353,7 @@ function HomeTab({
             </div>
           ) : (
             mealLogs.slice(0, 6).map((item: any, index: number) => (
-              <HomeMealLogItemV33 key={`${item.id || index}-${index}`} item={item} />
+              <PortalMealLogItemV34 key={`${item.id || index}-${index}`} item={item} />
             ))
           )}
         </div>
@@ -1363,7 +1362,7 @@ function HomeTab({
   );
 }
 
-function HomeMetricCardV33({
+function PortalMetricCardV34({
   label,
   value,
   note,
@@ -1392,7 +1391,7 @@ function HomeMetricCardV33({
   );
 }
 
-function normalizeImageUrlV33(value: any) {
+function normalizeImageUrlV34(value: any) {
   const raw = clean(value);
   if (!raw) return "";
 
@@ -1409,8 +1408,8 @@ function normalizeImageUrlV33(value: any) {
   return raw;
 }
 
-function HomeMealLogItemV33({ item }: { item: any }) {
-  const photo = normalizeImageUrlV33(item.photo_url);
+function PortalMealLogItemV34({ item }: { item: any }) {
+  const photo = normalizeImageUrlV34(item.photo_url);
   const sourceLabel =
     item.source === "google_sheet"
       ? "Google Sheet"
@@ -2694,69 +2693,364 @@ function WorkoutTab({
   );
 }
 
+
+function HealthtalkTab(props: {
+  form?: any;
+  evidence?: File | null;
+  setEvidence?: (file: File | null) => void;
+  setValue?: (key: string, value: string) => void;
+  saveHealthtalk?: () => void | Promise<void>;
+  logs?: any[];
+  [key: string]: any;
+}) {
+  const {
+    form = {},
+    evidence = null,
+    setEvidence = () => {},
+    setValue = () => {},
+    saveHealthtalk = () => {},
+    logs = [],
+  } = props;
+
+  return (
+    <section className="w-full max-w-full space-y-5 overflow-hidden">
+      <div className="overflow-hidden rounded-[2.4rem] border border-white bg-white shadow-xl shadow-slate-200/60">
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#e7f4fb] via-[#e1f3f0] to-[#fff0e8] p-6 md:p-7">
+          <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+            Health Talk
+          </div>
+
+          <h2 className="mt-3 text-3xl font-black leading-tight text-slate-950 md:text-4xl">
+            Input Health Talk
+          </h2>
+
+          <p className="mt-3 max-w-2xl text-sm font-bold leading-6 text-slate-600">
+            Catat kehadiran seminar, edukasi kesehatan, atau aktivitas pembelajaran wellness.
+          </p>
+        </div>
+
+        <div className="grid gap-5 p-5 md:grid-cols-[250px_1fr] md:p-6">
+          <div>
+            <label className="block cursor-pointer rounded-[2rem] border border-dashed border-teal-200 bg-[#f4fbfa] p-5 text-center transition hover:bg-teal-50">
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(event) => setEvidence(event.target.files?.[0] || null)}
+                className="hidden"
+              />
+
+              <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[2rem] bg-white text-sm font-black text-teal-700 shadow-sm">
+                {evidence ? "FILE" : "UPLOAD"}
+              </div>
+
+              <div className="mt-4 text-sm font-black text-slate-950">
+                {evidence ? evidence.name : "Upload Bukti"}
+              </div>
+
+              <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
+                Bisa berupa foto atau PDF bukti kehadiran.
+              </div>
+            </label>
+          </div>
+
+          <div className="grid gap-4">
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Tanggal
+              <input
+                type="date"
+                value={form.event_date || form.log_date || ""}
+                onChange={(e) => setValue("event_date", e.target.value)}
+                className={fieldClass}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Judul / Topik Health Talk
+              <input
+                value={form.title || form.topic || ""}
+                onChange={(e) => setValue("title", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: Edukasi Sindrom Metabolik"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Jenis Kehadiran
+              <select
+                value={form.attendance_type || ""}
+                onChange={(e) => setValue("attendance_type", e.target.value)}
+                className={fieldClass}
+              >
+                <option value="">Pilih jenis kehadiran</option>
+                <option value="Online">Online</option>
+                <option value="Offline">Offline</option>
+                <option value="Recording">Recording</option>
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Catatan
+              <textarea
+                value={form.notes || ""}
+                onChange={(e) => setValue("notes", e.target.value)}
+                className={`${fieldClass} min-h-[110px]`}
+                placeholder="Catatan tambahan atau poin edukasi yang didapat."
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => saveHealthtalk()}
+              className="rounded-[1.5rem] bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100"
+            >
+              Simpan Health Talk
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+              Health Talk History
+            </div>
+
+            <h3 className="mt-2 text-2xl font-black text-slate-950">
+              Riwayat Health Talk
+            </h3>
+          </div>
+
+          <div className="rounded-full bg-teal-50 px-3 py-2 text-xs font-black text-teal-700">
+            {logs.length} log
+          </div>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {logs.length === 0 ? (
+            <div className="rounded-[2rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
+              Belum ada input Health Talk.
+            </div>
+          ) : (
+            logs.slice(0, 10).map((item: any, index: number) => (
+              <div
+                key={`${item.id || index}-${index}`}
+                className="rounded-[1.7rem] bg-slate-50 p-4"
+              >
+                <div className="text-sm font-black text-slate-950">
+                  {item.title || item.topic || "Health Talk"}
+                </div>
+
+                <div className="mt-1 text-xs font-bold text-slate-400">
+                  {item.event_date || item.log_date || item.created_at || "-"}
+                </div>
+
+                <div className="mt-3 text-sm font-bold leading-6 text-slate-600">
+                  {item.notes || item.description || "-"}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
 function HistoryTab({
-  workoutItems,
+  participant,
   nutritionLogs,
+  workoutLogs,
+  workoutItems,
+  healthTalkLogs,
   healthtalkLogs,
+  clinicalHistory,
   refresh,
 }: {
-  workoutItems: any[];
-  nutritionLogs: any[];
-  healthtalkLogs: any[];
-  refresh: () => void;
+  participant?: any;
+  nutritionLogs?: any[];
+  workoutLogs?: any[];
+  workoutItems?: any[];
+  healthTalkLogs?: any[];
+  healthtalkLogs?: any[];
+  clinicalHistory?: any[];
+  refresh?: () => any;
 }) {
+  const participantId = Number(
+    participant?.id ||
+      participant?.participant_id ||
+      participant?.wellness_participant_id ||
+      0
+  );
+
+  const [directNutrition, setDirectNutrition] = useState<any>({
+    ok: false,
+    logs: [],
+    today_logs: [],
+    latest_logs: [],
+    today_count: 0,
+    today_row_count: 0,
+    today_calories: 0,
+    sources: null,
+  });
+
+  const [loadingNutrition, setLoadingNutrition] = useState(false);
+
+  async function loadDirectNutritionHistory() {
+    if (!participantId) return;
+
+    setLoadingNutrition(true);
+
+    const result = await fetch(
+      `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+      { cache: "no-store" }
+    )
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (result?.ok) {
+      setDirectNutrition(result);
+    }
+
+    setLoadingNutrition(false);
+  }
+
+  useEffect(() => {
+    loadDirectNutritionHistory();
+  }, [participantId]);
+
+  const nutrition =
+    directNutrition?.logs?.length > 0
+      ? directNutrition.logs
+      : nutritionLogs || [];
+
+  const workout = workoutLogs || workoutItems || [];
+  const healthTalk = healthTalkLogs || healthtalkLogs || [];
+  const clinical = clinicalHistory || [];
+
   return (
-    <section className="space-y-5">
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <section className="w-full max-w-full space-y-5 overflow-hidden">
+      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-xl font-black">History Workout</h2>
-            <p className="mt-1 text-sm font-bold text-slate-500">
-              Sumber bisa manual, Health Connect, atau Google Fit.
+            <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+              Participant History
+            </div>
+
+            <h2 className="mt-2 text-3xl font-black text-slate-950">
+              History Peserta
+            </h2>
+
+            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+              Riwayat nutrisi dibaca langsung dari Google Sheet dan Supabase.
             </p>
           </div>
 
           <button
             type="button"
-            onClick={refresh}
-            className="w-full rounded-full bg-slate-50 px-4 py-2 text-xs font-black text-slate-700 md:w-auto"
+            onClick={loadDirectNutritionHistory}
+            className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
           >
-            Refresh
+            {loadingNutrition ? "Memuat..." : "Refresh History"}
           </button>
         </div>
 
-        <div className="mt-5">
-          <WorkoutLogResponsive items={workoutItems} />
+        {directNutrition?.sources ? (
+          <div className="mt-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
+            Nutrition source: Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
+            {directNutrition.sources.google_sheet_rows || 0} row
+          </div>
+        ) : null}
+
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <PortalMetricCardV34
+            label="Nutrition"
+            value={`${nutrition.length}`}
+            note={`${fmtNumber(directNutrition?.today_calories || 0)} kkal hari ini`}
+            tone="sky"
+          />
+
+          <PortalMetricCardV34
+            label="Workout"
+            value={`${workout.length}`}
+            note="activity logs"
+            tone="teal"
+          />
+
+          <PortalMetricCardV34
+            label="Health Talk"
+            value={`${healthTalk.length}`}
+            note="edukasi"
+            tone="peach"
+          />
+
+          <PortalMetricCardV34
+            label="Clinical"
+            value={`${clinical.length}`}
+            note="MCU/progress"
+            tone="slate"
+          />
         </div>
       </div>
 
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <h2 className="text-xl font-black">History Nutrisi</h2>
+      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <h3 className="text-2xl font-black text-slate-950">
+          History Nutrisi
+        </h3>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {nutritionLogs.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 md:col-span-2">
+        <div className="mt-5 space-y-3">
+          {nutrition.length === 0 ? (
+            <div className="rounded-[1.8rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
               Belum ada input nutrisi.
             </div>
           ) : (
-            nutritionLogs.map((item, index) => (
-              <NutritionLogCard key={`${item.id || index}-${index}`} item={item} />
+            nutrition.slice(0, 20).map((item: any, index: number) => (
+              <PortalMealLogItemV34 key={`${item.id || index}-${index}`} item={item} />
             ))
           )}
         </div>
       </div>
 
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <h2 className="text-xl font-black">History Health Talk</h2>
+      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <h3 className="text-2xl font-black text-slate-950">
+          History Workout
+        </h3>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {healthtalkLogs.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400 md:col-span-2">
+        <div className="mt-5 space-y-3">
+          {workout.length === 0 ? (
+            <div className="rounded-[1.8rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
+              Belum ada input workout.
+            </div>
+          ) : (
+            workout.slice(0, 20).map((item: any, index: number) => (
+              <GenericHistoryCardV34
+                key={`${item.id || index}-${index}`}
+                title={item.activity_name || item.activity_type || "Workout"}
+                subtitle={item.log_date || item.created_at || "-"}
+                note={`${fmtNumber(item.calories || item.total_calories || 0)} kkal | ${fmtNumber(item.steps || item.total_steps || 0)} steps`}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-[2.4rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+        <h3 className="text-2xl font-black text-slate-950">
+          History Health Talk
+        </h3>
+
+        <div className="mt-5 space-y-3">
+          {healthTalk.length === 0 ? (
+            <div className="rounded-[1.8rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
               Belum ada input Health Talk.
             </div>
           ) : (
-            healthtalkLogs.map((item, index) => (
-              <HealthtalkLogCard key={`${item.id || index}-${index}`} item={item} />
+            healthTalk.slice(0, 20).map((item: any, index: number) => (
+              <GenericHistoryCardV34
+                key={`${item.id || index}-${index}`}
+                title={item.title || item.topic || "Health Talk"}
+                subtitle={item.event_date || item.log_date || item.created_at || "-"}
+                note={item.notes || item.description || "-"}
+              />
             ))
           )}
         </div>
@@ -2765,119 +3059,23 @@ function HistoryTab({
   );
 }
 
-function HealthtalkTab({
-  form,
-  evidence,
-  setEvidence,
-  setValue,
-  saveHealthtalk,
-  logs,
+function GenericHistoryCardV34({
+  title,
+  subtitle,
+  note,
 }: {
-  form: any;
-  evidence: File | null;
-  setEvidence: (file: File | null) => void;
-  setValue: (key: string, value: string) => void;
-  saveHealthtalk: () => void;
-  logs: any[];
+  title: string;
+  subtitle: string;
+  note: string;
 }) {
   return (
-    <section className="grid gap-5 lg:grid-cols-[1fr_380px]">
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-black">Input Health Talk / Seminar</h2>
-        <p className="mt-1 text-sm font-bold text-slate-500">
-          Catat seminar/health talk yang peserta ikuti. Bukti akan masuk ke Google Drive dan row masuk ke Form Responses.
-        </p>
-
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Input label="Tanggal Health Talk">
-            <input
-              type="date"
-              value={form.log_date}
-              onChange={(e) => setValue("log_date", e.target.value)}
-              className={fieldClass}
-            />
-          </Input>
-
-          <Input label="Jenis Kegiatan">
-            <select
-              value={form.healthtalk_type}
-              onChange={(e) => setValue("healthtalk_type", e.target.value)}
-              className={fieldClass}
-            >
-              <option value="Healthtalk/Seminar">Healthtalk/Seminar</option>
-              <option value="Webinar">Webinar</option>
-              <option value="Coaching">Coaching</option>
-              <option value="Edukasi Kesehatan">Edukasi Kesehatan</option>
-            </select>
-          </Input>
-
-          <div className="md:col-span-2">
-            <Input label="Judul / Topik Health Talk">
-              <input
-                value={form.healthtalk_title}
-                onChange={(e) => setValue("healthtalk_title", e.target.value)}
-                className={fieldClass}
-                placeholder="Contoh: Seminar olahraga, edukasi nutrisi, webinar diabetes"
-              />
-            </Input>
-          </div>
-
-          <div className="md:col-span-2">
-            <Input label="Bukti Health Talk">
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                onChange={(event) => setEvidence(event.target.files?.[0] || null)}
-                className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm font-bold text-slate-600 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-              />
-            </Input>
-            {evidence ? (
-              <div className="mt-2 text-xs font-bold text-violet-700">
-                File dipilih: {evidence.name}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="md:col-span-2">
-            <Input label="Catatan">
-              <textarea
-                value={form.notes}
-                onChange={(e) => setValue("notes", e.target.value)}
-                className={`${fieldClass} min-h-[100px]`}
-                placeholder="Catatan tambahan, misalnya nama pembicara, lokasi, atau insight penting."
-              />
-            </Input>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={saveHealthtalk}
-          className="mt-5 w-full rounded-2xl bg-violet-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-violet-100 md:w-auto"
-        >
-          Simpan Health Talk
-        </button>
-      </div>
-
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-black">Riwayat Health Talk</h3>
-
-        <div className="mt-4 space-y-3">
-          {logs.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
-              Belum ada input Health Talk.
-            </div>
-          ) : (
-            logs.slice(0, 8).map((item, index) => (
-              <HealthtalkLogCard key={`${item.id || index}-${index}`} item={item} />
-            ))
-          )}
-        </div>
-      </div>
-    </section>
+    <div className="rounded-[1.7rem] bg-slate-50 p-4">
+      <div className="text-sm font-black text-slate-950">{title}</div>
+      <div className="mt-1 text-xs font-bold text-slate-400">{subtitle}</div>
+      <div className="mt-3 text-sm font-bold leading-6 text-slate-600">{note}</div>
+    </div>
   );
 }
-
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
@@ -3535,6 +3733,9 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
+
+
 
 
 
