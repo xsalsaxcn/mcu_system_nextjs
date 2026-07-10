@@ -820,7 +820,7 @@ export default function WellnessParticipantPortalPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
-      <HideParticipantIntroCardsV37 />
+      <HideOldInvalidSummaryCardV38 />
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
@@ -1157,69 +1157,85 @@ function MiniDecorChart({ tone }: { tone: "blue" | "emerald" | "amber" | "slate"
 }
 
 
-function HideParticipantIntroCardsV37() {
+
+function HideOldInvalidSummaryCardV38() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const patterns = [
-      "WELLNESS PARTICIPANT PORTAL",
-      "Portal Individu Peserta",
-      "Portal peserta aktif. Silakan input",
-    ];
+    function textOf(element: Element | null) {
+      return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+    }
 
-    function hideCardFromTextNode(textNode: Node) {
-      const raw = textNode.textContent || "";
+    function isCardLike(element: HTMLElement) {
+      const className = element.getAttribute("class") || "";
 
-      if (!patterns.some((pattern) => raw.includes(pattern))) {
-        return;
-      }
+      return (
+        className.includes("rounded") ||
+        className.includes("shadow") ||
+        className.includes("border") ||
+        className.includes("bg-white") ||
+        className.includes("bg-[#")
+      );
+    }
 
-      let current = textNode.parentElement;
-      let level = 0;
+    function hideElement(element: HTMLElement) {
+      element.style.display = "none";
+      element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV38");
+    }
 
-      while (current && level < 10) {
-        const content = current.textContent || "";
-        const className = current.getAttribute("class") || "";
-        const looksLikeCard =
-          className.includes("rounded") ||
-          className.includes("shadow") ||
-          className.includes("gradient") ||
-          className.includes("bg-");
-
-        if (
-          looksLikeCard &&
-          content.length < 900 &&
-          !content.includes("Calories In") &&
-          !content.includes("Workout Calories") &&
-          !content.includes("History Nutrisi")
-        ) {
-          current.style.display = "none";
-          current.setAttribute("data-hidden-by", "HideParticipantIntroCardsV37");
-          return;
-        }
-
-        current = current.parentElement;
-        level++;
-      }
+    function isBefore(a: HTMLElement, b: HTMLElement) {
+      return Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     }
 
     function scan() {
       if (!document.body) return;
 
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT
-      );
+      const all = Array.from(
+        document.body.querySelectorAll("section, div, article")
+      ) as HTMLElement[];
 
-      const nodes: Node[] = [];
-      let node = walker.nextNode();
+      const haloElement =
+        all.find((element) => {
+          const text = textOf(element);
+          return (
+            text.includes("Halo,") &&
+            text.includes("Ringkasan aktivitas") &&
+            text.includes("Refresh Nutrisi")
+          );
+        }) || null;
 
-      while (node) {
-        nodes.push(node);
-        node = walker.nextNode();
-      }
+      all.forEach((element) => {
+        const text = textOf(element);
+        const rect = element.getBoundingClientRect();
 
-      nodes.forEach(hideCardFromTextNode);
+        if (!isCardLike(element)) return;
+
+        const beforeHalo = haloElement ? isBefore(element, haloElement) : true;
+
+        const isIntroHero =
+          text.includes("WELLNESS PARTICIPANT PORTAL") ||
+          text.includes("Portal Individu Peserta") ||
+          text.includes("Portal peserta aktif. Silakan input");
+
+        const isOldSummaryGroup =
+          beforeHalo &&
+          text.includes("CALORIES IN") &&
+          text.includes("WORKOUT CALORIES") &&
+          text.includes("STEPS") &&
+          !text.includes("Halo,") &&
+          text.length < 1200;
+
+        const isEmptyOldCard =
+          beforeHalo &&
+          text.length === 0 &&
+          rect.width > 220 &&
+          rect.height > 24 &&
+          rect.height < 160;
+
+        if (isIntroHero || isOldSummaryGroup || isEmptyOldCard) {
+          hideElement(element);
+        }
+      });
     }
 
     scan();
@@ -4119,6 +4135,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
 
 
 
