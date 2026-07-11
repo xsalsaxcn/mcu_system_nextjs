@@ -189,8 +189,22 @@ function buildParticipantRows(
     PDF_SECTION_SELECTION: sectionList,
     "Koordinator MCU": signatories.coordinator || "",
   };
-  if (sections.has("PROFILE_PHOTO")) summary.PhotoUrl = pick(raw.PhotoUrl, raw.PHOTOURL, raw["Link Foto"]);
-  rows.push(summary);
+  // CORPORATE_STRICT_PROFILE_PHOTO_V410
+  // Hanya field profil yang boleh masuk cover. Link Foto Rontgen tidak pernah menjadi fallback.
+  if (sections.has("PROFILE_PHOTO")) {
+    summary.PhotoUrl = pick(
+      raw.PhotoUrl,
+      raw.PHOTOURL,
+      raw["PHOTO URL"],
+      raw.PHOTO_URL,
+      raw["Link Foto"],
+      raw["Foto URL"],
+      raw["URL FOTO"]
+    );
+  } else {
+    summary.PhotoUrl = "";
+  }
+rows.push(summary);
 
   if (sections.has("PHYSICAL")) {
     const physical: Record<string, unknown> = { ...identity, _SheetName: "FISIK", PDF_SECTION_SELECTION: sectionList };
