@@ -43,6 +43,10 @@ export default function CorporateGeneratePage() {
   const [parameters, setParameters] = useState<ParameterOption[]>([]);
   const [selectedParameters, setSelectedParameters] = useState<Set<string>>(new Set());
   const [signatories, setSignatories] = useState<Record<string, string>>({});
+  // CORPORATE_SETUP_PERSISTENCE_V411
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupSaving, setSetupSaving] = useState(false);
+  const [setupSavedAt, setSetupSavedAt] = useState("");
   const [assetType, setAssetType] = useState("PROFILE_PHOTO");
   const [assetFiles, setAssetFiles] = useState<File[]>([]);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
@@ -150,9 +154,12 @@ export default function CorporateGeneratePage() {
   useEffect(() => { loadSources(); return clearPoll; }, []);
   useEffect(() => { if (sourceId) loadParticipants(); }, [sourceId]);
   useEffect(() => {
-    if (!sourceId) return;
-    const raw = localStorage.getItem(`${SIGNATORY_KEY_PREFIX}${sourceId}`);
-    setSignatories(raw ? JSON.parse(raw) : {});
+    if (!sourceId) {
+      setSignatories({});
+      setSetupSavedAt("");
+      return;
+    }
+    void loadSignatories(sourceId);
   }, [sourceId]);
   useEffect(() => {
     const stored = localStorage.getItem(ACTIVE_JOB_KEY);
@@ -172,10 +179,85 @@ export default function CorporateGeneratePage() {
     });
   }
 
-  function saveSignatories() {
-    if (!sourceId) return;
-    localStorage.setItem(`${SIGNATORY_KEY_PREFIX}${sourceId}`, JSON.stringify(signatories));
-    setNotice("Nama petugas tersimpan untuk database Corporate ini pada browser ini.");
+  function readLocalSignatories(id: string): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(`${SIGNATORY_KEY_PREFIX}${id}`);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function loadSignatories(id: string) {
+    setSetupLoading(true);
+    setSetupSavedAt("");
+    const localSetup = readLocalSignatories(id);
+
+    try {
+      const res = await fetch(`/api/ai-mcu/corporate/setup?sourceId=${encodeURIComponent(id)}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.message || "Gagal memuat setup dari server.");
+
+      const remoteSetup = json.signatories && typeof json.signatories === "object"
+        ? (json.signatories as Record<string, string>)
+        : {};
+      const hasRemoteSetup = Object.values(remoteSetup).some((value) => String(value || "").trim());
+      const resolvedSetup = hasRemoteSetup ? remoteSetup : localSetup;
+
+      setSignatories(resolvedSetup);
+      setSetupSavedAt(String(json.updatedAt || ""));
+      if (hasRemoteSetup) {
+        localStorage.setItem(`${SIGNATORY_KEY_PREFIX}${id}`, JSON.stringify(remoteSetup));
+      }
+    } catch {
+      setSignatories(localSetup);
+      if (Object.keys(localSetup).length) {
+        setNotice("Setup lokal browser dimuat. Simpan kembali setelah koneksi database tersedia.");
+      }
+    } finally {
+      setSetupLoading(false);
+    }
+  }
+
+  async function saveSignatories() {
+    if (!sourceId) {
+      setError("Pilih database MCU Corporate sebelum menyimpan setup.");
+      return;
+    }
+
+    const cleaned = Object.fromEntries(
+      Object.entries(signatories).map(([key, value]) => [key, String(value || "").trim()])
+    );
+
+    setSetupSaving(true);
+    setError("");
+    setNotice("");
+    localStorage.setItem(`${SIGNATORY_KEY_PREFIX}${sourceId}`, JSON.stringify(cleaned));
+
+    try {
+      const res = await fetch("/api/ai-mcu/corporate/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceId, signatories: cleaned }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.message || "Gagal menyimpan setup ke database.");
+
+      const savedSetup = json.signatories && typeof json.signatories === "object"
+        ? (json.signatories as Record<string, string>)
+        : cleaned;
+      setSignatories(savedSetup);
+      setSetupSavedAt(String(json.updatedAt || new Date().toISOString()));
+      localStorage.setItem(`${SIGNATORY_KEY_PREFIX}${sourceId}`, JSON.stringify(savedSetup));
+      setNotice("Setup penanggung jawab berhasil disimpan untuk database Corporate ini.");
+    } catch (err: any) {
+      setError(`${err?.message || "Gagal menyimpan setup ke database."} Data tetap disimpan lokal pada browser ini.`);
+    } finally {
+      setSetupSaving(false);
+    }
   }
 
   async function uploadAssets() {
@@ -278,7 +360,26 @@ export default function CorporateGeneratePage() {
             </div>
 
             <div className="rounded-2xl border p-5">
-              <div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold">4. Nama Petugas / Penanggung Jawab</h2><p className="text-sm text-slate-500">Nama muncul pada halaman dan footer pemeriksaan terkait.</p></div><button onClick={saveSignatories} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold">Simpan Setup</button></div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold">4. Nama Petugas / Penanggung Jawab</h2>
+                  <p className="text-sm text-slate-500">Nama muncul pada halaman dan footer pemeriksaan terkait.</p>
+                  {setupLoading ? <p className="mt-1 text-xs font-semibold text-blue-600">Memuat setup tersimpan...</p> : null}
+                  {!setupLoading && setupSavedAt ? (
+                    <p className="mt-1 text-xs font-semibold text-emerald-700">
+                      Setup database aktif · terakhir disimpan {new Date(setupSavedAt).toLocaleString("id-ID")}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={saveSignatories}
+                  disabled={!sourceId || setupLoading || setupSaving}
+                  className="rounded-xl border bg-white px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {setupSaving ? "Menyimpan..." : "Simpan Setup"}
+                </button>
+              </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">{CORPORATE_SIGNATORY_FIELDS.map((item) => <label key={item.key} className="text-sm font-bold text-slate-700">{item.label}<input value={signatories[item.key] || ""} onChange={(e) => setSignatories((current) => ({ ...current, [item.key]: e.target.value }))} placeholder="Free text: dr. Nama, Sp..." className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal"/></label>)}</div>
             </div>
 
