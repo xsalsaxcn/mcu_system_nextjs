@@ -42,12 +42,143 @@ function pick(...values: unknown[]) {
   return "";
 }
 
+// CORPORATE_BIRTH_DATE_DAY_FIRST_V418
+// Tanggal dari Excel dibaca secara ketat sebagai DD-MM-YYYY, bukan MM-DD-YYYY.
+const MONTH_NAMES_ID = [
+  "Januari",
+  "Februari",
+  "Maret",
+  "April",
+  "Mei",
+  "Juni",
+  "Juli",
+  "Agustus",
+  "September",
+  "Oktober",
+  "November",
+  "Desember",
+] as const;
+
+const MONTH_NAME_TO_NUMBER: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  januari: 1,
+  feb: 2,
+  february: 2,
+  februari: 2,
+  mar: 3,
+  march: 3,
+  maret: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  mei: 5,
+  jun: 6,
+  june: 6,
+  juni: 6,
+  jul: 7,
+  july: 7,
+  juli: 7,
+  aug: 8,
+  august: 8,
+  agu: 8,
+  agustus: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  okt: 10,
+  oktober: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+  des: 12,
+  desember: 12,
+};
+
+function validDateParts(day: number, month: number, year: number) {
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return false;
+  if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const check = new Date(Date.UTC(year, month - 1, day));
+  return (
+    check.getUTCFullYear() === year &&
+    check.getUTCMonth() === month - 1 &&
+    check.getUTCDate() === day
+  );
+}
+
+function formatDatePartsId(day: number, month: number, year: number) {
+  if (!validDateParts(day, month, year)) return "";
+  return `${String(day).padStart(2, "0")} ${MONTH_NAMES_ID[month - 1]} ${year}`;
+}
+
+function excelSerialToDateParts(serial: number) {
+  if (!Number.isFinite(serial) || serial <= 0 || serial > 200000) return null;
+  // Sistem tanggal Excel 1900: serial 1 = 1 Januari 1900.
+  // Basis 1899-12-30 juga menangani bug leap-year historis Excel.
+  const milliseconds = Math.round(serial * 86400000);
+  const date = new Date(Date.UTC(1899, 11, 30) + milliseconds);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  return validDateParts(day, month, year) ? { day, month, year } : null;
+}
+
 function formatDateId(value: unknown) {
-  const text = cleanCellValue(value);
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return formatDatePartsId(value.getUTCDate(), value.getUTCMonth() + 1, value.getUTCFullYear());
+  }
+
+  if (typeof value === "number") {
+    const parts = excelSerialToDateParts(value);
+    return parts ? formatDatePartsId(parts.day, parts.month, parts.year) : "";
+  }
+
+  const text = cleanCellValue(value).trim();
   if (!text) return "";
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return date.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+
+  // Serial Excel yang tersimpan sebagai teks.
+  if (/^\d{4,6}(?:\.\d+)?$/.test(text)) {
+    const parts = excelSerialToDateParts(Number(text));
+    if (parts) return formatDatePartsId(parts.day, parts.month, parts.year);
+  }
+
+  // Format utama workbook MCU: DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY.
+  // Penting: bagian pertama selalu dianggap HARI, termasuk bila nilainya 01-12.
+  let match = text.match(/^(\d{1,2})[\-\/.](\d{1,2})[\-\/.](\d{4})(?:\s.*)?$/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    const formatted = formatDatePartsId(day, month, year);
+    return formatted || text;
+  }
+
+  // Format DD-MMM-YYYY, misalnya 24-Jun-2026.
+  match = text.match(/^(\d{1,2})[\-\s\/.]([A-Za-z]+)[\-\s\/.](\d{4})(?:\s.*)?$/);
+  if (match) {
+    const day = Number(match[1]);
+    const month = MONTH_NAME_TO_NUMBER[match[2].toLowerCase()] || 0;
+    const year = Number(match[3]);
+    const formatted = formatDatePartsId(day, month, year);
+    return formatted || text;
+  }
+
+  // Format ISO dari database: YYYY-MM-DD atau YYYY-MM-DDTHH:mm:ss.
+  match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const formatted = formatDatePartsId(day, month, year);
+    return formatted || text;
+  }
+
+  // Jangan gunakan new Date(text) untuk string ambigu, karena 01-06-1992
+  // dapat ditafsirkan browser/Node sebagai MM-DD-YYYY.
+  return text;
 }
 
 async function fetchParticipants(supabase: any, sourceId: number, ids: number[]) {
