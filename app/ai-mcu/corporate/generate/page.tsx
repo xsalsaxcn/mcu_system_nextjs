@@ -12,7 +12,8 @@ type Participant = { id: number; name: string; mcu_id?: string | null; external_
 type SectionOption = { code: string; label: string; group: string; required?: boolean; defaultEnabled?: boolean; available: number; total: number };
 type ParameterOption = { key: string; count: number; category: string };
 type UploadResult = { ok: boolean; status?: string; message?: string; fileName?: string; participant?: { id: number; name: string; mcuId: string }; driveUrl?: string; driveFileId?: string; folderPath?: string; storage?: string };
-type JobResult = { ok: boolean; status?: string; message?: string; jobId?: string; progress?: number; current?: number; total?: number; currentName?: string; pdfUrl?: string; mergedPdfUrl?: string };
+type PdfFileItem = { name?: string; url?: string; size?: number };
+type JobResult = { ok: boolean; status?: string; message?: string; jobId?: string; progress?: number; current?: number; total?: number; currentName?: string; pdfUrl?: string; mergedPdfUrl?: string; pdfFiles?: PdfFileItem[]; mergedFiles?: PdfFileItem[] };
 
 const ACTIVE_JOB_KEY = "corporate_mcu_pdf_active_job_v1";
 const SIGNATORY_KEY_PREFIX = "corporate_mcu_pdf_signatories_v1_";
@@ -60,6 +61,12 @@ export default function CorporateGeneratePage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [job, setJob] = useState<JobResult | null>(null);
+  // CORPORATE_SELECTED_PAGES_UI_V414
+  const [printSourceUrl, setPrintSourceUrl] = useState("");
+  const [printPages, setPrintPages] = useState("");
+  const [printLoading, setPrintLoading] = useState(false);
+  const [printError, setPrintError] = useState("");
+  const [printResult, setPrintResult] = useState<{ pdfUrl: string; fileName?: string; selectedPages?: number[]; totalPages?: number } | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedSource = sources.find((item) => String(item.id) === sourceId);
@@ -73,6 +80,21 @@ export default function CorporateGeneratePage() {
     }
     return Array.from(groups.entries());
   }, [parameters]);
+
+  const printablePdfFiles = useMemo(() => {
+    const files: Array<{ name: string; url: string }> = [];
+    const add = (item: PdfFileItem | undefined, fallbackName: string) => {
+      const url = String(item?.url || "").trim();
+      if (!url || files.some((file) => file.url === url)) return;
+      files.push({ name: String(item?.name || fallbackName), url });
+    };
+
+    for (const item of job?.mergedFiles || []) add(item, "PDF gabungan");
+    if (job?.mergedPdfUrl) add({ name: "PDF gabungan", url: job.mergedPdfUrl }, "PDF gabungan");
+    for (const item of job?.pdfFiles || []) add(item, "PDF peserta");
+    if (job?.pdfUrl) add({ name: "PDF peserta", url: job.pdfUrl }, "PDF peserta");
+    return files;
+  }, [job]);
 
   function clearPoll() {
     if (pollRef.current) clearTimeout(pollRef.current);
@@ -170,6 +192,12 @@ export default function CorporateGeneratePage() {
     } catch {}
   }, []);
   useEffect(() => { if (selectedIds.size <= 1) setMergePdf(false); }, [selectedIds.size]);
+  useEffect(() => {
+    if (job?.status !== "done" || !printablePdfFiles.length) return;
+    setPrintSourceUrl((current) => printablePdfFiles.some((file) => file.url === current) ? current : printablePdfFiles[0].url);
+    setPrintResult(null);
+    setPrintError("");
+  }, [job?.status, printablePdfFiles]);
 
   function toggleParticipant(id: number) {
     setSelectedIds((current) => {
@@ -316,6 +344,29 @@ export default function CorporateGeneratePage() {
     pollRef.current = setTimeout(() => pollJob(json.jobId), 1200);
   }
 
+  async function createSelectedPagePdf() {
+    if (!printSourceUrl) return setPrintError("Pilih PDF sumber.");
+    if (!printPages.trim()) return setPrintError("Isi halaman, misalnya 1-3,5,8.");
+
+    setPrintLoading(true);
+    setPrintError("");
+    setPrintResult(null);
+    try {
+      const res = await fetch("/api/ai-mcu/corporate/print-selected", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceUrl: printSourceUrl, pages: printPages.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.message || "Gagal membuat PDF halaman terpilih.");
+      setPrintResult(json);
+    } catch (error: unknown) {
+      setPrintError(error instanceof Error ? error.message : "Gagal membuat PDF halaman terpilih.");
+    } finally {
+      setPrintLoading(false);
+    }
+  }
+
   const downloadUrl = job?.jobId ? `/api/ai-mcu/generate-pdf/download/${encodeURIComponent(job.jobId)}` : "";
 
   return (
@@ -401,6 +452,31 @@ export default function CorporateGeneratePage() {
 
           <aside className="space-y-5">
             <div className="rounded-2xl border p-5"><h2 className="text-lg font-bold">Status & Hasil Generate</h2><div className="mt-4 rounded-xl border bg-amber-50 p-3 text-sm text-amber-800">PDF final tetap dibuat oleh Python MCU Engine. Format Corporate existing dipertahankan.</div>{job ? <div className="mt-4 rounded-xl border p-4 text-sm"><div><b>Status:</b> {job.status || "queued"}</div><div className="mt-1 text-xs text-slate-500">Job ID: {job.jobId}</div><div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress || 0)))}%` }}/></div><div className="mt-2">{job.message || job.currentName || "Memproses..."}</div>{job.status === "done" && downloadUrl ? <a href={downloadUrl} target="_blank" className="mt-4 inline-flex rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white">Download / Buka Hasil PDF</a> : null}</div> : <div className="mt-4 rounded-xl border border-dashed p-8 text-center text-sm text-slate-500">Belum ada job Corporate.</div>}</div>
+            {job?.status === "done" && printablePdfFiles.length ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                <h2 className="text-lg font-bold text-emerald-950">7. Print Halaman Tertentu</h2>
+                <p className="mt-1 text-sm text-emerald-800">Membuat salinan PDF baru tanpa mengubah PDF asli. Isi contoh: <b>1-3,5,8</b>.</p>
+
+                <label className="mt-4 block text-sm font-bold text-slate-700">
+                  PDF sumber
+                  <select value={printSourceUrl} onChange={(e) => { setPrintSourceUrl(e.target.value); setPrintResult(null); setPrintError(""); }} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm font-normal">
+                    {printablePdfFiles.map((file) => <option key={file.url} value={file.url}>{file.name}</option>)}
+                  </select>
+                </label>
+
+                <label className="mt-3 block text-sm font-bold text-slate-700">
+                  Nomor halaman
+                  <input value={printPages} onChange={(e) => setPrintPages(e.target.value)} placeholder="Contoh: 1-3,5,8" className="mt-2 w-full rounded-xl border bg-white px-3 py-3 text-sm font-normal" />
+                </label>
+
+                <button onClick={createSelectedPagePdf} disabled={printLoading || !printSourceUrl || !printPages.trim()} className="mt-3 w-full rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
+                  {printLoading ? "Membuat PDF..." : "Buat PDF Halaman Terpilih"}
+                </button>
+
+                {printError ? <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{printError}</div> : null}
+                {printResult?.pdfUrl ? <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3 text-sm"><div className="font-bold text-emerald-900">PDF halaman terpilih berhasil dibuat.</div><div className="mt-1 text-xs text-slate-500">Halaman: {(printResult.selectedPages || []).join(", ")} dari {printResult.totalPages || "-"}</div><a href={printResult.pdfUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex rounded-xl bg-emerald-700 px-4 py-2 font-bold text-white">Buka / Print PDF Terpilih</a></div> : null}
+              </div>
+            ) : null}
             <div className="rounded-2xl border bg-blue-50 p-5 text-sm text-blue-900"><div className="font-black">Pengamanan modul</div><ul className="mt-2 list-disc space-y-1 pl-5"><li>Database dibatasi program Corporate.</li><li>Peserta harus berasal dari database yang sama.</li><li>Foto wajib cocok No MCU + nama.</li><li>File mismatch tidak pernah dipasang otomatis.</li><li>Route CAPASKA tetap terpisah.</li></ul></div>
           </aside>
         </div>
