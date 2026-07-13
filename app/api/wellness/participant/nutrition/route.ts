@@ -26,6 +26,162 @@ function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+
+// NUTRITION_API_BODY_PORTION_ESTIMATE_V45
+function numberFromPostedNutritionV45(value: any) {
+  const raw = String(value ?? "")
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseSubmittedBreakdownV45(value: any) {
+  const text = clean(value);
+
+  if (!text) return [];
+
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSubmittedNutritionEstimateV45(body: any) {
+  const directCalories =
+    numberFromPostedNutritionV45(body?.estimated_calories) ||
+    numberFromPostedNutritionV45(body?.estimatedCalories) ||
+    numberFromPostedNutritionV45(body?.calories) ||
+    numberFromPostedNutritionV45(body?.total_calories) ||
+    0;
+
+  const breakdown =
+    parseSubmittedBreakdownV45(body?.food_breakdown) ||
+    parseSubmittedBreakdownV45(body?.portion_breakdown) ||
+    [];
+
+  const activeBreakdown = Array.isArray(breakdown) ? breakdown : [];
+
+  const breakdownCalories = activeBreakdown.reduce((sum: number, item: any) => {
+    const subtotal =
+      numberFromPostedNutritionV45(item?.subtotal_calories) ||
+      numberFromPostedNutritionV45(item?.total_calories) ||
+      numberFromPostedNutritionV45(item?.calories) ||
+      0;
+
+    return sum + subtotal;
+  }, 0);
+
+  return {
+    submitted_calories: directCalories > 0 ? directCalories : breakdownCalories,
+    submitted_breakdown: activeBreakdown,
+  };
+}
+
+function normalizeSubmittedBreakdownV45(items: any[]) {
+  return (items || [])
+    .map((item: any) => {
+      const inputName = clean(
+        item?.input_name ||
+          item?.food_name ||
+          item?.name ||
+          item?.matched_name ||
+          "Makanan"
+      );
+
+      const matchedName = clean(item?.matched_name || item?.food_name || "");
+      const portionFraction = clean(item?.portion_fraction || item?.portion || "");
+      const portionMultiplier = numberFromPostedNutritionV45(item?.portion_multiplier) || null;
+      const baseCalories = numberFromPostedNutritionV45(item?.base_calories);
+      const subtotalCalories =
+        numberFromPostedNutritionV45(item?.subtotal_calories) ||
+        numberFromPostedNutritionV45(item?.total_calories) ||
+        numberFromPostedNutritionV45(item?.calories) ||
+        0;
+
+      return {
+        input_name: inputName,
+        matched: clean(item?.match_status || item?.status).toLowerCase() !== "unmatched",
+        matched_name: matchedName || null,
+        calories: subtotalCalories,
+        base_calories: baseCalories || null,
+        portion_fraction: portionFraction || null,
+        portion_multiplier: portionMultiplier,
+        reference_id: item?.reference_id || item?.id || null,
+        category: clean(item?.category) || null,
+        status: "matched_master_portion_ui",
+      };
+    })
+    .filter((item: any) => clean(item.input_name));
+}
+
+function submittedBreakdownTextV45(items: any[]) {
+  return (items || [])
+    .map((item: any) => {
+      const portion = clean(item.portion_fraction);
+      const matched = clean(item.matched_name);
+      const calories = numberFromPostedNutritionV45(item.calories);
+
+      if (portion && matched) {
+        return `${item.input_name}: ${calories} kkal (${portion} porsi, ${matched})`;
+      }
+
+      if (portion) {
+        return `${item.input_name}: ${calories} kkal (${portion} porsi)`;
+      }
+
+      if (matched) {
+        return `${item.input_name}: ${calories} kkal (${matched})`;
+      }
+
+      return `${item.input_name}: ${calories} kkal`;
+    })
+    .join(" | ");
+}
+
+function applySubmittedEstimateToCalorieResultV45(calorieResult: any, body: any) {
+  const submitted = readSubmittedNutritionEstimateV45(body);
+  const submittedCalories = numberFromPostedNutritionV45(submitted.submitted_calories);
+  const submittedBreakdown = normalizeSubmittedBreakdownV45(submitted.submitted_breakdown);
+
+  if (submittedCalories <= 0 && submittedBreakdown.length === 0) {
+    return calorieResult;
+  }
+
+  const breakdownCalories = submittedBreakdown.reduce((sum: number, item: any) => {
+    return sum + numberFromPostedNutritionV45(item.calories);
+  }, 0);
+
+  const finalCalories =
+    submittedCalories > 0
+      ? submittedCalories
+      : breakdownCalories > 0
+        ? breakdownCalories
+        : calorieResult?.total_calories;
+
+  const finalBreakdown =
+    submittedBreakdown.length > 0 ? submittedBreakdown : calorieResult?.breakdown || [];
+
+  const detectedText =
+    submittedBreakdown.length > 0
+      ? submittedBreakdownTextV45(finalBreakdown)
+      : calorieResult?.detected_foods_text;
+
+  return {
+    ...calorieResult,
+    total_calories: finalCalories,
+    breakdown: finalBreakdown,
+    detected_foods_text: detectedText,
+    calorie_match_status: "matched_master_portion_ui",
+    portion_estimate_source: "client_portion_breakdown_v45",
+    submitted_calories_v45: submittedCalories,
+  };
+}
+
 function toNumberOrNull(value: any) {
   const text = clean(value);
   if (!text) return null;
@@ -566,7 +722,11 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
           body?.company_name
       ) || "Tanpa Perusahaan";
 
-    const calorieResult = await calculateMultiFoodCalories(supabase, foodName);
+    let calorieResult = await calculateMultiFoodCalories(supabase, foodName);
+
+// PORTION_ESTIMATE_APPLIED_V45
+// Route ini membaca request lewat parseRequestBody(req), jadi estimasi porsi diambil dari body.
+calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
 
     const photoResult = await uploadNutritionPhoto({
       photo,
@@ -616,6 +776,8 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
       calorie_match_status: calorieResult.calorie_match_status,
       detected_foods_text: calorieResult.detected_foods_text,
       food_breakdown: calorieResult.breakdown,
+      portion_estimate_source: (calorieResult as any).portion_estimate_source || null,
+      submitted_calories_v45: (calorieResult as any).submitted_calories_v45 || null,
       google_sheet_row_number: sheetResult?.rowNumber || null,
       google_drive: photoResult || null,
       google_sheet: sheetResult || null,
@@ -637,6 +799,8 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
       calorie_match_status: calorieResult.calorie_match_status,
       detected_foods_text: calorieResult.detected_foods_text,
       food_breakdown: calorieResult.breakdown,
+      portion_estimate_source: (calorieResult as any).portion_estimate_source || null,
+      submitted_calories_v45: (calorieResult as any).submitted_calories_v45 || null,
       google_drive: photoResult,
       google_sheet: sheetResult,
     });
@@ -657,3 +821,5 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
     );
   }
 }
+
+
