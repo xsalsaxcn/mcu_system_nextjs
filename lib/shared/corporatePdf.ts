@@ -362,6 +362,9 @@ export function parameterCategory(key: string): "identity" | "summary" | "physic
   const norm = lower.replace(/\s+/g, " ");
   if (IDENTITY_KEYS.has(norm)) return "identity";
   if (SUMMARY_KEYS.has(norm)) return "summary";
+  // CORPORATE_LIPE_PHYSICAL_ALIAS_V416
+  // Beberapa workbook memakai LIPE / FS:LiPe untuk Lingkar Perut.
+  if (["lipe", "lingkarperut", "waistcircumference", "waist"].includes(normalizeLookup(key))) return "physical";
   if (PHYSICAL_PREFIXES.some((prefix) => lower.startsWith(prefix))) return "physical";
   if (LAB_PREFIXES.some((prefix) => lower.startsWith(prefix))) return "lab";
   if (CORPORATE_ASSET_TYPES.some((item) => normalizeLookup(item.rowField) === normalizeLookup(key))) return "attachment";

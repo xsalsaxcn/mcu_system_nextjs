@@ -209,6 +209,19 @@ rows.push(summary);
   if (sections.has("PHYSICAL")) {
     const physical: Record<string, unknown> = { ...identity, _SheetName: "FISIK", PDF_SECTION_SELECTION: sectionList };
     for (const [key, value] of Object.entries(selectedRaw)) if (isPhysicalParameter(key)) physical[key] = value;
+
+    // CORPORATE_LIPE_TO_WAIST_V416
+    // Canonical mapping: FS:LiPe / LIPE adalah Lingkar Perut, bukan parameter lain.
+    const waistCircumference = pickRowValue(selectedRaw, [
+      "Lingkar Perut", "LINGKAR PERUT", "FS:LiPe", "FS:LIPE", "FS:Lipe",
+      "FS:LPerut", "FS:LP", "LIPE", "LiPe", "Lipe",
+      "Waist Circumference", "Waist"
+    ]);
+    if (waistCircumference) {
+      physical["Lingkar Perut"] = waistCircumference;
+      physical["FS:LiPe"] = waistCircumference;
+    }
+
     physical["Dokter MCU"] = signatories.physical || "";
     rows.push(physical);
   }
