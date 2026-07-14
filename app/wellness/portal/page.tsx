@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
+import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
@@ -24,7 +25,7 @@ type PortalTab =
   | "healthtalk"
   | "history"
   | "devices"
-  | "profile";
+  | "profile" | "charts";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -993,6 +994,13 @@ export default function WellnessParticipantPortalPage() {
               />
             ) : null}
 
+            {activeTab === "charts" ? (
+              <AchievementChartsTab
+                participant={participant}
+                workoutItems={workoutItems}
+                clinicalHistory={clinicalHistory}
+              />
+            ) : null}
             {activeTab === "history" ? (
               <HistoryTab participant={participant}
                 workoutItems={workoutItems}
@@ -4390,6 +4398,9 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
+
+
 
 
 
