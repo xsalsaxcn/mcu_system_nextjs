@@ -321,7 +321,19 @@ const fieldClass =
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
   const [activeTab, setActiveTab] = useState<PortalTab>("home");
-  const [loading, setLoading] = useState(true);
+  
+// PORTAL_DEEPLINK_TAB_CHARTS_V47
+// Dipakai mobile app agar tombol Grafik Capaian langsung membuka tab Grafik.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const tab = new URLSearchParams(window.location.search).get("tab");
+
+    if (tab === "charts") {
+      setActiveTab("charts");
+    }
+  }, []);
+const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(
     "Masuk menggunakan Kode Karyawan. Lengkapi username, email, dan nomor HP untuk aktivasi portal peserta."
   );
@@ -4398,6 +4410,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
 
 
 
