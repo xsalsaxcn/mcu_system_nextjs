@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_COACH_MONITORING_FLAGS_V53
+// WELLNESS_COACH_CHAT_SUMMARY_V54
 // Scope: assigned groups, 7-day compliance flags, note read status, and existing target fields.
 // No schema migration and no access outside the coach assignment.
 
@@ -31,6 +32,21 @@ function clean(value: any) {
 function asNumber(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function isChatNote(note: any) {
+  const topic = clean(note?.topic).toLowerCase();
+  const issue = clean(note?.main_issue).toLowerCase();
+  const status = clean(note?.follow_up_status).toLowerCase();
+  return topic.includes("chat") || issue.startsWith("chat:") || status === "chat";
+}
+
+function chatSender(note: any) {
+  const topic = clean(note?.topic).toLowerCase();
+  const issue = clean(note?.main_issue).toLowerCase();
+  return issue.includes("participant") || topic.includes("peserta")
+    ? "participant"
+    : "coach";
 }
 
 function jakartaDate(offsetDays = 0) {
@@ -414,8 +430,10 @@ export async function GET(request: NextRequest) {
       const participantNotes = noteRows.filter(
         (note) => asNumber(note.participant_id) === id
       );
-      const latestNote = participantNotes[0] || null;
-      const latestTargetNote = participantNotes.find((note) =>
+      const chatNotes = participantNotes.filter(isChatNote);
+      const instructionNotes = participantNotes.filter((note) => !isChatNote(note));
+      const latestNote = instructionNotes[0] || null;
+      const latestTargetNote = instructionNotes.find((note) =>
         clean(note.topic).toLowerCase().includes("target wellness")
       );
       const todayActs = acts.filter((item) => activityDate(item) === today);
@@ -472,9 +490,22 @@ export async function GET(request: NextRequest) {
               read_at: latestNoteReadAt,
             }
           : null,
-        unread_note_count: participantNotes.filter(
+        unread_note_count: instructionNotes.filter(
           (note) => !readMap.get(`${asNumber(note.id)}:${id}`)
         ).length,
+        unread_chat_count: chatNotes.filter(
+          (note) =>
+            chatSender(note) === "participant" &&
+            !readMap.get(`${asNumber(note.id)}:${id}`)
+        ).length,
+        last_chat: chatNotes[0]
+          ? {
+              id: chatNotes[0].id,
+              sender: chatSender(chatNotes[0]),
+              message: clean(chatNotes[0].coach_note || chatNotes[0].action_plan),
+              created_at: chatNotes[0].created_at || chatNotes[0].session_date,
+            }
+          : null,
         status:
           flag.level === "green"
             ? "Patuh"
@@ -531,10 +562,14 @@ export async function GET(request: NextRequest) {
           (sum, item) => sum + asNumber(item.unread_note_count),
           0
         ),
+        unread_chat_messages: participantCards.reduce(
+          (sum, item) => sum + asNumber(item.unread_chat_count),
+          0
+        ),
         flags: flagSummary,
       },
       participants: participantCards,
-      notes: noteRows,
+      notes: noteRows.filter((note) => !isChatNote(note)),
       today,
       monitoring_period: { from: fromDate, to: today, days: 7 },
     });

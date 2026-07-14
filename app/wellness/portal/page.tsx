@@ -6,6 +6,7 @@ import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
+// WELLNESS_PARTICIPANT_COACH_CHAT_V54
 // Base dari V415:
 // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
 // - History Workout tetap menampilkan semua riwayat.
@@ -25,7 +26,9 @@ type PortalTab =
   | "healthtalk"
   | "history"
   | "devices"
-  | "profile" | "charts";
+  | "profile"
+  | "chat"
+  | "charts";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -1031,6 +1034,10 @@ const [loading, setLoading] = useState(true);
               />
             ) : null}
 
+            {activeTab === "chat" ? (
+              <ParticipantCoachChat participant={participant} />
+            ) : null}
+
             {activeTab === "profile" ? (
               <ProfileTab
                 participant={participant}
@@ -1045,6 +1052,202 @@ const [loading, setLoading] = useState(true);
   );
 }
 
+
+
+// WELLNESS_PARTICIPANT_COACH_CHAT_V54
+function ParticipantCoachChat({ participant }: { participant: any }) {
+  const participantId = asNumber(
+    participant?.id || participant?.participant_id || participant?.wellness_participant_id
+  );
+  const [messages, setMessages] = useState<any[]>([]);
+  const [text, setText] = useState("");
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [chatNotice, setChatNotice] = useState("");
+
+  async function loadChat() {
+    if (!participantId) return;
+    setLoadingChat(true);
+
+    const result = await fetch(
+      `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat`,
+      { cache: "no-store" }
+    )
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      const rows = Array.isArray(result.messages) ? result.messages : [];
+      setMessages(rows);
+      setChatNotice("");
+
+      const unreadCoachNoteIds = rows
+        .filter((item: any) => item.sender === "coach" && !item.is_read)
+        .map((item: any) => Number(item.id))
+        .filter(Boolean);
+
+      if (unreadCoachNoteIds.length > 0) {
+        await fetch("/api/wellness/portal/coach-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "mark_chat_read",
+            participant_id: participantId,
+            note_ids: unreadCoachNoteIds,
+          }),
+        }).catch(() => null);
+
+        setMessages((current) =>
+          current.map((item) =>
+            unreadCoachNoteIds.includes(Number(item.id))
+              ? { ...item, is_read: true, read_at: new Date().toISOString() }
+              : item
+          )
+        );
+      }
+    } else {
+      setChatNotice(result.message || "Chat belum dapat dimuat.");
+    }
+
+    setLoadingChat(false);
+  }
+
+  async function sendChat() {
+    const message = clean(text);
+    if (!participantId || !message) {
+      setChatNotice("Tulis pesan terlebih dahulu.");
+      return;
+    }
+
+    setSending(true);
+    setChatNotice("Mengirim pesan...");
+
+    const result = await fetch("/api/wellness/portal/coach-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "send_chat",
+        participant_id: participantId,
+        message,
+      }),
+    })
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      setText("");
+      setChatNotice("Pesan sudah dikirim kepada coach.");
+      await loadChat();
+    } else {
+      setChatNotice(result.message || "Pesan gagal dikirim.");
+    }
+
+    setSending(false);
+  }
+
+  useEffect(() => {
+    loadChat();
+  }, [participantId]);
+
+  return (
+    <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
+      <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 p-5 text-white md:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
+              Coach Support
+            </div>
+            <h2 className="mt-2 text-2xl font-black">Chat With Coach</h2>
+            <p className="mt-2 text-sm font-bold leading-6 text-white/90">
+              Sampaikan kendala nutrisi, workout, atau target wellness kepada coach.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadChat}
+            className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4 md:p-6">
+        {chatNotice ? (
+          <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-600">
+            {chatNotice}
+          </div>
+        ) : null}
+
+        <div className="max-h-[54vh] min-h-[300px] space-y-3 overflow-y-auto rounded-[1.75rem] bg-[#f4fbfa] p-4">
+          {loadingChat ? (
+            <div className="py-12 text-center text-sm font-bold text-slate-400">
+              Memuat percakapan...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="text-base font-black text-slate-900">Belum ada percakapan.</div>
+              <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+                Mulai chat untuk meminta arahan langsung dari coach.
+              </p>
+            </div>
+          ) : (
+            messages.map((item: any) => {
+              const fromParticipant = item.sender === "participant";
+              return (
+                <div
+                  key={item.id}
+                  className={`flex ${fromParticipant ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm ${
+                      fromParticipant
+                        ? "rounded-br-md bg-slate-950 text-white"
+                        : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap text-sm font-bold leading-6">
+                      {item.message || item.coach_note || "-"}
+                    </div>
+                    <div
+                      className={`mt-2 text-[11px] font-bold ${
+                        fromParticipant ? "text-white/60" : "text-slate-400"
+                      }`}
+                    >
+                      {formatCoachDate(item.created_at || item.session_date)}
+                      {fromParticipant
+                        ? item.is_read
+                          ? " · Sudah dibaca coach"
+                          : " · Terkirim"
+                        : " · Coach"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <textarea
+            className={`${fieldClass} min-h-[96px] resize-none`}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Tulis pesan untuk coach..."
+          />
+          <button
+            type="button"
+            onClick={sendChat}
+            disabled={sending || !clean(text)}
+            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+          >
+            {sending ? "Mengirim..." : "Kirim Pesan"}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function PortalLoginStatusNoticeV43({
   message,

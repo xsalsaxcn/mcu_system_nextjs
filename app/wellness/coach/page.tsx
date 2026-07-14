@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
+// WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
+type CoachView = "monitoring" | "chat";
 type CoachDashboard = {
   ok: boolean;
   message?: string;
@@ -47,6 +49,17 @@ function formatReadAt(value: any) {
   }).format(date)}`;
 }
 
+function formatChatTime(value: any) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 const fieldClass =
   "rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100";
 
@@ -59,6 +72,12 @@ export default function WellnessCoachPortalPage() {
   const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
   const [search, setSearch] = useState("");
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
+  const [coachView, setCoachView] = useState<CoachView>("monitoring");
+  const [coachMenuOpen, setCoachMenuOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [instructionScope, setInstructionScope] = useState<"participant" | "group">(
@@ -69,7 +88,9 @@ export default function WellnessCoachPortalPage() {
     topic: "Instruksi Wellness",
     main_issue: "",
     coach_note: "",
-    action_plan: "",
+    action_workout_calories: "",
+    action_nutrition_calories: "",
+    action_target_weight: "",
     follow_up_status: "Open",
     next_follow_up_date: "",
   });
@@ -131,6 +152,9 @@ export default function WellnessCoachPortalPage() {
     await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(() => null);
     setDashboard(null);
     setSelectedParticipant(null);
+    setChatMessages([]);
+    setCoachView("monitoring");
+    setCoachMenuOpen(false);
     setMessage("Coach logout berhasil.");
   }
 
@@ -166,7 +190,9 @@ export default function WellnessCoachPortalPage() {
       topic: scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual",
       main_issue: "",
       coach_note: "",
-      action_plan: "",
+      action_workout_calories: "",
+      action_nutrition_calories: "",
+      action_target_weight: "",
       next_follow_up_date: "",
     }));
     setComposerOpen(true);
@@ -177,6 +203,20 @@ export default function WellnessCoachPortalPage() {
       (item: any) =>
         String(item.wellness_group_unit_id || item.group_name) === selectedGroup
     );
+    const actionPlan = [
+      clean(instructionForm.action_workout_calories)
+        ? `Target Workout: ${clean(instructionForm.action_workout_calories)} kkal/hari`
+        : "",
+      clean(instructionForm.action_nutrition_calories)
+        ? `Target Nutrisi: ${clean(instructionForm.action_nutrition_calories)} kkal/hari`
+        : "",
+      clean(instructionForm.action_target_weight)
+        ? `Target BB: ${clean(instructionForm.action_target_weight)} kg`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
     setSaving(true);
     setMessage("Mengirim instruksi coach...");
 
@@ -189,7 +229,13 @@ export default function WellnessCoachPortalPage() {
         participant_id: selectedParticipant?.id || null,
         wellness_group_unit_id: group?.wellness_group_unit_id || null,
         group_name: group?.group_name || selectedParticipant?.group_name || "",
-        ...instructionForm,
+        session_date: instructionForm.session_date,
+        topic: instructionForm.topic,
+        main_issue: instructionForm.main_issue,
+        coach_note: instructionForm.coach_note,
+        action_plan: actionPlan,
+        follow_up_status: instructionForm.follow_up_status,
+        next_follow_up_date: instructionForm.next_follow_up_date,
       }),
     })
       .then((response) => response.json())
@@ -231,9 +277,103 @@ export default function WellnessCoachPortalPage() {
     setSaving(false);
   }
 
+  async function loadMemberChat(participant = selectedParticipant) {
+    const participantId = Number(participant?.id || 0);
+    if (!participantId) {
+      setChatMessages([]);
+      return;
+    }
+
+    setChatLoading(true);
+    const result = await fetch(
+      `/api/wellness/coach/notes?participant_id=${participantId}&mode=chat`,
+      { cache: "no-store" }
+    )
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      const rows = Array.isArray(result.messages) ? result.messages : [];
+      setChatMessages(rows);
+
+      const unreadMemberIds = rows
+        .filter((item: any) => item.sender === "participant" && !item.is_read)
+        .map((item: any) => Number(item.id))
+        .filter(Boolean);
+
+      if (unreadMemberIds.length > 0) {
+        await fetch("/api/wellness/coach/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "mark_chat_read",
+            participant_id: participantId,
+            note_ids: unreadMemberIds,
+          }),
+        }).catch(() => null);
+
+        setChatMessages((current) =>
+          current.map((item) =>
+            unreadMemberIds.includes(Number(item.id))
+              ? { ...item, is_read: true, read_at: new Date().toISOString() }
+              : item
+          )
+        );
+      }
+    } else {
+      setMessage(result.message || "Chat member belum dapat dimuat.");
+    }
+
+    setChatLoading(false);
+  }
+
+  async function sendMemberChat() {
+    const participantId = Number(selectedParticipant?.id || 0);
+    const chatMessage = clean(chatText);
+
+    if (!participantId) {
+      setMessage("Pilih anggota sebelum mengirim chat.");
+      return;
+    }
+    if (!chatMessage) {
+      setMessage("Tulis pesan chat terlebih dahulu.");
+      return;
+    }
+
+    setChatSending(true);
+    const result = await fetch("/api/wellness/coach/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "send_chat",
+        participant_id: participantId,
+        message: chatMessage,
+      }),
+    })
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      setChatText("");
+      setMessage("Pesan berhasil dikirim kepada member.");
+      await loadMemberChat();
+      await loadDashboard({ keepSelection: true });
+    } else {
+      setMessage(result.message || "Pesan chat gagal dikirim.");
+    }
+
+    setChatSending(false);
+  }
+
   useEffect(() => {
     loadDashboard();
   }, []);
+
+  useEffect(() => {
+    if (coachView === "chat" && selectedParticipant?.id) {
+      loadMemberChat(selectedParticipant);
+    }
+  }, [coachView, selectedParticipant?.id]);
 
   const participants = dashboard?.participants || [];
   const groups = dashboard?.groups || [];
@@ -279,10 +419,11 @@ export default function WellnessCoachPortalPage() {
             {isLoggedIn ? (
               <button
                 type="button"
-                onClick={logout}
-                className="rounded-full bg-white/20 px-5 py-3 text-xs font-black text-white backdrop-blur"
+                onClick={() => setCoachMenuOpen(true)}
+                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl font-black text-white shadow-sm backdrop-blur"
+                aria-label="Buka menu coach"
               >
-                Logout
+                ☰
               </button>
             ) : null}
           </div>
@@ -308,7 +449,9 @@ export default function WellnessCoachPortalPage() {
             loading={loading}
           />
         ) : (
-          <section className="mt-6 space-y-6">
+          <section className="mt-6">
+            {coachView === "monitoring" ? (
+              <div className="space-y-6">
             <div className="grid gap-4 md:grid-cols-4">
               <SummaryCard
                 label="Total Peserta"
@@ -432,22 +575,34 @@ export default function WellnessCoachPortalPage() {
                 <div className="mt-5 text-xs font-black uppercase tracking-wide text-slate-400">
                   Menampilkan {filteredParticipants.length} anggota
                 </div>
-                <div className="mt-3 grid gap-3">
-                  {filteredParticipants.length === 0 ? (
-                    <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
-                      Tidak ada peserta pada filter ini.
-                    </div>
-                  ) : (
-                    filteredParticipants.map((item: any) => (
-                      <ParticipantCard
-                        key={item.id}
-                        item={item}
-                        active={selectedParticipant?.id === item.id}
-                        onClick={() => chooseParticipant(item)}
-                      />
-                    ))
-                  )}
-                </div>
+                <label className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
+                  Pilih Anggota
+                  <select
+                    className={`${fieldClass} w-full`}
+                    value={selectedParticipant?.id ? String(selectedParticipant.id) : ""}
+                    onChange={(event) => {
+                      const participant = filteredParticipants.find(
+                        (item: any) => String(item.id) === event.target.value
+                      );
+                      if (participant) chooseParticipant(participant);
+                      else setSelectedParticipant(null);
+                    }}
+                  >
+                    <option value="">
+                      {filteredParticipants.length > 0
+                        ? "Pilih nama peserta"
+                        : "Tidak ada peserta pada filter ini"}
+                    </option>
+                    {filteredParticipants.map((item: any) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {item.name} | {item.group_name} | Steps {fmtNumber(item.today?.steps || 0)} | {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-bold leading-5 text-slate-400">
+                    Format: Nama lengkap · Kelompok · Steps · Kalori · Status
+                  </span>
+                </label>
               </section>
 
               <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
@@ -455,7 +610,7 @@ export default function WellnessCoachPortalPage() {
                   <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
                     <h3 className="text-lg font-black text-slate-900">Pilih Peserta</h3>
                     <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                      Klik anggota untuk melihat progres, target, dan status instruksi.
+                      Pilih nama pada daftar untuk melihat progres, target, dan status instruksi.
                     </p>
                   </div>
                 ) : (
@@ -470,9 +625,115 @@ export default function WellnessCoachPortalPage() {
                 )}
               </section>
             </div>
+              </div>
+            ) : (
+              <CoachChatPanel
+                dashboard={dashboard}
+                participants={participants}
+                groups={groups}
+                selectedGroup={selectedGroup}
+                setSelectedGroup={setSelectedGroup}
+                selectedParticipant={selectedParticipant}
+                chooseParticipant={chooseParticipant}
+                chatMessages={chatMessages}
+                chatText={chatText}
+                setChatText={setChatText}
+                chatLoading={chatLoading}
+                chatSending={chatSending}
+                loadChat={() => loadMemberChat()}
+                sendChat={sendMemberChat}
+              />
+            )}
           </section>
         )}
       </div>
+
+      {coachMenuOpen ? (
+        <div className="fixed inset-0 z-[9998] bg-slate-950/50 p-4 backdrop-blur-sm">
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setCoachMenuOpen(false)}
+            aria-label="Tutup menu coach"
+          />
+          <aside className="absolute bottom-4 right-4 top-4 flex w-[calc(100vw-2rem)] max-w-[420px] flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+            <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 p-5 text-white">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-[0.18em] text-white/75">
+                    Coach Menu
+                  </div>
+                  <div className="mt-2 text-xl font-black">
+                    {dashboard?.coach?.name || "Coach Wellness"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCoachMenuOpen(false)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-xl font-black"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setCoachView("monitoring");
+                  setCoachMenuOpen(false);
+                }}
+                className={`w-full rounded-3xl border p-4 text-left ${
+                  coachView === "monitoring"
+                    ? "border-teal-200 bg-teal-50"
+                    : "border-slate-100 bg-white"
+                }`}
+              >
+                <div className="text-base font-black">📊 Monitoring Peserta</div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Flag kepatuhan, target, dan instruksi
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCoachView("chat");
+                  setCoachMenuOpen(false);
+                }}
+                className={`w-full rounded-3xl border p-4 text-left ${
+                  coachView === "chat"
+                    ? "border-sky-200 bg-sky-50"
+                    : "border-slate-100 bg-white"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-base font-black">💬 Chat With Member</div>
+                  {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
+                    <span className="rounded-full bg-rose-500 px-3 py-1 text-xs font-black text-white">
+                      {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Percakapan dengan anggota assigned group
+                </div>
+              </button>
+            </div>
+
+            <div className="border-t border-slate-100 p-4">
+              <button
+                type="button"
+                onClick={logout}
+                className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-sm font-black text-white"
+              >
+                Keluar dari Portal Coach
+              </button>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {composerOpen ? (
         <InstructionModal
@@ -488,6 +749,214 @@ export default function WellnessCoachPortalPage() {
         />
       ) : null}
     </main>
+  );
+}
+
+function CoachChatPanel({
+  dashboard,
+  participants,
+  groups,
+  selectedGroup,
+  setSelectedGroup,
+  selectedParticipant,
+  chooseParticipant,
+  chatMessages,
+  chatText,
+  setChatText,
+  chatLoading,
+  chatSending,
+  loadChat,
+  sendChat,
+}: any) {
+  const availableParticipants = (participants || []).filter((item: any) => {
+    if (selectedGroup === "all") return true;
+    return (
+      clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
+      clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
+      clean(item.raw?.group_unit_id) === selectedGroup
+    );
+  });
+
+  return (
+    <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
+      <div className="bg-gradient-to-br from-sky-500 via-cyan-500 to-teal-500 p-5 text-white md:p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
+              Member Support
+            </div>
+            <h2 className="mt-2 text-2xl font-black">Chat With Member</h2>
+            <p className="mt-2 text-sm font-bold leading-6 text-white/90">
+              Coach hanya dapat menghubungi anggota dari kelompok yang di-assign.
+            </p>
+          </div>
+          <div className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur">
+            {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} pesan belum dibaca
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 p-4 md:p-6 lg:grid-cols-[360px_1fr]">
+        <aside className="rounded-[1.75rem] border border-slate-100 bg-slate-50 p-4">
+          <div className="text-sm font-black text-slate-900">Pilih Member</div>
+          <div className="mt-3 grid gap-3">
+            <select
+              className={fieldClass}
+              value={selectedGroup}
+              onChange={(event) => setSelectedGroup(event.target.value)}
+            >
+              <option value="all">Semua Assigned Group</option>
+              {(groups || []).map((group: any) => (
+                <option
+                  key={group.id}
+                  value={String(group.wellness_group_unit_id || group.group_name)}
+                >
+                  {group.group_name} ({group.member_count || 0})
+                </option>
+              ))}
+            </select>
+
+            <select
+              className={fieldClass}
+              value={selectedParticipant?.id ? String(selectedParticipant.id) : ""}
+              onChange={(event) => {
+                const participant = availableParticipants.find(
+                  (item: any) => String(item.id) === event.target.value
+                );
+                if (participant) chooseParticipant(participant);
+              }}
+            >
+              <option value="">Pilih nama member</option>
+              {availableParticipants.map((item: any) => (
+                <option key={item.id} value={String(item.id)}>
+                  {item.name} | {item.group_name} | Steps {fmtNumber(item.today?.steps || 0)} | {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedParticipant ? (
+            <div className="mt-4 rounded-3xl bg-white p-4 shadow-sm">
+              <div className="text-base font-black text-slate-950">
+                {selectedParticipant.name}
+              </div>
+              <div className="mt-1 text-xs font-bold text-slate-500">
+                {selectedParticipant.group_name} · {selectedParticipant.status}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">
+                  Steps {fmtNumber(selectedParticipant.today?.steps || 0)}
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">
+                  {fmtNumber(selectedParticipant.today?.calories || 0)} kkal
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </aside>
+
+        <div className="min-w-0">
+          {!selectedParticipant ? (
+            <div className="flex min-h-[420px] items-center justify-center rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+              <div>
+                <div className="text-lg font-black text-slate-900">Pilih member untuk chat</div>
+                <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+                  Percakapan akan tampil setelah coach memilih satu anggota.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black text-slate-950">
+                    {selectedParticipant.name}
+                  </div>
+                  <div className="text-xs font-bold text-slate-500">
+                    Chat member · {selectedParticipant.group_name}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadChat}
+                  className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="mt-4 max-h-[52vh] min-h-[340px] space-y-3 overflow-y-auto rounded-[1.75rem] bg-[#f4fbfa] p-4">
+                {chatLoading ? (
+                  <div className="py-12 text-center text-sm font-bold text-slate-400">
+                    Memuat percakapan...
+                  </div>
+                ) : chatMessages.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <div className="text-base font-black text-slate-900">
+                      Belum ada percakapan.
+                    </div>
+                    <p className="mt-2 text-sm font-bold text-slate-500">
+                      Kirim pesan pertama kepada member.
+                    </p>
+                  </div>
+                ) : (
+                  chatMessages.map((item: any) => {
+                    const fromCoach = item.sender === "coach";
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex ${fromCoach ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm ${
+                            fromCoach
+                              ? "rounded-br-md bg-slate-950 text-white"
+                              : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
+                          }`}
+                        >
+                          <div className="whitespace-pre-wrap text-sm font-bold leading-6">
+                            {item.message || item.coach_note || "-"}
+                          </div>
+                          <div
+                            className={`mt-2 text-[11px] font-bold ${
+                              fromCoach ? "text-white/60" : "text-slate-400"
+                            }`}
+                          >
+                            {formatChatTime(item.created_at || item.session_date)}
+                            {fromCoach
+                              ? item.is_read
+                                ? " · Sudah dibaca member"
+                                : " · Terkirim"
+                              : " · Member"}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                <textarea
+                  className={`${fieldClass} min-h-[96px] resize-none`}
+                  value={chatText}
+                  onChange={(event) => setChatText(event.target.value)}
+                  placeholder="Tulis pesan untuk member..."
+                />
+                <button
+                  type="button"
+                  onClick={sendChat}
+                  disabled={chatSending || !clean(chatText)}
+                  className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+                >
+                  {chatSending ? "Mengirim..." : "Kirim Pesan"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -688,7 +1157,7 @@ function ParticipantDetail({
         </div>
         <div className="mt-4 grid gap-3">
           <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Diet Maksimum Kalori / Hari
+            Batas Konsumsi Kalori Harian (kkal)
             <input
               type="number"
               min="0"
@@ -699,7 +1168,7 @@ function ParticipantDetail({
             />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Target Kalori Terbakar / Hari
+            Target Kalori Terbakar dari Workout (kkal)
             <input
               type="number"
               min="0"
@@ -853,15 +1322,48 @@ function InstructionModal({
               placeholder="Pesan yang akan diterima peserta"
             />
           </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Action Plan
-            <textarea
-              className={`${fieldClass} min-h-[100px]`}
-              value={form.action_plan}
-              onChange={(e) => setValue("action_plan", e.target.value)}
-              placeholder="Langkah yang harus dilakukan peserta"
-            />
-          </label>
+          <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4">
+            <div className="text-sm font-black text-sky-950">Target / Action Plan (Opsional)</div>
+            <p className="mt-1 text-xs font-bold leading-5 text-sky-800/70">
+              Isi hanya target yang ingin ditetapkan atau diubah. Kolom lainnya boleh dikosongkan.
+            </p>
+            <div className="mt-4 grid gap-3">
+              <label className="grid gap-2 text-sm font-bold text-slate-700">
+                Target Kalori Terbakar dari Workout (kkal/hari)
+                <input
+                  type="number"
+                  min="0"
+                  className={fieldClass}
+                  value={form.action_workout_calories}
+                  onChange={(e) => setValue("action_workout_calories", e.target.value)}
+                  placeholder="Contoh: 300"
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-700">
+                Batas Konsumsi Kalori Harian (kkal/hari)
+                <input
+                  type="number"
+                  min="0"
+                  className={fieldClass}
+                  value={form.action_nutrition_calories}
+                  onChange={(e) => setValue("action_nutrition_calories", e.target.value)}
+                  placeholder="Contoh: 1700"
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-bold text-slate-700">
+                Target Berat Badan (kg)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  className={fieldClass}
+                  value={form.action_target_weight}
+                  onChange={(e) => setValue("action_target_weight", e.target.value)}
+                  placeholder="Contoh: 72"
+                />
+              </label>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Status Follow Up

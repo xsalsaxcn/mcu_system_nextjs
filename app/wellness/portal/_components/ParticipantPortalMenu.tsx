@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_PORTAL_MENU_UI_V50
+// WELLNESS_PARTICIPANT_CHAT_MENU_V54
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
@@ -18,7 +19,9 @@ type PortalTab =
   | "healthtalk"
   | "history"
   | "devices"
-  | "profile" | "charts";
+  | "profile"
+  | "chat"
+  | "charts";
 
 type MenuItem = {
   key: PortalTab;
@@ -77,6 +80,13 @@ const menuItems: MenuItem[] = [
     shortLabel: "Device",
     description: "Google Fit / Health Connect",
     emoji: "⌚",
+  },
+  {
+    key: "chat",
+    label: "Chat With Coach",
+    shortLabel: "Chat",
+    description: "Konsultasi langsung dengan coach",
+    emoji: "\u{1F4AC}",
   },
   {
     key: "profile",

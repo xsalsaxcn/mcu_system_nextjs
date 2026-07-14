@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_COACH_INSTRUCTIONS_TARGETS_V53
+// WELLNESS_COACH_CHAT_API_V54
 // Reuses existing wellness_coach_notes and wellness_participants fields.
 // No table creation or schema migration.
 
@@ -29,6 +30,21 @@ function clean(value: any) {
 function asNumber(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function isChatNote(note: any) {
+  const topic = clean(note?.topic).toLowerCase();
+  const issue = clean(note?.main_issue).toLowerCase();
+  const status = clean(note?.follow_up_status).toLowerCase();
+  return topic.includes("chat") || issue.startsWith("chat:") || status === "chat";
+}
+
+function chatSender(note: any) {
+  const topic = clean(note?.topic).toLowerCase();
+  const issue = clean(note?.main_issue).toLowerCase();
+  return issue.includes("participant") || topic.includes("peserta")
+    ? "participant"
+    : "coach";
 }
 
 function participantGroupIds(row: any) {
@@ -187,6 +203,91 @@ async function updateExistingTargetFields(
   };
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = adminClient();
+    const coach = await getCoach(request, supabase);
+
+    if (!coach) {
+      return NextResponse.json(
+        { ok: false, message: "Session coach belum aktif." },
+        { status: 401 }
+      );
+    }
+
+    const participantId = asNumber(request.nextUrl.searchParams.get("participant_id"));
+    const mode = clean(request.nextUrl.searchParams.get("mode")).toLowerCase();
+
+    if (!participantId || mode !== "chat") {
+      return NextResponse.json(
+        { ok: false, message: "participant_id dan mode=chat wajib diisi." },
+        { status: 400 }
+      );
+    }
+
+    const { participants } = await assignedScope(supabase, asNumber(coach.id));
+    const participant = participants.find(
+      (item: any) => asNumber(item.id) === participantId
+    );
+
+    if (!participant) {
+      return NextResponse.json(
+        { ok: false, message: "Peserta tidak berada dalam assignment coach." },
+        { status: 403 }
+      );
+    }
+
+    const { data: notes, error: notesError } = await supabase
+      .from("wellness_coach_notes")
+      .select("*")
+      .eq("participant_id", participantId)
+      .order("created_at", { ascending: true })
+      .limit(100);
+
+    if (notesError) throw notesError;
+
+    const chatNotes = (notes || []).filter(isChatNote);
+    const noteIds = chatNotes.map((note: any) => asNumber(note.id)).filter(Boolean);
+    let readMap = new Map<number, string>();
+
+    if (noteIds.length > 0) {
+      const { data: reads, error: readsError } = await supabase
+        .from("wellness_coach_note_reads")
+        .select("note_id, read_at")
+        .eq("participant_id", participantId)
+        .in("note_id", noteIds);
+
+      if (!readsError) {
+        readMap = new Map(
+          (reads || []).map((item: any) => [asNumber(item.note_id), item.read_at])
+        );
+      }
+    }
+
+    const messages = chatNotes.map((note: any) => ({
+      ...note,
+      sender: chatSender(note),
+      message: clean(note.coach_note || note.action_plan),
+      is_read: Boolean(readMap.get(asNumber(note.id))),
+      read_at: readMap.get(asNumber(note.id)) || null,
+    }));
+
+    return NextResponse.json({
+      ok: true,
+      participant_id: participantId,
+      messages,
+      unread_member_messages: messages.filter(
+        (item: any) => item.sender === "participant" && !item.is_read
+      ).length,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, message: error?.message || "Gagal memuat chat member." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = adminClient();
@@ -209,6 +310,121 @@ export async function POST(request: NextRequest) {
       supabase,
       asNumber(coach.id)
     );
+
+    if (action === "send_chat") {
+      const participant = participants.find(
+        (item: any) => asNumber(item.id) === participantId
+      );
+      const message = clean(body.message);
+
+      if (!participant) {
+        return NextResponse.json(
+          { ok: false, message: "Peserta tidak berada dalam assignment coach." },
+          { status: 403 }
+        );
+      }
+
+      if (!message) {
+        return NextResponse.json(
+          { ok: false, message: "Pesan chat wajib diisi." },
+          { status: 400 }
+        );
+      }
+
+      const assignedGroup = assignedGroupFor(participant, assignments);
+      const now = new Date().toISOString();
+      const payload = {
+        coach_user_id: coach.id,
+        participant_id: participantId,
+        wellness_group_unit_id:
+          assignedGroup?.wellness_group_unit_id ||
+          participant.wellness_group_unit_id ||
+          participant.group_unit_id ||
+          null,
+        group_name:
+          clean(assignedGroup?.group_name) || participantGroupName(participant),
+        session_date: now.slice(0, 10),
+        topic: "Chat Coach",
+        main_issue: "chat:coach",
+        coach_note: message,
+        action_plan: "",
+        follow_up_status: "Open",
+        next_follow_up_date: null,
+        updated_at: now,
+      };
+
+      const { data, error } = await supabase
+        .from("wellness_coach_notes")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error) {
+        return NextResponse.json(
+          { ok: false, message: error.message },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: "Pesan sudah dikirim kepada member.",
+        chat: data,
+      });
+    }
+
+    if (action === "mark_chat_read") {
+      const noteIds = (Array.isArray(body.note_ids) ? body.note_ids : [body.note_id])
+        .map(asNumber)
+        .filter(Boolean);
+
+      if (!participantId || noteIds.length === 0) {
+        return NextResponse.json(
+          { ok: false, message: "participant_id dan note_id chat wajib diisi." },
+          { status: 400 }
+        );
+      }
+
+      const participant = participants.find(
+        (item: any) => asNumber(item.id) === participantId
+      );
+      if (!participant) {
+        return NextResponse.json(
+          { ok: false, message: "Peserta tidak berada dalam assignment coach." },
+          { status: 403 }
+        );
+      }
+
+      const { data: notes, error: notesError } = await supabase
+        .from("wellness_coach_notes")
+        .select("*")
+        .eq("participant_id", participantId)
+        .in("id", noteIds);
+
+      if (notesError) throw notesError;
+
+      const allowedIds = (notes || [])
+        .filter((note: any) => isChatNote(note) && chatSender(note) === "participant")
+        .map((note: any) => asNumber(note.id));
+
+      const readRows = allowedIds.map((noteId: number) => ({
+        note_id: noteId,
+        participant_id: participantId,
+        read_at: new Date().toISOString(),
+      }));
+
+      if (readRows.length > 0) {
+        const { error } = await supabase
+          .from("wellness_coach_note_reads")
+          .upsert(readRows, { onConflict: "note_id,participant_id" });
+        if (error) throw error;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: "Chat member sudah ditandai dibaca.",
+      });
+    }
 
     if (action === "save_targets") {
       const participant = participants.find(
