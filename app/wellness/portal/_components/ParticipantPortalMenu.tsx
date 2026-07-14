@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+// WELLNESS_PORTAL_MENU_UI_V50
+
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
 // - Bottom navigation seperti aplikasi.
@@ -55,7 +57,13 @@ const menuItems: MenuItem[] = [
     description: "Catat seminar / health talk",
     emoji: "🎤",
   },
-  {     tab: "charts",     id: "charts",     key: "charts",     value: "charts",     icon: "G",     title: "Grafik",     label: "Grafik",     subtitle: "Grafik capaian peserta",     description: "Progress nutrisi, workout, dan pemeriksaan",   } as any,
+  {
+    key: "charts",
+    label: "Grafik",
+    shortLabel: "Grafik",
+    description: "Progress nutrisi, workout, dan pemeriksaan",
+    emoji: "\u{1F4C8}",
+  },
   {
     key: "history",
     label: "History",
@@ -225,7 +233,7 @@ export default function ParticipantPortalMenu({
       </nav>
 
       {open ? (
-        <div className="fixed inset-0 z-[9999] bg-slate-950/50 backdrop-blur-sm">
+        <div className="fixed inset-x-0 bottom-0 top-[4.75rem] z-[9999] bg-slate-950/50 backdrop-blur-sm md:inset-0">
           <button
             type="button"
             className="absolute inset-0 cursor-default"
@@ -233,7 +241,7 @@ export default function ParticipantPortalMenu({
             aria-label="Tutup overlay menu"
           />
 
-          <aside className="absolute bottom-4 right-4 top-4 flex w-[calc(100vw-2rem)] max-w-[430px] flex-col overflow-hidden rounded-[2rem] border border-white/60 bg-white shadow-2xl shadow-slate-950/30">
+          <aside className="absolute bottom-4 right-4 top-0 flex w-[calc(100vw-2rem)] max-w-[430px] flex-col overflow-hidden rounded-[2rem] border border-white/60 bg-white shadow-2xl shadow-slate-950/30 md:top-4">
             <div className="bg-gradient-to-br from-orange-400 via-orange-500 to-amber-500 p-5 text-white">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -330,3 +338,5 @@ export default function ParticipantPortalMenu({
     </>
   );
 }
+
+
