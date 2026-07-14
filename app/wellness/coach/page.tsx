@@ -1,9 +1,11 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
-// WELLNESS_COACH_PORTAL_MVP_V1
+// WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
+// Extends the existing Coach Portal without changing database schema or other modules.
 
+type FlagLevel = "green" | "yellow" | "red";
 type CoachDashboard = {
   ok: boolean;
   message?: string;
@@ -13,6 +15,7 @@ type CoachDashboard = {
   participants?: any[];
   notes?: any[];
   today?: string;
+  monitoring_period?: any;
 };
 
 function clean(value: any) {
@@ -22,7 +25,6 @@ function clean(value: any) {
 function fmtNumber(value: any, digits = 0) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0";
-
   return new Intl.NumberFormat("id-ID", {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
@@ -33,48 +35,67 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function formatReadAt(value: any) {
+  if (!value) return "Belum dibaca";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sudah dibaca";
+  return `Sudah dibaca ${new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)}`;
+}
+
 const fieldClass =
   "rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100";
 
 export default function WellnessCoachPortalPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Masuk menggunakan akun coach.");
-  const [login, setLogin] = useState({
-    email: "",
-    access_code: "",
-  });
-
+  const [login, setLogin] = useState({ email: "", access_code: "" });
   const [dashboard, setDashboard] = useState<CoachDashboard | null>(null);
   const [selectedGroup, setSelectedGroup] = useState("all");
+  const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
   const [search, setSearch] = useState("");
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
-  const [savingNote, setSavingNote] = useState(false);
-
-  const [noteForm, setNoteForm] = useState({
+  const [saving, setSaving] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [instructionScope, setInstructionScope] = useState<"participant" | "group">(
+    "participant"
+  );
+  const [instructionForm, setInstructionForm] = useState({
     session_date: todayDate(),
-    topic: "Weekly coaching",
+    topic: "Instruksi Wellness",
     main_issue: "",
     coach_note: "",
     action_plan: "",
     follow_up_status: "Open",
     next_follow_up_date: "",
   });
+  const [targetForm, setTargetForm] = useState({
+    nutrition_max_calories: "",
+    workout_min_calories: "",
+    target_weight_kg: "",
+    coach_note: "",
+    next_follow_up_date: "",
+  });
 
-  async function loadDashboard() {
+  async function loadDashboard(options?: { keepSelection?: boolean }) {
     setLoading(true);
-
-    const result = await fetch("/api/wellness/coach/dashboard", {
-      cache: "no-store",
-    })
+    const result = await fetch("/api/wellness/coach/dashboard", { cache: "no-store" })
       .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Network error",
-      }));
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
     if (result.ok) {
       setDashboard(result);
       setMessage("Portal Coach aktif.");
+      if (options?.keepSelection && selectedParticipant?.id) {
+        const fresh = (result.participants || []).find(
+          (item: any) => Number(item.id) === Number(selectedParticipant.id)
+        );
+        if (fresh) setSelectedParticipant(fresh);
+      }
     } else {
       setDashboard(null);
       setMessage(result.message || "Session coach belum aktif.");
@@ -89,84 +110,125 @@ export default function WellnessCoachPortalPage() {
       setMessage("Email dan access code wajib diisi.");
       return;
     }
-
     setLoading(true);
     setMessage("Login coach...");
-
     const result = await fetch("/api/wellness/coach/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(login),
     })
       .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Network error",
-      }));
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
-    if (result.ok) {
-      setMessage("Login berhasil. Memuat dashboard...");
-      await loadDashboard();
-    } else {
+    if (result.ok) await loadDashboard();
+    else {
       setMessage(result.message || "Login gagal.");
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function logout() {
-    await fetch("/api/wellness/coach/me", {
-      method: "DELETE",
-    }).catch(() => null);
-
+    await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(() => null);
     setDashboard(null);
     setSelectedParticipant(null);
     setMessage("Coach logout berhasil.");
   }
 
-  async function saveNote() {
-    if (!selectedParticipant) {
-      setMessage("Pilih peserta terlebih dahulu.");
+  function chooseParticipant(item: any) {
+    setSelectedParticipant(item);
+    setTargetForm({
+      nutrition_max_calories: item?.targets?.nutrition_max_calories
+        ? String(item.targets.nutrition_max_calories)
+        : "",
+      workout_min_calories: item?.targets?.workout_min_calories
+        ? String(item.targets.workout_min_calories)
+        : "",
+      target_weight_kg: item?.targets?.target_weight_kg
+        ? String(item.targets.target_weight_kg)
+        : "",
+      coach_note: "",
+      next_follow_up_date: "",
+    });
+  }
+
+  function openInstruction(scope: "participant" | "group") {
+    if (scope === "participant" && !selectedParticipant) {
+      setMessage("Pilih peserta sebelum menambah instruksi individual.");
       return;
     }
+    if (scope === "group" && selectedGroup === "all") {
+      setMessage("Pilih satu assigned group sebelum menambah instruksi kelompok.");
+      return;
+    }
+    setInstructionScope(scope);
+    setInstructionForm((previous) => ({
+      ...previous,
+      topic: scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual",
+      main_issue: "",
+      coach_note: "",
+      action_plan: "",
+      next_follow_up_date: "",
+    }));
+    setComposerOpen(true);
+  }
 
-    setSavingNote(true);
-    setMessage("Menyimpan catatan coach...");
+  async function saveInstruction() {
+    const group = (dashboard?.groups || []).find(
+      (item: any) =>
+        String(item.wellness_group_unit_id || item.group_name) === selectedGroup
+    );
+    setSaving(true);
+    setMessage("Mengirim instruksi coach...");
 
     const result = await fetch("/api/wellness/coach/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        participant_id: selectedParticipant.id,
-        wellness_group_unit_id:
-          selectedParticipant.raw?.wellness_group_unit_id ||
-          selectedParticipant.raw?.group_unit_id ||
-          null,
-        group_name: selectedParticipant.group_name,
-        ...noteForm,
+        action: "save_instruction",
+        scope: instructionScope,
+        participant_id: selectedParticipant?.id || null,
+        wellness_group_unit_id: group?.wellness_group_unit_id || null,
+        group_name: group?.group_name || selectedParticipant?.group_name || "",
+        ...instructionForm,
       }),
     })
       .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Network error",
-      }));
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
     if (result.ok) {
-      setMessage(result.message || "Catatan coach berhasil disimpan.");
-      setNoteForm((previous) => ({
-        ...previous,
-        main_issue: "",
-        coach_note: "",
-        action_plan: "",
-        next_follow_up_date: "",
-      }));
-      await loadDashboard();
-    } else {
-      setMessage(result.message || "Gagal menyimpan catatan coach.");
-    }
+      setMessage(result.message || "Instruksi berhasil dikirim.");
+      setComposerOpen(false);
+      await loadDashboard({ keepSelection: true });
+    } else setMessage(result.message || "Gagal mengirim instruksi.");
+    setSaving(false);
+  }
 
-    setSavingNote(false);
+  async function saveTargets() {
+    if (!selectedParticipant) return;
+    setSaving(true);
+    setMessage("Menyimpan target peserta...");
+
+    const result = await fetch("/api/wellness/coach/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "save_targets",
+        participant_id: selectedParticipant.id,
+        nutrition_max_calories: targetForm.nutrition_max_calories,
+        workout_min_calories: targetForm.workout_min_calories,
+        target_weight_kg: targetForm.target_weight_kg,
+        coach_note: targetForm.coach_note,
+        next_follow_up_date: targetForm.next_follow_up_date,
+      }),
+    })
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      setMessage(result.message || "Target peserta berhasil disimpan.");
+      await loadDashboard({ keepSelection: true });
+    } else setMessage(result.message || "Gagal menyimpan target peserta.");
+    setSaving(false);
   }
 
   useEffect(() => {
@@ -175,32 +237,28 @@ export default function WellnessCoachPortalPage() {
 
   const participants = dashboard?.participants || [];
   const groups = dashboard?.groups || [];
-
   const filteredParticipants = useMemo(() => {
     const q = search.toLowerCase();
-
     return participants.filter((item: any) => {
       const byGroup =
         selectedGroup === "all" ||
         clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
         clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
         clean(item.raw?.group_unit_id) === selectedGroup;
-
+      const byFlag = flagFilter === "all" || item.flag === flagFilter;
       const haystack = [
         item.name,
         item.code,
         item.group_name,
         item.risk,
         item.status,
+        item.flag_reason,
       ]
         .map((x) => clean(x).toLowerCase())
         .join(" ");
-
-      const bySearch = !q || haystack.includes(q);
-
-      return byGroup && bySearch;
+      return byGroup && byFlag && (!q || haystack.includes(q));
     });
-  }, [participants, selectedGroup, search]);
+  }, [participants, selectedGroup, flagFilter, search]);
 
   const isLoggedIn = !!dashboard?.coach;
 
@@ -213,16 +271,11 @@ export default function WellnessCoachPortalPage() {
               <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
                 Wellness Coach Portal
               </div>
-
-              <h1 className="mt-2 text-3xl font-black md:text-4xl">
-                Portal Coach
-              </h1>
-
+              <h1 className="mt-2 text-3xl font-black md:text-4xl">Portal Coach</h1>
               <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-white/90">
-                Coach hanya dapat melihat peserta dari kelompok yang sudah di-assign oleh admin.
+                Monitoring kepatuhan, target individual, dan instruksi untuk assigned group.
               </p>
             </div>
-
             {isLoggedIn ? (
               <button
                 type="button"
@@ -238,9 +291,7 @@ export default function WellnessCoachPortalPage() {
         <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
           <div
             className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
-              message.toLowerCase().includes("gagal") ||
-              message.toLowerCase().includes("wajib") ||
-              message.toLowerCase().includes("belum")
+              /gagal|wajib|belum|pilih/i.test(message)
                 ? "bg-amber-50 text-amber-900"
                 : "bg-sky-50 text-sky-800"
             }`}
@@ -250,117 +301,106 @@ export default function WellnessCoachPortalPage() {
         </section>
 
         {!isLoggedIn ? (
-          <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_380px]">
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-black">Login Coach</h2>
-
-              <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-                Gunakan email coach dan access code yang dibuat oleh admin.
-              </p>
-
-              <div className="mt-5 grid gap-4">
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Email Coach
-                  <input
-                    type="email"
-                    className={fieldClass}
-                    value={login.email}
-                    onChange={(e) =>
-                      setLogin((previous) => ({
-                        ...previous,
-                        email: e.target.value,
-                      }))
-                    }
-                    placeholder="coach@inharmony.co.id"
-                  />
-                </label>
-
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Access Code
-                  <input
-                    className={fieldClass}
-                    value={login.access_code}
-                    onChange={(e) =>
-                      setLogin((previous) => ({
-                        ...previous,
-                        access_code: e.target.value,
-                      }))
-                    }
-                    placeholder="Contoh: INA2026"
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={submitLogin}
-                  className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100"
-                >
-                  Masuk Portal Coach
-                </button>
-              </div>
-            </div>
-
-            <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-black">Akses Coach</h3>
-
-              <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-500">
-                <p>Coach hanya melihat peserta sesuai group assignment.</p>
-                <p>Data peserta lain tidak ditampilkan di dashboard coach.</p>
-                <p className="rounded-2xl bg-teal-50 p-4 text-teal-900">
-                  MVP ini fokus pada monitoring group, detail peserta, dan catatan coaching.
-                </p>
-              </div>
-            </aside>
-          </section>
+          <LoginSection
+            login={login}
+            setLogin={setLogin}
+            submitLogin={submitLogin}
+            loading={loading}
+          />
         ) : (
           <section className="mt-6 space-y-6">
             <div className="grid gap-4 md:grid-cols-4">
               <SummaryCard
                 label="Total Peserta"
                 value={fmtNumber(dashboard?.summary?.total_participants || 0)}
-                note="peserta dalam group coach"
+                note="anggota assigned group"
                 tone="teal"
               />
-
               <SummaryCard
                 label="Aktif Hari Ini"
                 value={fmtNumber(dashboard?.summary?.active_today || 0)}
-                note="memiliki steps hari ini"
+                note="input nutrisi atau workout"
                 tone="sky"
               />
-
               <SummaryCard
                 label="Perlu Follow Up"
                 value={fmtNumber(dashboard?.summary?.need_follow_up || 0)}
-                note="belum aktif / perlu dipantau"
+                note="yellow + red flag"
                 tone="amber"
               />
-
               <SummaryCard
-                label="Medical Review"
-                value={fmtNumber(dashboard?.summary?.need_medical_review || 0)}
-                note="ditandai perlu review medis"
+                label="Instruksi Belum Dibaca"
+                value={fmtNumber(dashboard?.summary?.unread_instructions || 0)}
+                note="seluruh catatan peserta"
                 tone="rose"
               />
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-[1fr_420px]">
+            <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-xl font-black">Status Kepatuhan 7 Hari</h2>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    Klik card untuk melihat daftar peserta pada status tersebut.
+                  </p>
+                </div>
+                {flagFilter !== "all" ? (
+                  <button
+                    type="button"
+                    onClick={() => setFlagFilter("all")}
+                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                  >
+                    Tampilkan Semua
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                <FlagCard
+                  level="green"
+                  count={dashboard?.summary?.flags?.green || 0}
+                  active={flagFilter === "green"}
+                  onClick={() => setFlagFilter("green")}
+                />
+                <FlagCard
+                  level="yellow"
+                  count={dashboard?.summary?.flags?.yellow || 0}
+                  active={flagFilter === "yellow"}
+                  onClick={() => setFlagFilter("yellow")}
+                />
+                <FlagCard
+                  level="red"
+                  count={dashboard?.summary?.flags?.red || 0}
+                  active={flagFilter === "red"}
+                  onClick={() => setFlagFilter("red")}
+                />
+              </div>
+            </section>
+
+            <div className="grid gap-5 lg:grid-cols-[1fr_430px]">
               <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
                 <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                   <div>
-                    <h2 className="text-xl font-black">Monitoring Peserta</h2>
+                    <h2 className="text-xl font-black">Monitoring Anggota</h2>
                     <p className="mt-1 text-sm font-bold text-slate-500">
                       Coach: {dashboard?.coach?.name || "-"}
                     </p>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={loadDashboard}
-                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                  >
-                    Refresh
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openInstruction("group")}
+                      className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
+                    >
+                      + Instruksi Kelompok
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => loadDashboard({ keepSelection: true })}
+                      className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                    >
+                      Refresh
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-5 grid gap-3 md:grid-cols-[220px_1fr]">
@@ -373,17 +413,14 @@ export default function WellnessCoachPortalPage() {
                     {groups.map((group: any) => (
                       <option
                         key={group.id}
-                        value={
-                          group.wellness_group_unit_id
-                            ? String(group.wellness_group_unit_id)
-                            : group.group_name
-                        }
+                        value={String(
+                          group.wellness_group_unit_id || group.group_name
+                        )}
                       >
-                        {group.group_name}
+                        {group.group_name} ({group.member_count || 0})
                       </option>
                     ))}
                   </select>
-
                   <input
                     className={fieldClass}
                     value={search}
@@ -392,10 +429,13 @@ export default function WellnessCoachPortalPage() {
                   />
                 </div>
 
-                <div className="mt-5 grid gap-3">
+                <div className="mt-5 text-xs font-black uppercase tracking-wide text-slate-400">
+                  Menampilkan {filteredParticipants.length} anggota
+                </div>
+                <div className="mt-3 grid gap-3">
                   {filteredParticipants.length === 0 ? (
                     <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
-                      Belum ada peserta dalam assignment coach ini.
+                      Tidak ada peserta pada filter ini.
                     </div>
                   ) : (
                     filteredParticipants.map((item: any) => (
@@ -403,7 +443,7 @@ export default function WellnessCoachPortalPage() {
                         key={item.id}
                         item={item}
                         active={selectedParticipant?.id === item.id}
-                        onClick={() => setSelectedParticipant(item)}
+                        onClick={() => chooseParticipant(item)}
                       />
                     ))
                   )}
@@ -413,20 +453,19 @@ export default function WellnessCoachPortalPage() {
               <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
                 {!selectedParticipant ? (
                   <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                    <h3 className="text-lg font-black text-slate-900">
-                      Pilih Peserta
-                    </h3>
+                    <h3 className="text-lg font-black text-slate-900">Pilih Peserta</h3>
                     <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                      Klik salah satu peserta untuk melihat detail dan membuat catatan coaching.
+                      Klik anggota untuk melihat progres, target, dan status instruksi.
                     </p>
                   </div>
                 ) : (
                   <ParticipantDetail
                     participant={selectedParticipant}
-                    noteForm={noteForm}
-                    setNoteForm={setNoteForm}
-                    saveNote={saveNote}
-                    savingNote={savingNote}
+                    targetForm={targetForm}
+                    setTargetForm={setTargetForm}
+                    saveTargets={saveTargets}
+                    openInstruction={() => openInstruction("participant")}
+                    saving={saving}
                   />
                 )}
               </section>
@@ -434,55 +473,140 @@ export default function WellnessCoachPortalPage() {
           </section>
         )}
       </div>
+
+      {composerOpen ? (
+        <InstructionModal
+          scope={instructionScope}
+          participant={selectedParticipant}
+          selectedGroup={selectedGroup}
+          groups={groups}
+          form={instructionForm}
+          setForm={setInstructionForm}
+          saving={saving}
+          onClose={() => setComposerOpen(false)}
+          onSave={saveInstruction}
+        />
+      ) : null}
     </main>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  tone: "teal" | "sky" | "amber" | "rose";
-}) {
+function LoginSection({ login, setLogin, submitLogin, loading }: any) {
+  return (
+    <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_380px]">
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-black">Login Coach</h2>
+        <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
+          Gunakan email coach dan access code yang dibuat oleh admin.
+        </p>
+        <div className="mt-5 grid gap-4">
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Email Coach
+            <input
+              type="email"
+              className={fieldClass}
+              value={login.email}
+              onChange={(e) => setLogin((previous: any) => ({ ...previous, email: e.target.value }))}
+              placeholder="coach@inharmony.co.id"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Access Code
+            <input
+              className={fieldClass}
+              value={login.access_code}
+              onChange={(e) =>
+                setLogin((previous: any) => ({ ...previous, access_code: e.target.value }))
+              }
+              placeholder="Contoh: INA2026"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={submitLogin}
+            disabled={loading}
+            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+          >
+            Masuk Portal Coach
+          </button>
+        </div>
+      </div>
+      <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-black">Akses Coach</h3>
+        <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-500">
+          <p>Coach hanya melihat peserta sesuai group assignment.</p>
+          <p>Green, Yellow, dan Red Flag dihitung dari kepatuhan 7 hari.</p>
+          <p className="rounded-2xl bg-teal-50 p-4 text-teal-900">
+            Instruksi kelompok akan diterima oleh seluruh anggota kelompok terpilih.
+          </p>
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+function SummaryCard({ label, value, note, tone }: any) {
   const toneClass: Record<string, string> = {
     teal: "border-teal-100 bg-teal-50 text-teal-800",
     sky: "border-sky-100 bg-sky-50 text-sky-800",
     amber: "border-amber-100 bg-amber-50 text-amber-900",
     rose: "border-rose-100 bg-rose-50 text-rose-800",
   };
-
   return (
     <div className={`rounded-3xl border p-5 shadow-sm ${toneClass[tone]}`}>
-      <div className="text-xs font-black uppercase tracking-wide opacity-70">
-        {label}
-      </div>
+      <div className="text-xs font-black uppercase tracking-wide opacity-70">{label}</div>
       <div className="mt-2 text-2xl font-black">{value}</div>
       <div className="mt-1 text-xs font-bold opacity-70">{note}</div>
     </div>
   );
 }
 
-function ParticipantCard({
-  item,
-  active,
-  onClick,
-}: {
-  item: any;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const statusClass =
-    item.status === "Active today"
-      ? "bg-teal-50 text-teal-700"
-      : item.status === "Need Medical Review"
-        ? "bg-rose-50 text-rose-700"
-        : "bg-amber-50 text-amber-700";
+function FlagCard({ level, count, active, onClick }: any) {
+  const config: Record<string, any> = {
+    green: {
+      label: "Green Flag",
+      note: "Patuh dan konsisten",
+      emoji: "\u{1F7E2}",
+      style: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    },
+    yellow: {
+      label: "Yellow Flag",
+      note: "Perlu dipantau",
+      emoji: "\u{1F7E1}",
+      style: "border-amber-200 bg-amber-50 text-amber-900",
+    },
+    red: {
+      label: "Red Flag",
+      note: "Perlu follow up",
+      emoji: "\u{1F534}",
+      style: "border-rose-200 bg-rose-50 text-rose-900",
+    },
+  };
+  const item = config[level];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-3xl border p-5 text-left shadow-sm transition ${item.style} ${
+        active ? "ring-4 ring-slate-200" : "hover:-translate-y-0.5"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-2xl">{item.emoji}</span>
+        <span className="text-3xl font-black">{fmtNumber(count)}</span>
+      </div>
+      <div className="mt-3 text-base font-black">{item.label}</div>
+      <div className="mt-1 text-xs font-bold opacity-70">{item.note}</div>
+    </button>
+  );
+}
 
+function ParticipantCard({ item, active, onClick }: any) {
+  const flagClass: Record<string, string> = {
+    green: "bg-emerald-100 text-emerald-800",
+    yellow: "bg-amber-100 text-amber-800",
+    red: "bg-rose-100 text-rose-800",
+  };
   return (
     <button
       type="button"
@@ -494,27 +618,24 @@ function ParticipantCard({
       }`}
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <div className="text-base font-black text-slate-950">
-            {item.name}
-          </div>
+        <div className="min-w-0">
+          <div className="truncate text-base font-black text-slate-950">{item.name}</div>
           <div className="mt-1 text-xs font-bold text-slate-500">
             Kode {item.code} - {item.group_name}
           </div>
-          <div className="mt-2 text-xs font-black text-slate-400">
-            Risk: {item.risk || "-"}
+          <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
+            {item.flag_reason}
           </div>
         </div>
-
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full bg-white px-3 py-2 text-xs font-black text-slate-700">
-            Steps {fmtNumber(item.today?.steps || 0)}
+            Patuh {fmtNumber(item.compliance?.compliance_percent || 0)}%
           </span>
           <span className="rounded-full bg-white px-3 py-2 text-xs font-black text-slate-700">
             {fmtNumber(item.today?.calories || 0)} kkal
           </span>
-          <span className={`rounded-full px-3 py-2 text-xs font-black ${statusClass}`}>
-            {item.status}
+          <span className={`rounded-full px-3 py-2 text-xs font-black ${flagClass[item.flag]}`}>
+            {item.flag_label}
           </span>
         </div>
       </div>
@@ -524,160 +645,139 @@ function ParticipantCard({
 
 function ParticipantDetail({
   participant,
-  noteForm,
-  setNoteForm,
-  saveNote,
-  savingNote,
-}: {
-  participant: any;
-  noteForm: any;
-  setNoteForm: (value: any) => void;
-  saveNote: () => void;
-  savingNote: boolean;
-}) {
+  targetForm,
+  setTargetForm,
+  saveTargets,
+  openInstruction,
+  saving,
+}: any) {
   const clinical = participant.clinical || {};
   const latestNote = participant.latest_note || null;
-
-  function setValue(key: string, value: string) {
-    setNoteForm((previous: any) => ({
-      ...previous,
-      [key]: value,
-    }));
-  }
+  const setTarget = (key: string, value: string) =>
+    setTargetForm((previous: any) => ({ ...previous, [key]: value }));
 
   return (
-    <div>
+    <div className="space-y-5">
       <div className="rounded-3xl bg-gradient-to-br from-teal-50 to-sky-50 p-5">
         <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
           Detail Peserta
         </div>
-
-        <h2 className="mt-2 text-2xl font-black text-slate-950">
-          {participant.name}
-        </h2>
-
+        <h2 className="mt-2 text-2xl font-black text-slate-950">{participant.name}</h2>
         <div className="mt-2 text-sm font-bold leading-6 text-slate-500">
           Kode {participant.code} - {participant.group_name}
         </div>
-
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <MiniInfo label="Steps Hari Ini" value={fmtNumber(participant.today?.steps || 0)} />
-          <MiniInfo label="Workout Calories" value={`${fmtNumber(participant.today?.calories || 0)} kkal`} />
+          <MiniInfo label="Kepatuhan 7 Hari" value={`${fmtNumber(participant.compliance?.compliance_percent || 0)}%`} />
+          <MiniInfo label="Status" value={participant.flag_label || "-"} />
+          <MiniInfo label="Nutrisi Hari Ini" value={`${fmtNumber(participant.today?.nutrition_calories || 0)} kkal`} />
+          <MiniInfo label="Workout Hari Ini" value={`${fmtNumber(participant.today?.calories || 0)} kkal`} />
           <MiniInfo label="BMI" value={clinical?.bmi ? fmtNumber(clinical.bmi, 1) : "-"} />
           <MiniInfo
             label="Tensi"
-            value={
-              clinical?.systolic
-                ? `${clinical.systolic}/${clinical.diastolic || "-"}`
-                : "-"
-            }
+            value={clinical?.systolic ? `${clinical.systolic}/${clinical.diastolic || "-"}` : "-"}
           />
         </div>
       </div>
 
-      {latestNote ? (
-        <div className="mt-5 rounded-3xl border border-slate-100 bg-slate-50 p-4">
-          <div className="text-sm font-black text-slate-900">
-            Catatan Terakhir
-          </div>
-          <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
-            {latestNote.coach_note || "-"}
-          </div>
-          <div className="mt-3 rounded-full bg-white px-3 py-2 text-xs font-black text-slate-600">
-            Status: {latestNote.follow_up_status || "Open"}
-          </div>
+      <div className="rounded-3xl border border-slate-100 bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-black">Target Individual</h3>
+          <span className="rounded-full bg-sky-50 px-3 py-2 text-[11px] font-black text-sky-700">
+            Diterima peserta sebagai instruksi
+          </span>
         </div>
-      ) : null}
-
-      <div className="mt-5 rounded-3xl border border-slate-100 bg-white p-4">
-        <h3 className="text-lg font-black">Catatan Coaching</h3>
-
         <div className="mt-4 grid gap-3">
           <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Tanggal
+            Diet Maksimum Kalori / Hari
             <input
-              type="date"
+              type="number"
+              min="0"
               className={fieldClass}
-              value={noteForm.session_date}
-              onChange={(e) => setValue("session_date", e.target.value)}
+              value={targetForm.nutrition_max_calories}
+              onChange={(e) => setTarget("nutrition_max_calories", e.target.value)}
+              placeholder="Contoh: 1700"
             />
           </label>
-
           <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Topik
+            Target Kalori Terbakar / Hari
             <input
+              type="number"
+              min="0"
               className={fieldClass}
-              value={noteForm.topic}
-              onChange={(e) => setValue("topic", e.target.value)}
-              placeholder="Contoh: Weekly coaching"
+              value={targetForm.workout_min_calories}
+              onChange={(e) => setTarget("workout_min_calories", e.target.value)}
+              placeholder="Contoh: 300"
             />
           </label>
-
           <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Masalah Utama
+            Target Berat Badan (kg)
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              className={fieldClass}
+              value={targetForm.target_weight_kg}
+              onChange={(e) => setTarget("target_weight_kg", e.target.value)}
+              placeholder="Contoh: 72"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Catatan Target
             <textarea
               className={`${fieldClass} min-h-[80px]`}
-              value={noteForm.main_issue}
-              onChange={(e) => setValue("main_issue", e.target.value)}
-              placeholder="Contoh: belum rutin jalan kaki, pola makan masih tinggi gula"
+              value={targetForm.coach_note}
+              onChange={(e) => setTarget("coach_note", e.target.value)}
+              placeholder="Arahan singkat untuk mencapai target"
             />
           </label>
-
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Catatan Coach
-            <textarea
-              className={`${fieldClass} min-h-[100px]`}
-              value={noteForm.coach_note}
-              onChange={(e) => setValue("coach_note", e.target.value)}
-              placeholder="Catatan hasil coaching"
-            />
-          </label>
-
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Action Plan
-            <textarea
-              className={`${fieldClass} min-h-[100px]`}
-              value={noteForm.action_plan}
-              onChange={(e) => setValue("action_plan", e.target.value)}
-              placeholder="Target minggu ini"
-            />
-          </label>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Status Follow Up
-              <select
-                className={fieldClass}
-                value={noteForm.follow_up_status}
-                onChange={(e) => setValue("follow_up_status", e.target.value)}
-              >
-                <option value="Open">Open</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Done">Done</option>
-                <option value="Need Medical Review">Need Medical Review</option>
-              </select>
-            </label>
-
-            <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Next Follow Up
-              <input
-                type="date"
-                className={fieldClass}
-                value={noteForm.next_follow_up_date}
-                onChange={(e) => setValue("next_follow_up_date", e.target.value)}
-              />
-            </label>
-          </div>
-
           <button
             type="button"
-            onClick={saveNote}
-            disabled={savingNote}
-            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            onClick={saveTargets}
+            disabled={saving}
+            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50"
           >
-            {savingNote ? "Menyimpan..." : "Simpan Catatan Coach"}
+            {saving ? "Menyimpan..." : "Simpan Target Peserta"}
           </button>
         </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-black">Instruksi Terakhir</h3>
+          <button
+            type="button"
+            onClick={openInstruction}
+            className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white"
+          >
+            + Tambah Instruksi
+          </button>
+        </div>
+        {latestNote ? (
+          <div className="mt-4">
+            <div className="text-sm font-black text-slate-900">
+              {latestNote.topic || "Catatan Coaching"}
+            </div>
+            <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">
+              {latestNote.coach_note || latestNote.action_plan || "-"}
+            </div>
+            {latestNote.action_plan ? (
+              <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">
+                {latestNote.action_plan}
+              </div>
+            ) : null}
+            <div
+              className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${
+                latestNote.is_read
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {formatReadAt(latestNote.read_at)}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 text-sm font-bold text-slate-400">Belum ada instruksi.</div>
+        )}
       </div>
     </div>
   );
@@ -686,12 +786,111 @@ function ParticipantDetail({
 function MiniInfo({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-white p-4">
-      <div className="text-xs font-black uppercase tracking-wide text-slate-400">
-        {label}
-      </div>
-      <div className="mt-1 text-sm font-black text-slate-900">
-        {value}
-      </div>
+      <div className="text-xs font-black uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1 text-sm font-black text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function InstructionModal({
+  scope,
+  participant,
+  selectedGroup,
+  groups,
+  form,
+  setForm,
+  saving,
+  onClose,
+  onSave,
+}: any) {
+  const group = groups.find(
+    (item: any) => String(item.wellness_group_unit_id || item.group_name) === selectedGroup
+  );
+  const setValue = (key: string, value: string) =>
+    setForm((previous: any) => ({ ...previous, [key]: value }));
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-slate-950/60 p-3 backdrop-blur-sm md:items-center">
+      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="Tutup" />
+      <section className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[2rem] bg-white p-5 shadow-2xl md:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-600">
+              {scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual"}
+            </div>
+            <h2 className="mt-2 text-2xl font-black">
+              {scope === "group" ? group?.group_name || "Kelompok" : participant?.name || "Peserta"}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg font-black"
+          >
+            ×
+          </button>
+        </div>
+        <div className="mt-5 grid gap-3">
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Topik
+            <input className={fieldClass} value={form.topic} onChange={(e) => setValue("topic", e.target.value)} />
+          </label>
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Masalah / Fokus
+            <textarea
+              className={`${fieldClass} min-h-[80px]`}
+              value={form.main_issue}
+              onChange={(e) => setValue("main_issue", e.target.value)}
+              placeholder="Contoh: input nutrisi belum konsisten"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Instruksi / Note
+            <textarea
+              className={`${fieldClass} min-h-[110px]`}
+              value={form.coach_note}
+              onChange={(e) => setValue("coach_note", e.target.value)}
+              placeholder="Pesan yang akan diterima peserta"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-bold text-slate-700">
+            Action Plan
+            <textarea
+              className={`${fieldClass} min-h-[100px]`}
+              value={form.action_plan}
+              onChange={(e) => setValue("action_plan", e.target.value)}
+              placeholder="Langkah yang harus dilakukan peserta"
+            />
+          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Status Follow Up
+              <select className={fieldClass} value={form.follow_up_status} onChange={(e) => setValue("follow_up_status", e.target.value)}>
+                <option value="Open">Open</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Done">Done</option>
+                <option value="Need Medical Review">Need Medical Review</option>
+              </select>
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Follow Up Berikutnya
+              <input type="date" className={fieldClass} value={form.next_follow_up_date} onChange={(e) => setValue("next_follow_up_date", e.target.value)} />
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+          >
+            {saving
+              ? "Mengirim..."
+              : scope === "group"
+                ? "Kirim ke Seluruh Anggota"
+                : "Kirim ke Peserta"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
