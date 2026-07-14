@@ -375,6 +375,34 @@ function ChartStatusCard({
   );
 }
 
+// WELLNESS_CHART_POINT_INTERACTION_V49B
+// Memperluas area interaksi tanpa mengubah ukuran atau tampilan dot grafik.
+function nearestChartPointIndex(
+  clientX: number,
+  svg: SVGSVGElement,
+  points: Array<{ x: number }>
+) {
+  if (!points.length) return 0;
+
+  const rect = svg.getBoundingClientRect();
+  const viewBoxWidth = svg.viewBox?.baseVal?.width || 620;
+  const relativeX =
+    rect.width > 0 ? ((clientX - rect.left) / rect.width) * viewBoxWidth : 0;
+
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  points.forEach((point, index) => {
+    const distance = Math.abs(point.x - relativeX);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+
+  return nearestIndex;
+}
 function SmoothDashboardChart({
   title,
   description,
@@ -459,6 +487,26 @@ function SmoothDashboardChart({
             className="h-64 w-full"
             role="img"
             aria-label={title}
+            onPointerMove={(event) => {
+              if (event.pointerType !== "touch") {
+                setActiveIndex(
+                  nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+                );
+              }
+            }}
+            onPointerDown={(event) =>
+              setActiveIndex(
+                nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+              )
+            }
+            onClick={(event) =>
+              setActiveIndex(
+                nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+              )
+            }
+            onPointerLeave={(event) => {
+              if (event.pointerType !== "touch") setActiveIndex(null);
+            }}
           >
             <defs>
               <linearGradient id={`chartGradient-${slug(title)}`} x1="0" x2="1" y1="0" y2="0">
@@ -637,7 +685,32 @@ function SmoothBpChart({
         </div>
       ) : (
         <div className="relative mt-5 overflow-hidden rounded-[1.8rem] bg-gradient-to-br from-slate-50 via-white to-teal-50 p-3">
-          <svg viewBox="0 0 620 250" className="h-64 w-full" role="img" aria-label={title}>
+          <svg
+            viewBox="0 0 620 250"
+            className="h-64 w-full"
+            role="img"
+            aria-label={title}
+            onPointerMove={(event) => {
+              if (event.pointerType !== "touch") {
+                setActiveIndex(
+                  nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+                );
+              }
+            }}
+            onPointerDown={(event) =>
+              setActiveIndex(
+                nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+              )
+            }
+            onClick={(event) =>
+              setActiveIndex(
+                nearestChartPointIndex(event.clientX, event.currentTarget, chart.points)
+              )
+            }
+            onPointerLeave={(event) => {
+              if (event.pointerType !== "touch") setActiveIndex(null);
+            }}
+          >
             {[0, 1, 2, 3].map((row) => {
               const y = 30 + row * 55;
 
@@ -1008,3 +1081,4 @@ function slug(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
+
