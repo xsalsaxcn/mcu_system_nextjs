@@ -403,6 +403,44 @@ function nearestChartPointIndex(
 
   return nearestIndex;
 }
+
+// WELLNESS_CHART_ADAPTIVE_TOOLTIP_V52
+// Menjaga tooltip tetap berada di dalam card dan memberi pulse halus pada titik aktif/terakhir.
+function clampChartValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function adaptiveChartTooltipStyle(
+  point: { x: number; y: number },
+  width = 620,
+  height = 250
+) {
+  const rawLeft = (point.x / width) * 100;
+  const rawTop = (point.y / height) * 100;
+  const placeBelow = point.y <= height * 0.38;
+
+  let left = clampChartValue(rawLeft, 4, 96);
+  let translateX = "-50%";
+
+  if (rawLeft < 18) {
+    left = 4;
+    translateX = "0%";
+  } else if (rawLeft > 82) {
+    left = 96;
+    translateX = "-100%";
+  }
+
+  const top = placeBelow
+    ? clampChartValue(rawTop + 8, 8, 84)
+    : clampChartValue(rawTop - 6, 12, 88);
+
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    transform: `translate(${translateX}, ${placeBelow ? "0%" : "-100%"})`,
+  };
+}
+
 function SmoothDashboardChart({
   title,
   description,
@@ -564,11 +602,12 @@ function SmoothDashboardChart({
 
             {chart.points.map((point, index) => (
               <g key={`${point.x}-${point.y}-${index}`}>
-                {index === chart.points.length - 1 ? (
+                {activeIndex === index ||
+                (activeIndex === null && index === chart.points.length - 1) ? (
                   <circle
                     cx={point.x}
                     cy={point.y}
-                    r="13"
+                    r={activeIndex === index ? "16" : "13"}
                     fill="#14b8a6"
                     opacity="0.16"
                     className="animate-ping"
@@ -592,12 +631,8 @@ function SmoothDashboardChart({
 
           {activePoint ? (
             <div
-              className="pointer-events-none absolute rounded-2xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-xl"
-              style={{
-                left: `${Math.max(12, Math.min(78, (activePoint.x / 620) * 100))}%`,
-                top: `${Math.max(12, Math.min(70, (activePoint.y / 250) * 100))}%`,
-                transform: "translate(-50%, -120%)",
-              }}
+              className="pointer-events-none absolute z-10 max-w-[calc(100%_-_1.5rem)] whitespace-nowrap rounded-2xl bg-slate-950 px-3 py-2 text-center text-xs font-black text-white shadow-xl"
+              style={adaptiveChartTooltipStyle(activePoint, 620, 250)}
             >
               {activePoint.label}: {fmtNumber(activePoint.value, 0)} {unit}
             </div>
@@ -639,6 +674,11 @@ function SmoothBpChart({
     activeIndex !== null && data[activeIndex]
       ? data[activeIndex]
       : data[data.length - 1];
+
+  const activeChartPoint =
+    activeIndex !== null && chart.points[activeIndex]
+      ? chart.points[activeIndex]
+      : chart.points[chart.points.length - 1];
 
   const latest = data[data.length - 1] || null;
   const danger = latest ? latest.sbp >= 140 || latest.dbp >= 90 : false;
@@ -746,6 +786,28 @@ function SmoothBpChart({
 
             {chart.points.map((point, index) => (
               <g key={`${point.x}-${point.sbpY}-${index}`}>
+                {activeIndex === index ||
+                (activeIndex === null && index === chart.points.length - 1) ? (
+                  <>
+                    <circle
+                      cx={point.x}
+                      cy={point.sbpY}
+                      r="13"
+                      fill="#ef4444"
+                      opacity="0.12"
+                      className="animate-ping"
+                    />
+                    <circle
+                      cx={point.x}
+                      cy={point.dbpY}
+                      r="13"
+                      fill="#0f766e"
+                      opacity="0.12"
+                      className="animate-ping"
+                    />
+                  </>
+                ) : null}
+
                 <circle
                   cx={point.x}
                   cy={point.sbpY}
@@ -771,8 +833,18 @@ function SmoothBpChart({
             ))}
           </svg>
 
-          {active ? (
-            <div className="absolute left-1/2 top-5 -translate-x-1/2 rounded-2xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-xl">
+          {active && activeChartPoint ? (
+            <div
+              className="pointer-events-none absolute z-10 max-w-[calc(100%_-_1.5rem)] whitespace-nowrap rounded-2xl bg-slate-950 px-3 py-2 text-center text-xs font-black text-white shadow-xl"
+              style={adaptiveChartTooltipStyle(
+                {
+                  x: activeChartPoint.x,
+                  y: Math.min(activeChartPoint.sbpY, activeChartPoint.dbpY),
+                },
+                620,
+                250
+              )}
+            >
               {active.label}: {active.sbp}/{active.dbp} mmHg
             </div>
           ) : null}
