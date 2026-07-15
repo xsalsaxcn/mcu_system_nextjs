@@ -4,10 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
+// WELLNESS_COACH_TABLE_DETAIL_CHARTS_V55
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
 type CoachView = "monitoring" | "chat";
+type CoachParticipantDetail = {
+  ok: boolean;
+  message?: string;
+  participant?: any;
+  summary?: any;
+  point_breakdown?: any;
+  charts?: Record<string, any[]>;
+  healthtalks?: any[];
+};
 type CoachDashboard = {
   ok: boolean;
   message?: string;
@@ -72,6 +82,8 @@ export default function WellnessCoachPortalPage() {
   const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
   const [search, setSearch] = useState("");
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
+  const [participantDetail, setParticipantDetail] = useState<CoachParticipantDetail | null>(null);
+  const [participantDetailLoading, setParticipantDetailLoading] = useState(false);
   const [coachView, setCoachView] = useState<CoachView>("monitoring");
   const [coachMenuOpen, setCoachMenuOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -152,14 +164,39 @@ export default function WellnessCoachPortalPage() {
     await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(() => null);
     setDashboard(null);
     setSelectedParticipant(null);
+    setParticipantDetail(null);
     setChatMessages([]);
     setCoachView("monitoring");
     setCoachMenuOpen(false);
     setMessage("Coach logout berhasil.");
   }
 
+  async function loadParticipantDetail(item: any) {
+    const participantId = Number(item?.id || 0);
+    if (!participantId) {
+      setParticipantDetail(null);
+      return;
+    }
+
+    setParticipantDetailLoading(true);
+    const result = await fetch(
+      `/api/wellness/coach/participant-detail?participant_id=${participantId}`,
+      { cache: "no-store" }
+    )
+      .then((response) => response.json())
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) setParticipantDetail(result);
+    else {
+      setParticipantDetail(null);
+      setMessage(result.message || "Gagal memuat detail peserta.");
+    }
+    setParticipantDetailLoading(false);
+  }
+
   function chooseParticipant(item: any) {
     setSelectedParticipant(item);
+    setParticipantDetail(null);
     setTargetForm({
       nutrition_max_calories: item?.targets?.nutrition_max_calories
         ? String(item.targets.nutrition_max_calories)
@@ -173,6 +210,17 @@ export default function WellnessCoachPortalPage() {
       coach_note: "",
       next_follow_up_date: "",
     });
+    void loadParticipantDetail(item);
+  }
+
+  function applyFlagFilter(level: FlagLevel) {
+    setFlagFilter(level);
+    window.setTimeout(() => {
+      document.getElementById("coach-participant-table")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
   }
 
   function openInstruction(scope: "participant" | "group") {
@@ -452,7 +500,7 @@ export default function WellnessCoachPortalPage() {
           <section className="mt-6">
             {coachView === "monitoring" ? (
               <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <SummaryCard
                 label="Total Peserta"
                 value={fmtNumber(dashboard?.summary?.total_participants || 0)}
@@ -484,7 +532,7 @@ export default function WellnessCoachPortalPage() {
                 <div>
                   <h2 className="text-xl font-black">Status Kepatuhan 7 Hari</h2>
                   <p className="mt-1 text-sm font-bold text-slate-500">
-                    Klik card untuk melihat daftar peserta pada status tersebut.
+                    Klik status untuk menampilkan daftar peserta pada tabel.
                   </p>
                 </div>
                 {flagFilter !== "all" ? (
@@ -497,134 +545,167 @@ export default function WellnessCoachPortalPage() {
                   </button>
                 ) : null}
               </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="mt-4 grid grid-cols-3 gap-2 md:gap-3">
                 <FlagCard
                   level="green"
                   count={dashboard?.summary?.flags?.green || 0}
                   active={flagFilter === "green"}
-                  onClick={() => setFlagFilter("green")}
+                  onClick={() => applyFlagFilter("green")}
                 />
                 <FlagCard
                   level="yellow"
                   count={dashboard?.summary?.flags?.yellow || 0}
                   active={flagFilter === "yellow"}
-                  onClick={() => setFlagFilter("yellow")}
+                  onClick={() => applyFlagFilter("yellow")}
                 />
                 <FlagCard
                   level="red"
                   count={dashboard?.summary?.flags?.red || 0}
                   active={flagFilter === "red"}
-                  onClick={() => setFlagFilter("red")}
+                  onClick={() => applyFlagFilter("red")}
                 />
               </div>
             </section>
 
-            <div className="grid gap-5 lg:grid-cols-[1fr_430px]">
-              <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-                <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <h2 className="text-xl font-black">Monitoring Anggota</h2>
-                    <p className="mt-1 text-sm font-bold text-slate-500">
-                      Coach: {dashboard?.coach?.name || "-"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openInstruction("group")}
-                      className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
-                    >
-                      + Instruksi Kelompok
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => loadDashboard({ keepSelection: true })}
-                      className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                    >
-                      Refresh
-                    </button>
-                  </div>
+            <section
+              id="coach-participant-table"
+              className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6"
+            >
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <h2 className="text-xl font-black">Monitoring Anggota</h2>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    Coach: {dashboard?.coach?.name || "-"} · Klik nama untuk membuka grafik dan detail peserta.
+                  </p>
                 </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-[220px_1fr]">
-                  <select
-                    className={fieldClass}
-                    value={selectedGroup}
-                    onChange={(e) => setSelectedGroup(e.target.value)}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openInstruction("group")}
+                    className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
                   >
-                    <option value="all">Semua Assigned Group</option>
-                    {groups.map((group: any) => (
-                      <option
-                        key={group.id}
-                        value={String(
-                          group.wellness_group_unit_id || group.group_name
-                        )}
-                      >
-                        {group.group_name} ({group.member_count || 0})
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className={fieldClass}
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Cari nama, kode, group, atau status"
-                  />
-                </div>
-
-                <div className="mt-5 text-xs font-black uppercase tracking-wide text-slate-400">
-                  Menampilkan {filteredParticipants.length} anggota
-                </div>
-                <label className="mt-3 grid gap-2 text-sm font-bold text-slate-700">
-                  Pilih Anggota
-                  <select
-                    className={`${fieldClass} w-full`}
-                    value={selectedParticipant?.id ? String(selectedParticipant.id) : ""}
-                    onChange={(event) => {
-                      const participant = filteredParticipants.find(
-                        (item: any) => String(item.id) === event.target.value
-                      );
-                      if (participant) chooseParticipant(participant);
-                      else setSelectedParticipant(null);
-                    }}
+                    + Instruksi Kelompok
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loadDashboard({ keepSelection: true })}
+                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
                   >
-                    <option value="">
-                      {filteredParticipants.length > 0
-                        ? "Pilih nama peserta"
-                        : "Tidak ada peserta pada filter ini"}
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
+                <select
+                  className={fieldClass}
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                >
+                  <option value="all">Semua Assigned Group</option>
+                  {groups.map((group: any) => (
+                    <option
+                      key={group.id}
+                      value={String(group.wellness_group_unit_id || group.group_name)}
+                    >
+                      {group.group_name} ({group.member_count || 0})
                     </option>
-                    {filteredParticipants.map((item: any) => (
-                      <option key={item.id} value={String(item.id)}>
-                        {item.name} | {item.group_name} | Steps {fmtNumber(item.today?.steps || 0)} | {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs font-bold leading-5 text-slate-400">
-                    Format: Nama lengkap · Kelompok · Steps · Kalori · Status
-                  </span>
-                </label>
-              </section>
+                  ))}
+                </select>
+                <input
+                  className={fieldClass}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Cari nama, kode, kelompok, atau status"
+                />
+              </div>
 
-              <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-                {!selectedParticipant ? (
-                  <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                    <h3 className="text-lg font-black text-slate-900">Pilih Peserta</h3>
-                    <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                      Pilih nama pada daftar untuk melihat progres, target, dan status instruksi.
-                    </p>
-                  </div>
-                ) : (
-                  <ParticipantDetail
-                    participant={selectedParticipant}
-                    targetForm={targetForm}
-                    setTargetForm={setTargetForm}
-                    saveTargets={saveTargets}
-                    openInstruction={() => openInstruction("participant")}
-                    saving={saving}
-                  />
-                )}
+              <div className="mt-4 flex items-center justify-between gap-3 text-xs font-black uppercase tracking-wide text-slate-400">
+                <span>Menampilkan {filteredParticipants.length} anggota</span>
+                <span>{flagFilter === "all" ? "Semua status" : `${flagFilter} flag`}</span>
+              </div>
+
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-100">
+                <table className="min-w-[820px] w-full border-collapse text-left">
+                  <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Nama Peserta</th>
+                      <th className="px-4 py-3">Kelompok</th>
+                      <th className="px-4 py-3 text-right">Steps</th>
+                      <th className="px-4 py-3 text-right">Kalori</th>
+                      <th className="px-4 py-3 text-right">Kepatuhan</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredParticipants.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                          Tidak ada peserta pada filter ini.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredParticipants.map((item: any) => (
+                        <tr
+                          key={item.id}
+                          className={`transition hover:bg-teal-50/50 ${
+                            Number(selectedParticipant?.id) === Number(item.id)
+                              ? "bg-teal-50"
+                              : ""
+                          }`}
+                        >
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => chooseParticipant(item)}
+                              className="text-left"
+                            >
+                              <div className="font-black text-slate-950 hover:text-teal-700">
+                                {item.name}
+                              </div>
+                              <div className="mt-1 text-xs font-bold text-slate-400">
+                                Kode {item.code}
+                              </div>
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-sm font-bold text-slate-600">
+                            {item.group_name}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
+                            {fmtNumber(item.today?.steps || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
+                            {fmtNumber(item.today?.calories || 0)} kkal
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
+                            {fmtNumber(item.compliance?.compliance_percent || 0)}%
+                          </td>
+                          <td className="px-4 py-3">
+                            <FlagBadge level={item.flag} label={item.status} />
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {selectedParticipant ? (
+              <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6">
+                <ParticipantDetail
+                  participant={selectedParticipant}
+                  detail={participantDetail}
+                  detailLoading={participantDetailLoading}
+                  reloadDetail={() => loadParticipantDetail(selectedParticipant)}
+                  targetForm={targetForm}
+                  setTargetForm={setTargetForm}
+                  saveTargets={saveTargets}
+                  openInstruction={() => openInstruction("participant")}
+                  saving={saving}
+                />
               </section>
-            </div>
+            ) : null}
               </div>
             ) : (
               <CoachChatPanel
@@ -1022,9 +1103,9 @@ function SummaryCard({ label, value, note, tone }: any) {
     rose: "border-rose-100 bg-rose-50 text-rose-800",
   };
   return (
-    <div className={`rounded-3xl border p-5 shadow-sm ${toneClass[tone]}`}>
+    <div className={`rounded-2xl border p-4 shadow-sm ${toneClass[tone]}`}>
       <div className="text-xs font-black uppercase tracking-wide opacity-70">{label}</div>
-      <div className="mt-2 text-2xl font-black">{value}</div>
+      <div className="mt-1 text-xl font-black md:text-2xl">{value}</div>
       <div className="mt-1 text-xs font-bold opacity-70">{note}</div>
     </div>
   );
@@ -1033,20 +1114,20 @@ function SummaryCard({ label, value, note, tone }: any) {
 function FlagCard({ level, count, active, onClick }: any) {
   const config: Record<string, any> = {
     green: {
-      label: "Green Flag",
-      note: "Patuh dan konsisten",
+      label: "Green",
+      note: "Patuh",
       emoji: "\u{1F7E2}",
       style: "border-emerald-200 bg-emerald-50 text-emerald-900",
     },
     yellow: {
-      label: "Yellow Flag",
-      note: "Perlu dipantau",
+      label: "Yellow",
+      note: "Pantau",
       emoji: "\u{1F7E1}",
       style: "border-amber-200 bg-amber-50 text-amber-900",
     },
     red: {
-      label: "Red Flag",
-      note: "Perlu follow up",
+      label: "Red",
+      note: "Follow up",
       emoji: "\u{1F534}",
       style: "border-rose-200 bg-rose-50 text-rose-900",
     },
@@ -1056,16 +1137,16 @@ function FlagCard({ level, count, active, onClick }: any) {
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-3xl border p-5 text-left shadow-sm transition ${item.style} ${
+      className={`min-w-0 rounded-2xl border p-3 text-left shadow-sm transition md:p-4 ${item.style} ${
         active ? "ring-4 ring-slate-200" : "hover:-translate-y-0.5"
       }`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-2xl">{item.emoji}</span>
-        <span className="text-3xl font-black">{fmtNumber(count)}</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-base md:text-lg">{item.emoji}</span>
+        <span className="text-xl font-black md:text-2xl">{fmtNumber(count)}</span>
       </div>
-      <div className="mt-3 text-base font-black">{item.label}</div>
-      <div className="mt-1 text-xs font-bold opacity-70">{item.note}</div>
+      <div className="mt-2 truncate text-xs font-black md:text-sm">{item.label} Flag</div>
+      <div className="mt-0.5 truncate text-[10px] font-bold opacity-70 md:text-xs">{item.note}</div>
     </button>
   );
 }
@@ -1114,105 +1195,43 @@ function ParticipantCard({ item, active, onClick }: any) {
 
 function ParticipantDetail({
   participant,
+  detail,
+  detailLoading,
+  reloadDetail,
   targetForm,
   setTargetForm,
   saveTargets,
   openInstruction,
   saving,
 }: any) {
-  const clinical = participant.clinical || {};
   const latestNote = participant.latest_note || null;
+  const summary = detail?.summary || {};
+  const breakdown = detail?.point_breakdown || {};
+  const charts = detail?.charts || {};
+  const healthtalks = detail?.healthtalks || [];
   const setTarget = (key: string, value: string) =>
     setTargetForm((previous: any) => ({ ...previous, [key]: value }));
 
   return (
     <div className="space-y-5">
-      <div className="rounded-3xl bg-gradient-to-br from-teal-50 to-sky-50 p-5">
-        <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
-          Detail Peserta
+      <div className="flex flex-col gap-4 rounded-3xl bg-gradient-to-br from-teal-50 to-sky-50 p-4 md:flex-row md:items-center md:justify-between md:p-5">
+        <div>
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
+            Detail dan Progress Peserta
+          </div>
+          <h2 className="mt-2 text-2xl font-black text-slate-950">{participant.name}</h2>
+          <div className="mt-1 text-sm font-bold text-slate-500">
+            Kode {participant.code} · {participant.group_name} · {participant.flag_label}
+          </div>
         </div>
-        <h2 className="mt-2 text-2xl font-black text-slate-950">{participant.name}</h2>
-        <div className="mt-2 text-sm font-bold leading-6 text-slate-500">
-          Kode {participant.code} - {participant.group_name}
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <MiniInfo label="Kepatuhan 7 Hari" value={`${fmtNumber(participant.compliance?.compliance_percent || 0)}%`} />
-          <MiniInfo label="Status" value={participant.flag_label || "-"} />
-          <MiniInfo label="Nutrisi Hari Ini" value={`${fmtNumber(participant.today?.nutrition_calories || 0)} kkal`} />
-          <MiniInfo label="Workout Hari Ini" value={`${fmtNumber(participant.today?.calories || 0)} kkal`} />
-          <MiniInfo label="BMI" value={clinical?.bmi ? fmtNumber(clinical.bmi, 1) : "-"} />
-          <MiniInfo
-            label="Tensi"
-            value={clinical?.systolic ? `${clinical.systolic}/${clinical.diastolic || "-"}` : "-"}
-          />
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-slate-100 bg-white p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-lg font-black">Target Individual</h3>
-          <span className="rounded-full bg-sky-50 px-3 py-2 text-[11px] font-black text-sky-700">
-            Diterima peserta sebagai instruksi
-          </span>
-        </div>
-        <div className="mt-4 grid gap-3">
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Batas Konsumsi Kalori Harian (kkal)
-            <input
-              type="number"
-              min="0"
-              className={fieldClass}
-              value={targetForm.nutrition_max_calories}
-              onChange={(e) => setTarget("nutrition_max_calories", e.target.value)}
-              placeholder="Contoh: 1700"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Target Kalori Terbakar dari Workout (kkal)
-            <input
-              type="number"
-              min="0"
-              className={fieldClass}
-              value={targetForm.workout_min_calories}
-              onChange={(e) => setTarget("workout_min_calories", e.target.value)}
-              placeholder="Contoh: 300"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Target Berat Badan (kg)
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              className={fieldClass}
-              value={targetForm.target_weight_kg}
-              onChange={(e) => setTarget("target_weight_kg", e.target.value)}
-              placeholder="Contoh: 72"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Catatan Target
-            <textarea
-              className={`${fieldClass} min-h-[80px]`}
-              value={targetForm.coach_note}
-              onChange={(e) => setTarget("coach_note", e.target.value)}
-              placeholder="Arahan singkat untuk mencapai target"
-            />
-          </label>
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={saveTargets}
-            disabled={saving}
-            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50"
+            onClick={reloadDetail}
+            className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm"
           >
-            {saving ? "Menyimpan..." : "Simpan Target Peserta"}
+            Refresh Data
           </button>
-        </div>
-      </div>
-
-      <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-base font-black">Instruksi Terakhir</h3>
           <button
             type="button"
             onClick={openInstruction}
@@ -1221,33 +1240,265 @@ function ParticipantDetail({
             + Tambah Instruksi
           </button>
         </div>
-        {latestNote ? (
-          <div className="mt-4">
-            <div className="text-sm font-black text-slate-900">
-              {latestNote.topic || "Catatan Coaching"}
-            </div>
-            <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">
-              {latestNote.coach_note || latestNote.action_plan || "-"}
-            </div>
-            {latestNote.action_plan ? (
-              <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">
-                {latestNote.action_plan}
-              </div>
-            ) : null}
-            <div
-              className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${
-                latestNote.is_read
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800"
-              }`}
-            >
-              {formatReadAt(latestNote.read_at)}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 text-sm font-bold text-slate-400">Belum ada instruksi.</div>
-        )}
       </div>
+
+      {detailLoading ? (
+        <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm font-bold text-slate-400">
+          Mengambil point, grafik, dan riwayat Health Talk peserta...
+        </div>
+      ) : !detail?.ok ? (
+        <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+          <div className="text-base font-black text-slate-900">Detail belum dimuat</div>
+          <p className="mt-2 text-sm font-bold text-slate-500">
+            Tekan Refresh Data untuk mengambil progress peserta.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+            <CompactMetric label="Total Point" value={fmtNumber(summary.total_points || 0)} tone="amber" />
+            <CompactMetric label="Health Talk" value={`${fmtNumber(summary.healthtalk_count || 0)}x`} tone="violet" />
+            <CompactMetric label="Log Nutrisi" value={fmtNumber(summary.nutrition_log_count || 0)} tone="sky" />
+            <CompactMetric label="Log Workout" value={fmtNumber(summary.workout_log_count || 0)} tone="teal" />
+            <CompactMetric label="BB Terakhir" value={summary.latest_weight_kg ? `${fmtNumber(summary.latest_weight_kg, 1)} kg` : "-"} tone="slate" />
+            <CompactMetric label="BMI Terakhir" value={summary.latest_bmi ? fmtNumber(summary.latest_bmi, 1) : "-"} tone="slate" />
+          </div>
+
+          <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">Breakdown Point</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Ringkasan sumber point peserta dari data Wellness yang sudah tersedia.
+                </p>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <PointPill label="Nutrisi" value={breakdown.nutrition || 0} />
+                <PointPill label="Workout" value={breakdown.activity || 0} />
+                <PointPill label="Health Talk" value={breakdown.healthtalk || 0} />
+                <PointPill label="Lainnya" value={breakdown.other || 0} />
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div>
+              <h3 className="text-lg font-black text-slate-950">Grafik Progress Peserta</h3>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                Grafik diambil saat nama peserta dipilih, tanpa memuat seluruh anggota sekaligus.
+              </p>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <CoachTrendChart title="Kalori Nutrisi" points={charts.nutrition_calories || []} suffix="kkal" />
+              <CoachTrendChart title="Kalori Workout" points={charts.workout_calories || []} suffix="kkal" />
+              <CoachTrendChart title="Steps" points={charts.steps || []} />
+              <CoachTrendChart title="Berat Badan" points={charts.weight_kg || []} suffix="kg" />
+              <CoachTrendChart title="BMI" points={charts.bmi || []} />
+              <CoachTrendChart title="HbA1c" points={charts.hba1c || []} suffix="%" />
+              <CoachTrendChart title="Gula Darah" points={charts.glucose || []} suffix="mg/dL" />
+              <CoachTrendChart title="Tekanan Darah" points={charts.blood_pressure || []} suffix="mmHg" secondaryLabel="Diastolik" />
+              <CoachTrendChart title="Point Harian" points={charts.points || []} suffix="pt" />
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-100 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">Keikutsertaan Health Talk</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Total {fmtNumber(summary.healthtalk_count || 0)} kegiatan yang tercatat.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-100">
+              <table className="min-w-[620px] w-full text-left text-sm">
+                <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Tanggal</th>
+                    <th className="px-4 py-3">Health Talk</th>
+                    <th className="px-4 py-3">Jenis</th>
+                    <th className="px-4 py-3 text-right">Point</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {healthtalks.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center font-bold text-slate-400">
+                        Belum ada keikutsertaan Health Talk yang tercatat.
+                      </td>
+                    </tr>
+                  ) : (
+                    healthtalks.slice(0, 12).map((item: any, index: number) => (
+                      <tr key={item.id || `${item.date}-${index}`}>
+                        <td className="px-4 py-3 font-bold text-slate-500">{item.date || "-"}</td>
+                        <td className="px-4 py-3 font-black text-slate-900">{item.title || "Health Talk"}</td>
+                        <td className="px-4 py-3 font-bold text-slate-600">{item.type || "-"}</td>
+                        <td className="px-4 py-3 text-right font-black text-violet-700">{fmtNumber(item.points || 0)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-3xl border border-slate-100 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-black">Target Individual</h3>
+            <span className="rounded-full bg-sky-50 px-3 py-2 text-[11px] font-black text-sky-700">
+              Opsional
+            </span>
+          </div>
+          <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+            Isi hanya target yang ingin ditetapkan atau diubah.
+          </p>
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Batas Konsumsi Kalori Harian (kkal/hari)
+              <input type="number" min="0" className={fieldClass} value={targetForm.nutrition_max_calories} onChange={(e) => setTarget("nutrition_max_calories", e.target.value)} placeholder="Contoh: 1700" />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Target Kalori Terbakar dari Workout (kkal/hari)
+              <input type="number" min="0" className={fieldClass} value={targetForm.workout_min_calories} onChange={(e) => setTarget("workout_min_calories", e.target.value)} placeholder="Contoh: 300" />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Target Berat Badan (kg)
+              <input type="number" min="0" step="0.1" className={fieldClass} value={targetForm.target_weight_kg} onChange={(e) => setTarget("target_weight_kg", e.target.value)} placeholder="Contoh: 72" />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Catatan Target
+              <textarea className={`${fieldClass} min-h-[72px]`} value={targetForm.coach_note} onChange={(e) => setTarget("coach_note", e.target.value)} placeholder="Arahan singkat untuk mencapai target" />
+            </label>
+            <button type="button" onClick={saveTargets} disabled={saving} className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50">
+              {saving ? "Menyimpan..." : "Simpan Target Peserta"}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-base font-black">Instruksi Terakhir</h3>
+            <button type="button" onClick={openInstruction} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white">
+              + Tambah Instruksi
+            </button>
+          </div>
+          {latestNote ? (
+            <div className="mt-4">
+              <div className="text-sm font-black text-slate-900">{latestNote.topic || "Catatan Coaching"}</div>
+              <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">{latestNote.coach_note || latestNote.action_plan || "-"}</div>
+              {latestNote.action_plan ? (
+                <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">{latestNote.action_plan}</div>
+              ) : null}
+              <div className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${latestNote.is_read ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                {formatReadAt(latestNote.read_at)}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 text-sm font-bold text-slate-400">Belum ada instruksi.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlagBadge({ level, label }: { level: string; label: string }) {
+  const classes: Record<string, string> = {
+    green: "bg-emerald-100 text-emerald-800",
+    yellow: "bg-amber-100 text-amber-800",
+    red: "bg-rose-100 text-rose-800",
+  };
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-2 text-xs font-black ${classes[level] || "bg-slate-100 text-slate-700"}`}>
+      {label || "-"}
+    </span>
+  );
+}
+
+function CompactMetric({ label, value, tone }: any) {
+  const tones: Record<string, string> = {
+    amber: "bg-amber-50 text-amber-900",
+    violet: "bg-violet-50 text-violet-900",
+    sky: "bg-sky-50 text-sky-900",
+    teal: "bg-teal-50 text-teal-900",
+    slate: "bg-slate-50 text-slate-900",
+  };
+  return (
+    <div className={`rounded-2xl p-3 ${tones[tone] || tones.slate}`}>
+      <div className="text-[10px] font-black uppercase tracking-wide opacity-60">{label}</div>
+      <div className="mt-1 text-lg font-black">{value}</div>
+    </div>
+  );
+}
+
+function PointPill({ label, value }: any) {
+  return (
+    <div className="rounded-2xl bg-white px-3 py-2 shadow-sm">
+      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1 text-sm font-black text-slate-900">{fmtNumber(value)}</div>
+    </div>
+  );
+}
+
+function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: any) {
+  const rows = Array.isArray(points) ? points.filter(Boolean).slice(-14) : [];
+  const width = 320;
+  const height = 130;
+  const padX = 16;
+  const padTop = 12;
+  const padBottom = 24;
+  const values = rows.flatMap((item: any) => [Number(item.value), Number(item.secondary)]).filter(Number.isFinite);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  const range = max - min || 1;
+  const x = (index: number) => padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
+  const y = (value: any) => padTop + ((max - Number(value || 0)) / range) * (height - padTop - padBottom);
+  const primary = rows.map((item: any, index: number) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(item.value)}`).join(" ");
+  const secondaryRows = rows.filter((item: any) => Number.isFinite(Number(item.secondary)));
+  const secondary = secondaryRows.map((item: any) => {
+    const index = rows.indexOf(item);
+    return `${secondaryRows.indexOf(item) === 0 ? "M" : "L"} ${x(index)} ${y(item.secondary)}`;
+  }).join(" ");
+  const latest = rows.at(-1);
+
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-950">{title}</div>
+          <div className="mt-1 text-[11px] font-bold text-slate-400">{rows.length} titik data</div>
+        </div>
+        <div className="text-right">
+          <div className="text-base font-black text-teal-800">
+            {latest?.value !== undefined && latest?.value !== null ? `${fmtNumber(latest.value, 1)} ${suffix}`.trim() : "-"}
+          </div>
+          {latest?.secondary !== undefined && latest?.secondary !== null ? (
+            <div className="text-[11px] font-bold text-sky-600">{secondaryLabel || "Nilai 2"}: {fmtNumber(latest.secondary, 1)}</div>
+          ) : null}
+        </div>
+      </div>
+      {rows.length < 2 ? (
+        <div className="mt-4 flex h-[130px] items-center justify-center rounded-2xl bg-slate-50 text-xs font-bold text-slate-400">
+          Data grafik belum cukup.
+        </div>
+      ) : (
+        <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-[130px] w-full overflow-visible" role="img" aria-label={`Grafik ${title}`}>
+          <line x1={padX} y1={height - padBottom} x2={width - padX} y2={height - padBottom} stroke="#e2e8f0" strokeWidth="1" />
+          <path d={primary} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+          {secondary ? <path d={secondary} fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
+          {rows.map((item: any, index: number) => (
+            <g key={`${item.date || item.label}-${index}`}>
+              <circle cx={x(index)} cy={y(item.value)} r="4" fill="white" stroke="#0f766e" strokeWidth="2" />
+              <title>{`${item.label || item.date || "Data"}: ${fmtNumber(item.value, 1)} ${suffix}`}</title>
+            </g>
+          ))}
+          <text x={padX} y={height - 5} fontSize="10" fill="#94a3b8">{rows[0]?.label || ""}</text>
+          <text x={width - padX} y={height - 5} textAnchor="end" fontSize="10" fill="#94a3b8">{rows.at(-1)?.label || ""}</text>
+        </svg>
+      )}
     </div>
   );
 }
