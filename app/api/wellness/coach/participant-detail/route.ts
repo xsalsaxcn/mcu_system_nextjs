@@ -12,6 +12,7 @@ export const runtime = "nodejs";
 // WELLNESS_COACH_PARTICIPANT_DETAIL_V55
 // Read-only detail endpoint for assigned coach participants.
 // No schema migration and no access outside coach assignments.
+// WELLNESS_COACH_POINT_RULES_V59
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -238,19 +239,72 @@ function foodCalories(row: any) {
 }
 
 function healthtalkPoint(row: any) {
-  const explicit = nullableNumber(
-    row?.points,
-    row?.point,
-    row?.total_points,
-    row?.raw_payload?.["Total Point"]
-  );
-  if (explicit !== null) return explicit;
+  const type = clean(
+    row?.healthtalk_type ||
+      row?.attendance_type ||
+      row?.participation_type ||
+      row?.type
+  ).toLowerCase();
 
-  const type = clean(row?.healthtalk_type || row?.attendance_type || row?.type).toLowerCase();
-  const hasEvidence = Boolean(clean(row?.evidence_url || row?.evidence_preview_url));
-  if (/offline|luring|onsite|tatap muka/.test(type)) return hasEvidence ? 20 : 0;
-  if (/online|daring|webinar|zoom/.test(type)) return 10;
+  if (/offline|luring|onsite|tatap muka/.test(type)) return 10;
+  if (/online|daring|webinar|zoom/.test(type)) return 5;
   return 0;
+}
+
+function parseTargetsFromNote(note: any) {
+  const text = [note?.action_plan, note?.coach_note, note?.main_issue]
+    .map(clean)
+    .filter(Boolean)
+    .join("\n");
+  const find = (pattern: RegExp) => {
+    const match = text.match(pattern);
+    return match ? asNumber(String(match[1]).replace(",", ".")) : 0;
+  };
+  return {
+    workout_min_calories: find(/Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i),
+  };
+}
+
+function workoutTargetForParticipant(participant: any, notes: any[]) {
+  const direct = asNumber(
+    participant?.workout_calorie_target ||
+      participant?.active_calorie_target ||
+      participant?.daily_activity_calorie_target
+  );
+  if (direct > 0) return direct;
+
+  for (const note of notes || []) {
+    const parsed = parseTargetsFromNote(note);
+    if (parsed.workout_min_calories > 0) return parsed.workout_min_calories;
+  }
+  return 0;
+}
+
+function rowsByDate(rows: any[], dateGetter: (row: any) => string) {
+  const map = new Map<string, any[]>();
+  for (const row of rows || []) {
+    const date = dateKey(dateGetter(row));
+    if (!date) continue;
+    const current = map.get(date) || [];
+    current.push(row);
+    map.set(date, current);
+  }
+  return map;
+}
+
+function addDailyPoint(map: Map<string, number>, date: string, points: number) {
+  if (!date || !Number.isFinite(points)) return;
+  map.set(date, (map.get(date) || 0) + points);
+}
+
+function nutritionMealCount(rows: any[]) {
+  const slots = new Set<string>();
+  (rows || []).forEach((row, index) => {
+    const mealType = clean(row?.meal_type || row?.meal_time).toLowerCase();
+    const fallback = clean(row?.id || row?.created_at || `row-${index}`);
+    slots.add(mealType || `log:${fallback}:${index}`);
+  });
+  return slots.size;
 }
 
 function pointCategory(row: any) {
@@ -302,7 +356,7 @@ export async function GET(request: NextRequest) {
 
     const code = clean(participant.code || participant.employee_code || participant.no_karyawan);
 
-    const [activityRows, foodRows, weightRows, clinicalRows, historyById, historyByCode, miniMcuRows, pointRows, healthtalkRows] = await Promise.all([
+    const [activityRows, foodRows, weightRows, clinicalRows, historyById, historyByCode, miniMcuRows, pointRows, healthtalkRows, targetNotes] = await Promise.all([
       safeSelect(supabase, "wellness_activity_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(2000)),
       safeSelect(supabase, "wellness_food_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(2000)),
       safeSelect(supabase, "wellness_weight_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(1000)),
@@ -314,6 +368,7 @@ export async function GET(request: NextRequest) {
       safeSelect(supabase, "wellness_mini_mcu_logs", (q) => q.eq("participant_id", participantId).order("exam_date", { ascending: true }).limit(1000)),
       safeSelect(supabase, "wellness_point_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(3000)),
       safeSelect(supabase, "wellness_healthtalk_logs", (q) => q.eq("participant_id", participantId).order("event_date", { ascending: true }).limit(1000)),
+      safeSelect(supabase, "wellness_coach_notes", (q) => q.eq("participant_id", participantId).order("created_at", { ascending: false }).limit(100)),
     ]);
 
     const sheetResult = await fetchWellnessGoogleSheetRows({
@@ -333,46 +388,80 @@ export async function GET(request: NextRequest) {
     const mergedHealthtalkRows = mergeRows(healthtalkRows, sheetHealthtalkRows);
     const clinicalAll = mergeRows(clinicalRows, historyById, historyByCode, miniMcuRows);
 
-    const pointBreakdown = { nutrition: 0, activity: 0, healthtalk: 0, other: 0 };
+    const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes);
+    const dailyPoints = new Map<string, number>();
+
+    const nutritionRowsByDate = rowsByDate(
+      mergedFoodRows,
+      (row) => row?.log_date || row?.created_at
+    );
+    let nutritionPoints = 0;
+    for (const [date, rows] of nutritionRowsByDate.entries()) {
+      const mealCount = nutritionMealCount(rows);
+      const points = mealCount >= 3 ? 10 : mealCount > 0 ? 5 : 0;
+      nutritionPoints += points;
+      addDailyPoint(dailyPoints, date, points);
+    }
+
+    const workoutRowsByDate = rowsByDate(
+      activityRows,
+      (row) => row?.log_date || row?.started_at || row?.created_at
+    );
+    let activityPoints = 0;
+    for (const [date, rows] of workoutRowsByDate.entries()) {
+      const calories = rows.reduce((sum, row) => sum + activityCalories(row), 0);
+      const points =
+        calories <= 0
+          ? 0
+          : workoutTargetCalories > 0 && calories >= workoutTargetCalories
+            ? 10
+            : 5;
+      activityPoints += points;
+      addDailyPoint(dailyPoints, date, points);
+    }
+
+    let healthtalkPoints = 0;
+    for (const row of mergedHealthtalkRows) {
+      const date = dateKey(row?.event_date || row?.log_date || row?.created_at);
+      const points = healthtalkPoint(row);
+      healthtalkPoints += points;
+      addDailyPoint(dailyPoints, date, points);
+    }
+
+    let otherPoints = 0;
     for (const row of pointRows) {
-      const category = pointCategory(row);
-      pointBreakdown[category as keyof typeof pointBreakdown] += asNumber(row?.points);
+      if (pointCategory(row) !== "other") continue;
+      const points = asNumber(row?.points);
+      otherPoints += points;
+      addDailyPoint(
+        dailyPoints,
+        dateKey(row?.log_date || row?.event_date || row?.created_at),
+        points
+      );
     }
 
-    if (pointBreakdown.nutrition === 0) {
-      pointBreakdown.nutrition = mergedFoodRows.reduce((sum, row) => {
-        const explicit = nullableNumber(row?.points, row?.point, row?.total_points, row?.raw_payload?.["Total Point"]);
-        return sum + (explicit === null ? 5 : explicit);
-      }, 0);
-    }
-    if (pointBreakdown.healthtalk === 0) {
-      pointBreakdown.healthtalk = mergedHealthtalkRows.reduce((sum, row) => sum + healthtalkPoint(row), 0);
-    }
-
-    const totalPoints = Object.values(pointBreakdown).reduce((sum, value) => sum + value, 0);
+    const pointBreakdown = {
+      nutrition: nutritionPoints,
+      activity: activityPoints,
+      healthtalk: healthtalkPoints,
+      other: otherPoints,
+    };
+    const totalPoints = Object.values(pointBreakdown).reduce(
+      (sum, value) => sum + value,
+      0
+    );
 
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
     const workoutChart = aggregateByDate(activityRows, activityCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
     const stepChart = aggregateByDate(activityRows, activitySteps, (row) => row?.log_date || row?.started_at || row?.created_at);
-    const pointChart = aggregateByDate(
-      pointRows,
-      (row) => asNumber(row?.points),
-      (row) => row?.log_date || row?.event_date || row?.created_at
-    );
-
-    if (pointChart.length === 0) {
-      const derivedPointRows = [
-        ...mergedFoodRows.map((row) => ({
-          date: row?.log_date || row?.created_at,
-          points: nullableNumber(row?.points, row?.point, row?.total_points) ?? 5,
-        })),
-        ...mergedHealthtalkRows.map((row) => ({
-          date: row?.event_date || row?.log_date || row?.created_at,
-          points: healthtalkPoint(row),
-        })),
-      ];
-      pointChart.push(...aggregateByDate(derivedPointRows, (row) => asNumber(row.points), (row) => row.date));
-    }
+    const pointChart = [...dailyPoints.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-30)
+      .map(([date, value]) => ({
+        date,
+        label: dateLabel(date),
+        value: Math.round(value * 10) / 10,
+      }));
 
     const charts = {
       nutrition_calories: nutritionChart,
@@ -437,6 +526,16 @@ export async function GET(request: NextRequest) {
         latest_diastolic: latestBp?.secondary ?? null,
       },
       point_breakdown: pointBreakdown,
+      point_rules: {
+        nutrition_full_meals: 3,
+        nutrition_full_points: 10,
+        nutrition_partial_points: 5,
+        workout_target_calories: workoutTargetCalories,
+        workout_target_points: 10,
+        workout_partial_points: 5,
+        healthtalk_offline_points: 10,
+        healthtalk_online_points: 5,
+      },
       charts,
       healthtalks,
       google_sheet: {

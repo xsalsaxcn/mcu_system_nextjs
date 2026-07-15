@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
+// WELLNESS_COACH_DETAIL_POINTS_INSTRUCTION_V59
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -1372,6 +1373,7 @@ function ParticipantDetail({
   const breakdown = detail?.point_breakdown || {};
   const charts = detail?.charts || {};
   const healthtalks = detail?.healthtalks || [];
+  const pointRules = detail?.point_rules || {};
   const setTarget = (key: string, value: string) =>
     setTargetForm((previous: any) => ({ ...previous, [key]: value }));
 
@@ -1444,6 +1446,27 @@ function ParticipantDetail({
             </div>
           </section>
 
+          <section className="rounded-3xl border border-amber-100 bg-amber-50/60 p-4">
+            <h3 className="text-base font-black text-slate-950">Aturan Point Wellness</h3>
+            <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+              Point dihitung otomatis per hari dari input aktual peserta.
+            </p>
+            <div className="mt-3 grid gap-2 text-xs font-bold text-slate-700">
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <span className="font-black text-sky-700">Nutrisi:</span> 3 kali atau lebih = 10 point; 1–2 kali = 5 point; tidak input = 0 point.
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <span className="font-black text-teal-700">Workout:</span>{" "}
+                {Number(pointRules.workout_target_calories || 0) > 0
+                  ? `mencapai target ${fmtNumber(pointRules.workout_target_calories)} kkal = 10 point; ada aktivitas tetapi belum mencapai target = 5 point; tidak workout = 0 point.`
+                  : "target belum ditetapkan; aktivitas yang tercatat = 5 point dan tidak workout = 0 point."}
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-3">
+                <span className="font-black text-violet-700">Health Talk:</span> offline = 10 point; online = 5 point; tidak ikut = 0 point.
+              </div>
+            </div>
+          </section>
+
           <section>
             <div>
               <h3 className="text-lg font-black text-slate-950">Grafik Progress Peserta</h3>
@@ -1457,6 +1480,7 @@ function ParticipantDetail({
               <CoachTrendChart title="Steps" points={charts.steps || []} />
               <CoachTrendChart title="Berat Badan" points={charts.weight_kg || []} suffix="kg" />
               <CoachTrendChart title="BMI" points={charts.bmi || []} />
+              <CoachTrendChart title="Lingkar Pinggang" points={charts.waist_cm || []} suffix="cm" />
               <CoachTrendChart title="HbA1c" points={charts.hba1c || []} suffix="%" />
               <CoachTrendChart title="Gula Darah" points={charts.glucose || []} suffix="mg/dL" />
               <CoachTrendChart title="Tekanan Darah" points={charts.blood_pressure || []} suffix="mmHg" secondaryLabel="Diastolik" />
@@ -1684,7 +1708,9 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
   const chartMax = max + buffer;
   const range = chartMax - chartMin || 1;
   const x = (index: number) =>
-    padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
+    rows.length === 1
+      ? width / 2
+      : padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
   const y = (value: any) =>
     padTop +
     ((chartMax - Number(value || 0)) / range) *
@@ -1748,7 +1774,7 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
           ) : null}
         </div>
       </div>
-      {rows.length < 2 ? (
+      {rows.length === 0 ? (
         <div className="mt-4 flex h-[180px] items-center justify-center rounded-2xl bg-slate-50 text-xs font-bold text-slate-400">
           Data grafik belum cukup.
         </div>
@@ -1838,18 +1864,32 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
                 </g>
               );
             })}
-            <text x={padX} y={height - 10} fontSize="18" fill="#94a3b8">
-              {rows[0]?.label || ""}
-            </text>
-            <text
-              x={width - padX}
-              y={height - 10}
-              textAnchor="end"
-              fontSize="18"
-              fill="#94a3b8"
-            >
-              {rows.at(-1)?.label || ""}
-            </text>
+            {rows.length === 1 ? (
+              <text
+                x={width / 2}
+                y={height - 10}
+                textAnchor="middle"
+                fontSize="18"
+                fill="#94a3b8"
+              >
+                {rows[0]?.label || ""}
+              </text>
+            ) : (
+              <>
+                <text x={padX} y={height - 10} fontSize="18" fill="#94a3b8">
+                  {rows[0]?.label || ""}
+                </text>
+                <text
+                  x={width - padX}
+                  y={height - 10}
+                  textAnchor="end"
+                  fontSize="18"
+                  fill="#94a3b8"
+                >
+                  {rows.at(-1)?.label || ""}
+                </text>
+              </>
+            )}
           </svg>
 
           {activePoint ? (
@@ -1899,6 +1939,7 @@ function InstructionModal({
   onClose,
   onSave,
 }: any) {
+  const [viewportFrame, setViewportFrame] = useState({ top: 0, height: 0 });
   const groupKey = scope === "group" ? instructionGroup : selectedGroup;
   const group = groups.find(
     (item: any) => String(item.wellness_group_unit_id || item.group_name) === groupKey
@@ -1906,10 +1947,63 @@ function InstructionModal({
   const setValue = (key: string, value: string) =>
     setForm((previous: any) => ({ ...previous, [key]: value }));
 
-  return (
-    <div className="fixed inset-0 z-[10030] flex items-center justify-center bg-slate-900/25 p-3 backdrop-blur-[1px]">
-      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="Tutup" />
-      <section className="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[2rem] border border-white/80 bg-white p-5 shadow-2xl md:p-6">
+  useEffect(() => {
+    const updateViewportFrame = () => {
+      const viewport = window.visualViewport;
+      setViewportFrame({
+        top: Math.max(0, Number(viewport?.pageTop ?? window.scrollY ?? 0)),
+        height: Math.max(320, Number(viewport?.height ?? window.innerHeight ?? 0)),
+      });
+    };
+
+    updateViewportFrame();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("resize", updateViewportFrame);
+    window.visualViewport?.addEventListener("resize", updateViewportFrame);
+    window.visualViewport?.addEventListener("scroll", updateViewportFrame);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("resize", updateViewportFrame);
+      window.visualViewport?.removeEventListener("resize", updateViewportFrame);
+      window.visualViewport?.removeEventListener("scroll", updateViewportFrame);
+    };
+  }, []);
+
+  if (typeof document === "undefined" || viewportFrame.height <= 0) return null;
+
+  return createPortal(
+    <div
+      data-wellness-coach-instruction-modal="v59"
+      style={{
+        position: "absolute",
+        top: `${viewportFrame.top}px`,
+        left: 0,
+        right: 0,
+        height: `${viewportFrame.height}px`,
+        zIndex: 2147483600,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "12px",
+        background: "rgba(15, 23, 42, 0.36)",
+      }}
+    >
+      <button
+        type="button"
+        style={{ position: "absolute", inset: 0, border: 0, background: "transparent" }}
+        onClick={onClose}
+        aria-label="Tutup instruksi"
+      />
+      <section
+        className="relative w-full max-w-xl overflow-y-auto overscroll-contain rounded-[2rem] border border-white/80 bg-white p-5 shadow-2xl md:p-6"
+        style={{
+          zIndex: 1,
+          maxHeight: `calc(${viewportFrame.height}px - 24px)`,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-600">
@@ -2041,6 +2135,8 @@ function InstructionModal({
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body
   );
 }
+
