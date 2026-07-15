@@ -492,14 +492,15 @@ export default function WellnessCoachPortalPage() {
   return (
     <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">
-        <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
+        {/* WELLNESS_COACH_COMPACT_HEADER_V63 */}
+        <section className="overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
+          <div className="flex items-start justify-between gap-3 md:items-end">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
                 Wellness Coach Portal
               </div>
-              <h1 className="mt-2 text-3xl font-black md:text-4xl">Portal Coach</h1>
-              <p className="mt-2 max-w-3xl text-sm font-bold leading-6 text-white/90">
+              <h1 className="mt-1.5 text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">Portal Coach</h1>
+              <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
                 Monitoring kepatuhan, target individual, dan instruksi untuk assigned group.
               </p>
             </div>
@@ -507,7 +508,7 @@ export default function WellnessCoachPortalPage() {
               <button
                 type="button"
                 onClick={() => setCoachMenuOpen(true)}
-                className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl font-black text-white shadow-sm backdrop-blur"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 text-xl font-black text-white shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
                 aria-label="Buka menu coach"
               >
                 ☰
