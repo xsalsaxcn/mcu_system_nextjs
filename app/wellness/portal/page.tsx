@@ -1042,7 +1042,7 @@ const [loading, setLoading] = useState(true);
             ) : null}
 
             {activeTab === "support" ? (
-              <SupportChatPanel actorType="participant" />
+              <SupportChatPanel actorType="participant" onClose={() => setActiveTab("home")} />
             ) : null}
 
             {activeTab === "profile" ? (

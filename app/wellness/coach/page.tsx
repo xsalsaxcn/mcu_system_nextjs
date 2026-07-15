@@ -760,7 +760,7 @@ export default function WellnessCoachPortalPage() {
                 sendChat={sendMemberChat}
               />
             ) : (
-              <SupportChatPanel actorType="coach" />
+              <SupportChatPanel actorType="coach" onClose={() => setCoachView("monitoring")} />
             )}
           </section>
         )}
