@@ -1,5 +1,6 @@
 "use client";
 
+// WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -660,19 +661,18 @@ export default function WellnessCoachPortalPage() {
                 <span>{flagFilter === "all" ? "Semua status" : `${flagFilter} flag`}</span>
               </div>
 
-              <div className="mt-3 overflow-hidden rounded-2xl border border-slate-100">
+              <div className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white" data-wellness-coach-mobile-table="v58">
                 <table className="w-full table-fixed border-collapse text-left">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
                     <tr>
-                      <th className="w-[43%] px-3 py-3 sm:w-[42%] sm:px-4">Peserta</th>
-                      <th className="w-[35%] px-2 py-3 sm:w-[36%] sm:px-4">Belum Isi</th>
-                      <th className="w-[22%] px-2 py-3 text-center sm:px-4">Status</th>
+                      <th className="w-[47%] px-3 py-3 sm:w-[50%] sm:px-4">Peserta</th>
+                      <th className="w-[53%] px-3 py-3 sm:w-[50%] sm:px-4">Monitoring</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredParticipants.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                        <td colSpan={2} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
                           Tidak ada peserta pada filter ini.
                         </td>
                       </tr>
@@ -686,38 +686,45 @@ export default function WellnessCoachPortalPage() {
                               : ""
                           }`}
                         >
-                          <td className="px-3 py-3 align-top sm:px-4">
+                          <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
                             <button
                               type="button"
                               onClick={() => chooseParticipant(item)}
-                              className="block w-full text-left"
+                              className="block w-full min-w-0 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
                             >
-                              <div className="line-clamp-2 text-sm font-black leading-5 text-slate-950 hover:text-teal-700 sm:text-base">
+                              <div className="break-words text-[13px] font-black leading-[1.35] text-slate-950 hover:text-teal-700 sm:text-base">
                                 {item.name}
                               </div>
-                              <div className="mt-1 break-words text-[10px] font-bold leading-4 text-slate-400 sm:text-xs">
+                              <div className="mt-1 break-all text-[9px] font-bold leading-4 text-slate-400 sm:break-words sm:text-xs">
                                 {item.code} · {item.group_name}
+                              </div>
+                              <div className="mt-2 text-[9px] font-black leading-4 text-slate-500 sm:text-[11px]">
+                                {fmtNumber(item.today?.steps || 0)} step · {fmtNumber(item.today?.calories || 0)} kkal
+                              </div>
+                              <div className="mt-2 inline-flex items-center rounded-full bg-teal-50 px-2 py-1 text-[9px] font-black text-teal-700 sm:text-[10px]">
+                                Buka detail peserta
                               </div>
                             </button>
                           </td>
-                          <td className="px-2 py-3 align-top sm:px-4">
-                            <div className="space-y-1 text-[10px] font-black leading-4 sm:text-xs">
-                              <div className="rounded-lg bg-orange-50 px-2 py-1 text-orange-800">
-                                Nutrisi: {formatDaysWithoutInput(item.compliance?.days_since_nutrition)}
+                          <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
+                            <div className="grid min-w-0 gap-1.5">
+                              <div className="min-w-0 rounded-lg bg-orange-50 px-2 py-1.5 text-orange-900">
+                                <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">Nutrisi</div>
+                                <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
+                                  {formatDaysWithoutInput(item.compliance?.days_since_nutrition)}
+                                </div>
                               </div>
-                              <div className="rounded-lg bg-sky-50 px-2 py-1 text-sky-800">
-                                Workout: {formatDaysWithoutInput(item.compliance?.days_since_workout)}
+                              <div className="min-w-0 rounded-lg bg-sky-50 px-2 py-1.5 text-sky-900">
+                                <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">Workout</div>
+                                <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
+                                  {formatDaysWithoutInput(item.compliance?.days_since_workout)}
+                                </div>
                               </div>
                             </div>
-                            <div className="mt-2 text-[9px] font-bold leading-4 text-slate-400 sm:text-[11px]">
-                              {fmtNumber(item.today?.steps || 0)} step · {fmtNumber(item.today?.calories || 0)} kkal
-                            </div>
-                          </td>
-                          <td className="px-2 py-3 text-center align-top sm:px-4">
-                            <div className="text-xs font-black text-slate-800 sm:text-sm">
-                              {fmtNumber(item.compliance?.compliance_percent || 0)}%
-                            </div>
-                            <div className="mt-1 flex justify-center">
+                            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black text-slate-700 sm:text-[10px]">
+                                {fmtNumber(item.compliance?.compliance_percent || 0)}%
+                              </span>
                               <FlagBadge level={item.flag} label={item.status} />
                             </div>
                           </td>
@@ -1236,28 +1243,89 @@ function ParticipantCard({ item, active, onClick }: any) {
 }
 
 function ParticipantDetailModal({ onClose, ...props }: any) {
+  const [viewportFrame, setViewportFrame] = useState({
+    top: 0,
+    height: 0,
+  });
+
   useEffect(() => {
+    const updateViewportFrame = () => {
+      const viewport = window.visualViewport;
+      const top = Math.max(
+        0,
+        Number(viewport?.pageTop ?? window.scrollY ?? 0)
+      );
+      const height = Math.max(
+        320,
+        Number(viewport?.height ?? window.innerHeight ?? 0)
+      );
+      setViewportFrame({ top, height });
+    };
+
+    updateViewportFrame();
+
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+
+    window.addEventListener("resize", updateViewportFrame);
+    window.visualViewport?.addEventListener("resize", updateViewportFrame);
+    window.visualViewport?.addEventListener("scroll", updateViewportFrame);
+
     return () => {
       document.body.style.overflow = previousOverflow;
+      window.removeEventListener("resize", updateViewportFrame);
+      window.visualViewport?.removeEventListener("resize", updateViewportFrame);
+      window.visualViewport?.removeEventListener("scroll", updateViewportFrame);
     };
   }, []);
 
-  if (typeof document === "undefined") return null;
+  if (typeof document === "undefined" || viewportFrame.height <= 0) return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 isolate z-[2147483000] flex items-center justify-center bg-slate-950/45 p-2 sm:p-4"
-      data-wellness-coach-participant-modal="v57"
+      data-wellness-coach-participant-modal="v58"
+      style={{
+        position: "absolute",
+        top: `${viewportFrame.top}px`,
+        left: 0,
+        right: 0,
+        height: `${viewportFrame.height}px`,
+        zIndex: 2147483000,
+        background: "rgba(15, 23, 42, 0.42)",
+      }}
     >
       <button
         type="button"
-        className="absolute inset-0 z-0"
         onClick={onClose}
         aria-label="Tutup detail peserta"
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          border: 0,
+          padding: 0,
+          background: "transparent",
+        }}
       />
-      <section className="relative z-10 flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:rounded-[2rem]">
+      <section
+        style={{
+          position: "absolute",
+          top: "8px",
+          right: "8px",
+          bottom: "8px",
+          left: "8px",
+          zIndex: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          border: "1px solid rgb(226 232 240)",
+          borderRadius: "24px",
+          background: "#ffffff",
+          boxShadow: "0 24px 70px rgba(15, 23, 42, 0.28)",
+          transform: "translateZ(0)",
+        }}
+      >
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-white px-4 py-3 sm:px-6">
           <div className="min-w-0">
             <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600">
@@ -1276,7 +1344,10 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
             ×
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-3 sm:p-5">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-3 sm:p-5"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
           <ParticipantDetail {...props} />
         </div>
       </section>
