@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 // WELLNESS_COACH_MONITORING_FLAGS_V53
 // WELLNESS_COACH_CHAT_SUMMARY_V54
+// WELLNESS_COACH_MISSING_INPUT_DAYS_V57
 // Scope: assigned groups, 7-day compliance flags, note read status, and existing target fields.
 // No schema migration and no access outside the coach assignment.
 
@@ -237,9 +238,19 @@ function makeFlag(params: {
   const nutritionDays = new Set(params.nutritionDates.filter(Boolean)).size;
   const workoutDays = new Set(params.workoutDates.filter(Boolean)).size;
   const compliancePercent = Math.round(((nutritionDays + workoutDays) / 14) * 100);
-  const allDates = [...params.nutritionDates, ...params.workoutDates]
-    .filter(Boolean)
-    .sort();
+  const nutritionDateList = params.nutritionDates.filter(Boolean).sort();
+  const workoutDateList = params.workoutDates.filter(Boolean).sort();
+  const lastNutritionDate =
+    nutritionDateList.length > 0 ? nutritionDateList[nutritionDateList.length - 1] : "";
+  const lastWorkoutDate =
+    workoutDateList.length > 0 ? workoutDateList[workoutDateList.length - 1] : "";
+  const daysSinceNutrition = lastNutritionDate
+    ? daysBetween(lastNutritionDate, params.today)
+    : 99;
+  const daysSinceWorkout = lastWorkoutDate
+    ? daysBetween(lastWorkoutDate, params.today)
+    : 99;
+  const allDates = [...nutritionDateList, ...workoutDateList].sort();
   const lastDate = allDates.length > 0 ? allDates[allDates.length - 1] : "";
   const daysSinceLastInput = lastDate ? daysBetween(lastDate, params.today) : 99;
   const medicalReview =
@@ -253,6 +264,10 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      last_nutrition_date: lastNutritionDate || null,
+      last_workout_date: lastWorkoutDate || null,
+      days_since_nutrition: daysSinceNutrition,
+      days_since_workout: daysSinceWorkout,
       last_input_date: lastDate || null,
       days_since_last_input: daysSinceLastInput,
     };
@@ -269,6 +284,10 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      last_nutrition_date: lastNutritionDate || null,
+      last_workout_date: lastWorkoutDate || null,
+      days_since_nutrition: daysSinceNutrition,
+      days_since_workout: daysSinceWorkout,
       last_input_date: lastDate || null,
       days_since_last_input: daysSinceLastInput,
     };
@@ -285,6 +304,10 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      last_nutrition_date: lastNutritionDate || null,
+      last_workout_date: lastWorkoutDate || null,
+      days_since_nutrition: daysSinceNutrition,
+      days_since_workout: daysSinceWorkout,
       last_input_date: lastDate || null,
       days_since_last_input: daysSinceLastInput,
     };
@@ -297,6 +320,10 @@ function makeFlag(params: {
     compliance_percent: compliancePercent,
     nutrition_days: nutritionDays,
     workout_days: workoutDays,
+    last_nutrition_date: lastNutritionDate || null,
+    last_workout_date: lastWorkoutDate || null,
+    days_since_nutrition: daysSinceNutrition,
+    days_since_workout: daysSinceWorkout,
     last_input_date: lastDate || null,
     days_since_last_input: daysSinceLastInput,
   };

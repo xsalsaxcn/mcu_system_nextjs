@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
 // WELLNESS_COACH_TABLE_DETAIL_CHARTS_V55
 // WELLNESS_COACH_MODAL_RESPONSIVE_CHARTS_V56
+// WELLNESS_COACH_MODAL_PORTAL_MISSING_DAYS_V57
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
@@ -69,6 +71,14 @@ function formatChatTime(value: any) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatDaysWithoutInput(value: any) {
+  const days = Number(value);
+  if (!Number.isFinite(days) || days >= 99) return "Belum pernah";
+  if (days <= 0) return "Hari ini";
+  if (days === 1) return "1 hari";
+  return `${Math.floor(days)} hari`;
 }
 
 const fieldClass =
@@ -654,9 +664,9 @@ export default function WellnessCoachPortalPage() {
                 <table className="w-full table-fixed border-collapse text-left">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
                     <tr>
-                      <th className="w-[46%] px-3 py-3 sm:w-[44%] sm:px-4">Peserta</th>
-                      <th className="w-[27%] px-2 py-3 text-right sm:w-[28%] sm:px-4">Aktivitas</th>
-                      <th className="w-[27%] px-2 py-3 text-center sm:w-[28%] sm:px-4">Status</th>
+                      <th className="w-[43%] px-3 py-3 sm:w-[42%] sm:px-4">Peserta</th>
+                      <th className="w-[35%] px-2 py-3 sm:w-[36%] sm:px-4">Belum Isi</th>
+                      <th className="w-[22%] px-2 py-3 text-center sm:px-4">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
@@ -690,12 +700,17 @@ export default function WellnessCoachPortalPage() {
                               </div>
                             </button>
                           </td>
-                          <td className="px-2 py-3 text-right align-top sm:px-4">
-                            <div className="text-xs font-black text-slate-800 sm:text-sm">
-                              {fmtNumber(item.today?.steps || 0)} steps
+                          <td className="px-2 py-3 align-top sm:px-4">
+                            <div className="space-y-1 text-[10px] font-black leading-4 sm:text-xs">
+                              <div className="rounded-lg bg-orange-50 px-2 py-1 text-orange-800">
+                                Nutrisi: {formatDaysWithoutInput(item.compliance?.days_since_nutrition)}
+                              </div>
+                              <div className="rounded-lg bg-sky-50 px-2 py-1 text-sky-800">
+                                Workout: {formatDaysWithoutInput(item.compliance?.days_since_workout)}
+                              </div>
                             </div>
-                            <div className="mt-1 text-[10px] font-bold text-slate-500 sm:text-xs">
-                              {fmtNumber(item.today?.calories || 0)} kkal
+                            <div className="mt-2 text-[9px] font-bold leading-4 text-slate-400 sm:text-[11px]">
+                              {fmtNumber(item.today?.steps || 0)} step · {fmtNumber(item.today?.calories || 0)} kkal
                             </div>
                           </td>
                           <td className="px-2 py-3 text-center align-top sm:px-4">
@@ -1221,21 +1236,34 @@ function ParticipantCard({ item, active, onClick }: any) {
 }
 
 function ParticipantDetailModal({ onClose, ...props }: any) {
-  return (
-    <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-slate-900/25 p-2 backdrop-blur-[1px] sm:p-4">
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 isolate z-[2147483000] flex items-center justify-center bg-slate-950/45 p-2 sm:p-4"
+      data-wellness-coach-participant-modal="v57"
+    >
       <button
         type="button"
-        className="absolute inset-0"
+        className="absolute inset-0 z-0"
         onClick={onClose}
         aria-label="Tutup detail peserta"
       />
-      <section className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[1.75rem] border border-white/80 bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem]">
-        <div className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
-          <div>
+      <section className="relative z-10 flex h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:rounded-[2rem]">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-white px-4 py-3 sm:px-6">
+          <div className="min-w-0">
             <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600">
               Progress Peserta
             </div>
-            <div className="mt-1 line-clamp-1 text-base font-black text-slate-950 sm:text-lg">
+            <div className="mt-1 truncate text-base font-black text-slate-950 sm:text-lg">
               {props.participant?.name || "Detail peserta"}
             </div>
           </div>
@@ -1248,11 +1276,12 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
             ×
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white p-3 sm:p-5">
           <ParticipantDetail {...props} />
         </div>
       </section>
-    </div>
+    </div>,
+    document.body
   );
 }
 
