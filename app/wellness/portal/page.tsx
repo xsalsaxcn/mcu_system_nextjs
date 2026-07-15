@@ -9,6 +9,7 @@ import SupportChatPanel from "@/components/wellness/SupportChatPanel";
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
 // WELLNESS_PARTICIPANT_ADMIN_SUPPORT_V61
+// WELLNESS_PROGRESS_CHAT_SMOOTH_V65
 // Base dari V415:
 // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
 // - History Workout tetap menampilkan semua riwayat.
@@ -1062,6 +1063,7 @@ const [loading, setLoading] = useState(true);
 
 
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
+// WELLNESS_PARTICIPANT_CHAT_OPTIMISTIC_READ_V65
 function ParticipantCoachChat({ participant }: { participant: any }) {
   const participantId = asNumber(
     participant?.id || participant?.participant_id || participant?.wellness_participant_id
@@ -1072,12 +1074,22 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
   const [sending, setSending] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
 
-  async function loadChat() {
+  function scrollChatToLatest(behavior: ScrollBehavior = "smooth") {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      document.getElementById("participant-coach-chat-end")?.scrollIntoView({
+        behavior,
+        block: "end",
+      });
+    }, 40);
+  }
+
+  async function loadChat(options?: { silent?: boolean; scroll?: boolean }) {
     if (!participantId) return;
-    setLoadingChat(true);
+    if (!options?.silent) setLoadingChat(true);
 
     const result = await fetch(
-      `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat`,
+      `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat&t=${Date.now()}`,
       { cache: "no-store" }
     )
       .then((response) => response.json())
@@ -1112,22 +1124,35 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
           )
         );
       }
-    } else {
+
+      if (options?.scroll) scrollChatToLatest("auto");
+    } else if (!options?.silent) {
       setChatNotice(result.message || "Chat belum dapat dimuat.");
     }
 
-    setLoadingChat(false);
+    if (!options?.silent) setLoadingChat(false);
   }
 
   async function sendChat() {
     const message = clean(text);
-    if (!participantId || !message) {
-      setChatNotice("Tulis pesan terlebih dahulu.");
-      return;
-    }
+    if (!participantId || !message || sending) return;
+
+    const optimisticId = `participant-pending-${Date.now()}`;
+    const optimisticMessage = {
+      id: optimisticId,
+      sender: "participant",
+      message,
+      coach_note: message,
+      created_at: new Date().toISOString(),
+      is_read: false,
+      optimistic: true,
+    };
 
     setSending(true);
-    setChatNotice("Mengirim pesan...");
+    setChatNotice("");
+    setText("");
+    setMessages((current) => [...current, optimisticMessage]);
+    scrollChatToLatest();
 
     const result = await fetch("/api/wellness/portal/coach-notes", {
       method: "POST",
@@ -1142,18 +1167,44 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
     if (result.ok) {
-      setText("");
-      setChatNotice("Pesan sudah dikirim kepada coach.");
-      await loadChat();
+      const saved = result.chat || {};
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === optimisticId
+            ? {
+                ...saved,
+                id: saved.id || optimisticId,
+                sender: "participant",
+                message,
+                coach_note: message,
+                created_at: saved.created_at || optimisticMessage.created_at,
+                is_read: false,
+                optimistic: false,
+              }
+            : item
+        )
+      );
+      window.setTimeout(() => void loadChat({ silent: true }), 900);
     } else {
-      setChatNotice(result.message || "Pesan gagal dikirim.");
+      setMessages((current) => current.filter((item) => item.id !== optimisticId));
+      setText((current) => current || message);
+      setChatNotice(result.message || "Pesan gagal dikirim. Silakan coba lagi.");
     }
 
     setSending(false);
+    scrollChatToLatest();
   }
 
   useEffect(() => {
-    loadChat();
+    void loadChat({ scroll: true });
+  }, [participantId]);
+
+  useEffect(() => {
+    if (!participantId) return;
+    const intervalId = window.setInterval(() => {
+      void loadChat({ silent: true });
+    }, 12000);
+    return () => window.clearInterval(intervalId);
   }, [participantId]);
 
   return (
@@ -1171,7 +1222,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
           </div>
           <button
             type="button"
-            onClick={loadChat}
+            onClick={() => void loadChat({ scroll: true })}
             className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur"
           >
             Refresh
@@ -1181,7 +1232,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
 
       <div className="p-4 md:p-6">
         {chatNotice ? (
-          <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-600">
+          <div className="mb-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
             {chatNotice}
           </div>
         ) : null}
@@ -1207,32 +1258,33 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                   className={`flex ${fromParticipant ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm ${
+                    className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
                       fromParticipant
                         ? "rounded-br-md bg-slate-950 text-white"
                         : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
-                    }`}
+                    } ${item.optimistic ? "opacity-90" : "opacity-100"}`}
                   >
                     <div className="whitespace-pre-wrap text-sm font-bold leading-6">
                       {item.message || item.coach_note || "-"}
                     </div>
                     <div
-                      className={`mt-2 text-[11px] font-bold ${
+                      className={`mt-2 flex items-center gap-1 text-[11px] font-bold ${
                         fromParticipant ? "text-white/60" : "text-slate-400"
                       }`}
                     >
-                      {formatCoachDate(item.created_at || item.session_date)}
-                      {fromParticipant
-                        ? item.is_read
-                          ? " · Sudah dibaca coach"
-                          : " · Terkirim"
-                        : " · Coach"}
+                      <span>{formatCoachDate(item.created_at || item.session_date)}</span>
+                      {fromParticipant ? (
+                        <span>{item.is_read ? "· Sudah dibaca coach" : "· Terkirim"}</span>
+                      ) : (
+                        <span>· Coach</span>
+                      )}
                     </div>
                   </div>
                 </div>
               );
             })
           )}
+          <div id="participant-coach-chat-end" className="h-px" aria-hidden="true" />
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -1246,9 +1298,14 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             type="button"
             onClick={sendChat}
             disabled={sending || !clean(text)}
-            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            className="flex min-h-[52px] items-center justify-center rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            aria-label={sending ? "Pesan sedang diproses" : "Kirim pesan"}
           >
-            {sending ? "Mengirim..." : "Kirim Pesan"}
+            {sending ? (
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            ) : (
+              "Kirim Pesan"
+            )}
           </button>
         </div>
       </div>
@@ -1547,6 +1604,82 @@ function HideOldInvalidSummaryCardV39() {
 
   return null;
 }
+// WELLNESS_PARTICIPANT_PROGRESS_BARS_V65
+function parseWellnessNumber(value: any) {
+  const raw = clean(value).replace(/[^0-9,.-]/g, "");
+  if (!raw) return 0;
+  if (raw.includes(",")) {
+    return asNumber(raw.replace(/\./g, "").replace(",", "."));
+  }
+  if (/^\d{1,3}(\.\d{3})+$/.test(raw)) return asNumber(raw.replace(/\./g, ""));
+  return asNumber(raw);
+}
+
+function coachTargetFromText(text: any, label: RegExp) {
+  const match = clean(text).match(label);
+  return match?.[1] ? parseWellnessNumber(match[1]) : 0;
+}
+
+function clampProgressPercent(value: number) {
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
+}
+
+function progressPercent(current: number, target: number) {
+  if (!(target > 0)) return 0;
+  return clampProgressPercent((current / target) * 100);
+}
+
+function weightTargetProgress(current: number, baseline: number, target: number) {
+  if (!(current > 0) || !(target > 0)) return 0;
+  if (!(baseline > 0) || baseline === target) return Math.abs(current - target) <= 0.5 ? 100 : 0;
+  const totalDistance = Math.abs(baseline - target);
+  const remainingDistance = Math.abs(current - target);
+  return clampProgressPercent(((totalDistance - remainingDistance) / totalDistance) * 100);
+}
+
+function WellnessProgressRow({
+  label,
+  valueLabel,
+  percent,
+  note,
+  tone = "teal",
+}: {
+  label: string;
+  valueLabel: string;
+  percent: number;
+  note?: string;
+  tone?: "teal" | "sky" | "orange" | "violet";
+}) {
+  const toneClasses = {
+    teal: "bg-teal-500",
+    sky: "bg-sky-500",
+    orange: "bg-orange-500",
+    violet: "bg-violet-500",
+  };
+  const safePercent = clampProgressPercent(percent);
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-black text-slate-900">{label}</div>
+          {note ? <div className="mt-1 text-xs font-bold text-slate-500">{note}</div> : null}
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-sm font-black text-slate-900">{valueLabel}</div>
+          <div className="mt-1 text-[11px] font-black text-slate-400">{Math.round(safePercent)}%</div>
+        </div>
+      </div>
+      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${toneClasses[tone]}`}
+          style={{ width: `${safePercent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function HomeTab({
   participant,
   nutritionLogs,
@@ -1584,6 +1717,40 @@ function HomeTab({
   });
 
   const [nutritionLoading, setNutritionLoading] = useState(false);
+  const [coachTargets, setCoachTargets] = useState({
+    nutrition_max_calories: 0,
+    workout_min_calories: 0,
+    target_weight_kg: 0,
+  });
+
+  async function loadCoachTargets() {
+    if (!participantId) return;
+    const result = await fetch(
+      `/api/wellness/portal/coach-notes?participant_id=${participantId}&t=${Date.now()}`,
+      { cache: "no-store" }
+    )
+      .then((response) => response.json())
+      .catch(() => null);
+
+    const notes = Array.isArray(result?.notes) ? result.notes : [];
+    const targetNote = notes.find((item: any) =>
+      clean(item?.topic).toLowerCase().includes("target wellness") ||
+      clean(item?.action_plan).toLowerCase().includes("target nutrisi")
+    );
+    const actionPlan = clean(targetNote?.action_plan);
+
+    setCoachTargets({
+      nutrition_max_calories:
+        coachTargetFromText(actionPlan, /Target\s+Nutrisi\s*:\s*([0-9.,]+)/i) ||
+        asNumber(participant?.nutrition_max_calories || participant?.daily_calorie_target),
+      workout_min_calories:
+        coachTargetFromText(actionPlan, /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i) ||
+        asNumber(participant?.workout_min_calories || participant?.workout_calorie_target || participant?.active_calorie_target),
+      target_weight_kg:
+        coachTargetFromText(actionPlan, /Target\s+BB\s*:\s*([0-9.,]+)/i) ||
+        asNumber(participant?.target_weight_kg || participant?.target_weight),
+    });
+  }
 
   async function loadDirectNutrition() {
     if (!participantId) return;
@@ -1606,6 +1773,7 @@ function HomeTab({
 
   useEffect(() => {
     loadDirectNutrition();
+    loadCoachTargets();
   }, [participantId]);
 
   const latestClinical =
@@ -1638,6 +1806,21 @@ function HomeTab({
         ? "Belum ada input hari ini. Menampilkan data terakhir."
         : "Belum ada input nutrisi.";
 
+  const nutritionTarget = asNumber(coachTargets.nutrition_max_calories);
+  const workoutTarget = asNumber(coachTargets.workout_min_calories);
+  const weightTarget = asNumber(coachTargets.target_weight_kg);
+  const stepsTarget = asNumber(participant?.daily_step_target || participant?.step_target || 8000);
+  const latestWeight = asNumber(latestClinical?.weight_kg || latestClinical?.weight || latestClinical?.bb);
+  const oldestClinical = Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    ? clinicalHistory[clinicalHistory.length - 1]
+    : null;
+  const baselineWeight = asNumber(oldestClinical?.weight_kg || oldestClinical?.weight || oldestClinical?.bb || latestWeight);
+  const mealProgress = progressPercent(todayRowCount, 3);
+  const nutritionProgress = nutritionTarget > 0 ? progressPercent(todayCalories, nutritionTarget) : mealProgress;
+  const workoutProgress = workoutTarget > 0 ? progressPercent(totals.workoutCalories || 0, workoutTarget) : 0;
+  const stepsProgress = progressPercent(totals.steps || 0, stepsTarget);
+  const weightProgress = weightTarget > 0 ? weightTargetProgress(latestWeight, baselineWeight, weightTarget) : 0;
+
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
       <CoachNoticeCenter participant={participant} />
@@ -1666,38 +1849,51 @@ function HomeTab({
           </button>
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-4">
-          <PortalMetricCardV34
-            label="Calories In"
-            value={`${fmtNumber(todayCalories, 0)} kkal`}
-            note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <WellnessProgressRow
+            label="Input Nutrisi Hari Ini"
+            valueLabel={`${fmtNumber(todayRowCount, 0)} / 3 kali`}
+            percent={mealProgress}
+            note={todayRowCount >= 3 ? "Target input harian tercapai" : `${Math.max(0, 3 - todayRowCount)} input lagi untuk mencapai target`}
             tone="sky"
           />
-
-          <PortalMetricCardV34
-            label="Workout Calories"
-            value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
-            note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+          <WellnessProgressRow
+            label="Konsumsi Kalori Harian"
+            valueLabel={nutritionTarget > 0 ? `${fmtNumber(todayCalories, 0)} / ${fmtNumber(nutritionTarget, 0)} kkal` : `${fmtNumber(todayCalories, 0)} kkal`}
+            percent={nutritionProgress}
+            note={nutritionTarget > 0 ? `${fmtNumber(Math.max(0, nutritionTarget - todayCalories), 0)} kkal tersisa dari batas Coach` : "Target kalori belum ditetapkan Coach"}
+            tone="sky"
+          />
+          <WellnessProgressRow
+            label="Kalori Terbakar dari Workout"
+            valueLabel={workoutTarget > 0 ? `${fmtNumber(totals.workoutCalories || 0, 0)} / ${fmtNumber(workoutTarget, 0)} kkal` : `${fmtNumber(totals.workoutCalories || 0, 0)} kkal`}
+            percent={workoutProgress}
+            note={workoutTarget > 0 ? `${fmtNumber(Math.max(0, workoutTarget - (totals.workoutCalories || 0)), 0)} kkal lagi menuju target` : "Target workout belum ditetapkan Coach"}
             tone="teal"
           />
-
-          <PortalMetricCardV34
-            label="Steps"
-            value={fmtNumber(totals.steps || 0)}
-            note="hari ini dari manual/device bila tersedia"
-            tone="peach"
+          <WellnessProgressRow
+            label="Langkah Hari Ini"
+            valueLabel={`${fmtNumber(totals.steps || 0)} / ${fmtNumber(stepsTarget)}`}
+            percent={stepsProgress}
+            note="Target langkah harian"
+            tone="orange"
           />
-
-          <PortalMetricCardV34
-            label="BMI / Tensi"
-            value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
-            note={
-              latestClinical?.systolic
-                ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg`
-                : "110/80 mmHg"
-            }
-            tone="slate"
-          />
+          {weightTarget > 0 ? (
+            <WellnessProgressRow
+              label="Progress Berat Badan"
+              valueLabel={latestWeight > 0 ? `${fmtNumber(latestWeight, 1)} → ${fmtNumber(weightTarget, 1)} kg` : `Target ${fmtNumber(weightTarget, 1)} kg`}
+              percent={weightProgress}
+              note={latestWeight > 0 ? `${fmtNumber(Math.abs(latestWeight - weightTarget), 1)} kg dari target` : "Data BB terbaru belum tersedia"}
+              tone="violet"
+            />
+          ) : null}
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 md:col-span-2">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-600">
+              <span><strong className="text-slate-900">BMI:</strong> {latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}</span>
+              <span><strong className="text-slate-900">Tensi:</strong> {latestClinical?.systolic ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg` : "-"}</span>
+              <span><strong className="text-slate-900">Workout:</strong> {fmtNumber(totals.workoutMinutes || 0, 1)} menit</span>
+            </div>
+          </div>
         </div>
       </div>
 

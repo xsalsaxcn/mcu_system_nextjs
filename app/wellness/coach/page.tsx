@@ -3,6 +3,7 @@
 // WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
 // WELLNESS_COACH_DETAIL_POINTS_INSTRUCTION_V59
 // WELLNESS_COACH_ADMIN_SUPPORT_V61
+// WELLNESS_PROGRESS_CHAT_SMOOTH_V65
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
@@ -364,16 +365,29 @@ export default function WellnessCoachPortalPage() {
     setSaving(false);
   }
 
-  async function loadMemberChat(participant = selectedParticipant) {
+  function scrollCoachChatToLatest(behavior: ScrollBehavior = "smooth") {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      document.getElementById("coach-member-chat-end")?.scrollIntoView({
+        behavior,
+        block: "end",
+      });
+    }, 40);
+  }
+
+  async function loadMemberChat(
+    participant = selectedParticipant,
+    options?: { silent?: boolean; scroll?: boolean }
+  ) {
     const participantId = Number(participant?.id || 0);
     if (!participantId) {
       setChatMessages([]);
       return;
     }
 
-    setChatLoading(true);
+    if (!options?.silent) setChatLoading(true);
     const result = await fetch(
-      `/api/wellness/coach/notes?participant_id=${participantId}&mode=chat`,
+      `/api/wellness/coach/notes?participant_id=${participantId}&mode=chat&t=${Date.now()}`,
       { cache: "no-store" }
     )
       .then((response) => response.json())
@@ -407,11 +421,13 @@ export default function WellnessCoachPortalPage() {
           )
         );
       }
-    } else {
+
+      if (options?.scroll) scrollCoachChatToLatest("auto");
+    } else if (!options?.silent) {
       setMessage(result.message || "Chat member belum dapat dimuat.");
     }
 
-    setChatLoading(false);
+    if (!options?.silent) setChatLoading(false);
   }
 
   async function sendMemberChat() {
@@ -422,12 +438,24 @@ export default function WellnessCoachPortalPage() {
       setMessage("Pilih anggota sebelum mengirim chat.");
       return;
     }
-    if (!chatMessage) {
-      setMessage("Tulis pesan chat terlebih dahulu.");
-      return;
-    }
+    if (!chatMessage || chatSending) return;
+
+    const optimisticId = `coach-pending-${Date.now()}`;
+    const optimisticMessage = {
+      id: optimisticId,
+      sender: "coach",
+      message: chatMessage,
+      coach_note: chatMessage,
+      created_at: new Date().toISOString(),
+      is_read: false,
+      optimistic: true,
+    };
 
     setChatSending(true);
+    setChatText("");
+    setChatMessages((current) => [...current, optimisticMessage]);
+    scrollCoachChatToLatest();
+
     const result = await fetch("/api/wellness/coach/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -441,15 +469,36 @@ export default function WellnessCoachPortalPage() {
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
     if (result.ok) {
-      setChatText("");
-      setMessage("Pesan berhasil dikirim kepada member.");
-      await loadMemberChat();
-      await loadDashboard({ keepSelection: true });
+      const saved = result.chat || {};
+      setChatMessages((current) =>
+        current.map((item) =>
+          item.id === optimisticId
+            ? {
+                ...saved,
+                id: saved.id || optimisticId,
+                sender: "coach",
+                message: chatMessage,
+                coach_note: chatMessage,
+                created_at: saved.created_at || optimisticMessage.created_at,
+                is_read: false,
+                optimistic: false,
+              }
+            : item
+        )
+      );
+      window.setTimeout(
+        () => void loadMemberChat(selectedParticipant, { silent: true }),
+        900
+      );
+      window.setTimeout(() => void loadDashboard({ keepSelection: true }), 1200);
     } else {
+      setChatMessages((current) => current.filter((item) => item.id !== optimisticId));
+      setChatText((current) => current || chatMessage);
       setMessage(result.message || "Pesan chat gagal dikirim.");
     }
 
     setChatSending(false);
+    scrollCoachChatToLatest();
   }
 
   useEffect(() => {
@@ -457,9 +506,12 @@ export default function WellnessCoachPortalPage() {
   }, []);
 
   useEffect(() => {
-    if (coachView === "chat" && selectedParticipant?.id) {
-      loadMemberChat(selectedParticipant);
-    }
+    if (coachView !== "chat" || !selectedParticipant?.id) return;
+    void loadMemberChat(selectedParticipant, { scroll: true });
+    const intervalId = window.setInterval(() => {
+      void loadMemberChat(selectedParticipant, { silent: true });
+    }, 12000);
+    return () => window.clearInterval(intervalId);
   }, [coachView, selectedParticipant?.id]);
 
   const participants = dashboard?.participants || [];
@@ -1074,11 +1126,11 @@ function CoachChatPanel({
                         className={`flex ${fromCoach ? "justify-end" : "justify-start"}`}
                       >
                         <div
-                          className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm ${
+                          className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
                             fromCoach
                               ? "rounded-br-md bg-slate-950 text-white"
                               : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
-                          }`}
+                          } ${item.optimistic ? "opacity-90" : "opacity-100"}`}
                         >
                           <div className="whitespace-pre-wrap text-sm font-bold leading-6">
                             {item.message || item.coach_note || "-"}
@@ -1100,6 +1152,7 @@ function CoachChatPanel({
                     );
                   })
                 )}
+                <div id="coach-member-chat-end" className="h-px" aria-hidden="true" />
               </div>
 
               <div className="mt-4 grid gap-3">
@@ -1113,9 +1166,14 @@ function CoachChatPanel({
                   type="button"
                   onClick={sendChat}
                   disabled={chatSending || !clean(chatText)}
-                  className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+                  className="flex min-h-[52px] items-center justify-center rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+                  aria-label={chatSending ? "Pesan sedang diproses" : "Kirim pesan"}
                 >
-                  {chatSending ? "Mengirim..." : "Kirim Pesan"}
+                  {chatSending ? (
+                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    "Kirim Pesan"
+                  )}
                 </button>
               </div>
             </>
@@ -1392,6 +1450,61 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
   );
 }
 
+// WELLNESS_COACH_PARTICIPANT_PROGRESS_BARS_V65
+function coachClampProgress(value: number) {
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
+}
+
+function coachPercent(current: number, target: number) {
+  if (!(target > 0)) return 0;
+  return coachClampProgress((current / target) * 100);
+}
+
+function coachWeightProgress(current: number, baseline: number, target: number) {
+  if (!(current > 0) || !(target > 0)) return 0;
+  if (!(baseline > 0) || baseline === target) return Math.abs(current - target) <= 0.5 ? 100 : 0;
+  const totalDistance = Math.abs(baseline - target);
+  const remainingDistance = Math.abs(current - target);
+  return coachClampProgress(((totalDistance - remainingDistance) / totalDistance) * 100);
+}
+
+function CoachProgressRowV65({
+  label,
+  value,
+  percent,
+  note,
+  tone = "teal",
+}: any) {
+  const colors: Record<string, string> = {
+    teal: "bg-teal-500",
+    sky: "bg-sky-500",
+    orange: "bg-orange-500",
+    violet: "bg-violet-500",
+    rose: "bg-rose-500",
+  };
+  const safePercent = coachClampProgress(Number(percent || 0));
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-black text-slate-900">{label}</div>
+          {note ? <div className="mt-1 text-xs font-bold text-slate-500">{note}</div> : null}
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-sm font-black text-slate-900">{value}</div>
+          <div className="mt-1 text-[11px] font-black text-slate-400">{Math.round(safePercent)}%</div>
+        </div>
+      </div>
+      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${colors[tone] || colors.teal}`}
+          style={{ width: `${safePercent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ParticipantDetail({
   participant,
   detail,
@@ -1411,6 +1524,24 @@ function ParticipantDetail({
   const pointRules = detail?.point_rules || {};
   const setTarget = (key: string, value: string) =>
     setTargetForm((previous: any) => ({ ...previous, [key]: value }));
+  const latestChartValue = (key: string) => {
+    const rows = Array.isArray(charts?.[key]) ? charts[key] : [];
+    return Number(rows.length ? rows[rows.length - 1]?.value || 0 : 0);
+  };
+  const firstChartValue = (key: string) => {
+    const rows = Array.isArray(charts?.[key]) ? charts[key] : [];
+    return Number(rows.length ? rows[0]?.value || 0 : 0);
+  };
+  const nutritionTarget = Number(targetForm?.nutrition_max_calories || participant?.targets?.nutrition_max_calories || 0);
+  const workoutTarget = Number(targetForm?.workout_min_calories || participant?.targets?.workout_min_calories || 0);
+  const weightTarget = Number(targetForm?.target_weight_kg || participant?.targets?.target_weight_kg || 0);
+  const nutritionLatest = latestChartValue("nutrition_calories");
+  const workoutLatest = latestChartValue("workout_calories");
+  const stepsLatest = latestChartValue("steps");
+  const latestWeightValue = Number(summary.latest_weight_kg || latestChartValue("weight_kg") || 0);
+  const baselineWeightValue = firstChartValue("weight_kg") || latestWeightValue;
+  const complianceRate = Number(participant?.compliance_rate || participant?.compliance_percentage || 0);
+  const stepTarget = Number(participant?.daily_step_target || participant?.step_target || 8000);
 
   return (
     <div className="space-y-5">
@@ -1455,14 +1586,66 @@ function ParticipantDetail({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-            <CompactMetric label="Total Point" value={fmtNumber(summary.total_points || 0)} tone="amber" />
-            <CompactMetric label="Health Talk" value={`${fmtNumber(summary.healthtalk_count || 0)}x`} tone="violet" />
-            <CompactMetric label="Log Nutrisi" value={fmtNumber(summary.nutrition_log_count || 0)} tone="sky" />
-            <CompactMetric label="Log Workout" value={fmtNumber(summary.workout_log_count || 0)} tone="teal" />
-            <CompactMetric label="BB Terakhir" value={summary.latest_weight_kg ? `${fmtNumber(summary.latest_weight_kg, 1)} kg` : "-"} tone="slate" />
-            <CompactMetric label="BMI Terakhir" value={summary.latest_bmi ? fmtNumber(summary.latest_bmi, 1) : "-"} tone="slate" />
-          </div>
+          <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">Capaian Target Peserta</h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">Progress terbaru dibanding target individual Coach.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] font-black">
+                <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">{fmtNumber(summary.total_points || 0)} point</span>
+                <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">{fmtNumber(summary.healthtalk_count || 0)} Health Talk</span>
+                <span className="rounded-full bg-sky-50 px-3 py-2 text-sky-700">{fmtNumber(summary.nutrition_log_count || 0)} log nutrisi</span>
+                <span className="rounded-full bg-teal-50 px-3 py-2 text-teal-700">{fmtNumber(summary.workout_log_count || 0)} log workout</span>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <CoachProgressRowV65
+                label="Konsumsi Kalori Terakhir"
+                value={nutritionTarget > 0 ? `${fmtNumber(nutritionLatest)} / ${fmtNumber(nutritionTarget)} kkal` : `${fmtNumber(nutritionLatest)} kkal`}
+                percent={nutritionTarget > 0 ? coachPercent(nutritionLatest, nutritionTarget) : 0}
+                note={nutritionTarget > 0 ? `${fmtNumber(Math.max(0, nutritionTarget - nutritionLatest))} kkal tersisa dari batas` : "Target nutrisi belum ditetapkan"}
+                tone="sky"
+              />
+              <CoachProgressRowV65
+                label="Kalori Workout Terakhir"
+                value={workoutTarget > 0 ? `${fmtNumber(workoutLatest)} / ${fmtNumber(workoutTarget)} kkal` : `${fmtNumber(workoutLatest)} kkal`}
+                percent={workoutTarget > 0 ? coachPercent(workoutLatest, workoutTarget) : 0}
+                note={workoutTarget > 0 ? `${fmtNumber(Math.max(0, workoutTarget - workoutLatest))} kkal lagi menuju target` : "Target workout belum ditetapkan"}
+                tone="teal"
+              />
+              <CoachProgressRowV65
+                label="Langkah Terakhir"
+                value={`${fmtNumber(stepsLatest)} / ${fmtNumber(stepTarget)}`}
+                percent={coachPercent(stepsLatest, stepTarget)}
+                note="Target langkah harian"
+                tone="orange"
+              />
+              <CoachProgressRowV65
+                label="Kepatuhan 7 Hari"
+                value={`${fmtNumber(complianceRate)}%`}
+                percent={complianceRate}
+                note={participant?.flag_label || "Status monitoring"}
+                tone={complianceRate >= 80 ? "teal" : complianceRate >= 50 ? "orange" : "rose"}
+              />
+              {weightTarget > 0 ? (
+                <CoachProgressRowV65
+                  label="Progress Berat Badan"
+                  value={latestWeightValue > 0 ? `${fmtNumber(latestWeightValue, 1)} → ${fmtNumber(weightTarget, 1)} kg` : `Target ${fmtNumber(weightTarget, 1)} kg`}
+                  percent={coachWeightProgress(latestWeightValue, baselineWeightValue, weightTarget)}
+                  note={latestWeightValue > 0 ? `${fmtNumber(Math.abs(latestWeightValue - weightTarget), 1)} kg dari target` : "BB terbaru belum tersedia"}
+                  tone="violet"
+                />
+              ) : null}
+              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm">
+                <div className="text-sm font-black text-slate-900">Parameter Klinis Terakhir</div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-black text-slate-600">
+                  <span className="rounded-full bg-slate-50 px-3 py-2">BMI {summary.latest_bmi ? fmtNumber(summary.latest_bmi, 1) : "-"}</span>
+                  <span className="rounded-full bg-slate-50 px-3 py-2">Tensi {summary.latest_systolic ? `${fmtNumber(summary.latest_systolic)}/${fmtNumber(summary.latest_diastolic)}` : "-"}</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
