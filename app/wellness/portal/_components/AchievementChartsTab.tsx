@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -238,7 +238,11 @@ export default function AchievementChartsTab({
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="mt-5">
+          <WorkoutMomentumSpotlight data={workoutSeries} target={workoutMinTarget} />
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ChartStatusCard
             title="Kalori masuk"
             value={`${fmtNumber(latestNutrition, 0)} kkal`}
@@ -322,6 +326,65 @@ export default function AchievementChartsTab({
         />
       </div>
     </section>
+  );
+}
+
+
+// WELLNESS_CHART_WORKOUT_SPOTLIGHT_V66
+function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target: number }) {
+  const series = data.slice(-7);
+  const maximum = Math.max(target || 0, ...series.map((item) => Number(item.value || 0)), 1);
+  const latest = series.length ? Number(series[series.length - 1]?.value || 0) : 0;
+  const achievement = target > 0 ? Math.round((latest / target) * 100) : 0;
+
+  return (
+    <article className="rounded-[1.7rem] border border-teal-100 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-4 text-white shadow-xl shadow-teal-900/10">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-teal-300">Workout Momentum</div>
+          <h3 className="mt-1 text-xl font-black">Kalori Terbakar 7 Hari</h3>
+          <p className="mt-1 text-xs font-bold text-slate-300">Bandingkan hasil harian dengan target Coach.</p>
+        </div>
+        <div className="rounded-2xl bg-white/10 px-3 py-2 text-right backdrop-blur">
+          <div className="text-xl font-black">{fmtNumber(latest)} kkal</div>
+          <div className="mt-1 text-[10px] font-black text-teal-300">{achievement}% target</div>
+        </div>
+      </div>
+
+      <div className="relative mt-5 flex h-32 items-end gap-2 border-b border-white/15 pb-5">
+        {target > 0 ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-teal-300/70"
+            style={{ bottom: `${20 + Math.min(100, (target / maximum) * 100) * 0.88}px` }}
+          >
+            <span className="absolute -top-5 right-0 text-[9px] font-black text-teal-300">Target {fmtNumber(target)}</span>
+          </div>
+        ) : null}
+        {(series.length > 0 ? series : Array.from({ length: 7 }, (_, index) => ({ date: `empty-${index}`, label: "-", value: 0 }))).map((item, index, rows) => {
+          const height = Math.max(Number(item.value || 0) > 0 ? 12 : 5, (Number(item.value || 0) / maximum) * 88);
+          const latestBar = index === rows.length - 1;
+          return (
+            <div key={`${item.date}-${index}`} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
+              <div className="flex h-[88px] w-full items-end justify-center">
+                <div
+                  className={`w-[60%] max-w-7 rounded-t-full bg-gradient-to-t from-teal-500 to-emerald-300 transition-all duration-700 ${latestBar ? "shadow-[0_0_20px_rgba(45,212,191,0.45)]" : "opacity-75"}`}
+                  style={{ height: `${height}px` }}
+                  title={`${item.label}: ${fmtNumber(item.value)} kkal`}
+                />
+              </div>
+              <span className={`text-[9px] font-black ${latestBar ? "text-teal-300" : "text-slate-400"}`}>{item.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3">
+        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/10">
+          <div className="h-full rounded-full bg-gradient-to-r from-teal-400 to-emerald-300" style={{ width: `${Math.min(100, achievement)}%` }} />
+        </div>
+        <span className="text-xs font-black text-teal-300">{achievement}%</span>
+      </div>
+    </article>
   );
 }
 

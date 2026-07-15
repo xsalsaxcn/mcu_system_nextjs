@@ -177,6 +177,111 @@ function aggregateByDate(rows: any[], valueGetter: (row: any) => number, dateGet
     }));
 }
 
+
+// WELLNESS_COACH_STREAK_COMPUTED_V66
+function jakartaDateKey(offsetDays = 0) {
+  const shifted = new Date(Date.now() + offsetDays * 86400000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(shifted);
+}
+
+function shortDayLabel(date: string) {
+  if (!date) return "-";
+  return new Date(`${date}T12:00:00+07:00`).toLocaleDateString("id-ID", {
+    weekday: "short",
+    timeZone: "Asia/Jakarta",
+  }).slice(0, 3);
+}
+
+function buildStreakSummary(
+  foodRows: any[],
+  activityRows: any[],
+  workoutTargetCalories: number
+) {
+  const map = new Map<string, {
+    mealKeys: Set<string>;
+    nutritionCalories: number;
+    workoutCalories: number;
+    steps: number;
+  }>();
+
+  const ensure = (date: string) => {
+    if (!map.has(date)) {
+      map.set(date, { mealKeys: new Set<string>(), nutritionCalories: 0, workoutCalories: 0, steps: 0 });
+    }
+    return map.get(date)!;
+  };
+
+  for (const row of foodRows || []) {
+    const date = dateKey(row?.log_date || row?.created_at || row?.updated_at);
+    if (!date) continue;
+    const bucket = ensure(date);
+    const meal = clean(row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan).toLowerCase();
+    bucket.mealKeys.add(meal || `row-${bucket.mealKeys.size + 1}`);
+    bucket.nutritionCalories += foodCalories(row);
+  }
+
+  for (const row of activityRows || []) {
+    const date = dateKey(row?.log_date || row?.started_at || row?.created_at || row?.updated_at);
+    if (!date) continue;
+    const bucket = ensure(date);
+    bucket.workoutCalories += activityCalories(row);
+    bucket.steps += activitySteps(row);
+  }
+
+  const days = [] as any[];
+  for (let offset = -41; offset <= 0; offset += 1) {
+    const date = jakartaDateKey(offset);
+    const bucket = map.get(date);
+    const nutritionCount = bucket?.mealKeys.size || 0;
+    const workoutCalories = Math.round(bucket?.workoutCalories || 0);
+    const success = nutritionCount >= 3 && (
+      workoutTargetCalories > 0
+        ? workoutCalories >= workoutTargetCalories
+        : workoutCalories > 0
+    );
+    days.push({
+      date,
+      label: shortDayLabel(date),
+      nutrition_count: nutritionCount,
+      nutrition_calories: Math.round(bucket?.nutritionCalories || 0),
+      workout_calories: workoutCalories,
+      steps: Math.round(bucket?.steps || 0),
+      success,
+    });
+  }
+
+  let cursor = days.length - 1;
+  if (!days[cursor]?.success) cursor -= 1;
+  let currentStreak = 0;
+  while (cursor >= 0 && days[cursor]?.success) {
+    currentStreak += 1;
+    cursor -= 1;
+  }
+
+  let longestStreak = 0;
+  let running = 0;
+  for (const day of days) {
+    if (day.success) {
+      running += 1;
+      longestStreak = Math.max(longestStreak, running);
+    } else {
+      running = 0;
+    }
+  }
+
+  return {
+    current_streak: currentStreak,
+    longest_streak: longestStreak,
+    success_dates: days.filter((item) => item.success).map((item) => item.date),
+    days: days.slice(-7),
+  };
+}
+
 function compactClinicalPoints(rows: any[], getter: (row: any) => number | null) {
   const map = new Map<string, any>();
 
@@ -494,6 +599,7 @@ export async function GET(request: NextRequest) {
     const latestWeight = charts.weight_kg.at(-1)?.value ?? null;
     const latestBmi = charts.bmi.at(-1)?.value ?? null;
     const latestBp = charts.blood_pressure.at(-1) || null;
+    const streak = buildStreakSummary(mergedFoodRows, activityRows, workoutTargetCalories);
 
     const healthtalks = mergedHealthtalkRows
       .map((row: any) => ({
@@ -537,6 +643,7 @@ export async function GET(request: NextRequest) {
         healthtalk_online_points: 5,
       },
       charts,
+      streak,
       healthtalks,
       google_sheet: {
         ok: Boolean(sheetResult.ok),

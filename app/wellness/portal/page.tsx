@@ -5,6 +5,7 @@ import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
+import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/components/wellness/WellnessMomentumDashboard";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
@@ -978,6 +979,8 @@ const [loading, setLoading] = useState(true);
                 healthConnectConnected={!!healthConnectConnected}
                 googleFitConnected={!!googleFitConnected}
                 clinicalHistory={clinicalHistory}
+                workoutItems={workoutItems}
+                healthtalkLogs={healthtalkLogs}
               />
             ) : null}
 
@@ -1680,6 +1683,110 @@ function WellnessProgressRow({
   );
 }
 
+
+// WELLNESS_PARTICIPANT_MOMENTUM_STREAK_V66
+function localDateKeyV66(value: any) {
+  const raw = clean(value);
+  if (!raw) return "";
+  const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct?.[1]) return direct[1];
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(parsed);
+}
+
+function jakartaDayKeyV66(offsetDays = 0) {
+  const now = new Date(Date.now() + offsetDays * 86400000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+function shortDayLabelV66(date: string) {
+  if (!date) return "-";
+  return new Date(`${date}T12:00:00+07:00`).toLocaleDateString("id-ID", {
+    weekday: "short",
+    timeZone: "Asia/Jakarta",
+  }).replace("Min", "Min").replace("Sen", "Sen").replace("Sel", "Sel").replace("Rab", "Rab").replace("Kam", "Kam").replace("Jum", "Jum").replace("Sab", "Sab");
+}
+
+function buildParticipantMomentumV66(
+  nutritionRows: any[],
+  workoutRows: any[],
+  workoutTarget: number
+) {
+  const map = new Map<string, {
+    mealKeys: Set<string>;
+    nutritionCalories: number;
+    workoutCalories: number;
+    steps: number;
+  }>();
+
+  function ensure(date: string) {
+    if (!map.has(date)) {
+      map.set(date, { mealKeys: new Set<string>(), nutritionCalories: 0, workoutCalories: 0, steps: 0 });
+    }
+    return map.get(date)!;
+  }
+
+  for (const row of nutritionRows || []) {
+    const date = localDateKeyV66(row?.log_date || row?.created_at || row?.updated_at || row?.date);
+    if (!date) continue;
+    const bucket = ensure(date);
+    const mealKey = clean(row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan).toLowerCase();
+    bucket.mealKeys.add(mealKey || `row-${bucket.mealKeys.size + 1}`);
+    bucket.nutritionCalories += asNumber(row?.calories || row?.total_calories || row?.calorie_total);
+  }
+
+  for (const row of workoutRows || []) {
+    const date = localDateKeyV66(row?.log_date || row?.started_at || row?.created_at || row?.updated_at || row?.date);
+    if (!date) continue;
+    const bucket = ensure(date);
+    bucket.workoutCalories += activityCaloriesValue(row);
+    bucket.steps += activityStepsValue(row);
+  }
+
+  const allDays: WellnessMomentumDay[] = [];
+  for (let offset = -41; offset <= 0; offset += 1) {
+    const date = jakartaDayKeyV66(offset);
+    const bucket = map.get(date);
+    const nutritionCount = bucket?.mealKeys.size || 0;
+    const workoutCalories = bucket?.workoutCalories || 0;
+    const success = nutritionCount >= 3 && (workoutTarget > 0 ? workoutCalories >= workoutTarget : workoutCalories > 0);
+    allDays.push({
+      date,
+      label: shortDayLabelV66(date).slice(0, 3),
+      nutritionCount,
+      nutritionCalories: Math.round(bucket?.nutritionCalories || 0),
+      workoutCalories: Math.round(workoutCalories),
+      steps: Math.round(bucket?.steps || 0),
+      success,
+    });
+  }
+
+  const todayIndex = allDays.length - 1;
+  let cursor = allDays[todayIndex]?.success ? todayIndex : todayIndex - 1;
+  let currentStreak = 0;
+  while (cursor >= 0 && allDays[cursor]?.success) {
+    currentStreak += 1;
+    cursor -= 1;
+  }
+
+  return {
+    days: allDays.slice(-7),
+    successDates: allDays.filter((item) => item.success).map((item) => item.date),
+    currentStreak,
+  };
+}
+
 function HomeTab({
   participant,
   nutritionLogs,
@@ -1688,6 +1795,8 @@ function HomeTab({
   healthConnectConnected,
   googleFitConnected,
   clinicalHistory,
+  workoutItems,
+  healthtalkLogs,
 }: {
   participant: any;
   nutritionLogs: any[];
@@ -1696,6 +1805,8 @@ function HomeTab({
   healthConnectConnected: boolean;
   googleFitConnected: boolean;
   clinicalHistory: any[];
+  workoutItems: any[];
+  healthtalkLogs: any[];
 }) {
   const participantId = Number(
     participant?.id ||
@@ -1820,6 +1931,10 @@ function HomeTab({
   const workoutProgress = workoutTarget > 0 ? progressPercent(totals.workoutCalories || 0, workoutTarget) : 0;
   const stepsProgress = progressPercent(totals.steps || 0, stepsTarget);
   const weightProgress = weightTarget > 0 ? weightTargetProgress(latestWeight, baselineWeight, weightTarget) : 0;
+  const participantMomentum = useMemo(
+    () => buildParticipantMomentumV66(directNutrition?.logs || nutritionLogs || [], workoutItems || [], workoutTarget),
+    [JSON.stringify(directNutrition?.logs || nutritionLogs || []), JSON.stringify(workoutItems || []), workoutTarget]
+  );
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
@@ -1849,51 +1964,26 @@ function HomeTab({
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <WellnessProgressRow
-            label="Input Nutrisi Hari Ini"
-            valueLabel={`${fmtNumber(todayRowCount, 0)} / 3 kali`}
-            percent={mealProgress}
-            note={todayRowCount >= 3 ? "Target input harian tercapai" : `${Math.max(0, 3 - todayRowCount)} input lagi untuk mencapai target`}
-            tone="sky"
+        <div className="mt-5">
+          <WellnessMomentumDashboard
+            days={participantMomentum.days}
+            currentStreak={participantMomentum.currentStreak}
+            successDates={participantMomentum.successDates}
+            nutritionCount={todayRowCount}
+            nutritionCalories={todayCalories}
+            workoutCalories={asNumber(totals.workoutCalories || 0)}
+            steps={asNumber(totals.steps || 0)}
+            nutritionTarget={nutritionTarget}
+            workoutTarget={workoutTarget}
+            stepsTarget={stepsTarget}
+            currentWeight={latestWeight}
+            baselineWeight={baselineWeight}
+            targetWeight={weightTarget}
+            bmi={latestClinical?.bmi || null}
+            systolic={latestClinical?.systolic || null}
+            diastolic={latestClinical?.diastolic || null}
+            mode="participant"
           />
-          <WellnessProgressRow
-            label="Konsumsi Kalori Harian"
-            valueLabel={nutritionTarget > 0 ? `${fmtNumber(todayCalories, 0)} / ${fmtNumber(nutritionTarget, 0)} kkal` : `${fmtNumber(todayCalories, 0)} kkal`}
-            percent={nutritionProgress}
-            note={nutritionTarget > 0 ? `${fmtNumber(Math.max(0, nutritionTarget - todayCalories), 0)} kkal tersisa dari batas Coach` : "Target kalori belum ditetapkan Coach"}
-            tone="sky"
-          />
-          <WellnessProgressRow
-            label="Kalori Terbakar dari Workout"
-            valueLabel={workoutTarget > 0 ? `${fmtNumber(totals.workoutCalories || 0, 0)} / ${fmtNumber(workoutTarget, 0)} kkal` : `${fmtNumber(totals.workoutCalories || 0, 0)} kkal`}
-            percent={workoutProgress}
-            note={workoutTarget > 0 ? `${fmtNumber(Math.max(0, workoutTarget - (totals.workoutCalories || 0)), 0)} kkal lagi menuju target` : "Target workout belum ditetapkan Coach"}
-            tone="teal"
-          />
-          <WellnessProgressRow
-            label="Langkah Hari Ini"
-            valueLabel={`${fmtNumber(totals.steps || 0)} / ${fmtNumber(stepsTarget)}`}
-            percent={stepsProgress}
-            note="Target langkah harian"
-            tone="orange"
-          />
-          {weightTarget > 0 ? (
-            <WellnessProgressRow
-              label="Progress Berat Badan"
-              valueLabel={latestWeight > 0 ? `${fmtNumber(latestWeight, 1)} → ${fmtNumber(weightTarget, 1)} kg` : `Target ${fmtNumber(weightTarget, 1)} kg`}
-              percent={weightProgress}
-              note={latestWeight > 0 ? `${fmtNumber(Math.abs(latestWeight - weightTarget), 1)} kg dari target` : "Data BB terbaru belum tersedia"}
-              tone="violet"
-            />
-          ) : null}
-          <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4 md:col-span-2">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-600">
-              <span><strong className="text-slate-900">BMI:</strong> {latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}</span>
-              <span><strong className="text-slate-900">Tensi:</strong> {latestClinical?.systolic ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg` : "-"}</span>
-              <span><strong className="text-slate-900">Workout:</strong> {fmtNumber(totals.workoutMinutes || 0, 1)} menit</span>
-            </div>
-          </div>
         </div>
       </div>
 

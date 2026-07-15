@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
+import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/components/wellness/WellnessMomentumDashboard";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
@@ -25,6 +26,7 @@ type CoachParticipantDetail = {
   point_breakdown?: any;
   charts?: Record<string, any[]>;
   healthtalks?: any[];
+  streak?: any;
 };
 type CoachDashboard = {
   ok: boolean;
@@ -1522,6 +1524,7 @@ function ParticipantDetail({
   const charts = detail?.charts || {};
   const healthtalks = detail?.healthtalks || [];
   const pointRules = detail?.point_rules || {};
+  const streak = detail?.streak || {};
   const setTarget = (key: string, value: string) =>
     setTargetForm((previous: any) => ({ ...previous, [key]: value }));
   const latestChartValue = (key: string) => {
@@ -1542,6 +1545,18 @@ function ParticipantDetail({
   const baselineWeightValue = firstChartValue("weight_kg") || latestWeightValue;
   const complianceRate = Number(participant?.compliance_rate || participant?.compliance_percentage || 0);
   const stepTarget = Number(participant?.daily_step_target || participant?.step_target || 8000);
+  const momentumDays: WellnessMomentumDay[] = Array.isArray(streak?.days)
+    ? streak.days.map((item: any) => ({
+        date: clean(item?.date),
+        label: clean(item?.label || item?.day_label || "-").slice(0, 3),
+        nutritionCount: Number(item?.nutrition_count || 0),
+        nutritionCalories: Number(item?.nutrition_calories || 0),
+        workoutCalories: Number(item?.workout_calories || 0),
+        steps: Number(item?.steps || 0),
+        success: Boolean(item?.success),
+      }))
+    : [];
+  const latestMomentum = momentumDays.length > 0 ? momentumDays[momentumDays.length - 1] : null;
 
   return (
     <div className="space-y-5">
@@ -1586,65 +1601,28 @@ function ParticipantDetail({
         </div>
       ) : (
         <>
-          <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-black text-slate-950">Capaian Target Peserta</h3>
-                <p className="mt-1 text-xs font-bold text-slate-500">Progress terbaru dibanding target individual Coach.</p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-[11px] font-black">
-                <span className="rounded-full bg-amber-50 px-3 py-2 text-amber-700">{fmtNumber(summary.total_points || 0)} point</span>
-                <span className="rounded-full bg-violet-50 px-3 py-2 text-violet-700">{fmtNumber(summary.healthtalk_count || 0)} Health Talk</span>
-                <span className="rounded-full bg-sky-50 px-3 py-2 text-sky-700">{fmtNumber(summary.nutrition_log_count || 0)} log nutrisi</span>
-                <span className="rounded-full bg-teal-50 px-3 py-2 text-teal-700">{fmtNumber(summary.workout_log_count || 0)} log workout</span>
-              </div>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <CoachProgressRowV65
-                label="Konsumsi Kalori Terakhir"
-                value={nutritionTarget > 0 ? `${fmtNumber(nutritionLatest)} / ${fmtNumber(nutritionTarget)} kkal` : `${fmtNumber(nutritionLatest)} kkal`}
-                percent={nutritionTarget > 0 ? coachPercent(nutritionLatest, nutritionTarget) : 0}
-                note={nutritionTarget > 0 ? `${fmtNumber(Math.max(0, nutritionTarget - nutritionLatest))} kkal tersisa dari batas` : "Target nutrisi belum ditetapkan"}
-                tone="sky"
-              />
-              <CoachProgressRowV65
-                label="Kalori Workout Terakhir"
-                value={workoutTarget > 0 ? `${fmtNumber(workoutLatest)} / ${fmtNumber(workoutTarget)} kkal` : `${fmtNumber(workoutLatest)} kkal`}
-                percent={workoutTarget > 0 ? coachPercent(workoutLatest, workoutTarget) : 0}
-                note={workoutTarget > 0 ? `${fmtNumber(Math.max(0, workoutTarget - workoutLatest))} kkal lagi menuju target` : "Target workout belum ditetapkan"}
-                tone="teal"
-              />
-              <CoachProgressRowV65
-                label="Langkah Terakhir"
-                value={`${fmtNumber(stepsLatest)} / ${fmtNumber(stepTarget)}`}
-                percent={coachPercent(stepsLatest, stepTarget)}
-                note="Target langkah harian"
-                tone="orange"
-              />
-              <CoachProgressRowV65
-                label="Kepatuhan 7 Hari"
-                value={`${fmtNumber(complianceRate)}%`}
-                percent={complianceRate}
-                note={participant?.flag_label || "Status monitoring"}
-                tone={complianceRate >= 80 ? "teal" : complianceRate >= 50 ? "orange" : "rose"}
-              />
-              {weightTarget > 0 ? (
-                <CoachProgressRowV65
-                  label="Progress Berat Badan"
-                  value={latestWeightValue > 0 ? `${fmtNumber(latestWeightValue, 1)} → ${fmtNumber(weightTarget, 1)} kg` : `Target ${fmtNumber(weightTarget, 1)} kg`}
-                  percent={coachWeightProgress(latestWeightValue, baselineWeightValue, weightTarget)}
-                  note={latestWeightValue > 0 ? `${fmtNumber(Math.abs(latestWeightValue - weightTarget), 1)} kg dari target` : "BB terbaru belum tersedia"}
-                  tone="violet"
-                />
-              ) : null}
-              <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm">
-                <div className="text-sm font-black text-slate-900">Parameter Klinis Terakhir</div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs font-black text-slate-600">
-                  <span className="rounded-full bg-slate-50 px-3 py-2">BMI {summary.latest_bmi ? fmtNumber(summary.latest_bmi, 1) : "-"}</span>
-                  <span className="rounded-full bg-slate-50 px-3 py-2">Tensi {summary.latest_systolic ? `${fmtNumber(summary.latest_systolic)}/${fmtNumber(summary.latest_diastolic)}` : "-"}</span>
-                </div>
-              </div>
-            </div>
+          <section className="rounded-[1.9rem] border border-slate-100 bg-slate-50/70 p-4">
+            <WellnessMomentumDashboard
+              days={momentumDays}
+              currentStreak={Number(streak?.current_streak || 0)}
+              successDates={Array.isArray(streak?.success_dates) ? streak.success_dates : []}
+              nutritionCount={Number(latestMomentum?.nutritionCount || 0)}
+              nutritionCalories={Number(latestMomentum?.nutritionCalories || nutritionLatest || 0)}
+              workoutCalories={Number(latestMomentum?.workoutCalories || workoutLatest || 0)}
+              steps={Number(latestMomentum?.steps || stepsLatest || 0)}
+              nutritionTarget={nutritionTarget}
+              workoutTarget={workoutTarget}
+              stepsTarget={stepTarget}
+              currentWeight={latestWeightValue}
+              baselineWeight={baselineWeightValue}
+              targetWeight={weightTarget}
+              bmi={summary.latest_bmi || null}
+              systolic={summary.latest_systolic || null}
+              diastolic={summary.latest_diastolic || null}
+              totalPoints={Number(summary.total_points || 0)}
+              healthTalkCount={Number(summary.healthtalk_count || 0)}
+              mode="coach"
+            />
           </section>
 
           <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
