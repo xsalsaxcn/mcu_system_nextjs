@@ -1926,6 +1926,8 @@ function MiniInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
+// WELLNESS_COACH_INSTRUCTION_MODAL_V60
+// Modal memakai pola viewport yang sama dengan detail peserta agar stabil di Android WebView.
 function InstructionModal({
   scope,
   participant,
@@ -1941,7 +1943,7 @@ function InstructionModal({
 }: any) {
   const [viewportFrame, setViewportFrame] = useState({ top: 0, height: 0 });
   const groupKey = scope === "group" ? instructionGroup : selectedGroup;
-  const group = groups.find(
+  const group = (groups || []).find(
     (item: any) => String(item.wellness_group_unit_id || item.group_name) === groupKey
   );
   const setValue = (key: string, value: string) =>
@@ -1950,15 +1952,15 @@ function InstructionModal({
   useEffect(() => {
     const updateViewportFrame = () => {
       const viewport = window.visualViewport;
-      setViewportFrame({
-        top: Math.max(0, Number(viewport?.pageTop ?? window.scrollY ?? 0)),
-        height: Math.max(320, Number(viewport?.height ?? window.innerHeight ?? 0)),
-      });
+      const top = Math.max(0, Number(viewport?.pageTop ?? window.scrollY ?? 0));
+      const height = Math.max(420, Number(viewport?.height ?? window.innerHeight ?? 0));
+      setViewportFrame({ top, height });
     };
 
     updateViewportFrame();
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+
     window.addEventListener("resize", updateViewportFrame);
     window.visualViewport?.addEventListener("resize", updateViewportFrame);
     window.visualViewport?.addEventListener("scroll", updateViewportFrame);
@@ -1975,7 +1977,7 @@ function InstructionModal({
 
   return createPortal(
     <div
-      data-wellness-coach-instruction-modal="v59"
+      data-wellness-coach-instruction-modal="v60"
       style={{
         position: "absolute",
         top: `${viewportFrame.top}px`,
@@ -1983,160 +1985,207 @@ function InstructionModal({
         right: 0,
         height: `${viewportFrame.height}px`,
         zIndex: 2147483600,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "12px",
-        background: "rgba(15, 23, 42, 0.36)",
+        background: "rgba(15, 23, 42, 0.42)",
       }}
     >
       <button
         type="button"
-        style={{ position: "absolute", inset: 0, border: 0, background: "transparent" }}
         onClick={onClose}
         aria-label="Tutup instruksi"
-      />
-      <section
-        className="relative w-full max-w-xl overflow-y-auto overscroll-contain rounded-[2rem] border border-white/80 bg-white p-5 shadow-2xl md:p-6"
         style={{
-          zIndex: 1,
-          maxHeight: `calc(${viewportFrame.height}px - 24px)`,
-          WebkitOverflowScrolling: "touch",
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          width: "100%",
+          height: "100%",
+          border: 0,
+          padding: 0,
+          background: "transparent",
+        }}
+      />
+
+      <section
+        style={{
+          position: "absolute",
+          top: "8px",
+          right: "8px",
+          bottom: "8px",
+          left: "8px",
+          zIndex: 2,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          border: "1px solid rgb(226 232 240)",
+          borderRadius: "24px",
+          background: "#ffffff",
+          boxShadow: "0 24px 70px rgba(15, 23, 42, 0.28)",
+          transform: "translateZ(0)",
         }}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-600">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 sm:text-xs">
               {scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual"}
             </div>
-            <h2 className="mt-2 text-2xl font-black">
-              {scope === "group" ? group?.group_name || "Kelompok" : participant?.name || "Peserta"}
+            <h2 className="mt-1 break-words text-lg font-black text-slate-950 sm:text-2xl">
+              {scope === "group"
+                ? group?.group_name || "Pilih kelompok penerima"
+                : participant?.name || "Peserta"}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg font-black"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xl font-black text-slate-700"
+            aria-label="Tutup instruksi"
+            style={{ touchAction: "manipulation" }}
           >
             ×
           </button>
         </div>
-        {scope === "group" ? (
-          <label className="mt-5 grid gap-2 text-sm font-bold text-slate-700">
-            Kelompok Penerima
-            <select
-              className={fieldClass}
-              value={instructionGroup}
-              onChange={(event) => setInstructionGroup(event.target.value)}
-            >
-              {(groups || []).map((item: any) => (
-                <option
-                  key={item.id}
-                  value={String(item.wellness_group_unit_id || item.group_name)}
-                >
-                  {item.group_name} ({item.member_count || 0} anggota)
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
 
-        <div className="mt-5 grid gap-3">
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Topik
-            <input className={fieldClass} value={form.topic} onChange={(e) => setValue("topic", e.target.value)} />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Masalah / Fokus
-            <textarea
-              className={`${fieldClass} min-h-[80px]`}
-              value={form.main_issue}
-              onChange={(e) => setValue("main_issue", e.target.value)}
-              placeholder="Contoh: input nutrisi belum konsisten"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Instruksi / Note
-            <textarea
-              className={`${fieldClass} min-h-[110px]`}
-              value={form.coach_note}
-              onChange={(e) => setValue("coach_note", e.target.value)}
-              placeholder="Pesan yang akan diterima peserta"
-            />
-          </label>
-          <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4">
-            <div className="text-sm font-black text-sky-950">Target / Action Plan (Opsional)</div>
-            <p className="mt-1 text-xs font-bold leading-5 text-sky-800/70">
-              Isi hanya target yang ingin ditetapkan atau diubah. Kolom lainnya boleh dikosongkan.
-            </p>
-            <div className="mt-4 grid gap-3">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-4 py-4 sm:px-6 sm:py-5"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "max(24px, env(safe-area-inset-bottom))",
+          }}
+        >
+          {scope === "group" ? (
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Kelompok Penerima
+              <select
+                className={fieldClass}
+                value={instructionGroup}
+                onChange={(event) => setInstructionGroup(event.target.value)}
+              >
+                {(groups || []).map((item: any) => (
+                  <option
+                    key={item.id}
+                    value={String(item.wellness_group_unit_id || item.group_name)}
+                  >
+                    {item.group_name} ({item.member_count || 0} anggota)
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Topik
+              <input
+                className={fieldClass}
+                value={form.topic}
+                onChange={(event) => setValue("topic", event.target.value)}
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Masalah / Fokus
+              <textarea
+                className={`${fieldClass} min-h-[80px]`}
+                value={form.main_issue}
+                onChange={(event) => setValue("main_issue", event.target.value)}
+                placeholder="Contoh: input nutrisi belum konsisten"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Instruksi / Note
+              <textarea
+                className={`${fieldClass} min-h-[110px]`}
+                value={form.coach_note}
+                onChange={(event) => setValue("coach_note", event.target.value)}
+                placeholder="Pesan yang akan diterima peserta"
+              />
+            </label>
+
+            <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4">
+              <div className="text-sm font-black text-sky-950">Target / Action Plan (Opsional)</div>
+              <p className="mt-1 text-xs font-bold leading-5 text-sky-800/70">
+                Isi hanya target yang ingin ditetapkan atau diubah. Kolom lainnya boleh dikosongkan.
+              </p>
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Target Kalori Terbakar dari Workout (kkal/hari)
+                  <input
+                    type="number"
+                    min="0"
+                    className={fieldClass}
+                    value={form.action_workout_calories}
+                    onChange={(event) => setValue("action_workout_calories", event.target.value)}
+                    placeholder="Contoh: 300"
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Batas Konsumsi Kalori Harian (kkal/hari)
+                  <input
+                    type="number"
+                    min="0"
+                    className={fieldClass}
+                    value={form.action_nutrition_calories}
+                    onChange={(event) => setValue("action_nutrition_calories", event.target.value)}
+                    placeholder="Contoh: 1700"
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-slate-700">
+                  Target Berat Badan (kg)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    className={fieldClass}
+                    value={form.action_target_weight}
+                    onChange={(event) => setValue("action_target_weight", event.target.value)}
+                    placeholder="Contoh: 72"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-bold text-slate-700">
-                Target Kalori Terbakar dari Workout (kkal/hari)
-                <input
-                  type="number"
-                  min="0"
+                Status Follow Up
+                <select
                   className={fieldClass}
-                  value={form.action_workout_calories}
-                  onChange={(e) => setValue("action_workout_calories", e.target.value)}
-                  placeholder="Contoh: 300"
-                />
+                  value={form.follow_up_status}
+                  onChange={(event) => setValue("follow_up_status", event.target.value)}
+                >
+                  <option value="Open">Open</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Done">Done</option>
+                  <option value="Need Medical Review">Need Medical Review</option>
+                </select>
               </label>
               <label className="grid gap-2 text-sm font-bold text-slate-700">
-                Batas Konsumsi Kalori Harian (kkal/hari)
+                Follow Up Berikutnya
                 <input
-                  type="number"
-                  min="0"
+                  type="date"
                   className={fieldClass}
-                  value={form.action_nutrition_calories}
-                  onChange={(e) => setValue("action_nutrition_calories", e.target.value)}
-                  placeholder="Contoh: 1700"
-                />
-              </label>
-              <label className="grid gap-2 text-sm font-bold text-slate-700">
-                Target Berat Badan (kg)
-                <input
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  className={fieldClass}
-                  value={form.action_target_weight}
-                  onChange={(e) => setValue("action_target_weight", e.target.value)}
-                  placeholder="Contoh: 72"
+                  value={form.next_follow_up_date}
+                  onChange={(event) => setValue("next_follow_up_date", event.target.value)}
                 />
               </label>
             </div>
+
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving}
+              className="sticky bottom-0 rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+              style={{ touchAction: "manipulation" }}
+            >
+              {saving
+                ? "Mengirim..."
+                : scope === "group"
+                  ? "Kirim ke Seluruh Anggota"
+                  : "Kirim ke Peserta"}
+            </button>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Status Follow Up
-              <select className={fieldClass} value={form.follow_up_status} onChange={(e) => setValue("follow_up_status", e.target.value)}>
-                <option value="Open">Open</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Done">Done</option>
-                <option value="Need Medical Review">Need Medical Review</option>
-              </select>
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-slate-700">
-              Follow Up Berikutnya
-              <input type="date" className={fieldClass} value={form.next_follow_up_date} onChange={(e) => setValue("next_follow_up_date", e.target.value)} />
-            </label>
-          </div>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saving}
-            className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
-          >
-            {saving
-              ? "Mengirim..."
-              : scope === "group"
-                ? "Kirim ke Seluruh Anggota"
-                : "Kirim ke Peserta"}
-          </button>
         </div>
       </section>
     </div>,
     document.body
   );
 }
-
