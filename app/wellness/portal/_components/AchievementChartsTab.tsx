@@ -331,7 +331,7 @@ export default function AchievementChartsTab({
 
 
 // WELLNESS_CHART_WORKOUT_SPOTLIGHT_V66
-// WELLNESS_CHART_WORKOUT_TOOLTIP_V68
+// WELLNESS_CHART_WORKOUT_TOOLTIP_V69
 function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target: number }) {
   const series = data.slice(-7);
   const rows =
@@ -347,29 +347,31 @@ function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target
   const achievement = target > 0 ? Math.round((latest / target) * 100) : 0;
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const selectedIndex = activeIndex ?? Math.max(0, rows.length - 1);
+  const selected = rows[selectedIndex] || rows[rows.length - 1];
+  const selectedValue = Number(selected?.value || 0);
+  const selectedAchievement = target > 0 ? Math.round((selectedValue / target) * 100) : 0;
+  const targetHeight = Math.min(104, (Math.max(0, target) / maximum) * 104);
 
   return (
-    <article className="overflow-hidden rounded-[1.7rem] border border-teal-100 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-4 text-white shadow-xl shadow-teal-900/10">
-      <div className="flex items-start justify-between gap-3">
+    <article className="rounded-[1.7rem] border border-teal-100 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-4 text-white shadow-xl shadow-teal-900/10">
+      <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
         <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.2em] text-teal-300">Workout Momentum</div>
-          <h3 className="mt-1 text-xl font-black leading-tight">Kalori Workout 7 Hari</h3>
-          <p className="mt-1 text-xs font-bold leading-5 text-slate-300">Pantau progres kalori harian Anda.</p>
+          <h3 className="mt-1 text-xl font-black leading-tight text-white">Kalori Workout 7 Hari</h3>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-300">Pilih batang untuk melihat detail harian.</p>
         </div>
-        <div className="shrink-0 rounded-2xl bg-white/10 px-3 py-2 text-right backdrop-blur">
-          <div className="text-xl font-black leading-tight">{fmtNumber(latest)} kkal</div>
+        <div className="w-full rounded-2xl bg-white/10 px-3 py-2 text-left backdrop-blur min-[420px]:w-auto min-[420px]:shrink-0 min-[420px]:text-right">
+          <div className="text-xl font-black leading-tight text-white">{fmtNumber(latest)} kkal</div>
           <div className="mt-1 text-[10px] font-black text-teal-300">{achievement}% target</div>
         </div>
       </div>
 
-      <div className="relative mt-5 flex h-40 items-end gap-1.5 border-b border-white/15 pb-6 sm:gap-2">
+      <div className="relative mt-5 flex h-44 items-end gap-1.5 border-b border-white/15 pb-7 pt-8 sm:gap-2">
         {target > 0 ? (
           <div
-            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-teal-300/70"
-            style={{ bottom: `${24 + Math.min(100, (target / maximum) * 100) * 1.04}px` }}
-          >
-            <span className="absolute -top-5 right-0 text-[9px] font-black text-teal-300">Target {fmtNumber(target)}</span>
-          </div>
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-teal-300/55"
+            style={{ bottom: `${28 + targetHeight}px` }}
+          />
         ) : null}
 
         {rows.map((item, index) => {
@@ -386,14 +388,15 @@ function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target
               aria-label={`${item.label}: ${fmtNumber(numericValue)} kkal`}
               onPointerEnter={() => setActiveIndex(index)}
               onPointerDown={() => setActiveIndex(index)}
+              onTouchStart={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
               onClick={() => setActiveIndex(index)}
             >
               <div className="relative flex h-[104px] w-full items-end justify-center overflow-visible">
                 {isSelected ? (
                   <div
-                    className={`pointer-events-none absolute z-30 min-w-[84px] rounded-xl bg-white px-2.5 py-2 text-left text-slate-950 shadow-2xl ${alignClass}`}
-                    style={{ bottom: `${Math.min(110, height + 10)}px` }}
+                    className={`pointer-events-none absolute z-30 min-w-[88px] rounded-xl bg-white px-2.5 py-2 text-left text-slate-950 shadow-2xl ${alignClass}`}
+                    style={{ bottom: `${Math.min(116, height + 12)}px` }}
                   >
                     <div className="text-[10px] font-black text-slate-500">{item.label}</div>
                     <div className="mt-0.5 whitespace-nowrap text-xs font-black">{fmtNumber(numericValue)} kkal</div>
@@ -414,12 +417,28 @@ function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target
                   style={{ height: `${height}px` }}
                 />
               </div>
-              <span className={`truncate text-[8px] font-black sm:text-[9px] ${isSelected ? "text-teal-300" : "text-slate-400"}`}>
+              <span className={`whitespace-nowrap text-[8px] font-black sm:text-[9px] ${isSelected ? "text-teal-300" : "text-slate-400"}`}>
                 {item.label}
               </span>
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-3 grid gap-2 min-[420px]:grid-cols-2">
+        <div className="rounded-xl bg-white/5 px-3 py-2.5">
+          <div className="text-[9px] font-black uppercase tracking-wide text-slate-400">Hari dipilih</div>
+          <div className="mt-1 flex items-baseline justify-between gap-2">
+            <span className="text-xs font-black text-white">{selected?.label || "-"}</span>
+            <span className="text-xs font-black text-teal-300">{fmtNumber(selectedValue)} kkal</span>
+          </div>
+          <div className="mt-1 text-[9px] font-bold text-slate-400">{selectedAchievement}% dari target</div>
+        </div>
+        <div className="rounded-xl bg-white/5 px-3 py-2.5">
+          <div className="text-[9px] font-black uppercase tracking-wide text-slate-400">Target Coach</div>
+          <div className="mt-1 text-xs font-black text-white">{target > 0 ? `${fmtNumber(target)} kkal / hari` : "Belum ditetapkan"}</div>
+          <div className="mt-1 text-[9px] font-bold text-slate-400">Garis putus-putus pada grafik</div>
+        </div>
       </div>
 
       <div className="mt-4 flex items-center gap-3">

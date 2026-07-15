@@ -1,7 +1,9 @@
 "use client";
 
-// WELLNESS_MOMENTUM_UI_POLISH_V68
-// Refines labels and responsive positioning without changing calculations or data sources.
+import { useState } from "react";
+
+// WELLNESS_MOMENTUM_UI_POLISH_V69
+// Improves mobile card proportions, full day labels, and interactive bar values without changing calculations or data sources.
 
 // WELLNESS_MOMENTUM_STREAK_V66
 // Shared visual dashboard for participant and coach. Pure presentation; no database writes.
@@ -57,6 +59,22 @@ function fmt(value: number, digits = 0) {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
+function momentumDayLabel(day: WellnessMomentumDay) {
+  const raw = String(day.label || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day.date)) {
+    const parsed = new Date(`${day.date}T12:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed
+        .toLocaleDateString("id-ID", { weekday: "short" })
+        .replace(/\./g, "")
+        .slice(0, 3);
+    }
+  }
+
+  if (!raw || raw === "-") return "-";
+  return raw.replace(/\./g, "").slice(0, 3);
+}
+
 function dateKey(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -109,6 +127,7 @@ function WeeklyMetricCard({
   tone,
   days,
   dayValue,
+  dayValueLabel,
   limitMode = false,
 }: {
   title: string;
@@ -120,61 +139,76 @@ function WeeklyMetricCard({
   tone: Tone;
   days: WellnessMomentumDay[];
   dayValue: (day: WellnessMomentumDay) => number;
+  dayValueLabel: (value: number) => string;
   limitMode?: boolean;
 }) {
   const colors = toneMap[tone];
   const rawPercent = percent(value, target);
   const fillPercent = clamp(rawPercent);
   const maximum = Math.max(target || 0, ...days.map(dayValue), 1);
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, days.length - 1));
+  const selectedDay = days[activeIndex] || days[days.length - 1];
+  const selectedValue = selectedDay ? dayValue(selectedDay) : 0;
 
   return (
     <article
       aria-label={`${title}: ${Math.round(rawPercent)}% dari ${limitMode ? "batas" : "target"}`}
-      className="min-w-0 overflow-hidden rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-[0_12px_35px_rgba(15,23,42,0.07)] sm:p-4"
+      className="min-w-0 overflow-hidden rounded-[1.45rem] border border-slate-100 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.07)]"
     >
-      <div className="grid min-h-[82px] grid-cols-[2.5rem_minmax(0,1fr)] items-start gap-2.5">
-        <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-lg ${colors.icon}`}>
+      <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-3">
+        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-lg ${colors.icon}`}>
           {icon}
         </div>
 
         <div className="min-w-0">
-          <h3 className="truncate text-[13px] font-black leading-4 text-slate-950 sm:text-sm">
-            {title}
-          </h3>
-          <div className={`mt-1 whitespace-nowrap text-[12px] font-black leading-4 ${colors.text}`}>
+          <h3 className="text-sm font-black leading-5 text-slate-950">{title}</h3>
+          <div className={`mt-1 break-words text-[13px] font-black leading-5 ${colors.text}`}>
             {valueLabel}
           </div>
-          <p className="mt-1 line-clamp-2 text-[10px] font-bold leading-4 text-slate-400 sm:text-[11px]">
-            {subtitle}
-          </p>
+          <p className="mt-0.5 text-[11px] font-bold leading-4 text-slate-400">{subtitle}</p>
         </div>
       </div>
 
-      <div className="mt-2 flex h-[84px] items-end gap-1 border-b border-dashed border-slate-200 pb-1.5 sm:gap-1.5">
+      <div className={`mt-3 flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${colors.soft}`}>
+        <span className="text-[10px] font-black text-slate-500">
+          {selectedDay ? momentumDayLabel(selectedDay) : "-"}
+        </span>
+        <span className={`text-[11px] font-black ${colors.text}`}>{dayValueLabel(selectedValue)}</span>
+      </div>
+
+      <div className="mt-3 flex h-[96px] items-end gap-1.5 border-b border-dashed border-slate-200 pb-2">
         {days.map((day, index) => {
           const dayNumber = dayValue(day);
-          const height = Math.max(dayNumber > 0 ? 9 : 3, (dayNumber / maximum) * 58);
-          const isLatest = index === days.length - 1;
+          const height = Math.max(dayNumber > 0 ? 10 : 3, (dayNumber / maximum) * 58);
+          const isSelected = index === activeIndex;
+          const dayLabel = momentumDayLabel(day);
 
           return (
-            <div key={`${day.date}-${title}`} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-              <div className="flex h-[58px] w-full items-end justify-center">
+            <button
+              type="button"
+              key={`${day.date}-${title}`}
+              className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5 outline-none"
+              aria-label={`${dayLabel}: ${dayValueLabel(dayNumber)}`}
+              onPointerEnter={() => setActiveIndex(index)}
+              onPointerDown={() => setActiveIndex(index)}
+              onTouchStart={() => setActiveIndex(index)}
+              onFocus={() => setActiveIndex(index)}
+              onClick={() => setActiveIndex(index)}
+            >
+              <div className="flex h-[60px] w-full items-end justify-center">
                 <div
-                  className={`w-[62%] max-w-5 rounded-t-full transition-all duration-700 ${colors.bar} ${
-                    isLatest ? "shadow-[0_0_0_4px_rgba(20,184,166,0.08)]" : "opacity-75"
+                  className={`w-[58%] max-w-6 rounded-t-full transition-all duration-500 ${colors.bar} ${
+                    isSelected
+                      ? "ring-2 ring-white shadow-[0_0_0_4px_rgba(20,184,166,0.12)]"
+                      : "opacity-70"
                   }`}
                   style={{ height: `${height}px` }}
-                  title={`${day.label}: ${fmt(dayNumber)}`}
                 />
               </div>
-              <span
-                className={`max-w-full truncate text-[7px] font-black leading-none sm:text-[8px] ${
-                  isLatest ? colors.text : "text-slate-400"
-                }`}
-              >
-                {day.label}
+              <span className={`whitespace-nowrap text-[8px] font-black leading-none ${isSelected ? colors.text : "text-slate-400"}`}>
+                {dayLabel}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -186,7 +220,7 @@ function WeeklyMetricCard({
             style={{ width: `${fillPercent}%` }}
           />
         </div>
-        <span className={`w-10 shrink-0 text-right text-xs font-black ${colors.text}`}>
+        <span className={`w-11 shrink-0 text-right text-xs font-black ${colors.text}`}>
           {Math.round(rawPercent)}%
         </span>
       </div>
@@ -339,7 +373,7 @@ export default function WellnessMomentumDashboard({
         <span className="rounded-full bg-slate-100 px-3 py-2 text-[10px] font-black text-slate-500">7 Hari Terakhir</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 min-[440px]:grid-cols-2">
         <WeeklyMetricCard
           title="Nutrisi"
           subtitle="Target harian"
@@ -350,6 +384,7 @@ export default function WellnessMomentumDashboard({
           tone="teal"
           days={sevenDays}
           dayValue={(day) => day.nutritionCount}
+          dayValueLabel={(value) => `${fmt(value)} kali`}
         />
         <WeeklyMetricCard
           title="Kalori Masuk"
@@ -361,6 +396,7 @@ export default function WellnessMomentumDashboard({
           tone="orange"
           days={sevenDays}
           dayValue={(day) => day.nutritionCalories}
+          dayValueLabel={(value) => `${fmt(value)} kkal`}
           limitMode
         />
         <WeeklyMetricCard
@@ -373,6 +409,7 @@ export default function WellnessMomentumDashboard({
           tone="teal"
           days={sevenDays}
           dayValue={(day) => day.workoutCalories}
+          dayValueLabel={(value) => `${fmt(value)} kkal`}
         />
         <WeeklyMetricCard
           title="Langkah"
@@ -384,6 +421,7 @@ export default function WellnessMomentumDashboard({
           tone="blue"
           days={sevenDays}
           dayValue={(day) => day.steps}
+          dayValueLabel={(value) => `${fmt(value)} langkah`}
         />
       </div>
 
