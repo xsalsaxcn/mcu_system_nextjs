@@ -331,58 +331,105 @@ export default function AchievementChartsTab({
 
 
 // WELLNESS_CHART_WORKOUT_SPOTLIGHT_V66
+// WELLNESS_CHART_WORKOUT_TOOLTIP_V68
 function WorkoutMomentumSpotlight({ data, target }: { data: ChartPoint[]; target: number }) {
   const series = data.slice(-7);
-  const maximum = Math.max(target || 0, ...series.map((item) => Number(item.value || 0)), 1);
+  const rows =
+    series.length > 0
+      ? series
+      : Array.from({ length: 7 }, (_, index) => ({
+          date: `empty-${index}`,
+          label: "-",
+          value: 0,
+        }));
+  const maximum = Math.max(target || 0, ...rows.map((item) => Number(item.value || 0)), 1);
   const latest = series.length ? Number(series[series.length - 1]?.value || 0) : 0;
   const achievement = target > 0 ? Math.round((latest / target) * 100) : 0;
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const selectedIndex = activeIndex ?? Math.max(0, rows.length - 1);
 
   return (
-    <article className="rounded-[1.7rem] border border-teal-100 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-4 text-white shadow-xl shadow-teal-900/10">
+    <article className="overflow-hidden rounded-[1.7rem] border border-teal-100 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 p-4 text-white shadow-xl shadow-teal-900/10">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.2em] text-teal-300">Workout Momentum</div>
-          <h3 className="mt-1 text-xl font-black">Kalori Terbakar 7 Hari</h3>
-          <p className="mt-1 text-xs font-bold text-slate-300">Bandingkan hasil harian dengan target Coach.</p>
+          <h3 className="mt-1 text-xl font-black leading-tight">Kalori Workout 7 Hari</h3>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-300">Pantau progres kalori harian Anda.</p>
         </div>
-        <div className="rounded-2xl bg-white/10 px-3 py-2 text-right backdrop-blur">
-          <div className="text-xl font-black">{fmtNumber(latest)} kkal</div>
+        <div className="shrink-0 rounded-2xl bg-white/10 px-3 py-2 text-right backdrop-blur">
+          <div className="text-xl font-black leading-tight">{fmtNumber(latest)} kkal</div>
           <div className="mt-1 text-[10px] font-black text-teal-300">{achievement}% target</div>
         </div>
       </div>
 
-      <div className="relative mt-5 flex h-32 items-end gap-2 border-b border-white/15 pb-5">
+      <div className="relative mt-5 flex h-40 items-end gap-1.5 border-b border-white/15 pb-6 sm:gap-2">
         {target > 0 ? (
           <div
             className="pointer-events-none absolute inset-x-0 border-t border-dashed border-teal-300/70"
-            style={{ bottom: `${20 + Math.min(100, (target / maximum) * 100) * 0.88}px` }}
+            style={{ bottom: `${24 + Math.min(100, (target / maximum) * 100) * 1.04}px` }}
           >
             <span className="absolute -top-5 right-0 text-[9px] font-black text-teal-300">Target {fmtNumber(target)}</span>
           </div>
         ) : null}
-        {(series.length > 0 ? series : Array.from({ length: 7 }, (_, index) => ({ date: `empty-${index}`, label: "-", value: 0 }))).map((item, index, rows) => {
-          const height = Math.max(Number(item.value || 0) > 0 ? 12 : 5, (Number(item.value || 0) / maximum) * 88);
-          const latestBar = index === rows.length - 1;
+
+        {rows.map((item, index) => {
+          const numericValue = Number(item.value || 0);
+          const height = Math.max(numericValue > 0 ? 12 : 5, (numericValue / maximum) * 104);
+          const isSelected = index === selectedIndex;
+          const alignClass = index === 0 ? "left-0" : index === rows.length - 1 ? "right-0" : "left-1/2 -translate-x-1/2";
+
           return (
-            <div key={`${item.date}-${index}`} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2">
-              <div className="flex h-[88px] w-full items-end justify-center">
+            <button
+              type="button"
+              key={`${item.date}-${index}`}
+              className="relative flex min-w-0 flex-1 flex-col items-center justify-end gap-2 outline-none"
+              aria-label={`${item.label}: ${fmtNumber(numericValue)} kkal`}
+              onPointerEnter={() => setActiveIndex(index)}
+              onPointerDown={() => setActiveIndex(index)}
+              onFocus={() => setActiveIndex(index)}
+              onClick={() => setActiveIndex(index)}
+            >
+              <div className="relative flex h-[104px] w-full items-end justify-center overflow-visible">
+                {isSelected ? (
+                  <div
+                    className={`pointer-events-none absolute z-30 min-w-[84px] rounded-xl bg-white px-2.5 py-2 text-left text-slate-950 shadow-2xl ${alignClass}`}
+                    style={{ bottom: `${Math.min(110, height + 10)}px` }}
+                  >
+                    <div className="text-[10px] font-black text-slate-500">{item.label}</div>
+                    <div className="mt-0.5 whitespace-nowrap text-xs font-black">{fmtNumber(numericValue)} kkal</div>
+                    <span
+                      className={`absolute -bottom-1.5 h-3 w-3 rotate-45 bg-white ${
+                        index === 0 ? "left-4" : index === rows.length - 1 ? "right-4" : "left-1/2 -translate-x-1/2"
+                      }`}
+                    />
+                  </div>
+                ) : null}
+
                 <div
-                  className={`w-[60%] max-w-7 rounded-t-full bg-gradient-to-t from-teal-500 to-emerald-300 transition-all duration-700 ${latestBar ? "shadow-[0_0_20px_rgba(45,212,191,0.45)]" : "opacity-75"}`}
+                  className={`w-[62%] max-w-7 rounded-t-full bg-gradient-to-t from-teal-500 to-emerald-300 transition-all duration-500 ${
+                    isSelected
+                      ? "ring-2 ring-white shadow-[0_0_24px_rgba(45,212,191,0.55)]"
+                      : "opacity-75"
+                  }`}
                   style={{ height: `${height}px` }}
-                  title={`${item.label}: ${fmtNumber(item.value)} kkal`}
                 />
               </div>
-              <span className={`text-[9px] font-black ${latestBar ? "text-teal-300" : "text-slate-400"}`}>{item.label}</span>
-            </div>
+              <span className={`truncate text-[8px] font-black sm:text-[9px] ${isSelected ? "text-teal-300" : "text-slate-400"}`}>
+                {item.label}
+              </span>
+            </button>
           );
         })}
       </div>
 
       <div className="mt-4 flex items-center gap-3">
-        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/10">
-          <div className="h-full rounded-full bg-gradient-to-r from-teal-400 to-emerald-300" style={{ width: `${Math.min(100, achievement)}%` }} />
+        <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-teal-400 to-emerald-300 transition-all duration-700"
+            style={{ width: `${Math.min(100, achievement)}%` }}
+          />
         </div>
-        <span className="text-xs font-black text-teal-300">{achievement}%</span>
+        <span className="w-14 shrink-0 text-right text-xs font-black text-teal-300">{achievement}%</span>
       </div>
     </article>
   );
