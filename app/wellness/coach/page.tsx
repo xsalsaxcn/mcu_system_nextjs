@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
 // WELLNESS_COACH_TABLE_DETAIL_CHARTS_V55
+// WELLNESS_COACH_MODAL_RESPONSIVE_CHARTS_V56
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
@@ -84,6 +85,7 @@ export default function WellnessCoachPortalPage() {
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
   const [participantDetail, setParticipantDetail] = useState<CoachParticipantDetail | null>(null);
   const [participantDetailLoading, setParticipantDetailLoading] = useState(false);
+  const [participantModalOpen, setParticipantModalOpen] = useState(false);
   const [coachView, setCoachView] = useState<CoachView>("monitoring");
   const [coachMenuOpen, setCoachMenuOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -92,6 +94,7 @@ export default function WellnessCoachPortalPage() {
   const [chatSending, setChatSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [instructionGroup, setInstructionGroup] = useState("");
   const [instructionScope, setInstructionScope] = useState<"participant" | "group">(
     "participant"
   );
@@ -194,7 +197,10 @@ export default function WellnessCoachPortalPage() {
     setParticipantDetailLoading(false);
   }
 
-  function chooseParticipant(item: any) {
+  function chooseParticipant(
+    item: any,
+    options?: { openDetail?: boolean }
+  ) {
     setSelectedParticipant(item);
     setParticipantDetail(null);
     setTargetForm({
@@ -210,6 +216,7 @@ export default function WellnessCoachPortalPage() {
       coach_note: "",
       next_follow_up_date: "",
     });
+    if (options?.openDetail !== false) setParticipantModalOpen(true);
     void loadParticipantDetail(item);
   }
 
@@ -228,11 +235,22 @@ export default function WellnessCoachPortalPage() {
       setMessage("Pilih peserta sebelum menambah instruksi individual.");
       return;
     }
-    if (scope === "group" && selectedGroup === "all") {
-      setMessage("Pilih satu assigned group sebelum menambah instruksi kelompok.");
+    if (scope === "group" && groups.length === 0) {
+      setMessage("Belum ada assigned group untuk coach ini.");
       return;
     }
+
+    const defaultGroup =
+      selectedGroup !== "all"
+        ? selectedGroup
+        : String(
+            groups[0]?.wellness_group_unit_id ||
+              groups[0]?.group_name ||
+              ""
+          );
+
     setInstructionScope(scope);
+    setInstructionGroup(scope === "group" ? defaultGroup : "");
     setInstructionForm((previous) => ({
       ...previous,
       topic: scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual",
@@ -247,10 +265,17 @@ export default function WellnessCoachPortalPage() {
   }
 
   async function saveInstruction() {
+    const targetGroupKey =
+      instructionScope === "group" ? instructionGroup : selectedGroup;
     const group = (dashboard?.groups || []).find(
       (item: any) =>
-        String(item.wellness_group_unit_id || item.group_name) === selectedGroup
+        String(item.wellness_group_unit_id || item.group_name) === targetGroupKey
     );
+
+    if (instructionScope === "group" && !group) {
+      setMessage("Pilih kelompok penerima instruksi.");
+      return;
+    }
     const actionPlan = [
       clean(instructionForm.action_workout_calories)
         ? `Target Workout: ${clean(instructionForm.action_workout_calories)} kkal/hari`
@@ -625,22 +650,19 @@ export default function WellnessCoachPortalPage() {
                 <span>{flagFilter === "all" ? "Semua status" : `${flagFilter} flag`}</span>
               </div>
 
-              <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-100">
-                <table className="min-w-[820px] w-full border-collapse text-left">
-                  <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
+              <div className="mt-3 overflow-hidden rounded-2xl border border-slate-100">
+                <table className="w-full table-fixed border-collapse text-left">
+                  <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
                     <tr>
-                      <th className="px-4 py-3">Nama Peserta</th>
-                      <th className="px-4 py-3">Kelompok</th>
-                      <th className="px-4 py-3 text-right">Steps</th>
-                      <th className="px-4 py-3 text-right">Kalori</th>
-                      <th className="px-4 py-3 text-right">Kepatuhan</th>
-                      <th className="px-4 py-3">Status</th>
+                      <th className="w-[46%] px-3 py-3 sm:w-[44%] sm:px-4">Peserta</th>
+                      <th className="w-[27%] px-2 py-3 text-right sm:w-[28%] sm:px-4">Aktivitas</th>
+                      <th className="w-[27%] px-2 py-3 text-center sm:w-[28%] sm:px-4">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {filteredParticipants.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                        <td colSpan={3} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
                           Tidak ada peserta pada filter ini.
                         </td>
                       </tr>
@@ -654,34 +676,35 @@ export default function WellnessCoachPortalPage() {
                               : ""
                           }`}
                         >
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-3 align-top sm:px-4">
                             <button
                               type="button"
                               onClick={() => chooseParticipant(item)}
-                              className="text-left"
+                              className="block w-full text-left"
                             >
-                              <div className="font-black text-slate-950 hover:text-teal-700">
+                              <div className="line-clamp-2 text-sm font-black leading-5 text-slate-950 hover:text-teal-700 sm:text-base">
                                 {item.name}
                               </div>
-                              <div className="mt-1 text-xs font-bold text-slate-400">
-                                Kode {item.code}
+                              <div className="mt-1 break-words text-[10px] font-bold leading-4 text-slate-400 sm:text-xs">
+                                {item.code} · {item.group_name}
                               </div>
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-sm font-bold text-slate-600">
-                            {item.group_name}
+                          <td className="px-2 py-3 text-right align-top sm:px-4">
+                            <div className="text-xs font-black text-slate-800 sm:text-sm">
+                              {fmtNumber(item.today?.steps || 0)} steps
+                            </div>
+                            <div className="mt-1 text-[10px] font-bold text-slate-500 sm:text-xs">
+                              {fmtNumber(item.today?.calories || 0)} kkal
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
-                            {fmtNumber(item.today?.steps || 0)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
-                            {fmtNumber(item.today?.calories || 0)} kkal
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm font-black text-slate-800">
-                            {fmtNumber(item.compliance?.compliance_percent || 0)}%
-                          </td>
-                          <td className="px-4 py-3">
-                            <FlagBadge level={item.flag} label={item.status} />
+                          <td className="px-2 py-3 text-center align-top sm:px-4">
+                            <div className="text-xs font-black text-slate-800 sm:text-sm">
+                              {fmtNumber(item.compliance?.compliance_percent || 0)}%
+                            </div>
+                            <div className="mt-1 flex justify-center">
+                              <FlagBadge level={item.flag} label={item.status} />
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -691,21 +714,6 @@ export default function WellnessCoachPortalPage() {
               </div>
             </section>
 
-            {selectedParticipant ? (
-              <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-                <ParticipantDetail
-                  participant={selectedParticipant}
-                  detail={participantDetail}
-                  detailLoading={participantDetailLoading}
-                  reloadDetail={() => loadParticipantDetail(selectedParticipant)}
-                  targetForm={targetForm}
-                  setTargetForm={setTargetForm}
-                  saveTargets={saveTargets}
-                  openInstruction={() => openInstruction("participant")}
-                  saving={saving}
-                />
-              </section>
-            ) : null}
               </div>
             ) : (
               <CoachChatPanel
@@ -715,7 +723,9 @@ export default function WellnessCoachPortalPage() {
                 selectedGroup={selectedGroup}
                 setSelectedGroup={setSelectedGroup}
                 selectedParticipant={selectedParticipant}
-                chooseParticipant={chooseParticipant}
+                chooseParticipant={(item: any) =>
+                  chooseParticipant(item, { openDetail: false })
+                }
                 chatMessages={chatMessages}
                 chatText={chatText}
                 setChatText={setChatText}
@@ -728,6 +738,21 @@ export default function WellnessCoachPortalPage() {
           </section>
         )}
       </div>
+
+      {participantModalOpen && selectedParticipant ? (
+        <ParticipantDetailModal
+          participant={selectedParticipant}
+          detail={participantDetail}
+          detailLoading={participantDetailLoading}
+          reloadDetail={() => loadParticipantDetail(selectedParticipant)}
+          targetForm={targetForm}
+          setTargetForm={setTargetForm}
+          saveTargets={saveTargets}
+          openInstruction={() => openInstruction("participant")}
+          saving={saving}
+          onClose={() => setParticipantModalOpen(false)}
+        />
+      ) : null}
 
       {coachMenuOpen ? (
         <div className="fixed inset-0 z-[9998] bg-slate-950/50 p-4 backdrop-blur-sm">
@@ -822,6 +847,8 @@ export default function WellnessCoachPortalPage() {
           participant={selectedParticipant}
           selectedGroup={selectedGroup}
           groups={groups}
+          instructionGroup={instructionGroup}
+          setInstructionGroup={setInstructionGroup}
           form={instructionForm}
           setForm={setInstructionForm}
           saving={saving}
@@ -1193,6 +1220,42 @@ function ParticipantCard({ item, active, onClick }: any) {
   );
 }
 
+function ParticipantDetailModal({ onClose, ...props }: any) {
+  return (
+    <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-slate-900/25 p-2 backdrop-blur-[1px] sm:p-4">
+      <button
+        type="button"
+        className="absolute inset-0"
+        onClick={onClose}
+        aria-label="Tutup detail peserta"
+      />
+      <section className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[1.75rem] border border-white/80 bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-[2rem]">
+        <div className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600">
+              Progress Peserta
+            </div>
+            <div className="mt-1 line-clamp-1 text-base font-black text-slate-950 sm:text-lg">
+              {props.participant?.name || "Detail peserta"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xl font-black text-slate-700"
+            aria-label="Tutup detail peserta"
+          >
+            ×
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-5">
+          <ParticipantDetail {...props} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ParticipantDetail({
   participant,
   detail,
@@ -1310,30 +1373,31 @@ function ParticipantDetail({
                 </p>
               </div>
             </div>
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-100">
-              <table className="min-w-[620px] w-full text-left text-sm">
-                <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100">
+              <table className="w-full table-fixed text-left text-xs sm:text-sm">
+                <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
                   <tr>
-                    <th className="px-4 py-3">Tanggal</th>
-                    <th className="px-4 py-3">Health Talk</th>
-                    <th className="px-4 py-3">Jenis</th>
-                    <th className="px-4 py-3 text-right">Point</th>
+                    <th className="w-[24%] px-3 py-3">Tanggal</th>
+                    <th className="w-[58%] px-3 py-3">Health Talk</th>
+                    <th className="w-[18%] px-2 py-3 text-right">Point</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {healthtalks.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center font-bold text-slate-400">
+                      <td colSpan={3} className="px-4 py-8 text-center font-bold text-slate-400">
                         Belum ada keikutsertaan Health Talk yang tercatat.
                       </td>
                     </tr>
                   ) : (
                     healthtalks.slice(0, 12).map((item: any, index: number) => (
                       <tr key={item.id || `${item.date}-${index}`}>
-                        <td className="px-4 py-3 font-bold text-slate-500">{item.date || "-"}</td>
-                        <td className="px-4 py-3 font-black text-slate-900">{item.title || "Health Talk"}</td>
-                        <td className="px-4 py-3 font-bold text-slate-600">{item.type || "-"}</td>
-                        <td className="px-4 py-3 text-right font-black text-violet-700">{fmtNumber(item.points || 0)}</td>
+                        <td className="px-3 py-3 align-top font-bold text-slate-500">{item.date || "-"}</td>
+                        <td className="px-3 py-3 align-top">
+                          <div className="break-words font-black text-slate-900">{item.title || "Health Talk"}</div>
+                          <div className="mt-1 text-[10px] font-bold text-slate-500 sm:text-xs">{item.type || "-"}</div>
+                        </td>
+                        <td className="px-2 py-3 text-right align-top font-black text-violet-700">{fmtNumber(item.points || 0)}</td>
                       </tr>
                     ))
                   )}
@@ -1412,7 +1476,7 @@ function FlagBadge({ level, label }: { level: string; label: string }) {
     red: "bg-rose-100 text-rose-800",
   };
   return (
-    <span className={`inline-flex whitespace-nowrap rounded-full px-3 py-2 text-xs font-black ${classes[level] || "bg-slate-100 text-slate-700"}`}>
+    <span className={`inline-flex max-w-full items-center justify-center whitespace-normal rounded-full px-2 py-1 text-center text-[9px] font-black leading-3 sm:px-3 sm:py-2 sm:text-xs ${classes[level] || "bg-slate-100 text-slate-700"}`}>
       {label || "-"}
     </span>
   );
@@ -1443,61 +1507,271 @@ function PointPill({ label, value }: any) {
   );
 }
 
+function clampCoachChartValue(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function smoothCoachChartPath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  if (points.length === 2) {
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+  }
+
+  let path = `M ${points[0].x} ${points[0].y}`;
+  const tension = 0.18;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(index - 1, 0)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(index + 2, points.length - 1)];
+    const cp1x = p1.x + (p2.x - p0.x) * tension;
+    const cp1y = p1.y + (p2.y - p0.y) * tension;
+    const cp2x = p2.x - (p3.x - p1.x) * tension;
+    const cp2y = p2.y - (p3.y - p1.y) * tension;
+    path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+  }
+
+  return path;
+}
+
+function coachChartTooltipStyle(
+  point: { x: number; y: number },
+  width: number,
+  height: number
+) {
+  const rawLeft = (point.x / width) * 100;
+  const rawTop = (point.y / height) * 100;
+  const placeBelow = point.y <= height * 0.38;
+  let left = clampCoachChartValue(rawLeft, 4, 96);
+  let translateX = "-50%";
+
+  if (rawLeft < 18) {
+    left = 4;
+    translateX = "0%";
+  } else if (rawLeft > 82) {
+    left = 96;
+    translateX = "-100%";
+  }
+
+  const top = placeBelow
+    ? clampCoachChartValue(rawTop + 9, 7, 82)
+    : clampCoachChartValue(rawTop - 7, 14, 90);
+
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    transform: `translate(${translateX}, ${placeBelow ? "0%" : "-100%"})`,
+  };
+}
+
 function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: any) {
   const rows = Array.isArray(points) ? points.filter(Boolean).slice(-14) : [];
-  const width = 320;
-  const height = 130;
-  const padX = 16;
-  const padTop = 12;
-  const padBottom = 24;
-  const values = rows.flatMap((item: any) => [Number(item.value), Number(item.secondary)]).filter(Number.isFinite);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const width = 620;
+  const height = 250;
+  const padX = 34;
+  const padTop = 28;
+  const padBottom = 38;
+  const values = rows
+    .flatMap((item: any) => [Number(item.value), Number(item.secondary)])
+    .filter(Number.isFinite);
   const min = values.length ? Math.min(...values) : 0;
   const max = values.length ? Math.max(...values) : 1;
-  const range = max - min || 1;
-  const x = (index: number) => padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
-  const y = (value: any) => padTop + ((max - Number(value || 0)) / range) * (height - padTop - padBottom);
-  const primary = rows.map((item: any, index: number) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(item.value)}`).join(" ");
-  const secondaryRows = rows.filter((item: any) => Number.isFinite(Number(item.secondary)));
-  const secondary = secondaryRows.map((item: any) => {
-    const index = rows.indexOf(item);
-    return `${secondaryRows.indexOf(item) === 0 ? "M" : "L"} ${x(index)} ${y(item.secondary)}`;
-  }).join(" ");
+  const buffer = Math.max((max - min) * 0.12, max === min ? 1 : 0);
+  const chartMin = min - buffer;
+  const chartMax = max + buffer;
+  const range = chartMax - chartMin || 1;
+  const x = (index: number) =>
+    padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
+  const y = (value: any) =>
+    padTop +
+    ((chartMax - Number(value || 0)) / range) *
+      (height - padTop - padBottom);
+  const plotted = rows.map((item: any, index: number) => ({
+    row: item,
+    x: x(index),
+    y: y(item.value),
+    secondaryY: Number.isFinite(Number(item.secondary))
+      ? y(item.secondary)
+      : null,
+  }));
+  const primary = smoothCoachChartPath(
+    plotted.map((item) => ({ x: item.x, y: item.y }))
+  );
+  const secondaryPoints = plotted
+    .filter((item) => item.secondaryY !== null)
+    .map((item) => ({ x: item.x, y: Number(item.secondaryY) }));
+  const secondary = smoothCoachChartPath(secondaryPoints);
   const latest = rows.at(-1);
+  const visibleActiveIndex =
+    activeIndex === null ? Math.max(plotted.length - 1, 0) : activeIndex;
+  const activePoint = plotted[visibleActiveIndex] || null;
+
+  function activateNearest(event: any) {
+    if (plotted.length === 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointerX =
+      ((event.clientX - rect.left) / Math.max(rect.width, 1)) * width;
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    plotted.forEach((point, index) => {
+      const distance = Math.abs(point.x - pointerX);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    setActiveIndex(nearestIndex);
+  }
 
   return (
     <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-black text-slate-950">{title}</div>
-          <div className="mt-1 text-[11px] font-bold text-slate-400">{rows.length} titik data</div>
+          <div className="mt-1 text-[11px] font-bold text-slate-400">
+            {rows.length} titik data · sentuh titik untuk melihat nilai
+          </div>
         </div>
         <div className="text-right">
           <div className="text-base font-black text-teal-800">
-            {latest?.value !== undefined && latest?.value !== null ? `${fmtNumber(latest.value, 1)} ${suffix}`.trim() : "-"}
+            {latest?.value !== undefined && latest?.value !== null
+              ? `${fmtNumber(latest.value, 1)} ${suffix}`.trim()
+              : "-"}
           </div>
           {latest?.secondary !== undefined && latest?.secondary !== null ? (
-            <div className="text-[11px] font-bold text-sky-600">{secondaryLabel || "Nilai 2"}: {fmtNumber(latest.secondary, 1)}</div>
+            <div className="text-[11px] font-bold text-sky-600">
+              {secondaryLabel || "Nilai 2"}: {fmtNumber(latest.secondary, 1)}
+            </div>
           ) : null}
         </div>
       </div>
       {rows.length < 2 ? (
-        <div className="mt-4 flex h-[130px] items-center justify-center rounded-2xl bg-slate-50 text-xs font-bold text-slate-400">
+        <div className="mt-4 flex h-[180px] items-center justify-center rounded-2xl bg-slate-50 text-xs font-bold text-slate-400">
           Data grafik belum cukup.
         </div>
       ) : (
-        <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-[130px] w-full overflow-visible" role="img" aria-label={`Grafik ${title}`}>
-          <line x1={padX} y1={height - padBottom} x2={width - padX} y2={height - padBottom} stroke="#e2e8f0" strokeWidth="1" />
-          <path d={primary} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          {secondary ? <path d={secondary} fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
-          {rows.map((item: any, index: number) => (
-            <g key={`${item.date || item.label}-${index}`}>
-              <circle cx={x(index)} cy={y(item.value)} r="4" fill="white" stroke="#0f766e" strokeWidth="2" />
-              <title>{`${item.label || item.date || "Data"}: ${fmtNumber(item.value, 1)} ${suffix}`}</title>
-            </g>
-          ))}
-          <text x={padX} y={height - 5} fontSize="10" fill="#94a3b8">{rows[0]?.label || ""}</text>
-          <text x={width - padX} y={height - 5} textAnchor="end" fontSize="10" fill="#94a3b8">{rows.at(-1)?.label || ""}</text>
-        </svg>
+        <div className="relative mt-3 overflow-hidden rounded-2xl bg-gradient-to-b from-teal-50/70 to-white">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-[190px] w-full touch-none sm:h-[220px]"
+            role="img"
+            aria-label={`Grafik ${title}`}
+            onPointerMove={activateNearest}
+            onPointerDown={activateNearest}
+            onClick={activateNearest}
+            onPointerLeave={() => setActiveIndex(null)}
+          >
+            {[0.25, 0.5, 0.75].map((ratio) => (
+              <line
+                key={ratio}
+                x1={padX}
+                y1={padTop + (height - padTop - padBottom) * ratio}
+                x2={width - padX}
+                y2={padTop + (height - padTop - padBottom) * ratio}
+                stroke="#cbd5e1"
+                strokeWidth="1"
+                strokeDasharray="6 8"
+                opacity="0.45"
+              />
+            ))}
+            <line
+              x1={padX}
+              y1={height - padBottom}
+              x2={width - padX}
+              y2={height - padBottom}
+              stroke="#cbd5e1"
+              strokeWidth="1"
+            />
+            <path
+              d={primary}
+              fill="none"
+              stroke="#14b8a6"
+              strokeWidth="6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {secondary ? (
+              <path
+                d={secondary}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : null}
+            {plotted.map((item: any, index: number) => {
+              const isActive = visibleActiveIndex === index;
+              return (
+                <g key={`${item.row.date || item.row.label}-${index}`}>
+                  {isActive ? (
+                    <circle
+                      cx={item.x}
+                      cy={item.y}
+                      r="15"
+                      fill="#14b8a6"
+                      opacity="0.22"
+                      className="animate-ping"
+                    />
+                  ) : null}
+                  <circle
+                    cx={item.x}
+                    cy={item.y}
+                    r={isActive ? "7" : "5"}
+                    fill="white"
+                    stroke="#0f766e"
+                    strokeWidth={isActive ? "4" : "3"}
+                  />
+                  {item.secondaryY !== null ? (
+                    <circle
+                      cx={item.x}
+                      cy={item.secondaryY}
+                      r={isActive ? "6" : "4"}
+                      fill="white"
+                      stroke="#0284c7"
+                      strokeWidth="3"
+                    />
+                  ) : null}
+                </g>
+              );
+            })}
+            <text x={padX} y={height - 10} fontSize="18" fill="#94a3b8">
+              {rows[0]?.label || ""}
+            </text>
+            <text
+              x={width - padX}
+              y={height - 10}
+              textAnchor="end"
+              fontSize="18"
+              fill="#94a3b8"
+            >
+              {rows.at(-1)?.label || ""}
+            </text>
+          </svg>
+
+          {activePoint ? (
+            <div
+              className="pointer-events-none absolute z-10 min-w-[108px] max-w-[180px] rounded-2xl bg-slate-950 px-3 py-2 text-white shadow-xl"
+              style={coachChartTooltipStyle(activePoint, width, height)}
+            >
+              <div className="text-[10px] font-bold text-white/60">
+                {activePoint.row.label || activePoint.row.date || "Data"}
+              </div>
+              <div className="mt-1 text-sm font-black">
+                {fmtNumber(activePoint.row.value, 1)} {suffix}
+              </div>
+              {activePoint.row.secondary !== undefined &&
+              activePoint.row.secondary !== null ? (
+                <div className="mt-1 text-[11px] font-bold text-sky-200">
+                  {secondaryLabel || "Nilai 2"}: {fmtNumber(activePoint.row.secondary, 1)} {suffix}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   );
@@ -1517,22 +1791,25 @@ function InstructionModal({
   participant,
   selectedGroup,
   groups,
+  instructionGroup,
+  setInstructionGroup,
   form,
   setForm,
   saving,
   onClose,
   onSave,
 }: any) {
+  const groupKey = scope === "group" ? instructionGroup : selectedGroup;
   const group = groups.find(
-    (item: any) => String(item.wellness_group_unit_id || item.group_name) === selectedGroup
+    (item: any) => String(item.wellness_group_unit_id || item.group_name) === groupKey
   );
   const setValue = (key: string, value: string) =>
     setForm((previous: any) => ({ ...previous, [key]: value }));
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-slate-950/60 p-3 backdrop-blur-sm md:items-center">
+    <div className="fixed inset-0 z-[10030] flex items-center justify-center bg-slate-900/25 p-3 backdrop-blur-[1px]">
       <button type="button" className="absolute inset-0" onClick={onClose} aria-label="Tutup" />
-      <section className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[2rem] bg-white p-5 shadow-2xl md:p-6">
+      <section className="relative max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[2rem] border border-white/80 bg-white p-5 shadow-2xl md:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-600">
@@ -1550,6 +1827,26 @@ function InstructionModal({
             ×
           </button>
         </div>
+        {scope === "group" ? (
+          <label className="mt-5 grid gap-2 text-sm font-bold text-slate-700">
+            Kelompok Penerima
+            <select
+              className={fieldClass}
+              value={instructionGroup}
+              onChange={(event) => setInstructionGroup(event.target.value)}
+            >
+              {(groups || []).map((item: any) => (
+                <option
+                  key={item.id}
+                  value={String(item.wellness_group_unit_id || item.group_name)}
+                >
+                  {item.group_name} ({item.member_count || 0} anggota)
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <div className="mt-5 grid gap-3">
           <label className="grid gap-2 text-sm font-bold text-slate-700">
             Topik
