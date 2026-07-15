@@ -6,20 +6,12 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
-const SELECT_COLUMNS = `
-  id,
-  name,
-  mcu_id,
-  external_id,
-  nik,
-  gender,
-  province,
-  barcode_value,
-  program_type,
-  source_id,
-  package_id,
-  company_id
-`;
+// LABEL_CORPORATE_SOURCE_ENRICH_V419
+// LABEL_ALL_DEMOGRAPHICS_ROUTE_V420
+// Select * dipakai hanya pada endpoint label, lalu respons dipetakan kembali
+// ke field label yang aman. Ini memungkinkan field Corporate terbaca tanpa
+// mengubah schema printer atau endpoint lain.
+const SELECT_COLUMNS = "*";
 
 function extractBarcodeKeyword(rawCode: string) {
   const raw = String(rawCode || "").trim();
@@ -47,26 +39,163 @@ function cleanKeyword(value: string) {
     .trim();
 }
 
-function mapRows(data: any[]) {
-  return (data || []).map((p: any) => ({
-    id: p.id,
-    name: p.name,
-    mcu_id: p.mcu_id,
-    external_id: p.external_id,
-    nik: p.nik,
-    gender: p.gender,
-    province: p.province,
-    barcode_value: p.barcode_value || p.mcu_id || p.external_id || String(p.id),
-    program_type: p.program_type,
-    package_name: "-",
-    company_name: "",
-    source_name: "-",
-    institution_name: "",
-    label_printed_at: (p as any).label_printed_at || null,
-    label_printed_by: (p as any).label_printed_by || "",
-    label_print_count: Number((p as any).label_print_count || 0),
-    label_print_status: (p as any).label_printed_at ? "printed" : "unprinted"
-  }));
+function readParticipantValueV420(participant: any, aliases: string[]) {
+  const sources = [
+    participant,
+    participant?.raw,
+    participant?.raw_data,
+    participant?.demographics,
+    participant?.metadata,
+    participant?.extra_data,
+  ].filter((item) => item && typeof item === "object");
+
+  for (const source of sources) {
+    for (const alias of aliases) {
+      const direct = source?.[alias];
+      if (direct !== undefined && direct !== null && String(direct).trim()) {
+        return direct;
+      }
+
+      const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
+      for (const [key, value] of Object.entries(source)) {
+        const normalizedKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (
+          normalizedKey === normalizedAlias &&
+          value !== undefined &&
+          value !== null &&
+          String(value).trim()
+        ) {
+          return value;
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
+async function mapRows(data: any[], supabase: any) {
+  const rows = Array.isArray(data) ? data : [];
+  const sourceIds = Array.from(
+    new Set(
+      rows
+        .map((p: any) => Number(p?.source_id))
+        .filter((id: number) => Number.isFinite(id) && id > 0)
+    )
+  );
+
+  const sourceMap = new Map<number, any>();
+
+  if (sourceIds.length) {
+    const { data: sourceRows } = await supabase
+      .from("participant_sources")
+      .select("id,name,institution_name,program_type")
+      .in("id", sourceIds);
+
+    for (const source of sourceRows || []) {
+      sourceMap.set(Number(source.id), source);
+    }
+  }
+
+  return rows.map((p: any) => {
+    const source = sourceMap.get(Number(p.source_id)) || {};
+
+    const dateOfBirth = readParticipantValueV420(p, [
+      "date_of_birth",
+      "birth_date",
+      "tanggal_lahir",
+      "tgllahir",
+      "tgl_lahir",
+      "dob",
+    ]);
+
+    const department = readParticipantValueV420(p, [
+      "division",
+      "divisi",
+      "department",
+      "departemen",
+      "dept",
+      "bagian",
+      "unit_kerja",
+      "unit",
+      "section",
+    ]);
+
+    const province =
+      readParticipantValueV420(p, [
+        "province",
+        "provinsi",
+        "asal_provinsi",
+        "location",
+        "lokasi",
+        "kota",
+        "wilayah",
+      ]) || department;
+
+    const mcuDate = readParticipantValueV420(p, [
+      "mcu_date",
+      "tanggal_mcu",
+      "tgl_mcu",
+      "tanggal_pemeriksaan",
+      "exam_date",
+    ]);
+
+    const sourceName =
+      source.name ||
+      p.source_name ||
+      p.database_name ||
+      "-";
+
+    const institutionName =
+      source.institution_name ||
+      p.institution_name ||
+      p.company_name ||
+      p.company ||
+      "";
+
+    return {
+      id: p.id,
+      name: readParticipantValueV420(p, ["name", "nama"]),
+      mcu_id:
+        p.mcu_id ||
+        p.nomor_mcu ||
+        p.no_mcu ||
+        p.external_id ||
+        "",
+      external_id: p.external_id || "",
+      nik: readParticipantValueV420(p, ["nik", "nrp", "employee_id", "id_number", "nomor_identitas"]),
+      gender: readParticipantValueV420(p, ["gender", "jenis_kelamin", "jk", "sex"]),
+      province,
+      department,
+      division: department,
+      date_of_birth: dateOfBirth,
+      birth_date: dateOfBirth,
+      mcu_date: mcuDate,
+      tanggal_mcu: mcuDate,
+      age: readParticipantValueV420(p, ["age", "usia"]),
+      barcode_value:
+        p.barcode_value ||
+        p.mcu_id ||
+        p.external_id ||
+        String(p.id || ""),
+      program_type:
+        p.program_type ||
+        source.program_type ||
+        "",
+      package_name:
+        readParticipantValueV420(p, ["package_name", "paket", "package", "nama_paket"]) || "-",
+      company_name:
+        p.company_name ||
+        p.company ||
+        institutionName,
+      source_name: sourceName,
+      institution_name: institutionName,
+      label_printed_at: p.label_printed_at || null,
+      label_printed_by: p.label_printed_by || "",
+      label_print_count: Number(p.label_print_count || 0),
+      label_print_status: p.label_printed_at ? "printed" : "unprinted"
+    };
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -128,7 +257,7 @@ export async function GET(req: NextRequest) {
 
     if (exactData?.length) {
       return ok({
-        participants: mapRows(exactData),
+        participants: await mapRows(exactData, supabase),
         mode: "exact",
         duration_ms: Date.now() - startedAt
       });
@@ -152,7 +281,7 @@ export async function GET(req: NextRequest) {
   }
 
   return ok({
-    participants: mapRows(data || []),
+    participants: await mapRows(data || [], supabase),
     mode: keyword.length >= 2 ? "like" : "source",
     duration_ms: Date.now() - startedAt
   });

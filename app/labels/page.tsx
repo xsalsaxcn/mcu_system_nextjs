@@ -19,6 +19,14 @@ type Participant = {
   label_printed_at?: string | null;
   label_printed_by?: string;
   label_print_count?: number;
+  date_of_birth?: string;
+  birth_date?: string;
+  department?: string;
+  age?: string | number;
+  program_type?: string;
+  nik?: string;
+  division?: string;
+  mcu_date?: string;
 };
 
 export default function LabelsPage() {
@@ -74,6 +82,57 @@ function normalizeGenderLabel(value: any) {
   return raw.toUpperCase();
 }
 
+// LABEL_ALL_DEMOGRAPHICS_V420
+type LabelFieldKey =
+  | "name"
+  | "mcu_id"
+  | "nik"
+  | "institution"
+  | "division"
+  | "birth_date"
+  | "age"
+  | "gender"
+  | "province"
+  | "package_name"
+  | "mcu_date"
+  | "qr";
+
+type LabelFieldSettings = Record<LabelFieldKey, boolean>;
+
+const DEFAULT_LABEL_FIELDS: LabelFieldSettings = {
+  name: true,
+  mcu_id: true,
+  nik: false,
+  institution: true,
+  division: false,
+  birth_date: true,
+  age: false,
+  gender: true,
+  province: true,
+  package_name: false,
+  mcu_date: false,
+  qr: true,
+};
+
+const LABEL_FIELD_CATALOG: Array<{
+  key: LabelFieldKey;
+  label: string;
+  description: string;
+}> = [
+  { key: "name", label: "Nama peserta", description: "Nama lengkap peserta." },
+  { key: "mcu_id", label: "Nomor MCU", description: "Nomor MCU / external ID." },
+  { key: "nik", label: "NIK / NRP / ID", description: "Nomor identitas peserta bila tersedia." },
+  { key: "institution", label: "Perusahaan / instansi", description: "Nama perusahaan atau instansi database." },
+  { key: "division", label: "Divisi / departemen / bagian", description: "Divisi, departemen, unit kerja, atau bagian." },
+  { key: "birth_date", label: "Tanggal lahir", description: "Tanggal lahir peserta bila tersedia." },
+  { key: "age", label: "Usia", description: "Usia peserta bila tersedia." },
+  { key: "gender", label: "Jenis kelamin", description: "PUTRA / PUTRI atau nilai gender sumber." },
+  { key: "province", label: "Provinsi / lokasi", description: "Provinsi atau lokasi asal bila tersedia." },
+  { key: "package_name", label: "Paket MCU", description: "Nama paket pemeriksaan bila tersedia." },
+  { key: "mcu_date", label: "Tanggal MCU", description: "Tanggal pelaksanaan MCU bila tersedia." },
+  { key: "qr", label: "QR code", description: "QR tetap memakai nomor MCU." },
+];
+
 function LabelPrinter({ user }: { user: any }) {
   const [sources, setSources] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
@@ -93,14 +152,48 @@ function LabelPrinter({ user }: { user: any }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [printReady, setPrintReady] = useState(false);
+  const [readingParameters, setReadingParameters] = useState(false);
+  const [parameterRead, setParameterRead] = useState(false);
+  const [availableLabelFields, setAvailableLabelFields] = useState<LabelFieldSettings>({
+    ...DEFAULT_LABEL_FIELDS,
+  });
+  const [labelFields, setLabelFields] = useState<LabelFieldSettings>({
+    ...DEFAULT_LABEL_FIELDS,
+  });
 
-  const program = user.program_type === "all" ? "capaska" : user.program_type;
+  // Admin harus bisa melihat database CAPASKA dan Corporate.
+  const program =
+    user.role === "admin" || user.program_type === "all"
+      ? "all"
+      : String(user.program_type || "all");
 
   useEffect(() => {
     fetch(`/api/sources?program=${program}`)
       .then((r) => r.json())
       .then((d) => setSources(d.sources || []));
   }, [program]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("harmony-label-fields-v420");
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      setLabelFields((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // Gunakan default bila localStorage tidak valid.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "harmony-label-fields-v420",
+        JSON.stringify(labelFields)
+      );
+    } catch {
+      // Penyimpanan lokal bersifat opsional.
+    }
+  }, [labelFields]);
 
   const selectedParticipants = useMemo(() => {
     return participants.filter((p) => selectedIds[p.id]);
@@ -189,6 +282,115 @@ function LabelPrinter({ user }: { user: any }) {
         Hanya admin yang dapat cetak label barcode.
       </div>
     );
+  }
+
+  function updateLabelField(key: LabelFieldKey, checked: boolean) {
+    setLabelFields((prev) => ({ ...prev, [key]: checked }));
+    setPrintReady(false);
+  }
+
+  async function readLabelParameters() {
+    if (sourceId === "all") {
+      setMessage("Pilih satu database terlebih dahulu, lalu klik Baca Parameter.");
+      setParameterRead(false);
+      return;
+    }
+
+    setReadingParameters(true);
+    setMessage("Membaca parameter label dari database terpilih...");
+
+    try {
+      const params = new URLSearchParams({
+        program: "all",
+        source_id: sourceId,
+        keyword: "",
+        limit: "100",
+        label_print_status: "all",
+      });
+
+      const res = await fetch(`/api/labels/participants?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal membaca parameter label.");
+      }
+
+      const sample: Participant[] = Array.isArray(json.participants)
+        ? json.participants
+        : [];
+
+      const hasValue = (getter: (participant: any) => unknown) =>
+        sample.some((participant) =>
+          Boolean(String(getter(participant) ?? "").trim())
+        );
+
+      const available: LabelFieldSettings = {
+        name: hasValue((p) => p.name),
+        mcu_id: hasValue((p) => p.mcu_id || p.external_id || p.barcode_value),
+        nik: hasValue((p) => p.nik || p.nrp || p.employee_id || p.id_number),
+        institution: hasValue(
+          (p) => p.company_name || p.institution_name || p.source_name
+        ),
+        division: hasValue(
+          (p) =>
+            p.division ||
+            p.department ||
+            p.dept ||
+            p.bagian ||
+            p.unit_kerja
+        ),
+        birth_date: hasValue(
+          (p) => p.date_of_birth || p.birth_date || p.tanggal_lahir || p.dob
+        ),
+        age: hasValue((p) => p.age || p.usia),
+        gender: hasValue((p) => p.gender || p.jenis_kelamin),
+        province: hasValue(
+          (p) =>
+            p.province ||
+            p.provinsi ||
+            p.asal_provinsi ||
+            p.location ||
+            p.lokasi
+        ),
+        package_name: hasValue(
+          (p) => p.package_name || p.paket || p.package
+        ),
+        mcu_date: hasValue(
+          (p) => p.mcu_date || p.tanggal_mcu || p.tgl_mcu || p.exam_date
+        ),
+        qr: true,
+      };
+
+      setAvailableLabelFields(available);
+      setLabelFields((prev) => {
+        const next = { ...prev };
+        (Object.keys(available) as LabelFieldKey[]).forEach((key) => {
+          if (!available[key]) next[key] = false;
+        });
+        if (available.name) next.name = true;
+        if (available.mcu_id) next.mcu_id = true;
+        if (available.qr) next.qr = true;
+        return next;
+      });
+      setParameterRead(true);
+
+      const count = sample.length;
+      const availableCount = Object.values(available).filter(Boolean).length;
+      setMessage(
+        `Parameter label terbaca dari ${count} sampel peserta. ${availableCount} field tersedia untuk dipilih.`
+      );
+    } catch (error) {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : String(error || "Gagal membaca parameter label.");
+      setMessage(msg);
+      setParameterRead(false);
+    } finally {
+      setReadingParameters(false);
+    }
   }
 
   async function loadParticipants(e?: React.FormEvent) {
@@ -503,12 +705,22 @@ function printLabels() {
       </section>
 
       <section className="card p-5 no-print">
-        <form onSubmit={loadParticipants} className="grid gap-3 lg:grid-cols-[1fr_1fr_220px_auto]">
-          <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+        <form onSubmit={loadParticipants} className="grid gap-3 lg:grid-cols-[1fr_1fr_180px_220px]">
+          <select
+            className="input"
+            value={sourceId}
+            onChange={(e) => {
+              setSourceId(e.target.value);
+              setParameterRead(false);
+              setParticipants([]);
+              setSelectedIds({});
+              setPrintReady(false);
+            }}
+          >
             <option value="all">Semua Database Instansi</option>
             {sources.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name} - {s.institution_name || "-"}
+                [{String(s.program_type || "database").toUpperCase()}] {s.name} - {s.institution_name || "-"}
               </option>
             ))}
           </select>
@@ -520,10 +732,84 @@ function printLabels() {
             placeholder="Cari nama / nomor MCU / barcode"
           />
 
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={readLabelParameters}
+            disabled={readingParameters || loading || sourceId === "all"}
+          >
+            {readingParameters ? "Membaca..." : "Baca Parameter"}
+          </button>
+
           <button className="btn-primary" disabled={loading}>
             {loading ? "Mencari..." : "Cari Peserta"}
           </button>
         </form>
+
+        {parameterRead && (
+          <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="font-black text-cyan-950">
+                  Setting Isi Label
+                </div>
+                <div className="mt-1 text-xs font-semibold text-cyan-800">
+                  Semua data demografis yang tersedia ditampilkan sebagai pilihan.
+                  Ukuran kertas, posisi QR, margin, dan layout printer 50 mm × 30 mm tidak diubah.
+                  Area detail menampilkan maksimal 4 baris agar format label tetap aman.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setLabelFields({ ...DEFAULT_LABEL_FIELDS });
+                  setPrintReady(false);
+                }}
+              >
+                Reset Default
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {LABEL_FIELD_CATALOG.map((field) => {
+                const available = availableLabelFields[field.key];
+                return (
+                  <label
+                    key={field.key}
+                    className={`rounded-xl border p-3 ${
+                      available
+                        ? "border-cyan-200 bg-white"
+                        : "border-slate-200 bg-slate-100 opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(labelFields[field.key] && available)}
+                        disabled={!available}
+                        onChange={(event) =>
+                          updateLabelField(field.key, event.target.checked)
+                        }
+                      />
+                      <div>
+                        <div className="text-sm font-black text-slate-900">
+                          {field.label}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {available
+                            ? field.description
+                            : "Tidak ditemukan pada sampel database ini."}
+                        </div>
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {message && (
           <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">
@@ -777,6 +1063,7 @@ function printLabels() {
               qrSize={qrSize}
               fontSize={fontSize}
               showBorder={showBorder}
+              fields={labelFields}
             />
           ))}
           {!labels.length && (
@@ -796,6 +1083,7 @@ function printLabels() {
               qrSize={qrSize}
               fontSize={fontSize}
               showBorder={showBorder}
+              fields={labelFields}
               printMode
             />
           ))}
@@ -809,6 +1097,7 @@ function LabelCard({
   qrSize,
   fontSize,
   showBorder,
+  fields,
   showQr = true,
   showBarcodeText = false,
   printMode = false
@@ -817,6 +1106,7 @@ function LabelCard({
   qrSize: number;
   fontSize: number;
   showBorder: boolean;
+  fields: LabelFieldSettings;
   showQr?: boolean;
   showBarcodeText?: boolean;
   printMode?: boolean;
@@ -825,10 +1115,46 @@ function LabelCard({
   const idText = sanitizeQrText(participant.mcu_id || participant.external_id || String(participant.id));
   const qrValue = idText;
   const nameText = sanitizeQrText(participant.name).toUpperCase();
-  const institution = sanitizeQrText(participant.company_name || participant.institution_name || participantAny.company || participantAny.institution || "BPIP / CAPASKA").toUpperCase();
+  const institution = sanitizeQrText(
+    participant.company_name ||
+      participant.institution_name ||
+      participant.source_name ||
+      participantAny.company ||
+      participantAny.institution ||
+      "BPIP / CAPASKA"
+  ).toUpperCase();
   const genderRaw = sanitizeQrText(participantAny.gender || participantAny.jenis_kelamin || participantAny.sex || participantAny.kelamin || "").toUpperCase();
   const genderText = genderRaw.includes("WANITA") || genderRaw.includes("PEREMPUAN") || genderRaw.includes("PUTRI") ? "PUTRI" : genderRaw.includes("PRIA") || genderRaw.includes("LAKI") || genderRaw.includes("PUTRA") ? "PUTRA" : genderRaw;
   const birthDate = sanitizeQrText(participantAny.date_of_birth || participantAny.birth_date || participantAny.tanggal_lahir || participantAny.dob || "");
+  const nikText = sanitizeQrText(
+    participantAny.nik ||
+    participantAny.nrp ||
+    participantAny.employee_id ||
+    participantAny.id_number ||
+    ""
+  );
+  const divisionText = sanitizeQrText(
+    participantAny.division ||
+    participantAny.department ||
+    participantAny.dept ||
+    participantAny.bagian ||
+    participantAny.unit_kerja ||
+    ""
+  );
+  const ageText = sanitizeQrText(participantAny.age || participantAny.usia || "");
+  const packageText = sanitizeQrText(
+    participant.package_name ||
+    participantAny.paket ||
+    participantAny.package ||
+    ""
+  );
+  const mcuDateText = sanitizeQrText(
+    participantAny.mcu_date ||
+    participantAny.tanggal_mcu ||
+    participantAny.tgl_mcu ||
+    participantAny.exam_date ||
+    ""
+  );
   const provinceText = sanitizeQrText(
     participantAny.province ||
     participantAny.provinsi ||
@@ -850,7 +1176,18 @@ function LabelCard({
   const nameFont = nameText.length > 34 ? Math.max(10, safeFont + 2) : nameText.length > 24 ? Math.max(11, safeFont + 3) : Math.max(12, safeFont + 5);
   const detailFont = Math.max(6.4, Math.min(9, safeFont + 1));
   const provinceFont = provinceText.length > 23 ? Math.max(6.2, safeFont - 0.5) : provinceText.length > 16 ? Math.max(6.8, safeFont) : Math.max(7.2, safeFont + 0.5);
-  const textRight = showQr ? "calc(" + qrPx + "px + 4mm)" : "2.4mm";
+  const showQrEffective = Boolean(showQr && fields.qr);
+  const textRight = showQrEffective ? "calc(" + qrPx + "px + 4mm)" : "2.4mm";
+  const detailLines = [
+    fields.mcu_id ? `MCU: ${idText || "-"}` : "",
+    fields.nik && nikText ? `NIK/NRP: ${nikText}` : "",
+    fields.institution ? institution || "-" : "",
+    fields.division && divisionText ? `DIVISI: ${divisionText}` : "",
+    fields.birth_date && birthDate ? `TTL: ${birthDate}` : "",
+    fields.age && ageText ? `USIA: ${ageText}` : "",
+    fields.package_name && packageText ? `PAKET: ${packageText}` : "",
+    fields.mcu_date && mcuDateText ? `TGL MCU: ${mcuDateText}` : "",
+  ].filter(Boolean);
 
   return (
     <section
@@ -868,52 +1205,58 @@ function LabelCard({
         boxSizing: "border-box"
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          left: "2.4mm",
-          top: "2.2mm",
-          right: textRight,
-          zIndex: 2,
-          fontSize: nameFont + "px",
-          lineHeight: 0.94,
-          fontWeight: 950,
-          color: "#000000",
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          overflowWrap: "anywhere",
-          letterSpacing: "-0.04em",
-          maxHeight: "9.2mm",
-          overflow: "hidden"
-        }}
-      >
-        {nameText || "-"}
-      </div>
+      {fields.name ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            top: "2.2mm",
+            right: textRight,
+            zIndex: 2,
+            fontSize: nameFont + "px",
+            lineHeight: 0.94,
+            fontWeight: 950,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            letterSpacing: "-0.04em",
+            maxHeight: "9.2mm",
+            overflow: "hidden"
+          }}
+        >
+          {nameText || "-"}
+        </div>
+      ) : null}
 
-      <div
-        style={{
-          position: "absolute",
-          left: "2.4mm",
-          top: "12.3mm",
-          right: textRight,
-          zIndex: 2,
-          fontSize: detailFont + "px",
-          lineHeight: 1.02,
-          fontWeight: 900,
-          color: "#111827",
-          whiteSpace: "normal",
-          wordBreak: "break-word",
-          overflowWrap: "anywhere",
-          maxHeight: "7.6mm",
-          overflow: "hidden"
-        }}
-      >
-        <div>MCU: {idText || "-"}</div>
-        <div style={{ marginTop: "1mm" }}>{institution || "-"}</div>
-        {birthDate ? <div style={{ marginTop: "1mm" }}>TTL: {birthDate}</div> : null}
-      </div>
+      {detailLines.length ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            top: "12.3mm",
+            right: textRight,
+            zIndex: 2,
+            fontSize: detailFont + "px",
+            lineHeight: 1.02,
+            fontWeight: 900,
+            color: "#111827",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            maxHeight: "7.6mm",
+            overflow: "hidden"
+          }}
+        >
+          {detailLines.slice(0, 4).map((line, index) => (
+            <div key={`${line}-${index}`} style={{ marginTop: index ? "0.55mm" : undefined }}>
+              {line}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
-      {genderText ? (
+      {fields.gender && genderText ? (
         <div
           style={{
             position: "absolute",
@@ -934,7 +1277,7 @@ function LabelCard({
         </div>
       ) : null}
 
-      {provinceText ? (
+      {fields.province && provinceText ? (
         <div
           style={{
             position: "absolute",
@@ -958,7 +1301,7 @@ function LabelCard({
         </div>
       ) : null}
 
-      {showQr && (
+      {showQrEffective && (
         <div
           style={{
             position: "absolute",
@@ -978,7 +1321,7 @@ function LabelCard({
         </div>
       )}
 
-      {showQr && showBarcodeText && (
+      {showQrEffective && showBarcodeText && (
         <div
           style={{
             position: "absolute",
