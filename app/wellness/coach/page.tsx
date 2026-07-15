@@ -489,6 +489,18 @@ export default function WellnessCoachPortalPage() {
 
   const isLoggedIn = !!dashboard?.coach;
 
+  // WELLNESS_COACH_SUPPORT_ISOLATED_V64
+  // Chat with Admin memakai workspace yang sama persis dengan Portal Peserta,
+  // tanpa card header/status Portal Coach di belakangnya.
+  if (isLoggedIn && coachView === "support") {
+    return (
+      <SupportChatPanel
+        actorType="coach"
+        onClose={() => setCoachView("monitoring")}
+      />
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">

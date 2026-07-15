@@ -1863,6 +1863,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
   const [loading, setLoading] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState("");
   const [notificationPermission, setNotificationPermission] = useState("");
+  const [noticeOpen, setNoticeOpen] = useState(false);
 
   const unreadNotes = notes.filter((note) => !note.is_read);
   const latestNote = notes.length > 0 ? notes[0] : null;
@@ -2005,124 +2006,173 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
     return null;
   }
 
+  // WELLNESS_PARTICIPANT_COACH_NOTICE_DROPDOWN_V64
+  const noticeHeading = hasAlarm
+    ? "Ada notice dari Coach"
+    : notes.length > 0
+      ? "Notice dari Coach"
+      : "Notice dari Coach";
+  const noticeSummary = hasAlarm
+    ? `${unreadNotes.length} notice belum dibaca`
+    : latestNote?.topic || "Ketuk untuk melihat catatan dan arahan Coach.";
+
   return (
     <section
-      className={`overflow-hidden rounded-[2rem] border shadow-xl shadow-slate-200/60 ${
+      className={`overflow-hidden rounded-[1.5rem] border shadow-lg shadow-slate-200/50 ${
         hasAlarm
           ? hasHighPriority
             ? "border-rose-200 bg-rose-50"
             : "border-amber-200 bg-amber-50"
-          : "border-white bg-white"
+          : "border-slate-200 bg-white"
       }`}
+      data-wellness-coach-notice-dropdown="v64"
     >
-      <div className="relative p-5 md:p-6">
-        {hasAlarm ? (
-          <div className="absolute right-5 top-5 flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-black text-rose-700 shadow-sm">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" />
-            NEW
-          </div>
-        ) : null}
+      <button
+        type="button"
+        onClick={() => setNoticeOpen((value) => !value)}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left sm:px-5"
+        aria-expanded={noticeOpen}
+        aria-controls="wellness-coach-notice-content"
+      >
+        <span
+          className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xl ${
+            hasAlarm
+              ? "bg-rose-100 text-rose-700"
+              : "bg-teal-50 text-teal-700"
+          }`}
+          aria-hidden="true"
+        >
+          🔔
+          {hasAlarm ? (
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+              {unreadNotes.length > 99 ? "99+" : unreadNotes.length}
+            </span>
+          ) : null}
+        </span>
 
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
-              Catatan Coach
-            </div>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-black text-slate-950 sm:text-base">
+              {noticeHeading}
+            </span>
+            {hasAlarm ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-rose-700">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+                Baru
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-0.5 block truncate text-xs font-bold text-slate-500 sm:text-sm">
+            {noticeSummary}
+          </span>
+        </span>
 
-            <h2 className="mt-2 text-2xl font-black text-slate-950">
-              Notice dari Coach
-            </h2>
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-lg font-black text-slate-700 shadow-sm transition-transform ${
+            noticeOpen ? "rotate-180" : ""
+          }`}
+          aria-hidden="true"
+        >
+          ⌄
+        </span>
+      </button>
 
-            <p className="mt-2 max-w-2xl text-sm font-bold leading-6 text-slate-600">
-              Catatan, arahan, dan action plan dari coach akan muncul di sini.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
+      {noticeOpen ? (
+        <div
+          id="wellness-coach-notice-content"
+          className="border-t border-black/5 bg-white/80 px-4 pb-4 pt-3 sm:px-5 sm:pb-5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={loadCoachNotes}
-              className="rounded-full bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm"
+              className="rounded-full bg-slate-100 px-3.5 py-2 text-xs font-black text-slate-700"
             >
-              Refresh
+              {loading ? "Memuat..." : "Refresh"}
             </button>
 
             <button
               type="button"
               onClick={enableBrowserNotification}
-              className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white shadow-sm"
+              className="rounded-full bg-slate-950 px-3.5 py-2 text-xs font-black text-white"
             >
               Aktifkan Notifikasi
             </button>
-          </div>
-        </div>
-
-        {noticeMessage ? (
-          <div
-            className={`mt-4 rounded-[1.5rem] px-4 py-3 text-sm font-black ${
-              hasAlarm
-                ? "bg-white text-rose-700"
-                : "bg-slate-50 text-slate-600"
-            }`}
-          >
-            {noticeMessage}
-          </div>
-        ) : null}
-
-        {notificationPermission ? (
-          <div className="mt-2 text-xs font-bold text-slate-500">
-            Status notifikasi browser: {notificationPermission}
-          </div>
-        ) : null}
-
-        {loading ? (
-          <div className="mt-5 rounded-[2rem] border border-dashed border-slate-200 bg-white/70 p-6 text-center text-sm font-bold text-slate-400">
-            Memuat catatan coach...
-          </div>
-        ) : notes.length === 0 ? (
-          <div className="mt-5 rounded-[2rem] border border-dashed border-slate-200 bg-white/70 p-6 text-center">
-            <div className="text-base font-black text-slate-900">
-              Belum ada catatan dari coach.
-            </div>
-
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-              Jika coach membuat catatan atau action plan, peserta akan melihatnya di bagian ini.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-5 grid gap-3">
-            {latestNote ? (
-              <CoachNoticeCard
-                note={latestNote}
-                featured
-                onRead={() => markNoteRead(latestNote.id)}
-              />
-            ) : null}
-
-            {notes.slice(1, 4).map((note) => (
-              <CoachNoticeCard
-                key={note.id}
-                note={note}
-                onRead={() => markNoteRead(note.id)}
-              />
-            ))}
 
             {unreadNotes.length > 1 ? (
               <button
                 type="button"
                 onClick={markAllRead}
-                className="rounded-[1.5rem] bg-teal-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-teal-100"
+                className="rounded-full bg-teal-600 px-3.5 py-2 text-xs font-black text-white"
               >
                 Tandai Semua Dibaca
               </button>
             ) : null}
           </div>
-        )}
-      </div>
+
+          {noticeMessage ? (
+            <div
+              className={`mt-3 rounded-2xl px-3.5 py-2.5 text-xs font-black leading-5 ${
+                hasAlarm
+                  ? "bg-rose-50 text-rose-700"
+                  : "bg-slate-50 text-slate-600"
+              }`}
+            >
+              {noticeMessage}
+            </div>
+          ) : null}
+
+          {notificationPermission && notificationPermission !== "unsupported" ? (
+            <div className="mt-2 text-[11px] font-bold text-slate-400">
+              Status notifikasi: {notificationPermission}
+            </div>
+          ) : null}
+
+          {loading ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-center text-sm font-bold text-slate-400">
+              Memuat notice Coach...
+            </div>
+          ) : notes.length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-center">
+              <div className="text-sm font-black text-slate-900">
+                Belum ada notice dari Coach.
+              </div>
+              <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                Catatan dan target dari Coach akan muncul di sini.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3">
+              {latestNote ? (
+                <CoachNoticeCard
+                  note={latestNote}
+                  featured
+                  onRead={() => markNoteRead(latestNote.id)}
+                />
+              ) : null}
+
+              {notes.slice(1, 4).map((note) => (
+                <CoachNoticeCard
+                  key={note.id}
+                  note={note}
+                  onRead={() => markNoteRead(note.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setNoticeOpen(false)}
+            className="mt-3 w-full rounded-2xl bg-slate-100 px-4 py-3 text-xs font-black text-slate-700"
+          >
+            Tutup Notice
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
-
 function CoachNoticeCard({
   note,
   featured = false,
