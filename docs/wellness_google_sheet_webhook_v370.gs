@@ -9,6 +9,22 @@ const DEFAULT_EVIDENCE_FOLDER_NAME = 'wellness program';
 const DEFAULT_COMPANY_FOLDER_NAME = 'Tanpa Perusahaan';
 const DEFAULT_PARTICIPANT_FOLDER_NAME = 'Tanpa Nama Peserta';
 
+
+// WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_DRIVE_V61
+const SUPPORT_THREADS_SHEET_NAME = 'Wellness Support Threads';
+const SUPPORT_MESSAGES_SHEET_NAME = 'Wellness Support Messages';
+const SUPPORT_FOLDER_NAME = 'Technical Support';
+const SUPPORT_THREAD_HEADERS = [
+  'Ticket ID', 'Created At', 'Updated At', 'Actor Type', 'Actor ID', 'Actor Name',
+  'Actor Code', 'Company', 'Kelompok', 'Email', 'Status', 'Subject', 'Last Message',
+  'Last Sender Type', 'Unread Admin', 'Unread User', 'Closed At'
+];
+const SUPPORT_MESSAGE_HEADERS = [
+  'Message ID', 'Ticket ID', 'Created At', 'Sender Type', 'Sender ID', 'Sender Name',
+  'Message', 'Attachment Name', 'Attachment Type', 'Attachment Size', 'Attachment URL',
+  'Attachment Preview URL', 'Read By Admin At', 'Read By User At'
+];
+
 const FORM_RESPONSE_HEADERS = [
   'Submission Date',
   'Pilih Nama Anda',
@@ -89,6 +105,32 @@ function doPost(e) {
 
     if (payload.action === 'uploadEvidence') {
       return jsonResponse(uploadEvidenceToDrive(payload));
+    }
+
+
+    if (payload.action === 'uploadSupportAttachment') {
+      return jsonResponse(uploadSupportAttachmentToDrive(payload));
+    }
+    if (payload.action === 'supportEnsureThread') {
+      return jsonResponse(supportEnsureThread(payload));
+    }
+    if (payload.action === 'supportGetThread') {
+      return jsonResponse(supportGetThread(payload));
+    }
+    if (payload.action === 'supportGetMessages') {
+      return jsonResponse(supportGetMessages(payload));
+    }
+    if (payload.action === 'supportSendMessage') {
+      return jsonResponse(supportSendMessage(payload));
+    }
+    if (payload.action === 'supportMarkRead') {
+      return jsonResponse(supportMarkRead(payload));
+    }
+    if (payload.action === 'supportListThreads') {
+      return jsonResponse(supportListThreads(payload));
+    }
+    if (payload.action === 'supportUpdateStatus') {
+      return jsonResponse(supportUpdateStatus(payload));
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -231,6 +273,395 @@ function uploadEvidenceToDrive(payload) {
     folderPath: rootFolder.getName() + ' / ' + companyFolder.getName() + ' / ' + participantFolder.getName() + ' / ' + categoryFolder.getName(),
     category: categoryFolder.getName(),
     marker: 'WELLNESS_GOOGLE_DRIVE_FOLDER_FALLBACK_V370'
+  };
+}
+
+
+// -----------------------------------------------------------------------------
+// WELLNESS SUPPORT CHAT V61
+// Text/metadata: Google Sheet. Attachments: Google Drive. No Supabase Storage.
+// -----------------------------------------------------------------------------
+function supportClean_(value) {
+  return String(value === null || value === undefined ? '' : value).trim();
+}
+
+function supportNow_() {
+  return new Date().toISOString();
+}
+
+function supportSheet_(name, headers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+  const current = sheet.getLastColumn() > 0
+    ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String)
+    : [];
+  if (!current.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  } else {
+    const missing = headers.filter(function(header) { return current.indexOf(header) === -1; });
+    if (missing.length) {
+      const next = current.concat(missing);
+      sheet.getRange(1, 1, 1, next.length).setValues([next]);
+    }
+  }
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length))
+    .setFontWeight('bold')
+    .setBackground('#eef2ff')
+    .setWrap(true);
+  return sheet;
+}
+
+function supportHeaders_(sheet) {
+  if (sheet.getLastColumn() < 1) return [];
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+}
+
+function supportRows_(sheet) {
+  const headers = supportHeaders_(sheet);
+  if (sheet.getLastRow() < 2 || !headers.length) return [];
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  return values.map(function(row, index) {
+    const item = { __row: index + 2 };
+    headers.forEach(function(header, column) { item[header] = row[column]; });
+    return item;
+  });
+}
+
+function supportWriteRow_(sheet, rowNumber, object) {
+  const headers = supportHeaders_(sheet);
+  const values = headers.map(function(header) {
+    return object.hasOwnProperty(header) ? normalizeCell(object[header]) : '';
+  });
+  sheet.getRange(rowNumber, 1, 1, headers.length).setValues([values]);
+}
+
+function supportAppendRow_(sheet, object) {
+  const headers = supportHeaders_(sheet);
+  sheet.appendRow(headers.map(function(header) { return normalizeCell(object[header]); }));
+  return sheet.getLastRow();
+}
+
+function supportThreadPublic_(row) {
+  if (!row) return null;
+  return {
+    ticket_id: supportClean_(row['Ticket ID']),
+    created_at: supportClean_(row['Created At']),
+    updated_at: supportClean_(row['Updated At']),
+    actor_type: supportClean_(row['Actor Type']),
+    actor_id: supportClean_(row['Actor ID']),
+    actor_name: supportClean_(row['Actor Name']),
+    actor_code: supportClean_(row['Actor Code']),
+    company: supportClean_(row['Company']),
+    kelompok: supportClean_(row['Kelompok']),
+    email: supportClean_(row['Email']),
+    status: supportClean_(row['Status']) || 'Open',
+    subject: supportClean_(row['Subject']) || 'Kendala Teknis Aplikasi',
+    last_message: supportClean_(row['Last Message']),
+    last_sender_type: supportClean_(row['Last Sender Type']),
+    unread_admin: Number(row['Unread Admin'] || 0),
+    unread_user: Number(row['Unread User'] || 0),
+    closed_at: supportClean_(row['Closed At'])
+  };
+}
+
+function supportMessagePublic_(row) {
+  if (!row) return null;
+  return {
+    message_id: supportClean_(row['Message ID']),
+    ticket_id: supportClean_(row['Ticket ID']),
+    created_at: supportClean_(row['Created At']),
+    sender_type: supportClean_(row['Sender Type']),
+    sender_id: supportClean_(row['Sender ID']),
+    sender_name: supportClean_(row['Sender Name']),
+    message: supportClean_(row['Message']),
+    attachment_name: supportClean_(row['Attachment Name']),
+    attachment_type: supportClean_(row['Attachment Type']),
+    attachment_size: Number(row['Attachment Size'] || 0),
+    attachment_url: supportClean_(row['Attachment URL']),
+    attachment_preview_url: supportClean_(row['Attachment Preview URL']),
+    read_by_admin_at: supportClean_(row['Read By Admin At']),
+    read_by_user_at: supportClean_(row['Read By User At'])
+  };
+}
+
+function supportFindThreadByActor_(actorType, actorId) {
+  const sheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  const rows = supportRows_(sheet).filter(function(row) {
+    return supportClean_(row['Actor Type']) === supportClean_(actorType) &&
+      supportClean_(row['Actor ID']) === supportClean_(actorId);
+  });
+  rows.sort(function(a, b) {
+    return supportClean_(b['Updated At']).localeCompare(supportClean_(a['Updated At']));
+  });
+  return rows[0] || null;
+}
+
+function supportFindThreadById_(ticketId) {
+  const sheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  const rows = supportRows_(sheet);
+  return rows.find(function(row) {
+    return supportClean_(row['Ticket ID']) === supportClean_(ticketId);
+  }) || null;
+}
+
+function supportEnsureThread(payload) {
+  const actorType = supportClean_(payload.actorType);
+  const actorId = supportClean_(payload.actorId);
+  if (!actorType || !actorId) throw new Error('actorType dan actorId wajib untuk support thread');
+
+  let row = supportFindThreadByActor_(actorType, actorId);
+  if (row) return { ok: true, thread: supportThreadPublic_(row), created: false };
+
+  const sheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  const now = supportNow_();
+  const ticketId = 'SUP-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Jakarta', 'yyyyMMdd') + '-' + Utilities.getUuid().slice(0, 8).toUpperCase();
+  const object = {
+    'Ticket ID': ticketId,
+    'Created At': now,
+    'Updated At': now,
+    'Actor Type': actorType,
+    'Actor ID': actorId,
+    'Actor Name': supportClean_(payload.actorName),
+    'Actor Code': supportClean_(payload.actorCode),
+    'Company': supportClean_(payload.actorCompany),
+    'Kelompok': supportClean_(payload.actorGroup),
+    'Email': supportClean_(payload.actorEmail),
+    'Status': 'Open',
+    'Subject': 'Kendala Teknis Aplikasi',
+    'Last Message': '',
+    'Last Sender Type': '',
+    'Unread Admin': 0,
+    'Unread User': 0,
+    'Closed At': ''
+  };
+  const rowNumber = supportAppendRow_(sheet, object);
+  object.__row = rowNumber;
+  return { ok: true, thread: supportThreadPublic_(object), created: true };
+}
+
+function supportMessagesForTicket_(ticketId, limit) {
+  const sheet = supportSheet_(SUPPORT_MESSAGES_SHEET_NAME, SUPPORT_MESSAGE_HEADERS);
+  const rows = supportRows_(sheet).filter(function(row) {
+    return supportClean_(row['Ticket ID']) === supportClean_(ticketId);
+  });
+  rows.sort(function(a, b) {
+    return supportClean_(a['Created At']).localeCompare(supportClean_(b['Created At']));
+  });
+  const safeLimit = Math.max(1, Math.min(50, Number(limit || 30)));
+  return rows.slice(Math.max(0, rows.length - safeLimit));
+}
+
+function supportMarkReadInternal_(ticketId, readerType) {
+  const messageSheet = supportSheet_(SUPPORT_MESSAGES_SHEET_NAME, SUPPORT_MESSAGE_HEADERS);
+  const messageHeaders = supportHeaders_(messageSheet);
+  const adminCol = messageHeaders.indexOf('Read By Admin At') + 1;
+  const userCol = messageHeaders.indexOf('Read By User At') + 1;
+  const senderCol = messageHeaders.indexOf('Sender Type') + 1;
+  const ticketCol = messageHeaders.indexOf('Ticket ID') + 1;
+  const now = supportNow_();
+
+  if (messageSheet.getLastRow() > 1) {
+    const data = messageSheet.getRange(2, 1, messageSheet.getLastRow() - 1, messageHeaders.length).getValues();
+    data.forEach(function(row, index) {
+      if (supportClean_(row[ticketCol - 1]) !== supportClean_(ticketId)) return;
+      const sender = supportClean_(row[senderCol - 1]);
+      if (readerType === 'admin' && sender !== 'admin' && !row[adminCol - 1]) {
+        messageSheet.getRange(index + 2, adminCol).setValue(now);
+      }
+      if (readerType !== 'admin' && sender === 'admin' && !row[userCol - 1]) {
+        messageSheet.getRange(index + 2, userCol).setValue(now);
+      }
+    });
+  }
+
+  const threadSheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  const thread = supportFindThreadById_(ticketId);
+  if (thread) {
+    if (readerType === 'admin') thread['Unread Admin'] = 0;
+    else thread['Unread User'] = 0;
+    supportWriteRow_(threadSheet, thread.__row, thread);
+  }
+}
+
+function supportGetThread(payload) {
+  const row = supportFindThreadByActor_(payload.actorType, payload.actorId);
+  if (!row) return { ok: true, thread: null, messages: [] };
+  const ticketId = supportClean_(row['Ticket ID']);
+  if (payload.markRead) supportMarkReadInternal_(ticketId, supportClean_(payload.actorType));
+  const refreshed = supportFindThreadById_(ticketId) || row;
+  return {
+    ok: true,
+    thread: supportThreadPublic_(refreshed),
+    messages: supportMessagesForTicket_(ticketId, payload.limit).map(supportMessagePublic_)
+  };
+}
+
+function supportGetMessages(payload) {
+  const ticketId = supportClean_(payload.ticketId);
+  const row = supportFindThreadById_(ticketId);
+  if (!row) throw new Error('Ticket support tidak ditemukan');
+  if (payload.markRead) supportMarkReadInternal_(ticketId, supportClean_(payload.actorType));
+  const refreshed = supportFindThreadById_(ticketId) || row;
+  return {
+    ok: true,
+    thread: supportThreadPublic_(refreshed),
+    messages: supportMessagesForTicket_(ticketId, payload.limit).map(supportMessagePublic_)
+  };
+}
+
+function supportSendMessage(payload) {
+  const senderType = supportClean_(payload.senderType || payload.actorType);
+  let ticketId = supportClean_(payload.ticketId);
+  if (!ticketId && senderType !== 'admin') {
+    ticketId = supportEnsureThread(payload).thread.ticket_id;
+  }
+  const thread = supportFindThreadById_(ticketId);
+  if (!thread) throw new Error('Ticket support tidak ditemukan');
+
+  const messageText = supportClean_(payload.message).slice(0, 2000);
+  const attachmentUrl = supportClean_(payload.attachmentUrl);
+  if (!messageText && !attachmentUrl) throw new Error('Pesan atau attachment wajib diisi');
+
+  const now = supportNow_();
+  const messageSheet = supportSheet_(SUPPORT_MESSAGES_SHEET_NAME, SUPPORT_MESSAGE_HEADERS);
+  const messageObject = {
+    'Message ID': 'MSG-' + Utilities.getUuid(),
+    'Ticket ID': ticketId,
+    'Created At': now,
+    'Sender Type': senderType,
+    'Sender ID': supportClean_(payload.senderId || payload.actorId),
+    'Sender Name': supportClean_(payload.senderName || payload.actorName),
+    'Message': messageText,
+    'Attachment Name': supportClean_(payload.attachmentName),
+    'Attachment Type': supportClean_(payload.attachmentType),
+    'Attachment Size': Number(payload.attachmentSize || 0),
+    'Attachment URL': attachmentUrl,
+    'Attachment Preview URL': supportClean_(payload.attachmentPreviewUrl),
+    'Read By Admin At': senderType === 'admin' ? now : '',
+    'Read By User At': senderType === 'admin' ? '' : now
+  };
+  supportAppendRow_(messageSheet, messageObject);
+
+  const threadSheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  thread['Updated At'] = now;
+  thread['Status'] = supportClean_(thread['Status']) === 'Selesai' ? 'Open' : (supportClean_(thread['Status']) || 'Open');
+  thread['Closed At'] = '';
+  thread['Last Message'] = messageText || ('Attachment: ' + supportClean_(payload.attachmentName));
+  thread['Last Sender Type'] = senderType;
+  if (senderType === 'admin') {
+    thread['Unread User'] = Number(thread['Unread User'] || 0) + 1;
+  } else {
+    thread['Unread Admin'] = Number(thread['Unread Admin'] || 0) + 1;
+  }
+  supportWriteRow_(threadSheet, thread.__row, thread);
+
+  return {
+    ok: true,
+    thread: supportThreadPublic_(thread),
+    message: supportMessagePublic_(messageObject)
+  };
+}
+
+function supportMarkRead(payload) {
+  let ticketId = supportClean_(payload.ticketId);
+  if (!ticketId && supportClean_(payload.actorType) !== 'admin') {
+    const thread = supportFindThreadByActor_(payload.actorType, payload.actorId);
+    ticketId = thread ? supportClean_(thread['Ticket ID']) : '';
+  }
+  if (!ticketId) return { ok: true, marked: false };
+  supportMarkReadInternal_(ticketId, supportClean_(payload.readerType || payload.actorType));
+  return { ok: true, marked: true };
+}
+
+function supportListThreads(payload) {
+  const status = supportClean_(payload.status || 'all');
+  const query = supportClean_(payload.query).toLowerCase();
+  const limit = Math.max(1, Math.min(80, Number(payload.limit || 40)));
+  const sheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  let rows = supportRows_(sheet);
+  const allRows = rows.slice();
+
+  if (status && status !== 'all') {
+    rows = rows.filter(function(row) { return supportClean_(row['Status']) === status; });
+  }
+  if (query) {
+    rows = rows.filter(function(row) {
+      return [row['Ticket ID'], row['Actor Name'], row['Actor Code'], row['Company'], row['Kelompok'], row['Last Message']]
+        .map(function(value) { return supportClean_(value).toLowerCase(); })
+        .join(' ')
+        .indexOf(query) !== -1;
+    });
+  }
+  rows.sort(function(a, b) {
+    return supportClean_(b['Updated At']).localeCompare(supportClean_(a['Updated At']));
+  });
+
+  return {
+    ok: true,
+    threads: rows.slice(0, limit).map(supportThreadPublic_),
+    summary: {
+      total: allRows.length,
+      open: allRows.filter(function(row) { return supportClean_(row['Status']) === 'Open'; }).length,
+      handled: allRows.filter(function(row) { return supportClean_(row['Status']) === 'Ditangani'; }).length,
+      closed: allRows.filter(function(row) { return supportClean_(row['Status']) === 'Selesai'; }).length,
+      unread: allRows.reduce(function(sum, row) { return sum + Number(row['Unread Admin'] || 0); }, 0)
+    }
+  };
+}
+
+function supportUpdateStatus(payload) {
+  const ticketId = supportClean_(payload.ticketId);
+  const status = supportClean_(payload.status);
+  if (['Open', 'Ditangani', 'Selesai'].indexOf(status) === -1) throw new Error('Status support tidak valid');
+  const sheet = supportSheet_(SUPPORT_THREADS_SHEET_NAME, SUPPORT_THREAD_HEADERS);
+  const thread = supportFindThreadById_(ticketId);
+  if (!thread) throw new Error('Ticket support tidak ditemukan');
+  thread['Status'] = status;
+  thread['Updated At'] = supportNow_();
+  thread['Closed At'] = status === 'Selesai' ? supportNow_() : '';
+  supportWriteRow_(sheet, thread.__row, thread);
+  return { ok: true, thread: supportThreadPublic_(thread) };
+}
+
+function uploadSupportAttachmentToDrive(payload) {
+  const filename = sanitizeFileName(payload.filename || payload.originalFilename || 'support-attachment');
+  const contentType = supportClean_(payload.contentType || 'application/octet-stream');
+  const base64 = supportClean_(payload.dataBase64);
+  const ticketId = supportClean_(payload.ticketId);
+  if (!base64) throw new Error('dataBase64 is required for support attachment');
+  if (!ticketId) throw new Error('ticketId is required for support attachment');
+
+  const bytes = Utilities.base64Decode(base64);
+  const blob = Utilities.newBlob(bytes, contentType, filename);
+  const root = getEvidenceRootFolder(payload.folderName || DEFAULT_EVIDENCE_FOLDER_NAME);
+  const supportFolder = getOrCreateFolder(root, SUPPORT_FOLDER_NAME);
+  const ticketFolder = getOrCreateFolder(supportFolder, sanitizeFolderName(ticketId));
+  const file = ticketFolder.createFile(blob);
+  file.setDescription('Harmony Health Wellness Technical Support. Marker: WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_DRIVE_V61');
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (err) {}
+
+  const fileId = file.getId();
+  const driveUrl = file.getUrl();
+  const publicUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+  const previewUrl = contentType.indexOf('image/') === 0
+    ? 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w800'
+    : driveUrl;
+
+  return {
+    ok: true,
+    fileId: fileId,
+    name: file.getName(),
+    mimeType: contentType,
+    driveUrl: driveUrl,
+    publicUrl: publicUrl,
+    previewUrl: previewUrl,
+    thumbnailUrl: previewUrl,
+    ticketId: ticketId,
+    folderPath: root.getName() + ' / ' + supportFolder.getName() + ' / ' + ticketFolder.getName(),
+    marker: 'WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_DRIVE_V61'
   };
 }
 

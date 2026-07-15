@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_PORTAL_MENU_UI_V50
 // WELLNESS_PARTICIPANT_CHAT_MENU_V54
+// WELLNESS_PARTICIPANT_ADMIN_SUPPORT_MENU_V61
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
@@ -21,6 +22,7 @@ type PortalTab =
   | "devices"
   | "profile"
   | "chat"
+  | "support"
   | "charts";
 
 type MenuItem = {
@@ -87,6 +89,13 @@ const menuItems: MenuItem[] = [
     shortLabel: "Chat",
     description: "Konsultasi langsung dengan coach",
     emoji: "\u{1F4AC}",
+  },
+  {
+    key: "support",
+    label: "Chat with Admin",
+    shortLabel: "Support",
+    description: "Bantuan teknis aplikasi dan upload bukti kendala",
+    emoji: "🛠️",
   },
   {
     key: "profile",

@@ -1,12 +1,14 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
+import SupportChatPanel from "@/components/wellness/SupportChatPanel";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
+// WELLNESS_PARTICIPANT_ADMIN_SUPPORT_V61
 // Base dari V415:
 // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
 // - History Workout tetap menampilkan semua riwayat.
@@ -28,6 +30,7 @@ type PortalTab =
   | "devices"
   | "profile"
   | "chat"
+  | "support"
   | "charts";
 
 function clean(value: any) {
@@ -1036,6 +1039,10 @@ const [loading, setLoading] = useState(true);
 
             {activeTab === "chat" ? (
               <ParticipantCoachChat participant={participant} />
+            ) : null}
+
+            {activeTab === "support" ? (
+              <SupportChatPanel actorType="participant" />
             ) : null}
 
             {activeTab === "profile" ? (

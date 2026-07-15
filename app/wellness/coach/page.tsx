@@ -2,8 +2,10 @@
 
 // WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
 // WELLNESS_COACH_DETAIL_POINTS_INSTRUCTION_V59
+// WELLNESS_COACH_ADMIN_SUPPORT_V61
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import SupportChatPanel from "@/components/wellness/SupportChatPanel";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
@@ -13,7 +15,7 @@ import { createPortal } from "react-dom";
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
-type CoachView = "monitoring" | "chat";
+type CoachView = "monitoring" | "chat" | "support";
 type CoachParticipantDetail = {
   ok: boolean;
   message?: string;
@@ -738,7 +740,7 @@ export default function WellnessCoachPortalPage() {
             </section>
 
               </div>
-            ) : (
+            ) : coachView === "chat" ? (
               <CoachChatPanel
                 dashboard={dashboard}
                 participants={participants}
@@ -757,6 +759,8 @@ export default function WellnessCoachPortalPage() {
                 loadChat={() => loadMemberChat()}
                 sendChat={sendMemberChat}
               />
+            ) : (
+              <SupportChatPanel actorType="coach" />
             )}
           </section>
         )}
@@ -847,6 +851,24 @@ export default function WellnessCoachPortalPage() {
                 </div>
                 <div className="mt-1 text-sm font-bold text-slate-500">
                   Percakapan dengan anggota assigned group
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCoachView("support");
+                  setCoachMenuOpen(false);
+                }}
+                className={`w-full rounded-3xl border p-4 text-left ${
+                  coachView === "support"
+                    ? "border-indigo-200 bg-indigo-50"
+                    : "border-slate-100 bg-white"
+                }`}
+              >
+                <div className="text-base font-black">🛠️ Chat with Admin</div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Bantuan teknis Portal Coach dan aplikasi
                 </div>
               </button>
             </div>

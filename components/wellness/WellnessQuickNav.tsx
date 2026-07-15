@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const WELLNESS_QUICK_NAV_MARKER = "WELLNESS_QUICK_NAV_V374";
+const WELLNESS_QUICK_NAV_MARKER = "WELLNESS_QUICK_NAV_V374_SUPPORT_V61";
 
 const ITEMS = [
   { href: "/wellness/dashboard", label: "Dashboard" },
   { href: "/wellness/input", label: "Input Harian" },
   { href: "/wellness/nakes-input", label: "Input NAKES" },
   { href: "/wellness/history-import", label: "Import History MCU" },
+  { href: "/wellness/support-admin", label: "Support Admin" },
 ];
 
 function isActive(pathname: string | null, href: string) {
