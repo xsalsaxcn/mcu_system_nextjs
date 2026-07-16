@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_CHART_DEVICE_PRIMARY_SOURCE_V72
+// WELLNESS_CHART_TODAY_ONLY_SUMMARY_V73
 
 type ChartPoint = {
   date: string;
@@ -22,7 +23,20 @@ function clean(value: any) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const year = parts.find((entry) => entry.type === "year")?.value || "";
+  const month = parts.find((entry) => entry.type === "month")?.value || "";
+  const day = parts.find((entry) => entry.type === "day")?.value || "";
+
+  return year && month && day
+    ? `${year}-${month}-${day}`
+    : new Date().toISOString().slice(0, 10);
 }
 
 function fmtNumber(value: any, digits = 0) {
@@ -207,11 +221,18 @@ export default function AchievementChartsTab({
     return fromClinical;
   }, [JSON.stringify(clinicalHistory || []), participant?.baseline_sbp, participant?.baseline_dbp]);
 
-  const latestNutrition = latestValue(nutritionSeries);
-  const latestWorkout = latestValue(workoutSeries);
+  // V73: kartu status adalah kondisi hari ini, bukan nilai terakhir yang pernah diisi.
+  // Grafik historis di bawah tetap memakai seluruh nutritionSeries/workoutSeries.
+  const todayKeyV73 = todayDate();
+  const todayNutrition = Number(
+    nutritionSeries.find((item) => item.date === todayKeyV73)?.value || 0
+  );
+  const todayWorkout = Number(
+    workoutSeries.find((item) => item.date === todayKeyV73)?.value || 0
+  );
 
-  const nutritionRedFlag = latestNutrition > nutritionLimit;
-  const workoutRedFlag = latestWorkout > 0 && latestWorkout < workoutMinTarget;
+  const nutritionRedFlag = todayNutrition > nutritionLimit;
+  const workoutRedFlag = todayWorkout > 0 && todayWorkout < workoutMinTarget;
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
@@ -246,21 +267,29 @@ export default function AchievementChartsTab({
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ChartStatusCard
-            title="Kalori masuk"
-            value={`${fmtNumber(latestNutrition, 0)} kkal`}
+            title="Kalori masuk hari ini"
+            value={`${fmtNumber(todayNutrition, 0)} kkal`}
             note={`Limit ${fmtNumber(nutritionLimit, 0)} kkal per hari`}
             danger={nutritionRedFlag}
             dangerText="Red flag: konsumsi melebihi limit harian"
-            safeText="Masih dalam batas harian"
+            safeText={
+              todayNutrition > 0
+                ? "Masih dalam batas harian"
+                : "Belum ada input nutrisi hari ini"
+            }
           />
 
           <ChartStatusCard
-            title="Aktivitas workout"
-            value={`${fmtNumber(latestWorkout, 0)} kkal`}
+            title="Workout hari ini"
+            value={`${fmtNumber(todayWorkout, 0)} kkal`}
             note={`Target minimal ${fmtNumber(workoutMinTarget, 0)} kkal per hari`}
             danger={workoutRedFlag}
             dangerText="Red flag: kalori terbakar masih rendah"
-            safeText="Aktivitas memenuhi target minimal"
+            safeText={
+              todayWorkout > 0
+                ? "Aktivitas memenuhi target minimal"
+                : "Belum ada workout hari ini"
+            }
           />
         </div>
       </div>

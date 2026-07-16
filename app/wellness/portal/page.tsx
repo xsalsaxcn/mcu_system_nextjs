@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
+// WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
@@ -78,6 +79,50 @@ function todayDate() {
   if (!year || !month || !day) return new Date().toISOString().slice(0, 10);
 
   return `${year}-${month}-${day}`;
+}
+
+function nutritionLogDateV73(item: any) {
+  const raw = clean(
+    item?.log_date || item?.date || item?.meal_date || item?.created_at || item?.updated_at
+  );
+
+  if (!raw) return "";
+
+  const exactDate = raw.match(/^\d{4}-\d{2}-\d{2}$/);
+  if (exactDate) return exactDate[0];
+
+  const isoDate = raw.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoDate && !raw.includes("T")) return isoDate[0];
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return isoDate?.[0] || "";
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(parsed);
+
+  const year = parts.find((entry) => entry.type === "year")?.value || "";
+  const month = parts.find((entry) => entry.type === "month")?.value || "";
+  const day = parts.find((entry) => entry.type === "day")?.value || "";
+
+  return year && month && day ? `${year}-${month}-${day}` : isoDate?.[0] || "";
+}
+
+function nutritionCaloriesValueV73(item: any) {
+  return asNumber(
+    item?.calories ??
+      item?.total_calories ??
+      item?.calorie_total ??
+      item?.estimated_calories
+  );
+}
+
+function nutritionMealKeyV73(item: any, index: number) {
+  return clean(item?.meal_type || item?.meal_time || item?.category || item?.id || index)
+    .toLowerCase();
 }
 
 function jakartaDateFromAny(value: any) {
@@ -302,6 +347,38 @@ function activityCaloriesValue(item: any) {
   if (estimate > 0) return estimate;
 
   return stored > 0 && stored <= 1200 ? stored : 0;
+}
+
+function googleFitTotalCaloriesValueV73(item: any) {
+  if (!isGoogleFitDailyRow(item)) return 0;
+
+  const raw = activityRawPayloadV72(item);
+
+  return asNumber(
+    raw?.google_fit_calories_expended ??
+      raw?.google_fit_total_calories ??
+      raw?.calories_expended_total ??
+      raw?.original_payload?.calories_expended ??
+      raw?.original_payload?.calories
+  );
+}
+
+function historyWorkoutNoteV73(item: any) {
+  const activeCalories = historyCaloriesValueV41(item);
+  const steps = historyStepsValueV41(item);
+
+  if (isGoogleFitDailyRow(item)) {
+    const totalCalories = googleFitTotalCaloriesValueV73(item);
+
+    if (totalCalories > 0 && Math.abs(totalCalories - activeCalories) >= 1) {
+      return `${fmtNumber(activeCalories, 0)} kkal aktif | ${fmtNumber(
+        totalCalories,
+        0
+      )} kkal total Google Fit | ${fmtNumber(steps, 0)} steps`;
+    }
+  }
+
+  return `${fmtNumber(activeCalories, 0)} kkal | ${fmtNumber(steps, 0)} steps`;
 }
 
 function dailyRowPriorityV72(item: any) {
@@ -2072,30 +2149,42 @@ function HomeTab({
       ? clinicalHistory[0]
       : null;
 
-  const todayCalories = Number(directNutrition?.today_calories || 0);
-  const todayFoodCount = Number(directNutrition?.today_count || 0);
-  const todayRowCount = Number(directNutrition?.today_row_count || 0);
+  // V73: ringkasan harian harus hanya memakai log pada tanggal hari ini.
+  // Riwayat terakhir tetap tersedia di tab History, tetapi tidak dibawa ke kartu hari ini.
+  const nutritionSourceRows =
+    Array.isArray(directNutrition?.logs) && directNutrition.logs.length > 0
+      ? directNutrition.logs
+      : Array.isArray(nutritionLogs)
+        ? nutritionLogs
+        : [];
+  const todayKeyV73 = todayDate();
+  const todayNutritionRowsV73 = nutritionSourceRows.filter(
+    (item: any) => nutritionLogDateV73(item) === todayKeyV73
+  );
+  const todayCalories = todayNutritionRowsV73.reduce(
+    (sum: number, item: any) => sum + nutritionCaloriesValueV73(item),
+    0
+  );
+  const todayFoodCount = todayNutritionRowsV73.reduce((sum: number, item: any) => {
+    const foods = Array.isArray(item?.foods) ? item.foods.length : 0;
+    return sum + Math.max(1, foods);
+  }, 0);
+  const todayMealKeysV73 = new Set(
+    todayNutritionRowsV73.map((item: any, index: number) =>
+      nutritionMealKeyV73(item, index)
+    )
+  );
+  const todayRowCount = todayMealKeysV73.size;
 
-  const mealLogs =
-    directNutrition?.today_logs?.length > 0
-      ? directNutrition.today_logs
-      : directNutrition?.latest_logs?.length > 0
-        ? directNutrition.latest_logs
-        : nutritionLogs || [];
-
-  const mealTitle =
-    directNutrition?.today_logs?.length > 0
-      ? "Nutrisi Hari Ini"
-      : directNutrition?.latest_logs?.length > 0
-        ? "Riwayat Nutrisi Terakhir"
-        : "Nutrisi Hari Ini";
-
+  const mealLogs = todayNutritionRowsV73;
+  const mealTitle = "Nutrisi Hari Ini";
   const mealSubtitle =
-    directNutrition?.today_logs?.length > 0
-      ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(todayFoodCount, 0)} item makanan hari ini`
-      : directNutrition?.latest_logs?.length > 0
-        ? "Belum ada input hari ini. Menampilkan data terakhir."
-        : "Belum ada input nutrisi.";
+    todayNutritionRowsV73.length > 0
+      ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(
+          todayFoodCount,
+          0
+        )} item makanan hari ini`
+      : "Belum ada input nutrisi hari ini.";
 
   const nutritionTarget = asNumber(coachTargets.nutrition_max_calories);
   const workoutTarget = asNumber(coachTargets.workout_min_calories);
@@ -4231,12 +4320,16 @@ function HistoryTab({
                   key={`${item.id || index}-${index}`}
                   title={item.activity_name || item.activity_type || item.source || "Workout"}
                   subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
-                  note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+                  note={historyWorkoutNoteV73(item)}
                   status={
                     daily
                       ? selected
-                        ? "Dipakai untuk total & grafik"
-                        : "Sumber alternatif — tidak dijumlahkan"
+                        ? isGoogleFitDailyRow(item)
+                          ? "Dipakai untuk total & grafik — kalori aktif"
+                          : "Dipakai untuk total & grafik"
+                        : isGoogleFitDailyRow(item)
+                          ? "Alternatif — total Google Fit termasuk kalori istirahat"
+                          : "Sumber alternatif — tidak dijumlahkan"
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
