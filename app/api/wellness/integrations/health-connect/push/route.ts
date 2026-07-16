@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70
+// WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71
 // Update dari V421:
 // - Menerima data dari Android companion app.
 // - Menyimpan daily aggregate ke wellness_activity_logs.
@@ -109,6 +109,51 @@ function estimateDailyActiveCaloriesV70(params: {
   }
 
   return 0;
+}
+
+
+function chooseHealthConnectDailyCaloriesV71(params: {
+  reportedCalories: number;
+  estimatedCalories: number;
+  steps: number;
+  activeMinutes: number;
+}) {
+  const reportedCalories = Math.max(0, safeNumber(params.reportedCalories));
+  const estimatedCalories = Math.max(0, safeNumber(params.estimatedCalories));
+  const steps = Math.max(0, safeNumber(params.steps));
+  const activeMinutes = Math.max(0, safeNumber(params.activeMinutes));
+
+  // Nilai dari Android companion app adalah active calories Health Connect.
+  // Pertahankan nilai itu bila masih wajar. Estimasi hanya menjadi fallback.
+  const maxPlausibleCalories = Math.min(
+    2500,
+    Math.max(
+      1200,
+      steps * 0.25,
+      activeMinutes > 0 ? activeMinutes * 25 : 0
+    )
+  );
+
+  if (reportedCalories > 0 && reportedCalories <= maxPlausibleCalories) {
+    return {
+      calories: Math.round(reportedCalories * 100) / 100,
+      source: "health_connect_reported_active_calories",
+      usedReportedCalories: true,
+      rejectedReportedCalories: false,
+      maxPlausibleCalories,
+    };
+  }
+
+  return {
+    calories: Math.round(estimatedCalories * 100) / 100,
+    source:
+      reportedCalories > maxPlausibleCalories
+        ? "fallback_estimate_reported_value_implausible"
+        : "fallback_estimate_reported_value_missing",
+    usedReportedCalories: false,
+    rejectedReportedCalories: reportedCalories > maxPlausibleCalories,
+    maxPlausibleCalories,
+  };
 }
 
 function dateOnly(value: any) {
@@ -279,7 +324,7 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
     `participant_${participantId}`;
 
   const rawPayload = {
-    marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
+    marker: "WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71",
     device_id: body?.device_id || null,
     android_id: body?.android_id || null,
     app_version: body?.app_version || null,
@@ -384,16 +429,25 @@ async function handlePush(req: NextRequest) {
     safeNumber(steps),
     safeNumber(distanceKm)
   );
-  const sanitizedDailyCalories = estimateDailyActiveCaloriesV70({
+  const estimatedDailyCalories = estimateDailyActiveCaloriesV70({
     steps: safeNumber(steps),
     distanceKm: distanceValidation.distanceKm,
     activeMinutes: safeNumber(activeMinutes),
     weightKg: participantWeightKg(participant),
   });
 
+  const calorieSelection = chooseHealthConnectDailyCaloriesV71({
+    reportedCalories: safeNumber(calories),
+    estimatedCalories: estimatedDailyCalories,
+    steps: safeNumber(steps),
+    activeMinutes: safeNumber(activeMinutes),
+  });
+
+  const selectedDailyCalories = calorieSelection.calories;
+
   const emptyDailyPayload = isEmptyDailyPayload({
     steps,
-    calories: sanitizedDailyCalories,
+    calories: selectedDailyCalories,
     activeMinutes,
     distanceKm: distanceValidation.distanceKm,
     workouts,
@@ -409,24 +463,29 @@ async function handlePush(req: NextRequest) {
       log_date: date,
       started_at: normalizeStartedAt(body?.started_at, date),
       duration_minutes: activeMinutes,
-      calories: sanitizedDailyCalories,
+      calories: selectedDailyCalories,
       distance_km: distanceValidation.distanceKm,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
+        marker: "WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71",
         provider: "health_connect",
         sync_mode: "daily_aggregate",
         health_connect_steps: steps,
         health_connect_active_minutes: activeMinutes,
         health_connect_calories_original: calories,
-        health_connect_calories_original_ignored: safeNumber(calories) > 0,
+        health_connect_calories_used: calorieSelection.usedReportedCalories,
+        health_connect_calories_rejected:
+          calorieSelection.rejectedReportedCalories,
+        health_connect_calories_max_plausible:
+          calorieSelection.maxPlausibleCalories,
         health_connect_distance_km_original: distanceKm,
         health_connect_distance_km: distanceValidation.distanceKm,
         distance_validation_reason: distanceValidation.reason,
         estimated_distance_used: distanceValidation.usedEstimate,
-        sanitized_active_calories: sanitizedDailyCalories,
-        calories_source: "sanitized_active_estimate_v70",
+        estimated_active_calories: estimatedDailyCalories,
+        selected_active_calories: selectedDailyCalories,
+        calories_source: calorieSelection.source,
         calculation_note:
-          "Daily Health Connect energy may include resting/total energy. Workout calories use a guarded active estimate from steps, validated distance, active minutes, and participant weight.",
+          "Health Connect reported active calories are preserved when plausible. Step-based estimation is used only when the reported value is missing or clearly implausible.",
         health_connect_last_sync_at: nowIso,
         original_payload: body,
       },
@@ -498,7 +557,7 @@ async function handlePush(req: NextRequest) {
       calories: workoutCalories,
       distance_km: workoutDistance,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
+        marker: "WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71",
         provider: "health_connect",
         sync_mode: "exercise_session",
         health_connect_steps: workoutSteps,
@@ -521,7 +580,7 @@ async function handlePush(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
+    marker: "WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71",
     participant_id: participantId,
     date,
     inserted,
