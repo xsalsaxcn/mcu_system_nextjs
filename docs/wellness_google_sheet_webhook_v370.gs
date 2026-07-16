@@ -63,6 +63,35 @@ const WELLNESS_PROFILE_HEADERS = [
   "Updated At",
 ];
 
+// WELLNESS COMPANY <-> COACH CHAT V78
+const COMPANY_COACH_THREADS_SHEET_NAME = "Wellness Company Coach Threads";
+const COMPANY_COACH_MESSAGES_SHEET_NAME = "Wellness Company Coach Messages";
+const COMPANY_COACH_THREAD_HEADERS = [
+  "Thread ID",
+  "Created At",
+  "Updated At",
+  "Company ID",
+  "Company Name",
+  "Coach ID",
+  "Coach Name",
+  "Status",
+  "Last Message",
+  "Last Sender Type",
+  "Unread Company",
+  "Unread Coach",
+];
+const COMPANY_COACH_MESSAGE_HEADERS = [
+  "Message ID",
+  "Thread ID",
+  "Created At",
+  "Sender Type",
+  "Sender ID",
+  "Sender Name",
+  "Message",
+  "Read By Company At",
+  "Read By Coach At",
+];
+
 const FORM_RESPONSE_HEADERS = [
   "Submission Date",
   "Pilih Nama Anda",
@@ -191,6 +220,18 @@ function doPost(e) {
     }
     if (payload.action === "uploadWellnessProfilePhoto") {
       return jsonResponse(uploadWellnessProfilePhoto_(payload));
+    }
+    if (payload.action === "companyCoachListThreads") {
+      return jsonResponse(companyCoachListThreads_(payload));
+    }
+    if (payload.action === "companyCoachGetThread") {
+      return jsonResponse(companyCoachGetThread_(payload));
+    }
+    if (payload.action === "companyCoachSendMessage") {
+      return jsonResponse(companyCoachSendMessage_(payload));
+    }
+    if (payload.action === "companyCoachMarkRead") {
+      return jsonResponse(companyCoachMarkRead_(payload));
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1364,3 +1405,277 @@ function jsonResponse(data, statusCode) {
     ContentService.MimeType.JSON,
   );
 }
+
+// -----------------------------------------------------------------------------
+// WELLNESS COMPANY <-> COACH CHAT V78
+// Text only. Metadata and messages are stored in Google Sheet.
+// -----------------------------------------------------------------------------
+function companyCoachThreadPublic_(row) {
+  if (!row) return null;
+  return {
+    thread_id: supportClean_(row["Thread ID"]),
+    created_at: supportClean_(row["Created At"]),
+    updated_at: supportClean_(row["Updated At"]),
+    company_id: supportClean_(row["Company ID"]),
+    company_name: supportClean_(row["Company Name"]),
+    coach_id: supportClean_(row["Coach ID"]),
+    coach_name: supportClean_(row["Coach Name"]),
+    status: supportClean_(row["Status"]) || "Open",
+    last_message: supportClean_(row["Last Message"]),
+    last_sender_type: supportClean_(row["Last Sender Type"]),
+    unread_company: Number(row["Unread Company"] || 0),
+    unread_coach: Number(row["Unread Coach"] || 0),
+  };
+}
+
+function companyCoachMessagePublic_(row) {
+  if (!row) return null;
+  return {
+    message_id: supportClean_(row["Message ID"]),
+    thread_id: supportClean_(row["Thread ID"]),
+    created_at: supportClean_(row["Created At"]),
+    sender_type: supportClean_(row["Sender Type"]),
+    sender_id: supportClean_(row["Sender ID"]),
+    sender_name: supportClean_(row["Sender Name"]),
+    message: supportClean_(row["Message"]),
+    read_by_company_at: supportClean_(row["Read By Company At"]),
+    read_by_coach_at: supportClean_(row["Read By Coach At"]),
+  };
+}
+
+function companyCoachFindThread_(companyId, coachId) {
+  const sheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  const company = supportClean_(companyId);
+  const coach = supportClean_(coachId);
+  return (
+    supportRows_(sheet).find(function (row) {
+      return (
+        supportClean_(row["Company ID"]) === company &&
+        supportClean_(row["Coach ID"]) === coach
+      );
+    }) || null
+  );
+}
+
+function companyCoachFindThreadById_(threadId) {
+  const sheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  const id = supportClean_(threadId);
+  return (
+    supportRows_(sheet).find(function (row) {
+      return supportClean_(row["Thread ID"]) === id;
+    }) || null
+  );
+}
+
+function companyCoachEnsureThread_(payload) {
+  const companyId = supportClean_(payload.companyId);
+  const coachId = supportClean_(payload.coachId);
+  if (!companyId || !coachId)
+    throw new Error("companyId dan coachId wajib untuk Company Coach Chat");
+
+  let row = companyCoachFindThread_(companyId, coachId);
+  if (row) return row;
+
+  const sheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  const now = supportNow_();
+  const object = {
+    "Thread ID":
+      "CC-" +
+      Utilities.getUuid().replace(/-/g, "").slice(0, 16).toUpperCase(),
+    "Created At": now,
+    "Updated At": now,
+    "Company ID": companyId,
+    "Company Name": supportClean_(payload.companyName),
+    "Coach ID": coachId,
+    "Coach Name": supportClean_(payload.coachName),
+    Status: "Open",
+    "Last Message": "",
+    "Last Sender Type": "",
+    "Unread Company": 0,
+    "Unread Coach": 0,
+  };
+  object.__row = supportAppendRow_(sheet, object);
+  return object;
+}
+
+function companyCoachMessages_(threadId, limit) {
+  const sheet = supportSheet_(
+    COMPANY_COACH_MESSAGES_SHEET_NAME,
+    COMPANY_COACH_MESSAGE_HEADERS,
+  );
+  const id = supportClean_(threadId);
+  const maximum = Math.max(1, Math.min(80, Number(limit || 50)));
+  const rows = supportRows_(sheet).filter(function (row) {
+    return supportClean_(row["Thread ID"]) === id;
+  });
+  rows.sort(function (a, b) {
+    return supportClean_(a["Created At"]).localeCompare(
+      supportClean_(b["Created At"]),
+    );
+  });
+  return rows.slice(Math.max(0, rows.length - maximum));
+}
+
+function companyCoachMarkReadInternal_(threadId, readerType) {
+  const id = supportClean_(threadId);
+  const reader = supportClean_(readerType).toLowerCase();
+  if (!id || ["company", "coach"].indexOf(reader) === -1) return;
+
+  const now = supportNow_();
+  const messageSheet = supportSheet_(
+    COMPANY_COACH_MESSAGES_SHEET_NAME,
+    COMPANY_COACH_MESSAGE_HEADERS,
+  );
+  const headers = supportHeaders_(messageSheet);
+  const ticketCol = headers.indexOf("Thread ID") + 1;
+  const senderCol = headers.indexOf("Sender Type") + 1;
+  const readCol =
+    headers.indexOf(
+      reader === "company" ? "Read By Company At" : "Read By Coach At",
+    ) + 1;
+
+  if (messageSheet.getLastRow() >= 2 && ticketCol > 0 && senderCol > 0 && readCol > 0) {
+    const values = messageSheet
+      .getRange(2, 1, messageSheet.getLastRow() - 1, headers.length)
+      .getValues();
+    values.forEach(function (row, index) {
+      if (supportClean_(row[ticketCol - 1]) !== id) return;
+      if (supportClean_(row[senderCol - 1]).toLowerCase() === reader) return;
+      if (supportClean_(row[readCol - 1])) return;
+      messageSheet.getRange(index + 2, readCol).setValue(now);
+    });
+  }
+
+  const threadSheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  const thread = companyCoachFindThreadById_(id);
+  if (thread) {
+    thread[reader === "company" ? "Unread Company" : "Unread Coach"] = 0;
+    supportWriteRow_(threadSheet, thread.__row, thread);
+  }
+}
+
+function companyCoachListThreads_(payload) {
+  const actorType = supportClean_(payload.actorType).toLowerCase();
+  const companyId = supportClean_(payload.companyId);
+  const coachId = supportClean_(payload.coachId);
+  const sheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  let rows = supportRows_(sheet);
+  if (actorType === "company") {
+    rows = rows.filter(function (row) {
+      return supportClean_(row["Company ID"]) === companyId;
+    });
+  } else if (actorType === "coach") {
+    rows = rows.filter(function (row) {
+      return supportClean_(row["Coach ID"]) === coachId;
+    });
+  } else {
+    throw new Error("actorType Company Coach Chat tidak valid");
+  }
+  rows.sort(function (a, b) {
+    return supportClean_(b["Updated At"]).localeCompare(
+      supportClean_(a["Updated At"]),
+    );
+  });
+  return {
+    ok: true,
+    threads: rows.map(companyCoachThreadPublic_),
+  };
+}
+
+function companyCoachGetThread_(payload) {
+  const actorType = supportClean_(payload.actorType).toLowerCase();
+  const row = companyCoachEnsureThread_(payload);
+  const threadId = supportClean_(row["Thread ID"]);
+  if (payload.markRead !== false)
+    companyCoachMarkReadInternal_(threadId, actorType);
+  const refreshed = companyCoachFindThreadById_(threadId) || row;
+  return {
+    ok: true,
+    thread: companyCoachThreadPublic_(refreshed),
+    messages: companyCoachMessages_(threadId, payload.limit).map(
+      companyCoachMessagePublic_,
+    ),
+  };
+}
+
+function companyCoachSendMessage_(payload) {
+  const senderType = supportClean_(payload.senderType || payload.actorType).toLowerCase();
+  if (["company", "coach"].indexOf(senderType) === -1)
+    throw new Error("Sender Company Coach Chat tidak valid");
+  const message = supportClean_(payload.message).slice(0, 2000);
+  if (!message) throw new Error("Tulis pesan terlebih dahulu");
+
+  const thread = companyCoachEnsureThread_(payload);
+  const threadId = supportClean_(thread["Thread ID"]);
+  const now = supportNow_();
+  const messageSheet = supportSheet_(
+    COMPANY_COACH_MESSAGES_SHEET_NAME,
+    COMPANY_COACH_MESSAGE_HEADERS,
+  );
+  const messageObject = {
+    "Message ID":
+      "CCM-" +
+      Utilities.getUuid().replace(/-/g, "").slice(0, 18).toUpperCase(),
+    "Thread ID": threadId,
+    "Created At": now,
+    "Sender Type": senderType,
+    "Sender ID": supportClean_(payload.senderId),
+    "Sender Name": supportClean_(payload.senderName),
+    Message: message,
+    "Read By Company At": senderType === "company" ? now : "",
+    "Read By Coach At": senderType === "coach" ? now : "",
+  };
+  supportAppendRow_(messageSheet, messageObject);
+
+  const threadSheet = supportSheet_(
+    COMPANY_COACH_THREADS_SHEET_NAME,
+    COMPANY_COACH_THREAD_HEADERS,
+  );
+  thread["Updated At"] = now;
+  thread["Company Name"] =
+    supportClean_(payload.companyName) || thread["Company Name"];
+  thread["Coach Name"] =
+    supportClean_(payload.coachName) || thread["Coach Name"];
+  thread["Last Message"] = message;
+  thread["Last Sender Type"] = senderType;
+  thread["Status"] = "Open";
+  if (senderType === "company") {
+    thread["Unread Coach"] = Number(thread["Unread Coach"] || 0) + 1;
+  } else {
+    thread["Unread Company"] = Number(thread["Unread Company"] || 0) + 1;
+  }
+  supportWriteRow_(threadSheet, thread.__row, thread);
+
+  return {
+    ok: true,
+    thread: companyCoachThreadPublic_(thread),
+    message: companyCoachMessagePublic_(messageObject),
+  };
+}
+
+function companyCoachMarkRead_(payload) {
+  let threadId = supportClean_(payload.threadId);
+  if (!threadId) {
+    const row = companyCoachFindThread_(payload.companyId, payload.coachId);
+    threadId = row ? supportClean_(row["Thread ID"]) : "";
+  }
+  if (threadId)
+    companyCoachMarkReadInternal_(threadId, payload.actorType);
+  return { ok: true, marked: Boolean(threadId) };
+}
+

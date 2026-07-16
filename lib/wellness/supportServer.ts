@@ -3,12 +3,14 @@ import { createClient } from "@supabase/supabase-js";
 import { getSessionUser } from "@/lib/server/session";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import { postToWellnessWebhook } from "@/lib/wellness/googleSheetWebhook";
+import { companyActorPayload, resolveCompanyPortalContext } from "@/lib/wellness/companyAuth";
 
 // WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_V61
+// WELLNESS_COMPANY_SUPPORT_ACTOR_V78
 // Server-only authentication + webhook bridge for technical support chat.
 // Chat content lives in Google Sheet; attachments live in Google Drive.
 
-export type SupportActorType = "participant" | "coach" | "admin";
+export type SupportActorType = "participant" | "coach" | "company" | "admin";
 
 export type SupportActor = {
   type: SupportActorType;
@@ -81,6 +83,18 @@ async function participantActor(request: NextRequest): Promise<SupportActor | nu
   };
 }
 
+async function companyActor(request: NextRequest): Promise<SupportActor | null> {
+  const requestedContext = clean(
+    request.headers.get("x-wellness-actor-context") ||
+      request.nextUrl.searchParams.get("actor_context"),
+  ).toLowerCase();
+  if (requestedContext !== "company") return null;
+
+  const context = await resolveCompanyPortalContext(request);
+  if (!context.company) return null;
+  return companyActorPayload(context);
+}
+
 async function coachActor(request: NextRequest): Promise<SupportActor | null> {
   const token = request.cookies.get("wellness_coach_session")?.value || "";
   if (!token) return null;
@@ -109,6 +123,13 @@ async function coachActor(request: NextRequest): Promise<SupportActor | null> {
 }
 
 export async function getSupportActor(request: NextRequest): Promise<SupportActor | null> {
+  try {
+    const company = await companyActor(request);
+    if (company) return company;
+  } catch {
+    // Continue with the standard actor resolution.
+  }
+
   const admin = sessionAdminActor(request);
   if (admin) return admin;
 

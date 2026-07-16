@@ -5,6 +5,7 @@ import { prepareWellnessProfilePhoto } from "./profilePhoto";
 
 // WELLNESS_PROFILE_GOOGLE_DRIVE_V76
 // WELLNESS_PARTICIPANT_PROFILE_UI_FIX_V76B
+// WELLNESS_COMPANY_PROFILE_CONTEXT_V78
 
 export type WellnessProfileData = {
   actor_type?: string;
@@ -26,7 +27,10 @@ function initials(name: string) {
   return parts.map((part) => part.charAt(0).toUpperCase()).join("") || "HH";
 }
 
-export function useWellnessProfile(enabled = true) {
+export function useWellnessProfile(
+  enabled = true,
+  actorType?: "participant" | "coach" | "company",
+) {
   const [profile, setProfile] = useState<WellnessProfileData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,13 +39,17 @@ export function useWellnessProfile(enabled = true) {
     setLoading(true);
     const result = await fetch(`/api/wellness/profile?t=${Date.now()}`, {
       cache: "no-store",
+      headers:
+        actorType === "company"
+          ? { "x-wellness-actor-context": "company" }
+          : undefined,
     })
       .then((response) => response.json())
       .catch(() => ({ ok: false }));
     if (result?.ok) setProfile(result.profile || null);
     setLoading(false);
     return result;
-  }, [enabled]);
+  }, [actorType, enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -95,16 +103,17 @@ export function WellnessAvatar({
 }
 
 export function WellnessProfileAvatar({
+  actorType,
   name,
   size = "md",
   className = "",
 }: {
-  actorType?: "participant" | "coach";
+  actorType?: "participant" | "coach" | "company";
   name?: string;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
 }) {
-  const { profile } = useWellnessProfile(true);
+  const { profile } = useWellnessProfile(true, actorType);
   return (
     <WellnessAvatar
       name={profile?.name || name}
@@ -120,17 +129,21 @@ export default function WellnessProfilePanel({
   actor,
   title,
 }: {
-  actorType: "participant" | "coach";
+  actorType: "participant" | "coach" | "company";
   actor: any;
   title?: string;
 }) {
-  const { profile, loading, reload } = useWellnessProfile(true);
+  const { profile, loading, reload } = useWellnessProfile(true, actorType);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState("");
 
   const actorName =
     clean(profile?.name || actor?.name || actor?.full_name || actor?.email) ||
-    (actorType === "coach" ? "Coach Wellness" : "Peserta Wellness");
+    (actorType === "coach"
+      ? "Coach Wellness"
+      : actorType === "company"
+        ? "Perusahaan Wellness"
+        : "Peserta Wellness");
   const actorCode = clean(
     profile?.code || actor?.code || actor?.employee_code || actor?.no_karyawan,
   );
@@ -162,6 +175,10 @@ export default function WellnessProfilePanel({
       body.append("file", prepared);
       const result = await fetch("/api/wellness/profile/upload", {
         method: "POST",
+        headers:
+          actorType === "company"
+            ? { "x-wellness-actor-context": "company" }
+            : undefined,
         body,
       }).then((response) => response.json());
       if (!result?.ok) throw new Error(result?.message || "Upload foto gagal.");
@@ -192,7 +209,11 @@ export default function WellnessProfilePanel({
           />
           <div className="min-w-0 flex-1 pt-1">
             <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/75 md:text-[11px]">
-              {actorType === "coach" ? "Coach Profile" : "Participant Profile"}
+              {actorType === "coach"
+                ? "Coach Profile"
+                : actorType === "company"
+                  ? "Company Profile"
+                  : "Participant Profile"}
             </div>
             <h2 className="mt-2 break-words text-xl font-black leading-[1.15] text-white md:text-2xl">
               {title || actorName}
@@ -208,14 +229,24 @@ export default function WellnessProfilePanel({
         <div className="grid gap-3 md:grid-cols-2">
           <ProfileInfo label="Nama" value={actorName} />
           <ProfileInfo
-            label={actorType === "coach" ? "Coach ID" : "Kode Karyawan"}
+            label={
+              actorType === "coach"
+                ? "Coach ID"
+                : actorType === "company"
+                  ? "Company ID"
+                  : "Kode Karyawan"
+            }
             value={actorCode || clean(actor?.id)}
           />
           <ProfileInfo label="Email" value={actorEmail || "-"} />
           <ProfileInfo
             label="Peran"
             value={
-              actorType === "coach" ? "Wellness Coach" : "Peserta Wellness"
+              actorType === "coach"
+                ? "Wellness Coach"
+                : actorType === "company"
+                  ? "Perusahaan Wellness"
+                  : "Peserta Wellness"
             }
           />
         </div>

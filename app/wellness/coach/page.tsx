@@ -453,6 +453,7 @@ export default function WellnessCoachPortalPage() {
 
         if (markReadResult?.ok) {
           // WELLNESS_COACH_UNREAD_AUTO_CLEAR_V77E
+// WELLNESS_COACH_COMPANY_CHAT_MENU_V78
           // Hilangkan badge langsung setelah server berhasil menandai pesan dibaca.
           const readAt = new Date().toISOString();
 
@@ -1266,6 +1267,19 @@ export default function WellnessCoachPortalPage() {
                 </div>
                 <div className="mt-1 text-sm font-bold text-slate-500">
                   Percakapan dengan anggota assigned group
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = "/wellness/coach/company-chat";
+                }}
+                className="w-full rounded-3xl border border-slate-100 bg-white p-4 text-left"
+              >
+                <div className="text-base font-black">🏢 Chat With Company</div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Komunikasi dengan PIC perusahaan assigned group
                 </div>
               </button>
 

@@ -9,11 +9,12 @@ import {
 } from "@/components/wellness/supportFiles";
 
 // WELLNESS_SUPPORT_CHAT_FULLSCREEN_V62
+// WELLNESS_COMPANY_SUPPORT_CHAT_CONTEXT_V78
 // Full-screen technical support workspace for mobile WebView.
 // Storage and network behavior remain unchanged: Google Sheet/Drive, manual refresh, latest 30 messages.
 
 type SupportChatPanelProps = {
-  actorType: "participant" | "coach";
+  actorType: "participant" | "coach" | "company";
   onClose?: () => void;
 };
 
@@ -110,6 +111,10 @@ export default function SupportChatPanel({
     if (!options?.quiet) setLoading(true);
     const result = await fetch("/api/wellness/support?mode=messages&limit=30", {
       cache: "no-store",
+      headers:
+        actorType === "company"
+          ? { "x-wellness-actor-context": "company" }
+          : undefined,
     })
       .then((response) => response.json())
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
@@ -182,13 +187,19 @@ export default function SupportChatPanel({
       if (attachment) {
         uploaded = await uploadSupportAttachment(
           attachment,
-          clean(thread?.ticket_id || thread?.ticketId)
+          clean(thread?.ticket_id || thread?.ticketId),
+          actorType,
         );
       }
 
       const result = await fetch("/api/wellness/support", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(actorType === "company"
+            ? { "x-wellness-actor-context": "company" }
+            : {}),
+        },
         body: JSON.stringify({
           action: "send_message",
           thread_id:
@@ -222,7 +233,11 @@ export default function SupportChatPanel({
 
   const status = clean(thread?.status) || "Open";
   const contextLabel =
-    actorType === "coach" ? "Bantuan teknis Portal Coach" : "Bantuan teknis Portal Peserta";
+    actorType === "coach"
+      ? "Bantuan teknis Portal Coach"
+      : actorType === "company"
+        ? "Bantuan teknis Portal Perusahaan"
+        : "Bantuan teknis Portal Peserta";
 
   if (!mounted) return null;
 

@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_SUPPORT_ATTACHMENT_COMPRESSION_V61
+// WELLNESS_COMPANY_SUPPORT_ATTACHMENT_CONTEXT_V78
 // Client-side compression keeps images small before upload to Google Drive.
 
 export function formatSupportBytes(value: number) {
@@ -87,13 +88,21 @@ export async function prepareSupportAttachment(file: File): Promise<File> {
   });
 }
 
-export async function uploadSupportAttachment(file: File, threadId = "") {
+export async function uploadSupportAttachment(
+  file: File,
+  threadId = "",
+  actorType: "participant" | "coach" | "company" = "participant",
+) {
   const form = new FormData();
   form.append("file", file);
   if (threadId) form.append("thread_id", threadId);
 
   const response = await fetch("/api/wellness/support/upload", {
     method: "POST",
+    headers:
+      actorType === "company"
+        ? { "x-wellness-actor-context": "company" }
+        : undefined,
     body: form,
   });
   const result = await response.json().catch(() => ({ ok: false, message: "Upload gagal." }));
