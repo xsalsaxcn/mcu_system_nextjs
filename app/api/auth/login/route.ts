@@ -38,7 +38,33 @@ export async function POST(req: NextRequest) {
     role: user.role,
     post_id: user.post_id,
     post_name: postName,
-    program_type: user.program_type || "corporate"
+    program_type: user.program_type || "corporate",
+    // WELLNESS_COMPANY_LOGIN_CONTEXT_V78A
+    // Kolom yang tidak tersedia pada tabel users akan bernilai undefined
+    // dan tidak mengubah alur login role lain.
+    wellness_company_id:
+      user.wellness_company_id ||
+      user.company_id ||
+      user.main_entity_id ||
+      user.client_id ||
+      null,
+    company_id:
+      user.company_id ||
+      user.wellness_company_id ||
+      user.main_entity_id ||
+      user.client_id ||
+      null,
+    main_entity_id:
+      user.main_entity_id ||
+      user.wellness_company_id ||
+      user.company_id ||
+      null,
+    company_name:
+      user.company_name ||
+      user.company ||
+      user.main_entity_name ||
+      user.client_name ||
+      null,
   };
 
   const res = NextResponse.json({ ok: true, user: sessionUser });

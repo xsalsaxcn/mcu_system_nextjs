@@ -9,6 +9,7 @@ import WellnessProfilePanel, {
 } from "@/components/wellness/WellnessProfile";
 
 // WELLNESS_COMPANY_PORTAL_EXECUTIVE_V78
+// WELLNESS_COMPANY_MOBILE_INLINE_LOGIN_V78A
 // Company-scoped executive dashboard with rankings per kelompok, ranking
 // between kelompok, participant leaderboard, Coach/Admin communication,
 // profile, and mobile-first navigation.
@@ -81,17 +82,34 @@ export default function WellnessCompanyPortalPage() {
   const [metric, setMetric] = useState<Metric>("overall");
   const [unreadCoach, setUnreadCoach] = useState(0);
   const [unreadAdmin, setUnreadAdmin] = useState(0);
+  const [sessionRequired, setSessionRequired] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
+
     const result = await fetch("/api/wellness/company/dashboard?days=30", {
       cache: "no-store",
+      credentials: "include",
     })
-      .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({
+        ok: false,
+        http_status: 0,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       setData(result);
+      setSessionRequired(false);
+      setLoginError("");
       setMessage(result.message || "Portal Perusahaan aktif.");
       if (selectedGroup) {
         const fresh = (result.group_ranking || []).find(
@@ -100,20 +118,35 @@ export default function WellnessCompanyPortalPage() {
         if (fresh) setSelectedGroup(fresh);
       }
     } else {
+      const needsSession =
+        Number(result.http_status || 0) === 401 ||
+        /session perusahaan belum aktif|unauthorized/i.test(
+          clean(result.message),
+        );
+
+      if (needsSession) {
+        setData(null);
+        setSessionRequired(true);
+      }
+
       setMessage(result.message || "Portal Perusahaan gagal dimuat.");
     }
+
     if (!options?.quiet) setLoading(false);
+    return result;
   }
 
   async function loadUnread() {
     const [coachResult, adminResult] = await Promise.all([
       fetch("/api/wellness/company/coach-chat?mode=threads", {
         cache: "no-store",
+        credentials: "include",
       })
         .then((response) => response.json())
         .catch(() => ({ ok: false })),
       fetch("/api/wellness/support?mode=summary", {
         cache: "no-store",
+        credentials: "include",
         headers: { "x-wellness-actor-context": "company" },
       })
         .then((response) => response.json())
@@ -124,11 +157,16 @@ export default function WellnessCompanyPortalPage() {
   }
 
   useEffect(() => {
-    void load();
-    void loadUnread();
-    const timer = window.setInterval(() => void loadUnread(), 60_000);
+    void load().then((result) => {
+      if (result?.ok) void loadUnread();
+    });
+
+    const timer = window.setInterval(() => {
+      if (!sessionRequired) void loadUnread();
+    }, 60_000);
+
     return () => window.clearInterval(timer);
-  }, []);
+  }, [sessionRequired]);
 
   const totalUnread = unreadCoach + unreadAdmin;
   const company = data?.company || {};
@@ -136,11 +174,62 @@ export default function WellnessCompanyPortalPage() {
   const groupRanking = data?.group_ranking || [];
   const topParticipants = data?.rankings?.[metric] || [];
 
+  // WELLNESS_COMPANY_INLINE_LOGIN_V78A
+  async function loginCompany(event: React.FormEvent) {
+    event.preventDefault();
+
+    if (!loginUsername.trim() || !loginPassword) {
+      setLoginError("Username dan password wajib diisi.");
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError("");
+
+    const result = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: loginUsername.trim(),
+        password: loginPassword,
+      }),
+    })
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Tidak dapat terhubung ke server.",
+      }));
+
+    if (!result.ok) {
+      setLoginError(result.message || "Login perusahaan gagal.");
+      setLoginLoading(false);
+      return;
+    }
+
+    const dashboardResult = await load();
+    if (dashboardResult?.ok) {
+      setLoginPassword("");
+      await loadUnread();
+    } else if (!dashboardResult?.requires_company_selection) {
+      setLoginError(
+        dashboardResult?.message ||
+          "Akun berhasil masuk, tetapi belum memiliki akses Portal Perusahaan.",
+      );
+    }
+
+    setLoginLoading(false);
+  }
+
   async function chooseCompany(companyId: string) {
     if (!companyId) return;
     setLoading(true);
     const result = await fetch("/api/wellness/company/session", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ company_id: companyId }),
     }).then((response) => response.json());
@@ -151,6 +240,86 @@ export default function WellnessCompanyPortalPage() {
     }
     await load();
     await loadUnread();
+  }
+
+  if (sessionRequired && !loading) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-teal-900 px-4 py-8 text-slate-950">
+        <section className="mx-auto max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl shadow-slate-950/30">
+          <div className="bg-gradient-to-br from-indigo-950 via-blue-800 to-teal-600 p-6 text-white">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
+              Harmony Health
+            </div>
+            <h1 className="mt-2 text-3xl font-black leading-tight">
+              Portal Perusahaan
+            </h1>
+            <p className="mt-2 text-sm font-bold leading-6 text-white/80">
+              Masuk menggunakan akun perusahaan, HR, management, atau admin Wellness.
+            </p>
+          </div>
+
+          <form onSubmit={loginCompany} className="space-y-4 p-6">
+            {loginError ? (
+              <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold leading-5 text-rose-700">
+                {loginError}
+              </div>
+            ) : null}
+
+            <div>
+              <label className="mb-1.5 block text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                Username
+              </label>
+              <input
+                value={loginUsername}
+                onChange={(event) => setLoginUsername(event.target.value)}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="username"
+                placeholder="Masukkan username"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-950 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+              />
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowLoginPassword((previous) => !previous)
+                  }
+                  className="text-xs font-black text-teal-700"
+                >
+                  {showLoginPassword ? "Sembunyikan" : "Tampilkan"}
+                </button>
+              </div>
+              <input
+                type={showLoginPassword ? "text" : "password"}
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                autoComplete="current-password"
+                placeholder="Masukkan password"
+                className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-950 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="h-14 w-full rounded-2xl bg-teal-600 px-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            >
+              {loginLoading ? "Memproses..." : "Masuk ke Portal Perusahaan"}
+            </button>
+
+            <div className="rounded-2xl bg-sky-50 px-4 py-3 text-xs font-bold leading-5 text-sky-800">
+              Session akan tersimpan pada aplikasi ini. Setelah login berhasil, dashboard perusahaan dibuka otomatis.
+            </div>
+          </form>
+        </section>
+      </main>
+    );
   }
 
   if (data?.requires_company_selection) {

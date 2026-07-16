@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 // WELLNESS_COMPANY_PORTAL_AUTH_V78
+// WELLNESS_COMPANY_MOBILE_SESSION_V78A
 // Resolves the company scope from the signed-in user or an admin-selected
 // company context cookie. No new database table is required.
 
@@ -71,8 +72,8 @@ export type CompanyPortalContext = {
 export async function resolveCompanyPortalContext(
   request: NextRequest,
 ): Promise<CompanyPortalContext> {
-  const user: any = getSessionUser(request);
-  if (!user) {
+  const signedUser: any = getSessionUser(request);
+  if (!signedUser) {
     return {
       ok: false,
       user: null,
@@ -84,6 +85,29 @@ export async function resolveCompanyPortalContext(
       requiresSelection: false,
       message: "Session perusahaan belum aktif.",
     };
+  }
+
+  // WELLNESS_COMPANY_SESSION_ENRICH_V78A
+  // Cookie lama mungkin belum membawa company_id. Ambil ulang profil user
+  // secara server-side lalu gabungkan dengan signed session yang valid.
+  const supabase = getSupabaseAdmin();
+  let user: any = signedUser;
+  const signedUserId = numeric(signedUser?.id);
+
+  if (signedUserId) {
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", signedUserId)
+      .maybeSingle();
+
+    if (userRow) {
+      user = {
+        ...signedUser,
+        ...userRow,
+        id: signedUser.id,
+      };
+    }
   }
 
   const role = userRole(user);
@@ -104,7 +128,6 @@ export async function resolveCompanyPortalContext(
     };
   }
 
-  const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("wellness_companies")
     .select("*")
