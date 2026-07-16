@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_PORTAL_MENU_UI_V50
 // WELLNESS_PARTICIPANT_CHAT_MENU_V54
-// WELLNESS_PARTICIPANT_ADMIN_SUPPORT_MENU_V61
 // WELLNESS_PARTICIPANT_CHAT_NOTIFICATION_BELL_V74
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
@@ -90,13 +89,6 @@ const menuItems: MenuItem[] = [
     shortLabel: "Chat",
     description: "Konsultasi langsung dengan coach",
     emoji: "\u{1F4AC}",
-  },
-  {
-    key: "support",
-    label: "Chat with Admin",
-    shortLabel: "Support",
-    description: "Bantuan teknis aplikasi dan upload bukti kendala",
-    emoji: "🛠️",
   },
   {
     key: "profile",
@@ -244,21 +236,40 @@ export default function ParticipantPortalMenu({
   }
 
   function NotificationBell() {
-    if (totalUnread <= 0) return null;
-
+    // WELLNESS_NOTIFICATION_BELL_ALL_SCREENS_V75
+    // Lonceng selalu terlihat di seluruh Portal Peserta. Badge dan animasi
+    // hanya aktif ketika terdapat chat baru.
     return (
       <div className="relative">
         <button
           type="button"
           onClick={() => setNotificationOpen((previous) => !previous)}
-          className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-100 bg-white text-xl shadow-lg shadow-slate-200"
-          aria-label={`Ada ${totalUnread} chat baru`}
+          className={`relative flex h-12 w-12 items-center justify-center rounded-2xl border bg-white text-xl shadow-lg shadow-slate-200 ${
+            totalUnread > 0
+              ? "border-amber-200 text-amber-600"
+              : "border-slate-100 text-slate-500"
+          }`}
+          aria-label={
+            totalUnread > 0
+              ? `Ada ${totalUnread} chat baru`
+              : "Buka notifikasi chat"
+          }
           aria-expanded={notificationOpen}
         >
-          <span className="animate-[pulse_1.8s_ease-in-out_infinite]">🔔</span>
-          <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
-            {totalUnread > 99 ? "99+" : totalUnread}
+          <span
+            className={
+              totalUnread > 0
+                ? "animate-[pulse_1.8s_ease-in-out_infinite]"
+                : ""
+            }
+          >
+            🔔
           </span>
+          {totalUnread > 0 ? (
+            <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+              {totalUnread > 99 ? "99+" : totalUnread}
+            </span>
+          ) : null}
         </button>
 
         {notificationOpen ? (
@@ -311,6 +322,36 @@ export default function ParticipantPortalMenu({
                     {adminUnread}
                   </span>
                 </button>
+              ) : null}
+
+              {totalUnread === 0 ? (
+                <>
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 text-center">
+                    <div className="text-sm font-black text-slate-800">
+                      Belum ada chat baru
+                    </div>
+                    <div className="mt-1 text-[11px] font-bold text-slate-500">
+                      Lonceng tetap aktif pada seluruh halaman portal.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => chooseTab("chat")}
+                      className="rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-800"
+                    >
+                      💬 Chat Coach
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => chooseTab("support")}
+                      className="rounded-2xl bg-indigo-50 px-3 py-3 text-xs font-black text-indigo-800"
+                    >
+                      🛠️ Chat Admin
+                    </button>
+                  </div>
+                </>
               ) : null}
             </div>
           </div>

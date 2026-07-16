@@ -2894,6 +2894,8 @@ function NutritionTab({
 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [savingSmart, setSavingSmart] = useState(false);
+  const [nutritionHistoryOpen, setNutritionHistoryOpen] = useState(false);
+  const [nutritionHistoryDate, setNutritionHistoryDate] = useState("");
 
   const foodText = clean(
     form.food_name ||
@@ -3013,12 +3015,33 @@ function NutritionTab({
     }
   }, [JSON.stringify(breakdownPayload), totalEstimatedCalories]);
 
-  const historyLogs =
-    directNutrition?.today_logs?.length > 0
-      ? directNutrition.today_logs
-      : directNutrition?.latest_logs?.length > 0
+  // WELLNESS_NUTRITION_HISTORY_DROPDOWN_FILTER_V75
+  // Riwayat memakai seluruh data yang tersedia. Filter tanggal hanya mengubah
+  // tampilan dan tidak menghapus data historis.
+  const nutritionHistorySource =
+    Array.isArray(directNutrition?.logs) && directNutrition.logs.length > 0
+      ? directNutrition.logs
+      : Array.isArray(directNutrition?.latest_logs) &&
+          directNutrition.latest_logs.length > 0
         ? directNutrition.latest_logs
-        : logs || [];
+        : Array.isArray(logs)
+          ? logs
+          : [];
+
+  const sortedNutritionHistory = [...nutritionHistorySource].sort(
+    (left: any, right: any) =>
+      nutritionLogDateV73(right).localeCompare(nutritionLogDateV73(left))
+  );
+
+  const historyLogs = nutritionHistoryDate
+    ? sortedNutritionHistory.filter(
+        (item: any) => nutritionLogDateV73(item) === nutritionHistoryDate
+      )
+    : sortedNutritionHistory;
+
+  const visibleHistoryLogs = nutritionHistoryDate
+    ? historyLogs
+    : historyLogs.slice(0, 8);
 
   async function submitNutritionSmart() {
     setSavingSmart(true);
@@ -3165,44 +3188,111 @@ function NutritionTab({
       </div>
 
       <div className="rounded-[1.8rem] border border-white bg-white p-4 shadow-lg shadow-slate-200/50">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
-              Meal History
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() =>
+              setNutritionHistoryOpen((previous) => !previous)
+            }
+            className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-[1.4rem] bg-slate-50 px-4 py-4 text-left transition active:scale-[0.99]"
+            aria-expanded={nutritionHistoryOpen}
+          >
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                Meal History
+              </div>
+              <div className="mt-1 truncate text-lg font-black text-slate-950">
+                Riwayat Nutrisi
+              </div>
+              <div className="mt-1 text-[11px] font-bold text-slate-500">
+                {nutritionHistoryDate
+                  ? `${historyLogs.length} data pada tanggal terpilih`
+                  : `${sortedNutritionHistory.length} data tersimpan`}
+              </div>
             </div>
 
-            <h3 className="mt-2 text-xl font-black text-slate-950">
-              Riwayat Nutrisi
-            </h3>
-
-            {directNutrition?.sources ? (
-              <p className="mt-1 text-[11px] font-bold leading-5 text-slate-500">
-                Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
-                {directNutrition.sources.google_sheet_rows || 0} row
-              </p>
-            ) : null}
-          </div>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-xl font-black text-slate-700 shadow-sm">
+              {nutritionHistoryOpen ? "−" : "+"}
+            </span>
+          </button>
 
           <button
             type="button"
             onClick={loadDirectNutrition}
-            className="rounded-full bg-teal-50 px-3 py-2 text-[11px] font-black text-teal-700"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-50 text-base font-black text-teal-700"
+            aria-label="Refresh riwayat nutrisi"
           >
-            {loadingHistory ? "..." : "Refresh"}
+            {loadingHistory ? "…" : "↻"}
           </button>
         </div>
 
-        <div className="mt-4 space-y-3">
-          {historyLogs.length === 0 ? (
-            <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
-              Belum ada input nutrisi.
+        {nutritionHistoryOpen ? (
+          <div className="mt-4">
+            <div className="rounded-[1.4rem] border border-teal-100 bg-[#f4fbfa] p-3">
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="grid gap-2 text-[11px] font-black text-slate-700">
+                  Filter Tanggal
+                  <input
+                    type="date"
+                    value={nutritionHistoryDate}
+                    onChange={(event) =>
+                      setNutritionHistoryDate(event.target.value)
+                    }
+                    className={`${fieldClass} w-full bg-white text-sm`}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setNutritionHistoryDate("")}
+                  disabled={!nutritionHistoryDate}
+                  className="rounded-2xl bg-white px-4 py-3 text-xs font-black text-teal-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Semua Tanggal
+                </button>
+              </div>
+
+              {directNutrition?.sources ? (
+                <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
+                  Supabase {directNutrition.sources.supabase_rows || 0} data
+                  {" • "}
+                  Google Sheet {directNutrition.sources.google_sheet_rows || 0} data
+                </p>
+              ) : null}
             </div>
-          ) : (
-            historyLogs.slice(0, 6).map((item: any, index: number) => (
-              <CompactNutritionHistoryItemV43 key={`${item.id || index}-${index}`} item={item} />
-            ))
-          )}
-        </div>
+
+            <div className="mt-3 max-h-[30rem] space-y-3 overflow-y-auto pr-1">
+              {visibleHistoryLogs.length === 0 ? (
+                <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+                  {nutritionHistoryDate
+                    ? "Tidak ada input nutrisi pada tanggal tersebut."
+                    : "Belum ada input nutrisi."}
+                </div>
+              ) : (
+                visibleHistoryLogs.map((item: any, index: number) => (
+                  <CompactNutritionHistoryItemV43
+                    key={`${item.id || index}-${index}`}
+                    item={item}
+                  />
+                ))
+              )}
+            </div>
+
+            {!nutritionHistoryDate && historyLogs.length > visibleHistoryLogs.length ? (
+              <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-center text-[11px] font-bold text-slate-500">
+                Menampilkan 8 data terbaru. Pilih tanggal untuk melihat data tertentu.
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setNutritionHistoryOpen(true)}
+            className="mt-3 w-full rounded-[1.3rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black text-slate-500"
+          >
+            Buka riwayat dan filter berdasarkan tanggal
+          </button>
+        )}
       </div>
     </section>
   );
