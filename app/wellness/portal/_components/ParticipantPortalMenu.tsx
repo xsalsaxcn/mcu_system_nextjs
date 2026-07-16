@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_PORTAL_MENU_UI_V50
 // WELLNESS_PARTICIPANT_CHAT_MENU_V54
 // WELLNESS_PARTICIPANT_CHAT_NOTIFICATION_BELL_V74
+// WELLNESS_PARTICIPANT_ASSIGNED_COACH_MENU_V76
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
@@ -99,7 +100,13 @@ const menuItems: MenuItem[] = [
   },
 ];
 
-const bottomItems: PortalTab[] = ["home", "nutrition", "workout", "history", "devices"];
+const bottomItems: PortalTab[] = [
+  "home",
+  "nutrition",
+  "workout",
+  "history",
+  "devices",
+];
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -121,6 +128,7 @@ export default function ParticipantPortalMenu({
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [coachUnread, setCoachUnread] = useState(0);
   const [adminUnread, setAdminUnread] = useState(0);
+  const [assignedCoachName, setAssignedCoachName] = useState("");
 
   const participantName =
     clean(participant?.name) ||
@@ -132,13 +140,13 @@ export default function ParticipantPortalMenu({
     participant?.id ||
       participant?.participant_id ||
       participant?.wellness_participant_id ||
-      0
+      0,
   );
   const totalUnread = Math.max(0, coachUnread) + Math.max(0, adminUnread);
 
   const activeItem = useMemo(
     () => menuItems.find((item) => item.key === activeTab) || menuItems[0],
-    [activeTab]
+    [activeTab],
   );
 
   async function loadUnreadNotifications() {
@@ -152,7 +160,7 @@ export default function ParticipantPortalMenu({
     const [coachResult, adminResult] = await Promise.all([
       fetch(
         `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat_summary&t=${timestamp}`,
-        { cache: "no-store" }
+        { cache: "no-store" },
       )
         .then((response) => response.json())
         .catch(() => ({ ok: false })),
@@ -164,21 +172,18 @@ export default function ParticipantPortalMenu({
     ]);
 
     if (coachResult?.ok) {
+      setAssignedCoachName(clean(coachResult?.coach?.name));
       setCoachUnread(
         Math.max(
           0,
           Number(
-            coachResult.unread_count ??
-              coachResult.unread_coach_messages ??
-              0
-          ) || 0
-        )
+            coachResult.unread_count ?? coachResult.unread_coach_messages ?? 0,
+          ) || 0,
+        ),
       );
     }
     if (adminResult?.ok) {
-      setAdminUnread(
-        Math.max(0, Number(adminResult.unread_count || 0) || 0)
-      );
+      setAdminUnread(Math.max(0, Number(adminResult.unread_count || 0) || 0));
     }
   }
 
@@ -258,9 +263,7 @@ export default function ParticipantPortalMenu({
         >
           <span
             className={
-              totalUnread > 0
-                ? "animate-[pulse_1.8s_ease-in-out_infinite]"
-                : ""
+              totalUnread > 0 ? "animate-[pulse_1.8s_ease-in-out_infinite]" : ""
             }
           >
             🔔
@@ -292,7 +295,7 @@ export default function ParticipantPortalMenu({
                 >
                   <div>
                     <div className="text-sm font-black text-teal-950">
-                      💬 Chat dari Coach
+                      💬 Chat dari Coach {assignedCoachName || ""}
                     </div>
                     <div className="mt-1 text-[11px] font-bold text-teal-700">
                       Buka percakapan Coach
@@ -341,7 +344,7 @@ export default function ParticipantPortalMenu({
                       onClick={() => chooseTab("chat")}
                       className="rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-800"
                     >
-                      💬 Chat Coach
+                      💬 Chat Coach {assignedCoachName || ""}
                     </button>
                     <button
                       type="button"
@@ -369,7 +372,10 @@ export default function ParticipantPortalMenu({
               Harmony Health
             </div>
             <div className="truncate text-base font-black text-slate-950">
-              {activeItem.emoji} {activeItem.label}
+              {activeItem.emoji}{" "}
+              {activeItem.key === "chat" && assignedCoachName
+                ? `Chat With Coach ${assignedCoachName}`
+                : activeItem.label}
             </div>
           </div>
 
@@ -533,7 +539,9 @@ export default function ParticipantPortalMenu({
                               active ? "text-orange-700" : "text-slate-950"
                             }`}
                           >
-                            {item.label}
+                            {item.key === "chat" && assignedCoachName
+                              ? `Chat With Coach ${assignedCoachName}`
+                              : item.label}
                           </div>
 
                           <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
@@ -569,5 +577,3 @@ export default function ParticipantPortalMenu({
     </>
   );
 }
-
-

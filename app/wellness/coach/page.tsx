@@ -4,10 +4,18 @@
 // WELLNESS_COACH_DETAIL_POINTS_INSTRUCTION_V59
 // WELLNESS_COACH_ADMIN_SUPPORT_V61
 // WELLNESS_PROGRESS_CHAT_SMOOTH_V65
+// WELLNESS_COACH_RANKING_PROFILE_V76
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
-import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/components/wellness/WellnessMomentumDashboard";
+import WellnessMomentumDashboard, {
+  type WellnessMomentumDay,
+} from "@/components/wellness/WellnessMomentumDashboard";
+import WellnessLeaderboard from "@/components/wellness/WellnessLeaderboard";
+import WellnessProfilePanel, {
+  WellnessAvatar,
+  WellnessProfileAvatar,
+} from "@/components/wellness/WellnessProfile";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
@@ -17,7 +25,7 @@ import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/component
 // Extends the existing Coach Portal without changing database schema or other modules.
 
 type FlagLevel = "green" | "yellow" | "red";
-type CoachView = "monitoring" | "chat" | "support";
+type CoachView = "monitoring" | "chat" | "ranking" | "profile" | "support";
 type CoachParticipantDetail = {
   ok: boolean;
   message?: string;
@@ -100,8 +108,10 @@ export default function WellnessCoachPortalPage() {
   const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
   const [search, setSearch] = useState("");
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
-  const [participantDetail, setParticipantDetail] = useState<CoachParticipantDetail | null>(null);
-  const [participantDetailLoading, setParticipantDetailLoading] = useState(false);
+  const [participantDetail, setParticipantDetail] =
+    useState<CoachParticipantDetail | null>(null);
+  const [participantDetailLoading, setParticipantDetailLoading] =
+    useState(false);
   const [participantModalOpen, setParticipantModalOpen] = useState(false);
   const [coachView, setCoachView] = useState<CoachView>("monitoring");
   const [coachMenuOpen, setCoachMenuOpen] = useState(false);
@@ -112,9 +122,9 @@ export default function WellnessCoachPortalPage() {
   const [saving, setSaving] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [instructionGroup, setInstructionGroup] = useState("");
-  const [instructionScope, setInstructionScope] = useState<"participant" | "group">(
-    "participant"
-  );
+  const [instructionScope, setInstructionScope] = useState<
+    "participant" | "group"
+  >("participant");
   const [instructionForm, setInstructionForm] = useState({
     session_date: todayDate(),
     topic: "Instruksi Wellness",
@@ -136,16 +146,21 @@ export default function WellnessCoachPortalPage() {
 
   async function loadDashboard(options?: { keepSelection?: boolean }) {
     setLoading(true);
-    const result = await fetch("/api/wellness/coach/dashboard", { cache: "no-store" })
+    const result = await fetch("/api/wellness/coach/dashboard", {
+      cache: "no-store",
+    })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       setDashboard(result);
       setMessage("Portal Coach aktif.");
       if (options?.keepSelection && selectedParticipant?.id) {
         const fresh = (result.participants || []).find(
-          (item: any) => Number(item.id) === Number(selectedParticipant.id)
+          (item: any) => Number(item.id) === Number(selectedParticipant.id),
         );
         if (fresh) setSelectedParticipant(fresh);
       }
@@ -171,7 +186,10 @@ export default function WellnessCoachPortalPage() {
       body: JSON.stringify(login),
     })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) await loadDashboard();
     else {
@@ -181,7 +199,9 @@ export default function WellnessCoachPortalPage() {
   }
 
   async function logout() {
-    await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(() => null);
+    await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(
+      () => null,
+    );
     setDashboard(null);
     setSelectedParticipant(null);
     setParticipantDetail(null);
@@ -201,10 +221,13 @@ export default function WellnessCoachPortalPage() {
     setParticipantDetailLoading(true);
     const result = await fetch(
       `/api/wellness/coach/participant-detail?participant_id=${participantId}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) setParticipantDetail(result);
     else {
@@ -214,10 +237,7 @@ export default function WellnessCoachPortalPage() {
     setParticipantDetailLoading(false);
   }
 
-  function chooseParticipant(
-    item: any,
-    options?: { openDetail?: boolean }
-  ) {
+  function chooseParticipant(item: any, options?: { openDetail?: boolean }) {
     setSelectedParticipant(item);
     setParticipantDetail(null);
     setTargetForm({
@@ -261,9 +281,7 @@ export default function WellnessCoachPortalPage() {
       selectedGroup !== "all"
         ? selectedGroup
         : String(
-            groups[0]?.wellness_group_unit_id ||
-              groups[0]?.group_name ||
-              ""
+            groups[0]?.wellness_group_unit_id || groups[0]?.group_name || "",
           );
 
     setInstructionScope(scope);
@@ -286,7 +304,8 @@ export default function WellnessCoachPortalPage() {
       instructionScope === "group" ? instructionGroup : selectedGroup;
     const group = (dashboard?.groups || []).find(
       (item: any) =>
-        String(item.wellness_group_unit_id || item.group_name) === targetGroupKey
+        String(item.wellness_group_unit_id || item.group_name) ===
+        targetGroupKey,
     );
 
     if (instructionScope === "group" && !group) {
@@ -329,7 +348,10 @@ export default function WellnessCoachPortalPage() {
       }),
     })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       setMessage(result.message || "Instruksi berhasil dikirim.");
@@ -358,7 +380,10 @@ export default function WellnessCoachPortalPage() {
       }),
     })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       setMessage(result.message || "Target peserta berhasil disimpan.");
@@ -379,7 +404,7 @@ export default function WellnessCoachPortalPage() {
 
   async function loadMemberChat(
     participant = selectedParticipant,
-    options?: { silent?: boolean; scroll?: boolean }
+    options?: { silent?: boolean; scroll?: boolean },
   ) {
     const participantId = Number(participant?.id || 0);
     if (!participantId) {
@@ -390,10 +415,13 @@ export default function WellnessCoachPortalPage() {
     if (!options?.silent) setChatLoading(true);
     const result = await fetch(
       `/api/wellness/coach/notes?participant_id=${participantId}&mode=chat&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       const rows = Array.isArray(result.messages) ? result.messages : [];
@@ -419,8 +447,8 @@ export default function WellnessCoachPortalPage() {
           current.map((item) =>
             unreadMemberIds.includes(Number(item.id))
               ? { ...item, is_read: true, read_at: new Date().toISOString() }
-              : item
-          )
+              : item,
+          ),
         );
       }
 
@@ -468,7 +496,10 @@ export default function WellnessCoachPortalPage() {
       }),
     })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       const saved = result.chat || {};
@@ -485,16 +516,21 @@ export default function WellnessCoachPortalPage() {
                 is_read: false,
                 optimistic: false,
               }
-            : item
-        )
+            : item,
+        ),
       );
       window.setTimeout(
         () => void loadMemberChat(selectedParticipant, { silent: true }),
-        900
+        900,
       );
-      window.setTimeout(() => void loadDashboard({ keepSelection: true }), 1200);
+      window.setTimeout(
+        () => void loadDashboard({ keepSelection: true }),
+        1200,
+      );
     } else {
-      setChatMessages((current) => current.filter((item) => item.id !== optimisticId));
+      setChatMessages((current) =>
+        current.filter((item) => item.id !== optimisticId),
+      );
       setChatText((current) => current || chatMessage);
       setMessage(result.message || "Pesan chat gagal dikirim.");
     }
@@ -561,14 +597,29 @@ export default function WellnessCoachPortalPage() {
         {/* WELLNESS_COACH_COMPACT_HEADER_V63 */}
         <section className="overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
           <div className="flex items-start justify-between gap-3 md:items-end">
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
-                Wellness Coach Portal
+            <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+              {isLoggedIn ? (
+                <WellnessProfileAvatar
+                  actorType="coach"
+                  name={dashboard?.coach?.name || "Coach Wellness"}
+                  size="lg"
+                  className="ring-white/40"
+                />
+              ) : null}
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
+                  Wellness Coach Portal
+                </div>
+                <h1 className="mt-1.5 truncate text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">
+                  {isLoggedIn
+                    ? `Halo, ${dashboard?.coach?.name || "Coach"}`
+                    : "Portal Coach"}
+                </h1>
+                <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
+                  Monitoring kepatuhan, target individual, dan instruksi untuk
+                  assigned group.
+                </p>
               </div>
-              <h1 className="mt-1.5 text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">Portal Coach</h1>
-              <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
-                Monitoring kepatuhan, target individual, dan instruksi untuk assigned group.
-              </p>
             </div>
             {isLoggedIn ? (
               <button
@@ -606,206 +657,258 @@ export default function WellnessCoachPortalPage() {
           <section className="mt-6">
             {coachView === "monitoring" ? (
               <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <SummaryCard
-                label="Total Peserta"
-                value={fmtNumber(dashboard?.summary?.total_participants || 0)}
-                note="anggota assigned group"
-                tone="teal"
-              />
-              <SummaryCard
-                label="Aktif Hari Ini"
-                value={fmtNumber(dashboard?.summary?.active_today || 0)}
-                note="input nutrisi atau workout"
-                tone="sky"
-              />
-              <SummaryCard
-                label="Perlu Follow Up"
-                value={fmtNumber(dashboard?.summary?.need_follow_up || 0)}
-                note="yellow + red flag"
-                tone="amber"
-              />
-              <SummaryCard
-                label="Instruksi Belum Dibaca"
-                value={fmtNumber(dashboard?.summary?.unread_instructions || 0)}
-                note="seluruh catatan peserta"
-                tone="rose"
-              />
-            </div>
-
-            <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h2 className="text-xl font-black">Status Kepatuhan 7 Hari</h2>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    Klik status untuk menampilkan daftar peserta pada tabel.
-                  </p>
-                </div>
-                {flagFilter !== "all" ? (
-                  <button
-                    type="button"
-                    onClick={() => setFlagFilter("all")}
-                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                  >
-                    Tampilkan Semua
-                  </button>
-                ) : null}
-              </div>
-              <div className="mt-4 grid grid-cols-3 gap-2 md:gap-3">
-                <FlagCard
-                  level="green"
-                  count={dashboard?.summary?.flags?.green || 0}
-                  active={flagFilter === "green"}
-                  onClick={() => applyFlagFilter("green")}
-                />
-                <FlagCard
-                  level="yellow"
-                  count={dashboard?.summary?.flags?.yellow || 0}
-                  active={flagFilter === "yellow"}
-                  onClick={() => applyFlagFilter("yellow")}
-                />
-                <FlagCard
-                  level="red"
-                  count={dashboard?.summary?.flags?.red || 0}
-                  active={flagFilter === "red"}
-                  onClick={() => applyFlagFilter("red")}
-                />
-              </div>
-            </section>
-
-            <section
-              id="coach-participant-table"
-              className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6"
-            >
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <h2 className="text-xl font-black">Monitoring Anggota</h2>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    Coach: {dashboard?.coach?.name || "-"} · Klik nama untuk membuka grafik dan detail peserta.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openInstruction("group")}
-                    className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
-                  >
-                    + Instruksi Kelompok
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadDashboard({ keepSelection: true })}
-                    className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                  >
-                    Refresh
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
-                <select
-                  className={fieldClass}
-                  value={selectedGroup}
-                  onChange={(e) => setSelectedGroup(e.target.value)}
-                >
-                  <option value="all">Semua Assigned Group</option>
-                  {groups.map((group: any) => (
-                    <option
-                      key={group.id}
-                      value={String(group.wellness_group_unit_id || group.group_name)}
-                    >
-                      {group.group_name} ({group.member_count || 0})
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className={fieldClass}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Cari nama, kode, kelompok, atau status"
-                />
-              </div>
-
-              <div className="mt-4 flex items-center justify-between gap-3 text-xs font-black uppercase tracking-wide text-slate-400">
-                <span>Menampilkan {filteredParticipants.length} anggota</span>
-                <span>{flagFilter === "all" ? "Semua status" : `${flagFilter} flag`}</span>
-              </div>
-
-              <div className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white" data-wellness-coach-mobile-table="v58">
-                <table className="w-full table-fixed border-collapse text-left">
-                  <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
-                    <tr>
-                      <th className="w-[47%] px-3 py-3 sm:w-[50%] sm:px-4">Peserta</th>
-                      <th className="w-[53%] px-3 py-3 sm:w-[50%] sm:px-4">Monitoring</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {filteredParticipants.length === 0 ? (
-                      <tr>
-                        <td colSpan={2} className="px-4 py-10 text-center text-sm font-bold text-slate-400">
-                          Tidak ada peserta pada filter ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredParticipants.map((item: any) => (
-                        <tr
-                          key={item.id}
-                          className={`transition hover:bg-teal-50/50 ${
-                            Number(selectedParticipant?.id) === Number(item.id)
-                              ? "bg-teal-50"
-                              : ""
-                          }`}
-                        >
-                          <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
-                            <button
-                              type="button"
-                              onClick={() => chooseParticipant(item)}
-                              className="block w-full min-w-0 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
-                            >
-                              <div className="break-words text-[13px] font-black leading-[1.35] text-slate-950 hover:text-teal-700 sm:text-base">
-                                {item.name}
-                              </div>
-                              <div className="mt-1 break-all text-[9px] font-bold leading-4 text-slate-400 sm:break-words sm:text-xs">
-                                {item.code} · {item.group_name}
-                              </div>
-                              <div className="mt-2 text-[9px] font-black leading-4 text-slate-500 sm:text-[11px]">
-                                {fmtNumber(item.today?.steps || 0)} step · {fmtNumber(item.today?.calories || 0)} kkal
-                              </div>
-                              <div className="mt-2 inline-flex items-center rounded-full bg-teal-50 px-2 py-1 text-[9px] font-black text-teal-700 sm:text-[10px]">
-                                Buka detail peserta
-                              </div>
-                            </button>
-                          </td>
-                          <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
-                            <div className="grid min-w-0 gap-1.5">
-                              <div className="min-w-0 rounded-lg bg-orange-50 px-2 py-1.5 text-orange-900">
-                                <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">Nutrisi</div>
-                                <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
-                                  {formatDaysWithoutInput(item.compliance?.days_since_nutrition)}
-                                </div>
-                              </div>
-                              <div className="min-w-0 rounded-lg bg-sky-50 px-2 py-1.5 text-sky-900">
-                                <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">Workout</div>
-                                <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
-                                  {formatDaysWithoutInput(item.compliance?.days_since_workout)}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                              <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black text-slate-700 sm:text-[10px]">
-                                {fmtNumber(item.compliance?.compliance_percent || 0)}%
-                              </span>
-                              <FlagBadge level={item.flag} label={item.status} />
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <SummaryCard
+                    label="Total Peserta"
+                    value={fmtNumber(
+                      dashboard?.summary?.total_participants || 0,
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                    note="anggota assigned group"
+                    tone="teal"
+                  />
+                  <SummaryCard
+                    label="Aktif Hari Ini"
+                    value={fmtNumber(dashboard?.summary?.active_today || 0)}
+                    note="input nutrisi atau workout"
+                    tone="sky"
+                  />
+                  <SummaryCard
+                    label="Perlu Follow Up"
+                    value={fmtNumber(dashboard?.summary?.need_follow_up || 0)}
+                    note="yellow + red flag"
+                    tone="amber"
+                  />
+                  <SummaryCard
+                    label="Instruksi Belum Dibaca"
+                    value={fmtNumber(
+                      dashboard?.summary?.unread_instructions || 0,
+                    )}
+                    note="seluruh catatan peserta"
+                    tone="rose"
+                  />
+                </div>
 
+                <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div>
+                      <h2 className="text-xl font-black">
+                        Status Kepatuhan 7 Hari
+                      </h2>
+                      <p className="mt-1 text-sm font-bold text-slate-500">
+                        Klik status untuk menampilkan daftar peserta pada tabel.
+                      </p>
+                    </div>
+                    {flagFilter !== "all" ? (
+                      <button
+                        type="button"
+                        onClick={() => setFlagFilter("all")}
+                        className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                      >
+                        Tampilkan Semua
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 md:gap-3">
+                    <FlagCard
+                      level="green"
+                      count={dashboard?.summary?.flags?.green || 0}
+                      active={flagFilter === "green"}
+                      onClick={() => applyFlagFilter("green")}
+                    />
+                    <FlagCard
+                      level="yellow"
+                      count={dashboard?.summary?.flags?.yellow || 0}
+                      active={flagFilter === "yellow"}
+                      onClick={() => applyFlagFilter("yellow")}
+                    />
+                    <FlagCard
+                      level="red"
+                      count={dashboard?.summary?.flags?.red || 0}
+                      active={flagFilter === "red"}
+                      onClick={() => applyFlagFilter("red")}
+                    />
+                  </div>
+                </section>
+
+                <section
+                  id="coach-participant-table"
+                  className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6"
+                >
+                  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                    <div>
+                      <h2 className="text-xl font-black">Monitoring Anggota</h2>
+                      <p className="mt-1 text-sm font-bold text-slate-500">
+                        Coach: {dashboard?.coach?.name || "-"} · Klik nama untuk
+                        membuka grafik dan detail peserta.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openInstruction("group")}
+                        className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
+                      >
+                        + Instruksi Kelompok
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => loadDashboard({ keepSelection: true })}
+                        className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
+                    <select
+                      className={fieldClass}
+                      value={selectedGroup}
+                      onChange={(e) => setSelectedGroup(e.target.value)}
+                    >
+                      <option value="all">Semua Assigned Group</option>
+                      {groups.map((group: any) => (
+                        <option
+                          key={group.id}
+                          value={String(
+                            group.wellness_group_unit_id || group.group_name,
+                          )}
+                        >
+                          {group.group_name} ({group.member_count || 0})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className={fieldClass}
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Cari nama, kode, kelompok, atau status"
+                    />
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-3 text-xs font-black uppercase tracking-wide text-slate-400">
+                    <span>
+                      Menampilkan {filteredParticipants.length} anggota
+                    </span>
+                    <span>
+                      {flagFilter === "all"
+                        ? "Semua status"
+                        : `${flagFilter} flag`}
+                    </span>
+                  </div>
+
+                  <div
+                    className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white"
+                    data-wellness-coach-mobile-table="v58"
+                  >
+                    <table className="w-full table-fixed border-collapse text-left">
+                      <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
+                        <tr>
+                          <th className="w-[47%] px-3 py-3 sm:w-[50%] sm:px-4">
+                            Peserta
+                          </th>
+                          <th className="w-[53%] px-3 py-3 sm:w-[50%] sm:px-4">
+                            Monitoring
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {filteredParticipants.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={2}
+                              className="px-4 py-10 text-center text-sm font-bold text-slate-400"
+                            >
+                              Tidak ada peserta pada filter ini.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredParticipants.map((item: any) => (
+                            <tr
+                              key={item.id}
+                              className={`transition hover:bg-teal-50/50 ${
+                                Number(selectedParticipant?.id) ===
+                                Number(item.id)
+                                  ? "bg-teal-50"
+                                  : ""
+                              }`}
+                            >
+                              <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
+                                <button
+                                  type="button"
+                                  onClick={() => chooseParticipant(item)}
+                                  className="block w-full min-w-0 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+                                >
+                                  <div className="flex min-w-0 items-center gap-2.5">
+                                    <WellnessAvatar
+                                      name={item.name}
+                                      src={
+                                        item.profile_photo_preview_url ||
+                                        item.profile_photo_url
+                                      }
+                                      size="sm"
+                                    />
+                                    <div className="min-w-0">
+                                      <div className="break-words text-[13px] font-black leading-[1.35] text-slate-950 hover:text-teal-700 sm:text-base">
+                                        {item.name}
+                                      </div>
+                                      <div className="mt-1 break-all text-[9px] font-bold leading-4 text-slate-400 sm:break-words sm:text-xs">
+                                        {item.code} · {item.group_name}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-[9px] font-black leading-4 text-slate-500 sm:text-[11px]">
+                                    {fmtNumber(item.today?.steps || 0)} step ·{" "}
+                                    {fmtNumber(item.today?.calories || 0)} kkal
+                                  </div>
+                                  <div className="mt-2 inline-flex items-center rounded-full bg-teal-50 px-2 py-1 text-[9px] font-black text-teal-700 sm:text-[10px]">
+                                    Buka detail peserta
+                                  </div>
+                                </button>
+                              </td>
+                              <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
+                                <div className="grid min-w-0 gap-1.5">
+                                  <div className="min-w-0 rounded-lg bg-orange-50 px-2 py-1.5 text-orange-900">
+                                    <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">
+                                      Nutrisi
+                                    </div>
+                                    <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
+                                      {formatDaysWithoutInput(
+                                        item.compliance?.days_since_nutrition,
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="min-w-0 rounded-lg bg-sky-50 px-2 py-1.5 text-sky-900">
+                                    <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">
+                                      Workout
+                                    </div>
+                                    <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
+                                      {formatDaysWithoutInput(
+                                        item.compliance?.days_since_workout,
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black text-slate-700 sm:text-[10px]">
+                                    {fmtNumber(
+                                      item.compliance?.compliance_percent || 0,
+                                    )}
+                                    %
+                                  </span>
+                                  <FlagBadge
+                                    level={item.flag}
+                                    label={item.status}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
               </div>
             ) : coachView === "chat" ? (
               <CoachChatPanel
@@ -826,8 +929,19 @@ export default function WellnessCoachPortalPage() {
                 loadChat={() => loadMemberChat()}
                 sendChat={sendMemberChat}
               />
+            ) : coachView === "ranking" ? (
+              <WellnessLeaderboard groups={groups} />
+            ) : coachView === "profile" ? (
+              <WellnessProfilePanel
+                actorType="coach"
+                actor={dashboard?.coach}
+                title={dashboard?.coach?.name || "Profil Coach"}
+              />
             ) : (
-              <SupportChatPanel actorType="coach" onClose={() => setCoachView("monitoring")} />
+              <SupportChatPanel
+                actorType="coach"
+                onClose={() => setCoachView("monitoring")}
+              />
             )}
           </section>
         )}
@@ -890,7 +1004,9 @@ export default function WellnessCoachPortalPage() {
                     : "border-slate-100 bg-white"
                 }`}
               >
-                <div className="text-base font-black">📊 Monitoring Peserta</div>
+                <div className="text-base font-black">
+                  📊 Monitoring Peserta
+                </div>
                 <div className="mt-1 text-sm font-bold text-slate-500">
                   Flag kepatuhan, target, dan instruksi
                 </div>
@@ -909,7 +1025,9 @@ export default function WellnessCoachPortalPage() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-base font-black">💬 Chat With Member</div>
+                  <div className="text-base font-black">
+                    💬 Chat With Member
+                  </div>
                   {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
                     <span className="rounded-full bg-rose-500 px-3 py-1 text-xs font-black text-white">
                       {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)}
@@ -918,6 +1036,42 @@ export default function WellnessCoachPortalPage() {
                 </div>
                 <div className="mt-1 text-sm font-bold text-slate-500">
                   Percakapan dengan anggota assigned group
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCoachView("ranking");
+                  setCoachMenuOpen(false);
+                }}
+                className={`w-full rounded-3xl border p-4 text-left ${
+                  coachView === "ranking"
+                    ? "border-violet-200 bg-violet-50"
+                    : "border-slate-100 bg-white"
+                }`}
+              >
+                <div className="text-base font-black">🏆 Ranking Kelompok</div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Top 10 point, kerajinan, workout, nutrisi, dan Health Talk
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCoachView("profile");
+                  setCoachMenuOpen(false);
+                }}
+                className={`w-full rounded-3xl border p-4 text-left ${
+                  coachView === "profile"
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-slate-100 bg-white"
+                }`}
+              >
+                <div className="text-base font-black">👤 Profil Coach</div>
+                <div className="mt-1 text-sm font-bold text-slate-500">
+                  Data Coach dan Add Profile Picture
                 </div>
               </button>
 
@@ -1007,11 +1161,13 @@ function CoachChatPanel({
             </div>
             <h2 className="mt-2 text-2xl font-black">Chat With Member</h2>
             <p className="mt-2 text-sm font-bold leading-6 text-white/90">
-              Coach hanya dapat menghubungi anggota dari kelompok yang di-assign.
+              Coach hanya dapat menghubungi anggota dari kelompok yang
+              di-assign.
             </p>
           </div>
           <div className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur">
-            {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} pesan belum dibaca
+            {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} pesan
+            belum dibaca
           </div>
         </div>
       </div>
@@ -1029,7 +1185,9 @@ function CoachChatPanel({
               {(groups || []).map((group: any) => (
                 <option
                   key={group.id}
-                  value={String(group.wellness_group_unit_id || group.group_name)}
+                  value={String(
+                    group.wellness_group_unit_id || group.group_name,
+                  )}
                 >
                   {group.group_name} ({group.member_count || 0})
                 </option>
@@ -1038,10 +1196,12 @@ function CoachChatPanel({
 
             <select
               className={fieldClass}
-              value={selectedParticipant?.id ? String(selectedParticipant.id) : ""}
+              value={
+                selectedParticipant?.id ? String(selectedParticipant.id) : ""
+              }
               onChange={(event) => {
                 const participant = availableParticipants.find(
-                  (item: any) => String(item.id) === event.target.value
+                  (item: any) => String(item.id) === event.target.value,
                 );
                 if (participant) chooseParticipant(participant);
               }}
@@ -1049,7 +1209,9 @@ function CoachChatPanel({
               <option value="">Pilih nama member</option>
               {availableParticipants.map((item: any) => (
                 <option key={item.id} value={String(item.id)}>
-                  {item.name} | {item.group_name} | Steps {fmtNumber(item.today?.steps || 0)} | {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
+                  {item.name} | {item.group_name} | Steps{" "}
+                  {fmtNumber(item.today?.steps || 0)} |{" "}
+                  {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
                 </option>
               ))}
             </select>
@@ -1057,11 +1219,24 @@ function CoachChatPanel({
 
           {selectedParticipant ? (
             <div className="mt-4 rounded-3xl bg-white p-4 shadow-sm">
-              <div className="text-base font-black text-slate-950">
-                {selectedParticipant.name}
-              </div>
-              <div className="mt-1 text-xs font-bold text-slate-500">
-                {selectedParticipant.group_name} · {selectedParticipant.status}
+              <div className="flex items-center gap-3">
+                <WellnessAvatar
+                  name={selectedParticipant.name}
+                  src={
+                    selectedParticipant.profile_photo_preview_url ||
+                    selectedParticipant.profile_photo_url
+                  }
+                  size="md"
+                />
+                <div className="min-w-0">
+                  <div className="truncate text-base font-black text-slate-950">
+                    {selectedParticipant.name}
+                  </div>
+                  <div className="mt-1 truncate text-xs font-bold text-slate-500">
+                    {selectedParticipant.group_name} ·{" "}
+                    {selectedParticipant.status}
+                  </div>
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">
@@ -1079,7 +1254,9 @@ function CoachChatPanel({
           {!selectedParticipant ? (
             <div className="flex min-h-[420px] items-center justify-center rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
               <div>
-                <div className="text-lg font-black text-slate-900">Pilih member untuk chat</div>
+                <div className="text-lg font-black text-slate-900">
+                  Pilih member untuk chat
+                </div>
                 <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
                   Percakapan akan tampil setelah coach memilih satu anggota.
                 </p>
@@ -1088,12 +1265,22 @@ function CoachChatPanel({
           ) : (
             <>
               <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-lg font-black text-slate-950">
-                    {selectedParticipant.name}
-                  </div>
-                  <div className="text-xs font-bold text-slate-500">
-                    Chat member · {selectedParticipant.group_name}
+                <div className="flex min-w-0 items-center gap-3">
+                  <WellnessAvatar
+                    name={selectedParticipant.name}
+                    src={
+                      selectedParticipant.profile_photo_preview_url ||
+                      selectedParticipant.profile_photo_url
+                    }
+                    size="md"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-lg font-black text-slate-950">
+                      {selectedParticipant.name}
+                    </div>
+                    <div className="truncate text-xs font-bold text-slate-500">
+                      Chat member · {selectedParticipant.group_name}
+                    </div>
                   </div>
                 </div>
                 <button
@@ -1125,10 +1312,20 @@ function CoachChatPanel({
                     return (
                       <div
                         key={item.id}
-                        className={`flex ${fromCoach ? "justify-end" : "justify-start"}`}
+                        className={`flex items-end gap-2 ${fromCoach ? "justify-end" : "justify-start"}`}
                       >
+                        {!fromCoach ? (
+                          <WellnessAvatar
+                            name={selectedParticipant.name}
+                            src={
+                              selectedParticipant.profile_photo_preview_url ||
+                              selectedParticipant.profile_photo_url
+                            }
+                            size="sm"
+                          />
+                        ) : null}
                         <div
-                          className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
+                          className={`max-w-[82%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
                             fromCoach
                               ? "rounded-br-md bg-slate-950 text-white"
                               : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
@@ -1142,7 +1339,9 @@ function CoachChatPanel({
                               fromCoach ? "text-white/60" : "text-slate-400"
                             }`}
                           >
-                            {formatChatTime(item.created_at || item.session_date)}
+                            {formatChatTime(
+                              item.created_at || item.session_date,
+                            )}
                             {fromCoach
                               ? item.is_read
                                 ? " · Sudah dibaca member"
@@ -1154,7 +1353,11 @@ function CoachChatPanel({
                     );
                   })
                 )}
-                <div id="coach-member-chat-end" className="h-px" aria-hidden="true" />
+                <div
+                  id="coach-member-chat-end"
+                  className="h-px"
+                  aria-hidden="true"
+                />
               </div>
 
               <div className="mt-4 grid gap-3">
@@ -1169,7 +1372,9 @@ function CoachChatPanel({
                   onClick={sendChat}
                   disabled={chatSending || !clean(chatText)}
                   className="flex min-h-[52px] items-center justify-center rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
-                  aria-label={chatSending ? "Pesan sedang diproses" : "Kirim pesan"}
+                  aria-label={
+                    chatSending ? "Pesan sedang diproses" : "Kirim pesan"
+                  }
                 >
                   {chatSending ? (
                     <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1201,7 +1406,12 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
               type="email"
               className={fieldClass}
               value={login.email}
-              onChange={(e) => setLogin((previous: any) => ({ ...previous, email: e.target.value }))}
+              onChange={(e) =>
+                setLogin((previous: any) => ({
+                  ...previous,
+                  email: e.target.value,
+                }))
+              }
               placeholder="coach@inharmony.co.id"
             />
           </label>
@@ -1211,7 +1421,10 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
               className={fieldClass}
               value={login.access_code}
               onChange={(e) =>
-                setLogin((previous: any) => ({ ...previous, access_code: e.target.value }))
+                setLogin((previous: any) => ({
+                  ...previous,
+                  access_code: e.target.value,
+                }))
               }
               placeholder="Contoh: INA2026"
             />
@@ -1232,7 +1445,8 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
           <p>Coach hanya melihat peserta sesuai group assignment.</p>
           <p>Green, Yellow, dan Red Flag dihitung dari kepatuhan 7 hari.</p>
           <p className="rounded-2xl bg-teal-50 p-4 text-teal-900">
-            Instruksi kelompok akan diterima oleh seluruh anggota kelompok terpilih.
+            Instruksi kelompok akan diterima oleh seluruh anggota kelompok
+            terpilih.
           </p>
         </div>
       </aside>
@@ -1249,7 +1463,9 @@ function SummaryCard({ label, value, note, tone }: any) {
   };
   return (
     <div className={`rounded-2xl border p-4 shadow-sm ${toneClass[tone]}`}>
-      <div className="text-xs font-black uppercase tracking-wide opacity-70">{label}</div>
+      <div className="text-xs font-black uppercase tracking-wide opacity-70">
+        {label}
+      </div>
       <div className="mt-1 text-xl font-black md:text-2xl">{value}</div>
       <div className="mt-1 text-xs font-bold opacity-70">{note}</div>
     </div>
@@ -1288,10 +1504,16 @@ function FlagCard({ level, count, active, onClick }: any) {
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-base md:text-lg">{item.emoji}</span>
-        <span className="text-xl font-black md:text-2xl">{fmtNumber(count)}</span>
+        <span className="text-xl font-black md:text-2xl">
+          {fmtNumber(count)}
+        </span>
       </div>
-      <div className="mt-2 truncate text-xs font-black md:text-sm">{item.label} Flag</div>
-      <div className="mt-0.5 truncate text-[10px] font-bold opacity-70 md:text-xs">{item.note}</div>
+      <div className="mt-2 truncate text-xs font-black md:text-sm">
+        {item.label} Flag
+      </div>
+      <div className="mt-0.5 truncate text-[10px] font-bold opacity-70 md:text-xs">
+        {item.note}
+      </div>
     </button>
   );
 }
@@ -1314,7 +1536,9 @@ function ParticipantCard({ item, active, onClick }: any) {
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <div className="truncate text-base font-black text-slate-950">{item.name}</div>
+          <div className="truncate text-base font-black text-slate-950">
+            {item.name}
+          </div>
           <div className="mt-1 text-xs font-bold text-slate-500">
             Kode {item.code} - {item.group_name}
           </div>
@@ -1329,7 +1553,9 @@ function ParticipantCard({ item, active, onClick }: any) {
           <span className="rounded-full bg-white px-3 py-2 text-xs font-black text-slate-700">
             {fmtNumber(item.today?.calories || 0)} kkal
           </span>
-          <span className={`rounded-full px-3 py-2 text-xs font-black ${flagClass[item.flag]}`}>
+          <span
+            className={`rounded-full px-3 py-2 text-xs font-black ${flagClass[item.flag]}`}
+          >
             {item.flag_label}
           </span>
         </div>
@@ -1347,13 +1573,10 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
   useEffect(() => {
     const updateViewportFrame = () => {
       const viewport = window.visualViewport;
-      const top = Math.max(
-        0,
-        Number(viewport?.pageTop ?? window.scrollY ?? 0)
-      );
+      const top = Math.max(0, Number(viewport?.pageTop ?? window.scrollY ?? 0));
       const height = Math.max(
         320,
-        Number(viewport?.height ?? window.innerHeight ?? 0)
+        Number(viewport?.height ?? window.innerHeight ?? 0),
       );
       setViewportFrame({ top, height });
     };
@@ -1448,7 +1671,7 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
         </div>
       </section>
     </div>,
-    document.body
+    document.body,
   );
 }
 
@@ -1462,12 +1685,19 @@ function coachPercent(current: number, target: number) {
   return coachClampProgress((current / target) * 100);
 }
 
-function coachWeightProgress(current: number, baseline: number, target: number) {
+function coachWeightProgress(
+  current: number,
+  baseline: number,
+  target: number,
+) {
   if (!(current > 0) || !(target > 0)) return 0;
-  if (!(baseline > 0) || baseline === target) return Math.abs(current - target) <= 0.5 ? 100 : 0;
+  if (!(baseline > 0) || baseline === target)
+    return Math.abs(current - target) <= 0.5 ? 100 : 0;
   const totalDistance = Math.abs(baseline - target);
   const remainingDistance = Math.abs(current - target);
-  return coachClampProgress(((totalDistance - remainingDistance) / totalDistance) * 100);
+  return coachClampProgress(
+    ((totalDistance - remainingDistance) / totalDistance) * 100,
+  );
 }
 
 function CoachProgressRowV65({
@@ -1490,11 +1720,15 @@ function CoachProgressRowV65({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-black text-slate-900">{label}</div>
-          {note ? <div className="mt-1 text-xs font-bold text-slate-500">{note}</div> : null}
+          {note ? (
+            <div className="mt-1 text-xs font-bold text-slate-500">{note}</div>
+          ) : null}
         </div>
         <div className="shrink-0 text-right">
           <div className="text-sm font-black text-slate-900">{value}</div>
-          <div className="mt-1 text-[11px] font-black text-slate-400">{Math.round(safePercent)}%</div>
+          <div className="mt-1 text-[11px] font-black text-slate-400">
+            {Math.round(safePercent)}%
+          </div>
         </div>
       </div>
       <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
@@ -1535,16 +1769,32 @@ function ParticipantDetail({
     const rows = Array.isArray(charts?.[key]) ? charts[key] : [];
     return Number(rows.length ? rows[0]?.value || 0 : 0);
   };
-  const nutritionTarget = Number(targetForm?.nutrition_max_calories || participant?.targets?.nutrition_max_calories || 0);
-  const workoutTarget = Number(targetForm?.workout_min_calories || participant?.targets?.workout_min_calories || 0);
-  const weightTarget = Number(targetForm?.target_weight_kg || participant?.targets?.target_weight_kg || 0);
+  const nutritionTarget = Number(
+    targetForm?.nutrition_max_calories ||
+      participant?.targets?.nutrition_max_calories ||
+      0,
+  );
+  const workoutTarget = Number(
+    targetForm?.workout_min_calories ||
+      participant?.targets?.workout_min_calories ||
+      0,
+  );
+  const weightTarget = Number(
+    targetForm?.target_weight_kg || participant?.targets?.target_weight_kg || 0,
+  );
   const nutritionLatest = latestChartValue("nutrition_calories");
   const workoutLatest = latestChartValue("workout_calories");
   const stepsLatest = latestChartValue("steps");
-  const latestWeightValue = Number(summary.latest_weight_kg || latestChartValue("weight_kg") || 0);
+  const latestWeightValue = Number(
+    summary.latest_weight_kg || latestChartValue("weight_kg") || 0,
+  );
   const baselineWeightValue = firstChartValue("weight_kg") || latestWeightValue;
-  const complianceRate = Number(participant?.compliance_rate || participant?.compliance_percentage || 0);
-  const stepTarget = Number(participant?.daily_step_target || participant?.step_target || 8000);
+  const complianceRate = Number(
+    participant?.compliance_rate || participant?.compliance_percentage || 0,
+  );
+  const stepTarget = Number(
+    participant?.daily_step_target || participant?.step_target || 8000,
+  );
   const momentumDays: WellnessMomentumDay[] = Array.isArray(streak?.days)
     ? streak.days.map((item: any) => ({
         date: clean(item?.date),
@@ -1556,7 +1806,8 @@ function ParticipantDetail({
         success: Boolean(item?.success),
       }))
     : [];
-  const latestMomentum = momentumDays.length > 0 ? momentumDays[momentumDays.length - 1] : null;
+  const latestMomentum =
+    momentumDays.length > 0 ? momentumDays[momentumDays.length - 1] : null;
 
   return (
     <div className="space-y-5">
@@ -1565,9 +1816,12 @@ function ParticipantDetail({
           <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
             Detail dan Progress Peserta
           </div>
-          <h2 className="mt-2 text-2xl font-black text-slate-950">{participant.name}</h2>
+          <h2 className="mt-2 text-2xl font-black text-slate-950">
+            {participant.name}
+          </h2>
           <div className="mt-1 text-sm font-bold text-slate-500">
-            Kode {participant.code} · {participant.group_name} · {participant.flag_label}
+            Kode {participant.code} · {participant.group_name} ·{" "}
+            {participant.flag_label}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1594,7 +1848,9 @@ function ParticipantDetail({
         </div>
       ) : !detail?.ok ? (
         <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-          <div className="text-base font-black text-slate-900">Detail belum dimuat</div>
+          <div className="text-base font-black text-slate-900">
+            Detail belum dimuat
+          </div>
           <p className="mt-2 text-sm font-bold text-slate-500">
             Tekan Refresh Data untuk mengambil progress peserta.
           </p>
@@ -1605,10 +1861,16 @@ function ParticipantDetail({
             <WellnessMomentumDashboard
               days={momentumDays}
               currentStreak={Number(streak?.current_streak || 0)}
-              successDates={Array.isArray(streak?.success_dates) ? streak.success_dates : []}
+              successDates={
+                Array.isArray(streak?.success_dates) ? streak.success_dates : []
+              }
               nutritionCount={Number(latestMomentum?.nutritionCount || 0)}
-              nutritionCalories={Number(latestMomentum?.nutritionCalories || nutritionLatest || 0)}
-              workoutCalories={Number(latestMomentum?.workoutCalories || workoutLatest || 0)}
+              nutritionCalories={Number(
+                latestMomentum?.nutritionCalories || nutritionLatest || 0,
+              )}
+              workoutCalories={Number(
+                latestMomentum?.workoutCalories || workoutLatest || 0,
+              )}
               steps={Number(latestMomentum?.steps || stepsLatest || 0)}
               nutritionTarget={nutritionTarget}
               workoutTarget={workoutTarget}
@@ -1628,28 +1890,38 @@ function ParticipantDetail({
           <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
-                <h3 className="text-lg font-black text-slate-950">Breakdown Point</h3>
+                <h3 className="text-lg font-black text-slate-950">
+                  Breakdown Point
+                </h3>
                 <p className="mt-1 text-xs font-bold text-slate-500">
-                  Ringkasan sumber point peserta dari data Wellness yang sudah tersedia.
+                  Ringkasan sumber point peserta dari data Wellness yang sudah
+                  tersedia.
                 </p>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center">
                 <PointPill label="Nutrisi" value={breakdown.nutrition || 0} />
                 <PointPill label="Workout" value={breakdown.activity || 0} />
-                <PointPill label="Health Talk" value={breakdown.healthtalk || 0} />
+                <PointPill
+                  label="Health Talk"
+                  value={breakdown.healthtalk || 0}
+                />
                 <PointPill label="Lainnya" value={breakdown.other || 0} />
               </div>
             </div>
           </section>
 
           <section className="rounded-3xl border border-amber-100 bg-amber-50/60 p-4">
-            <h3 className="text-base font-black text-slate-950">Aturan Point Wellness</h3>
+            <h3 className="text-base font-black text-slate-950">
+              Aturan Point Wellness
+            </h3>
             <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
               Point dihitung otomatis per hari dari input aktual peserta.
             </p>
             <div className="mt-3 grid gap-2 text-xs font-bold text-slate-700">
               <div className="rounded-2xl bg-white px-3 py-3">
-                <span className="font-black text-sky-700">Nutrisi:</span> 3 kali atau lebih = 10 point; 1–2 kali = 5 point; tidak input = 0 point.
+                <span className="font-black text-sky-700">Nutrisi:</span> 3 kali
+                atau lebih = 10 point; 1–2 kali = 5 point; tidak input = 0
+                point.
               </div>
               <div className="rounded-2xl bg-white px-3 py-3">
                 <span className="font-black text-teal-700">Workout:</span>{" "}
@@ -1658,38 +1930,78 @@ function ParticipantDetail({
                   : "target belum ditetapkan; aktivitas yang tercatat = 5 point dan tidak workout = 0 point."}
               </div>
               <div className="rounded-2xl bg-white px-3 py-3">
-                <span className="font-black text-violet-700">Health Talk:</span> offline = 10 point; online = 5 point; tidak ikut = 0 point.
+                <span className="font-black text-violet-700">Health Talk:</span>{" "}
+                offline = 10 point; online = 5 point; tidak ikut = 0 point.
               </div>
             </div>
           </section>
 
           <section>
             <div>
-              <h3 className="text-lg font-black text-slate-950">Grafik Progress Peserta</h3>
+              <h3 className="text-lg font-black text-slate-950">
+                Grafik Progress Peserta
+              </h3>
               <p className="mt-1 text-xs font-bold text-slate-500">
-                Grafik diambil saat nama peserta dipilih, tanpa memuat seluruh anggota sekaligus.
+                Grafik diambil saat nama peserta dipilih, tanpa memuat seluruh
+                anggota sekaligus.
               </p>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <CoachTrendChart title="Kalori Nutrisi" points={charts.nutrition_calories || []} suffix="kkal" />
-              <CoachTrendChart title="Kalori Workout" points={charts.workout_calories || []} suffix="kkal" />
+              <CoachTrendChart
+                title="Kalori Nutrisi"
+                points={charts.nutrition_calories || []}
+                suffix="kkal"
+              />
+              <CoachTrendChart
+                title="Kalori Workout"
+                points={charts.workout_calories || []}
+                suffix="kkal"
+              />
               <CoachTrendChart title="Steps" points={charts.steps || []} />
-              <CoachTrendChart title="Berat Badan" points={charts.weight_kg || []} suffix="kg" />
+              <CoachTrendChart
+                title="Berat Badan"
+                points={charts.weight_kg || []}
+                suffix="kg"
+              />
               <CoachTrendChart title="BMI" points={charts.bmi || []} />
-              <CoachTrendChart title="Lingkar Pinggang" points={charts.waist_cm || []} suffix="cm" />
-              <CoachTrendChart title="HbA1c" points={charts.hba1c || []} suffix="%" />
-              <CoachTrendChart title="Gula Darah" points={charts.glucose || []} suffix="mg/dL" />
-              <CoachTrendChart title="Tekanan Darah" points={charts.blood_pressure || []} suffix="mmHg" secondaryLabel="Diastolik" />
-              <CoachTrendChart title="Point Harian" points={charts.points || []} suffix="pt" />
+              <CoachTrendChart
+                title="Lingkar Pinggang"
+                points={charts.waist_cm || []}
+                suffix="cm"
+              />
+              <CoachTrendChart
+                title="HbA1c"
+                points={charts.hba1c || []}
+                suffix="%"
+              />
+              <CoachTrendChart
+                title="Gula Darah"
+                points={charts.glucose || []}
+                suffix="mg/dL"
+              />
+              <CoachTrendChart
+                title="Tekanan Darah"
+                points={charts.blood_pressure || []}
+                suffix="mmHg"
+                secondaryLabel="Diastolik"
+              />
+              <CoachTrendChart
+                title="Point Harian"
+                points={charts.points || []}
+                suffix="pt"
+              />
             </div>
           </section>
 
           <section className="rounded-3xl border border-slate-100 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-black text-slate-950">Keikutsertaan Health Talk</h3>
+                <h3 className="text-lg font-black text-slate-950">
+                  Keikutsertaan Health Talk
+                </h3>
                 <p className="mt-1 text-xs font-bold text-slate-500">
-                  Total {fmtNumber(summary.healthtalk_count || 0)} kegiatan yang tercatat.
+                  Total {fmtNumber(summary.healthtalk_count || 0)} kegiatan yang
+                  tercatat.
                 </p>
               </div>
             </div>
@@ -1705,19 +2017,30 @@ function ParticipantDetail({
                 <tbody className="divide-y divide-slate-100">
                   {healthtalks.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="px-4 py-8 text-center font-bold text-slate-400">
+                      <td
+                        colSpan={3}
+                        className="px-4 py-8 text-center font-bold text-slate-400"
+                      >
                         Belum ada keikutsertaan Health Talk yang tercatat.
                       </td>
                     </tr>
                   ) : (
                     healthtalks.slice(0, 12).map((item: any, index: number) => (
                       <tr key={item.id || `${item.date}-${index}`}>
-                        <td className="px-3 py-3 align-top font-bold text-slate-500">{item.date || "-"}</td>
-                        <td className="px-3 py-3 align-top">
-                          <div className="break-words font-black text-slate-900">{item.title || "Health Talk"}</div>
-                          <div className="mt-1 text-[10px] font-bold text-slate-500 sm:text-xs">{item.type || "-"}</div>
+                        <td className="px-3 py-3 align-top font-bold text-slate-500">
+                          {item.date || "-"}
                         </td>
-                        <td className="px-2 py-3 text-right align-top font-black text-violet-700">{fmtNumber(item.points || 0)}</td>
+                        <td className="px-3 py-3 align-top">
+                          <div className="break-words font-black text-slate-900">
+                            {item.title || "Health Talk"}
+                          </div>
+                          <div className="mt-1 text-[10px] font-bold text-slate-500 sm:text-xs">
+                            {item.type || "-"}
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 text-right align-top font-black text-violet-700">
+                          {fmtNumber(item.points || 0)}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1742,21 +2065,57 @@ function ParticipantDetail({
           <div className="mt-4 grid gap-3">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Batas Konsumsi Kalori Harian (kkal/hari)
-              <input type="number" min="0" className={fieldClass} value={targetForm.nutrition_max_calories} onChange={(e) => setTarget("nutrition_max_calories", e.target.value)} placeholder="Contoh: 1700" />
+              <input
+                type="number"
+                min="0"
+                className={fieldClass}
+                value={targetForm.nutrition_max_calories}
+                onChange={(e) =>
+                  setTarget("nutrition_max_calories", e.target.value)
+                }
+                placeholder="Contoh: 1700"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Target Kalori Terbakar dari Workout (kkal/hari)
-              <input type="number" min="0" className={fieldClass} value={targetForm.workout_min_calories} onChange={(e) => setTarget("workout_min_calories", e.target.value)} placeholder="Contoh: 300" />
+              <input
+                type="number"
+                min="0"
+                className={fieldClass}
+                value={targetForm.workout_min_calories}
+                onChange={(e) =>
+                  setTarget("workout_min_calories", e.target.value)
+                }
+                placeholder="Contoh: 300"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Target Berat Badan (kg)
-              <input type="number" min="0" step="0.1" className={fieldClass} value={targetForm.target_weight_kg} onChange={(e) => setTarget("target_weight_kg", e.target.value)} placeholder="Contoh: 72" />
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                className={fieldClass}
+                value={targetForm.target_weight_kg}
+                onChange={(e) => setTarget("target_weight_kg", e.target.value)}
+                placeholder="Contoh: 72"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Catatan Target
-              <textarea className={`${fieldClass} min-h-[72px]`} value={targetForm.coach_note} onChange={(e) => setTarget("coach_note", e.target.value)} placeholder="Arahan singkat untuk mencapai target" />
+              <textarea
+                className={`${fieldClass} min-h-[72px]`}
+                value={targetForm.coach_note}
+                onChange={(e) => setTarget("coach_note", e.target.value)}
+                placeholder="Arahan singkat untuk mencapai target"
+              />
             </label>
-            <button type="button" onClick={saveTargets} disabled={saving} className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50">
+            <button
+              type="button"
+              onClick={saveTargets}
+              disabled={saving}
+              className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50"
+            >
               {saving ? "Menyimpan..." : "Simpan Target Peserta"}
             </button>
           </div>
@@ -1765,23 +2124,37 @@ function ParticipantDetail({
         <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-base font-black">Instruksi Terakhir</h3>
-            <button type="button" onClick={openInstruction} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white">
+            <button
+              type="button"
+              onClick={openInstruction}
+              className="rounded-full bg-slate-950 px-4 py-2 text-xs font-black text-white"
+            >
               + Tambah Instruksi
             </button>
           </div>
           {latestNote ? (
             <div className="mt-4">
-              <div className="text-sm font-black text-slate-900">{latestNote.topic || "Catatan Coaching"}</div>
-              <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">{latestNote.coach_note || latestNote.action_plan || "-"}</div>
+              <div className="text-sm font-black text-slate-900">
+                {latestNote.topic || "Catatan Coaching"}
+              </div>
+              <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">
+                {latestNote.coach_note || latestNote.action_plan || "-"}
+              </div>
               {latestNote.action_plan ? (
-                <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">{latestNote.action_plan}</div>
+                <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">
+                  {latestNote.action_plan}
+                </div>
               ) : null}
-              <div className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${latestNote.is_read ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+              <div
+                className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${latestNote.is_read ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
+              >
                 {formatReadAt(latestNote.read_at)}
               </div>
             </div>
           ) : (
-            <div className="mt-4 text-sm font-bold text-slate-400">Belum ada instruksi.</div>
+            <div className="mt-4 text-sm font-bold text-slate-400">
+              Belum ada instruksi.
+            </div>
           )}
         </div>
       </div>
@@ -1796,7 +2169,9 @@ function FlagBadge({ level, label }: { level: string; label: string }) {
     red: "bg-rose-100 text-rose-800",
   };
   return (
-    <span className={`inline-flex max-w-full items-center justify-center whitespace-normal rounded-full px-2 py-1 text-center text-[9px] font-black leading-3 sm:px-3 sm:py-2 sm:text-xs ${classes[level] || "bg-slate-100 text-slate-700"}`}>
+    <span
+      className={`inline-flex max-w-full items-center justify-center whitespace-normal rounded-full px-2 py-1 text-center text-[9px] font-black leading-3 sm:px-3 sm:py-2 sm:text-xs ${classes[level] || "bg-slate-100 text-slate-700"}`}
+    >
       {label || "-"}
     </span>
   );
@@ -1812,7 +2187,9 @@ function CompactMetric({ label, value, tone }: any) {
   };
   return (
     <div className={`rounded-2xl p-3 ${tones[tone] || tones.slate}`}>
-      <div className="text-[10px] font-black uppercase tracking-wide opacity-60">{label}</div>
+      <div className="text-[10px] font-black uppercase tracking-wide opacity-60">
+        {label}
+      </div>
       <div className="mt-1 text-lg font-black">{value}</div>
     </div>
   );
@@ -1821,8 +2198,12 @@ function CompactMetric({ label, value, tone }: any) {
 function PointPill({ label, value }: any) {
   return (
     <div className="rounded-2xl bg-white px-3 py-2 shadow-sm">
-      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-1 text-sm font-black text-slate-900">{fmtNumber(value)}</div>
+      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black text-slate-900">
+        {fmtNumber(value)}
+      </div>
     </div>
   );
 }
@@ -1859,7 +2240,7 @@ function smoothCoachChartPath(points: Array<{ x: number; y: number }>) {
 function coachChartTooltipStyle(
   point: { x: number; y: number },
   width: number,
-  height: number
+  height: number,
 ) {
   const rawLeft = (point.x / width) * 100;
   const rawTop = (point.y / height) * 100;
@@ -1886,7 +2267,12 @@ function coachChartTooltipStyle(
   };
 }
 
-function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: any) {
+function CoachTrendChart({
+  title,
+  points,
+  suffix = "",
+  secondaryLabel = "",
+}: any) {
   const rows = Array.isArray(points) ? points.filter(Boolean).slice(-14) : [];
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const width = 620;
@@ -1909,8 +2295,7 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
       : padX + (index * (width - padX * 2)) / Math.max(rows.length - 1, 1);
   const y = (value: any) =>
     padTop +
-    ((chartMax - Number(value || 0)) / range) *
-      (height - padTop - padBottom);
+    ((chartMax - Number(value || 0)) / range) * (height - padTop - padBottom);
   const plotted = rows.map((item: any, index: number) => ({
     row: item,
     x: x(index),
@@ -1920,7 +2305,7 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
       : null,
   }));
   const primary = smoothCoachChartPath(
-    plotted.map((item) => ({ x: item.x, y: item.y }))
+    plotted.map((item) => ({ x: item.x, y: item.y })),
   );
   const secondaryPoints = plotted
     .filter((item) => item.secondaryY !== null)
@@ -2102,7 +2487,8 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
               {activePoint.row.secondary !== undefined &&
               activePoint.row.secondary !== null ? (
                 <div className="mt-1 text-[11px] font-bold text-sky-200">
-                  {secondaryLabel || "Nilai 2"}: {fmtNumber(activePoint.row.secondary, 1)} {suffix}
+                  {secondaryLabel || "Nilai 2"}:{" "}
+                  {fmtNumber(activePoint.row.secondary, 1)} {suffix}
                 </div>
               ) : null}
             </div>
@@ -2116,7 +2502,9 @@ function CoachTrendChart({ title, points, suffix = "", secondaryLabel = "" }: an
 function MiniInfo({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-white p-4">
-      <div className="text-xs font-black uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-xs font-black uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
       <div className="mt-1 text-sm font-black text-slate-900">{value}</div>
     </div>
   );
@@ -2140,7 +2528,8 @@ function InstructionModal({
   const [viewportFrame, setViewportFrame] = useState({ top: 0, height: 0 });
   const groupKey = scope === "group" ? instructionGroup : selectedGroup;
   const group = (groups || []).find(
-    (item: any) => String(item.wellness_group_unit_id || item.group_name) === groupKey
+    (item: any) =>
+      String(item.wellness_group_unit_id || item.group_name) === groupKey,
   );
   const setValue = (key: string, value: string) =>
     setForm((previous: any) => ({ ...previous, [key]: value }));
@@ -2149,7 +2538,10 @@ function InstructionModal({
     const updateViewportFrame = () => {
       const viewport = window.visualViewport;
       const top = Math.max(0, Number(viewport?.pageTop ?? window.scrollY ?? 0));
-      const height = Math.max(420, Number(viewport?.height ?? window.innerHeight ?? 0));
+      const height = Math.max(
+        420,
+        Number(viewport?.height ?? window.innerHeight ?? 0),
+      );
       setViewportFrame({ top, height });
     };
 
@@ -2221,7 +2613,9 @@ function InstructionModal({
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 sm:text-xs">
-              {scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual"}
+              {scope === "group"
+                ? "Instruksi Kelompok"
+                : "Instruksi Individual"}
             </div>
             <h2 className="mt-1 break-words text-lg font-black text-slate-950 sm:text-2xl">
               {scope === "group"
@@ -2258,7 +2652,9 @@ function InstructionModal({
                 {(groups || []).map((item: any) => (
                   <option
                     key={item.id}
-                    value={String(item.wellness_group_unit_id || item.group_name)}
+                    value={String(
+                      item.wellness_group_unit_id || item.group_name,
+                    )}
                   >
                     {item.group_name} ({item.member_count || 0} anggota)
                   </option>
@@ -2298,9 +2694,12 @@ function InstructionModal({
             </label>
 
             <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4">
-              <div className="text-sm font-black text-sky-950">Target / Action Plan (Opsional)</div>
+              <div className="text-sm font-black text-sky-950">
+                Target / Action Plan (Opsional)
+              </div>
               <p className="mt-1 text-xs font-bold leading-5 text-sky-800/70">
-                Isi hanya target yang ingin ditetapkan atau diubah. Kolom lainnya boleh dikosongkan.
+                Isi hanya target yang ingin ditetapkan atau diubah. Kolom
+                lainnya boleh dikosongkan.
               </p>
               <div className="mt-4 grid gap-3">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
@@ -2310,7 +2709,9 @@ function InstructionModal({
                     min="0"
                     className={fieldClass}
                     value={form.action_workout_calories}
-                    onChange={(event) => setValue("action_workout_calories", event.target.value)}
+                    onChange={(event) =>
+                      setValue("action_workout_calories", event.target.value)
+                    }
                     placeholder="Contoh: 300"
                   />
                 </label>
@@ -2321,7 +2722,9 @@ function InstructionModal({
                     min="0"
                     className={fieldClass}
                     value={form.action_nutrition_calories}
-                    onChange={(event) => setValue("action_nutrition_calories", event.target.value)}
+                    onChange={(event) =>
+                      setValue("action_nutrition_calories", event.target.value)
+                    }
                     placeholder="Contoh: 1700"
                   />
                 </label>
@@ -2333,7 +2736,9 @@ function InstructionModal({
                     step="0.1"
                     className={fieldClass}
                     value={form.action_target_weight}
-                    onChange={(event) => setValue("action_target_weight", event.target.value)}
+                    onChange={(event) =>
+                      setValue("action_target_weight", event.target.value)
+                    }
                     placeholder="Contoh: 72"
                   />
                 </label>
@@ -2346,12 +2751,16 @@ function InstructionModal({
                 <select
                   className={fieldClass}
                   value={form.follow_up_status}
-                  onChange={(event) => setValue("follow_up_status", event.target.value)}
+                  onChange={(event) =>
+                    setValue("follow_up_status", event.target.value)
+                  }
                 >
                   <option value="Open">Open</option>
                   <option value="In Progress">In Progress</option>
                   <option value="Done">Done</option>
-                  <option value="Need Medical Review">Need Medical Review</option>
+                  <option value="Need Medical Review">
+                    Need Medical Review
+                  </option>
                 </select>
               </label>
               <label className="grid gap-2 text-sm font-bold text-slate-700">
@@ -2360,7 +2769,9 @@ function InstructionModal({
                   type="date"
                   className={fieldClass}
                   value={form.next_follow_up_date}
-                  onChange={(event) => setValue("next_follow_up_date", event.target.value)}
+                  onChange={(event) =>
+                    setValue("next_follow_up_date", event.target.value)
+                  }
                 />
               </label>
             </div>
@@ -2382,6 +2793,6 @@ function InstructionModal({
         </div>
       </section>
     </div>,
-    document.body
+    document.body,
   );
 }

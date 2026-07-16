@@ -3,13 +3,20 @@
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
+// WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
-import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/components/wellness/WellnessMomentumDashboard";
+import WellnessMomentumDashboard, {
+  type WellnessMomentumDay,
+} from "@/components/wellness/WellnessMomentumDashboard";
+import WellnessProfilePanel, {
+  WellnessAvatar,
+  WellnessProfileAvatar,
+} from "@/components/wellness/WellnessProfile";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
@@ -84,7 +91,11 @@ function todayDate() {
 
 function nutritionLogDateV73(item: any) {
   const raw = clean(
-    item?.log_date || item?.date || item?.meal_date || item?.created_at || item?.updated_at
+    item?.log_date ||
+      item?.date ||
+      item?.meal_date ||
+      item?.created_at ||
+      item?.updated_at,
   );
 
   if (!raw) return "";
@@ -117,13 +128,14 @@ function nutritionCaloriesValueV73(item: any) {
     item?.calories ??
       item?.total_calories ??
       item?.calorie_total ??
-      item?.estimated_calories
+      item?.estimated_calories,
   );
 }
 
 function nutritionMealKeyV73(item: any, index: number) {
-  return clean(item?.meal_type || item?.meal_time || item?.category || item?.id || index)
-    .toLowerCase();
+  return clean(
+    item?.meal_type || item?.meal_time || item?.category || item?.id || index,
+  ).toLowerCase();
 }
 
 function jakartaDateFromAny(value: any) {
@@ -131,10 +143,12 @@ function jakartaDateFromAny(value: any) {
   if (!text) return "";
 
   const isoDateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoDateOnly) return `${isoDateOnly[1]}-${isoDateOnly[2]}-${isoDateOnly[3]}`;
+  if (isoDateOnly)
+    return `${isoDateOnly[1]}-${isoDateOnly[2]}-${isoDateOnly[3]}`;
 
   const localDateTime = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+\d{1,2}:\d{2}/);
-  if (localDateTime) return `${localDateTime[1]}-${localDateTime[2]}-${localDateTime[3]}`;
+  if (localDateTime)
+    return `${localDateTime[1]}-${localDateTime[2]}-${localDateTime[3]}`;
 
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return text.slice(0, 10);
@@ -168,7 +182,7 @@ function activityDateKey(item: any) {
         item?.raw_payload?.last_sync_at ||
         item?.raw_payload?.health_connect_last_sync_at ||
         item?.updated_at ||
-        item?.created_at
+        item?.created_at,
     )
   );
 }
@@ -208,13 +222,15 @@ function activityRawPayloadV72(item: any) {
 
 function isGoogleFitDailyRow(item: any) {
   const raw = activityRawPayloadV72(item);
-  const source = clean(item?.source || item?.input_source || item?.provider || raw?.provider).toLowerCase();
+  const source = clean(
+    item?.source || item?.input_source || item?.provider || raw?.provider,
+  ).toLowerCase();
   const externalId = clean(
-    item?.external_activity_id || item?.provider_activity_id || item?.id
+    item?.external_activity_id || item?.provider_activity_id || item?.id,
   ).toLowerCase();
   const syncMode = clean(raw?.sync_mode).toLowerCase();
   const name = clean(
-    item?.activity_name || item?.activity_type || item?.nama_activities || ""
+    item?.activity_name || item?.activity_type || item?.nama_activities || "",
   ).toLowerCase();
 
   const providerMatches = source === "google_fit" || source === "google-fit";
@@ -228,16 +244,19 @@ function isGoogleFitDailyRow(item: any) {
 
 function isHealthConnectDailyRow(item: any) {
   const raw = activityRawPayloadV72(item);
-  const source = clean(item?.source || item?.input_source || item?.provider || raw?.provider).toLowerCase();
+  const source = clean(
+    item?.source || item?.input_source || item?.provider || raw?.provider,
+  ).toLowerCase();
   const externalId = clean(
-    item?.external_activity_id || item?.provider_activity_id || item?.id
+    item?.external_activity_id || item?.provider_activity_id || item?.id,
   ).toLowerCase();
   const syncMode = clean(raw?.sync_mode).toLowerCase();
   const name = clean(
-    item?.activity_name || item?.activity_type || item?.nama_activities || ""
+    item?.activity_name || item?.activity_type || item?.nama_activities || "",
   ).toLowerCase();
 
-  const providerMatches = source === "health_connect" || source === "health-connect";
+  const providerMatches =
+    source === "health_connect" || source === "health-connect";
   const dailyMatches =
     externalId.includes("health_connect_daily_") ||
     name.includes("health connect daily") ||
@@ -264,7 +283,7 @@ function activityDistanceValue(item: any) {
       item?.total_distance_km ??
       raw?.health_connect_distance_km ??
       raw?.google_fit_distance_km ??
-      raw?.distance_km
+      raw?.distance_km,
   );
 }
 
@@ -282,7 +301,7 @@ function rawActivityCaloriesValue(item: any) {
       raw?.health_connect_calories_original ??
       raw?.health_connect_active_calories ??
       raw?.google_fit_active_calories ??
-      raw?.calories
+      raw?.calories,
   );
 }
 
@@ -324,7 +343,7 @@ function activityCaloriesValue(item: any) {
       raw?.health_connect_calories_original ??
         raw?.health_connect_calories ??
         raw?.original_payload?.calories ??
-        raw?.original_payload?.active_calories
+        raw?.original_payload?.active_calories,
     );
 
     if (raw?.health_connect_calories_used === true && reported > 0) {
@@ -340,7 +359,7 @@ function activityCaloriesValue(item: any) {
   // Google Fit daily calories.expended can include resting/BMR energy.
   // Only use the sanitized active-calorie value written by the sync route.
   const sanitized = asNumber(
-    raw?.sanitized_active_calories ?? raw?.selected_active_calories
+    raw?.sanitized_active_calories ?? raw?.selected_active_calories,
   );
   if (sanitized > 0) return sanitized;
 
@@ -360,7 +379,7 @@ function googleFitTotalCaloriesValueV73(item: any) {
       raw?.google_fit_total_calories ??
       raw?.calories_expended_total ??
       raw?.original_payload?.calories_expended ??
-      raw?.original_payload?.calories
+      raw?.original_payload?.calories,
   );
 }
 
@@ -374,7 +393,7 @@ function historyWorkoutNoteV73(item: any) {
     if (totalCalories > 0 && Math.abs(totalCalories - activeCalories) >= 1) {
       return `${fmtNumber(activeCalories, 0)} kkal aktif | ${fmtNumber(
         totalCalories,
-        0
+        0,
       )} kkal total Google Fit | ${fmtNumber(steps, 0)} steps`;
     }
   }
@@ -388,7 +407,10 @@ function dailyRowPriorityV72(item: any) {
   if (isHealthConnectDailyRow(item)) {
     const selected = asNumber(raw?.selected_active_calories);
     const reported = asNumber(raw?.health_connect_calories_original);
-    if (selected > 0 || (raw?.health_connect_calories_used === true && reported > 0)) {
+    if (
+      selected > 0 ||
+      (raw?.health_connect_calories_used === true && reported > 0)
+    ) {
       return 400;
     }
     return 300;
@@ -415,7 +437,7 @@ function normalizeWorkoutItemsForMetrics(items: any[] = []) {
           item?.id ||
             item?.external_activity_id ||
             item?.provider_activity_id ||
-            `${date}-${result.size}`
+            `${date}-${result.size}`,
         );
     const previous = result.get(key);
 
@@ -447,7 +469,7 @@ function normalizeWorkoutItemsForMetrics(items: any[] = []) {
   }
 
   return [...result.values()].sort(
-    (a, b) => activityUpdatedAtMs(b) - activityUpdatedAtMs(a)
+    (a, b) => activityUpdatedAtMs(b) - activityUpdatedAtMs(a),
   );
 }
 
@@ -463,17 +485,20 @@ function normalizeWorkoutItemsForHistoryV72(items: any[] = []) {
           item?.id ||
             item?.external_activity_id ||
             item?.provider_activity_id ||
-            `${date}-${result.size}`
+            `${date}-${result.size}`,
         );
     const previous = result.get(key);
 
-    if (!previous || activityUpdatedAtMs(item) >= activityUpdatedAtMs(previous)) {
+    if (
+      !previous ||
+      activityUpdatedAtMs(item) >= activityUpdatedAtMs(previous)
+    ) {
       result.set(key, item);
     }
   }
 
   return [...result.values()].sort(
-    (a, b) => activityUpdatedAtMs(b) - activityUpdatedAtMs(a)
+    (a, b) => activityUpdatedAtMs(b) - activityUpdatedAtMs(a),
   );
 }
 
@@ -485,7 +510,7 @@ function workoutHistorySelectionKeyV72(item: any) {
 function normalizeTodayWorkoutItems(items: any[] = []) {
   const today = todayDate();
   return normalizeWorkoutItemsForMetrics(items).filter(
-    (item) => activityDateKey(item) === today
+    (item) => activityDateKey(item) === today,
   );
 }
 
@@ -497,7 +522,7 @@ function activityMinutesValue(item: any) {
       item?.total_duration_minutes ??
       raw?.google_fit_active_minutes ??
       raw?.health_connect_active_minutes ??
-      raw?.active_minutes
+      raw?.active_minutes,
   );
 }
 
@@ -510,7 +535,7 @@ function activityStepsValue(item: any) {
       raw?.health_connect_steps ??
       raw?.google_fit_steps ??
       raw?.steps ??
-      raw?.total_steps
+      raw?.total_steps,
   );
 }
 
@@ -539,8 +564,7 @@ function noticeText(value: string) {
       "STRAVA_CLIENT_ID belum terbaca di Environment Variables Vercel Production.",
     GOOGLE_FIT_CLIENT_ID_MISSING:
       "GOOGLE_FIT_CLIENT_ID belum terbaca di Environment Variables Vercel Production.",
-    APP_SECRET_MISSING:
-      "APP_SECRET belum terbaca di Environment Variables.",
+    APP_SECRET_MISSING: "APP_SECRET belum terbaca di Environment Variables.",
     PORTAL_SESSION_REQUIRED:
       "Session peserta belum aktif. Silakan login OTP ulang.",
     STRAVA_TOKEN_EXCHANGE_FAILED:
@@ -587,9 +611,9 @@ const fieldClass =
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
   const [activeTab, setActiveTab] = useState<PortalTab>("home");
-  
-// PORTAL_DEEPLINK_TAB_CHARTS_V47
-// Dipakai mobile app agar tombol Grafik Capaian langsung membuka tab Grafik.
+
+  // PORTAL_DEEPLINK_TAB_CHARTS_V47
+  // Dipakai mobile app agar tombol Grafik Capaian langsung membuka tab Grafik.
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -599,9 +623,9 @@ export default function WellnessParticipantPortalPage() {
       setActiveTab("charts");
     }
   }, []);
-const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(
-    "Masuk menggunakan Kode Karyawan. Lengkapi username, email, dan nomor HP untuk aktivasi portal peserta."
+    "Masuk menggunakan Kode Karyawan. Lengkapi username, email, dan nomor HP untuk aktivasi portal peserta.",
   );
   const [form, setForm] = useState({
     code: "",
@@ -646,7 +670,9 @@ const [loading, setLoading] = useState(true);
     healthtalk_title: "",
     notes: "",
   });
-  const [healthtalkEvidence, setHealthtalkEvidence] = useState<File | null>(null);
+  const [healthtalkEvidence, setHealthtalkEvidence] = useState<File | null>(
+    null,
+  );
 
   async function loadNutrition() {
     const result = await fetch("/api/wellness/participant/nutrition", {
@@ -694,7 +720,7 @@ const [loading, setLoading] = useState(true);
 
       if (!options?.keepMessage) {
         setMessage(
-          "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device."
+          "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device.",
         );
       }
 
@@ -740,7 +766,9 @@ const [loading, setLoading] = useState(true);
     }
 
     if (!clean(form.username)) {
-      setMessage("Username wajib dibuat agar peserta bisa mengenali akun portalnya.");
+      setMessage(
+        "Username wajib dibuat agar peserta bisa mengenali akun portalnya.",
+      );
       return;
     }
 
@@ -773,7 +801,7 @@ const [loading, setLoading] = useState(true);
       setStep("verify");
       setMessage(
         result.message ||
-          "OTP sudah dikirim. Cek email/WhatsApp/SMS sesuai data yang kamu isi."
+          "OTP sudah dikirim. Cek email/WhatsApp/SMS sesuai data yang kamu isi.",
       );
     } else {
       setMessage(result.message || "Gagal membuat atau mengirim OTP.");
@@ -826,7 +854,7 @@ const [loading, setLoading] = useState(true);
 
   async function syncProvider(
     provider: "strava" | "google-fit",
-    options?: { silent?: boolean; days?: number }
+    options?: { silent?: boolean; days?: number },
   ) {
     setSyncing(provider);
 
@@ -856,7 +884,7 @@ const [loading, setLoading] = useState(true);
 
         setMessage(
           result.message ||
-            `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`
+            `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`,
         );
       }
 
@@ -898,7 +926,9 @@ const [loading, setLoading] = useState(true);
       }));
 
     if (result.ok) {
-      setMessage(result.message || "Nutrisi harian berhasil masuk Google Sheet.");
+      setMessage(
+        result.message || "Nutrisi harian berhasil masuk Google Sheet.",
+      );
 
       if (result.log) {
         setNutritionLogs((previous) => [result.log, ...previous]);
@@ -930,7 +960,9 @@ const [loading, setLoading] = useState(true);
       return;
     }
 
-    setMessage("Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...");
+    setMessage(
+      "Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...",
+    );
 
     const body = new FormData();
     body.append("log_date", workoutForm.log_date);
@@ -985,7 +1017,8 @@ const [loading, setLoading] = useState(true);
     body.append("healthtalk_type", healthtalkForm.healthtalk_type);
     body.append("healthtalk_title", healthtalkForm.healthtalk_title);
     body.append("notes", healthtalkForm.notes);
-    if (healthtalkEvidence) body.append("healthtalk_evidence", healthtalkEvidence);
+    if (healthtalkEvidence)
+      body.append("healthtalk_evidence", healthtalkEvidence);
 
     const result = await fetch("/api/wellness/participant/healthtalk", {
       method: "POST",
@@ -1008,7 +1041,9 @@ const [loading, setLoading] = useState(true);
       await loadHealthtalk();
       setActiveTab("history");
     } else {
-      setMessage(result.detail || result.message || "Gagal menyimpan Health Talk.");
+      setMessage(
+        result.detail || result.message || "Gagal menyimpan Health Talk.",
+      );
     }
   }
 
@@ -1019,9 +1054,12 @@ const [loading, setLoading] = useState(true);
     if (step !== "portal") return;
     if (!googleFitConnected) return;
 
-    const intervalId = window.setInterval(() => {
-      syncProvider("google-fit", { silent: true, days: 2 });
-    }, 10 * 60 * 1000);
+    const intervalId = window.setInterval(
+      () => {
+        syncProvider("google-fit", { silent: true, days: 2 });
+      },
+      10 * 60 * 1000,
+    );
 
     return () => window.clearInterval(intervalId);
   }, [step, googleFitConnected]);
@@ -1042,7 +1080,9 @@ const [loading, setLoading] = useState(true);
 
   const todayNutrition = useMemo(() => {
     const today = todayDate();
-    return nutritionLogs.filter((item) => clean(item.log_date).slice(0, 10) === today);
+    return nutritionLogs.filter(
+      (item) => clean(item.log_date).slice(0, 10) === today,
+    );
   }, [nutritionLogs]);
 
   const totals = useMemo(() => {
@@ -1099,7 +1139,6 @@ const [loading, setLoading] = useState(true);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
-      
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
@@ -1110,8 +1149,6 @@ const [loading, setLoading] = useState(true);
       ) : null}
 
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
-
-
         {step !== "portal" ? (
           <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
             <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
@@ -1217,17 +1254,23 @@ const [loading, setLoading] = useState(true);
 
               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
                 <p>Portal ini khusus peserta program wellness.</p>
-                <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
-                <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+                <p>
+                  Setelah masuk, peserta dapat input nutrisi harian dan workout
+                  manual.
+                </p>
+                <p>
+                  Peserta juga bisa menghubungkan Google Fit dan Health Connect
+                  untuk sinkronisasi aktivitas.
+                </p>
                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
-                  Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+                  Kalori nutrisi dan workout dihitung otomatis dari master data,
+                  sehingga peserta tidak perlu mengisi angka kalori manual.
                 </p>
               </div>
             </aside>
           </section>
         ) : (
           <div className="mt-6 space-y-6">
-
             {activeTab === "home" ? (
               <HomeTab
                 participant={participant}
@@ -1243,7 +1286,8 @@ const [loading, setLoading] = useState(true);
             ) : null}
 
             {activeTab === "nutrition" ? (
-              <NutritionTab participant={participant}
+              <NutritionTab
+                participant={participant}
                 form={nutritionForm}
                 photo={nutritionPhoto}
                 setPhoto={setNutritionPhoto}
@@ -1282,7 +1326,8 @@ const [loading, setLoading] = useState(true);
               />
             ) : null}
             {activeTab === "history" ? (
-              <HistoryTab participant={participant}
+              <HistoryTab
+                participant={participant}
                 workoutItems={workoutItems}
                 nutritionLogs={nutritionLogs}
                 healthtalkLogs={healthtalkLogs}
@@ -1304,7 +1349,10 @@ const [loading, setLoading] = useState(true);
             ) : null}
 
             {activeTab === "support" ? (
-              <SupportChatPanel actorType="participant" onClose={() => setActiveTab("home")} />
+              <SupportChatPanel
+                actorType="participant"
+                onClose={() => setActiveTab("home")}
+              />
             ) : null}
 
             {activeTab === "profile" ? (
@@ -1321,19 +1369,20 @@ const [loading, setLoading] = useState(true);
   );
 }
 
-
-
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
 // WELLNESS_PARTICIPANT_CHAT_OPTIMISTIC_READ_V65
 function ParticipantCoachChat({ participant }: { participant: any }) {
   const participantId = asNumber(
-    participant?.id || participant?.participant_id || participant?.wellness_participant_id
+    participant?.id ||
+      participant?.participant_id ||
+      participant?.wellness_participant_id,
   );
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState("");
   const [loadingChat, setLoadingChat] = useState(false);
   const [sending, setSending] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
+  const [assignedCoach, setAssignedCoach] = useState<any>(null);
 
   function scrollChatToLatest(behavior: ScrollBehavior = "smooth") {
     if (typeof window === "undefined") return;
@@ -1351,14 +1400,18 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
 
     const result = await fetch(
       `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       const rows = Array.isArray(result.messages) ? result.messages : [];
       setMessages(rows);
+      setAssignedCoach(result.coach || null);
       setChatNotice("");
 
       const unreadCoachNoteIds = rows
@@ -1381,8 +1434,8 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
           current.map((item) =>
             unreadCoachNoteIds.includes(Number(item.id))
               ? { ...item, is_read: true, read_at: new Date().toISOString() }
-              : item
-          )
+              : item,
+          ),
         );
       }
 
@@ -1425,7 +1478,10 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
       }),
     })
       .then((response) => response.json())
-      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
 
     if (result.ok) {
       const saved = result.chat || {};
@@ -1442,14 +1498,18 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                 is_read: false,
                 optimistic: false,
               }
-            : item
-        )
+            : item,
+        ),
       );
       window.setTimeout(() => void loadChat({ silent: true }), 900);
     } else {
-      setMessages((current) => current.filter((item) => item.id !== optimisticId));
+      setMessages((current) =>
+        current.filter((item) => item.id !== optimisticId),
+      );
       setText((current) => current || message);
-      setChatNotice(result.message || "Pesan gagal dikirim. Silakan coba lagi.");
+      setChatNotice(
+        result.message || "Pesan gagal dikirim. Silakan coba lagi.",
+      );
     }
 
     setSending(false);
@@ -1472,14 +1532,25 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
     <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
       <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 p-5 text-white md:p-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
-              Coach Support
+          <div className="flex min-w-0 items-center gap-3">
+            <WellnessAvatar
+              name={assignedCoach?.name || "Coach Wellness"}
+              src={assignedCoach?.photo_preview_url || assignedCoach?.photo_url}
+              size="lg"
+              className="ring-white/40"
+            />
+            <div className="min-w-0">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
+                Coach Support
+              </div>
+              <h2 className="mt-2 truncate text-2xl font-black">
+                Chat With Coach {assignedCoach?.name || ""}
+              </h2>
+              <p className="mt-2 text-sm font-bold leading-6 text-white/90">
+                Sampaikan kendala nutrisi, workout, atau target wellness kepada
+                coach.
+              </p>
             </div>
-            <h2 className="mt-2 text-2xl font-black">Chat With Coach</h2>
-            <p className="mt-2 text-sm font-bold leading-6 text-white/90">
-              Sampaikan kendala nutrisi, workout, atau target wellness kepada coach.
-            </p>
           </div>
           <button
             type="button"
@@ -1505,7 +1576,9 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             </div>
           ) : messages.length === 0 ? (
             <div className="py-12 text-center">
-              <div className="text-base font-black text-slate-900">Belum ada percakapan.</div>
+              <div className="text-base font-black text-slate-900">
+                Belum ada percakapan.
+              </div>
               <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
                 Mulai chat untuk meminta arahan langsung dari coach.
               </p>
@@ -1516,10 +1589,20 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
               return (
                 <div
                   key={item.id}
-                  className={`flex ${fromParticipant ? "justify-end" : "justify-start"}`}
+                  className={`flex items-end gap-2 ${fromParticipant ? "justify-end" : "justify-start"}`}
                 >
+                  {!fromParticipant ? (
+                    <WellnessAvatar
+                      name={assignedCoach?.name || "Coach Wellness"}
+                      src={
+                        assignedCoach?.photo_preview_url ||
+                        assignedCoach?.photo_url
+                      }
+                      size="sm"
+                    />
+                  ) : null}
                   <div
-                    className={`max-w-[86%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
+                    className={`max-w-[82%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
                       fromParticipant
                         ? "rounded-br-md bg-slate-950 text-white"
                         : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
@@ -1533,9 +1616,13 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                         fromParticipant ? "text-white/60" : "text-slate-400"
                       }`}
                     >
-                      <span>{formatCoachDate(item.created_at || item.session_date)}</span>
+                      <span>
+                        {formatCoachDate(item.created_at || item.session_date)}
+                      </span>
                       {fromParticipant ? (
-                        <span>{item.is_read ? "· Sudah dibaca coach" : "· Terkirim"}</span>
+                        <span>
+                          {item.is_read ? "· Sudah dibaca coach" : "· Terkirim"}
+                        </span>
                       ) : (
                         <span>· Coach</span>
                       )}
@@ -1545,7 +1632,11 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
               );
             })
           )}
-          <div id="participant-coach-chat-end" className="h-px" aria-hidden="true" />
+          <div
+            id="participant-coach-chat-end"
+            className="h-px"
+            aria-hidden="true"
+          />
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -1601,8 +1692,10 @@ function PortalLoginStatusNoticeV43({
         : "Informasi akses";
 
   const body = isOtpStep
-    ? text || "Kode OTP sudah dikirim. Silakan cek email/WhatsApp dan masukkan kode OTP untuk masuk ke portal."
-    : text || "Masukkan kode karyawan, username, email, dan nomor HP untuk aktivasi portal peserta.";
+    ? text ||
+      "Kode OTP sudah dikirim. Silakan cek email/WhatsApp dan masukkan kode OTP untuk masuk ke portal."
+    : text ||
+      "Masukkan kode karyawan, username, email, dan nomor HP untuk aktivasi portal peserta.";
 
   const toneClass = isWarning
     ? "border-red-100 bg-red-50 text-red-900"
@@ -1622,9 +1715,7 @@ function PortalLoginStatusNoticeV43({
         <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${dotClass}`} />
 
         <div className="min-w-0">
-          <div className="text-sm font-black">
-            {title}
-          </div>
+          <div className="text-sm font-black">{title}</div>
 
           <div className="mt-1 text-xs font-bold leading-5 opacity-80">
             {body}
@@ -1666,7 +1757,9 @@ function SummaryCard({
   };
 
   return (
-    <div className={`overflow-hidden rounded-[2rem] border p-5 shadow-sm ${toneClass[tone]}`}>
+    <div
+      className={`overflow-hidden rounded-[2rem] border p-5 shadow-sm ${toneClass[tone]}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -1678,7 +1771,9 @@ function SummaryCard({
 
           <div className="mt-3 text-2xl font-black md:text-3xl">{value}</div>
 
-          <div className="mt-1 text-xs font-bold leading-5 opacity-70">{note}</div>
+          <div className="mt-1 text-xs font-bold leading-5 opacity-70">
+            {note}
+          </div>
         </div>
 
         <div className="hidden h-14 w-20 rounded-2xl bg-white/60 p-2 md:block">
@@ -1689,7 +1784,11 @@ function SummaryCard({
   );
 }
 
-function MiniDecorChart({ tone }: { tone: "blue" | "emerald" | "amber" | "slate" }) {
+function MiniDecorChart({
+  tone,
+}: {
+  tone: "blue" | "emerald" | "amber" | "slate";
+}) {
   const colorClass: Record<string, string> = {
     blue: "text-sky-500",
     emerald: "text-teal-500",
@@ -1698,7 +1797,11 @@ function MiniDecorChart({ tone }: { tone: "blue" | "emerald" | "amber" | "slate"
   };
 
   return (
-    <svg viewBox="0 0 90 52" className={`h-full w-full ${colorClass[tone]}`} aria-hidden="true">
+    <svg
+      viewBox="0 0 90 52"
+      className={`h-full w-full ${colorClass[tone]}`}
+      aria-hidden="true"
+    >
       <path
         d="M4 38 C 16 16, 27 43, 40 25 S 66 8, 86 19"
         fill="none"
@@ -1712,15 +1815,14 @@ function MiniDecorChart({ tone }: { tone: "blue" | "emerald" | "amber" | "slate"
   );
 }
 
-
-
-
 function HideOldInvalidSummaryCardV39() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     function compactText(element: Element | null) {
-      return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+      return String(element?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
     function hide(element: HTMLElement | null, reason: string) {
@@ -1774,7 +1876,7 @@ function HideOldInvalidSummaryCardV39() {
 
     function hideEmptyIntroArtifacts() {
       const candidates = Array.from(
-        document.body.querySelectorAll("section, div, article")
+        document.body.querySelectorAll("section, div, article"),
       ) as HTMLElement[];
 
       candidates.forEach((element) => {
@@ -1804,7 +1906,7 @@ function HideOldInvalidSummaryCardV39() {
       if (!document.body) return;
 
       const all = Array.from(
-        document.body.querySelectorAll("section, div, article")
+        document.body.querySelectorAll("section, div, article"),
       ) as HTMLElement[];
 
       all.forEach((element) => {
@@ -1890,12 +1992,19 @@ function progressPercent(current: number, target: number) {
   return clampProgressPercent((current / target) * 100);
 }
 
-function weightTargetProgress(current: number, baseline: number, target: number) {
+function weightTargetProgress(
+  current: number,
+  baseline: number,
+  target: number,
+) {
   if (!(current > 0) || !(target > 0)) return 0;
-  if (!(baseline > 0) || baseline === target) return Math.abs(current - target) <= 0.5 ? 100 : 0;
+  if (!(baseline > 0) || baseline === target)
+    return Math.abs(current - target) <= 0.5 ? 100 : 0;
   const totalDistance = Math.abs(baseline - target);
   const remainingDistance = Math.abs(current - target);
-  return clampProgressPercent(((totalDistance - remainingDistance) / totalDistance) * 100);
+  return clampProgressPercent(
+    ((totalDistance - remainingDistance) / totalDistance) * 100,
+  );
 }
 
 function WellnessProgressRow({
@@ -1924,11 +2033,15 @@ function WellnessProgressRow({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-black text-slate-900">{label}</div>
-          {note ? <div className="mt-1 text-xs font-bold text-slate-500">{note}</div> : null}
+          {note ? (
+            <div className="mt-1 text-xs font-bold text-slate-500">{note}</div>
+          ) : null}
         </div>
         <div className="shrink-0 text-right">
           <div className="text-sm font-black text-slate-900">{valueLabel}</div>
-          <div className="mt-1 text-[11px] font-black text-slate-400">{Math.round(safePercent)}%</div>
+          <div className="mt-1 text-[11px] font-black text-slate-400">
+            {Math.round(safePercent)}%
+          </div>
         </div>
       </div>
       <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
@@ -1940,7 +2053,6 @@ function WellnessProgressRow({
     </div>
   );
 }
-
 
 // WELLNESS_PARTICIPANT_MOMENTUM_STREAK_V66
 function localDateKeyV66(value: any) {
@@ -1970,42 +2082,70 @@ function jakartaDayKeyV66(offsetDays = 0) {
 
 function shortDayLabelV66(date: string) {
   if (!date) return "-";
-  return new Date(`${date}T12:00:00+07:00`).toLocaleDateString("id-ID", {
-    weekday: "short",
-    timeZone: "Asia/Jakarta",
-  }).replace("Min", "Min").replace("Sen", "Sen").replace("Sel", "Sel").replace("Rab", "Rab").replace("Kam", "Kam").replace("Jum", "Jum").replace("Sab", "Sab");
+  return new Date(`${date}T12:00:00+07:00`)
+    .toLocaleDateString("id-ID", {
+      weekday: "short",
+      timeZone: "Asia/Jakarta",
+    })
+    .replace("Min", "Min")
+    .replace("Sen", "Sen")
+    .replace("Sel", "Sel")
+    .replace("Rab", "Rab")
+    .replace("Kam", "Kam")
+    .replace("Jum", "Jum")
+    .replace("Sab", "Sab");
 }
 
 function buildParticipantMomentumV66(
   nutritionRows: any[],
   workoutRows: any[],
-  workoutTarget: number
+  workoutTarget: number,
 ) {
-  const map = new Map<string, {
-    mealKeys: Set<string>;
-    nutritionCalories: number;
-    workoutCalories: number;
-    steps: number;
-  }>();
+  const map = new Map<
+    string,
+    {
+      mealKeys: Set<string>;
+      nutritionCalories: number;
+      workoutCalories: number;
+      steps: number;
+    }
+  >();
 
   function ensure(date: string) {
     if (!map.has(date)) {
-      map.set(date, { mealKeys: new Set<string>(), nutritionCalories: 0, workoutCalories: 0, steps: 0 });
+      map.set(date, {
+        mealKeys: new Set<string>(),
+        nutritionCalories: 0,
+        workoutCalories: 0,
+        steps: 0,
+      });
     }
     return map.get(date)!;
   }
 
   for (const row of nutritionRows || []) {
-    const date = localDateKeyV66(row?.log_date || row?.created_at || row?.updated_at || row?.date);
+    const date = localDateKeyV66(
+      row?.log_date || row?.created_at || row?.updated_at || row?.date,
+    );
     if (!date) continue;
     const bucket = ensure(date);
-    const mealKey = clean(row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan).toLowerCase();
+    const mealKey = clean(
+      row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan,
+    ).toLowerCase();
     bucket.mealKeys.add(mealKey || `row-${bucket.mealKeys.size + 1}`);
-    bucket.nutritionCalories += asNumber(row?.calories || row?.total_calories || row?.calorie_total);
+    bucket.nutritionCalories += asNumber(
+      row?.calories || row?.total_calories || row?.calorie_total,
+    );
   }
 
   for (const row of normalizeWorkoutItemsForMetrics(workoutRows || [])) {
-    const date = localDateKeyV66(row?.log_date || row?.started_at || row?.created_at || row?.updated_at || row?.date);
+    const date = localDateKeyV66(
+      row?.log_date ||
+        row?.started_at ||
+        row?.created_at ||
+        row?.updated_at ||
+        row?.date,
+    );
     if (!date) continue;
     const bucket = ensure(date);
     bucket.workoutCalories += activityCaloriesValue(row);
@@ -2018,7 +2158,11 @@ function buildParticipantMomentumV66(
     const bucket = map.get(date);
     const nutritionCount = bucket?.mealKeys.size || 0;
     const workoutCalories = bucket?.workoutCalories || 0;
-    const success = nutritionCount >= 3 && (workoutTarget > 0 ? workoutCalories >= workoutTarget : workoutCalories > 0);
+    const success =
+      nutritionCount >= 3 &&
+      (workoutTarget > 0
+        ? workoutCalories >= workoutTarget
+        : workoutCalories > 0);
     allDays.push({
       date,
       label: shortDayLabelV66(date).slice(0, 3),
@@ -2040,7 +2184,9 @@ function buildParticipantMomentumV66(
 
   return {
     days: allDays.slice(-7),
-    successDates: allDays.filter((item) => item.success).map((item) => item.date),
+    successDates: allDays
+      .filter((item) => item.success)
+      .map((item) => item.date),
     currentStreak,
   };
 }
@@ -2070,7 +2216,7 @@ function HomeTab({
     participant?.id ||
       participant?.participant_id ||
       participant?.wellness_participant_id ||
-      0
+      0,
   );
 
   const [directNutrition, setDirectNutrition] = useState<any>({
@@ -2096,25 +2242,36 @@ function HomeTab({
     if (!participantId) return;
     const result = await fetch(
       `/api/wellness/portal/coach-notes?participant_id=${participantId}&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
       .catch(() => null);
 
     const notes = Array.isArray(result?.notes) ? result.notes : [];
-    const targetNote = notes.find((item: any) =>
-      clean(item?.topic).toLowerCase().includes("target wellness") ||
-      clean(item?.action_plan).toLowerCase().includes("target nutrisi")
+    const targetNote = notes.find(
+      (item: any) =>
+        clean(item?.topic).toLowerCase().includes("target wellness") ||
+        clean(item?.action_plan).toLowerCase().includes("target nutrisi"),
     );
     const actionPlan = clean(targetNote?.action_plan);
 
     setCoachTargets({
       nutrition_max_calories:
         coachTargetFromText(actionPlan, /Target\s+Nutrisi\s*:\s*([0-9.,]+)/i) ||
-        asNumber(participant?.nutrition_max_calories || participant?.daily_calorie_target),
+        asNumber(
+          participant?.nutrition_max_calories ||
+            participant?.daily_calorie_target,
+        ),
       workout_min_calories:
-        coachTargetFromText(actionPlan, /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i) ||
-        asNumber(participant?.workout_min_calories || participant?.workout_calorie_target || participant?.active_calorie_target),
+        coachTargetFromText(
+          actionPlan,
+          /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
+        ) ||
+        asNumber(
+          participant?.workout_min_calories ||
+            participant?.workout_calorie_target ||
+            participant?.active_calorie_target,
+        ),
       target_weight_kg:
         coachTargetFromText(actionPlan, /Target\s+BB\s*:\s*([0-9.,]+)/i) ||
         asNumber(participant?.target_weight_kg || participant?.target_weight),
@@ -2128,7 +2285,7 @@ function HomeTab({
 
     const result = await fetch(
       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
       .catch(() => null);
@@ -2160,20 +2317,23 @@ function HomeTab({
         : [];
   const todayKeyV73 = todayDate();
   const todayNutritionRowsV73 = nutritionSourceRows.filter(
-    (item: any) => nutritionLogDateV73(item) === todayKeyV73
+    (item: any) => nutritionLogDateV73(item) === todayKeyV73,
   );
   const todayCalories = todayNutritionRowsV73.reduce(
     (sum: number, item: any) => sum + nutritionCaloriesValueV73(item),
-    0
+    0,
   );
-  const todayFoodCount = todayNutritionRowsV73.reduce((sum: number, item: any) => {
-    const foods = Array.isArray(item?.foods) ? item.foods.length : 0;
-    return sum + Math.max(1, foods);
-  }, 0);
+  const todayFoodCount = todayNutritionRowsV73.reduce(
+    (sum: number, item: any) => {
+      const foods = Array.isArray(item?.foods) ? item.foods.length : 0;
+      return sum + Math.max(1, foods);
+    },
+    0,
+  );
   const todayMealKeysV73 = new Set(
     todayNutritionRowsV73.map((item: any, index: number) =>
-      nutritionMealKeyV73(item, index)
-    )
+      nutritionMealKeyV73(item, index),
+    ),
   );
   const todayRowCount = todayMealKeysV73.size;
 
@@ -2183,27 +2343,55 @@ function HomeTab({
     todayNutritionRowsV73.length > 0
       ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(
           todayFoodCount,
-          0
+          0,
         )} item makanan hari ini`
       : "Belum ada input nutrisi hari ini.";
 
   const nutritionTarget = asNumber(coachTargets.nutrition_max_calories);
   const workoutTarget = asNumber(coachTargets.workout_min_calories);
   const weightTarget = asNumber(coachTargets.target_weight_kg);
-  const stepsTarget = asNumber(participant?.daily_step_target || participant?.step_target || 8000);
-  const latestWeight = asNumber(latestClinical?.weight_kg || latestClinical?.weight || latestClinical?.bb);
-  const oldestClinical = Array.isArray(clinicalHistory) && clinicalHistory.length > 0
-    ? clinicalHistory[clinicalHistory.length - 1]
-    : null;
-  const baselineWeight = asNumber(oldestClinical?.weight_kg || oldestClinical?.weight || oldestClinical?.bb || latestWeight);
+  const stepsTarget = asNumber(
+    participant?.daily_step_target || participant?.step_target || 8000,
+  );
+  const latestWeight = asNumber(
+    latestClinical?.weight_kg || latestClinical?.weight || latestClinical?.bb,
+  );
+  const oldestClinical =
+    Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+      ? clinicalHistory[clinicalHistory.length - 1]
+      : null;
+  const baselineWeight = asNumber(
+    oldestClinical?.weight_kg ||
+      oldestClinical?.weight ||
+      oldestClinical?.bb ||
+      latestWeight,
+  );
   const mealProgress = progressPercent(todayRowCount, 3);
-  const nutritionProgress = nutritionTarget > 0 ? progressPercent(todayCalories, nutritionTarget) : mealProgress;
-  const workoutProgress = workoutTarget > 0 ? progressPercent(totals.workoutCalories || 0, workoutTarget) : 0;
+  const nutritionProgress =
+    nutritionTarget > 0
+      ? progressPercent(todayCalories, nutritionTarget)
+      : mealProgress;
+  const workoutProgress =
+    workoutTarget > 0
+      ? progressPercent(totals.workoutCalories || 0, workoutTarget)
+      : 0;
   const stepsProgress = progressPercent(totals.steps || 0, stepsTarget);
-  const weightProgress = weightTarget > 0 ? weightTargetProgress(latestWeight, baselineWeight, weightTarget) : 0;
+  const weightProgress =
+    weightTarget > 0
+      ? weightTargetProgress(latestWeight, baselineWeight, weightTarget)
+      : 0;
   const participantMomentum = useMemo(
-    () => buildParticipantMomentumV66(directNutrition?.logs || nutritionLogs || [], workoutItems || [], workoutTarget),
-    [JSON.stringify(directNutrition?.logs || nutritionLogs || []), JSON.stringify(workoutItems || []), workoutTarget]
+    () =>
+      buildParticipantMomentumV66(
+        directNutrition?.logs || nutritionLogs || [],
+        workoutItems || [],
+        workoutTarget,
+      ),
+    [
+      JSON.stringify(directNutrition?.logs || nutritionLogs || []),
+      JSON.stringify(workoutItems || []),
+      workoutTarget,
+    ],
   );
 
   return (
@@ -2211,18 +2399,25 @@ function HomeTab({
       <CoachNoticeCenter participant={participant} />
       <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
-              Today Wellness
+          <div className="flex items-center gap-4">
+            <WellnessProfileAvatar
+              actorType="participant"
+              name={participant?.name || "Peserta"}
+              size="lg"
+            />
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+                Today Wellness
+              </div>
+
+              <h2 className="mt-2 text-2xl font-black text-slate-950">
+                Halo, {participant?.name || "Peserta"}
+              </h2>
+
+              <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+                Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
+              </p>
             </div>
-
-            <h2 className="mt-2 text-2xl font-black text-slate-950">
-              Halo, {participant?.name || "Peserta"}
-            </h2>
-
-            <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-              Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
-            </p>
           </div>
 
           <button
@@ -2284,8 +2479,8 @@ function HomeTab({
 
         {directNutrition?.sources ? (
           <div className="mt-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            Source: Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
-            {directNutrition.sources.google_sheet_rows || 0} row
+            Source: Supabase {directNutrition.sources.supabase_rows || 0} row |
+            Google Sheet {directNutrition.sources.google_sheet_rows || 0} row
           </div>
         ) : null}
 
@@ -2297,13 +2492,19 @@ function HomeTab({
               </div>
 
               <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                Input nutrisi akan muncul di sini setelah data Google Sheet atau Supabase terbaca.
+                Input nutrisi akan muncul di sini setelah data Google Sheet atau
+                Supabase terbaca.
               </p>
             </div>
           ) : (
-            mealLogs.slice(0, 6).map((item: any, index: number) => (
-              <PortalMealLogItemV34 key={`${item.id || index}-${index}`} item={item} />
-            ))
+            mealLogs
+              .slice(0, 6)
+              .map((item: any, index: number) => (
+                <PortalMealLogItemV34
+                  key={`${item.id || index}-${index}`}
+                  item={item}
+                />
+              ))
           )}
         </div>
       </div>
@@ -2412,7 +2613,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
     participant?.id ||
       participant?.participant_id ||
       participant?.wellness_participant_id ||
-      0
+      0,
   );
 
   const [notes, setNotes] = useState<any[]>([]);
@@ -2433,7 +2634,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
 
     const result = await fetch(
       `/api/wellness/portal/coach-notes?participant_id=${participantId}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
       .catch((error) => ({
@@ -2445,9 +2646,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
       setNotes(result.notes || []);
 
       if ((result.unread_count || 0) > 0) {
-        setNoticeMessage(
-          `${result.unread_count} catatan coach belum dibaca.`
-        );
+        setNoticeMessage(`${result.unread_count} catatan coach belum dibaca.`);
       } else {
         setNoticeMessage("");
       }
@@ -2592,9 +2791,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
       >
         <span
           className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xl ${
-            hasAlarm
-              ? "bg-rose-100 text-rose-700"
-              : "bg-teal-50 text-teal-700"
+            hasAlarm ? "bg-rose-100 text-rose-700" : "bg-teal-50 text-teal-700"
           }`}
           aria-hidden="true"
         >
@@ -2678,7 +2875,8 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
             </div>
           ) : null}
 
-          {notificationPermission && notificationPermission !== "unsupported" ? (
+          {notificationPermission &&
+          notificationPermission !== "unsupported" ? (
             <div className="mt-2 text-[11px] font-bold text-slate-400">
               Status notifikasi: {notificationPermission}
             </div>
@@ -2877,7 +3075,7 @@ function NutritionTab({
       form?.participant_id ||
       form?.participantId ||
       form?.wellness_participant_id ||
-      0
+      0,
   );
 
   const [foodMaster, setFoodMaster] = useState<any[]>([]);
@@ -2902,7 +3100,7 @@ function NutritionTab({
       form.foodName ||
       form.meal_text ||
       form.mealText ||
-      form.makanan
+      form.makanan,
   );
 
   const mealChips = [
@@ -2939,7 +3137,7 @@ function NutritionTab({
 
     const result = await fetch(
       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
       .catch(() => null);
@@ -3030,12 +3228,12 @@ function NutritionTab({
 
   const sortedNutritionHistory = [...nutritionHistorySource].sort(
     (left: any, right: any) =>
-      nutritionLogDateV73(right).localeCompare(nutritionLogDateV73(left))
+      nutritionLogDateV73(right).localeCompare(nutritionLogDateV73(left)),
   );
 
   const historyLogs = nutritionHistoryDate
     ? sortedNutritionHistory.filter(
-        (item: any) => nutritionLogDateV73(item) === nutritionHistoryDate
+        (item: any) => nutritionLogDateV73(item) === nutritionHistoryDate,
       )
     : sortedNutritionHistory;
 
@@ -3074,7 +3272,8 @@ function NutritionTab({
             </h2>
 
             <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
-              Ketik makanan dengan koma. Sistem otomatis membuat breakdown dan estimasi kalori.
+              Ketik makanan dengan koma. Sistem otomatis membuat breakdown dan
+              estimasi kalori.
             </p>
           </div>
 
@@ -3085,9 +3284,7 @@ function NutritionTab({
             <div className="text-xl font-black text-teal-900">
               {fmtNumber(totalEstimatedCalories, 0)}
             </div>
-            <div className="text-[10px] font-bold text-teal-700/70">
-              kkal
-            </div>
+            <div className="text-[10px] font-bold text-teal-700/70">kkal</div>
           </div>
         </div>
 
@@ -3103,9 +3300,7 @@ function NutritionTab({
           </label>
 
           <div className="grid gap-2">
-            <div className="text-xs font-black text-slate-700">
-              Waktu Makan
-            </div>
+            <div className="text-xs font-black text-slate-700">Waktu Makan</div>
 
             <div className="grid grid-cols-4 gap-2">
               {mealChips.map((item) => (
@@ -3151,7 +3346,9 @@ function NutritionTab({
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(event) => setPhoto(event.target.files?.[0] || null)}
+                  onChange={(event) =>
+                    setPhoto(event.target.files?.[0] || null)
+                  }
                   className="hidden"
                 />
               </label>
@@ -3173,7 +3370,8 @@ function NutritionTab({
           </label>
 
           <div className="rounded-[1.4rem] bg-teal-50 p-3 text-[11px] font-bold leading-5 text-teal-900">
-            Peserta tidak perlu mengisi kalori manual. Sistem mencocokkan makanan dengan Master KaloriData.
+            Peserta tidak perlu mengisi kalori manual. Sistem mencocokkan
+            makanan dengan Master KaloriData.
           </div>
 
           <button
@@ -3191,9 +3389,7 @@ function NutritionTab({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() =>
-              setNutritionHistoryOpen((previous) => !previous)
-            }
+            onClick={() => setNutritionHistoryOpen((previous) => !previous)}
             className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-[1.4rem] bg-slate-50 px-4 py-4 text-left transition active:scale-[0.99]"
             aria-expanded={nutritionHistoryOpen}
           >
@@ -3256,7 +3452,9 @@ function NutritionTab({
                 <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
                   Supabase {directNutrition.sources.supabase_rows || 0} data
                   {" • "}
-                  Google Sheet {directNutrition.sources.google_sheet_rows || 0} data
+                  Google Sheet {directNutrition.sources.google_sheet_rows ||
+                    0}{" "}
+                  data
                 </p>
               ) : null}
             </div>
@@ -3278,9 +3476,11 @@ function NutritionTab({
               )}
             </div>
 
-            {!nutritionHistoryDate && historyLogs.length > visibleHistoryLogs.length ? (
+            {!nutritionHistoryDate &&
+            historyLogs.length > visibleHistoryLogs.length ? (
               <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-center text-[11px] font-bold text-slate-500">
-                Menampilkan 8 data terbaru. Pilih tanggal untuk melihat data tertentu.
+                Menampilkan 8 data terbaru. Pilih tanggal untuk melihat data
+                tertentu.
               </div>
             ) : null}
           </div>
@@ -3305,7 +3505,10 @@ function CompactAutoFoodBreakdownV43({
   foods: any[];
   onChangePortion: (key: string, value: string) => void;
 }) {
-  const total = foods.reduce((sum, item) => sum + Number(item.subtotal_calories || 0), 0);
+  const total = foods.reduce(
+    (sum, item) => sum + Number(item.subtotal_calories || 0),
+    0,
+  );
 
   if (!foods.length) {
     return (
@@ -3339,7 +3542,10 @@ function CompactAutoFoodBreakdownV43({
 
       <div className="mt-3 space-y-2">
         {foods.map((item) => (
-          <div key={item.key} className="rounded-[1.2rem] bg-white p-3 shadow-sm">
+          <div
+            key={item.key}
+            className="rounded-[1.2rem] bg-white p-3 shadow-sm"
+          >
             <div className="text-sm font-black text-slate-950">
               {item.input_name}
             </div>
@@ -3353,7 +3559,9 @@ function CompactAutoFoodBreakdownV43({
             <div className="mt-3 flex items-center gap-2">
               <select
                 value={item.portion_fraction}
-                onChange={(event) => onChangePortion(item.key, event.target.value)}
+                onChange={(event) =>
+                  onChangePortion(item.key, event.target.value)
+                }
                 className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black text-slate-700 outline-none"
               >
                 <option value="1/4">1/4 porsi</option>
@@ -3374,7 +3582,9 @@ function CompactAutoFoodBreakdownV43({
 }
 
 function CompactNutritionHistoryItemV43({ item }: { item: any }) {
-  const photo = normalizeImageUrlV37 ? normalizeImageUrlV37(item.photo_url) : clean(item.photo_url);
+  const photo = normalizeImageUrlV37
+    ? normalizeImageUrlV37(item.photo_url)
+    : clean(item.photo_url);
   const sourceLabel =
     item.source === "google_sheet"
       ? "Google Sheet"
@@ -3430,7 +3640,10 @@ function AutoFoodBreakdownV29({
   foods: any[];
   onChangePortion: (key: string, value: string) => void;
 }) {
-  const total = foods.reduce((sum, item) => sum + Number(item.subtotal_calories || 0), 0);
+  const total = foods.reduce(
+    (sum, item) => sum + Number(item.subtotal_calories || 0),
+    0,
+  );
 
   if (!foods.length) {
     return (
@@ -3484,7 +3697,9 @@ function AutoFoodBreakdownV29({
               <div className="flex shrink-0 items-center gap-2">
                 <select
                   value={item.portion_fraction}
-                  onChange={(event) => onChangePortion(item.key, event.target.value)}
+                  onChange={(event) =>
+                    onChangePortion(item.key, event.target.value)
+                  }
                   className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black text-slate-700 outline-none"
                 >
                   <option value="1/4">1/4 porsi</option>
@@ -3555,7 +3770,7 @@ function NutritionHistoryItemV29({ item }: { item: any }) {
 function buildAutoFoodBreakdownV29(
   foodText: string,
   foodMaster: any[],
-  portionMap: Record<string, string>
+  portionMap: Record<string, string>,
 ) {
   const tokens = splitFoodInputV29(foodText);
   const masterIndex = buildFoodMasterIndexV29(foodMaster);
@@ -3621,11 +3836,7 @@ function buildFoodMasterIndexV29(rows: any[]) {
           .map((item) => clean(item))
           .filter(Boolean);
 
-    const names = [
-      row.food_name,
-      row.name,
-      ...aliases,
-    ]
+    const names = [row.food_name, row.name, ...aliases]
       .map((item) => clean(item))
       .filter(Boolean);
 
@@ -3655,7 +3866,7 @@ function matchFoodMasterV29(
     calories: number;
     category: string;
     raw: any;
-  }>
+  }>,
 ) {
   const normalized = normalizeFoodTextV29(input);
 
@@ -3761,7 +3972,8 @@ function WorkoutTab({
     <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-black">Input Workout Manual</h2>
       <p className="mt-1 text-sm font-bold text-slate-500">
-        Peserta cukup isi jenis aktivitas dan durasi. Kalori dihitung otomatis dari Master KaloriOlahraga / MET.
+        Peserta cukup isi jenis aktivitas dan durasi. Kalori dihitung otomatis
+        dari Master KaloriOlahraga / MET.
       </p>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -3861,7 +4073,8 @@ function WorkoutTab({
       </div>
 
       <div className="mt-5 rounded-2xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
-        Field kalori disembunyikan dari peserta. Kalori manual workout akan dihitung otomatis oleh sistem.
+        Field kalori disembunyikan dari peserta. Kalori manual workout akan
+        dihitung otomatis oleh sistem.
       </div>
 
       <button
@@ -3874,7 +4087,6 @@ function WorkoutTab({
     </section>
   );
 }
-
 
 function HealthtalkTab(props: {
   form?: any;
@@ -3907,7 +4119,8 @@ function HealthtalkTab(props: {
           </h2>
 
           <p className="mt-3 max-w-2xl text-sm font-bold leading-6 text-slate-600">
-            Catat kehadiran seminar, edukasi kesehatan, atau aktivitas pembelajaran wellness.
+            Catat kehadiran seminar, edukasi kesehatan, atau aktivitas
+            pembelajaran wellness.
           </p>
         </div>
 
@@ -3917,7 +4130,9 @@ function HealthtalkTab(props: {
               <input
                 type="file"
                 accept="image/*,.pdf"
-                onChange={(event) => setEvidence(event.target.files?.[0] || null)}
+                onChange={(event) =>
+                  setEvidence(event.target.files?.[0] || null)
+                }
                 className="hidden"
               />
 
@@ -4089,7 +4304,8 @@ function numberFromTextPatternV41(text: any, pattern: RegExp) {
 
 function historyStepsValueV41(item: any) {
   const raw = parseRawPayloadV41(item);
-  const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
+  const original =
+    raw?.original_payload || raw?.original || raw?.diagnostic || {};
 
   const direct = firstPositiveNumberV41([
     item?.steps,
@@ -4146,7 +4362,7 @@ function HistoryTab({
     participant?.id ||
       participant?.participant_id ||
       participant?.wellness_participant_id ||
-      0
+      0,
   );
 
   const [openSection, setOpenSection] = useState("");
@@ -4173,7 +4389,7 @@ function HistoryTab({
 
     const result = await fetch(
       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
     )
       .then((response) => response.json())
       .catch(() => null);
@@ -4252,13 +4468,13 @@ function HistoryTab({
     rawWorkoutMetrics,
     startDate,
     endDate,
-    ["log_date", "created_at", "updated_at", "date"]
+    ["log_date", "created_at", "updated_at", "date"],
   );
 
   const selectedDeviceRows = new Set(
     workoutMetrics
       .filter((item: any) => isDeviceDailyRow(item))
-      .map((item: any) => workoutHistorySelectionKeyV72(item))
+      .map((item: any) => workoutHistorySelectionKeyV72(item)),
   );
 
   const healthTalk = filterHistoryByDateV37(rawHealthTalk, startDate, endDate, [
@@ -4301,7 +4517,8 @@ function HistoryTab({
             </h2>
 
             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-              Buka dropdown sesuai kebutuhan. Data nutrisi akan diretrieve saat dropdown dibuka.
+              Buka dropdown sesuai kebutuhan. Data nutrisi akan diretrieve saat
+              dropdown dibuka.
             </p>
           </div>
 
@@ -4377,17 +4594,26 @@ function HistoryTab({
       >
         {directNutrition?.sources ? (
           <div className="mb-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            Source: Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
-            {directNutrition.sources.google_sheet_rows || 0} row
+            Source: Supabase {directNutrition.sources.supabase_rows || 0} row |
+            Google Sheet {directNutrition.sources.google_sheet_rows || 0} row
           </div>
         ) : null}
 
         {nutrition.length === 0 ? (
-          <EmptyHistoryCardV37 text={nutritionLoaded ? "Belum ada input nutrisi pada periode ini." : "Klik dropdown untuk memuat data nutrisi."} />
+          <EmptyHistoryCardV37
+            text={
+              nutritionLoaded
+                ? "Belum ada input nutrisi pada periode ini."
+                : "Klik dropdown untuk memuat data nutrisi."
+            }
+          />
         ) : (
           <div className="space-y-3">
             {nutrition.slice(0, 30).map((item: any, index: number) => (
-              <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+              <HistoryMealItemV37
+                key={`${item.id || index}-${index}`}
+                item={item}
+              />
             ))}
           </div>
         )}
@@ -4407,13 +4633,21 @@ function HistoryTab({
             {workout.slice(0, 30).map((item: any, index: number) => {
               const daily = isDeviceDailyRow(item);
               const selected =
-                !daily || selectedDeviceRows.has(workoutHistorySelectionKeyV72(item));
+                !daily ||
+                selectedDeviceRows.has(workoutHistorySelectionKeyV72(item));
 
               return (
                 <HistoryGenericItemV37
                   key={`${item.id || index}-${index}`}
-                  title={item.activity_name || item.activity_type || item.source || "Workout"}
-                  subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+                  title={
+                    item.activity_name ||
+                    item.activity_type ||
+                    item.source ||
+                    "Workout"
+                  }
+                  subtitle={formatDateTextV37(
+                    item.log_date || item.created_at || item.updated_at,
+                  )}
                   note={historyWorkoutNoteV73(item)}
                   status={
                     daily
@@ -4449,7 +4683,9 @@ function HistoryTab({
               <HistoryGenericItemV37
                 key={`${item.id || index}-${index}`}
                 title={item.title || item.topic || "Health Talk"}
-                subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+                subtitle={formatDateTextV37(
+                  item.event_date || item.log_date || item.created_at,
+                )}
                 note={item.notes || item.description || "-"}
               />
             ))}
@@ -4463,15 +4699,21 @@ function HistoryTab({
           subtitle={`${clinical.length} data`}
           open={openSection === "clinical"}
           loading={false}
-          onClick={() => setOpenSection(openSection === "clinical" ? "" : "clinical")}
+          onClick={() =>
+            setOpenSection(openSection === "clinical" ? "" : "clinical")
+          }
         >
           <div className="space-y-3">
             {clinical.slice(0, 20).map((item: any, index: number) => (
               <HistoryGenericItemV37
                 key={`${item.id || index}-${index}`}
-                title={formatDateTextV37(item.exam_date || item.log_date || item.created_at)}
+                title={formatDateTextV37(
+                  item.exam_date || item.log_date || item.created_at,
+                )}
                 subtitle={`BMI ${item.bmi || item.imt || "-"} | Tensi ${
-                  item.systolic ? `${item.systolic}/${item.diastolic || "-"}` : "-"
+                  item.systolic
+                    ? `${item.systolic}/${item.diastolic || "-"}`
+                    : "-"
                 }`}
                 note={item.summary || item.notes || item.risk_category || "-"}
               />
@@ -4506,9 +4748,7 @@ function HistoryAccordionCardV37({
         className="flex w-full items-center justify-between gap-4 text-left"
       >
         <div>
-          <div className="text-2xl font-black text-slate-950">
-            {title}
-          </div>
+          <div className="text-2xl font-black text-slate-950">{title}</div>
 
           <div className="mt-2 text-sm font-bold leading-5 text-slate-500">
             {loading ? "Memuat data..." : subtitle}
@@ -4520,11 +4760,7 @@ function HistoryAccordionCardV37({
         </div>
       </button>
 
-      {open ? (
-        <div className="mt-5">
-          {children}
-        </div>
-      ) : null}
+      {open ? <div className="mt-5">{children}</div> : null}
     </div>
   );
 }
@@ -4554,9 +4790,7 @@ function HistoryGenericItemV37({
     <div className="rounded-[1.7rem] bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-black text-slate-950">
-            {title}
-          </div>
+          <div className="text-sm font-black text-slate-950">{title}</div>
           <div className="mt-1 text-xs font-bold text-slate-400">
             {subtitle}
           </div>
@@ -4632,7 +4866,8 @@ function HistoryMealItemV37({ item }: { item: any }) {
           </div>
 
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {formatDateTextV37(item.log_date || item.created_at)} | {item.meal_time || item.meal_type || "-"}
+            {formatDateTextV37(item.log_date || item.created_at)} |{" "}
+            {item.meal_time || item.meal_type || "-"}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -4654,7 +4889,7 @@ function filterHistoryByDateV37(
   items: any[],
   startDate: string,
   endDate: string,
-  keys: string[]
+  keys: string[],
 ) {
   return (items || []).filter((item) => {
     const dateText = extractDateFromItemV37(item, keys);
@@ -4750,7 +4985,9 @@ function DevicesTab({
             <div>2. Isi Participant ID sesuai peserta.</div>
             <div>3. Klik Cek Permission.</div>
             <div>4. Klik Sync Hari Ini.</div>
-            <div>5. Refresh portal ini untuk melihat update Steps dan Calories.</div>
+            <div>
+              5. Refresh portal ini untuk melihat update Steps dan Calories.
+            </div>
           </div>
         </div>
 
@@ -4839,49 +5076,64 @@ function ProfileTab({
     "-";
 
   return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="text-xl font-black">Profil Peserta</h2>
+    <div className="space-y-5">
+      <WellnessProfilePanel
+        actorType="participant"
+        actor={participant}
+        title={participant?.name || "Profil Peserta"}
+      />
+      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-black">Data Peserta</h2>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        <ProfileRow label="Participant ID" value={participantId} />
-        <ProfileRow label="Nama" value={participant?.name} />
-        <ProfileRow label="Kode Karyawan" value={participant?.code} />
-        <ProfileRow label="Gender" value={participant?.gender} />
-        <ProfileRow label="Email" value={participant?.portal_email || participant?.email} />
-        <ProfileRow label="Nomor HP" value={participant?.portal_phone || participant?.phone} />
-        <ProfileRow label="Username" value={participant?.portal_username} />
-      </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <ProfileRow label="Participant ID" value={participantId} />
+          <ProfileRow label="Nama" value={participant?.name} />
+          <ProfileRow label="Kode Karyawan" value={participant?.code} />
+          <ProfileRow label="Gender" value={participant?.gender} />
+          <ProfileRow
+            label="Email"
+            value={participant?.portal_email || participant?.email}
+          />
+          <ProfileRow
+            label="Nomor HP"
+            value={participant?.portal_phone || participant?.phone}
+          />
+          <ProfileRow label="Username" value={participant?.portal_username} />
+        </div>
 
-      <div className="mt-6 rounded-3xl bg-emerald-50 p-4">
-        <div className="text-sm font-black text-emerald-900">
-          ID untuk Sync Health Connect
+        <div className="mt-6 rounded-3xl bg-emerald-50 p-4">
+          <div className="text-sm font-black text-emerald-900">
+            ID untuk Sync Health Connect
+          </div>
+          <div className="mt-2 text-3xl font-black text-emerald-700">
+            {participantId}
+          </div>
+          <div className="mt-2 text-xs font-bold leading-5 text-emerald-900">
+            Masukkan angka ini pada aplikasi Harmony Health Connect di HP
+            Android, bukan Kode Karyawan.
+          </div>
         </div>
-        <div className="mt-2 text-3xl font-black text-emerald-700">
-          {participantId}
-        </div>
-        <div className="mt-2 text-xs font-bold leading-5 text-emerald-900">
-          Masukkan angka ini pada aplikasi Harmony Health Connect di HP Android,
-          bukan Kode Karyawan.
-        </div>
-      </div>
 
-      <div className="mt-6 rounded-3xl bg-slate-50 p-4">
-        <div className="text-sm font-black text-slate-900">Device Connected</div>
-        <div className="mt-2 text-xs font-bold text-slate-500">
-          {activeProviders.length
-            ? activeProviders.join(", ")
-            : "Belum ada device terkoneksi."}
+        <div className="mt-6 rounded-3xl bg-slate-50 p-4">
+          <div className="text-sm font-black text-slate-900">
+            Device Connected
+          </div>
+          <div className="mt-2 text-xs font-bold text-slate-500">
+            {activeProviders.length
+              ? activeProviders.join(", ")
+              : "Belum ada device terkoneksi."}
+          </div>
         </div>
-      </div>
 
-      <button
-        type="button"
-        onClick={logout}
-        className="mt-6 rounded-2xl bg-slate-900 px-5 py-3 text-xs font-black text-white"
-      >
-        Logout
-      </button>
-    </section>
+        <button
+          type="button"
+          onClick={logout}
+          className="mt-6 rounded-2xl bg-slate-900 px-5 py-3 text-xs font-black text-white"
+        >
+          Logout
+        </button>
+      </section>
+    </div>
   );
 }
 function ProfileRow({ label, value }: { label: string; value: any }) {
@@ -4890,9 +5142,7 @@ function ProfileRow({ label, value }: { label: string; value: any }) {
       <div className="text-xs font-black uppercase tracking-wide text-slate-400">
         {label}
       </div>
-      <div className="mt-1 text-sm font-black text-slate-900">
-        {fmt(value)}
-      </div>
+      <div className="mt-1 text-sm font-black text-slate-900">{fmt(value)}</div>
     </div>
   );
 }
@@ -5017,7 +5267,7 @@ function getDateValue(item: any) {
       item?.checkup_date ||
       item?.measurement_date ||
       item?.created_at ||
-      item?.date
+      item?.date,
   ).slice(0, 10);
 }
 
@@ -5036,14 +5286,16 @@ function buildSeries(rows: any[], keys: string[]) {
       value: getNumeric(row, keys),
     }))
     .filter((row) => row.date && row.value !== null) as Array<{
-      date: string;
-      value: number;
-    }>;
+    date: string;
+    value: number;
+  }>;
 
   const unique = new Map<string, { date: string; value: number }>();
   for (const row of mapped) unique.set(row.date, row);
 
-  return Array.from(unique.values()).sort((a, b) => a.date.localeCompare(b.date));
+  return Array.from(unique.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
 }
 
 function HealthProgressSection({
@@ -5110,7 +5362,10 @@ function HealthProgressSection({
         <MiniLineChart title="Lingkar Perut" unit="cm" series={waistSeries} />
         <MiniLineChart title="HbA1c" unit="%" series={hba1cSeries} />
         <MiniLineChart title="Gula Darah" unit="mg/dL" series={glucoseSeries} />
-        <BloodPressureChart systolic={systolicSeries} diastolic={diastolicSeries} />
+        <BloodPressureChart
+          systolic={systolicSeries}
+          diastolic={diastolicSeries}
+        />
       </div>
     </section>
   );
@@ -5139,7 +5394,9 @@ function MiniLineChart({
         </div>
 
         <div className="rounded-2xl bg-slate-50 px-3 py-2 text-right text-sm font-black text-slate-950">
-          {latest ? `${fmtNumber(latest.value, 1)}${unit ? ` ${unit}` : ""}` : "-"}
+          {latest
+            ? `${fmtNumber(latest.value, 1)}${unit ? ` ${unit}` : ""}`
+            : "-"}
         </div>
       </div>
 
@@ -5184,7 +5441,11 @@ function BloodPressureChart({
       </div>
 
       <div className="mt-4 rounded-[1.5rem] bg-[#f5fbfb] p-3">
-        <SmoothSvgChart series={systolic.slice(-8)} height={105} showLabels={false} />
+        <SmoothSvgChart
+          series={systolic.slice(-8)}
+          height={105}
+          showLabels={false}
+        />
       </div>
 
       <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-500">
@@ -5195,7 +5456,11 @@ function BloodPressureChart({
   );
 }
 
-function SimpleSvgLine({ series }: { series: Array<{ date: string; value: number }> }) {
+function SimpleSvgLine({
+  series,
+}: {
+  series: Array<{ date: string; value: number }>;
+}) {
   return <SmoothSvgChart series={series} height={96} showLabels={false} />;
 }
 
@@ -5292,11 +5557,7 @@ function SmoothSvgChart({
         );
       })}
 
-      <path
-        d={areaPath}
-        fill="#14b8a6"
-        fillOpacity="0.10"
-      />
+      <path d={areaPath} fill="#14b8a6" fillOpacity="0.10" />
 
       <path
         d={smoothPath}
@@ -5357,23 +5618,3 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

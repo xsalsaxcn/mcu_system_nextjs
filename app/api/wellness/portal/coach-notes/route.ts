@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { postSupportWebhook } from "@/lib/wellness/supportServer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_PARTICIPANT_CHAT_UNREAD_SUMMARY_V74
+// WELLNESS_PARTICIPANT_ASSIGNED_COACH_PROFILE_V76
 
 // WELLNESS_PARTICIPANT_COACH_CHAT_API_V54
 // Reuses wellness_coach_notes and wellness_coach_note_reads. No schema changes.
@@ -46,7 +48,9 @@ function isChatNote(note: any) {
   const topic = clean(note?.topic).toLowerCase();
   const issue = clean(note?.main_issue).toLowerCase();
   const status = clean(note?.follow_up_status).toLowerCase();
-  return topic.includes("chat") || issue.startsWith("chat:") || status === "chat";
+  return (
+    topic.includes("chat") || issue.startsWith("chat:") || status === "chat"
+  );
 }
 
 function chatSender(note: any) {
@@ -100,15 +104,57 @@ function participantGroupName(row: any) {
         row?.group_name ||
         row?.risk_group ||
         row?.risk_category ||
-        row?.category
+        row?.category,
     ) || "-"
   );
+}
+
+async function assignedCoachProfile(supabase: any, participantId: number) {
+  const { data: participant } = await supabase
+    .from("wellness_participants")
+    .select("*")
+    .eq("id", participantId)
+    .maybeSingle();
+  if (!participant) return null;
+
+  const { data: assignments } = await supabase
+    .from("wellness_coach_group_assignments")
+    .select("*")
+    .eq("is_active", true)
+    .limit(1000);
+  const assignment = matchingAssignment(participant, assignments || []);
+  if (!assignment?.coach_user_id) return null;
+
+  const { data: coach } = await supabase
+    .from("wellness_coach_users")
+    .select("*")
+    .eq("id", assignment.coach_user_id)
+    .maybeSingle();
+  if (!coach) return null;
+
+  const profileResult = await postSupportWebhook("wellnessProfileGet", {
+    actorType: "coach",
+    actorId: String(coach.id),
+  }).catch(() => ({ profile: null }));
+  const profile = profileResult?.profile || {};
+
+  return {
+    id: coach.id,
+    name:
+      clean(profile.name || coach.name || coach.full_name || coach.email) ||
+      "Coach Wellness",
+    email: clean(coach.email),
+    photo_url: clean(profile.photo_url),
+    photo_preview_url: clean(profile.photo_preview_url),
+    group_name:
+      clean(assignment.group_name) || participantGroupName(participant),
+  };
 }
 
 async function readMapForNotes(
   supabase: any,
   participantId: number,
-  noteIds: number[]
+  noteIds: number[],
 ) {
   if (noteIds.length === 0) return new Map<number, string>();
 
@@ -120,21 +166,23 @@ async function readMapForNotes(
 
   if (error) return new Map<number, string>();
   return new Map(
-    (data || []).map((item: any) => [Number(item.note_id), item.read_at])
+    (data || []).map((item: any) => [Number(item.note_id), item.read_at]),
   );
 }
 
 export async function GET(request: NextRequest) {
   try {
     const supabase = adminClient();
-    const participantId = asNumber(request.nextUrl.searchParams.get("participant_id"));
+    const participantId = asNumber(
+      request.nextUrl.searchParams.get("participant_id"),
+    );
     const mode = clean(request.nextUrl.searchParams.get("mode")).toLowerCase();
     const chatMode = mode === "chat" || mode === "chat_summary";
 
     if (!participantId) {
       return NextResponse.json(
         { ok: false, message: "participant_id wajib diisi." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -148,17 +196,20 @@ export async function GET(request: NextRequest) {
     if (notesError) {
       return NextResponse.json(
         { ok: false, message: notesError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     const selectedNotes = (allNotes || []).filter((note: any) =>
-      chatMode ? isChatNote(note) : !isChatNote(note)
+      chatMode ? isChatNote(note) : !isChatNote(note),
     );
-    const noteIds = selectedNotes.map((note: any) => Number(note.id)).filter(Boolean);
+    const noteIds = selectedNotes
+      .map((note: any) => Number(note.id))
+      .filter(Boolean);
     const readMap = await readMapForNotes(supabase, participantId, noteIds);
 
     if (chatMode) {
+      const coach = await assignedCoachProfile(supabase, participantId);
       const messages = selectedNotes.map((note: any) => {
         const readAt = readMap.get(Number(note.id)) || null;
         return {
@@ -171,7 +222,7 @@ export async function GET(request: NextRequest) {
       });
 
       const unreadCoachMessages = messages.filter(
-        (item: any) => item.sender === "coach" && !item.is_read
+        (item: any) => item.sender === "coach" && !item.is_read,
       ).length;
 
       if (mode === "chat_summary") {
@@ -180,6 +231,7 @@ export async function GET(request: NextRequest) {
           participant_id: participantId,
           unread_count: unreadCoachMessages,
           unread_coach_messages: unreadCoachMessages,
+          coach,
         });
       }
 
@@ -188,8 +240,9 @@ export async function GET(request: NextRequest) {
         participant_id: participantId,
         messages,
         unread_coach_messages: messages.filter(
-          (item: any) => item.sender === "coach" && !item.is_read
+          (item: any) => item.sender === "coach" && !item.is_read,
         ).length,
+        coach,
       });
     }
 
@@ -197,8 +250,8 @@ export async function GET(request: NextRequest) {
       .slice()
       .sort((a: any, b: any) =>
         clean(b?.created_at || b?.session_date).localeCompare(
-          clean(a?.created_at || a?.session_date)
-        )
+          clean(a?.created_at || a?.session_date),
+        ),
       )
       .slice(0, 20)
       .map((note: any) => {
@@ -216,14 +269,14 @@ export async function GET(request: NextRequest) {
       participant_id: participantId,
       unread_count: result.filter((note: any) => !note.is_read).length,
       high_priority_unread: result.filter(
-        (note: any) => !note.is_read && note.priority === "high"
+        (note: any) => !note.is_read && note.priority === "high",
       ).length,
       notes: result,
     });
   } catch (error: any) {
     return NextResponse.json(
       { ok: false, message: error?.message || "Gagal memuat catatan coach." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -238,7 +291,7 @@ export async function POST(request: NextRequest) {
     if (!participantId) {
       return NextResponse.json(
         { ok: false, message: "participant_id wajib diisi." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -247,7 +300,7 @@ export async function POST(request: NextRequest) {
       if (!message) {
         return NextResponse.json(
           { ok: false, message: "Pesan chat wajib diisi." },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -260,7 +313,7 @@ export async function POST(request: NextRequest) {
       if (participantError || !participant) {
         return NextResponse.json(
           { ok: false, message: "Peserta tidak ditemukan." },
-          { status: 404 }
+          { status: 404 },
         );
       }
 
@@ -273,15 +326,18 @@ export async function POST(request: NextRequest) {
       if (assignmentError) {
         return NextResponse.json(
           { ok: false, message: assignmentError.message },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
       const assignment = matchingAssignment(participant, assignments || []);
       if (!assignment?.coach_user_id) {
         return NextResponse.json(
-          { ok: false, message: "Coach untuk kelompok peserta belum di-assign." },
-          { status: 400 }
+          {
+            ok: false,
+            message: "Coach untuk kelompok peserta belum di-assign.",
+          },
+          { status: 400 },
         );
       }
 
@@ -294,7 +350,8 @@ export async function POST(request: NextRequest) {
           participant.wellness_group_unit_id ||
           participant.group_unit_id ||
           null,
-        group_name: clean(assignment.group_name) || participantGroupName(participant),
+        group_name:
+          clean(assignment.group_name) || participantGroupName(participant),
         session_date: now.slice(0, 10),
         topic: "Chat Peserta",
         main_issue: "chat:participant",
@@ -314,7 +371,7 @@ export async function POST(request: NextRequest) {
       if (error) {
         return NextResponse.json(
           { ok: false, message: error.message },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
@@ -326,14 +383,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "mark_chat_read") {
-      const noteIds = (Array.isArray(body.note_ids) ? body.note_ids : [body.note_id])
+      const noteIds = (
+        Array.isArray(body.note_ids) ? body.note_ids : [body.note_id]
+      )
         .map(asNumber)
         .filter(Boolean);
 
       if (noteIds.length === 0) {
         return NextResponse.json(
           { ok: false, message: "note_id chat wajib diisi." },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -362,7 +421,10 @@ export async function POST(request: NextRequest) {
         if (error) throw error;
       }
 
-      return NextResponse.json({ ok: true, message: "Chat sudah ditandai dibaca." });
+      return NextResponse.json({
+        ok: true,
+        message: "Chat sudah ditandai dibaca.",
+      });
     }
 
     const noteId = asNumber(body.note_id);
@@ -371,11 +433,15 @@ export async function POST(request: NextRequest) {
     if (!markAll && !noteId) {
       return NextResponse.json(
         { ok: false, message: "note_id wajib diisi." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    let payload: Array<{ note_id: number; participant_id: number; read_at: string }> = [];
+    let payload: Array<{
+      note_id: number;
+      participant_id: number;
+      read_at: string;
+    }> = [];
 
     if (markAll) {
       const { data: notes, error: notesError } = await supabase
@@ -420,7 +486,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     return NextResponse.json(
       { ok: false, message: error?.message || "Gagal memproses catatan." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

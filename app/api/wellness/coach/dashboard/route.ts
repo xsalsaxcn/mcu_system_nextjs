@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { postSupportWebhook } from "@/lib/wellness/supportServer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 // WELLNESS_COACH_MONITORING_FLAGS_V53
 // WELLNESS_COACH_CHAT_SUMMARY_V54
 // WELLNESS_COACH_MISSING_INPUT_DAYS_V57
+// WELLNESS_COACH_PARTICIPANT_PROFILE_PHOTO_V76
 // Scope: assigned groups, 7-day compliance flags, note read status, and existing target fields.
 // No schema migration and no access outside the coach assignment.
 
@@ -39,7 +41,9 @@ function isChatNote(note: any) {
   const topic = clean(note?.topic).toLowerCase();
   const issue = clean(note?.main_issue).toLowerCase();
   const status = clean(note?.follow_up_status).toLowerCase();
-  return topic.includes("chat") || issue.startsWith("chat:") || status === "chat";
+  return (
+    topic.includes("chat") || issue.startsWith("chat:") || status === "chat"
+  );
 }
 
 function chatSender(note: any) {
@@ -74,7 +78,9 @@ function daysBetween(from: string, to: string) {
 }
 
 function getParticipantId(row: any) {
-  return asNumber(row?.id || row?.participant_id || row?.wellness_participant_id);
+  return asNumber(
+    row?.id || row?.participant_id || row?.wellness_participant_id,
+  );
 }
 
 function participantGroupIds(row: any) {
@@ -102,25 +108,39 @@ function participantGroupNames(row: any) {
 }
 
 function participantName(row: any) {
-  return clean(row?.name || row?.employee_name || row?.nama || row?.full_name || "-");
+  return clean(
+    row?.name || row?.employee_name || row?.nama || row?.full_name || "-",
+  );
 }
 
 function participantCode(row: any) {
-  return clean(row?.code || row?.employee_code || row?.kode_karyawan || row?.nik || "-");
+  return clean(
+    row?.code || row?.employee_code || row?.kode_karyawan || row?.nik || "-",
+  );
 }
 
 function participantRisk(row: any) {
-  return clean(row?.risk_group || row?.risk_category || row?.baseline_risk_group || row?.category || "-");
+  return clean(
+    row?.risk_group ||
+      row?.risk_category ||
+      row?.baseline_risk_group ||
+      row?.category ||
+      "-",
+  );
 }
 
 function canAccessParticipant(row: any, assignments: any[]) {
   if (!assignments.length) return false;
 
   const allowedIds = new Set(
-    assignments.map((item) => clean(item.wellness_group_unit_id)).filter(Boolean)
+    assignments
+      .map((item) => clean(item.wellness_group_unit_id))
+      .filter(Boolean),
   );
   const allowedNames = new Set(
-    assignments.map((item) => clean(item.group_name).toLowerCase()).filter(Boolean)
+    assignments
+      .map((item) => clean(item.group_name).toLowerCase())
+      .filter(Boolean),
   );
 
   return (
@@ -143,7 +163,9 @@ function assignedGroupFor(row: any, assignments: any[]) {
 }
 
 function activityDate(row: any) {
-  return clean(row?.log_date || row?.date || row?.started_at || row?.created_at).slice(0, 10);
+  return clean(
+    row?.log_date || row?.date || row?.started_at || row?.created_at,
+  ).slice(0, 10);
 }
 
 function foodDate(row: any) {
@@ -155,7 +177,7 @@ function activitySteps(row: any) {
     row?.steps ||
       row?.total_steps ||
       row?.raw_payload?.health_connect_steps ||
-      row?.raw_payload?.google_fit_steps
+      row?.raw_payload?.google_fit_steps,
   );
 }
 
@@ -165,24 +187,27 @@ function activityCalories(row: any) {
       row?.total_calories ||
       row?.calories_burned ||
       row?.raw_payload?.health_connect_calories ||
-      row?.raw_payload?.google_fit_calories_expended
+      row?.raw_payload?.google_fit_calories_expended,
   );
 }
 
 function foodCalories(row: any) {
-  return asNumber(row?.calories || row?.total_calories || row?.estimated_calories);
+  return asNumber(
+    row?.calories || row?.total_calories || row?.estimated_calories,
+  );
 }
 
 function latestClinicalFor(participantId: number, clinicalRows: any[]) {
   const rows = clinicalRows
     .filter(
       (row) =>
-        asNumber(row?.participant_id || row?.wellness_participant_id) === participantId
+        asNumber(row?.participant_id || row?.wellness_participant_id) ===
+        participantId,
     )
     .sort((a, b) =>
       clean(b?.created_at || b?.exam_date || b?.checkup_date).localeCompare(
-        clean(a?.created_at || a?.exam_date || a?.checkup_date)
-      )
+        clean(a?.created_at || a?.exam_date || a?.checkup_date),
+      ),
     );
 
   return rows[0] || null;
@@ -201,8 +226,12 @@ function parseTargetsFromNote(note: any) {
 
   return {
     nutrition_max_calories: find(/Target\s+Nutrisi\s*:\s*([0-9.,]+)/i),
-    workout_min_calories: find(/Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i),
-    target_weight_kg: find(/Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i),
+    workout_min_calories: find(
+      /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
+    ),
+    target_weight_kg: find(
+      /Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i,
+    ),
   };
 }
 
@@ -211,14 +240,16 @@ function participantTargets(row: any, latestTargetNote: any) {
 
   return {
     nutrition_max_calories:
-      asNumber(row?.daily_calorie_limit || row?.target_calories || row?.calorie_limit) ||
+      asNumber(
+        row?.daily_calorie_limit || row?.target_calories || row?.calorie_limit,
+      ) ||
       fromNote.nutrition_max_calories ||
       0,
     workout_min_calories:
       asNumber(
         row?.workout_calorie_target ||
           row?.active_calorie_target ||
-          row?.daily_activity_calorie_target
+          row?.daily_activity_calorie_target,
       ) ||
       fromNote.workout_min_calories ||
       0,
@@ -237,13 +268,19 @@ function makeFlag(params: {
 }) {
   const nutritionDays = new Set(params.nutritionDates.filter(Boolean)).size;
   const workoutDays = new Set(params.workoutDates.filter(Boolean)).size;
-  const compliancePercent = Math.round(((nutritionDays + workoutDays) / 14) * 100);
+  const compliancePercent = Math.round(
+    ((nutritionDays + workoutDays) / 14) * 100,
+  );
   const nutritionDateList = params.nutritionDates.filter(Boolean).sort();
   const workoutDateList = params.workoutDates.filter(Boolean).sort();
   const lastNutritionDate =
-    nutritionDateList.length > 0 ? nutritionDateList[nutritionDateList.length - 1] : "";
+    nutritionDateList.length > 0
+      ? nutritionDateList[nutritionDateList.length - 1]
+      : "";
   const lastWorkoutDate =
-    workoutDateList.length > 0 ? workoutDateList[workoutDateList.length - 1] : "";
+    workoutDateList.length > 0
+      ? workoutDateList[workoutDateList.length - 1]
+      : "";
   const daysSinceNutrition = lastNutritionDate
     ? daysBetween(lastNutritionDate, params.today)
     : 99;
@@ -252,9 +289,12 @@ function makeFlag(params: {
     : 99;
   const allDates = [...nutritionDateList, ...workoutDateList].sort();
   const lastDate = allDates.length > 0 ? allDates[allDates.length - 1] : "";
-  const daysSinceLastInput = lastDate ? daysBetween(lastDate, params.today) : 99;
+  const daysSinceLastInput = lastDate
+    ? daysBetween(lastDate, params.today)
+    : 99;
   const medicalReview =
-    clean(params.latestNote?.follow_up_status).toLowerCase() === "need medical review";
+    clean(params.latestNote?.follow_up_status).toLowerCase() ===
+    "need medical review";
 
   if (medicalReview) {
     return {
@@ -340,7 +380,8 @@ async function getCoach(request: NextRequest, supabase: any) {
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
 
-  if (error || !data || !data.coach || data.coach.is_active === false) return null;
+  if (error || !data || !data.coach || data.coach.is_active === false)
+    return null;
   return data.coach;
 }
 
@@ -352,7 +393,7 @@ export async function GET(request: NextRequest) {
     if (!coach) {
       return NextResponse.json(
         { ok: false, message: "Session coach belum aktif." },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -366,7 +407,7 @@ export async function GET(request: NextRequest) {
     if (assignmentError) {
       return NextResponse.json(
         { ok: false, message: assignmentError.message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -383,12 +424,12 @@ export async function GET(request: NextRequest) {
             "Table wellness_participants belum terbaca. Cek nama table peserta wellness di Supabase.",
           detail: participantError.message,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     const participants = (allParticipants || []).filter((row: any) =>
-      canAccessParticipant(row, assignments || [])
+      canAccessParticipant(row, assignments || []),
     );
     const participantIds = participants.map(getParticipantId).filter(Boolean);
     const today = jakartaDate();
@@ -401,38 +442,41 @@ export async function GET(request: NextRequest) {
     let noteReadRows: any[] = [];
 
     if (participantIds.length > 0) {
-      const [activityResult, foodResult, clinicalResult, noteResult] = await Promise.all([
-        supabase
-          .from("wellness_activity_logs")
-          .select("*")
-          .in("participant_id", participantIds)
-          .gte("log_date", fromDate)
-          .limit(10000),
-        supabase
-          .from("wellness_food_logs")
-          .select("*")
-          .in("participant_id", participantIds)
-          .gte("log_date", fromDate)
-          .limit(10000),
-        supabase
-          .from("wellness_clinical_history")
-          .select("*")
-          .in("participant_id", participantIds)
-          .limit(5000),
-        supabase
-          .from("wellness_coach_notes")
-          .select("*")
-          .in("participant_id", participantIds)
-          .order("created_at", { ascending: false })
-          .limit(3000),
-      ]);
+      const [activityResult, foodResult, clinicalResult, noteResult] =
+        await Promise.all([
+          supabase
+            .from("wellness_activity_logs")
+            .select("*")
+            .in("participant_id", participantIds)
+            .gte("log_date", fromDate)
+            .limit(10000),
+          supabase
+            .from("wellness_food_logs")
+            .select("*")
+            .in("participant_id", participantIds)
+            .gte("log_date", fromDate)
+            .limit(10000),
+          supabase
+            .from("wellness_clinical_history")
+            .select("*")
+            .in("participant_id", participantIds)
+            .limit(5000),
+          supabase
+            .from("wellness_coach_notes")
+            .select("*")
+            .in("participant_id", participantIds)
+            .order("created_at", { ascending: false })
+            .limit(3000),
+        ]);
 
       activityRows = activityResult.data || [];
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
       noteRows = noteResult.data || [];
 
-      const noteIds = noteRows.map((note: any) => asNumber(note.id)).filter(Boolean);
+      const noteIds = noteRows
+        .map((note: any) => asNumber(note.id))
+        .filter(Boolean);
       if (noteIds.length > 0) {
         const reads = await supabase
           .from("wellness_coach_note_reads")
@@ -447,21 +491,38 @@ export async function GET(request: NextRequest) {
       noteReadRows.map((item: any) => [
         `${asNumber(item.note_id)}:${asNumber(item.participant_id)}`,
         item.read_at,
-      ])
+      ]),
+    );
+
+    const profileResult = await postSupportWebhook("wellnessProfileList", {
+      actorType: "participant",
+      actorIds: participantIds.map(String),
+    }).catch(() => ({ profiles: [] }));
+    const profileMap = new Map<string, any>(
+      (profileResult?.profiles || []).map((profile: any) => [
+        clean(profile.actor_id),
+        profile,
+      ]),
     );
 
     const participantCards = participants.map((row: any) => {
       const id = getParticipantId(row);
-      const acts = activityRows.filter((item) => asNumber(item.participant_id) === id);
-      const foods = foodRows.filter((item) => asNumber(item.participant_id) === id);
+      const acts = activityRows.filter(
+        (item) => asNumber(item.participant_id) === id,
+      );
+      const foods = foodRows.filter(
+        (item) => asNumber(item.participant_id) === id,
+      );
       const participantNotes = noteRows.filter(
-        (note) => asNumber(note.participant_id) === id
+        (note) => asNumber(note.participant_id) === id,
       );
       const chatNotes = participantNotes.filter(isChatNote);
-      const instructionNotes = participantNotes.filter((note) => !isChatNote(note));
+      const instructionNotes = participantNotes.filter(
+        (note) => !isChatNote(note),
+      );
       const latestNote = instructionNotes[0] || null;
       const latestTargetNote = instructionNotes.find((note) =>
-        clean(note.topic).toLowerCase().includes("target wellness")
+        clean(note.topic).toLowerCase().includes("target wellness"),
       );
       const todayActs = acts.filter((item) => activityDate(item) === today);
       const todayFoods = foods.filter((item) => foodDate(item) === today);
@@ -472,34 +533,42 @@ export async function GET(request: NextRequest) {
         today,
         nutritionDates: foods.map(foodDate),
         workoutDates: acts
-          .filter((item) => activitySteps(item) > 0 || activityCalories(item) > 0)
+          .filter(
+            (item) => activitySteps(item) > 0 || activityCalories(item) > 0,
+          )
           .map(activityDate),
         latestNote,
       });
 
       const assignedGroup = assignedGroupFor(row, assignments || []);
+      const profile = profileMap.get(String(id)) || {};
 
       return {
         id,
         name: participantName(row),
         code: participantCode(row),
+        profile_photo_url: clean(profile.photo_url),
+        profile_photo_preview_url: clean(profile.photo_preview_url),
         group_name:
           clean(assignedGroup?.group_name) ||
           clean(
             row?.group_unit_name ||
               row?.group_name ||
               row?.risk_group ||
-              row?.category
+              row?.category,
           ) ||
           "-",
         risk: participantRisk(row),
         raw: row,
         today: {
           steps: todayActs.reduce((sum, item) => sum + activitySteps(item), 0),
-          calories: todayActs.reduce((sum, item) => sum + activityCalories(item), 0),
+          calories: todayActs.reduce(
+            (sum, item) => sum + activityCalories(item),
+            0,
+          ),
           nutrition_calories: todayFoods.reduce(
             (sum, item) => sum + foodCalories(item),
-            0
+            0,
           ),
           activity_count: todayActs.length,
           nutrition_count: todayFoods.length,
@@ -518,18 +587,20 @@ export async function GET(request: NextRequest) {
             }
           : null,
         unread_note_count: instructionNotes.filter(
-          (note) => !readMap.get(`${asNumber(note.id)}:${id}`)
+          (note) => !readMap.get(`${asNumber(note.id)}:${id}`),
         ).length,
         unread_chat_count: chatNotes.filter(
           (note) =>
             chatSender(note) === "participant" &&
-            !readMap.get(`${asNumber(note.id)}:${id}`)
+            !readMap.get(`${asNumber(note.id)}:${id}`),
         ).length,
         last_chat: chatNotes[0]
           ? {
               id: chatNotes[0].id,
               sender: chatSender(chatNotes[0]),
-              message: clean(chatNotes[0].coach_note || chatNotes[0].action_plan),
+              message: clean(
+                chatNotes[0].coach_note || chatNotes[0].action_plan,
+              ),
               created_at: chatNotes[0].created_at || chatNotes[0].session_date,
             }
           : null,
@@ -565,7 +636,8 @@ export async function GET(request: NextRequest) {
         group_name: name,
         member_count: members.length,
         green_count: members.filter((member) => member.flag === "green").length,
-        yellow_count: members.filter((member) => member.flag === "yellow").length,
+        yellow_count: members.filter((member) => member.flag === "yellow")
+          .length,
         red_count: members.filter((member) => member.flag === "red").length,
       };
     });
@@ -577,21 +649,22 @@ export async function GET(request: NextRequest) {
       summary: {
         total_participants: participantCards.length,
         active_today: participantCards.filter(
-          (item) => item.today.activity_count > 0 || item.today.nutrition_count > 0
+          (item) =>
+            item.today.activity_count > 0 || item.today.nutrition_count > 0,
         ).length,
         need_follow_up: flagSummary.yellow + flagSummary.red,
         need_medical_review: participantCards.filter(
           (item) =>
             clean(item.latest_note?.follow_up_status).toLowerCase() ===
-            "need medical review"
+            "need medical review",
         ).length,
         unread_instructions: participantCards.reduce(
           (sum, item) => sum + asNumber(item.unread_note_count),
-          0
+          0,
         ),
         unread_chat_messages: participantCards.reduce(
           (sum, item) => sum + asNumber(item.unread_chat_count),
-          0
+          0,
         ),
         flags: flagSummary,
       },
@@ -603,7 +676,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     return NextResponse.json(
       { ok: false, message: error?.message || "Gagal memuat dashboard coach." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
