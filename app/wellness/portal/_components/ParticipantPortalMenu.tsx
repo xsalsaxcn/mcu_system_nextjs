@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_PORTAL_MENU_UI_V50
 // WELLNESS_PARTICIPANT_CHAT_MENU_V54
 // WELLNESS_PARTICIPANT_ADMIN_SUPPORT_MENU_V61
+// WELLNESS_PARTICIPANT_CHAT_NOTIFICATION_BELL_V74
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
@@ -125,6 +126,9 @@ export default function ParticipantPortalMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [coachUnread, setCoachUnread] = useState(0);
+  const [adminUnread, setAdminUnread] = useState(0);
 
   const participantName =
     clean(participant?.name) ||
@@ -132,10 +136,92 @@ export default function ParticipantPortalMenu({
     clean(participant?.full_name) ||
     "Peserta Wellness";
 
+  const participantId = Number(
+    participant?.id ||
+      participant?.participant_id ||
+      participant?.wellness_participant_id ||
+      0
+  );
+  const totalUnread = Math.max(0, coachUnread) + Math.max(0, adminUnread);
+
   const activeItem = useMemo(
     () => menuItems.find((item) => item.key === activeTab) || menuItems[0],
     [activeTab]
   );
+
+  async function loadUnreadNotifications() {
+    if (!participantId) {
+      setCoachUnread(0);
+      setAdminUnread(0);
+      return;
+    }
+
+    const timestamp = Date.now();
+    const [coachResult, adminResult] = await Promise.all([
+      fetch(
+        `/api/wellness/portal/coach-notes?participant_id=${participantId}&mode=chat_summary&t=${timestamp}`,
+        { cache: "no-store" }
+      )
+        .then((response) => response.json())
+        .catch(() => ({ ok: false })),
+      fetch(`/api/wellness/support?mode=summary&t=${timestamp}`, {
+        cache: "no-store",
+      })
+        .then((response) => response.json())
+        .catch(() => ({ ok: false })),
+    ]);
+
+    if (coachResult?.ok) {
+      setCoachUnread(
+        Math.max(
+          0,
+          Number(
+            coachResult.unread_count ??
+              coachResult.unread_coach_messages ??
+              0
+          ) || 0
+        )
+      );
+    }
+    if (adminResult?.ok) {
+      setAdminUnread(
+        Math.max(0, Number(adminResult.unread_count || 0) || 0)
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (!participantId) return;
+
+    void loadUnreadNotifications();
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadUnreadNotifications();
+      }
+    }, 30000);
+
+    const refreshOnFocus = () => void loadUnreadNotifications();
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void loadUnreadNotifications();
+      }
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
+    };
+  }, [participantId]);
+
+  useEffect(() => {
+    setNotificationOpen(false);
+    if (activeTab === "chat") setCoachUnread(0);
+    if (activeTab === "support") setAdminUnread(0);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -152,6 +238,85 @@ export default function ParticipantPortalMenu({
     onChangeTab(tab);
     setOpen(false);
     setQuickOpen(false);
+    setNotificationOpen(false);
+    if (tab === "chat") setCoachUnread(0);
+    if (tab === "support") setAdminUnread(0);
+  }
+
+  function NotificationBell() {
+    if (totalUnread <= 0) return null;
+
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setNotificationOpen((previous) => !previous)}
+          className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-100 bg-white text-xl shadow-lg shadow-slate-200"
+          aria-label={`Ada ${totalUnread} chat baru`}
+          aria-expanded={notificationOpen}
+        >
+          <span className="animate-[pulse_1.8s_ease-in-out_infinite]">🔔</span>
+          <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+            {totalUnread > 99 ? "99+" : totalUnread}
+          </span>
+        </button>
+
+        {notificationOpen ? (
+          <div className="absolute right-0 top-[3.5rem] z-[10020] w-[min(18rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white shadow-2xl shadow-slate-950/20">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-600">
+                Notifikasi
+              </div>
+              <div className="mt-1 text-sm font-black text-slate-950">
+                Ada chat baru
+              </div>
+            </div>
+
+            <div className="grid gap-2 p-3">
+              {coachUnread > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => chooseTab("chat")}
+                  className="flex items-center justify-between gap-3 rounded-2xl bg-teal-50 px-4 py-3 text-left"
+                >
+                  <div>
+                    <div className="text-sm font-black text-teal-950">
+                      💬 Chat dari Coach
+                    </div>
+                    <div className="mt-1 text-[11px] font-bold text-teal-700">
+                      Buka percakapan Coach
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-teal-600 px-2.5 py-1 text-xs font-black text-white">
+                    {coachUnread}
+                  </span>
+                </button>
+              ) : null}
+
+              {adminUnread > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => chooseTab("support")}
+                  className="flex items-center justify-between gap-3 rounded-2xl bg-indigo-50 px-4 py-3 text-left"
+                >
+                  <div>
+                    <div className="text-sm font-black text-indigo-950">
+                      🛠️ Chat dari Admin
+                    </div>
+                    <div className="mt-1 text-[11px] font-bold text-indigo-700">
+                      Buka bantuan teknis
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-black text-white">
+                    {adminUnread}
+                  </span>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   return (
@@ -167,25 +332,31 @@ export default function ParticipantPortalMenu({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-2xl font-black text-white shadow-lg shadow-slate-200"
-            aria-label="Buka menu peserta"
-          >
-            ☰
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell />
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-2xl font-black text-white shadow-lg shadow-slate-200"
+              aria-label="Buka menu peserta"
+            >
+              ☰
+            </button>
+          </div>
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="fixed right-4 top-4 z-[9998] hidden h-14 w-14 items-center justify-center rounded-full border border-slate-100 bg-white text-2xl font-black text-slate-900 shadow-2xl shadow-slate-300/60 md:flex"
-        aria-label="Buka menu peserta"
-      >
-        ☰
-      </button>
+      <div className="fixed right-4 top-4 z-[9998] hidden items-center gap-2 md:flex">
+        <NotificationBell />
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-100 bg-white text-2xl font-black text-slate-900 shadow-2xl shadow-slate-300/60"
+          aria-label="Buka menu peserta"
+        >
+          ☰
+        </button>
+      </div>
 
       {quickOpen ? (
         <div className="fixed bottom-24 right-5 z-[9997] grid gap-3 md:hidden">

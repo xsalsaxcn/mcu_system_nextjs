@@ -1,8 +1,10 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+// WELLNESS_PARTICIPANT_CHAT_UNREAD_SUMMARY_V74
 
 // WELLNESS_PARTICIPANT_COACH_CHAT_API_V54
 // Reuses wellness_coach_notes and wellness_coach_note_reads. No schema changes.
@@ -127,6 +129,7 @@ export async function GET(request: NextRequest) {
     const supabase = adminClient();
     const participantId = asNumber(request.nextUrl.searchParams.get("participant_id"));
     const mode = clean(request.nextUrl.searchParams.get("mode")).toLowerCase();
+    const chatMode = mode === "chat" || mode === "chat_summary";
 
     if (!participantId) {
       return NextResponse.json(
@@ -140,7 +143,7 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("participant_id", participantId)
       .order("created_at", { ascending: true })
-      .limit(mode === "chat" ? 100 : 50);
+      .limit(chatMode ? 100 : 50);
 
     if (notesError) {
       return NextResponse.json(
@@ -150,12 +153,12 @@ export async function GET(request: NextRequest) {
     }
 
     const selectedNotes = (allNotes || []).filter((note: any) =>
-      mode === "chat" ? isChatNote(note) : !isChatNote(note)
+      chatMode ? isChatNote(note) : !isChatNote(note)
     );
     const noteIds = selectedNotes.map((note: any) => Number(note.id)).filter(Boolean);
     const readMap = await readMapForNotes(supabase, participantId, noteIds);
 
-    if (mode === "chat") {
+    if (chatMode) {
       const messages = selectedNotes.map((note: any) => {
         const readAt = readMap.get(Number(note.id)) || null;
         return {
@@ -166,6 +169,19 @@ export async function GET(request: NextRequest) {
           read_at: readAt,
         };
       });
+
+      const unreadCoachMessages = messages.filter(
+        (item: any) => item.sender === "coach" && !item.is_read
+      ).length;
+
+      if (mode === "chat_summary") {
+        return NextResponse.json({
+          ok: true,
+          participant_id: participantId,
+          unread_count: unreadCoachMessages,
+          unread_coach_messages: unreadCoachMessages,
+        });
+      }
 
       return NextResponse.json({
         ok: true,

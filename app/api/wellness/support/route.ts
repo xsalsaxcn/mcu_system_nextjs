@@ -8,6 +8,7 @@ import {
 } from "@/lib/wellness/supportServer";
 
 // WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_V61_API
+// WELLNESS_SUPPORT_UNREAD_SUMMARY_V74
 // Text and metadata are stored in Google Sheet, not Supabase.
 
 export const runtime = "nodejs";
@@ -43,6 +44,23 @@ export async function GET(request: NextRequest) {
 
     const actor = await getSupportActor(request);
     if (!actor) return fail("Session Wellness belum aktif.", 401);
+
+    if (mode === "summary" && !actor.isAdmin) {
+      const result = await postSupportWebhook("supportGetThread", {
+        ...actorWebhookPayload(actor),
+        limit: 1,
+        markRead: false,
+      });
+      const thread = result.thread || null;
+      const unreadCount = Number(
+        thread?.unread_user ?? thread?.unreadUser ?? 0
+      );
+      return ok({
+        thread,
+        unread_count: Number.isFinite(unreadCount) ? unreadCount : 0,
+        has_unread: Number.isFinite(unreadCount) && unreadCount > 0,
+      });
+    }
 
     const threadId = clean(request.nextUrl.searchParams.get("thread_id"));
     const limit = clampLimit(request.nextUrl.searchParams.get("limit"), 30, 50);

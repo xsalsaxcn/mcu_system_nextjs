@@ -2,6 +2,7 @@
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
+// WELLNESS_NUTRITION_FILLING_GUIDE_V74
 
 import { useEffect, useMemo, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
@@ -3102,12 +3103,15 @@ function NutritionTab({
           </div>
 
           <label className="grid gap-2 text-xs font-black text-slate-700">
-            Nama Makanan
+            <span>Nama Makanan</span>
+            <span className="rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold leading-5 text-teal-800">
+              Cara pengisian: Nasi Putih, Sayur Sop, Es Campur
+            </span>
             <textarea
               value={form.food_name}
               onChange={(e) => setValue("food_name", e.target.value)}
               className={`${fieldClass} min-h-[92px] w-full resize-none text-sm`}
-              placeholder="Contoh: Nasi putih, sayur sop, ayam goreng"
+              placeholder="Nasi Putih, Sayur Sop, Es Campur"
             />
           </label>
 
