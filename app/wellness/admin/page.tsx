@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
 // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
 // WELLNESS_ADMIN_EXCEL_EXPORT_V79D
+// WELLNESS_ADMIN_UNIFIED_WEB_MOBILE_V79E
 // Dedicated mobile-first Admin Portal. It intentionally does not reuse the
 // desktop operational dashboard layout.
 
@@ -132,6 +133,7 @@ export default function WellnessAdminMobilePage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [query, setQuery] = useState("");
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
 
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
@@ -256,6 +258,7 @@ export default function WellnessAdminMobilePage() {
 
       setSessionRequired(false);
       setLoginError("");
+      setLastLoadedAt(new Date());
 
       if (failedDashboards.length > 0) {
         setMessage(
@@ -557,9 +560,59 @@ export default function WellnessAdminMobilePage() {
     menu: "Menu Admin",
   };
 
+
+  const canonicalAdminUrl = "/wellness/admin";
+  const exportExcelUrl = "/api/wellness/admin/export-excel?days=30";
+  const lastLoadedLabel = lastLoadedAt
+    ? lastLoadedAt.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "-";
+
   return (
-    <main className="min-h-screen bg-[#f4f8fb] pb-24 text-slate-950">
-      <div className="mx-auto max-w-3xl px-3 py-3 sm:px-5 sm:py-5">
+    <main className="min-h-screen bg-[#f4f8fb] pb-24 text-slate-950 lg:pb-8">
+      <div className="mx-auto max-w-7xl px-3 py-3 sm:px-5 sm:py-5 lg:px-8 lg:py-7">
+        {/* WELLNESS_ADMIN_DESKTOP_NAV_V79E */}
+        <nav className="mb-5 hidden items-center justify-between gap-4 rounded-[1.4rem] border border-slate-200 bg-white p-3 shadow-sm lg:flex">
+          <div className="flex min-w-0 items-center gap-2">
+            {[
+              ["home", "Dashboard"],
+              ["companies", "Perusahaan"],
+              ["coaches", "Coach"],
+              ["participants", "Peserta"],
+              ["monitoring", "Monitoring"],
+              ["ranking", "Ranking"],
+              ["reports", "Laporan"],
+            ].map(([key, label]) => (
+              <button
+                key={String(key)}
+                type="button"
+                onClick={() => openView(key as View)}
+                className={`rounded-xl px-3 py-2.5 text-xs font-black transition ${
+                  view === key
+                    ? "bg-slate-950 text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
+              Sync {lastLoadedLabel}
+            </div>
+            <a
+              href={exportExcelUrl}
+              className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-black text-white shadow-sm"
+            >
+              ⬇ Export Excel
+            </a>
+          </div>
+        </nav>
+
         {view === "home" ? (
           <section className="relative overflow-visible rounded-[1.75rem] bg-gradient-to-br from-slate-950 via-blue-900 to-teal-600 p-5 text-white shadow-xl shadow-blue-100 sm:p-6">
             <div className="flex items-start justify-between gap-3">
@@ -581,6 +634,14 @@ export default function WellnessAdminMobilePage() {
               </div>
 
               <div className="relative flex shrink-0 gap-2">
+                <a
+                  href={exportExcelUrl}
+                  className="flex h-11 items-center justify-center gap-1 rounded-2xl bg-emerald-500 px-3 text-[10px] font-black text-white shadow-sm"
+                  aria-label="Export Excel Admin"
+                >
+                  <span>⬇</span>
+                  <span className="hidden sm:inline">Excel</span>
+                </a>
                 <button
                   type="button"
                   onClick={() =>
@@ -644,6 +705,14 @@ export default function WellnessAdminMobilePage() {
               </h1>
             </div>
             <div className="flex shrink-0 gap-2">
+              <a
+                href={exportExcelUrl}
+                className="flex h-10 items-center justify-center gap-1 rounded-full bg-emerald-700 px-3 text-[10px] font-black text-white"
+                aria-label="Export Excel Admin"
+              >
+                <span>⬇</span>
+                <span className="hidden sm:inline">Excel</span>
+              </a>
               <button
                 type="button"
                 onClick={() => openView("home")}
@@ -670,10 +739,22 @@ export default function WellnessAdminMobilePage() {
           </div>
         ) : null}
 
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3.5 py-2.5 text-[10px] font-bold text-emerald-900">
+          <div>
+            Data mobile dan web: <span className="font-black">satu backend yang sama</span>
+            <span className="mx-1">·</span>
+            Portal Perusahaan 30 hari
+          </div>
+          <div className="flex items-center gap-2">
+            <span>Sync {lastLoadedLabel}</span>
+            <span className="rounded-full bg-white px-2 py-1 font-black text-emerald-700">V79E</span>
+          </div>
+        </div>
+
         <div className="mt-4">
           {view === "home" ? (
             <div className="space-y-4">
-              <section className="grid grid-cols-2 gap-3">
+              <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <MetricCard
                   label="Perusahaan"
                   value={summary.total_companies}
@@ -740,6 +821,21 @@ export default function WellnessAdminMobilePage() {
                       <div className="mt-1 text-2xl font-black">{fmt(value)}</div>
                     </button>
                   ))}
+                  <a
+                    href={exportExcelUrl}
+                    className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-3 text-left text-emerald-900"
+                  >
+                    <span className="text-xl">📥</span>
+                    <span className="text-xs font-black">Export Excel</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => openView("reports")}
+                    className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left"
+                  >
+                    <span className="text-xl">📄</span>
+                    <span className="text-xs font-black text-slate-800">Laporan</span>
+                  </button>
                 </div>
               </section>
 
@@ -747,7 +843,7 @@ export default function WellnessAdminMobilePage() {
                 <div className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
                   Quick Action
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2.5">
+                <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-4">
                   {[
                     ["🏢", "Perusahaan", "companies"],
                     ["🧭", "Coach", "coaches"],
@@ -827,7 +923,7 @@ export default function WellnessAdminMobilePage() {
           ) : null}
 
           {view === "companies" ? (
-            <section className="space-y-3">
+            <section className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
               {enrichedCompanies.map((company: any, index: number) => (
                 <article
                   key={company.id}
@@ -876,7 +972,7 @@ export default function WellnessAdminMobilePage() {
           ) : null}
 
           {view === "coaches" ? (
-            <section className="space-y-3">
+            <section className="space-y-3 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
               {coaches.map((coach: any, index: number) => (
                 <article key={coach.id} className="rounded-[1.55rem] border border-slate-100 bg-white p-4 shadow-sm">
                   <div className="flex items-start gap-3">
@@ -978,8 +1074,8 @@ export default function WellnessAdminMobilePage() {
           ) : null}
 
           {view === "ranking" ? (
-            <section className="space-y-4">
-              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+            <section className="space-y-4 lg:grid lg:grid-cols-2 lg:gap-5 lg:space-y-0">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 lg:col-span-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-[10px] font-black uppercase tracking-[0.13em] text-emerald-700">
@@ -994,7 +1090,7 @@ export default function WellnessAdminMobilePage() {
                   </div>
 
                   <a
-                    href="/api/wellness/admin/export-excel?days=30"
+                    href={exportExcelUrl}
                     className="flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-2.5 text-[10px] font-black text-white shadow-sm active:scale-[0.98]"
                     aria-label="Export laporan Portal Admin ke Excel"
                   >
@@ -1125,7 +1221,7 @@ export default function WellnessAdminMobilePage() {
               <a href="/wellness/history-import" className="rounded-[1.5rem] border border-teal-100 bg-teal-50 p-4 text-teal-950 shadow-sm"><div className="text-2xl">📈</div><div className="mt-2 text-base font-black">History MCU</div><div className="mt-1 text-xs font-bold leading-5 text-teal-700">Kelola baseline dan pemeriksaan berkala.</div></a>
               <a href="/wellness/support-admin" className="rounded-[1.5rem] border border-violet-100 bg-violet-50 p-4 text-violet-950 shadow-sm"><div className="text-2xl">📄</div><div className="mt-2 text-base font-black">Laporan Follow-up</div><div className="mt-1 text-xs font-bold leading-5 text-violet-700">Tinjau tiket dan tindak lanjut layanan.</div></a>
               <a
-                href="/api/wellness/admin/export-excel?days=30"
+                href={exportExcelUrl}
                 className="rounded-[1.5rem] border border-emerald-100 bg-emerald-50 p-4 text-emerald-950 shadow-sm active:scale-[0.99]"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -1152,6 +1248,9 @@ export default function WellnessAdminMobilePage() {
                 <div className="mt-4 break-words text-xl font-black text-slate-950">{admin.name}</div>
                 <div className="mt-1 text-xs font-bold text-slate-500">@{admin.username || "admin"}</div>
                 <span className="mt-3 rounded-full bg-blue-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-blue-700">{roleLabel(admin.role)}</span>
+                <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-bold text-emerald-800">
+                  Web dan mobile menggunakan {canonicalAdminUrl}
+                </div>
               </div>
               <div className="mt-5 grid gap-2">
                 <a href="/dashboard" className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-800">Buka Dashboard Desktop</a>
@@ -1163,7 +1262,7 @@ export default function WellnessAdminMobilePage() {
         </div>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1">
           {[
             ["home", "🏠", "Home"],
@@ -1212,6 +1311,12 @@ export default function WellnessAdminMobilePage() {
               ].map(([icon, label, nextView]) => (
                 <button key={String(label)} type="button" onClick={() => openView(nextView as View)} className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"><span className="text-xl">{icon}</span><span className="text-sm font-black text-slate-800">{label}</span></button>
               ))}
+              <a
+                href={exportExcelUrl}
+                className="mb-2 block rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-black text-white"
+              >
+                📥 Export Excel Admin
+              </a>
               <div className="my-3 border-t border-slate-200" />
               <a href="/wellness/dashboard" className="mb-2 block rounded-2xl bg-blue-50 px-4 py-3 text-sm font-black text-blue-800">Wellness Management</a>
               <a href="/dashboard" className="mb-2 block rounded-2xl bg-slate-200 px-4 py-3 text-sm font-black text-slate-800">Dashboard Operasional</a>
