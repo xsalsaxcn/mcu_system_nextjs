@@ -145,8 +145,12 @@ export default function WellnessCoachPortalPage() {
     next_follow_up_date: "",
   });
 
-  async function loadDashboard(options?: { keepSelection?: boolean }) {
-    setLoading(true);
+  async function loadDashboard(options?: {
+    keepSelection?: boolean;
+    silent?: boolean;
+  }) {
+    if (!options?.silent) setLoading(true);
+
     const result = await fetch("/api/wellness/coach/dashboard", {
       cache: "no-store",
     })
@@ -158,19 +162,20 @@ export default function WellnessCoachPortalPage() {
 
     if (result.ok) {
       setDashboard(result);
-      setMessage("Portal Coach aktif.");
+      if (!options?.silent) setMessage("Portal Coach aktif.");
+
       if (options?.keepSelection && selectedParticipant?.id) {
         const fresh = (result.participants || []).find(
           (item: any) => Number(item.id) === Number(selectedParticipant.id),
         );
         if (fresh) setSelectedParticipant(fresh);
       }
-    } else {
+    } else if (!options?.silent) {
       setDashboard(null);
       setMessage(result.message || "Session coach belum aktif.");
     }
 
-    setLoading(false);
+    if (!options?.silent) setLoading(false);
     return result;
   }
 
@@ -434,7 +439,7 @@ export default function WellnessCoachPortalPage() {
         .filter(Boolean);
 
       if (unreadMemberIds.length > 0) {
-        await fetch("/api/wellness/coach/notes", {
+        const markReadResult = await fetch("/api/wellness/coach/notes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -442,15 +447,89 @@ export default function WellnessCoachPortalPage() {
             participant_id: participantId,
             note_ids: unreadMemberIds,
           }),
-        }).catch(() => null);
+        })
+          .then((response) => response.json())
+          .catch(() => null);
 
-        setChatMessages((current) =>
-          current.map((item) =>
-            unreadMemberIds.includes(Number(item.id))
-              ? { ...item, is_read: true, read_at: new Date().toISOString() }
-              : item,
-          ),
-        );
+        if (markReadResult?.ok) {
+          // WELLNESS_COACH_UNREAD_AUTO_CLEAR_V77E
+          // Hilangkan badge langsung setelah server berhasil menandai pesan dibaca.
+          const readAt = new Date().toISOString();
+
+          setChatMessages((current) =>
+            current.map((item) =>
+              unreadMemberIds.includes(Number(item.id))
+                ? { ...item, is_read: true, read_at: readAt }
+                : item,
+            ),
+          );
+
+          setSelectedParticipant((current: any) => {
+            if (Number(current?.id) !== participantId) return current;
+
+            return {
+              ...current,
+              unread_chat_count: 0,
+              last_chat: current?.last_chat
+                ? {
+                    ...current.last_chat,
+                    is_read: true,
+                    read_at: readAt,
+                  }
+                : current?.last_chat,
+            };
+          });
+
+          setDashboard((current: any) => {
+            if (!current) return current;
+
+            let removedUnread = unreadMemberIds.length;
+
+            const participants = (current.participants || []).map(
+              (item: any) => {
+                if (Number(item.id) !== participantId) return item;
+
+                const currentUnread = Number(item.unread_chat_count || 0);
+                if (currentUnread > 0) removedUnread = currentUnread;
+
+                return {
+                  ...item,
+                  unread_chat_count: 0,
+                  last_chat: item.last_chat
+                    ? {
+                        ...item.last_chat,
+                        is_read: true,
+                        read_at: readAt,
+                      }
+                    : item.last_chat,
+                };
+              },
+            );
+
+            return {
+              ...current,
+              participants,
+              summary: {
+                ...(current.summary || {}),
+                unread_chat_messages: Math.max(
+                  0,
+                  Number(current.summary?.unread_chat_messages || 0) -
+                    removedUnread,
+                ),
+              },
+            };
+          });
+
+          // Rekonsiliasi ringan dengan server tanpa loader/flicker.
+          window.setTimeout(
+            () =>
+              void loadDashboard({
+                keepSelection: true,
+                silent: true,
+              }),
+            450,
+          );
+        }
       }
 
       if (options?.scroll) scrollCoachChatToLatest("auto");
@@ -1295,6 +1374,7 @@ function CoachChatPanel({
   sendChat,
 }: any) {
   // WELLNESS_COACH_CHAT_WHATSAPP_DIRECT_V77D
+// WELLNESS_COACH_UNREAD_AUTO_CLEAR_V77E
   const [chatSearch, setChatSearch] = useState("");
   const [memberMenuOpen, setMemberMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
