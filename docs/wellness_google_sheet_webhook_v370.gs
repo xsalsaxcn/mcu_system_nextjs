@@ -384,6 +384,7 @@ function uploadEvidenceToDrive(payload) {
 
 // -----------------------------------------------------------------------------
 // WELLNESS PROFILE V76
+// WELLNESS_PROFILE_ATOMIC_ROW_SAVE_V76B
 // Metadata: Google Sheet. Photos: Google Drive. No Supabase Storage/migration.
 // -----------------------------------------------------------------------------
 function wellnessProfileClean_(value) {
@@ -481,11 +482,19 @@ function wellnessProfileSave_(payload) {
   );
   object["Updated At"] = supportNow_();
 
-  if (existing && existing.__row) {
-    supportWriteRow_(sheet, existing.__row, object);
-  } else {
-    supportAppendRow_(sheet, object);
+  const headers = WELLNESS_PROFILE_HEADERS.slice();
+  if (sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
+  const values = headers.map(function (header) {
+    return normalizeCell(object[header]);
+  });
+  const rowNumber =
+    existing && existing.__row
+      ? Number(existing.__row)
+      : Math.max(2, sheet.getLastRow() + 1);
+  sheet.getRange(rowNumber, 1, 1, headers.length).setValues([values]);
+
   return { ok: true, profile: wellnessProfilePublic_(object) };
 }
 
@@ -542,6 +551,16 @@ function uploadWellnessProfilePhoto_(payload) {
   const publicUrl = "https://drive.google.com/uc?export=view&id=" + fileId;
   const previewUrl =
     "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w600";
+  const savedProfile = wellnessProfileSave_({
+    actorType: actorType,
+    actorId: actorId,
+    actorName: actorName,
+    actorCode: payload.actorCode,
+    actorEmail: payload.actorEmail,
+    photoUrl: publicUrl || driveUrl,
+    photoPreviewUrl: previewUrl || publicUrl || driveUrl,
+  });
+
   return {
     ok: true,
     fileId: fileId,
@@ -551,6 +570,7 @@ function uploadWellnessProfilePhoto_(payload) {
     publicUrl: publicUrl,
     previewUrl: previewUrl,
     thumbnailUrl: previewUrl,
+    profile: savedProfile.profile,
     folderPath:
       root.getName() +
       " / " +
@@ -559,7 +579,7 @@ function uploadWellnessProfilePhoto_(payload) {
       actorTypeFolder.getName() +
       " / " +
       actorFolder.getName(),
-    marker: "WELLNESS_PROFILE_PHOTO_GOOGLE_DRIVE_V76",
+    marker: "WELLNESS_PROFILE_PHOTO_GOOGLE_DRIVE_V76B",
   };
 }
 

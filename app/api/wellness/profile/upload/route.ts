@@ -7,6 +7,7 @@ import {
 } from "@/lib/wellness/supportServer";
 
 // WELLNESS_PROFILE_PHOTO_GOOGLE_DRIVE_API_V76
+// WELLNESS_PROFILE_UPLOAD_ATOMIC_SAVE_V76B
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,22 +58,34 @@ export async function POST(request: NextRequest) {
       folderName: "wellness program",
     });
 
-    const saved = await postSupportWebhook("wellnessProfileSave", {
-      ...actorWebhookPayload(actor),
-      photoUrl: uploaded.driveUrl || uploaded.publicUrl || uploaded.url || "",
-      photoPreviewUrl:
-        uploaded.previewUrl ||
-        uploaded.thumbnailUrl ||
-        uploaded.publicUrl ||
-        uploaded.driveUrl ||
-        "",
-    });
+    let profile = uploaded?.profile || null;
+
+    if (!profile) {
+      const saved = await postSupportWebhook("wellnessProfileSave", {
+        ...actorWebhookPayload(actor),
+        photoUrl:
+          uploaded.driveUrl || uploaded.publicUrl || uploaded.url || "",
+        photoPreviewUrl:
+          uploaded.previewUrl ||
+          uploaded.thumbnailUrl ||
+          uploaded.publicUrl ||
+          uploaded.driveUrl ||
+          "",
+      });
+      profile = saved?.profile || null;
+    }
 
     return ok({
-      profile: saved.profile,
+      profile,
       message: "Foto profil berhasil disimpan di Google Drive.",
     });
   } catch (error: any) {
-    return fail(error?.message || "Upload foto profil gagal.", 500);
+    const rawMessage = clean(error?.message || "Upload foto profil gagal.");
+    return fail(
+      /no row data supplied/i.test(rawMessage)
+        ? "Metadata foto belum dapat disimpan. Deploy ulang Apps Script V76B lalu coba kembali."
+        : rawMessage,
+      500,
+    );
   }
 }

@@ -1371,6 +1371,7 @@ export default function WellnessParticipantPortalPage() {
 
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
 // WELLNESS_PARTICIPANT_CHAT_OPTIMISTIC_READ_V65
+// WELLNESS_PARTICIPANT_CHAT_COMPACT_UI_V76B
 function ParticipantCoachChat({ participant }: { participant: any }) {
   const participantId = asNumber(
     participant?.id ||
@@ -1528,59 +1529,62 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
     return () => window.clearInterval(intervalId);
   }, [participantId]);
 
+  const coachDisplayName =
+    clean(assignedCoach?.name || assignedCoach?.full_name) || "Coach Wellness";
+
   return (
-    <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
-      <div className="bg-gradient-to-br from-teal-500 via-cyan-500 to-sky-500 p-5 text-white md:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
+    <section className="overflow-hidden rounded-[1.65rem] border border-slate-100 bg-white shadow-xl shadow-slate-200/55">
+      <div className="bg-gradient-to-r from-teal-600 via-cyan-600 to-sky-600 px-4 py-3.5 text-white md:px-5 md:py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <WellnessAvatar
-              name={assignedCoach?.name || "Coach Wellness"}
+              name={coachDisplayName}
               src={assignedCoach?.photo_preview_url || assignedCoach?.photo_url}
-              size="lg"
-              className="ring-white/40"
+              size="md"
+              className="ring-white/45"
             />
-            <div className="min-w-0">
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/75">
                 Coach Support
               </div>
-              <h2 className="mt-2 truncate text-2xl font-black">
-                Chat With Coach {assignedCoach?.name || ""}
+              <h2 className="mt-1 break-words text-lg font-black leading-tight text-white md:text-xl">
+                Chat With Coach {coachDisplayName}
               </h2>
-              <p className="mt-2 text-sm font-bold leading-6 text-white/90">
-                Sampaikan kendala nutrisi, workout, atau target wellness kepada
-                coach.
+              <p className="mt-1 text-[11px] font-bold leading-4 text-white/80 md:text-xs">
+                Konsultasi nutrisi, workout, dan target wellness.
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={() => void loadChat({ scroll: true })}
-            className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/18 text-lg font-black backdrop-blur"
+            aria-label="Refresh chat"
           >
-            Refresh
+            ↻
           </button>
         </div>
       </div>
 
-      <div className="p-4 md:p-6">
+      <div className="p-3 md:p-4">
         {chatNotice ? (
-          <div className="mb-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+          <div className="mb-3 rounded-2xl bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">
             {chatNotice}
           </div>
         ) : null}
 
-        <div className="max-h-[54vh] min-h-[300px] space-y-3 overflow-y-auto rounded-[1.75rem] bg-[#f4fbfa] p-4">
+        <div className="h-[min(52vh,30rem)] min-h-[18rem] space-y-2.5 overflow-y-auto rounded-[1.35rem] bg-[#f4fbfa] p-3 md:p-4">
           {loadingChat ? (
             <div className="py-12 text-center text-sm font-bold text-slate-400">
               Memuat percakapan...
             </div>
           ) : messages.length === 0 ? (
-            <div className="py-12 text-center">
+            <div className="flex h-full flex-col items-center justify-center px-5 text-center">
               <div className="text-base font-black text-slate-900">
-                Belum ada percakapan.
+                Belum ada percakapan
               </div>
-              <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                Mulai chat untuk meminta arahan langsung dari coach.
+              <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+                Kirim pesan pertama kepada {coachDisplayName}.
               </p>
             </div>
           ) : (
@@ -1593,7 +1597,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                 >
                   {!fromParticipant ? (
                     <WellnessAvatar
-                      name={assignedCoach?.name || "Coach Wellness"}
+                      name={coachDisplayName}
                       src={
                         assignedCoach?.photo_preview_url ||
                         assignedCoach?.photo_url
@@ -1602,17 +1606,17 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                     />
                   ) : null}
                   <div
-                    className={`max-w-[82%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
+                    className={`max-w-[78%] rounded-[1.25rem] px-3.5 py-2.5 shadow-sm transition-opacity ${
                       fromParticipant
-                        ? "rounded-br-md bg-slate-950 text-white"
-                        : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
-                    } ${item.optimistic ? "opacity-90" : "opacity-100"}`}
+                        ? "rounded-br-sm bg-slate-950 text-white"
+                        : "rounded-bl-sm border border-teal-100 bg-white text-slate-900"
+                    } ${item.optimistic ? "opacity-85" : "opacity-100"}`}
                   >
-                    <div className="whitespace-pre-wrap text-sm font-bold leading-6">
+                    <div className="whitespace-pre-wrap break-words text-[13px] font-bold leading-5">
                       {item.message || item.coach_note || "-"}
                     </div>
                     <div
-                      className={`mt-2 flex items-center gap-1 text-[11px] font-bold ${
+                      className={`mt-1.5 flex flex-wrap items-center gap-x-1 text-[10px] font-bold ${
                         fromParticipant ? "text-white/60" : "text-slate-400"
                       }`}
                     >
@@ -1621,10 +1625,10 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                       </span>
                       {fromParticipant ? (
                         <span>
-                          {item.is_read ? "· Sudah dibaca coach" : "· Terkirim"}
+                          {item.is_read ? "· Sudah dibaca" : "· Terkirim"}
                         </span>
                       ) : (
-                        <span>· Coach</span>
+                        <span>· {coachDisplayName}</span>
                       )}
                     </div>
                   </div>
@@ -1639,24 +1643,25 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
           />
         </div>
 
-        <div className="mt-4 grid gap-3">
+        <div className="mt-3 flex items-end gap-2 rounded-[1.35rem] border border-slate-200 bg-white p-2 shadow-sm">
           <textarea
-            className={`${fieldClass} min-h-[96px] resize-none`}
+            className="min-h-[48px] max-h-[112px] flex-1 resize-none rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none placeholder:text-slate-400"
             value={text}
             onChange={(event) => setText(event.target.value)}
-            placeholder="Tulis pesan untuk coach..."
+            placeholder={`Tulis pesan untuk ${coachDisplayName}...`}
+            rows={1}
           />
           <button
             type="button"
             onClick={sendChat}
             disabled={sending || !clean(text)}
-            className="flex min-h-[52px] items-center justify-center rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-teal-600 text-lg font-black text-white shadow-lg shadow-teal-100 disabled:opacity-40"
             aria-label={sending ? "Pesan sedang diproses" : "Kirim pesan"}
           >
             {sending ? (
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
             ) : (
-              "Kirim Pesan"
+              "➤"
             )}
           </button>
         </div>

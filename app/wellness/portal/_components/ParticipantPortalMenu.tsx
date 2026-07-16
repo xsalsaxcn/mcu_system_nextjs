@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_PARTICIPANT_CHAT_MENU_V54
 // WELLNESS_PARTICIPANT_CHAT_NOTIFICATION_BELL_V74
 // WELLNESS_PARTICIPANT_ASSIGNED_COACH_MENU_V76
+// WELLNESS_PARTICIPANT_CHAT_GROUP_MENU_V76B
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // Mobile app style:
@@ -92,6 +93,13 @@ const menuItems: MenuItem[] = [
     emoji: "\u{1F4AC}",
   },
   {
+    key: "support",
+    label: "Chat With Admin",
+    shortLabel: "Admin",
+    description: "Bantuan teknis aplikasi",
+    emoji: "🛠️",
+  },
+  {
     key: "profile",
     label: "Profil",
     shortLabel: "Profile",
@@ -126,6 +134,9 @@ export default function ParticipantPortalMenu({
   const [open, setOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [chatGroupOpen, setChatGroupOpen] = useState(
+    activeTab === "chat" || activeTab === "support",
+  );
   const [coachUnread, setCoachUnread] = useState(0);
   const [adminUnread, setAdminUnread] = useState(0);
   const [assignedCoachName, setAssignedCoachName] = useState("");
@@ -218,6 +229,9 @@ export default function ParticipantPortalMenu({
     setNotificationOpen(false);
     if (activeTab === "chat") setCoachUnread(0);
     if (activeTab === "support") setAdminUnread(0);
+    if (activeTab === "chat" || activeTab === "support") {
+      setChatGroupOpen(true);
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -405,7 +419,7 @@ export default function ParticipantPortalMenu({
         </button>
       </div>
 
-      {quickOpen ? (
+      {quickOpen && !["chat", "support", "profile"].includes(activeTab) ? (
         <div className="fixed bottom-24 right-5 z-[9997] grid gap-3 md:hidden">
           <button
             type="button"
@@ -433,14 +447,16 @@ export default function ParticipantPortalMenu({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        onClick={() => setQuickOpen((previous) => !previous)}
-        className="fixed bottom-[5.2rem] right-5 z-[9997] flex h-16 w-16 items-center justify-center rounded-full bg-orange-500 text-4xl font-black text-white shadow-2xl shadow-orange-300 md:hidden"
-        aria-label="Quick input"
-      >
-        +
-      </button>
+      {!(["chat", "support", "profile"] as PortalTab[]).includes(activeTab) ? (
+        <button
+          type="button"
+          onClick={() => setQuickOpen((previous) => !previous)}
+          className="fixed bottom-[5.2rem] right-5 z-[9997] flex h-16 w-16 items-center justify-center rounded-full bg-orange-500 text-4xl font-black text-white shadow-2xl shadow-orange-300 md:hidden"
+          aria-label="Quick input"
+        >
+          +
+        </button>
+      ) : null}
 
       <nav className="fixed bottom-0 left-0 right-0 z-[9996] border-t border-orange-100 bg-white/95 px-2 pb-3 pt-2 shadow-2xl shadow-slate-300 backdrop-blur md:hidden">
         <div className="grid grid-cols-5 gap-1">
@@ -509,8 +525,116 @@ export default function ParticipantPortalMenu({
             <div className="flex-1 overflow-y-auto bg-[#fff8ef] p-4">
               <div className="grid gap-3">
                 {menuItems.map((item) => {
-                  const active = item.key === activeTab;
+                  if (item.key === "support") return null;
 
+                  if (item.key === "chat") {
+                    const chatActive =
+                      activeTab === "chat" || activeTab === "support";
+                    return (
+                      <div
+                        key="chat-group"
+                        className={`overflow-hidden rounded-3xl border transition ${
+                          chatActive
+                            ? "border-orange-200 bg-white shadow-lg shadow-orange-100"
+                            : "border-white bg-white/80"
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChatGroupOpen((previous) => !previous)
+                          }
+                          className="flex w-full items-center justify-between gap-3 p-4 text-left"
+                          aria-expanded={chatGroupOpen}
+                        >
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div
+                              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl ${
+                                chatActive
+                                  ? "bg-orange-500 text-white"
+                                  : "bg-orange-50 text-orange-600"
+                              }`}
+                            >
+                              💬
+                            </div>
+                            <div className="min-w-0">
+                              <div
+                                className={`text-sm font-black ${
+                                  chatActive
+                                    ? "text-orange-700"
+                                    : "text-slate-950"
+                                }`}
+                              >
+                                Chat
+                              </div>
+                              <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                                Percakapan Coach dan bantuan Admin
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-lg font-black text-slate-500">
+                            {chatGroupOpen ? "−" : "+"}
+                          </span>
+                        </button>
+
+                        {chatGroupOpen ? (
+                          <div className="grid gap-2 border-t border-orange-100 bg-orange-50/45 p-3">
+                            <button
+                              type="button"
+                              onClick={() => chooseTab("chat")}
+                              className={`flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left ${
+                                activeTab === "chat"
+                                  ? "bg-white text-orange-700 shadow-sm"
+                                  : "bg-white/70 text-slate-900"
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="break-words text-sm font-black leading-5">
+                                  Chat With Coach{assignedCoachName
+                                    ? ` ${assignedCoachName}`
+                                    : ""}
+                                </div>
+                                <div className="mt-1 text-[11px] font-bold text-slate-500">
+                                  Konsultasi wellness
+                                </div>
+                              </div>
+                              {coachUnread > 0 ? (
+                                <span className="rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black text-white">
+                                  {coachUnread}
+                                </span>
+                              ) : null}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => chooseTab("support")}
+                              className={`flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left ${
+                                activeTab === "support"
+                                  ? "bg-white text-indigo-700 shadow-sm"
+                                  : "bg-white/70 text-slate-900"
+                              }`}
+                            >
+                              <div>
+                                <div className="text-sm font-black">
+                                  Chat With Admin
+                                </div>
+                                <div className="mt-1 text-[11px] font-bold text-slate-500">
+                                  Bantuan teknis aplikasi
+                                </div>
+                              </div>
+                              {adminUnread > 0 ? (
+                                <span className="rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black text-white">
+                                  {adminUnread}
+                                </span>
+                              ) : null}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  }
+
+                  const active = item.key === activeTab;
                   return (
                     <button
                       key={item.key}
@@ -532,18 +656,14 @@ export default function ParticipantPortalMenu({
                         >
                           {item.emoji}
                         </div>
-
                         <div className="min-w-0">
                           <div
                             className={`text-sm font-black ${
                               active ? "text-orange-700" : "text-slate-950"
                             }`}
                           >
-                            {item.key === "chat" && assignedCoachName
-                              ? `Chat With Coach ${assignedCoachName}`
-                              : item.label}
+                            {item.label}
                           </div>
-
                           <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
                             {item.description}
                           </div>

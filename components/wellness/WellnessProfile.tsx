@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { prepareWellnessProfilePhoto } from "./profilePhoto";
 
 // WELLNESS_PROFILE_GOOGLE_DRIVE_V76
+// WELLNESS_PARTICIPANT_PROFILE_UI_FIX_V76B
 
 export type WellnessProfileData = {
   actor_type?: string;
@@ -168,7 +169,12 @@ export default function WellnessProfilePanel({
       await reload();
       window.dispatchEvent(new Event("wellness-profile-updated"));
     } catch (error: any) {
-      setNotice(error?.message || "Upload foto gagal.");
+      const rawMessage = clean(error?.message || "Upload foto gagal.");
+      setNotice(
+        /no row data supplied/i.test(rawMessage)
+          ? "Foto belum dapat dicatat. Perbarui dan deploy ulang Apps Script V76B, lalu coba kembali."
+          : rawMessage,
+      );
     } finally {
       setUploading(false);
     }
@@ -176,17 +182,22 @@ export default function WellnessProfilePanel({
 
   return (
     <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
-      <div className="bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-800 p-6 text-white">
-        <div className="flex items-center gap-4">
-          <WellnessAvatar name={actorName} src={photo} size="xl" />
-          <div className="min-w-0">
-            <div className="text-[11px] font-black uppercase tracking-[0.2em] text-white/65">
+      <div className="bg-gradient-to-br from-indigo-950 via-violet-800 to-purple-700 p-5 text-white md:p-6">
+        <div className="flex items-start gap-4">
+          <WellnessAvatar
+            name={actorName}
+            src={photo}
+            size="lg"
+            className="mt-0.5 ring-white/70 md:h-24 md:w-24 md:text-2xl"
+          />
+          <div className="min-w-0 flex-1 pt-1">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/75 md:text-[11px]">
               {actorType === "coach" ? "Coach Profile" : "Participant Profile"}
             </div>
-            <h2 className="mt-2 truncate text-2xl font-black">
+            <h2 className="mt-2 break-words text-xl font-black leading-[1.15] text-white md:text-2xl">
               {title || actorName}
             </h2>
-            <p className="mt-1 text-sm font-bold text-white/70">
+            <p className="mt-2 text-xs font-bold leading-5 text-white/75 md:text-sm">
               {lastUpdated}
             </p>
           </div>
@@ -212,10 +223,10 @@ export default function WellnessProfilePanel({
         <label className="mt-5 flex cursor-pointer items-center justify-between gap-4 rounded-[1.5rem] border border-dashed border-teal-200 bg-teal-50 p-4 transition active:scale-[0.99]">
           <div>
             <div className="text-sm font-black text-teal-950">
-              Add Profile Picture
+              Tambah Foto Profil
             </div>
             <div className="mt-1 text-xs font-bold leading-5 text-teal-700">
-              Foto otomatis dipotong persegi dan dikompres sekitar 20–80 KB.
+              Foto dipotong persegi dan dikompres otomatis sekitar 20–80 KB.
             </div>
           </div>
           <span className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white">
