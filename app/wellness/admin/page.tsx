@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
 // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
+// WELLNESS_ADMIN_EXCEL_EXPORT_V79D
 // Dedicated mobile-first Admin Portal. It intentionally does not reuse the
 // desktop operational dashboard layout.
 
@@ -979,14 +980,27 @@ export default function WellnessAdminMobilePage() {
           {view === "ranking" ? (
             <section className="space-y-4">
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                <div className="text-[10px] font-black uppercase tracking-[0.13em] text-emerald-700">
-                  Sumber Data
-                </div>
-                <div className="mt-1 text-xs font-bold leading-5 text-emerald-900">
-                  Backend Portal Perusahaan · Supabase + Google Sheet · Periode 30 hari
-                </div>
-                <div className="mt-1 text-[10px] font-bold leading-4 text-emerald-700">
-                  Portal Admin tidak menghitung ulang poin di perangkat.
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-black uppercase tracking-[0.13em] text-emerald-700">
+                      Sumber Data
+                    </div>
+                    <div className="mt-1 text-xs font-bold leading-5 text-emerald-900">
+                      Backend Portal Perusahaan · Supabase + Google Sheet · Periode 30 hari
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold leading-4 text-emerald-700">
+                      Portal Admin tidak menghitung ulang poin di perangkat.
+                    </div>
+                  </div>
+
+                  <a
+                    href="/api/wellness/admin/export-excel?days=30"
+                    className="flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-2.5 text-[10px] font-black text-white shadow-sm active:scale-[0.98]"
+                    aria-label="Export laporan Portal Admin ke Excel"
+                  >
+                    <span>⬇️</span>
+                    <span>Excel</span>
+                  </a>
                 </div>
               </div>
 
@@ -1110,7 +1124,24 @@ export default function WellnessAdminMobilePage() {
               <a href="/wellness/dashboard" className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4 text-sky-950 shadow-sm"><div className="text-2xl">📊</div><div className="mt-2 text-base font-black">Dashboard Wellness Lengkap</div><div className="mt-1 text-xs font-bold leading-5 text-sky-700">Buka laporan operasional dan detail parameter.</div></a>
               <a href="/wellness/history-import" className="rounded-[1.5rem] border border-teal-100 bg-teal-50 p-4 text-teal-950 shadow-sm"><div className="text-2xl">📈</div><div className="mt-2 text-base font-black">History MCU</div><div className="mt-1 text-xs font-bold leading-5 text-teal-700">Kelola baseline dan pemeriksaan berkala.</div></a>
               <a href="/wellness/support-admin" className="rounded-[1.5rem] border border-violet-100 bg-violet-50 p-4 text-violet-950 shadow-sm"><div className="text-2xl">📄</div><div className="mt-2 text-base font-black">Laporan Follow-up</div><div className="mt-1 text-xs font-bold leading-5 text-violet-700">Tinjau tiket dan tindak lanjut layanan.</div></a>
-              <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-white p-4"><div className="text-sm font-black">Export PDF, Excel, dan Presentation Summary</div><div className="mt-1 text-xs font-bold leading-5 text-slate-500">Paket laporan mobile dilanjutkan pada V79E.</div></div>
+              <a
+                href="/api/wellness/admin/export-excel?days=30"
+                className="rounded-[1.5rem] border border-emerald-100 bg-emerald-50 p-4 text-emerald-950 shadow-sm active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-2xl">📥</div>
+                    <div className="mt-2 text-base font-black">Export Excel Admin</div>
+                    <div className="mt-1 text-xs font-bold leading-5 text-emerald-700">
+                      Unduh ringkasan, ranking perusahaan, ranking kelompok, peserta, flag, Coach, dan before–after dalam satu workbook.
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-emerald-700 px-3 py-2 text-[10px] font-black text-white">
+                    XLSX
+                  </span>
+                </div>
+              </a>
+              <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-white p-4"><div className="text-sm font-black">Export PDF dan Presentation Summary</div><div className="mt-1 text-xs font-bold leading-5 text-slate-500">Format PDF dan presentasi dilanjutkan pada tahap laporan berikutnya.</div></div>
             </section>
           ) : null}
 
