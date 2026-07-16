@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "./WellnessProfile";
 
 // WELLNESS_COACH_GROUP_LEADERBOARD_V76
-// WELLNESS_COACH_LEADERBOARD_POLISH_V77B
+// WELLNESS_COACH_LEADERBOARD_POLISH_V77C
 
 type Metric = "overall" | "compliance" | "workout" | "nutrition" | "healthtalk";
 

@@ -595,7 +595,7 @@ export default function WellnessCoachPortalPage() {
   return (
     <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">
-        {/* WELLNESS_COACH_SUBVIEW_HEADER_V77B */}
+        {/* WELLNESS_COACH_SUBVIEW_HEADER_V77C */}
         {!isLoggedIn || coachView === "monitoring" ? (
           <>
             <section className="overflow-visible rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
@@ -957,7 +957,7 @@ export default function WellnessCoachPortalPage() {
                     </span>
                   </div>
 
-                  {/* WELLNESS_COACH_MONITORING_RESPONSIVE_V77B */}
+                  {/* WELLNESS_COACH_MONITORING_RESPONSIVE_V77C */}
                   <div className="mt-3 grid gap-3">
                     {filteredParticipants.length === 0 ? (
                       <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-400">
@@ -1292,7 +1292,7 @@ function CoachChatPanel({
   loadChat,
   sendChat,
 }: any) {
-  // WELLNESS_COACH_CHAT_INBOX_V77B
+  // WELLNESS_COACH_CHAT_INBOX_V77C
   const [chatSearch, setChatSearch] = useState("");
   const [memberMenuOpen, setMemberMenuOpen] = useState(false);
 
