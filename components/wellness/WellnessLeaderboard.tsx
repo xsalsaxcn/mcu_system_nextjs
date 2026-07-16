@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "./WellnessProfile";
 
 // WELLNESS_COACH_GROUP_LEADERBOARD_V76
+// WELLNESS_COACH_LEADERBOARD_POLISH_V77B
 
 type Metric = "overall" | "compliance" | "workout" | "nutrition" | "healthtalk";
 
@@ -72,7 +73,7 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
               <div className="text-[11px] font-black uppercase tracking-[0.2em] text-fuchsia-200">
                 Group Performance
               </div>
-              <h2 className="mt-2 text-3xl font-black">Ranking Kelompok</h2>
+              <h2 className="mt-2 text-3xl font-black text-white">Ranking Kelompok</h2>
               <p className="mt-2 max-w-xl text-sm font-bold leading-6 text-white/70">
                 Top 10 peserta dari kelompok yang di-assign kepada Coach,
                 dihitung dari 30 hari terakhir.
@@ -146,10 +147,10 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
                     </span>
                   </div>
                   <div className="mt-24 w-full min-w-0">
-                    <div className="truncate text-sm font-black md:text-base">
+                    <div className="min-h-[2.5rem] break-words text-[11px] font-black leading-tight text-white sm:text-sm md:text-base">
                       {item?.name || "-"}
                     </div>
-                    <div className="mt-1 truncate text-[10px] font-bold text-white/55 md:text-xs">
+                    <div className="mt-1 break-words text-[9px] font-bold leading-tight text-white/70 sm:text-[10px] md:text-xs">
                       {item?.group_name || "-"}
                     </div>
                     <div className="mt-3 text-xl font-black text-amber-300">
@@ -196,7 +197,7 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
             rest.map((item: any) => (
               <div
                 key={item.participant_id}
-                className="grid grid-cols-[36px_48px_minmax(0,1fr)_auto] items-center gap-3 rounded-[1.4rem] border border-slate-100 bg-slate-50/80 p-3"
+                className="grid grid-cols-[28px_44px_minmax(0,1fr)] items-start gap-3 rounded-[1.4rem] border border-slate-100 bg-slate-50/80 p-3 sm:grid-cols-[36px_48px_minmax(0,1fr)_auto] sm:items-center"
               >
                 <div className="text-center text-base font-black text-slate-400">
                   {item.rank}
@@ -207,10 +208,10 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
                   size="md"
                 />
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-black text-slate-950">
+                  <div className="break-words text-sm font-black leading-5 text-slate-950">
                     {item.name}
                   </div>
-                  <div className="mt-1 truncate text-[11px] font-bold text-slate-500">
+                  <div className="mt-1 break-words text-[11px] font-bold leading-4 text-slate-500">
                     {item.group_name} · 🔥 {fmt(item.current_streak)} hari
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
@@ -222,7 +223,7 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
                     />
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="col-start-3 mt-2 flex items-end justify-between gap-3 text-left sm:col-start-auto sm:mt-0 sm:block sm:text-right">
                   <div className="text-lg font-black text-violet-700">
                     {fmt(item.metric_value)}
                   </div>

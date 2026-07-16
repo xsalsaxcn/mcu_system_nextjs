@@ -115,6 +115,7 @@ export default function WellnessCoachPortalPage() {
   const [participantModalOpen, setParticipantModalOpen] = useState(false);
   const [coachView, setCoachView] = useState<CoachView>("monitoring");
   const [coachMenuOpen, setCoachMenuOpen] = useState(false);
+  const [coachNotificationOpen, setCoachNotificationOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatText, setChatText] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -594,57 +595,216 @@ export default function WellnessCoachPortalPage() {
   return (
     <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">
-        {/* WELLNESS_COACH_COMPACT_HEADER_V63 */}
-        <section className="overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
-          <div className="flex items-start justify-between gap-3 md:items-end">
-            <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-              {isLoggedIn ? (
-                <WellnessProfileAvatar
-                  actorType="coach"
-                  name={dashboard?.coach?.name || "Coach Wellness"}
-                  size="lg"
-                  className="ring-white/40"
-                />
-              ) : null}
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
-                  Wellness Coach Portal
+        {/* WELLNESS_COACH_SUBVIEW_HEADER_V77B */}
+        {!isLoggedIn || coachView === "monitoring" ? (
+          <>
+            <section className="overflow-visible rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
+              <div className="flex items-start justify-between gap-3 md:items-end">
+                <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                  {isLoggedIn ? (
+                    <WellnessProfileAvatar
+                      actorType="coach"
+                      name={dashboard?.coach?.name || "Coach Wellness"}
+                      size="lg"
+                      className="ring-white/40"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
+                      Wellness Coach Portal
+                    </div>
+                    <h1 className="mt-1.5 break-words text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">
+                      {isLoggedIn
+                        ? `Halo, ${dashboard?.coach?.name || "Coach"}`
+                        : "Portal Coach"}
+                    </h1>
+                    <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
+                      Monitoring kepatuhan, target individual, dan instruksi untuk
+                      assigned group.
+                    </p>
+                  </div>
                 </div>
-                <h1 className="mt-1.5 truncate text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">
-                  {isLoggedIn
-                    ? `Halo, ${dashboard?.coach?.name || "Coach"}`
-                    : "Portal Coach"}
-                </h1>
-                <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
-                  Monitoring kepatuhan, target individual, dan instruksi untuk
-                  assigned group.
-                </p>
+
+                {isLoggedIn ? (
+                  <div className="relative flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCoachNotificationOpen((previous) => !previous)
+                      }
+                      className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg text-slate-700 shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl"
+                      aria-label="Buka notifikasi Coach"
+                      aria-expanded={coachNotificationOpen}
+                    >
+                      🔔
+                      {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
+                        <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                          {Number(dashboard?.summary?.unread_chat_messages || 0) > 99
+                            ? "99+"
+                            : Number(
+                                dashboard?.summary?.unread_chat_messages || 0,
+                              )}
+                        </span>
+                      ) : null}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCoachMenuOpen(true)}
+                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-xl font-black text-white shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
+                      aria-label="Buka menu coach"
+                    >
+                      ☰
+                    </button>
+
+                    {coachNotificationOpen ? (
+                      <div className="absolute right-0 top-14 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.5rem] border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl">
+                        <div className="px-2 pb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                          Notifikasi Coach
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedParticipant(null);
+                            setChatMessages([]);
+                            setCoachView("chat");
+                            setCoachNotificationOpen(false);
+                          }}
+                          className="flex w-full items-center justify-between gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-left"
+                        >
+                          <div>
+                            <div className="text-sm font-black text-sky-950">
+                              💬 Chat With Member
+                            </div>
+                            <div className="mt-1 text-[11px] font-bold text-sky-700">
+                              Buka inbox percakapan peserta
+                            </div>
+                          </div>
+                          {Number(
+                            dashboard?.summary?.unread_chat_messages || 0,
+                          ) > 0 ? (
+                            <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
+                              {Number(
+                                dashboard?.summary?.unread_chat_messages || 0,
+                              )}
+                            </span>
+                          ) : null}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCoachView("support");
+                            setCoachNotificationOpen(false);
+                          }}
+                          className="mt-2 w-full rounded-2xl bg-indigo-50 px-4 py-3 text-left text-sm font-black text-indigo-950"
+                        >
+                          🛠️ Chat With Admin
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
+            </section>
+
+            <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div
+                className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
+                  /gagal|wajib|belum|pilih/i.test(message)
+                    ? "bg-amber-50 text-amber-900"
+                    : "bg-sky-50 text-sky-800"
+                }`}
+              >
+                {loading ? "Memuat Portal Coach..." : message}
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="relative flex items-center justify-between gap-3 rounded-[1.35rem] border border-slate-100 bg-white px-4 py-3 shadow-sm">
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">
+                Wellness Coach
+              </div>
+              <h1 className="mt-1 break-words text-xl font-black leading-tight text-slate-950">
+                {coachView === "chat"
+                  ? selectedParticipant
+                    ? `Chat With ${selectedParticipant.name}`
+                    : "Chat With Member"
+                  : coachView === "ranking"
+                    ? "Ranking Kelompok"
+                    : coachView === "profile"
+                      ? "Profil Coach"
+                      : "Portal Coach"}
+              </h1>
             </div>
-            {isLoggedIn ? (
+
+            <div className="relative flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setCoachNotificationOpen((previous) => !previous)
+                }
+                className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 text-lg shadow-sm"
+                aria-label="Buka notifikasi Coach"
+              >
+                🔔
+                {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
+                  <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                    {Number(dashboard?.summary?.unread_chat_messages || 0) > 99
+                      ? "99+"
+                      : Number(dashboard?.summary?.unread_chat_messages || 0)}
+                  </span>
+                ) : null}
+              </button>
               <button
                 type="button"
                 onClick={() => setCoachMenuOpen(true)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20 text-xl font-black text-white shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
+                className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-xl font-black text-white shadow-sm"
                 aria-label="Buka menu coach"
               >
                 ☰
               </button>
-            ) : null}
-          </div>
-        </section>
 
-        <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-          <div
-            className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
-              /gagal|wajib|belum|pilih/i.test(message)
-                ? "bg-amber-50 text-amber-900"
-                : "bg-sky-50 text-sky-800"
-            }`}
-          >
-            {loading ? "Memuat Portal Coach..." : message}
-          </div>
-        </section>
+              {coachNotificationOpen ? (
+                <div className="absolute right-0 top-14 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.5rem] border border-slate-100 bg-white p-3 shadow-2xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedParticipant(null);
+                      setChatMessages([]);
+                      setCoachView("chat");
+                      setCoachNotificationOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-left"
+                  >
+                    <span className="text-sm font-black text-sky-950">
+                      💬 Chat With Member
+                    </span>
+                    {Number(
+                      dashboard?.summary?.unread_chat_messages || 0,
+                    ) > 0 ? (
+                      <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
+                        {Number(
+                          dashboard?.summary?.unread_chat_messages || 0,
+                        )}
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoachView("support");
+                      setCoachNotificationOpen(false);
+                    }}
+                    className="mt-2 w-full rounded-2xl bg-indigo-50 px-4 py-3 text-left text-sm font-black text-indigo-950"
+                  >
+                    🛠️ Chat With Admin
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </section>
+        )}
 
         {!isLoggedIn ? (
           <LoginSection
@@ -797,116 +957,98 @@ export default function WellnessCoachPortalPage() {
                     </span>
                   </div>
 
-                  <div
-                    className="mt-3 overflow-hidden rounded-2xl border border-slate-100 bg-white"
-                    data-wellness-coach-mobile-table="v58"
-                  >
-                    <table className="w-full table-fixed border-collapse text-left">
-                      <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-[11px]">
-                        <tr>
-                          <th className="w-[47%] px-3 py-3 sm:w-[50%] sm:px-4">
-                            Peserta
-                          </th>
-                          <th className="w-[53%] px-3 py-3 sm:w-[50%] sm:px-4">
-                            Monitoring
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {filteredParticipants.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={2}
-                              className="px-4 py-10 text-center text-sm font-bold text-slate-400"
-                            >
-                              Tidak ada peserta pada filter ini.
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredParticipants.map((item: any) => (
-                            <tr
-                              key={item.id}
-                              className={`transition hover:bg-teal-50/50 ${
-                                Number(selectedParticipant?.id) ===
-                                Number(item.id)
-                                  ? "bg-teal-50"
-                                  : ""
-                              }`}
-                            >
-                              <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
-                                <button
-                                  type="button"
-                                  onClick={() => chooseParticipant(item)}
-                                  className="block w-full min-w-0 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
-                                >
-                                  <div className="flex min-w-0 items-center gap-2.5">
-                                    <WellnessAvatar
-                                      name={item.name}
-                                      src={
-                                        item.profile_photo_preview_url ||
-                                        item.profile_photo_url
-                                      }
-                                      size="sm"
-                                    />
-                                    <div className="min-w-0">
-                                      <div className="break-words text-[13px] font-black leading-[1.35] text-slate-950 hover:text-teal-700 sm:text-base">
-                                        {item.name}
-                                      </div>
-                                      <div className="mt-1 break-all text-[9px] font-bold leading-4 text-slate-400 sm:break-words sm:text-xs">
-                                        {item.code} · {item.group_name}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="mt-2 text-[9px] font-black leading-4 text-slate-500 sm:text-[11px]">
-                                    {fmtNumber(item.today?.steps || 0)} step ·{" "}
-                                    {fmtNumber(item.today?.calories || 0)} kkal
-                                  </div>
-                                  <div className="mt-2 inline-flex items-center rounded-full bg-teal-50 px-2 py-1 text-[9px] font-black text-teal-700 sm:text-[10px]">
-                                    Buka detail peserta
-                                  </div>
-                                </button>
-                              </td>
-                              <td className="min-w-0 px-3 py-3 align-top sm:px-4 sm:py-4">
-                                <div className="grid min-w-0 gap-1.5">
-                                  <div className="min-w-0 rounded-lg bg-orange-50 px-2 py-1.5 text-orange-900">
-                                    <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">
-                                      Nutrisi
-                                    </div>
-                                    <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
-                                      {formatDaysWithoutInput(
-                                        item.compliance?.days_since_nutrition,
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="min-w-0 rounded-lg bg-sky-50 px-2 py-1.5 text-sky-900">
-                                    <div className="text-[8px] font-black uppercase tracking-wide opacity-60 sm:text-[9px]">
-                                      Workout
-                                    </div>
-                                    <div className="mt-0.5 break-words text-[10px] font-black leading-4 sm:text-xs">
-                                      {formatDaysWithoutInput(
-                                        item.compliance?.days_since_workout,
-                                      )}
-                                    </div>
-                                  </div>
+                  {/* WELLNESS_COACH_MONITORING_RESPONSIVE_V77B */}
+                  <div className="mt-3 grid gap-3">
+                    {filteredParticipants.length === 0 ? (
+                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-400">
+                        Tidak ada peserta pada filter ini.
+                      </div>
+                    ) : (
+                      filteredParticipants.map((item: any) => (
+                        <article
+                          key={item.id}
+                          className={`rounded-[1.5rem] border p-3.5 transition sm:p-4 ${
+                            Number(selectedParticipant?.id) === Number(item.id)
+                              ? "border-teal-200 bg-teal-50/70"
+                              : "border-slate-100 bg-white shadow-sm"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => chooseParticipant(item)}
+                            className="block w-full rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+                          >
+                            <div className="flex min-w-0 items-start gap-3">
+                              <WellnessAvatar
+                                name={item.name}
+                                src={
+                                  item.profile_photo_preview_url ||
+                                  item.profile_photo_url
+                                }
+                                size="md"
+                              />
+
+                              <div className="min-w-0 flex-1">
+                                <div className="break-words text-[15px] font-black leading-5 text-slate-950 sm:text-base">
+                                  {item.name}
                                 </div>
-                                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black text-slate-700 sm:text-[10px]">
-                                    {fmtNumber(
-                                      item.compliance?.compliance_percent || 0,
-                                    )}
-                                    %
-                                  </span>
-                                  <FlagBadge
-                                    level={item.flag}
-                                    label={item.status}
-                                  />
+                                <div className="mt-1 break-words text-[11px] font-bold leading-4 text-slate-500 sm:text-xs">
+                                  {item.code} · {item.group_name}
                                 </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                              </div>
+
+                              <FlagBadge level={item.flag} label={item.status} />
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-xl bg-orange-50 px-3 py-2 text-orange-950">
+                                <div className="text-[9px] font-black uppercase tracking-wide text-orange-700/70">
+                                  Nutrisi
+                                </div>
+                                <div className="mt-1 break-words text-xs font-black leading-4">
+                                  {formatDaysWithoutInput(
+                                    item.compliance?.days_since_nutrition,
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-950">
+                                <div className="text-[9px] font-black uppercase tracking-wide text-sky-700/70">
+                                  Workout
+                                </div>
+                                <div className="mt-1 break-words text-xs font-black leading-4">
+                                  {formatDaysWithoutInput(
+                                    item.compliance?.days_since_workout,
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap gap-2 text-[10px] font-black text-slate-600">
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
+                                  {fmtNumber(item.today?.steps || 0)} step
+                                </span>
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
+                                  {fmtNumber(item.today?.calories || 0)} kkal
+                                </span>
+                                <span className="rounded-full bg-violet-50 px-2.5 py-1.5 text-violet-700">
+                                  Kepatuhan{" "}
+                                  {fmtNumber(
+                                    item.compliance?.compliance_percent || 0,
+                                  )}
+                                  %
+                                </span>
+                              </div>
+
+                              <span className="text-[10px] font-black text-teal-700">
+                                Buka detail peserta →
+                              </span>
+                            </div>
+                          </button>
+                        </article>
+                      ))
+                    )}
                   </div>
                 </section>
               </div>
@@ -921,6 +1063,11 @@ export default function WellnessCoachPortalPage() {
                 chooseParticipant={(item: any) =>
                   chooseParticipant(item, { openDetail: false })
                 }
+                clearParticipant={() => {
+                  setSelectedParticipant(null);
+                  setParticipantDetail(null);
+                  setChatMessages([]);
+                }}
                 chatMessages={chatMessages}
                 chatText={chatText}
                 setChatText={setChatText}
@@ -1015,6 +1162,8 @@ export default function WellnessCoachPortalPage() {
               <button
                 type="button"
                 onClick={() => {
+                  setSelectedParticipant(null);
+                  setChatMessages([]);
                   setCoachView("chat");
                   setCoachMenuOpen(false);
                 }}
@@ -1134,6 +1283,7 @@ function CoachChatPanel({
   setSelectedGroup,
   selectedParticipant,
   chooseParticipant,
+  clearParticipant,
   chatMessages,
   chatText,
   setChatText,
@@ -1142,6 +1292,10 @@ function CoachChatPanel({
   loadChat,
   sendChat,
 }: any) {
+  // WELLNESS_COACH_CHAT_INBOX_V77B
+  const [chatSearch, setChatSearch] = useState("");
+  const [memberMenuOpen, setMemberMenuOpen] = useState(false);
+
   const availableParticipants = (participants || []).filter((item: any) => {
     if (selectedGroup === "all") return true;
     return (
@@ -1151,245 +1305,357 @@ function CoachChatPanel({
     );
   });
 
+  const conversations = [...availableParticipants].sort((left: any, right: any) => {
+    const unreadDifference =
+      Number(right.unread_chat_count || 0) - Number(left.unread_chat_count || 0);
+    if (unreadDifference !== 0) return unreadDifference;
+
+    const rightTime = new Date(right.last_chat?.created_at || 0).getTime() || 0;
+    const leftTime = new Date(left.last_chat?.created_at || 0).getTime() || 0;
+    if (rightTime !== leftTime) return rightTime - leftTime;
+
+    return clean(left.name).localeCompare(clean(right.name), "id");
+  });
+
+  const normalizedSearch = clean(chatSearch).toLowerCase();
+  const filteredConversations = conversations.filter((item: any) => {
+    if (!normalizedSearch) return true;
+    return [item.name, item.code, item.group_name]
+      .map((value) => clean(value).toLowerCase())
+      .join(" ")
+      .includes(normalizedSearch);
+  });
+
+  function openConversation(item: any) {
+    chooseParticipant(item);
+    setMemberMenuOpen(false);
+  }
+
   return (
-    <section className="overflow-hidden rounded-[2rem] border border-white bg-white shadow-xl shadow-slate-200/60">
-      <div className="bg-gradient-to-br from-sky-500 via-cyan-500 to-teal-500 p-5 text-white md:p-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.2em] text-white/75">
-              Member Support
-            </div>
-            <h2 className="mt-2 text-2xl font-black">Chat With Member</h2>
-            <p className="mt-2 text-sm font-bold leading-6 text-white/90">
-              Coach hanya dapat menghubungi anggota dari kelompok yang
-              di-assign.
-            </p>
-          </div>
-          <div className="rounded-full bg-white/20 px-4 py-2 text-xs font-black backdrop-blur">
-            {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} pesan
-            belum dibaca
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-5 p-4 md:p-6 lg:grid-cols-[360px_1fr]">
-        <aside className="rounded-[1.75rem] border border-slate-100 bg-slate-50 p-4">
-          <div className="text-sm font-black text-slate-900">Pilih Member</div>
-          <div className="mt-3 grid gap-3">
-            <select
-              className={fieldClass}
-              value={selectedGroup}
-              onChange={(event) => setSelectedGroup(event.target.value)}
-            >
-              <option value="all">Semua Assigned Group</option>
-              {(groups || []).map((group: any) => (
-                <option
-                  key={group.id}
-                  value={String(
-                    group.wellness_group_unit_id || group.group_name,
-                  )}
-                >
-                  {group.group_name} ({group.member_count || 0})
-                </option>
-              ))}
-            </select>
-
-            <select
-              className={fieldClass}
-              value={
-                selectedParticipant?.id ? String(selectedParticipant.id) : ""
-              }
-              onChange={(event) => {
-                const participant = availableParticipants.find(
-                  (item: any) => String(item.id) === event.target.value,
-                );
-                if (participant) chooseParticipant(participant);
-              }}
-            >
-              <option value="">Pilih nama member</option>
-              {availableParticipants.map((item: any) => (
-                <option key={item.id} value={String(item.id)}>
-                  {item.name} | {item.group_name} | Steps{" "}
-                  {fmtNumber(item.today?.steps || 0)} |{" "}
-                  {fmtNumber(item.today?.calories || 0)} kkal | {item.status}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedParticipant ? (
-            <div className="mt-4 rounded-3xl bg-white p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <WellnessAvatar
-                  name={selectedParticipant.name}
-                  src={
-                    selectedParticipant.profile_photo_preview_url ||
-                    selectedParticipant.profile_photo_url
-                  }
-                  size="md"
-                />
-                <div className="min-w-0">
-                  <div className="truncate text-base font-black text-slate-950">
-                    {selectedParticipant.name}
-                  </div>
-                  <div className="mt-1 truncate text-xs font-bold text-slate-500">
-                    {selectedParticipant.group_name} ·{" "}
-                    {selectedParticipant.status}
-                  </div>
+    <section className="overflow-visible rounded-[1.75rem] border border-slate-100 bg-white shadow-xl shadow-slate-200/50">
+      {!selectedParticipant ? (
+        <>
+          <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-sky-600">
+                  Member Inbox
                 </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">
-                  Steps {fmtNumber(selectedParticipant.today?.steps || 0)}
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">
-                  {fmtNumber(selectedParticipant.today?.calories || 0)} kkal
-                </span>
-              </div>
-            </div>
-          ) : null}
-        </aside>
-
-        <div className="min-w-0">
-          {!selectedParticipant ? (
-            <div className="flex min-h-[420px] items-center justify-center rounded-[1.75rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-              <div>
-                <div className="text-lg font-black text-slate-900">
-                  Pilih member untuk chat
-                </div>
-                <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                  Percakapan akan tampil setelah coach memilih satu anggota.
+                <h2 className="mt-1 text-xl font-black text-slate-950">
+                  Chat With Member
+                </h2>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Semua percakapan peserta dalam satu inbox.
                 </p>
               </div>
+              <span className="rounded-full bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">
+                {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} baru
+              </span>
             </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <WellnessAvatar
-                    name={selectedParticipant.name}
-                    src={
-                      selectedParticipant.profile_photo_preview_url ||
-                      selectedParticipant.profile_photo_url
-                    }
-                    size="md"
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate text-lg font-black text-slate-950">
-                      {selectedParticipant.name}
-                    </div>
-                    <div className="truncate text-xs font-bold text-slate-500">
-                      Chat member · {selectedParticipant.group_name}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={loadChat}
-                  className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                >
-                  Refresh
-                </button>
-              </div>
 
-              <div className="mt-4 max-h-[52vh] min-h-[340px] space-y-3 overflow-y-auto rounded-[1.75rem] bg-[#f4fbfa] p-4">
-                {chatLoading ? (
-                  <div className="py-12 text-center text-sm font-bold text-slate-400">
-                    Memuat percakapan...
-                  </div>
-                ) : chatMessages.length === 0 ? (
-                  <div className="py-12 text-center">
-                    <div className="text-base font-black text-slate-900">
-                      Belum ada percakapan.
-                    </div>
-                    <p className="mt-2 text-sm font-bold text-slate-500">
-                      Kirim pesan pertama kepada member.
-                    </p>
-                  </div>
-                ) : (
-                  chatMessages.map((item: any) => {
-                    const fromCoach = item.sender === "coach";
-                    return (
-                      <div
-                        key={item.id}
-                        className={`flex items-end gap-2 ${fromCoach ? "justify-end" : "justify-start"}`}
-                      >
-                        {!fromCoach ? (
-                          <WellnessAvatar
-                            name={selectedParticipant.name}
-                            src={
-                              selectedParticipant.profile_photo_preview_url ||
-                              selectedParticipant.profile_photo_url
-                            }
-                            size="sm"
-                          />
-                        ) : null}
+            <div className="mt-4 grid gap-2 sm:grid-cols-[180px_1fr]">
+              <select
+                className={`${fieldClass} w-full`}
+                value={selectedGroup}
+                onChange={(event) => setSelectedGroup(event.target.value)}
+              >
+                <option value="all">Semua Group</option>
+                {(groups || []).map((group: any) => (
+                  <option
+                    key={group.id}
+                    value={String(
+                      group.wellness_group_unit_id || group.group_name,
+                    )}
+                  >
+                    {group.group_name}
+                  </option>
+                ))}
+              </select>
+              <input
+                className={`${fieldClass} w-full`}
+                value={chatSearch}
+                onChange={(event) => setChatSearch(event.target.value)}
+                placeholder="Cari nama atau kelompok"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-[66vh] divide-y divide-slate-100 overflow-y-auto">
+            {filteredConversations.length === 0 ? (
+              <div className="px-5 py-14 text-center">
+                <div className="text-base font-black text-slate-900">
+                  Percakapan tidak ditemukan
+                </div>
+                <div className="mt-2 text-sm font-bold text-slate-500">
+                  Ubah filter atau kata pencarian.
+                </div>
+              </div>
+            ) : (
+              filteredConversations.map((item: any) => {
+                const unread = Number(item.unread_chat_count || 0);
+                const lastMessage = clean(item.last_chat?.message);
+                const fromCoach = item.last_chat?.sender === "coach";
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openConversation(item)}
+                    className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-sky-50/70 active:bg-sky-50 sm:px-5"
+                  >
+                    <WellnessAvatar
+                      name={item.name}
+                      src={
+                        item.profile_photo_preview_url ||
+                        item.profile_photo_url
+                      }
+                      size="md"
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 break-words text-[14px] font-black leading-5 text-slate-950 sm:text-[15px]">
+                          {item.name}
+                        </div>
                         <div
-                          className={`max-w-[82%] rounded-[1.5rem] px-4 py-3 shadow-sm transition-opacity ${
-                            fromCoach
-                              ? "rounded-br-md bg-slate-950 text-white"
-                              : "rounded-bl-md border border-teal-100 bg-white text-slate-900"
-                          } ${item.optimistic ? "opacity-90" : "opacity-100"}`}
+                          className={`shrink-0 text-[10px] font-bold ${
+                            unread > 0 ? "text-teal-700" : "text-slate-400"
+                          }`}
                         >
-                          <div className="whitespace-pre-wrap text-sm font-bold leading-6">
-                            {item.message || item.coach_note || "-"}
-                          </div>
-                          <div
-                            className={`mt-2 text-[11px] font-bold ${
-                              fromCoach ? "text-white/60" : "text-slate-400"
-                            }`}
-                          >
-                            {formatChatTime(
-                              item.created_at || item.session_date,
-                            )}
-                            {fromCoach
-                              ? item.is_read
-                                ? " · Sudah dibaca member"
-                                : " · Terkirim"
-                              : " · Member"}
-                          </div>
+                          {item.last_chat?.created_at
+                            ? formatChatTime(item.last_chat.created_at)
+                            : ""}
                         </div>
                       </div>
-                    );
-                  })
-                )}
-                <div
-                  id="coach-member-chat-end"
-                  className="h-px"
-                  aria-hidden="true"
-                />
-              </div>
 
-              <div className="mt-4 grid gap-3">
-                <textarea
-                  className={`${fieldClass} min-h-[96px] resize-none`}
-                  value={chatText}
-                  onChange={(event) => setChatText(event.target.value)}
-                  placeholder="Tulis pesan untuk member..."
-                />
-                <button
-                  type="button"
-                  onClick={sendChat}
-                  disabled={chatSending || !clean(chatText)}
-                  className="flex min-h-[52px] items-center justify-center rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
-                  aria-label={
-                    chatSending ? "Pesan sedang diproses" : "Kirim pesan"
-                  }
-                >
-                  {chatSending ? (
-                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  ) : (
-                    "Kirim Pesan"
-                  )}
-                </button>
+                      <div className="mt-0.5 break-words text-[10px] font-bold text-slate-400">
+                        {item.group_name} · {item.code}
+                      </div>
+
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <div
+                          className={`min-w-0 truncate text-xs font-bold ${
+                            unread > 0 ? "text-slate-800" : "text-slate-500"
+                          }`}
+                        >
+                          {lastMessage
+                            ? `${fromCoach ? "Anda: " : ""}${lastMessage}`
+                            : "Belum ada percakapan"}
+                        </div>
+                        {unread > 0 ? (
+                          <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-teal-600 px-1.5 text-[10px] font-black text-white">
+                            {unread > 99 ? "99+" : unread}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="relative">
+          <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-100 bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
+            <button
+              type="button"
+              onClick={clearParticipant}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-700"
+              aria-label="Kembali ke daftar chat"
+            >
+              ←
+            </button>
+
+            <WellnessAvatar
+              name={selectedParticipant.name}
+              src={
+                selectedParticipant.profile_photo_preview_url ||
+                selectedParticipant.profile_photo_url
+              }
+              size="sm"
+            />
+
+            <div className="min-w-0 flex-1">
+              <div className="break-words text-sm font-black leading-5 text-slate-950 sm:text-base">
+                {selectedParticipant.name}
               </div>
-            </>
-          )}
+              <div className="mt-0.5 break-words text-[10px] font-bold text-slate-500">
+                {selectedParticipant.group_name} ·{" "}
+                {selectedParticipant.status}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => loadChat()}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-black text-slate-700"
+              aria-label="Refresh chat"
+            >
+              ↻
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMemberMenuOpen((previous) => !previous)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white"
+              aria-label="Pilih Chat With Member"
+              aria-expanded={memberMenuOpen}
+            >
+              ☰
+            </button>
+
+            {memberMenuOpen ? (
+              <div className="absolute right-3 top-[3.75rem] z-40 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white shadow-2xl">
+                <div className="border-b border-slate-100 p-3">
+                  <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-400">
+                    Chat With Member
+                  </div>
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold outline-none focus:border-teal-400"
+                    value={chatSearch}
+                    onChange={(event) => setChatSearch(event.target.value)}
+                    placeholder="Cari nama"
+                  />
+                </div>
+
+                <div className="max-h-[22rem] overflow-y-auto p-2">
+                  {filteredConversations.map((item: any) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openConversation(item)}
+                      className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left ${
+                        Number(item.id) === Number(selectedParticipant.id)
+                          ? "bg-teal-50"
+                          : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <WellnessAvatar
+                        name={item.name}
+                        src={
+                          item.profile_photo_preview_url ||
+                          item.profile_photo_url
+                        }
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-sm font-black leading-5 text-slate-950">
+                          {item.name}
+                        </div>
+                        <div className="mt-0.5 text-[10px] font-bold text-slate-500">
+                          {item.group_name}
+                        </div>
+                      </div>
+                      {Number(item.unread_chat_count || 0) > 0 ? (
+                        <span className="rounded-full bg-rose-600 px-2 py-1 text-[10px] font-black text-white">
+                          {Number(item.unread_chat_count)}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="max-h-[58vh] min-h-[390px] space-y-2 overflow-y-auto bg-[#eef7f5] px-3 py-4 sm:px-4">
+            {chatLoading ? (
+              <div className="py-14 text-center text-sm font-bold text-slate-400">
+                Memuat percakapan...
+              </div>
+            ) : chatMessages.length === 0 ? (
+              <div className="mx-auto mt-12 max-w-xs rounded-2xl bg-white/80 px-5 py-5 text-center shadow-sm">
+                <div className="text-sm font-black text-slate-900">
+                  Belum ada percakapan
+                </div>
+                <div className="mt-1 text-xs font-bold text-slate-500">
+                  Kirim pesan pertama kepada peserta.
+                </div>
+              </div>
+            ) : (
+              chatMessages.map((item: any) => {
+                const fromCoach = item.sender === "coach";
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex items-end gap-2 ${
+                      fromCoach ? "justify-end" : "justify-start"
+                    }`}
+                  >
+                    {!fromCoach ? (
+                      <WellnessAvatar
+                        name={selectedParticipant.name}
+                        src={
+                          selectedParticipant.profile_photo_preview_url ||
+                          selectedParticipant.profile_photo_url
+                        }
+                        size="sm"
+                      />
+                    ) : null}
+
+                    <div
+                      className={`max-w-[84%] rounded-[1.2rem] px-3.5 py-2.5 shadow-sm ${
+                        fromCoach
+                          ? "rounded-br-sm bg-[#d9fdd3] text-slate-950"
+                          : "rounded-bl-sm bg-white text-slate-950"
+                      } ${item.optimistic ? "opacity-80" : "opacity-100"}`}
+                    >
+                      <div className="whitespace-pre-wrap break-words text-[13px] font-semibold leading-5">
+                        {item.message || item.coach_note || "-"}
+                      </div>
+                      <div className="mt-1 flex items-center justify-end gap-1 text-[9px] font-bold text-slate-400">
+                        <span>
+                          {formatChatTime(
+                            item.created_at || item.session_date,
+                          )}
+                        </span>
+                        {fromCoach ? (
+                          <span className={item.is_read ? "text-sky-500" : ""}>
+                            {item.is_read ? "✓✓" : "✓"}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div
+              id="coach-member-chat-end"
+              className="h-px"
+              aria-hidden="true"
+            />
+          </div>
+
+          <div className="flex items-end gap-2 border-t border-slate-100 bg-white p-3 sm:p-4">
+            <textarea
+              className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-5 text-slate-900 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+              value={chatText}
+              onChange={(event) => setChatText(event.target.value)}
+              placeholder="Tulis pesan..."
+              rows={1}
+            />
+            <button
+              type="button"
+              onClick={sendChat}
+              disabled={chatSending || !clean(chatText)}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-teal-600 text-lg font-black text-white shadow-lg shadow-teal-100 disabled:opacity-40"
+              aria-label="Kirim pesan"
+            >
+              {chatSending ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              ) : (
+                "➤"
+              )}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }
+
 
 function LoginSection({ login, setLogin, submitLogin, loading }: any) {
   return (
