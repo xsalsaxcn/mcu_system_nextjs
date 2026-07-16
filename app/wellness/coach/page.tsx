@@ -595,7 +595,7 @@ export default function WellnessCoachPortalPage() {
   return (
     <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">
-        {/* WELLNESS_COACH_SUBVIEW_HEADER_V77C */}
+        {/* WELLNESS_COACH_CHAT_DIRECT_HEADER_V77D */}
         {!isLoggedIn || coachView === "monitoring" ? (
           <>
             <section className="overflow-visible rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
@@ -634,7 +634,6 @@ export default function WellnessCoachPortalPage() {
                       }
                       className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg text-slate-700 shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl"
                       aria-label="Buka notifikasi Coach"
-                      aria-expanded={coachNotificationOpen}
                     >
                       🔔
                       {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
@@ -659,12 +658,10 @@ export default function WellnessCoachPortalPage() {
 
                     {coachNotificationOpen ? (
                       <div className="absolute right-0 top-14 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.5rem] border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl">
-                        <div className="px-2 pb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
-                          Notifikasi Coach
-                        </div>
                         <button
                           type="button"
                           onClick={() => {
+                            setSelectedGroup("all");
                             setSelectedParticipant(null);
                             setChatMessages([]);
                             setCoachView("chat");
@@ -672,14 +669,9 @@ export default function WellnessCoachPortalPage() {
                           }}
                           className="flex w-full items-center justify-between gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-left"
                         >
-                          <div>
-                            <div className="text-sm font-black text-sky-950">
-                              💬 Chat With Member
-                            </div>
-                            <div className="mt-1 text-[11px] font-bold text-sky-700">
-                              Buka inbox percakapan peserta
-                            </div>
-                          </div>
+                          <span className="text-sm font-black text-sky-950">
+                            💬 Chat With Member
+                          </span>
                           {Number(
                             dashboard?.summary?.unread_chat_messages || 0,
                           ) > 0 ? (
@@ -719,22 +711,14 @@ export default function WellnessCoachPortalPage() {
               </div>
             </section>
           </>
-        ) : (
-          <section className="relative flex items-center justify-between gap-3 rounded-[1.35rem] border border-slate-100 bg-white px-4 py-3 shadow-sm">
+        ) : coachView === "chat" ? (
+          <section className="relative flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-1 pb-2 pt-1">
             <div className="min-w-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">
-                Wellness Coach
+              <div className="text-[9px] font-black uppercase tracking-[0.15em] text-teal-600">
+                Member Chat
               </div>
-              <h1 className="mt-1 break-words text-xl font-black leading-tight text-slate-950">
-                {coachView === "chat"
-                  ? selectedParticipant
-                    ? `Chat With ${selectedParticipant.name}`
-                    : "Chat With Member"
-                  : coachView === "ranking"
-                    ? "Ranking Kelompok"
-                    : coachView === "profile"
-                      ? "Profil Coach"
-                      : "Portal Coach"}
+              <h1 className="mt-0.5 text-lg font-black leading-tight text-slate-950">
+                Chat With Member
               </h1>
             </div>
 
@@ -744,7 +728,7 @@ export default function WellnessCoachPortalPage() {
                 onClick={() =>
                   setCoachNotificationOpen((previous) => !previous)
                 }
-                className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-100 bg-slate-50 text-lg shadow-sm"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-100 bg-white text-lg shadow-sm"
                 aria-label="Buka notifikasi Coach"
               >
                 🔔
@@ -756,39 +740,30 @@ export default function WellnessCoachPortalPage() {
                   </span>
                 ) : null}
               </button>
+
               <button
                 type="button"
                 onClick={() => setCoachMenuOpen(true)}
-                className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-xl font-black text-white shadow-sm"
-                aria-label="Buka menu coach"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white shadow-sm"
+                aria-label="Buka menu Coach"
               >
                 ☰
               </button>
 
               {coachNotificationOpen ? (
-                <div className="absolute right-0 top-14 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.5rem] border border-slate-100 bg-white p-3 shadow-2xl">
+                <div className="absolute right-0 top-12 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.4rem] border border-slate-100 bg-white p-3 shadow-2xl">
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedGroup("all");
                       setSelectedParticipant(null);
                       setChatMessages([]);
-                      setCoachView("chat");
                       setCoachNotificationOpen(false);
                     }}
-                    className="flex w-full items-center justify-between gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-left"
+                    className="flex w-full items-center justify-between rounded-2xl bg-sky-50 px-4 py-3 text-left text-sm font-black text-sky-950"
                   >
-                    <span className="text-sm font-black text-sky-950">
-                      💬 Chat With Member
-                    </span>
-                    {Number(
-                      dashboard?.summary?.unread_chat_messages || 0,
-                    ) > 0 ? (
-                      <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
-                        {Number(
-                          dashboard?.summary?.unread_chat_messages || 0,
-                        )}
-                      </span>
-                    ) : null}
+                    <span>💬 Semua percakapan</span>
+                    <span>{fmtNumber(dashboard?.summary?.unread_chat_messages || 0)}</span>
                   </button>
                   <button
                     type="button"
@@ -804,6 +779,32 @@ export default function WellnessCoachPortalPage() {
               ) : null}
             </div>
           </section>
+        ) : (
+          <section className="relative flex items-center justify-between gap-3 rounded-[1.1rem] border border-slate-100 bg-white px-3 py-2.5 shadow-sm">
+            <div className="min-w-0">
+              <div className="text-[9px] font-black uppercase tracking-[0.15em] text-teal-600">
+                Wellness Coach
+              </div>
+              <h1 className="mt-0.5 break-words text-lg font-black leading-tight text-slate-950">
+                {coachView === "ranking"
+                  ? "Ranking Kelompok"
+                  : coachView === "profile"
+                    ? "Profil Coach"
+                    : "Portal Coach"}
+              </h1>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCoachMenuOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white shadow-sm"
+                aria-label="Buka menu Coach"
+              >
+                ☰
+              </button>
+            </div>
+          </section>
         )}
 
         {!isLoggedIn ? (
@@ -814,7 +815,7 @@ export default function WellnessCoachPortalPage() {
             loading={loading}
           />
         ) : (
-          <section className="mt-6">
+          <section className={coachView === "chat" ? "mt-2" : "mt-6"}>
             {coachView === "monitoring" ? (
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -1162,6 +1163,7 @@ export default function WellnessCoachPortalPage() {
               <button
                 type="button"
                 onClick={() => {
+                  setSelectedGroup("all");
                   setSelectedParticipant(null);
                   setChatMessages([]);
                   setCoachView("chat");
@@ -1292,35 +1294,65 @@ function CoachChatPanel({
   loadChat,
   sendChat,
 }: any) {
-  // WELLNESS_COACH_CHAT_INBOX_V77C
+  // WELLNESS_COACH_CHAT_WHATSAPP_DIRECT_V77D
   const [chatSearch, setChatSearch] = useState("");
   const [memberMenuOpen, setMemberMenuOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
-  const availableParticipants = (participants || []).filter((item: any) => {
+  const selectedGroupObject = (groups || []).find(
+    (group: any) =>
+      String(group.wellness_group_unit_id || group.group_name) ===
+      String(selectedGroup),
+  );
+  const selectedGroupName = clean(
+    selectedGroupObject?.group_name || selectedGroup,
+  ).toLowerCase();
+
+  const groupFilteredParticipants = (participants || []).filter((item: any) => {
     if (selectedGroup === "all") return true;
+
+    const participantGroupName = clean(item.group_name).toLowerCase();
+    const participantGroupIds = [
+      item.raw?.wellness_group_unit_id,
+      item.raw?.group_unit_id,
+      item.raw?.wellness_group_id,
+    ].map((value) => clean(value));
+
     return (
-      clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
-      clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
-      clean(item.raw?.group_unit_id) === selectedGroup
+      participantGroupIds.includes(clean(selectedGroup)) ||
+      participantGroupName === selectedGroupName ||
+      participantGroupName.includes(selectedGroupName) ||
+      selectedGroupName.includes(participantGroupName)
     );
   });
 
-  const conversations = [...availableParticipants].sort((left: any, right: any) => {
-    const unreadDifference =
-      Number(right.unread_chat_count || 0) - Number(left.unread_chat_count || 0);
-    if (unreadDifference !== 0) return unreadDifference;
+  // Jangan biarkan inbox kosong hanya karena format ID/nama group berbeda.
+  const availableParticipants =
+    selectedGroup !== "all" && groupFilteredParticipants.length === 0
+      ? participants || []
+      : groupFilteredParticipants;
 
-    const rightTime = new Date(right.last_chat?.created_at || 0).getTime() || 0;
-    const leftTime = new Date(left.last_chat?.created_at || 0).getTime() || 0;
-    if (rightTime !== leftTime) return rightTime - leftTime;
+  const conversations = [...availableParticipants].sort(
+    (left: any, right: any) => {
+      const unreadDifference =
+        Number(right.unread_chat_count || 0) -
+        Number(left.unread_chat_count || 0);
+      if (unreadDifference !== 0) return unreadDifference;
 
-    return clean(left.name).localeCompare(clean(right.name), "id");
-  });
+      const rightTime =
+        new Date(right.last_chat?.created_at || 0).getTime() || 0;
+      const leftTime =
+        new Date(left.last_chat?.created_at || 0).getTime() || 0;
+      if (rightTime !== leftTime) return rightTime - leftTime;
+
+      return clean(left.name).localeCompare(clean(right.name), "id");
+    },
+  );
 
   const normalizedSearch = clean(chatSearch).toLowerCase();
   const filteredConversations = conversations.filter((item: any) => {
     if (!normalizedSearch) return true;
-    return [item.name, item.code, item.group_name]
+    return [item.name, item.code, item.group_name, item.last_chat?.message]
       .map((value) => clean(value).toLowerCase())
       .join(" ")
       .includes(normalizedSearch);
@@ -1331,35 +1363,45 @@ function CoachChatPanel({
     setMemberMenuOpen(false);
   }
 
-  return (
-    <section className="overflow-visible rounded-[1.75rem] border border-slate-100 bg-white shadow-xl shadow-slate-200/50">
-      {!selectedParticipant ? (
-        <>
-          <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-sky-600">
-                  Member Inbox
-                </div>
-                <h2 className="mt-1 text-xl font-black text-slate-950">
-                  Chat With Member
-                </h2>
-                <p className="mt-1 text-xs font-bold text-slate-500">
-                  Semua percakapan peserta dalam satu inbox.
-                </p>
-              </div>
-              <span className="rounded-full bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">
-                {fmtNumber(dashboard?.summary?.unread_chat_messages || 0)} baru
+  if (!selectedParticipant) {
+    return (
+      <section className="overflow-hidden border-y border-slate-200 bg-white sm:rounded-[1.25rem] sm:border">
+        <div className="sticky top-0 z-20 border-b border-slate-100 bg-white px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                🔍
               </span>
+              <input
+                value={chatSearch}
+                onChange={(event) => setChatSearch(event.target.value)}
+                placeholder="Cari percakapan"
+                className="h-11 w-full rounded-full border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm font-semibold text-slate-900 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+              />
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-[180px_1fr]">
+            <button
+              type="button"
+              onClick={() => setFilterOpen((previous) => !previous)}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border text-lg shadow-sm ${
+                filterOpen || selectedGroup !== "all"
+                  ? "border-teal-200 bg-teal-50 text-teal-700"
+                  : "border-slate-200 bg-white text-slate-700"
+              }`}
+              aria-label="Filter group"
+            >
+              ☰
+            </button>
+          </div>
+
+          {filterOpen ? (
+            <div className="mt-2 rounded-2xl bg-slate-50 p-2">
               <select
-                className={`${fieldClass} w-full`}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-teal-400"
                 value={selectedGroup}
                 onChange={(event) => setSelectedGroup(event.target.value)}
               >
-                <option value="all">Semua Group</option>
+                <option value="all">Semua Assigned Group</option>
                 {(groups || []).map((group: any) => (
                   <option
                     key={group.id}
@@ -1371,287 +1413,265 @@ function CoachChatPanel({
                   </option>
                 ))}
               </select>
-              <input
-                className={`${fieldClass} w-full`}
-                value={chatSearch}
-                onChange={(event) => setChatSearch(event.target.value)}
-                placeholder="Cari nama atau kelompok"
-              />
             </div>
-          </div>
+          ) : null}
+        </div>
 
-          <div className="max-h-[66vh] divide-y divide-slate-100 overflow-y-auto">
-            {filteredConversations.length === 0 ? (
-              <div className="px-5 py-14 text-center">
-                <div className="text-base font-black text-slate-900">
-                  Percakapan tidak ditemukan
-                </div>
-                <div className="mt-2 text-sm font-bold text-slate-500">
-                  Ubah filter atau kata pencarian.
-                </div>
+        <div className="max-h-[calc(100vh-13.5rem)] min-h-[30rem] divide-y divide-slate-100 overflow-y-auto">
+          {filteredConversations.length === 0 ? (
+            <div className="px-5 py-16 text-center">
+              <div className="text-base font-black text-slate-900">
+                Belum ada peserta
               </div>
-            ) : (
-              filteredConversations.map((item: any) => {
-                const unread = Number(item.unread_chat_count || 0);
-                const lastMessage = clean(item.last_chat?.message);
-                const fromCoach = item.last_chat?.sender === "coach";
+              <div className="mt-2 text-sm font-bold leading-5 text-slate-500">
+                Tidak ada peserta yang sesuai dengan pencarian.
+              </div>
+            </div>
+          ) : (
+            filteredConversations.map((item: any) => {
+              const unread = Number(item.unread_chat_count || 0);
+              const lastMessage = clean(item.last_chat?.message);
+              const fromCoach = item.last_chat?.sender === "coach";
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => openConversation(item)}
-                    className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-sky-50/70 active:bg-sky-50 sm:px-5"
-                  >
-                    <WellnessAvatar
-                      name={item.name}
-                      src={
-                        item.profile_photo_preview_url ||
-                        item.profile_photo_url
-                      }
-                      size="md"
-                    />
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openConversation(item)}
+                  className="flex w-full items-center gap-3 px-3 py-3 text-left transition active:bg-slate-100 sm:px-4"
+                >
+                  <WellnessAvatar
+                    name={item.name}
+                    src={
+                      item.profile_photo_preview_url ||
+                      item.profile_photo_url
+                    }
+                    size="md"
+                  />
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 break-words text-[14px] font-black leading-5 text-slate-950 sm:text-[15px]">
-                          {item.name}
-                        </div>
-                        <div
-                          className={`shrink-0 text-[10px] font-bold ${
-                            unread > 0 ? "text-teal-700" : "text-slate-400"
-                          }`}
-                        >
-                          {item.last_chat?.created_at
-                            ? formatChatTime(item.last_chat.created_at)
-                            : ""}
-                        </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        className={`min-w-0 break-words text-[14px] leading-5 text-slate-950 ${
+                          unread > 0 ? "font-black" : "font-bold"
+                        }`}
+                      >
+                        {item.name}
                       </div>
-
-                      <div className="mt-0.5 break-words text-[10px] font-bold text-slate-400">
-                        {item.group_name} · {item.code}
-                      </div>
-
-                      <div className="mt-1 flex items-center justify-between gap-3">
-                        <div
-                          className={`min-w-0 truncate text-xs font-bold ${
-                            unread > 0 ? "text-slate-800" : "text-slate-500"
-                          }`}
-                        >
-                          {lastMessage
-                            ? `${fromCoach ? "Anda: " : ""}${lastMessage}`
-                            : "Belum ada percakapan"}
-                        </div>
-                        {unread > 0 ? (
-                          <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-teal-600 px-1.5 text-[10px] font-black text-white">
-                            {unread > 99 ? "99+" : unread}
-                          </span>
-                        ) : null}
+                      <div
+                        className={`shrink-0 pt-0.5 text-[10px] font-bold ${
+                          unread > 0 ? "text-teal-700" : "text-slate-400"
+                        }`}
+                      >
+                        {item.last_chat?.created_at
+                          ? formatChatTime(item.last_chat.created_at)
+                          : ""}
                       </div>
                     </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="relative">
-          <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-100 bg-white/95 px-3 py-3 backdrop-blur sm:px-4">
-            <button
-              type="button"
-              onClick={clearParticipant}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-700"
-              aria-label="Kembali ke daftar chat"
-            >
-              ←
-            </button>
 
-            <WellnessAvatar
-              name={selectedParticipant.name}
-              src={
-                selectedParticipant.profile_photo_preview_url ||
-                selectedParticipant.profile_photo_url
-              }
-              size="sm"
-            />
-
-            <div className="min-w-0 flex-1">
-              <div className="break-words text-sm font-black leading-5 text-slate-950 sm:text-base">
-                {selectedParticipant.name}
-              </div>
-              <div className="mt-0.5 break-words text-[10px] font-bold text-slate-500">
-                {selectedParticipant.group_name} ·{" "}
-                {selectedParticipant.status}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => loadChat()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-black text-slate-700"
-              aria-label="Refresh chat"
-            >
-              ↻
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMemberMenuOpen((previous) => !previous)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white"
-              aria-label="Pilih Chat With Member"
-              aria-expanded={memberMenuOpen}
-            >
-              ☰
-            </button>
-
-            {memberMenuOpen ? (
-              <div className="absolute right-3 top-[3.75rem] z-40 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white shadow-2xl">
-                <div className="border-b border-slate-100 p-3">
-                  <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-400">
-                    Chat With Member
-                  </div>
-                  <input
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold outline-none focus:border-teal-400"
-                    value={chatSearch}
-                    onChange={(event) => setChatSearch(event.target.value)}
-                    placeholder="Cari nama"
-                  />
-                </div>
-
-                <div className="max-h-[22rem] overflow-y-auto p-2">
-                  {filteredConversations.map((item: any) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => openConversation(item)}
-                      className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left ${
-                        Number(item.id) === Number(selectedParticipant.id)
-                          ? "bg-teal-50"
-                          : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <WellnessAvatar
-                        name={item.name}
-                        src={
-                          item.profile_photo_preview_url ||
-                          item.profile_photo_url
-                        }
-                        size="sm"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="break-words text-sm font-black leading-5 text-slate-950">
-                          {item.name}
-                        </div>
-                        <div className="mt-0.5 text-[10px] font-bold text-slate-500">
-                          {item.group_name}
-                        </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-3">
+                      <div className="min-w-0 truncate text-xs font-semibold text-slate-500">
+                        {lastMessage
+                          ? `${fromCoach ? "Anda: " : ""}${lastMessage}`
+                          : `${item.group_name} · Belum ada pesan`}
                       </div>
-                      {Number(item.unread_chat_count || 0) > 0 ? (
-                        <span className="rounded-full bg-rose-600 px-2 py-1 text-[10px] font-black text-white">
-                          {Number(item.unread_chat_count)}
+                      {unread > 0 ? (
+                        <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-teal-600 px-1.5 text-[10px] font-black text-white">
+                          {unread > 99 ? "99+" : unread}
                         </span>
                       ) : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
+                    </div>
 
-          <div className="max-h-[58vh] min-h-[390px] space-y-2 overflow-y-auto bg-[#eef7f5] px-3 py-4 sm:px-4">
-            {chatLoading ? (
-              <div className="py-14 text-center text-sm font-bold text-slate-400">
-                Memuat percakapan...
-              </div>
-            ) : chatMessages.length === 0 ? (
-              <div className="mx-auto mt-12 max-w-xs rounded-2xl bg-white/80 px-5 py-5 text-center shadow-sm">
-                <div className="text-sm font-black text-slate-900">
-                  Belum ada percakapan
-                </div>
-                <div className="mt-1 text-xs font-bold text-slate-500">
-                  Kirim pesan pertama kepada peserta.
-                </div>
-              </div>
-            ) : (
-              chatMessages.map((item: any) => {
-                const fromCoach = item.sender === "coach";
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex items-end gap-2 ${
-                      fromCoach ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    {!fromCoach ? (
-                      <WellnessAvatar
-                        name={selectedParticipant.name}
-                        src={
-                          selectedParticipant.profile_photo_preview_url ||
-                          selectedParticipant.profile_photo_url
-                        }
-                        size="sm"
-                      />
-                    ) : null}
-
-                    <div
-                      className={`max-w-[84%] rounded-[1.2rem] px-3.5 py-2.5 shadow-sm ${
-                        fromCoach
-                          ? "rounded-br-sm bg-[#d9fdd3] text-slate-950"
-                          : "rounded-bl-sm bg-white text-slate-950"
-                      } ${item.optimistic ? "opacity-80" : "opacity-100"}`}
-                    >
-                      <div className="whitespace-pre-wrap break-words text-[13px] font-semibold leading-5">
-                        {item.message || item.coach_note || "-"}
-                      </div>
-                      <div className="mt-1 flex items-center justify-end gap-1 text-[9px] font-bold text-slate-400">
-                        <span>
-                          {formatChatTime(
-                            item.created_at || item.session_date,
-                          )}
-                        </span>
-                        {fromCoach ? (
-                          <span className={item.is_read ? "text-sky-500" : ""}>
-                            {item.is_read ? "✓✓" : "✓"}
-                          </span>
-                        ) : null}
-                      </div>
+                    <div className="mt-0.5 text-[10px] font-bold text-slate-400">
+                      {item.group_name} · {item.code}
                     </div>
                   </div>
-                );
-              })
-            )}
-            <div
-              id="coach-member-chat-end"
-              className="h-px"
-              aria-hidden="true"
-            />
-          </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </section>
+    );
+  }
 
-          <div className="flex items-end gap-2 border-t border-slate-100 bg-white p-3 sm:p-4">
-            <textarea
-              className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-5 text-slate-900 outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
-              value={chatText}
-              onChange={(event) => setChatText(event.target.value)}
-              placeholder="Tulis pesan..."
-              rows={1}
-            />
-            <button
-              type="button"
-              onClick={sendChat}
-              disabled={chatSending || !clean(chatText)}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-teal-600 text-lg font-black text-white shadow-lg shadow-teal-100 disabled:opacity-40"
-              aria-label="Kirim pesan"
-            >
-              {chatSending ? (
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              ) : (
-                "➤"
-              )}
-            </button>
+  return (
+    <section className="overflow-hidden border-y border-slate-200 bg-white sm:rounded-[1.25rem] sm:border">
+      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-2.5">
+        <button
+          type="button"
+          onClick={clearParticipant}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-700"
+          aria-label="Kembali ke daftar percakapan"
+        >
+          ←
+        </button>
+
+        <WellnessAvatar
+          name={selectedParticipant.name}
+          src={
+            selectedParticipant.profile_photo_preview_url ||
+            selectedParticipant.profile_photo_url
+          }
+          size="sm"
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="break-words text-sm font-black leading-5 text-slate-950">
+            {selectedParticipant.name}
+          </div>
+          <div className="truncate text-[10px] font-bold text-slate-500">
+            {selectedParticipant.group_name}
           </div>
         </div>
-      )}
+
+        <button
+          type="button"
+          onClick={() => loadChat()}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base font-black text-slate-700"
+          aria-label="Refresh chat"
+        >
+          ↻
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMemberMenuOpen((previous) => !previous)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white"
+          aria-label="Pilih peserta lain"
+        >
+          ☰
+        </button>
+
+        {memberMenuOpen ? (
+          <div className="absolute right-3 top-[3.6rem] z-40 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-[1.4rem] border border-slate-100 bg-white shadow-2xl">
+            <div className="border-b border-slate-100 p-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">
+                Chat With Member
+              </div>
+              <input
+                className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold outline-none focus:border-teal-400"
+                value={chatSearch}
+                onChange={(event) => setChatSearch(event.target.value)}
+                placeholder="Cari nama"
+              />
+            </div>
+
+            <div className="max-h-[22rem] overflow-y-auto p-2">
+              {filteredConversations.map((item: any) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openConversation(item)}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ${
+                    Number(item.id) === Number(selectedParticipant.id)
+                      ? "bg-teal-50"
+                      : "hover:bg-slate-50"
+                  }`}
+                >
+                  <WellnessAvatar
+                    name={item.name}
+                    src={
+                      item.profile_photo_preview_url ||
+                      item.profile_photo_url
+                    }
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="break-words text-sm font-black leading-5 text-slate-950">
+                      {item.name}
+                    </div>
+                    <div className="truncate text-[10px] font-bold text-slate-500">
+                      {item.group_name}
+                    </div>
+                  </div>
+                  {Number(item.unread_chat_count || 0) > 0 ? (
+                    <span className="rounded-full bg-rose-600 px-2 py-1 text-[10px] font-black text-white">
+                      {Number(item.unread_chat_count)}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="max-h-[calc(100vh-16.5rem)] min-h-[27rem] space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4">
+        {chatLoading ? (
+          <div className="py-14 text-center text-sm font-bold text-slate-400">
+            Memuat percakapan...
+          </div>
+        ) : chatMessages.length === 0 ? (
+          <div className="mx-auto mt-12 max-w-xs rounded-xl bg-white/80 px-5 py-4 text-center shadow-sm">
+            <div className="text-sm font-black text-slate-900">
+              Belum ada percakapan
+            </div>
+            <div className="mt-1 text-xs font-bold text-slate-500">
+              Kirim pesan pertama kepada peserta.
+            </div>
+          </div>
+        ) : (
+          chatMessages.map((item: any) => {
+            const fromCoach = item.sender === "coach";
+
+            return (
+              <div
+                key={item.id}
+                className={`flex ${
+                  fromCoach ? "justify-end" : "justify-start"
+                }`}
+              >
+                <div
+                  className={`max-w-[84%] rounded-lg px-3 py-2 shadow-sm ${
+                    fromCoach
+                      ? "rounded-br-sm bg-[#d9fdd3] text-slate-950"
+                      : "rounded-bl-sm bg-white text-slate-950"
+                  } ${item.optimistic ? "opacity-80" : "opacity-100"}`}
+                >
+                  <div className="whitespace-pre-wrap break-words text-[13px] font-semibold leading-5">
+                    {item.message || item.coach_note || "-"}
+                  </div>
+                  <div className="mt-1 flex items-center justify-end gap-1 text-[9px] font-bold text-slate-400">
+                    <span>
+                      {formatChatTime(item.created_at || item.session_date)}
+                    </span>
+                    {fromCoach ? (
+                      <span className={item.is_read ? "text-sky-500" : ""}>
+                        {item.is_read ? "✓✓" : "✓"}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div id="coach-member-chat-end" className="h-px" aria-hidden="true" />
+      </div>
+
+      <div className="flex items-end gap-2 border-t border-slate-100 bg-white p-2.5">
+        <textarea
+          className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[1.35rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold leading-5 text-slate-900 outline-none focus:border-teal-400"
+          value={chatText}
+          onChange={(event) => setChatText(event.target.value)}
+          placeholder="Tulis pesan..."
+          rows={1}
+        />
+        <button
+          type="button"
+          onClick={sendChat}
+          disabled={chatSending || !clean(chatText)}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-600 text-base font-black text-white shadow-lg shadow-teal-100 disabled:opacity-40"
+          aria-label="Kirim pesan"
+        >
+          {chatSending ? (
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          ) : (
+            "➤"
+          )}
+        </button>
+      </div>
     </section>
   );
 }
