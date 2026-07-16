@@ -1,7 +1,7 @@
 "use client";
 
 // WELLNESS_WORKOUT_LOG_RESPONSIVE_HEALTH_CONNECT_V423
-// WELLNESS_WORKOUT_LOG_ACTIVE_CALORIE_GUARD_V70
+// WELLNESS_WORKOUT_LOG_DEVICE_SOURCE_V72
 // Fix:
 // - History Workout membaca steps dari Health Connect.
 // - Membaca calories, duration, distance dari Google Fit / Health Connect / manual.
@@ -176,24 +176,40 @@ function isDailyDeviceRow(item: any) {
 
 function activityCalories(item: any) {
   const raw = item?.raw_payload || {};
-  const sanitized = asNumber(raw?.sanitized_active_calories);
-  if (sanitized > 0) return sanitized;
-
   const stored = asNumber(
     item?.calories ??
       item?.total_calories ??
       item?.activity_calories ??
       item?.calories_burned ??
-      raw?.health_connect_calories ??
-      raw?.health_connect_calories_original ??
-      raw?.health_connect_active_calories ??
-      raw?.google_fit_calories_expended ??
       raw?.calories ??
       raw?.active_calories ??
       raw?.calories_burned
   );
 
   if (!isDailyDeviceRow(item)) return stored;
+
+  const source = clean(item?.source || item?.input_source || item?.provider || raw?.provider).toLowerCase();
+  const isHealthConnect = source === "health_connect" || source === "health-connect";
+
+  if (isHealthConnect) {
+    const selected = asNumber(raw?.selected_active_calories);
+    if (selected > 0) return selected;
+
+    const reported = asNumber(
+      raw?.health_connect_calories_original ??
+        raw?.health_connect_calories ??
+        raw?.original_payload?.calories ??
+        raw?.original_payload?.active_calories
+    );
+
+    if (raw?.health_connect_calories_used === true && reported > 0) return reported;
+    if (stored > 0 && stored <= 2500) return stored;
+  } else {
+    const sanitized = asNumber(
+      raw?.sanitized_active_calories ?? raw?.selected_active_calories
+    );
+    if (sanitized > 0) return sanitized;
+  }
 
   const steps = activitySteps(item);
   const minutes = activityDuration(item);

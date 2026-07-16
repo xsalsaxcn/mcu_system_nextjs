@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+// WELLNESS_CHART_DEVICE_PRIMARY_SOURCE_V72
+
 type ChartPoint = {
   date: string;
   label: string;
@@ -108,7 +110,7 @@ export default function AchievementChartsTab({
   }, [JSON.stringify(nutritionData?.logs || [])]);
 
   const workoutSeries = useMemo(() => {
-    return aggregateChartSeries(workoutItems || [], {
+    return aggregateChartSeries(normalizeWorkoutItemsForChartV72(workoutItems || []), {
       dateKeys: ["log_date", "created_at", "updated_at", "date"],
       valueGetter: (item: any) => chartCaloriesValue(item),
       average: false,
@@ -1109,8 +1111,105 @@ function chartDateFromItem(item: any, keys: string[]) {
   return "";
 }
 
+function chartDeviceProviderV72(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  const source = clean(item?.source || item?.input_source || item?.provider || raw?.provider).toLowerCase();
+  const externalId = clean(item?.external_activity_id || item?.provider_activity_id).toLowerCase();
+  const name = clean(item?.activity_name || item?.activity_type).toLowerCase();
+  const mode = clean(raw?.sync_mode).toLowerCase();
+
+  if (
+    (source === "health_connect" || source === "health-connect") &&
+    (externalId.includes("health_connect_daily_") ||
+      name.includes("health connect daily") ||
+      mode === "daily_aggregate")
+  ) {
+    return "health_connect";
+  }
+
+  if (
+    (source === "google_fit" || source === "google-fit") &&
+    (externalId.includes("google_fit_daily_") ||
+      name.includes("google fit daily") ||
+      mode === "aggregate_daily")
+  ) {
+    return "google_fit";
+  }
+
+  return "";
+}
+
+function chartDateKeyV72(item: any) {
+  return clean(
+    item?.log_date || item?.date || item?.started_at || item?.created_at || item?.updated_at
+  ).slice(0, 10);
+}
+
+function chartUpdatedAtV72(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  const date = new Date(
+    raw?.health_connect_last_sync_at ||
+      raw?.google_fit_last_sync_at ||
+      item?.updated_at ||
+      item?.created_at ||
+      item?.started_at ||
+      ""
+  );
+
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function chartStepsValueV72(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  return firstNumber([
+    item?.steps,
+    item?.total_steps,
+    raw?.health_connect_steps,
+    raw?.google_fit_steps,
+    raw?.steps,
+    raw?.original_payload?.steps,
+  ]);
+}
+
+function chartEstimatedCaloriesV72(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  const steps = chartStepsValueV72(item);
+  const minutes = firstNumber([
+    item?.duration_minutes,
+    raw?.health_connect_active_minutes,
+    raw?.google_fit_active_minutes,
+    raw?.active_minutes,
+  ]);
+
+  if (steps > 0) return Math.max(1, Math.round(Math.min(steps * 0.0371, steps * 0.1)));
+  if (minutes > 0) return Math.min(1200, Math.max(1, Math.round(minutes * 4.2)));
+  return 0;
+}
+
 function chartCaloriesValue(item: any) {
   const raw = parseRawPayloadForChart(item);
+  const provider = chartDeviceProviderV72(item);
+
+  if (provider === "health_connect") {
+    return firstNumber([
+      raw?.selected_active_calories,
+      raw?.health_connect_calories_used === true
+        ? raw?.health_connect_calories_original
+        : 0,
+      item?.calories,
+      item?.total_calories,
+      raw?.health_connect_calories,
+      chartEstimatedCaloriesV72(item),
+    ]);
+  }
+
+  if (provider === "google_fit") {
+    return firstNumber([
+      raw?.sanitized_active_calories,
+      raw?.selected_active_calories,
+      chartEstimatedCaloriesV72(item),
+    ]);
+  }
 
   return firstNumber([
     item?.calories,
@@ -1122,6 +1221,73 @@ function chartCaloriesValue(item: any) {
     raw?.original_payload?.calories,
     raw?.original_payload?.active_calories,
   ]);
+}
+
+function chartDailyPriorityV72(item: any) {
+  const provider = chartDeviceProviderV72(item);
+  const raw = parseRawPayloadForChart(item);
+
+  if (provider === "health_connect") {
+    if (
+      firstNumber([raw?.selected_active_calories]) > 0 ||
+      (raw?.health_connect_calories_used === true &&
+        firstNumber([raw?.health_connect_calories_original]) > 0)
+    ) {
+      return 400;
+    }
+    return 300;
+  }
+
+  if (provider === "google_fit") return 200;
+  return 0;
+}
+
+function normalizeWorkoutItemsForChartV72(items: any[] = []) {
+  const result = new Map<string, any>();
+
+  for (const item of items || []) {
+    const provider = chartDeviceProviderV72(item);
+    const date = chartDateKeyV72(item);
+    const key = provider
+      ? `device_daily_${date}`
+      : String(
+          item?.id ||
+            item?.external_activity_id ||
+            item?.provider_activity_id ||
+            `${date}-${result.size}`
+        );
+    const previous = result.get(key);
+
+    if (!previous) {
+      result.set(key, item);
+      continue;
+    }
+
+    if (provider && chartDeviceProviderV72(previous)) {
+      const currentPriority = chartDailyPriorityV72(item);
+      const previousPriority = chartDailyPriorityV72(previous);
+
+      if (currentPriority > previousPriority) {
+        result.set(key, item);
+        continue;
+      }
+
+      if (currentPriority < previousPriority) continue;
+    }
+
+    const currentQuality = chartStepsValueV72(item) * 1000 + chartCaloriesValue(item);
+    const previousQuality = chartStepsValueV72(previous) * 1000 + chartCaloriesValue(previous);
+
+    if (
+      currentQuality > previousQuality ||
+      (currentQuality === previousQuality &&
+        chartUpdatedAtV72(item) >= chartUpdatedAtV72(previous))
+    ) {
+      result.set(key, item);
+    }
+  }
+
+  return [...result.values()];
 }
 
 function parseRawPayloadForChart(item: any) {
@@ -1144,7 +1310,18 @@ function parseRawPayloadForChart(item: any) {
 
 function firstNumber(values: any[]) {
   for (const value of values) {
-    const n = Number(String(value ?? "").replace(/\./g, "").replace(",", "."));
+    if (typeof value === "number") {
+      if (Number.isFinite(value) && value > 0) return value;
+      continue;
+    }
+
+    const text = String(value ?? "").trim();
+    if (!text) continue;
+
+    const normalized = text.includes(",")
+      ? text.replace(/\./g, "").replace(",", ".")
+      : text.replace(/[^0-9.-]/g, "");
+    const n = Number(normalized);
 
     if (Number.isFinite(n) && n > 0) return n;
   }
