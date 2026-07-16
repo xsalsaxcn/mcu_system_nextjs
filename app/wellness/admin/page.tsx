@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
+// WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
 // Dedicated mobile-first Admin Portal. It intentionally does not reuse the
 // desktop operational dashboard layout.
 
@@ -42,6 +43,11 @@ function roleLabel(role: any) {
 }
 
 function flagOf(item: any) {
+  const backendFlag = clean(item.flag).toLowerCase();
+  if (["green", "yellow", "red"].includes(backendFlag)) {
+    return backendFlag;
+  }
+
   const level = clean(item.risk_level).toLowerCase();
   const compliance = clean(item.compliance_status).toLowerCase();
   if (
@@ -129,45 +135,149 @@ export default function WellnessAdminMobilePage() {
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
 
-    const [structureResult, participantResult] = await Promise.all([
-      fetch("/api/wellness/admin/dashboard", {
-        cache: "no-store",
-        credentials: "include",
-      })
-        .then(async (response) => ({
-          ...(await response.json().catch(() => ({}))),
-          http_status: response.status,
-        }))
-        .catch((error) => ({
-          ok: false,
-          http_status: 0,
-          message: error?.message || "Network error",
-        })),
-      fetch("/api/wellness/dashboard", {
-        cache: "no-store",
-        credentials: "include",
-      })
-        .then((response) => response.json())
-        .catch(() => ({ ok: false })),
-    ]);
+    const structureResult = await fetch("/api/wellness/admin/dashboard", {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({
+        ok: false,
+        http_status: 0,
+        message: error?.message || "Network error",
+      }));
 
     if (structureResult.ok) {
+      const companyList = structureResult.companies || [];
+
+      // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
+      // Source of truth Admin ranking = endpoint Portal Perusahaan yang sama.
+      // Tidak ada perhitungan poin ulang di UI Admin.
+      const companyDashboardResults = await Promise.all(
+        companyList.map(async (company: any) => {
+          const companyId = Number(company.id || 0);
+          if (!companyId) {
+            return {
+              ok: false,
+              company,
+              message: "Company ID tidak valid.",
+            };
+          }
+
+          return fetch(
+            `/api/wellness/company/dashboard?company_id=${encodeURIComponent(
+              String(companyId),
+            )}&days=30`,
+            {
+              cache: "no-store",
+              credentials: "include",
+            },
+          )
+            .then(async (response) => ({
+              ...(await response.json().catch(() => ({}))),
+              http_status: response.status,
+            }))
+            .catch((error) => ({
+              ok: false,
+              company,
+              message: error?.message || "Gagal memuat ranking perusahaan.",
+            }));
+        }),
+      );
+
+      const successfulDashboards = companyDashboardResults.filter(
+        (item: any) => item?.ok && item?.company?.id,
+      );
+      const failedDashboards = companyDashboardResults.filter(
+        (item: any) => !item?.ok,
+      );
+
+      const rankingRows = successfulDashboards.flatMap((companyResult: any) => {
+        const companyId = Number(companyResult.company?.id || 0);
+        const companyName =
+          clean(companyResult.company?.name) || `Perusahaan ${companyId}`;
+
+        return (companyResult.participants || []).map((participant: any) => ({
+          ...participant,
+          id: Number(participant.id || participant.participant_id || 0),
+          participant_id: Number(
+            participant.participant_id || participant.id || 0,
+          ),
+          company_id: companyId,
+          company_name: companyName,
+          group_name:
+            clean(participant.group_name) ||
+            clean(participant.kelompok_name) ||
+            "-",
+          bmi: Number(
+            participant.current?.bmi ||
+              participant.bmi ||
+              participant.baseline?.bmi ||
+              0,
+          ),
+          compliance_status:
+            clean(participant.flag_label) ||
+            (participant.flag === "green"
+              ? "Patuh"
+              : participant.flag === "yellow"
+                ? "Perlu dipantau"
+                : "Perlu follow up"),
+          need_followup: participant.flag === "red",
+          risk_flags:
+            participant.flag === "red"
+              ? [clean(participant.flag_label) || "Perlu follow up"]
+              : [],
+          ranking_source: "company_dashboard",
+          ranking_period_days: Number(companyResult.period?.days || 30),
+        }));
+      });
+
       setData(structureResult);
+      setWellnessData({
+        ok: successfulDashboards.length > 0 || companyList.length === 0,
+        source: "company_dashboard",
+        source_label: "Backend Portal Perusahaan",
+        period_days: 30,
+        rows: rankingRows,
+        company_dashboards: successfulDashboards,
+        failed_company_dashboards: failedDashboards,
+        summary: {
+          pending_evidence_count: 0,
+          total_points: successfulDashboards.reduce(
+            (sum: number, item: any) =>
+              sum + Number(item.summary?.total_points || 0),
+            0,
+          ),
+        },
+      });
+
       setSessionRequired(false);
       setLoginError("");
-      setMessage("Portal Admin aktif.");
-      if (participantResult.ok) setWellnessData(participantResult);
+
+      if (failedDashboards.length > 0) {
+        setMessage(
+          `${successfulDashboards.length} perusahaan berhasil dimuat, ${failedDashboards.length} gagal. Ranking hanya menampilkan data backend yang valid.`,
+        );
+      } else {
+        setMessage(
+          "Portal Admin aktif. Ranking tersambung ke backend Portal Perusahaan.",
+        );
+      }
     } else {
       const needsSession =
         Number(structureResult.http_status || 0) === 401 ||
         /session admin belum aktif|unauthorized/i.test(
           clean(structureResult.message),
         );
+
       if (needsSession) {
         setData(null);
         setWellnessData(null);
         setSessionRequired(true);
       }
+
       setMessage(structureResult.message || "Portal Admin gagal dimuat.");
     }
 
@@ -238,6 +348,7 @@ export default function WellnessAdminMobilePage() {
   }
 
   const rows = wellnessData?.rows || [];
+  const companyDashboards = wellnessData?.company_dashboards || [];
   const companies = data?.companies || [];
   const coaches = data?.coaches || [];
   const groups = data?.groups || [];
@@ -251,33 +362,64 @@ export default function WellnessAdminMobilePage() {
   }, [rows]);
 
   const enrichedCompanies = useMemo(() => {
+    const dashboardByCompanyId = new Map<number, any>(
+      companyDashboards.map((item: any) => [
+        Number(item.company?.id || 0),
+        item,
+      ]),
+    );
+
     return companies
       .map((company: any) => {
+        const companyId = Number(company.id || 0);
+        const dashboard = dashboardByCompanyId.get(companyId);
+        const backendSummary = dashboard?.summary || {};
         const companyRows = rows.filter(
-          (item: any) =>
-            clean(item.company_name).toLowerCase() ===
-            clean(company.name).toLowerCase(),
+          (item: any) => Number(item.company_id || 0) === companyId,
         );
-        const good = companyRows.filter(
-          (item: any) => flagOf(item) === "green",
-        ).length;
-        const compliance = companyRows.length
-          ? Math.round((good / companyRows.length) * 100)
-          : 0;
+
+        const fallbackFlags = {
+          green: companyRows.filter(
+            (item: any) => flagOf(item) === "green",
+          ).length,
+          yellow: companyRows.filter(
+            (item: any) => flagOf(item) === "yellow",
+          ).length,
+          red: companyRows.filter(
+            (item: any) => flagOf(item) === "red",
+          ).length,
+        };
+
         return {
           ...company,
-          compliance,
-          flags: {
-            green: good,
-            yellow: companyRows.filter((item: any) => flagOf(item) === "yellow")
-              .length,
-            red: companyRows.filter((item: any) => flagOf(item) === "red")
-              .length,
-          },
+          participant_count: Number(
+            backendSummary.total_participants ??
+              company.participant_count ??
+              companyRows.length,
+          ),
+          compliance: Number(backendSummary.compliance_rate || 0),
+          achievement_score: Number(
+            backendSummary.average_group_score || 0,
+          ),
+          total_points: Number(backendSummary.total_points || 0),
+          flags: backendSummary.flags || fallbackFlags,
+          ranking_loaded: Boolean(dashboard?.ok),
+          ranking_period: dashboard?.period || null,
         };
       })
-      .sort((left: any, right: any) => right.compliance - left.compliance);
-  }, [companies, rows]);
+      .sort((left: any, right: any) => {
+        const scoreDifference =
+          Number(right.achievement_score || 0) -
+          Number(left.achievement_score || 0);
+        if (scoreDifference !== 0) return scoreDifference;
+
+        const pointDifference =
+          Number(right.total_points || 0) - Number(left.total_points || 0);
+        if (pointDifference !== 0) return pointDifference;
+
+        return clean(left.name).localeCompare(clean(right.name), "id");
+      });
+  }, [companies, companyDashboards, rows]);
 
   const topParticipants = useMemo(
     () =>
@@ -305,7 +447,7 @@ export default function WellnessAdminMobilePage() {
       .slice(0, 120);
   }, [rows, query]);
 
-  const unreadPriority = flags.red + Number(wellnessData?.summary?.pending_evidence_count || 0);
+  const unreadPriority = flags.red;
 
   if (sessionRequired && !loading) {
     return (
@@ -836,34 +978,110 @@ export default function WellnessAdminMobilePage() {
 
           {view === "ranking" ? (
             <section className="space-y-4">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <div className="text-[10px] font-black uppercase tracking-[0.13em] text-emerald-700">
+                  Sumber Data
+                </div>
+                <div className="mt-1 text-xs font-bold leading-5 text-emerald-900">
+                  Backend Portal Perusahaan · Supabase + Google Sheet · Periode 30 hari
+                </div>
+                <div className="mt-1 text-[10px] font-bold leading-4 text-emerald-700">
+                  Portal Admin tidak menghitung ulang poin di perangkat.
+                </div>
+              </div>
+
               <div className="rounded-[1.55rem] border border-slate-100 bg-white p-4 shadow-sm">
-                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-500">Ranking Perusahaan</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-500">
+                  Ranking Perusahaan
+                </div>
                 <div className="mt-3 space-y-2">
                   {enrichedCompanies.slice(0, 10).map((company: any, index: number) => (
                     <div key={company.id} className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">{index + 1}</div>
-                      <div className="min-w-0 flex-1">
-                        <div className="break-words text-sm font-black leading-5">{company.name}</div>
-                        <div className="mt-0.5 text-[10px] font-bold text-slate-500">{fmt(company.participant_count)} peserta</div>
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-xs font-black text-white">
+                        {index + 1}
                       </div>
-                      <div className="text-lg font-black text-teal-700">{fmt(company.compliance)}%</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-sm font-black leading-5">
+                          {company.name}
+                        </div>
+                        <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">
+                          {fmt(company.participant_count)} peserta · {fmt(company.total_points)} poin
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-lg font-black text-teal-700">
+                          {fmt(company.achievement_score)}%
+                        </div>
+                        <div className="text-[9px] font-bold text-slate-400">
+                          capaian
+                        </div>
+                      </div>
                     </div>
                   ))}
+                  {enrichedCompanies.length === 0 ? (
+                    <EmptyState
+                      icon="🏢"
+                      title="Ranking belum tersedia"
+                      text="Backend perusahaan belum mengembalikan data yang valid."
+                    />
+                  ) : null}
                 </div>
               </div>
+
               <div className="rounded-[1.55rem] border border-slate-100 bg-white p-4 shadow-sm">
-                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-violet-500">Top Participants</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-violet-500">
+                  Top Participants · Poin 30 Hari
+                </div>
                 <div className="mt-3 space-y-2">
                   {topParticipants.map((item: any, index: number) => (
-                    <div key={item.id || index} className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-600 text-xs font-black text-white">{index + 1}</div>
-                      <div className="min-w-0 flex-1">
-                        <div className="break-words text-sm font-black leading-5">{item.name}</div>
-                        <div className="mt-0.5 break-words text-[10px] font-bold text-slate-500">{item.company_name} · {item.group_name}</div>
+                    <div key={item.id || index} className="rounded-2xl bg-slate-50 p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-600 text-xs font-black text-white">
+                          {index + 1}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words text-sm font-black leading-5">
+                            {item.name}
+                          </div>
+                          <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">
+                            {item.company_name} · {item.group_name}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="text-base font-black text-violet-700">
+                            {fmt(item.total_points)}
+                          </div>
+                          <div className="text-[9px] font-bold text-slate-400">
+                            poin
+                          </div>
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right"><div className="text-base font-black text-violet-700">{fmt(item.total_points)}</div><div className="text-[9px] font-bold text-slate-400">poin</div></div>
+
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-black">
+                        <span className="rounded-full bg-orange-50 px-2 py-1 text-orange-700">
+                          Nutrisi {fmt(item.nutrition_points)}
+                        </span>
+                        <span className="rounded-full bg-sky-50 px-2 py-1 text-sky-700">
+                          Workout {fmt(item.workout_points)}
+                        </span>
+                        <span className="rounded-full bg-fuchsia-50 px-2 py-1 text-fuchsia-700">
+                          Health Talk {fmt(item.healthtalk_points)}
+                        </span>
+                        {Number(item.other_points || 0) > 0 ? (
+                          <span className="rounded-full bg-slate-200 px-2 py-1 text-slate-700">
+                            Lainnya {fmt(item.other_points)}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
+                  {topParticipants.length === 0 ? (
+                    <EmptyState
+                      icon="🏆"
+                      title="Poin belum tersedia"
+                      text="Tidak ada data ranking valid dari backend Portal Perusahaan."
+                    />
+                  ) : null}
                 </div>
               </div>
             </section>
