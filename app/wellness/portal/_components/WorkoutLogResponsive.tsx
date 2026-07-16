@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_WORKOUT_LOG_RESPONSIVE_HEALTH_CONNECT_V423
+// WELLNESS_WORKOUT_LOG_ACTIVE_CALORIE_GUARD_V70
 // Fix:
 // - History Workout membaca steps dari Health Connect.
 // - Membaca calories, duration, distance dari Google Fit / Health Connect / manual.
@@ -156,21 +157,62 @@ function activityDuration(item: any) {
   );
 }
 
+function isDailyDeviceRow(item: any) {
+  const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
+  const externalId = clean(item?.external_activity_id || item?.provider_activity_id).toLowerCase();
+  const syncMode = clean(item?.raw_payload?.sync_mode).toLowerCase();
+  const name = clean(item?.activity_name || item?.activity_type).toLowerCase();
+
+  if (source === "google_fit" || source === "google-fit") {
+    return externalId.includes("google_fit_daily_") || name.includes("google fit daily") || syncMode === "aggregate_daily";
+  }
+
+  if (source === "health_connect" || source === "health-connect") {
+    return externalId.includes("health_connect_daily_") || name.includes("health connect daily") || syncMode === "daily_aggregate";
+  }
+
+  return false;
+}
+
 function activityCalories(item: any) {
   const raw = item?.raw_payload || {};
+  const sanitized = asNumber(raw?.sanitized_active_calories);
+  if (sanitized > 0) return sanitized;
 
-  return asNumber(
+  const stored = asNumber(
     item?.calories ??
       item?.total_calories ??
       item?.activity_calories ??
       item?.calories_burned ??
       raw?.health_connect_calories ??
+      raw?.health_connect_calories_original ??
       raw?.health_connect_active_calories ??
       raw?.google_fit_calories_expended ??
       raw?.calories ??
       raw?.active_calories ??
       raw?.calories_burned
   );
+
+  if (!isDailyDeviceRow(item)) return stored;
+
+  const steps = activitySteps(item);
+  const minutes = activityDuration(item);
+  const distanceRaw = activityDistance(item);
+  const estimatedDistance = steps > 0 ? steps * 0.0007 : distanceRaw;
+  const minDistance = Math.max(0.05, steps * 0.00025);
+  const maxDistance = Math.max(0.3, steps * 0.0015);
+  const distance =
+    steps > 0 && distanceRaw >= minDistance && distanceRaw <= maxDistance
+      ? distanceRaw
+      : estimatedDistance;
+
+  if (steps > 0) {
+    return Math.max(1, Math.round(Math.min(distance * 70 * 0.53, steps * 0.1)));
+  }
+
+  if (minutes > 0) return Math.min(1200, Math.max(1, Math.round(minutes * 4.2)));
+
+  return stored > 0 && stored <= 1200 ? stored : 0;
 }
 
 function activityDistance(item: any) {

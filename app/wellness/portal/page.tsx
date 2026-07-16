@@ -11,6 +11,7 @@ import WellnessMomentumDashboard, { type WellnessMomentumDay } from "@/component
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
 // WELLNESS_PARTICIPANT_ADMIN_SUPPORT_V61
 // WELLNESS_PROGRESS_CHAT_SMOOTH_V65
+// WELLNESS_DEVICE_DAILY_DEDUPE_ACTIVE_CALORIE_V70
 // Base dari V415:
 // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
 // - History Workout tetap menampilkan semua riwayat.
@@ -143,68 +144,114 @@ function activityUpdatedAtMs(item: any) {
 
 function isGoogleFitDailyRow(item: any) {
   const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
-
+  const externalId = clean(
+    item?.external_activity_id || item?.provider_activity_id || item?.id
+  ).toLowerCase();
+  const syncMode = clean(item?.raw_payload?.sync_mode).toLowerCase();
   const name = clean(
-    item?.activity_name ||
-      item?.activity_type ||
-      item?.nama_activities ||
-      item?.raw_payload?.provider ||
-      item?.raw_payload?.sync_mode ||
-      ""
+    item?.activity_name || item?.activity_type || item?.nama_activities || ""
   ).toLowerCase();
 
-  return (
-    source === "google_fit" ||
-    source === "google-fit" ||
+  const providerMatches = source === "google_fit" || source === "google-fit";
+  const dailyMatches =
+    externalId.includes("google_fit_daily_") ||
     name.includes("google fit daily") ||
-    name.includes("google_fit") ||
-    name.includes("aggregate_daily")
-  );
+    syncMode === "aggregate_daily";
+
+  return providerMatches && dailyMatches;
 }
 
 function isHealthConnectDailyRow(item: any) {
   const source = clean(item?.source || item?.input_source || item?.provider).toLowerCase();
-
+  const externalId = clean(
+    item?.external_activity_id || item?.provider_activity_id || item?.id
+  ).toLowerCase();
+  const syncMode = clean(item?.raw_payload?.sync_mode).toLowerCase();
   const name = clean(
-    item?.activity_name ||
-      item?.activity_type ||
-      item?.nama_activities ||
-      item?.raw_payload?.provider ||
-      item?.raw_payload?.sync_mode ||
-      ""
+    item?.activity_name || item?.activity_type || item?.nama_activities || ""
   ).toLowerCase();
 
-  return (
-    source === "health_connect" ||
-    source === "health-connect" ||
+  const providerMatches = source === "health_connect" || source === "health-connect";
+  const dailyMatches =
+    externalId.includes("health_connect_daily_") ||
     name.includes("health connect daily") ||
-    name.includes("health_connect") ||
-    name.includes("daily_aggregate")
+    syncMode === "daily_aggregate";
+
+  return providerMatches && dailyMatches;
+}
+
+function isDeviceDailyRow(item: any) {
+  return isGoogleFitDailyRow(item) || isHealthConnectDailyRow(item);
+}
+
+function activityDistanceValue(item: any) {
+  return asNumber(
+    item?.distance_km ??
+      item?.total_distance_km ??
+      item?.raw_payload?.google_fit_distance_km ??
+      item?.raw_payload?.health_connect_distance_km ??
+      item?.raw_payload?.distance_km
   );
 }
 
-function normalizeTodayWorkoutItems(items: any[] = []) {
-  const today = todayDate();
+function rawActivityCaloriesValue(item: any) {
+  return asNumber(
+    item?.calories ??
+      item?.total_calories ??
+      item?.activity_calories ??
+      item?.raw_payload?.sanitized_active_calories ??
+      item?.raw_payload?.google_fit_calories_expended ??
+      item?.raw_payload?.health_connect_calories ??
+      item?.raw_payload?.health_connect_calories_original ??
+      item?.raw_payload?.health_connect_active_calories ??
+      item?.raw_payload?.calories
+  );
+}
+
+function estimatedDeviceDailyCalories(item: any) {
+  const steps = activityStepsValue(item);
+  const minutes = activityMinutesValue(item);
+  const rawDistance = activityDistanceValue(item);
+  const estimatedDistance = steps > 0 ? steps * 0.0007 : rawDistance;
+  const minDistance = Math.max(0.05, steps * 0.00025);
+  const maxDistance = Math.max(0.3, steps * 0.0015);
+  const distance =
+    steps > 0 && rawDistance >= minDistance && rawDistance <= maxDistance
+      ? rawDistance
+      : estimatedDistance;
+
+  if (steps > 0) {
+    const distanceEstimate = distance * 70 * 0.53;
+    return Math.max(1, Math.round(Math.min(distanceEstimate, steps * 0.1)));
+  }
+
+  if (minutes > 0) {
+    return Math.min(1200, Math.max(1, Math.round(minutes * 4.2)));
+  }
+
+  return 0;
+}
+
+function dailyRowQuality(item: any) {
+  const steps = activityStepsValue(item);
+  const calories = activityCaloriesValue(item);
+  const providerBonus = isGoogleFitDailyRow(item) ? 100 : 0;
+  return steps * 1000 + calories + providerBonus;
+}
+
+function normalizeWorkoutItemsForMetrics(items: any[] = []) {
   const result = new Map<string, any>();
 
   for (const item of items || []) {
     const date = activityDateKey(item);
-    if (date !== today) continue;
-
-    const googleFitDaily = isGoogleFitDailyRow(item);
-    const healthConnectDaily = isHealthConnectDailyRow(item);
-
-    const key = googleFitDaily
-      ? `google_fit_daily_${date}`
-      : healthConnectDaily
-        ? `health_connect_daily_${date}`
-        : String(
-            item?.id ||
-              item?.external_activity_id ||
-              item?.provider_activity_id ||
-              `${date}-${result.size}`
-          );
-
+    const key = isDeviceDailyRow(item)
+      ? `device_daily_${date}`
+      : String(
+          item?.id ||
+            item?.external_activity_id ||
+            item?.provider_activity_id ||
+            `${date}-${result.size}`
+        );
     const previous = result.get(key);
 
     if (!previous) {
@@ -212,29 +259,42 @@ function normalizeTodayWorkoutItems(items: any[] = []) {
       continue;
     }
 
-    const previousTime = activityUpdatedAtMs(previous);
-    const currentTime = activityUpdatedAtMs(item);
+    const previousQuality = dailyRowQuality(previous);
+    const currentQuality = dailyRowQuality(item);
+    const shouldReplace =
+      currentQuality > previousQuality ||
+      (currentQuality === previousQuality &&
+        activityUpdatedAtMs(item) >= activityUpdatedAtMs(previous));
 
-    if (currentTime >= previousTime) {
-      result.set(key, item);
-    }
+    if (shouldReplace) result.set(key, item);
   }
 
-  return [...result.values()].sort((a, b) => {
-    return activityUpdatedAtMs(b) - activityUpdatedAtMs(a);
-  });
+  return [...result.values()].sort(
+    (a, b) => activityUpdatedAtMs(b) - activityUpdatedAtMs(a)
+  );
+}
+
+function normalizeTodayWorkoutItems(items: any[] = []) {
+  const today = todayDate();
+  return normalizeWorkoutItemsForMetrics(items).filter(
+    (item) => activityDateKey(item) === today
+  );
 }
 
 function activityCaloriesValue(item: any) {
-  return asNumber(
-    item?.calories ??
-      item?.total_calories ??
-      item?.activity_calories ??
-      item?.raw_payload?.google_fit_calories_expended ??
-      item?.raw_payload?.health_connect_calories ??
-      item?.raw_payload?.health_connect_active_calories ??
-      item?.raw_payload?.calories
-  );
+  const sanitized = asNumber(item?.raw_payload?.sanitized_active_calories);
+  if (sanitized > 0) return sanitized;
+
+  const rawCalories = rawActivityCaloriesValue(item);
+  if (!isDeviceDailyRow(item)) return rawCalories;
+
+  const estimate = estimatedDeviceDailyCalories(item);
+
+  // Google Fit daily calories.expended often contains resting/BMR energy.
+  // Daily device rows therefore use the guarded active estimate.
+  if (estimate > 0) return estimate;
+
+  return rawCalories > 0 && rawCalories <= 1200 ? rawCalories : 0;
 }
 
 function activityMinutesValue(item: any) {
@@ -1746,7 +1806,7 @@ function buildParticipantMomentumV66(
     bucket.nutritionCalories += asNumber(row?.calories || row?.total_calories || row?.calorie_total);
   }
 
-  for (const row of workoutRows || []) {
+  for (const row of normalizeWorkoutItemsForMetrics(workoutRows || [])) {
     const date = localDateKeyV66(row?.log_date || row?.started_at || row?.created_at || row?.updated_at || row?.date);
     if (!date) continue;
     const bucket = ensure(date);
@@ -3758,23 +3818,7 @@ function historyStepsValueV41(item: any) {
 }
 
 function historyCaloriesValueV41(item: any) {
-  const raw = parseRawPayloadV41(item);
-  const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
-
-  return firstPositiveNumberV41([
-    item?.calories,
-    item?.total_calories,
-    item?.calorie,
-    item?.kcal,
-    raw?.calories,
-    raw?.total_calories,
-    raw?.calorie,
-    raw?.kcal,
-    raw?.active_calories,
-    original?.calories,
-    original?.total_calories,
-    original?.active_calories,
-  ]);
+  return activityCaloriesValue(item);
 }
 function HistoryTab({
   participant,
@@ -3882,7 +3926,9 @@ function HistoryTab({
       ? directNutrition.logs
       : nutritionLogs || [];
 
-  const rawWorkout = workoutLogs || workoutItems || [];
+  const rawWorkout = normalizeWorkoutItemsForMetrics(
+    workoutLogs || workoutItems || []
+  );
   const rawHealthTalk = healthTalkLogs || healthtalkLogs || [];
   const rawClinical = clinicalHistory || [];
 
@@ -3918,11 +3964,11 @@ function HistoryTab({
   }, 0);
 
   const workoutCalories = workout.reduce((sum: number, item: any) => {
-    return sum + Number(item.calories || item.total_calories || 0);
+    return sum + activityCaloriesValue(item);
   }, 0);
 
   const workoutSteps = workout.reduce((sum: number, item: any) => {
-    return sum + Number(item.steps || item.total_steps || 0);
+    return sum + activityStepsValue(item);
   }, 0);
 
   return (

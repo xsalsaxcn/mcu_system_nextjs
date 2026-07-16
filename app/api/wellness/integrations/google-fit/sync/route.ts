@@ -1,4 +1,4 @@
-// WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414
+// WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -17,7 +17,7 @@ import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
 export const runtime = "nodejs";
 
-const MARKER = "WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414";
+const MARKER = "WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70";
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
@@ -104,29 +104,82 @@ function estimateDistanceFromSteps(steps: number) {
   return Math.round(steps * 0.0007 * 100) / 100;
 }
 
+function validateDailyDistanceFromSteps(steps: number, googleDistanceKm: number) {
+  const safeSteps = Math.max(0, Number(steps || 0));
+  const rawDistanceKm = Math.max(0, Number(googleDistanceKm || 0));
+  const estimatedDistanceKm = estimateDistanceFromSteps(safeSteps);
+
+  if (safeSteps <= 0) {
+    return {
+      distanceKm: rawDistanceKm,
+      usedEstimate: false,
+      reason: rawDistanceKm > 0 ? "NO_STEPS_DISTANCE_PRESERVED" : "NO_DISTANCE",
+      rawDistanceKm,
+      estimatedDistanceKm,
+    };
+  }
+
+  // Plausible stride range 0.25-1.50 meter per step.
+  // Outside this range the aggregate is likely cumulative, duplicated, or unit-mismatched.
+  const minPlausibleKm = Math.max(0.05, safeSteps * 0.00025);
+  const maxPlausibleKm = Math.max(0.3, safeSteps * 0.0015);
+  const plausible =
+    rawDistanceKm > 0 &&
+    rawDistanceKm >= minPlausibleKm &&
+    rawDistanceKm <= maxPlausibleKm;
+
+  return {
+    distanceKm: plausible ? rawDistanceKm : estimatedDistanceKm,
+    usedEstimate: !plausible,
+    reason: plausible
+      ? "GOOGLE_DISTANCE_PLAUSIBLE"
+      : rawDistanceKm > 0
+        ? "GOOGLE_DISTANCE_REJECTED_AS_IMPLAUSIBLE"
+        : "GOOGLE_DISTANCE_MISSING",
+    rawDistanceKm,
+    estimatedDistanceKm,
+    minPlausibleKm,
+    maxPlausibleKm,
+  };
+}
+
 function estimateActiveMinutesFromSteps(steps: number) {
   if (!steps || steps <= 0) return 0;
 
-  return Math.round((steps / 100) * 10) / 10;
+  // Approximate 100 steps/minute for ordinary walking.
+  return Math.min(1440, Math.round((steps / 100) * 10) / 10);
 }
 
 function estimateActiveCalories(params: {
   steps: number;
   distanceKm: number;
   weightKg: number;
+  activeMinutes?: number;
 }) {
-  const steps = Number(params.steps || 0);
-  const weightKg = Number(params.weightKg || 70);
+  const steps = Math.max(0, Number(params.steps || 0));
+  const weightKg = Math.min(250, Math.max(35, Number(params.weightKg || 70)));
   const distanceKm =
     Number(params.distanceKm || 0) > 0
       ? Number(params.distanceKm)
       : estimateDistanceFromSteps(steps);
+  const activeMinutes = Math.max(0, Number(params.activeMinutes || 0));
 
-  if (!steps || steps <= 0) return 0;
+  if (steps > 0) {
+    // Active walking/running estimate. Hard cap prevents total-energy/BMR values
+    // from becoming workout calories (for example 8,878 kkal for ~1,000 steps).
+    const distanceEstimate = distanceKm * weightKg * 0.53;
+    const stepCap = steps * 0.1;
+    const calories = Math.min(distanceEstimate, stepCap);
 
-  const calories = distanceKm * weightKg * 0.53;
+    return Math.max(1, Math.round(calories));
+  }
 
-  return Math.max(1, Math.round(calories));
+  if (activeMinutes > 0) {
+    const perMinute = Math.max(3, weightKg * 0.06);
+    return Math.min(1200, Math.max(1, Math.round(activeMinutes * perMinute)));
+  }
+
+  return 0;
 }
 
 function getWeightKg(participant: any) {
@@ -357,16 +410,23 @@ async function upsertDailyRow(params: {
       last_sync_at_jakarta: nowJakarta,
       google_fit_steps: params.row.steps,
       google_fit_distance_km: params.row.distance_km,
+      google_fit_distance_km_original: params.row.google_fit_distance_km_original,
       google_fit_calories_expended: params.row.google_fit_calories_expended,
+      google_fit_calories_expended_ignored:
+        params.row.google_fit_calories_expended > 0,
       google_fit_active_minutes: params.row.google_fit_active_minutes,
       estimated_distance_used: params.row.estimated_distance_used,
+      distance_validation_reason: params.row.distance_validation_reason,
+      distance_min_plausible_km: params.row.distance_min_plausible_km,
+      distance_max_plausible_km: params.row.distance_max_plausible_km,
       estimated_active_minutes_used: params.row.estimated_active_minutes_used,
-      estimated_calories_used: params.row.estimated_calories_used,
+      estimated_calories_used: true,
+      sanitized_active_calories: params.row.calories,
       calories_source: params.row.calories_source,
       distance_source: params.row.distance_source,
       duration_source: params.row.duration_source,
       calculation_note:
-        "Values are read from Google Fit aggregate API where available. Calories are Google Fit calories.expended when available; otherwise estimated.",
+        "Google Fit calories.expended may include basal/resting energy, so it is retained only for audit and is not used as workout calories. Active calories are estimated from validated distance, steps, participant weight, and active minutes.",
       synced_at: nowIso,
     },
   };
@@ -492,9 +552,11 @@ export async function POST(req: NextRequest) {
         const distanceKmFromGoogle =
           Math.round((Number(distanceResult.rows.get(date) || 0) / 1000) * 100) / 100;
 
-        const estimatedDistanceKm = estimateDistanceFromSteps(steps);
-        const distanceKm =
-          distanceKmFromGoogle > 0 ? distanceKmFromGoogle : estimatedDistanceKm;
+        const distanceValidation = validateDailyDistanceFromSteps(
+          steps,
+          distanceKmFromGoogle
+        );
+        const distanceKm = distanceValidation.distanceKm;
 
         const activeMinutesFromGoogle =
           Math.round(Number(activeMinutesResult.rows.get(date) || 0) * 10) / 10;
@@ -510,9 +572,12 @@ export async function POST(req: NextRequest) {
           steps,
           distanceKm,
           weightKg,
+          activeMinutes: durationMinutes,
         });
 
-        const calories = googleCalories > 0 ? googleCalories : estimatedCalories;
+        // Never use calories.expended as workout calories because daily Google Fit
+        // totals can include resting/BMR energy. Keep the original only in raw_payload.
+        const calories = estimatedCalories;
 
         return {
           date,
@@ -521,16 +586,18 @@ export async function POST(req: NextRequest) {
           duration_minutes: durationMinutes,
           calories,
           google_fit_calories_expended: googleCalories,
+          google_fit_distance_km_original: distanceKmFromGoogle,
           google_fit_active_minutes: activeMinutesFromGoogle,
-          estimated_distance_used: distanceKmFromGoogle <= 0 && steps > 0,
+          estimated_distance_used: distanceValidation.usedEstimate,
+          distance_validation_reason: distanceValidation.reason,
+          distance_min_plausible_km: distanceValidation.minPlausibleKm || null,
+          distance_max_plausible_km: distanceValidation.maxPlausibleKm || null,
           estimated_active_minutes_used: activeMinutesFromGoogle <= 0 && steps > 0,
-          estimated_calories_used: googleCalories <= 0 && steps > 0,
-          calories_source:
-            googleCalories > 0
-              ? "google_fit_calories_expended"
-              : "estimated_from_steps_distance_weight",
-          distance_source:
-            distanceKmFromGoogle > 0 ? "google_fit_distance_delta" : "estimated_from_steps",
+          estimated_calories_used: steps > 0 || durationMinutes > 0,
+          calories_source: "sanitized_active_estimate_v70",
+          distance_source: distanceValidation.usedEstimate
+            ? "estimated_from_steps"
+            : "google_fit_distance_delta_validated",
           duration_source:
             activeMinutesFromGoogle > 0
               ? "google_fit_active_minutes"
@@ -598,7 +665,7 @@ export async function POST(req: NextRequest) {
       daily: dailyRows,
     });
   } catch (error: any) {
-    console.error("WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414_ERROR", error);
+    console.error("WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70_ERROR", error);
 
     return NextResponse.json(
       {

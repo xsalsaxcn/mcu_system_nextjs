@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
-// WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO
+// WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70
 // Update dari V421:
 // - Menerima data dari Android companion app.
 // - Menyimpan daily aggregate ke wellness_activity_logs.
@@ -25,6 +25,90 @@ function num(value: any): number | null {
 function safeNumber(value: any): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function participantWeightKg(participant: any) {
+  const keys = [
+    "current_weight_kg",
+    "latest_weight_kg",
+    "weight_kg",
+    "baseline_weight_kg",
+    "initial_weight_kg",
+    "bb",
+    "berat_badan",
+  ];
+
+  for (const key of keys) {
+    const value = safeNumber(participant?.[key]);
+    if (value > 0) return Math.min(250, Math.max(35, value));
+  }
+
+  return 70;
+}
+
+function estimateDistanceFromStepsV70(steps: number) {
+  if (steps <= 0) return 0;
+  return Math.round(steps * 0.0007 * 100) / 100;
+}
+
+function validateDailyDistanceV70(steps: number, distanceKm: number) {
+  const safeSteps = Math.max(0, safeNumber(steps));
+  const rawDistanceKm = Math.max(0, safeNumber(distanceKm));
+  const estimatedDistanceKm = estimateDistanceFromStepsV70(safeSteps);
+
+  if (safeSteps <= 0) {
+    return {
+      distanceKm: rawDistanceKm,
+      rawDistanceKm,
+      usedEstimate: false,
+      reason: rawDistanceKm > 0 ? "NO_STEPS_DISTANCE_PRESERVED" : "NO_DISTANCE",
+    };
+  }
+
+  const minPlausibleKm = Math.max(0.05, safeSteps * 0.00025);
+  const maxPlausibleKm = Math.max(0.3, safeSteps * 0.0015);
+  const plausible =
+    rawDistanceKm > 0 &&
+    rawDistanceKm >= minPlausibleKm &&
+    rawDistanceKm <= maxPlausibleKm;
+
+  return {
+    distanceKm: plausible ? rawDistanceKm : estimatedDistanceKm,
+    rawDistanceKm,
+    usedEstimate: !plausible,
+    reason: plausible
+      ? "HEALTH_CONNECT_DISTANCE_PLAUSIBLE"
+      : rawDistanceKm > 0
+        ? "HEALTH_CONNECT_DISTANCE_REJECTED_AS_IMPLAUSIBLE"
+        : "HEALTH_CONNECT_DISTANCE_MISSING",
+    minPlausibleKm,
+    maxPlausibleKm,
+  };
+}
+
+function estimateDailyActiveCaloriesV70(params: {
+  steps: number;
+  distanceKm: number;
+  activeMinutes: number;
+  weightKg: number;
+}) {
+  const steps = Math.max(0, safeNumber(params.steps));
+  const distanceKm = Math.max(0, safeNumber(params.distanceKm));
+  const activeMinutes = Math.max(0, safeNumber(params.activeMinutes));
+  const weightKg = Math.min(250, Math.max(35, safeNumber(params.weightKg) || 70));
+
+  if (steps > 0) {
+    const distanceEstimate = distanceKm * weightKg * 0.53;
+    const stepCap = steps * 0.1;
+    return Math.max(1, Math.round(Math.min(distanceEstimate, stepCap)));
+  }
+
+  if (activeMinutes > 0) {
+    const perMinute = Math.max(3, weightKg * 0.06);
+    return Math.min(1200, Math.max(1, Math.round(activeMinutes * perMinute)));
+  }
+
+  return 0;
 }
 
 function dateOnly(value: any) {
@@ -195,7 +279,7 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
     `participant_${participantId}`;
 
   const rawPayload = {
-    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
+    marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
     device_id: body?.device_id || null,
     android_id: body?.android_id || null,
     app_version: body?.app_version || null,
@@ -296,11 +380,22 @@ async function handlePush(req: NextRequest) {
     activeMinutes !== null ||
     distanceKm !== null;
 
+  const distanceValidation = validateDailyDistanceV70(
+    safeNumber(steps),
+    safeNumber(distanceKm)
+  );
+  const sanitizedDailyCalories = estimateDailyActiveCaloriesV70({
+    steps: safeNumber(steps),
+    distanceKm: distanceValidation.distanceKm,
+    activeMinutes: safeNumber(activeMinutes),
+    weightKg: participantWeightKg(participant),
+  });
+
   const emptyDailyPayload = isEmptyDailyPayload({
     steps,
-    calories,
+    calories: sanitizedDailyCalories,
     activeMinutes,
-    distanceKm,
+    distanceKm: distanceValidation.distanceKm,
     workouts,
   });
 
@@ -314,16 +409,24 @@ async function handlePush(req: NextRequest) {
       log_date: date,
       started_at: normalizeStartedAt(body?.started_at, date),
       duration_minutes: activeMinutes,
-      calories,
-      distance_km: distanceKm,
+      calories: sanitizedDailyCalories,
+      distance_km: distanceValidation.distanceKm,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
+        marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
         provider: "health_connect",
         sync_mode: "daily_aggregate",
         health_connect_steps: steps,
         health_connect_active_minutes: activeMinutes,
-        health_connect_calories: calories,
-        health_connect_distance_km: distanceKm,
+        health_connect_calories_original: calories,
+        health_connect_calories_original_ignored: safeNumber(calories) > 0,
+        health_connect_distance_km_original: distanceKm,
+        health_connect_distance_km: distanceValidation.distanceKm,
+        distance_validation_reason: distanceValidation.reason,
+        estimated_distance_used: distanceValidation.usedEstimate,
+        sanitized_active_calories: sanitizedDailyCalories,
+        calories_source: "sanitized_active_estimate_v70",
+        calculation_note:
+          "Daily Health Connect energy may include resting/total energy. Workout calories use a guarded active estimate from steps, validated distance, active minutes, and participant weight.",
         health_connect_last_sync_at: nowIso,
         original_payload: body,
       },
@@ -395,7 +498,7 @@ async function handlePush(req: NextRequest) {
       calories: workoutCalories,
       distance_km: workoutDistance,
       raw_payload: {
-        marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
+        marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
         provider: "health_connect",
         sync_mode: "exercise_session",
         health_connect_steps: workoutSteps,
@@ -418,7 +521,7 @@ async function handlePush(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    marker: "WELLNESS_HEALTH_CONNECT_PUSH_RECEIVER_V422_SKIP_EMPTY_ZERO",
+    marker: "WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIE_GUARD_V70",
     participant_id: participantId,
     date,
     inserted,
