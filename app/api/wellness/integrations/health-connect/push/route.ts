@@ -5,6 +5,7 @@ import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 // WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71
 // WELLNESS_HEALTH_CONNECT_SINGLE_SOURCE_GUARD_V79F
+// WELLNESS_PARTICIPANT_FITNESS_SELECTION_SYNC_V79H
 // Update dari V421:
 // - Menerima data dari Android companion app.
 // - Menyimpan daily aggregate ke wellness_activity_logs.
@@ -17,6 +18,33 @@ import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 function clean(value: any) {
   return String(value ?? "").trim();
+}
+
+function trueValue(value: any) {
+  if (value === true || value === 1 || value === "1") return true;
+  return ["true", "yes", "ya", "on"].includes(clean(value).toLowerCase());
+}
+
+function participantConfirmedHealthConnect(body: any) {
+  const syncMode = clean(body?.sync_mode || body?.diagnostic?.sync_mode)
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const requestedSource = clean(
+    body?.requested_fitness_source || "health_connect",
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const originPackage = clean(
+    body?.health_connect_origin_package ||
+      body?.diagnostic?.selected_origin_package,
+  );
+
+  return (
+    trueValue(body?.source_selection_confirmed) &&
+    requestedSource === "health_connect" &&
+    ["manual", "manual_selection"].includes(syncMode) &&
+    Boolean(originPackage)
+  );
 }
 
 function num(value: any): number | null {
@@ -339,6 +367,18 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
     synced_at: nowIso,
     permissions: body?.permissions || null,
     source: "health_connect",
+    health_connect_origin_package:
+      body?.health_connect_origin_package ||
+      body?.diagnostic?.selected_origin_package ||
+      null,
+    health_connect_origin_name:
+      body?.health_connect_origin_name ||
+      body?.diagnostic?.selected_origin_name ||
+      null,
+    source_selection_confirmed: trueValue(
+      body?.source_selection_confirmed,
+    ),
+    sync_mode: body?.sync_mode || body?.diagnostic?.sync_mode || null,
   };
 
   const { data: existing, error: existingError } = await supabase
@@ -379,6 +419,36 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
   if (error) throw error;
 }
 
+async function activateHealthConnectFromParticipant(
+  supabase: any,
+  participantId: number,
+  currentControl: any,
+) {
+  const nowIso = new Date().toISOString();
+  const { error: controlError } = await supabase
+    .from("wellness_participant_controls")
+    .upsert(
+      {
+        participant_id: participantId,
+        session_enabled: currentControl?.session_enabled !== false,
+        fitness_enabled: true,
+        fitness_source: "health_connect",
+        updated_at: nowIso,
+      },
+      { onConflict: "participant_id" },
+    );
+
+  if (controlError) throw controlError;
+
+  const { error: disableError } = await supabase
+    .from("wellness_integrations")
+    .update({ is_active: 0, updated_at: nowIso })
+    .eq("participant_id", participantId)
+    .in("provider", ["health_connect", "google_fit"]);
+
+  if (disableError) throw disableError;
+}
+
 async function handlePush(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const body = await req.json().catch(() => ({}));
@@ -397,7 +467,7 @@ async function handlePush(req: NextRequest) {
   }
 
   const participantId = Number(participant.id);
-  const control = await loadParticipantControl(supabase, participantId);
+  let control = await loadParticipantControl(supabase, participantId);
   if (!control.session_enabled) {
     return NextResponse.json(
       {
@@ -408,13 +478,43 @@ async function handlePush(req: NextRequest) {
       { status: 403 },
     );
   }
+
+  const participantSelectedHealthConnect =
+    participantConfirmedHealthConnect(body);
+  let sourceChangedByParticipant = false;
+
+  if (participantSelectedHealthConnect) {
+    await activateHealthConnectFromParticipant(
+      supabase,
+      participantId,
+      control,
+    );
+    await upsertIntegration(supabase, participantId, body);
+    control = await loadParticipantControl(supabase, participantId);
+    sourceChangedByParticipant = true;
+
+    if (trueValue(body?.selection_only)) {
+      return NextResponse.json({
+        ok: true,
+        marker: "WELLNESS_PARTICIPANT_FITNESS_SELECTION_SYNC_V79H",
+        participant_id: participantId,
+        fitness_enabled: control.fitness_enabled,
+        fitness_source: control.fitness_source,
+        source_connected: control.source_connected,
+        message:
+          "Health Connect dipilih oleh peserta dan sudah tersinkron ke Portal Admin.",
+      });
+    }
+  }
+
   if (!control.fitness_enabled || control.fitness_source !== "health_connect") {
     return NextResponse.json(
       {
         ok: false,
         participant_id: participantId,
+        fitness_source: control.fitness_source,
         message:
-          "Health Connect bukan sumber fitness aktif. Pilih Health Connect dari Portal Admin.",
+          "Health Connect bukan sumber fitness aktif. Pilih sumber di aplikasi peserta atau Portal Admin.",
       },
       { status: 409 },
     );
@@ -621,6 +721,8 @@ async function handlePush(req: NextRequest) {
     updated,
     skipped,
     skipped_empty_daily_payload: emptyDailyPayload,
+    source_changed_by_participant: sourceChangedByParticipant,
+    fitness_source: "health_connect",
     message: emptyDailyPayload
       ? `Health Connect terbaca kosong, data tidak dioverwrite. ${inserted} baru, ${updated} update, ${skipped} skip.`
       : `Health Connect diterima. ${inserted} baru, ${updated} update, ${skipped} skip.`,

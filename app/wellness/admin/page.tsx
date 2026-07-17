@@ -345,6 +345,26 @@ export default function WellnessAdminMobilePage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (sessionRequired) return;
+
+    const refreshQuietly = () => {
+      if (document.visibilityState === "visible") {
+        void load({ quiet: true });
+      }
+    };
+
+    const intervalId = window.setInterval(refreshQuietly, 10_000);
+    window.addEventListener("focus", refreshQuietly);
+    document.addEventListener("visibilitychange", refreshQuietly);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshQuietly);
+      document.removeEventListener("visibilitychange", refreshQuietly);
+    };
+  }, [sessionRequired]);
+
   async function loginAdmin(event: React.FormEvent) {
     event.preventDefault();
     if (!loginUsername.trim() || !loginPassword) {
