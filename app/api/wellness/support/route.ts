@@ -9,6 +9,7 @@ import {
 
 // WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_V61_API
 // WELLNESS_SUPPORT_UNREAD_SUMMARY_V74
+// WELLNESS_SUPPORT_AUTO_THREAD_V79F
 // Text and metadata are stored in Google Sheet, not Supabase.
 
 export const runtime = "nodejs";
@@ -75,6 +76,10 @@ export async function GET(request: NextRequest) {
       });
       return ok({ thread: result.thread || null, messages: result.messages || [] });
     }
+
+    await postSupportWebhook("supportEnsureThread", {
+      ...actorWebhookPayload(actor),
+    });
 
     const result = await postSupportWebhook("supportGetThread", {
       ...actorWebhookPayload(actor),

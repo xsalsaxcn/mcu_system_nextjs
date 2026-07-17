@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,6 +10,7 @@ export const runtime = "nodejs";
 // WELLNESS_COACH_CHAT_SUMMARY_V54
 // WELLNESS_COACH_MISSING_INPUT_DAYS_V57
 // WELLNESS_COACH_PARTICIPANT_PROFILE_PHOTO_V76
+// WELLNESS_COACH_SINGLE_FITNESS_SOURCE_V79F
 // Scope: assigned groups, 7-day compliance flags, note read status, and existing target fields.
 // No schema migration and no access outside the coach assignment.
 
@@ -432,6 +434,10 @@ export async function GET(request: NextRequest) {
       canAccessParticipant(row, assignments || []),
     );
     const participantIds = participants.map(getParticipantId).filter(Boolean);
+    const participantControlMap = await loadParticipantControlMap(
+      supabase,
+      participantIds,
+    );
     const today = jakartaDate();
     const fromDate = jakartaDate(-6);
 
@@ -469,7 +475,10 @@ export async function GET(request: NextRequest) {
             .limit(3000),
         ]);
 
-      activityRows = activityResult.data || [];
+      activityRows = filterActivityRowsByFitnessSource(
+        activityResult.data || [],
+        participantControlMap,
+      );
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
       noteRows = noteResult.data || [];

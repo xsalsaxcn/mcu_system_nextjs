@@ -6,8 +6,10 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 // WELLNESS_COACH_GROUP_RANKING_API_V76
+// WELLNESS_COACH_RANKING_SINGLE_FITNESS_SOURCE_V79F
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -335,6 +337,7 @@ export async function GET(request: NextRequest) {
     }
 
     const ids = participants.map(participantId).filter(Boolean);
+    const participantControlMap = await loadParticipantControlMap(supabase, ids);
     if (!ids.length) {
       return NextResponse.json({
         ok: true,
@@ -378,7 +381,12 @@ export async function GET(request: NextRequest) {
         ),
       ]);
 
-    const activityRows = selectedActivityRows(activityRowsRaw);
+    const activityRows = selectedActivityRows(
+      filterActivityRowsByFitnessSource(
+        activityRowsRaw,
+        participantControlMap,
+      ),
+    );
     const sheet = await fetchWellnessGoogleSheetRows({ limit: 10000 }).catch(
       () => ({ ok: false, rows: [] as any[] }),
     );

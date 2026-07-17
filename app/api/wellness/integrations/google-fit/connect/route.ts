@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 // WELLNESS_GOOGLE_FIT_CONNECT_V388
+// WELLNESS_GOOGLE_FIT_ADMIN_SOURCE_GUARD_V79F
 // Google Fit connect memakai session portal peserta OTP, bukan session admin.
 
 function clean(value: any) {
@@ -60,6 +62,13 @@ export async function GET(req: NextRequest) {
 
   if (!participant?.id) {
     return NextResponse.redirect(portalUrl(req, "PORTAL_SESSION_REQUIRED"));
+  }
+
+  const control = await loadParticipantControl(supabase, participant.id);
+  if (!control.fitness_enabled || control.fitness_source !== "google_fit") {
+    return NextResponse.redirect(
+      portalUrl(req, "FITNESS_SOURCE_GOOGLE_FIT_NOT_ACTIVE"),
+    );
   }
 
   const callbackUrl = `${req.nextUrl.origin}/api/wellness/integrations/google-fit/callback`;

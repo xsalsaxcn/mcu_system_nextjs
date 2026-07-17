@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 // WELLNESS_GOOGLE_FIT_CALLBACK_V388
+// WELLNESS_GOOGLE_FIT_SINGLE_SOURCE_CALLBACK_V79F
 // Callback Google Fit menyimpan token ke wellness_integrations provider google_fit.
 
 function clean(value: any) {
@@ -126,6 +128,12 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = getSupabaseAdmin();
+  const control = await loadParticipantControl(supabase, participantId);
+  if (!control.fitness_enabled || control.fitness_source !== "google_fit") {
+    return NextResponse.redirect(
+      portalUrl(req, "FITNESS_SOURCE_GOOGLE_FIT_NOT_ACTIVE"),
+    );
+  }
 
   const sessionParticipant = await getParticipantFromPortalSession(
     supabase,
@@ -170,6 +178,12 @@ export async function GET(req: NextRequest) {
     clean(profile?.sub) ||
     clean(profile?.email) ||
     `participant_${participantId}`;
+
+  await supabase
+    .from("wellness_integrations")
+    .update({ is_active: 0, updated_at: new Date().toISOString() })
+    .eq("participant_id", participantId)
+    .eq("provider", "health_connect");
 
   await supabase
     .from("wellness_integrations")

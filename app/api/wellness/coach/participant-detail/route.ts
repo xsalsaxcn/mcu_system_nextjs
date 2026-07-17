@@ -5,6 +5,7 @@ import {
   googleSheetRowsToFoodLogs,
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 // Read-only detail endpoint for assigned coach participants.
 // No schema migration and no access outside coach assignments.
 // WELLNESS_COACH_POINT_RULES_V59
+// WELLNESS_COACH_DETAIL_SINGLE_FITNESS_SOURCE_V79F
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -461,7 +463,7 @@ export async function GET(request: NextRequest) {
 
     const code = clean(participant.code || participant.employee_code || participant.no_karyawan);
 
-    const [activityRows, foodRows, weightRows, clinicalRows, historyById, historyByCode, miniMcuRows, pointRows, healthtalkRows, targetNotes] = await Promise.all([
+    const [activityRowsRaw, foodRows, weightRows, clinicalRows, historyById, historyByCode, miniMcuRows, pointRows, healthtalkRows, targetNotes] = await Promise.all([
       safeSelect(supabase, "wellness_activity_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(2000)),
       safeSelect(supabase, "wellness_food_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(2000)),
       safeSelect(supabase, "wellness_weight_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(1000)),
@@ -475,6 +477,15 @@ export async function GET(request: NextRequest) {
       safeSelect(supabase, "wellness_healthtalk_logs", (q) => q.eq("participant_id", participantId).order("event_date", { ascending: true }).limit(1000)),
       safeSelect(supabase, "wellness_coach_notes", (q) => q.eq("participant_id", participantId).order("created_at", { ascending: false }).limit(100)),
     ]);
+
+    const participantControlMap = await loadParticipantControlMap(
+      supabase,
+      [participantId],
+    );
+    const activityRows = filterActivityRowsByFitnessSource(
+      activityRowsRaw,
+      participantControlMap,
+    );
 
     const sheetResult = await fetchWellnessGoogleSheetRows({
       participantId,

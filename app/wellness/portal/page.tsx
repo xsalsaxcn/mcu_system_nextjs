@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
+// WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
@@ -391,10 +392,10 @@ function historyWorkoutNoteV73(item: any) {
     const totalCalories = googleFitTotalCaloriesValueV73(item);
 
     if (totalCalories > 0 && Math.abs(totalCalories - activeCalories) >= 1) {
-      return `${fmtNumber(activeCalories, 0)} kkal aktif | ${fmtNumber(
+      return `${fmtNumber(activeCalories, 0)} kkal aktivitas | ${fmtNumber(
         totalCalories,
         0,
-      )} kkal total Google Fit | ${fmtNumber(steps, 0)} steps`;
+      )} kkal total (termasuk istirahat) | ${fmtNumber(steps, 0)} steps`;
     }
   }
 
@@ -580,6 +581,10 @@ function noticeText(value: string) {
     GOOGLE_FIT_STATE_INVALID:
       "State Google Fit tidak valid atau sudah kedaluwarsa. Silakan konek ulang.",
     OTP_REQUIRED: "Silakan aktifkan OTP peserta terlebih dahulu.",
+    FITNESS_SOURCE_GOOGLE_FIT_NOT_ACTIVE:
+      "Google Fit belum diaktifkan sebagai sumber utama. Hubungi Admin untuk memilih Google Fit.",
+    FITNESS_SOURCE_HEALTH_CONNECT_NOT_ACTIVE:
+      "Health Connect belum diaktifkan sebagai sumber utama. Hubungi Admin untuk memilih Health Connect.",
   };
 
   return map[text] || text;
@@ -635,6 +640,7 @@ export default function WellnessParticipantPortalPage() {
     otp: "",
   });
   const [participant, setParticipant] = useState<any>(null);
+  const [fitnessSettings, setFitnessSettings] = useState<any>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [activitySummary, setActivitySummary] = useState<any[]>([]);
@@ -712,6 +718,9 @@ export default function WellnessParticipantPortalPage() {
 
     if (result.ok) {
       setParticipant(result.participant);
+      setFitnessSettings(
+        result.fitness_settings || result.participant?.wellness_control || null,
+      );
       setIntegrations(result.integrations || []);
       setActivities(result.activities || []);
       setActivitySummary(result.activity_summary || []);
@@ -725,6 +734,13 @@ export default function WellnessParticipantPortalPage() {
       }
 
       await Promise.all([loadNutrition(), loadHealthtalk()]);
+    } else {
+      setMessage(result.message || "Session Wellness belum aktif.");
+      if (/dinonaktifkan|session|otp/i.test(clean(result.message))) {
+        setParticipant(null);
+        setFitnessSettings(null);
+        setStep("request");
+      }
     }
 
     setLoading(false);
@@ -841,6 +857,7 @@ export default function WellnessParticipantPortalPage() {
     }).catch(() => null);
 
     setParticipant(null);
+    setFitnessSettings(null);
     setIntegrations([]);
     setActivities([]);
     setActivitySummary([]);
@@ -1049,9 +1066,14 @@ export default function WellnessParticipantPortalPage() {
 
   const healthConnectConnected = providerStatus(integrations, "health_connect");
   const googleFitConnected = providerStatus(integrations, "google_fit");
+  const activeFitnessSource = clean(
+    fitnessSettings?.fitness_source || "none",
+  ).toLowerCase();
+  const fitnessEnabled = fitnessSettings?.fitness_enabled === true;
 
   useEffect(() => {
     if (step !== "portal") return;
+    if (!fitnessEnabled || activeFitnessSource !== "google_fit") return;
     if (!googleFitConnected) return;
 
     const intervalId = window.setInterval(
@@ -1062,17 +1084,28 @@ export default function WellnessParticipantPortalPage() {
     );
 
     return () => window.clearInterval(intervalId);
-  }, [step, googleFitConnected]);
+  }, [step, googleFitConnected, fitnessEnabled, activeFitnessSource]);
 
   const workoutItems = useMemo(() => {
-    if (Array.isArray(activities) && activities.length > 0) return activities;
+    const sourceRows =
+      Array.isArray(activities) && activities.length > 0
+        ? activities
+        : Array.isArray(activitySummary) && activitySummary.length > 0
+          ? activitySummary
+          : [];
 
-    if (Array.isArray(activitySummary) && activitySummary.length > 0) {
-      return activitySummary;
-    }
-
-    return [];
-  }, [activities, activitySummary]);
+    return sourceRows.filter((item: any) => {
+      const raw = activityRawPayloadV72(item);
+      const provider = clean(
+        item?.source || item?.provider || item?.input_source || raw?.provider,
+      )
+        .toLowerCase()
+        .replace(/-/g, "_");
+      if (!['health_connect', 'google_fit'].includes(provider)) return true;
+      if (!fitnessEnabled) return false;
+      return provider === activeFitnessSource;
+    });
+  }, [activities, activitySummary, fitnessEnabled, activeFitnessSource]);
 
   const todayWorkoutItems = useMemo(() => {
     return normalizeTodayWorkoutItems(workoutItems);
@@ -1339,6 +1372,7 @@ export default function WellnessParticipantPortalPage() {
               <DevicesTab
                 healthConnectConnected={!!healthConnectConnected}
                 googleFitConnected={!!googleFitConnected}
+                fitnessSettings={fitnessSettings}
                 syncing={syncing}
                 syncProvider={syncProvider}
               />
@@ -1359,6 +1393,7 @@ export default function WellnessParticipantPortalPage() {
               <ProfileTab
                 participant={participant}
                 integrations={integrations}
+                fitnessSettings={fitnessSettings}
                 logout={logout}
               />
             ) : null}
@@ -4661,8 +4696,8 @@ function HistoryTab({
                           ? "Dipakai untuk total & grafik — kalori aktif"
                           : "Dipakai untuk total & grafik"
                         : isGoogleFitDailyRow(item)
-                          ? "Alternatif — total Google Fit termasuk kalori istirahat"
-                          : "Sumber alternatif — tidak dijumlahkan"
+                          ? "Tidak dipakai — total Google Fit termasuk kalori istirahat"
+                          : "Tidak dipakai — sumber lain yang aktif"
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
@@ -4943,114 +4978,197 @@ function formatDateTextV37(value: any) {
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
+  fitnessSettings,
   syncing,
   syncProvider,
 }: {
   healthConnectConnected: boolean;
   googleFitConnected: boolean;
+  fitnessSettings: any;
   syncing: string;
   syncProvider: (provider: "strava" | "google-fit") => void;
 }) {
+  // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
+  const enabled = fitnessSettings?.fitness_enabled === true;
+  const source = clean(fitnessSettings?.fitness_source || "none")
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const sourceLabel =
+    source === "health_connect"
+      ? "Health Connect"
+      : source === "google_fit"
+        ? "Google Fit"
+        : "Belum dipilih";
+  const connectedProviders = Array.isArray(
+    fitnessSettings?.connected_providers,
+  )
+    ? fitnessSettings.connected_providers
+    : [];
+  const hasMultiple =
+    fitnessSettings?.has_multiple_active_providers === true ||
+    connectedProviders.filter((item: any) =>
+      ["health_connect", "google_fit"].includes(clean(item).toLowerCase()),
+    ).length > 1;
+  const healthSelected = enabled && source === "health_connect";
+  const googleSelected = enabled && source === "google_fit";
+
   return (
-    <section className="grid gap-5 lg:grid-cols-2">
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-black">Health Connect</h2>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-              Tarik steps, calories, distance, dan durasi aktivitas dari Health
-              Connect melalui aplikasi Harmony Health Connect di HP Android.
-            </p>
-          </div>
-
-          <span
-            className={`rounded-full px-3 py-2 text-xs font-black ${
-              healthConnectConnected
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700"
-            }`}
-          >
-            {healthConnectConnected ? "Connected" : "Belum sync"}
-          </span>
+    <section className="space-y-5">
+      <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4 text-sky-950">
+        <div className="text-[10px] font-black uppercase tracking-[0.15em] text-sky-700">
+          Sumber Fitness Aktif
         </div>
-
-        <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
-          Health Connect sudah siap. Pastikan Mi Fitness / Google Fit / Samsung
-          Health sudah menulis data ke Health Connect, lalu buka aplikasi
-          Harmony Health Connect di HP dan klik Sync Hari Ini.
+        <div className="mt-1 text-xl font-black">
+          {enabled ? sourceLabel : "Fitness App Nonaktif"}
         </div>
-
-        <div className="mt-5 grid gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-4">
-          <div className="text-xs font-black uppercase tracking-wide text-slate-400">
-            Cara Sync
-          </div>
-
-          <div className="grid gap-2 text-sm font-bold leading-6 text-slate-600">
-            <div>1. Buka aplikasi Harmony Health Connect di HP Android.</div>
-            <div>2. Isi Participant ID sesuai peserta.</div>
-            <div>3. Klik Cek Permission.</div>
-            <div>4. Klik Sync Hari Ini.</div>
-            <div>
-              5. Refresh portal ini untuk melihat update Steps dan Calories.
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-emerald-100"
-          >
-            Refresh Portal
-          </button>
-
-          <button
-            type="button"
-            disabled
-            className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500"
-          >
-            Sync dilakukan dari Android App
-          </button>
+        <div className="mt-2 text-xs font-bold leading-5 text-sky-800">
+          Dashboard, grafik, target workout, dan ranking hanya menggunakan satu
+          sumber yang dipilih Admin. Data Health Connect dan Google Fit tidak
+          dijumlahkan.
         </div>
       </div>
 
-      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-black">Google Fit</h2>
-            <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-              Tarik steps, daily activity, dan workout dari Google Fit.
-            </p>
+      {hasMultiple ? (
+        <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
+          ⚠️ Hanya boleh memilih satu aplikasi fitness. Hubungi Admin untuk
+          menonaktifkan salah satu koneksi.
+        </div>
+      ) : null}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div
+          className={`rounded-[2rem] border bg-white p-6 shadow-sm ${
+            healthSelected
+              ? "border-emerald-300 ring-4 ring-emerald-100"
+              : "border-slate-200"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black">Health Connect</h2>
+              <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
+                Steps, kalori aktivitas, jarak, dan durasi dari Android.
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-3 py-2 text-xs font-black ${
+                healthSelected
+                  ? "bg-emerald-600 text-white"
+                  : healthConnectConnected
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {healthSelected
+                ? "Sumber Aktif"
+                : healthConnectConnected
+                  ? "Connected"
+                  : "Belum sync"}
+            </span>
           </div>
 
-          <span
-            className={`rounded-full px-3 py-2 text-xs font-black ${
-              googleFitConnected
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-slate-50 text-slate-500"
-            }`}
-          >
-            {googleFitConnected ? "Connected" : "Not connected"}
-          </span>
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-3">
-          <a
-            href="/api/wellness/integrations/google-fit/connect"
-            className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
-          >
-            {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
-          </a>
+          {!enabled ? (
+            <div className="mt-5 rounded-3xl bg-slate-100 p-4 text-xs font-bold leading-5 text-slate-600">
+              Fitness App dinonaktifkan oleh Admin.
+            </div>
+          ) : !healthSelected ? (
+            <div className="mt-5 rounded-3xl bg-amber-50 p-4 text-xs font-bold leading-5 text-amber-900">
+              Health Connect tidak dipakai untuk capaian karena sumber aktif saat
+              ini adalah {sourceLabel}.
+            </div>
+          ) : (
+            <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
+              Buka aplikasi Harmony Health Connect di HP Android, lalu klik Sync
+              Hari Ini. Nilai yang dipakai adalah active calories.
+            </div>
+          )}
 
           <button
             type="button"
-            onClick={() => syncProvider("google-fit")}
-            disabled={!googleFitConnected || syncing === "google-fit"}
-            className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white disabled:opacity-40"
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-emerald-100"
           >
-            {syncing === "google-fit" ? "Sync..." : "Sync Google Fit"}
+            Refresh Portal
           </button>
+        </div>
+
+        <div
+          className={`rounded-[2rem] border bg-white p-6 shadow-sm ${
+            googleSelected
+              ? "border-blue-300 ring-4 ring-blue-100"
+              : "border-slate-200"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black">Google Fit</h2>
+              <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
+                Steps dan aktivitas harian dari akun Google.
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-3 py-2 text-xs font-black ${
+                googleSelected
+                  ? "bg-blue-600 text-white"
+                  : googleFitConnected
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {googleSelected
+                ? "Sumber Aktif"
+                : googleFitConnected
+                  ? "Connected"
+                  : "Not connected"}
+            </span>
+          </div>
+
+          <div className="mt-5 rounded-3xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
+            <div>Kalori aktivitas: dipakai untuk target dan ranking.</div>
+            <div className="mt-1">
+              Kalori total: termasuk energi istirahat/basal dan hanya ditampilkan
+              sebagai informasi.
+            </div>
+          </div>
+
+          {!enabled ? (
+            <div className="mt-4 rounded-2xl bg-slate-100 p-3 text-xs font-bold text-slate-600">
+              Fitness App dinonaktifkan oleh Admin.
+            </div>
+          ) : !googleSelected ? (
+            <div className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+              Google Fit tidak dipakai untuk capaian karena sumber aktif saat ini
+              adalah {sourceLabel}.
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            {googleSelected ? (
+              <a
+                href="/api/wellness/integrations/google-fit/connect"
+                className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
+              >
+                {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
+              </a>
+            ) : (
+              <span className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500">
+                Pilih melalui Portal Admin
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => syncProvider("google-fit")}
+              disabled={
+                !googleSelected ||
+                !googleFitConnected ||
+                syncing === "google-fit"
+              }
+              className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white disabled:opacity-40"
+            >
+              {syncing === "google-fit" ? "Sync..." : "Sync Google Fit"}
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -5059,10 +5177,12 @@ function DevicesTab({
 function ProfileTab({
   participant,
   integrations,
+  fitnessSettings,
   logout,
 }: {
   participant: any;
   integrations: any[];
+  fitnessSettings: any;
   logout: () => void;
 }) {
   const activeProviders = (integrations || [])
@@ -5119,7 +5239,34 @@ function ProfileTab({
           </div>
         </div>
 
-        <div className="mt-6 rounded-3xl bg-slate-50 p-4">
+        <div className="mt-6 grid gap-3 md:grid-cols-2">
+          <div className="rounded-3xl bg-sky-50 p-4">
+            <div className="text-sm font-black text-sky-950">
+              Session Wellness
+            </div>
+            <div className="mt-2 text-xs font-bold text-sky-700">
+              {fitnessSettings?.session_enabled === false
+                ? "Dinonaktifkan Admin"
+                : "Aktif"}
+            </div>
+          </div>
+          <div className="rounded-3xl bg-slate-50 p-4">
+            <div className="text-sm font-black text-slate-900">
+              Fitness Source
+            </div>
+            <div className="mt-2 text-xs font-bold text-slate-500">
+              {fitnessSettings?.fitness_enabled
+                ? clean(fitnessSettings?.fitness_source) === "health_connect"
+                  ? "Health Connect"
+                  : clean(fitnessSettings?.fitness_source) === "google_fit"
+                    ? "Google Fit"
+                    : "Belum dipilih"
+                : "Nonaktif"}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-3xl bg-slate-50 p-4">
           <div className="text-sm font-black text-slate-900">
             Device Connected
           </div>

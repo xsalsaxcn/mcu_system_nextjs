@@ -1,9 +1,11 @@
 // WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V377_PORTAL_ME
+// WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_V79F
 
 import { NextRequest, NextResponse } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { clearPortalCookie, getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 export const runtime = "nodejs";
 
@@ -124,8 +126,7 @@ export async function GET(req: NextRequest) {
     const { data: integrations } = await supabase
       .from("wellness_integrations")
       .select("provider,provider_user_id,scope,connected_at,last_sync_at,is_active")
-      .eq("participant_id", participant.id)
-      .eq("is_active", true);
+      .eq("participant_id", participant.id);
 
     const { data: activities } = await supabase
       .from("wellness_activity_logs")
@@ -156,12 +157,29 @@ export async function GET(req: NextRequest) {
     const clinical_history = mergeUniqueRows(historyById || [], historyByCode || [])
       .sort((a, b) => String(b.checkup_date || b.created_at || "").localeCompare(String(a.checkup_date || a.created_at || "")));
 
-    const activity_summary = buildActivitySummary(activities || [], participant);
+    const controlMap = await loadParticipantControlMap(supabase, [participant.id]);
+    const fitnessSettings = controlMap.get(Number(participant.id)) ||
+      participant.wellness_control || {
+        participant_id: Number(participant.id),
+        session_enabled: true,
+        fitness_enabled: false,
+        fitness_source: "none",
+        connected_providers: [],
+        active_providers: [],
+        has_multiple_active_providers: false,
+        source_connected: false,
+      };
+    const selectedActivities = filterActivityRowsByFitnessSource(
+      activities || [],
+      controlMap,
+    );
+    const activity_summary = buildActivitySummary(selectedActivities, participant);
 
     return ok({
-      participant,
+      participant: { ...participant, wellness_control: fitnessSettings },
+      fitness_settings: fitnessSettings,
       integrations: integrations || [],
-      activities: activities || [],
+      activities: selectedActivities,
       activity_summary,
       clinical_history,
     });

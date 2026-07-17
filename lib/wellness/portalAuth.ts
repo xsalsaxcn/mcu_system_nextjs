@@ -1,10 +1,12 @@
 // WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376
+// WELLNESS_PARTICIPANT_SESSION_CONTROL_V79F
 // Small portal auth helper for participant-facing Wellness pages.
 // Uses OTP -> httpOnly cookie -> participant lookup. Wellness-only.
 
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 const COOKIE_NAME = "wellness_portal_token";
 
@@ -109,7 +111,16 @@ export async function getParticipantFromPortalSession(supabase: SupabaseClient, 
   if (participantError) throw participantError;
   if (!participant) return null;
 
-  return participant;
+  const wellnessControl = await loadParticipantControl(
+    supabase,
+    Number(participant.id || 0),
+  );
+  if (!wellnessControl.session_enabled) return null;
+
+  return {
+    ...participant,
+    wellness_control: wellnessControl,
+  };
 }
 
 export function signedState(payload: Record<string, any>) {

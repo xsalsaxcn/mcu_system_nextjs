@@ -1,9 +1,11 @@
 // WELLNESS_PARTICIPANT_OTP_STRAVA_GFIT_V376
+// WELLNESS_PARTICIPANT_VERIFY_SESSION_GUARD_V79F
 
 import { NextRequest, NextResponse } from "next/server";
 import { fail } from "@/lib/server/response";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { clean, hashOtp, hashSecret, makePortalToken, normalizePhone, setPortalCookie } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,11 @@ export async function POST(req: NextRequest) {
 
     if (participantError) throw participantError;
     if (!participant) return fail("Peserta Wellness tidak ditemukan.", 404);
+
+    const control = await loadParticipantControl(supabase, participant.id);
+    if (!control.session_enabled) {
+      return fail("Session Wellness dinonaktifkan oleh Admin.", 403);
+    }
 
     const storedEmail = clean(participant.email).toLowerCase();
     const storedPhone = normalizePhone(participant.phone);

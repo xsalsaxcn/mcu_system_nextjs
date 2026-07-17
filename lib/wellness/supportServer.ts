@@ -7,6 +7,7 @@ import { companyActorPayload, resolveCompanyPortalContext } from "@/lib/wellness
 
 // WELLNESS_SUPPORT_CHAT_GOOGLE_SHEET_V61
 // WELLNESS_COMPANY_SUPPORT_ACTOR_V78
+// WELLNESS_SUPPORT_CONTEXT_PRIORITY_V79F
 // Server-only authentication + webhook bridge for technical support chat.
 // Chat content lives in Google Sheet; attachments live in Google Drive.
 
@@ -123,15 +124,50 @@ async function coachActor(request: NextRequest): Promise<SupportActor | null> {
 }
 
 export async function getSupportActor(request: NextRequest): Promise<SupportActor | null> {
+  // WELLNESS_SUPPORT_EXPLICIT_ROLE_CONTEXT_V79F
+  // Shared Android WebView can retain Participant, Coach, Company, and Admin
+  // cookies at the same time. The caller therefore declares its active portal
+  // role so another valid cookie cannot hijack profile/support requests.
+  const requestedContext = clean(
+    request.headers.get("x-wellness-actor-context") ||
+      request.nextUrl.searchParams.get("actor_context"),
+  ).toLowerCase();
+
+  if (requestedContext === "company") {
+    try {
+      return await companyActor(request);
+    } catch {
+      return null;
+    }
+  }
+
+  if (requestedContext === "participant") {
+    try {
+      return await participantActor(request);
+    } catch {
+      return null;
+    }
+  }
+
+  if (requestedContext === "coach") {
+    try {
+      return await coachActor(request);
+    } catch {
+      return null;
+    }
+  }
+
+  if (requestedContext === "admin") {
+    return sessionAdminActor(request);
+  }
+
+  // Backward-compatible fallback for older pages that do not send context.
   try {
     const company = await companyActor(request);
     if (company) return company;
   } catch {
-    // Continue with the standard actor resolution.
+    // Continue with participant/coach/admin resolution.
   }
-
-  const admin = sessionAdminActor(request);
-  if (admin) return admin;
 
   try {
     const participant = await participantActor(request);
@@ -141,10 +177,13 @@ export async function getSupportActor(request: NextRequest): Promise<SupportActo
   }
 
   try {
-    return await coachActor(request);
+    const coach = await coachActor(request);
+    if (coach) return coach;
   } catch {
-    return null;
+    // Continue to Admin session lookup.
   }
+
+  return sessionAdminActor(request);
 }
 
 export function getSupportAdminActor(request: NextRequest): SupportActor | null {

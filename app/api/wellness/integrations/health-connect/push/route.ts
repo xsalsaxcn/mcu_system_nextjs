@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 // WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71
+// WELLNESS_HEALTH_CONNECT_SINGLE_SOURCE_GUARD_V79F
 // Update dari V421:
 // - Menerima data dari Android companion app.
 // - Menyimpan daily aggregate ke wellness_activity_logs.
@@ -317,6 +319,12 @@ async function saveActivityLog(supabase: any, payload: any) {
 async function upsertIntegration(supabase: any, participantId: number, body: any) {
   const nowIso = new Date().toISOString();
 
+  await supabase
+    .from("wellness_integrations")
+    .update({ is_active: 0, updated_at: nowIso })
+    .eq("participant_id", participantId)
+    .eq("provider", "google_fit");
+
   const providerUserId =
     clean(body?.device_id) ||
     clean(body?.android_id) ||
@@ -389,6 +397,29 @@ async function handlePush(req: NextRequest) {
   }
 
   const participantId = Number(participant.id);
+  const control = await loadParticipantControl(supabase, participantId);
+  if (!control.session_enabled) {
+    return NextResponse.json(
+      {
+        ok: false,
+        participant_id: participantId,
+        message: "Session Wellness dinonaktifkan oleh Admin.",
+      },
+      { status: 403 },
+    );
+  }
+  if (!control.fitness_enabled || control.fitness_source !== "health_connect") {
+    return NextResponse.json(
+      {
+        ok: false,
+        participant_id: participantId,
+        message:
+          "Health Connect bukan sumber fitness aktif. Pilih Health Connect dari Portal Admin.",
+      },
+      { status: 409 },
+    );
+  }
+
   const date = normalizeDate(body?.date || body?.log_date);
   const nowIso = new Date().toISOString();
 
@@ -404,11 +435,14 @@ async function handlePush(req: NextRequest) {
 
   const steps = num(body?.steps ?? body?.total_steps);
 
+  // WELLNESS_HEALTH_CONNECT_ACTIVE_CALORIES_ONLY_V79F
+  // Workout achievement must never use total calories (active + resting/BMR).
+  // Android sends final active calories in `calories`; `total_calories`, when
+  // present, is retained only inside original_payload for audit.
   const calories = num(
-    body?.calories ??
-      body?.active_calories ??
-      body?.calories_burned ??
-      body?.total_calories
+    body?.active_calories ??
+      body?.calories ??
+      body?.calories_burned
   );
 
   const activeMinutes = num(

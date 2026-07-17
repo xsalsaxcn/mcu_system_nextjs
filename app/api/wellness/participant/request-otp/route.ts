@@ -1,4 +1,5 @@
 // WELLNESS_PARTICIPANT_REAL_EMAIL_OTP_V394_MICROSOFT365
+// WELLNESS_PARTICIPANT_SESSION_ADMIN_GUARD_V79F
 
 import { NextRequest } from "next/server";
 import nodemailer from "nodemailer";
@@ -10,6 +11,7 @@ import {
   makeOtp,
   normalizePhone,
 } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 export const runtime = "nodejs";
 
@@ -184,6 +186,11 @@ export async function POST(req: NextRequest) {
 
     if (participant.is_active === 0 || participant.is_active === false) {
       return fail("Peserta Wellness tidak aktif.", 403);
+    }
+
+    const control = await loadParticipantControl(supabase, participant.id);
+    if (!control.session_enabled) {
+      return fail("Session Wellness dinonaktifkan oleh Admin.", 403);
     }
 
     const storedEmail = clean(participant.email).toLowerCase();

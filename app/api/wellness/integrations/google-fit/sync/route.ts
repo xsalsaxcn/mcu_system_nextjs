@@ -1,5 +1,6 @@
 // WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
 // Google Fit daily sync using Google Fit aggregate API.
+// WELLNESS_GOOGLE_FIT_SINGLE_SOURCE_SYNC_V79F
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
 // - Steps: com.google.step_count.delta
@@ -14,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 export const runtime = "nodejs";
 
@@ -471,6 +473,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, message: "OTP/session peserta belum aktif." },
       { status: 401 }
+    );
+  }
+
+  const control = await loadParticipantControl(supabase, participant.id);
+  if (!control.fitness_enabled || control.fitness_source !== "google_fit") {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Google Fit bukan sumber fitness aktif. Pilih Google Fit dari Portal Admin.",
+      },
+      { status: 409 },
     );
   }
 

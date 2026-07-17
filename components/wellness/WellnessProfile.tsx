@@ -6,6 +6,7 @@ import { prepareWellnessProfilePhoto } from "./profilePhoto";
 // WELLNESS_PROFILE_GOOGLE_DRIVE_V76
 // WELLNESS_PARTICIPANT_PROFILE_UI_FIX_V76B
 // WELLNESS_COMPANY_PROFILE_CONTEXT_V78
+// WELLNESS_PROFILE_ALL_ROLE_CONTEXT_V79F
 
 export type WellnessProfileData = {
   actor_type?: string;
@@ -39,10 +40,9 @@ export function useWellnessProfile(
     setLoading(true);
     const result = await fetch(`/api/wellness/profile?t=${Date.now()}`, {
       cache: "no-store",
-      headers:
-        actorType === "company"
-          ? { "x-wellness-actor-context": "company" }
-          : undefined,
+      headers: actorType
+        ? { "x-wellness-actor-context": actorType }
+        : undefined,
     })
       .then((response) => response.json())
       .catch(() => ({ ok: false }));
@@ -175,10 +175,7 @@ export default function WellnessProfilePanel({
       body.append("file", prepared);
       const result = await fetch("/api/wellness/profile/upload", {
         method: "POST",
-        headers:
-          actorType === "company"
-            ? { "x-wellness-actor-context": "company" }
-            : undefined,
+        headers: { "x-wellness-actor-context": actorType },
         body,
       }).then((response) => response.json());
       if (!result?.ok) throw new Error(result?.message || "Upload foto gagal.");

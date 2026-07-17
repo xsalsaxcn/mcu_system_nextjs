@@ -626,6 +626,7 @@ function uploadWellnessProfilePhoto_(payload) {
 
 // -----------------------------------------------------------------------------
 // WELLNESS SUPPORT CHAT V61
+// WELLNESS_SUPPORT_AUTO_THREAD_V79F
 // Text/metadata: Google Sheet. Attachments: Google Drive. No Supabase Storage.
 // -----------------------------------------------------------------------------
 function supportClean_(value) {
@@ -888,7 +889,11 @@ function supportMarkReadInternal_(ticketId, readerType) {
 }
 
 function supportGetThread(payload) {
-  const row = supportFindThreadByActor_(payload.actorType, payload.actorId);
+  let row = supportFindThreadByActor_(payload.actorType, payload.actorId);
+  if (!row) {
+    supportEnsureThread(payload);
+    row = supportFindThreadByActor_(payload.actorType, payload.actorId);
+  }
   if (!row) return { ok: true, thread: null, messages: [] };
   const ticketId = supportClean_(row["Ticket ID"]);
   if (payload.markRead)

@@ -10,6 +10,7 @@ import {
 
 // WELLNESS_SUPPORT_CHAT_FULLSCREEN_V62
 // WELLNESS_COMPANY_SUPPORT_CHAT_CONTEXT_V78
+// WELLNESS_SUPPORT_ALL_ROLE_CONTEXT_V79F
 // Full-screen technical support workspace for mobile WebView.
 // Storage and network behavior remain unchanged: Google Sheet/Drive, manual refresh, latest 30 messages.
 
@@ -111,10 +112,7 @@ export default function SupportChatPanel({
     if (!options?.quiet) setLoading(true);
     const result = await fetch("/api/wellness/support?mode=messages&limit=30", {
       cache: "no-store",
-      headers:
-        actorType === "company"
-          ? { "x-wellness-actor-context": "company" }
-          : undefined,
+      headers: { "x-wellness-actor-context": actorType },
     })
       .then((response) => response.json())
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
@@ -196,9 +194,7 @@ export default function SupportChatPanel({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(actorType === "company"
-            ? { "x-wellness-actor-context": "company" }
-            : {}),
+          "x-wellness-actor-context": actorType,
         },
         body: JSON.stringify({
           action: "send_message",

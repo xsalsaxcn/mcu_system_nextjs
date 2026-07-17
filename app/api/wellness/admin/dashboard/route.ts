@@ -2,8 +2,10 @@ import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
+import { loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_API_V79B
+// WELLNESS_ADMIN_PARTICIPANT_CONTROL_SUMMARY_V79F
 // Lightweight structure API for the dedicated mobile Admin Portal.
 // Participant health metrics remain sourced from the existing
 // /api/wellness/dashboard endpoint so there is no duplicate scoring logic.
@@ -89,6 +91,11 @@ export async function GET(request: NextRequest) {
     const participants = participantRows.filter((item: any) => active(item.is_active));
     const assignments = assignmentRows.filter((item: any) => active(item.is_active));
     const coaches = coachRows.filter((item: any) => active(item.is_active));
+
+    const participantControlMap = await loadParticipantControlMap(
+      supabase,
+      participants.map((item: any) => numberValue(item.id)).filter(Boolean),
+    );
 
     const companyById = new Map<number, any>(
       companies.map((item: any) => [numberValue(item.id), item]),
@@ -254,6 +261,22 @@ export async function GET(request: NextRequest) {
       companies: companyCards,
       groups: groupCards,
       coaches: coachCards,
+      participant_controls: participants.map((participant: any) => {
+        const participantId = numberValue(participant.id);
+        return (
+          participantControlMap.get(participantId) || {
+            participant_id: participantId,
+            session_enabled: true,
+            fitness_enabled: false,
+            fitness_source: "none",
+            connected_providers: [],
+            active_providers: [],
+            has_multiple_active_providers: false,
+            source_connected: false,
+            control_exists: false,
+          }
+        );
+      }),
     });
   } catch (error: any) {
     return fail(error?.message || "Portal Admin gagal dimuat.", 500);

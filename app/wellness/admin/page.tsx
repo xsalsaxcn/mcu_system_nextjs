@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
 // WELLNESS_ADMIN_EXCEL_EXPORT_V79D
 // WELLNESS_ADMIN_UNIFIED_WEB_MOBILE_V79E
+// WELLNESS_ADMIN_CONTROL_FITNESS_UI_V79F
 // Dedicated mobile-first Admin Portal. It intentionally does not reuse the
 // desktop operational dashboard layout.
 
@@ -78,6 +79,44 @@ function avatarTone(index: number) {
   ][index % 4];
 }
 
+function fitnessSourceLabel(value: any) {
+  const source = clean(value).toLowerCase().replace(/-/g, "_");
+  if (source === "health_connect") return "Health Connect";
+  if (source === "google_fit") return "Google Fit";
+  return "Nonaktif";
+}
+
+function ToggleSwitch({
+  active,
+  disabled,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={active}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+        active ? "bg-emerald-600" : "bg-slate-300"
+      } disabled:cursor-not-allowed disabled:opacity-50`}
+    >
+      <span
+        className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+          active ? "left-6" : "left-1"
+        }`}
+      />
+    </button>
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -134,6 +173,8 @@ export default function WellnessAdminMobilePage() {
   const [loginError, setLoginError] = useState("");
   const [query, setQuery] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [controlSavingId, setControlSavingId] = useState<number | null>(null);
+  const [controlNotice, setControlNotice] = useState("");
 
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
@@ -197,6 +238,13 @@ export default function WellnessAdminMobilePage() {
         (item: any) => !item?.ok,
       );
 
+      const participantControlById = new Map<number, any>(
+        (structureResult.participant_controls || []).map((item: any) => [
+          Number(item.participant_id || 0),
+          item,
+        ]),
+      );
+
       const rankingRows = successfulDashboards.flatMap((companyResult: any) => {
         const companyId = Number(companyResult.company?.id || 0);
         const companyName =
@@ -234,6 +282,10 @@ export default function WellnessAdminMobilePage() {
               : [],
           ranking_source: "company_dashboard",
           ranking_period_days: Number(companyResult.period?.days || 30),
+          wellness_control:
+            participantControlById.get(
+              Number(participant.participant_id || participant.id || 0),
+            ) || null,
         }));
       });
 
@@ -349,6 +401,63 @@ export default function WellnessAdminMobilePage() {
     setData(null);
     setWellnessData(null);
     setView("home");
+  }
+
+  async function saveParticipantControl(item: any, patch: any) {
+    const participantId = Number(item.participant_id || item.id || 0);
+    if (!participantId) return;
+    const current = item.wellness_control || {};
+    setControlSavingId(participantId);
+    setControlNotice(`Menyimpan kontrol ${item.name || "peserta"}...`);
+
+    const result = await fetch("/api/wellness/admin/participant-control", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        participant_id: participantId,
+        session_enabled:
+          patch.session_enabled ?? current.session_enabled ?? true,
+        fitness_enabled:
+          patch.fitness_enabled ?? current.fitness_enabled ?? false,
+        fitness_source:
+          patch.fitness_source ?? current.fitness_source ?? "none",
+      }),
+    })
+      .then((response) => response.json())
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
+
+    if (result.ok) {
+      const nextControl = result.control;
+      setWellnessData((previous: any) => ({
+        ...previous,
+        rows: (previous?.rows || []).map((row: any) =>
+          Number(row.participant_id || row.id || 0) === participantId
+            ? { ...row, wellness_control: nextControl }
+            : row,
+        ),
+      }));
+      setData((previous: any) => ({
+        ...previous,
+        participant_controls: (previous?.participant_controls || []).some(
+          (control: any) =>
+            Number(control.participant_id || 0) === participantId,
+        )
+          ? (previous?.participant_controls || []).map((control: any) =>
+              Number(control.participant_id || 0) === participantId
+                ? nextControl
+                : control,
+            )
+          : [...(previous?.participant_controls || []), nextControl],
+      }));
+      setControlNotice(result.message || "Kontrol peserta berhasil disimpan.");
+    } else {
+      setControlNotice(result.message || "Kontrol peserta gagal disimpan.");
+    }
+    setControlSavingId(null);
   }
 
   const rows = wellnessData?.rows || [];
@@ -573,7 +682,7 @@ export default function WellnessAdminMobilePage() {
 
   return (
     <main className="min-h-screen bg-[#f4f8fb] pb-24 text-slate-950 lg:pb-8">
-      <div className="mx-auto max-w-7xl px-3 py-3 sm:px-5 sm:py-5 lg:px-8 lg:py-7">
+      <div className="w-full max-w-none px-3 py-3 sm:px-5 sm:py-5 lg:px-6 lg:py-6 xl:px-8">
         {/* WELLNESS_ADMIN_DESKTOP_NAV_V79E */}
         <nav className="mb-5 hidden items-center justify-between gap-4 rounded-[1.4rem] border border-slate-200 bg-white p-3 shadow-sm lg:flex">
           <div className="flex min-w-0 items-center gap-2">
@@ -1009,36 +1118,213 @@ export default function WellnessAdminMobilePage() {
 
           {view === "participants" ? (
             <section className="space-y-3">
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cari nama, kode, perusahaan, atau kelompok"
-                className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
-              />
-              {filteredParticipants.map((item: any, index: number) => {
-                const flag = flagOf(item);
-                return (
-                  <article key={item.id || index} className="rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-sm">
-                    <div className="flex items-start gap-3">
-                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${avatarTone(index + 2)} text-xs font-black text-white`}>
-                        {initials(item.name)}
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Cari nama, kode, perusahaan, atau kelompok"
+                  className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+                />
+                <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600">
+                  {fmt(filteredParticipants.length)} peserta tampil
+                </div>
+              </div>
+
+              {controlNotice ? (
+                <div
+                  className={`rounded-2xl px-4 py-3 text-xs font-bold leading-5 ${
+                    /gagal|belum tersedia|error/i.test(controlNotice)
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-sky-50 text-sky-800"
+                  }`}
+                >
+                  {controlNotice}
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                {filteredParticipants.map((item: any, index: number) => {
+                  const flag = flagOf(item);
+                  const control = item.wellness_control || {
+                    session_enabled: true,
+                    fitness_enabled: false,
+                    fitness_source: "none",
+                    connected_providers: [],
+                    active_providers: [],
+                    has_multiple_active_providers: false,
+                  };
+                  const participantId = Number(
+                    item.participant_id || item.id || 0,
+                  );
+                  const saving = controlSavingId === participantId;
+                  const connected = Array.isArray(control.connected_providers)
+                    ? control.connected_providers
+                    : [];
+                  const source = clean(control.fitness_source || "none")
+                    .toLowerCase()
+                    .replace(/-/g, "_");
+
+                  return (
+                    <article
+                      key={item.id || index}
+                      className="rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-sm"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${avatarTone(index + 2)} text-xs font-black text-white`}
+                        >
+                          {initials(item.name)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words text-sm font-black leading-5 text-slate-950">
+                            {item.name}
+                          </div>
+                          <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">
+                            {item.code || "-"} · {item.company_name || "-"} · {item.group_name || "-"}
+                          </div>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${flagTone(flag)}`}
+                        >
+                          {flag}
+                        </span>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="break-words text-sm font-black leading-5 text-slate-950">{item.name}</div>
-                        <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">{item.code || "-"} · {item.company_name || "-"} · {item.group_name || "-"}</div>
+
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-xl bg-slate-50 p-2">
+                          <div className="text-[9px] font-black text-slate-400">POINT</div>
+                          <div className="mt-0.5 text-sm font-black">{fmt(item.total_points)}</div>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-2">
+                          <div className="text-[9px] font-black text-slate-400">BMI</div>
+                          <div className="mt-0.5 text-sm font-black">{fmt(item.bmi, 1)}</div>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-2">
+                          <div className="text-[9px] font-black text-slate-400">STATUS</div>
+                          <div className="mt-0.5 break-words text-[10px] font-black leading-4">
+                            {item.compliance_status || "-"}
+                          </div>
+                        </div>
                       </div>
-                      <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${flagTone(flag)}`}>{flag}</span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                      <div className="rounded-xl bg-slate-50 p-2"><div className="text-[9px] font-black text-slate-400">POINT</div><div className="mt-0.5 text-sm font-black">{fmt(item.total_points)}</div></div>
-                      <div className="rounded-xl bg-slate-50 p-2"><div className="text-[9px] font-black text-slate-400">BMI</div><div className="mt-0.5 text-sm font-black">{fmt(item.bmi, 1)}</div></div>
-                      <div className="rounded-xl bg-slate-50 p-2"><div className="text-[9px] font-black text-slate-400">STATUS</div><div className="mt-0.5 truncate text-[10px] font-black">{item.compliance_status || "-"}</div></div>
-                    </div>
-                  </article>
-                );
-              })}
+
+                      <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                        <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
+                          Kontrol Pengembangan
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Session Wellness</div>
+                            <div className="mt-0.5 text-[10px] font-bold text-slate-500">
+                              {control.session_enabled ? "Aktif" : "Nonaktif"}
+                            </div>
+                          </div>
+                          <ToggleSwitch
+                            active={control.session_enabled !== false}
+                            disabled={saving}
+                            label="Aktifkan atau nonaktifkan Session Wellness"
+                            onClick={() =>
+                              void saveParticipantControl(item, {
+                                session_enabled: !control.session_enabled,
+                              })
+                            }
+                          />
+                        </div>
+
+                        <div className="my-3 border-t border-slate-200" />
+
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-black text-slate-900">Aktivasi Fitness App</div>
+                            <div className="mt-0.5 text-[10px] font-bold text-slate-500">
+                              {control.fitness_enabled
+                                ? fitnessSourceLabel(source)
+                                : "Nonaktif"}
+                            </div>
+                          </div>
+                          <ToggleSwitch
+                            active={control.fitness_enabled === true}
+                            disabled={saving}
+                            label="Aktifkan atau nonaktifkan Fitness App"
+                            onClick={() => {
+                              const nextEnabled = !control.fitness_enabled;
+                              const fallbackSource = connected.includes("health_connect")
+                                ? "health_connect"
+                                : connected.includes("google_fit")
+                                  ? "google_fit"
+                                  : source !== "none"
+                                    ? source
+                                    : "health_connect";
+                              void saveParticipantControl(item, {
+                                fitness_enabled: nextEnabled,
+                                fitness_source: nextEnabled
+                                  ? fallbackSource
+                                  : "none",
+                              });
+                            }}
+                          />
+                        </div>
+
+                        <select
+                          value={control.fitness_enabled ? source : "none"}
+                          disabled={saving || !control.fitness_enabled}
+                          onChange={(event) =>
+                            void saveParticipantControl(item, {
+                              fitness_enabled: event.target.value !== "none",
+                              fitness_source: event.target.value,
+                            })
+                          }
+                          className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-800 outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="none">Nonaktif</option>
+                          <option value="health_connect">Health Connect</option>
+                          <option value="google_fit">Google Fit</option>
+                        </select>
+
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {connected.length ? (
+                            connected.map((provider: string) => (
+                              <span
+                                key={provider}
+                                className={`rounded-full px-2 py-1 text-[9px] font-black ${
+                                  provider === source && control.fitness_enabled
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-white text-slate-600"
+                                }`}
+                              >
+                                {fitnessSourceLabel(provider)}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[9px] font-bold text-slate-400">
+                              Belum ada aplikasi fitness terkoneksi.
+                            </span>
+                          )}
+                        </div>
+
+                        {control.has_multiple_active_providers ? (
+                          <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-bold leading-4 text-amber-900">
+                            ⚠️ Hanya boleh memilih satu aplikasi fitness. Simpan salah satu sumber untuk menonaktifkan koneksi lainnya.
+                          </div>
+                        ) : null}
+
+                        {saving ? (
+                          <div className="mt-2 text-[10px] font-black text-sky-700">
+                            Menyimpan...
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
               {filteredParticipants.length === 0 ? (
-                <EmptyState icon="👥" title="Peserta tidak ditemukan" text="Ubah kata pencarian atau periksa data peserta." />
+                <EmptyState
+                  icon="👥"
+                  title="Peserta tidak ditemukan"
+                  text="Ubah kata pencarian atau periksa data peserta."
+                />
               ) : null}
             </section>
           ) : null}

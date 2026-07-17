@@ -2,6 +2,7 @@
 
 // WELLNESS_SUPPORT_ATTACHMENT_COMPRESSION_V61
 // WELLNESS_COMPANY_SUPPORT_ATTACHMENT_CONTEXT_V78
+// WELLNESS_SUPPORT_ATTACHMENT_ALL_ROLE_CONTEXT_V79F
 // Client-side compression keeps images small before upload to Google Drive.
 
 export function formatSupportBytes(value: number) {
@@ -99,10 +100,7 @@ export async function uploadSupportAttachment(
 
   const response = await fetch("/api/wellness/support/upload", {
     method: "POST",
-    headers:
-      actorType === "company"
-        ? { "x-wellness-actor-context": "company" }
-        : undefined,
+    headers: { "x-wellness-actor-context": actorType },
     body: form,
   });
   const result = await response.json().catch(() => ({ ok: false, message: "Upload gagal." }));

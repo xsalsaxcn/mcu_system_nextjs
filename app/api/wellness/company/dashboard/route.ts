@@ -8,11 +8,13 @@ import {
 } from "@/lib/wellness/googleSheetResponses";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { resolveCompanyPortalContext } from "@/lib/wellness/companyAuth";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_COMPANY_DASHBOARD_RANKING_V78
+// WELLNESS_COMPANY_SINGLE_FITNESS_SOURCE_V79F
 // Company-scoped executive dashboard, per-kelompok rankings, cross-group
 // rankings, flags, and aggregated before-after progress. No schema migration.
 
@@ -373,6 +375,10 @@ export async function GET(request: NextRequest) {
 
     const participantIds = participants.map((item: any) => number(item.id)).filter(Boolean);
     const participantCodes = participants.map((item: any) => clean(item.code)).filter(Boolean);
+    const participantControlMap = await loadParticipantControlMap(
+      supabase,
+      participantIds,
+    );
 
     let activityRows: any[] = [];
     let foodRows: any[] = [];
@@ -476,7 +482,11 @@ export async function GET(request: NextRequest) {
 
     const dbFood = groupRows(foodRows);
     const sheetFood = rowsByParticipantOrCode(sheetFoodRows);
-    const dbActivity = groupRows(activityRows);
+    const selectedActivityRows = filterActivityRowsByFitnessSource(
+      activityRows,
+      participantControlMap,
+    );
+    const dbActivity = groupRows(selectedActivityRows);
     const dbHealthtalk = groupRows(healthtalkRows);
     const sheetHealthtalk = rowsByParticipantOrCode(sheetHealthtalkRows);
     const points = groupRows(pointRows);
@@ -718,6 +728,7 @@ export async function GET(request: NextRequest) {
             : flag === "yellow"
               ? "Perlu dipantau"
               : "Perlu follow up",
+        wellness_control: participantControlMap.get(id) || null,
         baseline,
         current,
       };
