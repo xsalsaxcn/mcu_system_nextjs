@@ -1,5 +1,7 @@
 "use client";
 
+// WELLNESS_ADMIN_SUPPORT_UNREAD_NORMALIZED_V79Q
+
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
@@ -187,7 +189,7 @@ export default function WellnessAdminMobilePage() {
       .catch(() => null);
 
     if (result?.ok) {
-      setSupportUnread(Math.max(0, Number(result.summary?.unread || 0)));
+      setSupportUnread(Math.max(0, Number(result.summary?.unread ?? result.summary?.unread_admin ?? result.summary?.unreadAdmin ?? 0)));
     }
   }
 
