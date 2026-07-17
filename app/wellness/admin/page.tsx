@@ -173,8 +173,23 @@ export default function WellnessAdminMobilePage() {
   const [loginError, setLoginError] = useState("");
   const [query, setQuery] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [supportUnread, setSupportUnread] = useState(0);
+  // WELLNESS_ADMIN_SUPPORT_BADGE_V79P
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
   const [controlNotice, setControlNotice] = useState("");
+
+  async function loadSupportUnread() {
+    const result = await fetch("/api/wellness/support?mode=threads&status=all&limit=1", {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (result?.ok) {
+      setSupportUnread(Math.max(0, Number(result.summary?.unread || 0)));
+    }
+  }
 
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
@@ -340,6 +355,21 @@ export default function WellnessAdminMobilePage() {
     if (!options?.quiet) setLoading(false);
     return structureResult;
   }
+
+  useEffect(() => {
+    void loadSupportUnread();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadSupportUnread();
+    }, 8000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void loadSupportUnread();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     void load();
@@ -580,7 +610,7 @@ export default function WellnessAdminMobilePage() {
       .slice(0, 120);
   }, [rows, query]);
 
-  const unreadPriority = flags.red;
+  const unreadPriority = supportUnread;
 
   if (sessionRequired && !loading) {
     return (
@@ -814,9 +844,14 @@ export default function WellnessAdminMobilePage() {
                     </button>
                     <a
                       href="/wellness/support-admin"
-                      className="mt-2 block rounded-2xl bg-indigo-50 px-4 py-3 text-sm font-black text-indigo-950"
+                      className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-indigo-50 px-4 py-3 text-sm font-black text-indigo-950"
                     >
-                      💬 Buka Admin Support Inbox
+                      <span>💬 Buka Admin Support Inbox</span>
+                      {supportUnread > 0 ? (
+                        <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
+                          {supportUnread > 99 ? "99+" : supportUnread}
+                        </span>
+                      ) : null}
                     </a>
                   </div>
                 ) : null}

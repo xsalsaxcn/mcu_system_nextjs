@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 // WELLNESS_MOMENTUM_UI_POLISH_V69
+// WELLNESS_GOOGLE_FIT_TOTAL_DISPLAY_V79O
+// WELLNESS_MOMENTUM_PROPS_BUILD_FIX_V79P
 // Improves mobile card proportions, full day labels, and interactive bar values without changing calculations or data sources.
 
 // WELLNESS_MOMENTUM_STREAK_V66
@@ -14,6 +16,9 @@ export type WellnessMomentumDay = {
   nutritionCount: number;
   nutritionCalories: number;
   workoutCalories: number;
+  workoutTitle?: string;
+  workoutSubtitle?: string;
+  workoutTargetEnabled?: boolean;
   steps: number;
   success: boolean;
 };
@@ -27,6 +32,9 @@ type Props = {
   nutritionCount: number;
   nutritionCalories: number;
   workoutCalories: number;
+  workoutTitle?: string;
+  workoutSubtitle?: string;
+  workoutTargetEnabled?: boolean;
   steps: number;
   nutritionTarget?: number;
   workoutTarget?: number;
@@ -129,6 +137,7 @@ function WeeklyMetricCard({
   dayValue,
   dayValueLabel,
   limitMode = false,
+  showProgress = true,
 }: {
   title: string;
   subtitle: string;
@@ -141,6 +150,7 @@ function WeeklyMetricCard({
   dayValue: (day: WellnessMomentumDay) => number;
   dayValueLabel: (value: number) => string;
   limitMode?: boolean;
+  showProgress?: boolean;
 }) {
   const colors = toneMap[tone];
   const rawPercent = percent(value, target);
@@ -152,7 +162,11 @@ function WeeklyMetricCard({
 
   return (
     <article
-      aria-label={`${title}: ${Math.round(rawPercent)}% dari ${limitMode ? "batas" : "target"}`}
+      aria-label={
+        showProgress
+          ? `${title}: ${Math.round(rawPercent)}% dari ${limitMode ? "batas" : "target"}`
+          : `${title}: ${valueLabel}`
+      }
       className="min-w-0 overflow-hidden rounded-[1.45rem] border border-slate-100 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.07)]"
     >
       <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-3">
@@ -213,17 +227,23 @@ function WeeklyMetricCard({
         })}
       </div>
 
-      <div className="mt-3 flex items-center gap-2.5">
-        <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
-          <div
-            className={`h-full rounded-full transition-all duration-700 ${colors.bar}`}
-            style={{ width: `${fillPercent}%` }}
-          />
+      {showProgress ? (
+        <div className="mt-3 flex items-center gap-2.5">
+          <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${colors.bar}`}
+              style={{ width: `${fillPercent}%` }}
+            />
+          </div>
+          <span className={`w-11 shrink-0 text-right text-xs font-black ${colors.text}`}>
+            {Math.round(rawPercent)}%
+          </span>
         </div>
-        <span className={`w-11 shrink-0 text-right text-xs font-black ${colors.text}`}>
-          {Math.round(rawPercent)}%
-        </span>
-      </div>
+      ) : (
+        <div className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-[10px] font-black leading-4 text-blue-700">
+          Nilai ditampilkan persis dari provider dan tidak dibandingkan dengan target workout.
+        </div>
+      )}
     </article>
   );
 }
@@ -335,6 +355,9 @@ export default function WellnessMomentumDashboard({
   nutritionCount,
   nutritionCalories,
   workoutCalories,
+  workoutTitle = "Kalori Workout",
+  workoutSubtitle = "Target terbakar",
+  workoutTargetEnabled = true,
   steps,
   nutritionTarget = 0,
   workoutTarget = 0,
@@ -400,16 +423,21 @@ export default function WellnessMomentumDashboard({
           limitMode
         />
         <WeeklyMetricCard
-          title="Kalori Workout"
-          subtitle="Target terbakar"
+          title={workoutTitle}
+          subtitle={workoutSubtitle}
           value={workoutCalories}
-          target={workoutTarget}
-          valueLabel={workoutTarget > 0 ? `${fmt(workoutCalories)} / ${fmt(workoutTarget)} kkal` : `${fmt(workoutCalories)} kkal`}
+          target={workoutTargetEnabled ? workoutTarget : 0}
+          valueLabel={
+            workoutTargetEnabled && workoutTarget > 0
+              ? `${fmt(workoutCalories)} / ${fmt(workoutTarget)} kkal`
+              : `${fmt(workoutCalories)} kkal`
+          }
           icon="🏋️"
           tone="teal"
           days={sevenDays}
           dayValue={(day) => day.workoutCalories}
           dayValueLabel={(value) => `${fmt(value)} kkal`}
+          showProgress={workoutTargetEnabled}
         />
         <WeeklyMetricCard
           title="Langkah"

@@ -125,6 +125,7 @@ async function coachActor(request: NextRequest): Promise<SupportActor | null> {
 
 export async function getSupportActor(request: NextRequest): Promise<SupportActor | null> {
   // WELLNESS_SUPPORT_EXPLICIT_ROLE_CONTEXT_V79F
+  // WELLNESS_SUPPORT_EXPLICIT_ACTOR_V79P
   // Shared Android WebView can retain Participant, Coach, Company, and Admin
   // cookies at the same time. The caller therefore declares its active portal
   // role so another valid cookie cannot hijack profile/support requests.
