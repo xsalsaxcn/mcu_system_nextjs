@@ -6,6 +6,7 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -556,16 +557,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const resolvedPointLedger = resolveWellnessPointBreakdown({
+      ledgerRows: pointRows,
+      calculated: {
+        nutrition: nutritionPoints,
+        workout: activityPoints,
+        healthtalk: healthtalkPoints,
+        other: otherPoints,
+      },
+    });
     const pointBreakdown = {
-      nutrition: nutritionPoints,
-      activity: activityPoints,
-      healthtalk: healthtalkPoints,
-      other: otherPoints,
+      nutrition: resolvedPointLedger.nutrition,
+      activity: resolvedPointLedger.workout,
+      healthtalk: resolvedPointLedger.healthtalk,
+      other: resolvedPointLedger.other,
     };
-    const totalPoints = Object.values(pointBreakdown).reduce(
-      (sum, value) => sum + value,
-      0
-    );
+    const totalPoints = resolvedPointLedger.total;
 
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
     const workoutChart = aggregateByDate(activityRows, activityCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
@@ -643,6 +650,8 @@ export async function GET(request: NextRequest) {
         latest_diastolic: latestBp?.secondary ?? null,
       },
       point_breakdown: pointBreakdown,
+        point_source: resolvedPointLedger.source,
+        point_ledger_rows: resolvedPointLedger.ledger_row_count,
       point_rules: {
         nutrition_full_meals: 3,
         nutrition_full_points: 10,

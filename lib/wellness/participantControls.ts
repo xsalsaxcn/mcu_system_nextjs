@@ -1,4 +1,5 @@
 // WELLNESS_PARTICIPANT_CONTROLS_V79F
+// WELLNESS_GOOGLE_FIT_CONNECTION_TRUTH_V79G
 // Central source of truth for participant portal access and the single active
 // fitness provider used by dashboards, ranking, and workout calculations.
 
@@ -90,7 +91,7 @@ export async function loadParticipantControlMap(
     safeRows(
       supabase
         .from("wellness_integrations")
-        .select("participant_id,provider,is_active,connected_at,last_sync_at")
+        .select("participant_id,provider,is_active,connected_at,last_sync_at,access_token,refresh_token,expires_at")
         .in("participant_id", ids)
         .in("provider", ["health_connect", "google_fit"]),
     ),
@@ -111,16 +112,26 @@ export async function loadParticipantControlMap(
   for (const participantId of ids) {
     const row = controlById.get(participantId) || null;
     const integrations = integrationsById.get(participantId) || [];
+    const usableIntegrations = integrations.filter((item: any) => {
+      const provider = normalizeFitnessSource(item.provider);
+      if (provider === "google_fit") {
+        return Boolean(clean(item.access_token) || clean(item.refresh_token));
+      }
+      if (provider === "health_connect") {
+        return Boolean(item.connected_at || item.last_sync_at || item.provider);
+      }
+      return false;
+    });
     const connectedProviders = [
       ...new Set(
-        integrations
+        usableIntegrations
           .map((item: any) => normalizeFitnessSource(item.provider))
           .filter((item: FitnessSource) => item !== "none"),
       ),
     ] as FitnessSource[];
     const activeProviders = [
       ...new Set(
-        integrations
+        usableIntegrations
           .filter((item: any) => enabled(item.is_active, true))
           .map((item: any) => normalizeFitnessSource(item.provider))
           .filter((item: FitnessSource) => item !== "none"),

@@ -7,6 +7,7 @@ import {
 } from "@/lib/wellness/googleSheetResponses";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 
 // WELLNESS_COACH_GROUP_RANKING_API_V76
 // WELLNESS_COACH_RANKING_SINGLE_FITNESS_SOURCE_V79F
@@ -482,13 +483,26 @@ export async function GET(request: NextRequest) {
         if (achieved) workoutAchievedDays += 1;
       }
 
-      const healthtalkPoints = participantHealthtalk.reduce(
+      let healthtalkPoints = participantHealthtalk.reduce(
         (sum: number, row: any) => sum + healthtalkPoint(row),
         0,
       );
-      const otherPoints = pointRows
-        .filter((row: any) => asNumber(row.participant_id) === id)
-        .reduce((sum: number, row: any) => sum + asNumber(row.points), 0);
+      const participantPointRows = pointRows.filter(
+        (row: any) => asNumber(row.participant_id) === id,
+      );
+      const pointLedger = resolveWellnessPointBreakdown({
+        ledgerRows: participantPointRows,
+        calculated: {
+          nutrition: nutritionPoints,
+          workout: workoutPoints,
+          healthtalk: healthtalkPoints,
+          other: 0,
+        },
+      });
+      nutritionPoints = pointLedger.nutrition;
+      workoutPoints = pointLedger.workout;
+      healthtalkPoints = pointLedger.healthtalk;
+      const otherPoints = pointLedger.other;
       const activeDates = new Set([
         ...foodByDate.keys(),
         ...workoutByDate.keys(),
@@ -517,8 +531,7 @@ export async function GET(request: NextRequest) {
         currentStreak += 1;
       }
 
-      const totalPoints =
-        nutritionPoints + workoutPoints + healthtalkPoints + otherPoints;
+      const totalPoints = pointLedger.total;
       const profile = profileMap.get(String(id)) || {};
       return {
         participant_id: id,
@@ -538,6 +551,9 @@ export async function GET(request: NextRequest) {
         nutrition_achieved_days: nutritionAchievedDays,
         healthtalk_points: healthtalkPoints,
         healthtalk_count: participantHealthtalk.length,
+        other_points: otherPoints,
+        point_source: pointLedger.source,
+        point_ledger_rows: pointLedger.ledger_row_count,
         current_streak: currentStreak,
       };
     });

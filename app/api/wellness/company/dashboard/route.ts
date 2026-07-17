@@ -9,12 +9,14 @@ import {
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { resolveCompanyPortalContext } from "@/lib/wellness/companyAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_COMPANY_DASHBOARD_RANKING_V78
 // WELLNESS_COMPANY_SINGLE_FITNESS_SOURCE_V79F
+// WELLNESS_COMPANY_POINT_LEDGER_TRUTH_V79G
 // Company-scoped executive dashboard, per-kelompok rankings, cross-group
 // rankings, flags, and aggregated before-after progress. No schema migration.
 
@@ -615,7 +617,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const healthtalkPoints = talks.reduce(
+      let healthtalkPoints = talks.reduce(
         (sum: number, item: any) => sum + healthtalkPoint(item),
         0,
       );
@@ -659,15 +661,24 @@ export async function GET(request: NextRequest) {
         number(participant.target_weight_kg),
       );
 
-      const otherPoints = (points.get(id) || [])
-        .filter((item: any) => {
-          const source = clean(item.source_type).toLowerCase();
-          return !/food|nutrition|activity|workout|healthtalk/.test(source);
-        })
-        .reduce((sum: number, item: any) => sum + number(item.points), 0);
+      const pointLedger = resolveWellnessPointBreakdown({
+        ledgerRows: points.get(id) || [],
+        calculated: {
+          nutrition: nutritionPoints,
+          workout: workoutPoints,
+          healthtalk: healthtalkPoints,
+          other: 0,
+        },
+      });
 
-      const totalPoints =
-        nutritionPoints + workoutPoints + healthtalkPoints + otherPoints;
+      // Canonical rule: do not add calculated event points on top of
+      // wellness_point_logs. Use the ledger per category, with calculation only
+      // for legacy/imported categories that have no ledger row.
+      nutritionPoints = pointLedger.nutrition;
+      workoutPoints = pointLedger.workout;
+      healthtalkPoints = pointLedger.healthtalk;
+      const otherPoints = pointLedger.other;
+      const totalPoints = pointLedger.total;
       const healthtalkPercent = clamp(healthtalkCount * 25, 0, 100);
       const streakPercent = clamp((streak / 7) * 100, 0, 100);
       const overallScore = Math.round(
@@ -710,6 +721,8 @@ export async function GET(request: NextRequest) {
         workout_points: workoutPoints,
         healthtalk_points: healthtalkPoints,
         other_points: otherPoints,
+        point_source: pointLedger.source,
+        point_ledger_rows: pointLedger.ledger_row_count,
         diligence_percent: clamp(diligencePercent, 0, 100),
         nutrition_achievement_percent: clamp(nutritionAchievementPercent, 0, 100),
         workout_achievement_percent: clamp(workoutAchievementPercent, 0, 100),

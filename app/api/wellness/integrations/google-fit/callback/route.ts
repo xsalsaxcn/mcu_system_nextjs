@@ -6,6 +6,7 @@ import { loadParticipantControl } from "@/lib/wellness/participantControls";
 
 // WELLNESS_GOOGLE_FIT_CALLBACK_V388
 // WELLNESS_GOOGLE_FIT_SINGLE_SOURCE_CALLBACK_V79F
+// WELLNESS_GOOGLE_FIT_CALLBACK_PERSISTENCE_V79G
 // Callback Google Fit menyimpan token ke wellness_integrations provider google_fit.
 
 function clean(value: any) {
@@ -160,13 +161,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // Google does not always send a new refresh_token on repeated consent.
+  // Preserve the previous token when available; an access-token-only connection
+  // is still valid until expiry and must be shown as connected.
   const refreshToken = clean(tokenData.refresh_token) || clean(existing?.refresh_token);
-
-  if (!refreshToken) {
-    return NextResponse.redirect(
-      portalUrl(req, "GOOGLE_FIT_REFRESH_TOKEN_MISSING")
-    );
-  }
 
   const profile = await fetchGoogleProfile(tokenData.access_token).catch(() => null);
 
@@ -179,57 +177,88 @@ export async function GET(req: NextRequest) {
     clean(profile?.email) ||
     `participant_${participantId}`;
 
+  const nowIso = new Date().toISOString();
+
   await supabase
     .from("wellness_integrations")
-    .update({ is_active: 0, updated_at: new Date().toISOString() })
+    .update({ is_active: 0, updated_at: nowIso })
     .eq("participant_id", participantId)
     .eq("provider", "health_connect");
 
-  await supabase
-    .from("wellness_integrations")
-    .delete()
-    .eq("participant_id", participantId)
-    .eq("provider", "google_fit");
-
-  if (providerUserId) {
-    await supabase
-      .from("wellness_integrations")
-      .delete()
-      .eq("provider", "google_fit")
-      .eq("provider_user_id", providerUserId);
-  }
-
-  const insertPayload: any = {
+  const savePayload: any = {
     participant_id: participantId,
     provider: "google_fit",
     provider_user_id: providerUserId,
     scope: clean(tokenData.scope),
     access_token: tokenData.access_token,
-    refresh_token: refreshToken,
+    refresh_token: refreshToken || null,
     expires_at: expiresAt,
     token_type: clean(tokenData.token_type) || "Bearer",
     is_active: 1,
-    connected_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    connected_at: existing?.connected_at || nowIso,
+    updated_at: nowIso,
     raw_payload: {
       profile,
       scope: tokenData.scope || null,
       token_type: tokenData.token_type || null,
       expires_in: tokenData.expires_in || null,
+      refresh_token_received: Boolean(tokenData.refresh_token),
+      marker: "WELLNESS_GOOGLE_FIT_CALLBACK_PERSISTENCE_V79G",
     },
   };
 
-  const { error: insertError } = await supabase
-    .from("wellness_integrations")
-    .insert(insertPayload);
+  let saveError: any = null;
+  if (existing?.id) {
+    const result = await supabase
+      .from("wellness_integrations")
+      .update(savePayload)
+      .eq("id", existing.id);
+    saveError = result.error;
+  } else {
+    const result = await supabase
+      .from("wellness_integrations")
+      .insert(savePayload);
+    saveError = result.error;
+  }
 
-  if (insertError) {
-    console.error("GOOGLE_FIT_INTEGRATION_INSERT_ERROR", insertError);
-
+  if (saveError) {
+    console.error("GOOGLE_FIT_INTEGRATION_SAVE_ERROR", saveError);
     return NextResponse.redirect(portalUrl(req, "GOOGLE_FIT_SAVE_FAILED"));
   }
 
-  const url = portalUrl(req, "GOOGLE_FIT_CONNECTED");
+  // Keep the selected source consistent even when OAuth is completed in an
+  // external browser rather than the Android WebView.
+  await supabase.from("wellness_participant_controls").upsert(
+    {
+      participant_id: participantId,
+      session_enabled: true,
+      fitness_enabled: true,
+      fitness_source: "google_fit",
+      updated_at: nowIso,
+    },
+    { onConflict: "participant_id" },
+  );
+
+  const { data: verified } = await supabase
+    .from("wellness_integrations")
+    .select("id,access_token,refresh_token,is_active,connected_at")
+    .eq("participant_id", participantId)
+    .eq("provider", "google_fit")
+    .eq("is_active", 1)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!verified?.id || !clean(verified.access_token)) {
+    return NextResponse.redirect(
+      portalUrl(req, "GOOGLE_FIT_SAVE_VERIFY_FAILED"),
+    );
+  }
+
+  const url = portalUrl(
+    req,
+    refreshToken ? "GOOGLE_FIT_CONNECTED" : "GOOGLE_FIT_CONNECTED_ACCESS_ONLY",
+  );
   url.searchParams.set("participant_id", String(participantId));
 
   if (sessionParticipant?.id && Number(sessionParticipant.id) !== participantId) {

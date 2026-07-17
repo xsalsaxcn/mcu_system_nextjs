@@ -2,6 +2,7 @@
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
 // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
+  // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
@@ -559,6 +560,10 @@ function noticeText(value: string) {
       "Strava berhasil terhubung. Klik Sync Strava untuk menarik activity terbaru.",
     GOOGLE_FIT_CONNECTED:
       "Google Fit berhasil terhubung. Klik Sync Google Fit untuk menarik activity terbaru.",
+    GOOGLE_FIT_CONNECTED_ACCESS_ONLY:
+      "Google Fit terhubung dengan access token. Klik Sync sekarang; koneksi ulang mungkin diperlukan setelah token kedaluwarsa.",
+    GOOGLE_FIT_SAVE_VERIFY_FAILED:
+      "Google Fit authorize berhasil tetapi koneksi belum terbaca kembali dari database. Silakan reconnect sekali lagi.",
     STRAVA_CLIENT_ID_NOT_SET:
       "STRAVA_CLIENT_ID belum diatur di Environment Variables.",
     STRAVA_CLIENT_ID_MISSING:
@@ -5115,13 +5120,21 @@ function DevicesTab({
                     : "bg-slate-100 text-slate-500"
               }`}
             >
-              {googleSelected
-                ? "Sumber Aktif"
-                : googleFitConnected
-                  ? "Connected"
-                  : "Not connected"}
+              {googleSelected && googleFitConnected
+                ? "Aktif · Connected"
+                : googleSelected
+                  ? "Dipilih · Belum terhubung"
+                  : googleFitConnected
+                    ? "Connected"
+                    : "Not connected"}
             </span>
           </div>
+
+          {googleSelected && !googleFitConnected ? (
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">
+              Google Fit sudah dipilih sebagai sumber, tetapi token koneksi belum tersimpan. Tekan Reconnect Google Fit dan kembali ke portal setelah izin selesai.
+            </div>
+          ) : null}
 
           <div className="mt-5 rounded-3xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
             <div>Kalori aktivitas: dipakai untuk target dan ranking.</div>
