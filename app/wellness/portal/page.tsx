@@ -1,7 +1,8 @@
 "use client";
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
-// WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
+// WELLNESS_GOOGLE_FIT_EXACT_LAST_SYNC_V79K
+  // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
 // WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
@@ -359,17 +360,12 @@ function activityCaloriesValue(item: any) {
     return estimatedDeviceDailyCalories(item);
   }
 
-  // Google Fit daily calories.expended can include resting/BMR energy.
-  // Only use the sanitized active-calorie value written by the sync route.
-  const sanitized = asNumber(
-    raw?.sanitized_active_calories ?? raw?.selected_active_calories,
+  // Google Fit REST provides total calories including BMR. It does not provide
+  // a separate exact active-calorie total in this sync. Never estimate it here.
+  const exactActive = asNumber(
+    raw?.google_fit_active_calories_exact ?? raw?.google_fit_active_calories,
   );
-  if (sanitized > 0) return sanitized;
-
-  const estimate = estimatedDeviceDailyCalories(item);
-  if (estimate > 0) return estimate;
-
-  return stored > 0 && stored <= 1200 ? stored : 0;
+  return exactActive > 0 ? exactActive : 0;
 }
 
 function googleFitTotalCaloriesValueV73(item: any) {
@@ -393,11 +389,18 @@ function historyWorkoutNoteV73(item: any) {
   if (isGoogleFitDailyRow(item)) {
     const totalCalories = googleFitTotalCaloriesValueV73(item);
 
-    if (totalCalories > 0 && Math.abs(totalCalories - activeCalories) >= 1) {
-      return `${fmtNumber(activeCalories, 0)} kkal aktivitas | ${fmtNumber(
-        totalCalories,
+    if (totalCalories > 0) {
+      if (activeCalories > 0) {
+        return `${fmtNumber(activeCalories, 0)} kkal aktivitas | ${fmtNumber(
+          totalCalories,
+          0,
+        )} kkal total (termasuk istirahat) | ${fmtNumber(steps, 0)} steps`;
+      }
+
+      return `${fmtNumber(totalCalories, 0)} kkal total Google Fit | ${fmtNumber(
+        steps,
         0,
-      )} kkal total (termasuk istirahat) | ${fmtNumber(steps, 0)} steps`;
+      )} steps | kalori aktif tidak diestimasi`;
     }
   }
 
@@ -672,6 +675,9 @@ export default function WellnessParticipantPortalPage() {
   const [fitnessLastSyncAt, setFitnessLastSyncAt] = useState<
     Record<string, string>
   >({});
+  const [fitnessLastSyncSnapshot, setFitnessLastSyncSnapshot] = useState<
+    Record<string, any>
+  >({});
   const [activities, setActivities] = useState<any[]>([]);
   const [activitySummary, setActivitySummary] = useState<any[]>([]);
   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
@@ -764,8 +770,24 @@ export default function WellnessParticipantPortalPage() {
         }
         return next;
       });
-      setActivities(result.activities || []);
+      const nextActivities = result.activities || [];
+      setActivities(nextActivities);
       setActivitySummary(result.activity_summary || []);
+
+      const latestGoogleFitDaily = nextActivities
+        .filter((item: any) => isGoogleFitDailyRow(item))
+        .sort((left: any, right: any) =>
+          clean(right?.updated_at || right?.raw_payload?.last_sync_at).localeCompare(
+            clean(left?.updated_at || left?.raw_payload?.last_sync_at),
+          ),
+        )[0];
+      const latestGoogleRaw = activityRawPayloadV72(latestGoogleFitDaily);
+      if (latestGoogleRaw?.exact_snapshot) {
+        setFitnessLastSyncSnapshot((current) => ({
+          ...current,
+          google_fit: latestGoogleRaw.exact_snapshot,
+        }));
+      }
       setClinicalHistory(result.clinical_history || []);
       setStep("portal");
 
@@ -902,6 +924,7 @@ export default function WellnessParticipantPortalPage() {
     setFitnessSettings(null);
     setIntegrations([]);
     setFitnessLastSyncAt({});
+    setFitnessLastSyncSnapshot({});
     setActivities([]);
     setActivitySummary([]);
     setClinicalHistory([]);
@@ -942,6 +965,12 @@ export default function WellnessParticipantPortalPage() {
         ...current,
         [providerKey]: completedAt,
       }));
+      if (result.last_sync_snapshot) {
+        setFitnessLastSyncSnapshot((current) => ({
+          ...current,
+          [providerKey]: result.last_sync_snapshot,
+        }));
+      }
 
       if (!options?.silent) {
         const fetched = Number(result.fetched || result.fetched_daily || 0);
@@ -1431,6 +1460,9 @@ export default function WellnessParticipantPortalPage() {
                   fitnessLastSyncAt.google_fit ||
                   googleFitConnected?.last_sync_at ||
                   ""
+                }
+                googleFitLastSyncSnapshot={
+                  fitnessLastSyncSnapshot.google_fit || null
                 }
                 fitnessSettings={fitnessSettings}
                 syncing={syncing}
@@ -4753,7 +4785,7 @@ function HistoryTab({
                     daily
                       ? selected
                         ? isGoogleFitDailyRow(item)
-                          ? "Dipakai untuk total & grafik — kalori aktif"
+                          ? "Dipakai untuk steps & grafik — data exact Last Sync"
                           : "Dipakai untuk total & grafik"
                         : isGoogleFitDailyRow(item)
                           ? "Tidak dipakai — total Google Fit termasuk kalori istirahat"
@@ -5040,6 +5072,7 @@ function DevicesTab({
   googleFitConnected,
   healthConnectLastSyncAt,
   googleFitLastSyncAt,
+  googleFitLastSyncSnapshot,
   fitnessSettings,
   syncing,
   syncProvider,
@@ -5048,6 +5081,7 @@ function DevicesTab({
   googleFitConnected: boolean;
   healthConnectLastSyncAt: string;
   googleFitLastSyncAt: string;
+  googleFitLastSyncSnapshot: any;
   fitnessSettings: any;
   syncing: string;
   syncProvider: (provider: "strava" | "google-fit") => void;
@@ -5205,10 +5239,13 @@ function DevicesTab({
           ) : null}
 
           <div className="mt-5 rounded-3xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
-            <div>Kalori aktivitas: dipakai untuk target dan ranking.</div>
+            <div>
+              Steps memakai sumber resmi <span className="font-black">estimated_steps</span>
+              yang digunakan Google Fit App.
+            </div>
             <div className="mt-1">
-              Kalori total: termasuk energi istirahat/basal dan hanya ditampilkan
-              sebagai informasi.
+              Kalori yang disinkronkan adalah total Google Fit termasuk energi
+              istirahat/basal. Kalori aktif tidak ditebak atau diestimasi.
             </div>
           </div>
 
@@ -5232,6 +5269,36 @@ function DevicesTab({
                 ? "Sedang memperbarui..."
                 : formatFitnessLastSync(googleFitLastSyncAt)}
             </div>
+
+            {googleFitLastSyncSnapshot ? (
+              <div className="mt-3 grid grid-cols-2 gap-2 border-t border-blue-100 pt-3">
+                <div className="rounded-xl bg-white/80 px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-wide text-blue-400">
+                    Steps saat sync
+                  </div>
+                  <div className="mt-1 text-base font-black text-blue-950">
+                    {fmtNumber(googleFitLastSyncSnapshot.steps || 0, 0)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white/80 px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-wide text-blue-400">
+                    Kalori total saat sync
+                  </div>
+                  <div className="mt-1 text-base font-black text-blue-950">
+                    {fmtNumber(
+                      googleFitLastSyncSnapshot.total_calories || 0,
+                      0,
+                    )} kkal
+                  </div>
+                </div>
+                <div className="col-span-2 break-all rounded-xl bg-white/60 px-3 py-2 text-[9px] font-bold leading-4 text-blue-700">
+                  Sumber steps: {clean(
+                    googleFitLastSyncSnapshot.step_data_source_id ||
+                      "estimated_steps",
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
