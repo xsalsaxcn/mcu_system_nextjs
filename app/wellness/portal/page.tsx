@@ -2,6 +2,7 @@
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
 // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
+// WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -552,6 +553,27 @@ function providerStatus(integrations: any[], provider: string) {
   );
 }
 
+function formatFitnessLastSync(value: any) {
+  const raw = clean(value);
+  if (!raw) return "Belum pernah sync";
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+
+  const formatted = new Intl.DateTimeFormat("id-ID", {
+    timeZone: "Asia/Jakarta",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(parsed);
+
+  return `${formatted} WIB`;
+}
+
 function noticeText(value: string) {
   const text = clean(value);
 
@@ -647,6 +669,9 @@ export default function WellnessParticipantPortalPage() {
   const [participant, setParticipant] = useState<any>(null);
   const [fitnessSettings, setFitnessSettings] = useState<any>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
+  const [fitnessLastSyncAt, setFitnessLastSyncAt] = useState<
+    Record<string, string>
+  >({});
   const [activities, setActivities] = useState<any[]>([]);
   const [activitySummary, setActivitySummary] = useState<any[]>([]);
   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
@@ -726,7 +751,19 @@ export default function WellnessParticipantPortalPage() {
       setFitnessSettings(
         result.fitness_settings || result.participant?.wellness_control || null,
       );
-      setIntegrations(result.integrations || []);
+      const nextIntegrations = result.integrations || [];
+      setIntegrations(nextIntegrations);
+      setFitnessLastSyncAt((current) => {
+        const next = { ...current };
+        for (const integration of nextIntegrations) {
+          const providerKey = clean(integration?.provider)
+            .toLowerCase()
+            .replace(/-/g, "_");
+          const lastSyncAt = clean(integration?.last_sync_at);
+          if (providerKey && lastSyncAt) next[providerKey] = lastSyncAt;
+        }
+        return next;
+      });
       setActivities(result.activities || []);
       setActivitySummary(result.activity_summary || []);
       setClinicalHistory(result.clinical_history || []);
@@ -864,6 +901,7 @@ export default function WellnessParticipantPortalPage() {
     setParticipant(null);
     setFitnessSettings(null);
     setIntegrations([]);
+    setFitnessLastSyncAt({});
     setActivities([]);
     setActivitySummary([]);
     setClinicalHistory([]);
@@ -898,6 +936,13 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
+      const providerKey = provider === "google-fit" ? "google_fit" : provider;
+      const completedAt = clean(result.last_sync_at) || new Date().toISOString();
+      setFitnessLastSyncAt((current) => ({
+        ...current,
+        [providerKey]: completedAt,
+      }));
+
       if (!options?.silent) {
         const fetched = Number(result.fetched || result.fetched_daily || 0);
         const inserted = Number(result.inserted || result.synced || 0);
@@ -1377,6 +1422,16 @@ export default function WellnessParticipantPortalPage() {
               <DevicesTab
                 healthConnectConnected={!!healthConnectConnected}
                 googleFitConnected={!!googleFitConnected}
+                healthConnectLastSyncAt={
+                  fitnessLastSyncAt.health_connect ||
+                  healthConnectConnected?.last_sync_at ||
+                  ""
+                }
+                googleFitLastSyncAt={
+                  fitnessLastSyncAt.google_fit ||
+                  googleFitConnected?.last_sync_at ||
+                  ""
+                }
                 fitnessSettings={fitnessSettings}
                 syncing={syncing}
                 syncProvider={syncProvider}
@@ -4983,12 +5038,16 @@ function formatDateTextV37(value: any) {
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
+  healthConnectLastSyncAt,
+  googleFitLastSyncAt,
   fitnessSettings,
   syncing,
   syncProvider,
 }: {
   healthConnectConnected: boolean;
   googleFitConnected: boolean;
+  healthConnectLastSyncAt: string;
+  googleFitLastSyncAt: string;
   fitnessSettings: any;
   syncing: string;
   syncProvider: (provider: "strava" | "google-fit") => void;
@@ -5088,6 +5147,15 @@ function DevicesTab({
             </div>
           )}
 
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+              Last Sync
+            </div>
+            <div className="mt-1 break-words text-sm font-black text-slate-900">
+              {formatFitnessLastSync(healthConnectLastSyncAt)}
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={() => window.location.reload()}
@@ -5154,6 +5222,17 @@ function DevicesTab({
               adalah {sourceLabel}.
             </div>
           ) : null}
+
+          <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-500">
+              Last Sync Google Fit
+            </div>
+            <div className="mt-1 break-words text-sm font-black text-blue-950">
+              {syncing === "google-fit"
+                ? "Sedang memperbarui..."
+                : formatFitnessLastSync(googleFitLastSyncAt)}
+            </div>
+          </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
             {googleSelected ? (
