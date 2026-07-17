@@ -1,6 +1,7 @@
 // WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
 // WELLNESS_GOOGLE_FIT_EXACT_LAST_SYNC_V79K
 // WELLNESS_GOOGLE_FIT_CLOUD_RECONCILIATION_V79M
+// WELLNESS_GOOGLE_FIT_NATIVE_FRESHNESS_GUARD_V79N
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -439,7 +440,7 @@ async function upsertDailyRow(params: {
 
   const existing = await params.supabase
     .from("wellness_activity_logs")
-    .select("id,steps,distance_km,duration_minutes,calories,raw_payload")
+    .select("id,steps,distance_km,duration_minutes,calories,raw_payload,updated_at")
     .eq("participant_id", params.participant.id)
     .eq("source", "google_fit")
     .eq("external_activity_id", externalId)
@@ -460,7 +461,48 @@ async function upsertDailyRow(params: {
     existing.data?.raw_payload,
   );
 
-  // Daily cumulative Google Fit values must never regress during the same day.
+  const existingRaw =
+    typeof existing.data?.raw_payload === "string"
+      ? (() => {
+          try {
+            return JSON.parse(existing.data.raw_payload);
+          } catch {
+            return {};
+          }
+        })()
+      : existing.data?.raw_payload || {};
+  const nativeMeasuredAt = clean(
+    existingRaw?.native_measured_at ||
+      existingRaw?.exact_snapshot?.measured_at ||
+      existingRaw?.exact_snapshot?.synced_at,
+  );
+  const nativeMeasuredAtMs = new Date(nativeMeasuredAt).getTime();
+  const nativeFresh =
+    clean(existingRaw?.sync_mode) === "native_live_daily" &&
+    Number.isFinite(nativeMeasuredAtMs) &&
+    Date.now() - nativeMeasuredAtMs < 20 * 60 * 1000;
+
+  // A fresh Android readDailyTotal snapshot is closer to the device than the
+  // REST fitness store. Do not replace it with a delayed cloud aggregate.
+  if (existing.data?.id && nativeFresh) {
+    return {
+      action: "native_preserved",
+      row: existing.data,
+      resolvedRow: {
+        ...params.row,
+        steps: previousSteps,
+        distance_km: previousDistanceKm,
+        duration_minutes: previousDurationMinutes,
+        google_fit_total_calories: previousTotalCalories,
+        step_data_source_id:
+          existingRaw?.exact_snapshot?.source ||
+          "google_fit_android_read_daily_total",
+      },
+      nativePreserved: true,
+    };
+  }
+
+  // Daily cumulative Google Fit cloud values must never regress during the same day.
   // A temporary cloud lag can return a smaller partial value; preserve the
   // highest canonical value already observed for this participant and date.
   const resolvedRow = {

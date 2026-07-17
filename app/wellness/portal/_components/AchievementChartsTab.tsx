@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_CHART_DEVICE_PRIMARY_SOURCE_V72
 // WELLNESS_CHART_TODAY_ONLY_SUMMARY_V73
+// WELLNESS_CHART_NO_GOOGLE_FIT_CALORIE_GUESS_V79N
 
 type ChartPoint = {
   date: string;
@@ -1233,10 +1234,15 @@ function chartCaloriesValue(item: any) {
   }
 
   if (provider === "google_fit") {
+    // Google Fit total calories include basal/resting energy. Use only an
+    // explicitly reported active-calorie value. Never estimate workout calories.
     return firstNumber([
-      raw?.sanitized_active_calories,
+      raw?.google_fit_active_calories_exact,
+      raw?.google_fit_active_calories,
       raw?.selected_active_calories,
-      chartEstimatedCaloriesV72(item),
+      raw?.active_calories_available === true
+        ? raw?.sanitized_active_calories
+        : 0,
     ]);
   }
 
