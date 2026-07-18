@@ -5255,7 +5255,8 @@ function formatDateTextV37(value: any) {
 
   return raw.slice(0, 10);
 }
-// WELLNESS_GOOGLE_FIT_DEVICES_PROP_EXACT_V79R2
+// WELLNESS_GOOGLE_FIT_DEVICES_PROP_V79Q1
+// WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
@@ -5485,9 +5486,10 @@ function DevicesTab({
                   </div>
                 </div>
                 <div className="col-span-2 break-all rounded-xl bg-white/60 px-3 py-2 text-[9px] font-bold leading-4 text-blue-700">
-                  Sumber steps: {clean(
-                    googleFitLastSyncSnapshot.step_data_source_id ||
-                      "estimated_steps",
+                  Sumber: {clean(
+                    googleFitLastSyncSnapshot.source ||
+                      googleFitLastSyncSnapshot.step_data_source_id ||
+                      "google_fit_android_read_daily_total",
                   )}
                 </div>
               </div>
@@ -5497,22 +5499,34 @@ function DevicesTab({
           <div className="mt-5 flex flex-wrap gap-3">
             {googleSelected ? (
               nativeGoogleFitBridgeV79Q() ? (
-                <button
-                  type="button"
-                  onClick={() => connectNativeGoogleFit(googleFitConnected)}
-                  disabled={syncing === "google-fit"}
-                  className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100 disabled:opacity-40"
-                >
-                  {googleFitConnected
-                    ? "Ganti Akun Google Fit"
-                    : "Hubungkan Google Fit"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => connectNativeGoogleFit(false)}
+                    disabled={syncing === "google-fit"}
+                    className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100 disabled:opacity-40"
+                  >
+                    {googleFitConnected
+                      ? "Siapkan Akun di Perangkat"
+                      : "Hubungkan Google Fit"}
+                  </button>
+                  {googleFitConnected ? (
+                    <button
+                      type="button"
+                      onClick={() => connectNativeGoogleFit(true)}
+                      disabled={syncing === "google-fit"}
+                      className="rounded-full border border-blue-200 bg-white px-4 py-3 text-xs font-black text-blue-700 disabled:opacity-40"
+                    >
+                      Ganti Akun
+                    </button>
+                  ) : null}
+                </>
               ) : (
                 <a
                   href="/api/wellness/integrations/google-fit/connect"
                   className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
                 >
-                  {googleFitConnected ? "Ganti Akun Google Fit" : "Konek Google Fit"}
+                  {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
                 </a>
               )
             ) : (

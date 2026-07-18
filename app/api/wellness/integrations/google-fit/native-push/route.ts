@@ -1,5 +1,6 @@
 // WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N
 // Exact Android HistoryClient.readDailyTotal snapshot. No calorie estimation.
+// WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -232,12 +233,34 @@ export async function POST(req: NextRequest) {
 
     const existingResult = await supabase
       .from("wellness_activity_logs")
-      .select("id")
+      .select("id,raw_payload,updated_at")
       .eq("participant_id", participantId)
       .eq("source", "google_fit")
       .eq("external_activity_id", externalId)
       .maybeSingle();
     if (existingResult.error) throw existingResult.error;
+
+    const previousRaw = parseRawPayload(existingResult.data?.raw_payload);
+    const previousMeasuredAtText = clean(
+      previousRaw?.native_measured_at || previousRaw?.exact_snapshot?.measured_at,
+    );
+    const previousMeasuredAtMs = new Date(previousMeasuredAtText).getTime();
+    if (
+      existingResult.data?.id &&
+      Number.isFinite(previousMeasuredAtMs) &&
+      previousMeasuredAtMs > measuredAtMs
+    ) {
+      return NextResponse.json({
+        ok: true,
+        marker: MARKER,
+        action: "newer_native_preserved",
+        message: "Snapshot native yang lebih baru sudah tersimpan.",
+        last_sync_at: clean(existingResult.data?.updated_at) || nowIso,
+        last_sync_snapshot: previousRaw?.exact_snapshot || null,
+        active_calories_available:
+          previousRaw?.active_calories_available === true,
+      });
+    }
 
     let action = "inserted";
     if (existingResult.data?.id) {
@@ -273,7 +296,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       marker: MARKER,
       action,
-      message: `Google Fit Live tersinkron: ${steps.toLocaleString("id-ID")} steps.`,
+      message: `Google Fit tersinkron dari perangkat: ${steps.toLocaleString("id-ID")} steps, ${Math.round(totalCalories).toLocaleString("id-ID")} kkal total.`,
       last_sync_at: nowIso,
       last_sync_snapshot: exactSnapshot,
       active_calories_available: activeCaloriesAvailable,
