@@ -5,6 +5,7 @@
   // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
 // WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
 // WELLNESS_GOOGLE_FIT_NATIVE_BRIDGE_V79N
+// WELLNESS_GOOGLE_FIT_STABLE_SYNC_AND_TOTAL_DISPLAY_V79O
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -2605,6 +2606,56 @@ function HomeTab({
       return raw?.active_calories_available === false;
     });
 
+  // WELLNESS_GOOGLE_FIT_EXACT_TOTAL_DISPLAY_V79O
+  // When Google Fit exposes only total energy, show that exact provider value
+  // instead of a fake 0. It is explicitly not compared with the workout target.
+  const googleFitTotalByDateV79O = useMemo(() => {
+    const values = new Map<string, { value: number; updatedAt: number }>();
+
+    for (const item of workoutItems || []) {
+      if (!isGoogleFitDailyRow(item)) continue;
+
+      const date = activityDateKey(item);
+      const value = googleFitTotalCaloriesValueV73(item);
+      const updatedAt = activityUpdatedAtMs(item);
+
+      if (!date || !(value > 0)) continue;
+
+      const current = values.get(date);
+      if (!current || updatedAt >= current.updatedAt) {
+        values.set(date, { value, updatedAt });
+      }
+    }
+
+    return values;
+  }, [JSON.stringify(workoutItems || [])]);
+
+  const todayGoogleFitTotalCaloriesV79O =
+    googleFitTotalByDateV79O.get(todayKeyV73)?.value || 0;
+
+  const googleFitTotalDisplayModeV79O =
+    googleFitActiveCaloriesUnavailable &&
+    todayGoogleFitTotalCaloriesV79O > 0;
+
+  const participantMomentumDisplayV79O = useMemo(() => {
+    if (!googleFitTotalDisplayModeV79O) return participantMomentum;
+
+    return {
+      ...participantMomentum,
+      days: (participantMomentum.days || []).map((day: any) => ({
+        ...day,
+        workoutCalories:
+          googleFitTotalByDateV79O.get(day.date)?.value ||
+          day.workoutCalories ||
+          0,
+      })),
+    };
+  }, [
+    participantMomentum,
+    googleFitTotalDisplayModeV79O,
+    googleFitTotalByDateV79O,
+  ]);
+
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
       <CoachNoticeCenter participant={participant} />
@@ -2642,22 +2693,36 @@ function HomeTab({
 
         {googleFitActiveCaloriesUnavailable ? (
           <div className="mt-5 rounded-[1.5rem] border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
-            Google Fit Live sudah mengirim steps secara langsung. Google Fit hanya
-            memberikan kalori total yang termasuk energi basal; kalori workout
-            exact belum tersedia dan tidak akan ditebak. Karena itu kartu Kalori
-            Workout tetap kosong sampai ada workout manual atau active calories
-            dari Health Connect.
+            Google Fit mengirim steps dan kalori total secara langsung. Karena
+            kalori total mencakup energi basal, nilainya ditampilkan sebagai
+            <strong> Kalori Google Fit</strong> dan tidak dihitung sebagai poin
+            atau target workout.
           </div>
         ) : null}
 
         <div className="mt-5">
           <WellnessMomentumDashboard
-            days={participantMomentum.days}
-            currentStreak={participantMomentum.currentStreak}
-            successDates={participantMomentum.successDates}
+            days={participantMomentumDisplayV79O.days}
+            currentStreak={participantMomentumDisplayV79O.currentStreak}
+            successDates={participantMomentumDisplayV79O.successDates}
             nutritionCount={todayRowCount}
             nutritionCalories={todayCalories}
-            workoutCalories={asNumber(totals.workoutCalories || 0)}
+            workoutCalories={
+              googleFitTotalDisplayModeV79O
+                ? todayGoogleFitTotalCaloriesV79O
+                : asNumber(totals.workoutCalories || 0)
+            }
+            workoutTitle={
+              googleFitTotalDisplayModeV79O
+                ? "Kalori Google Fit"
+                : "Kalori Workout"
+            }
+            workoutSubtitle={
+              googleFitTotalDisplayModeV79O
+                ? "Total energi, termasuk basal"
+                : "Target terbakar"
+            }
+            workoutTargetEnabled={!googleFitTotalDisplayModeV79O}
             steps={asNumber(totals.steps || 0)}
             nutritionTarget={nutritionTarget}
             workoutTarget={workoutTarget}
@@ -5398,7 +5463,7 @@ function DevicesTab({
                 href="/api/wellness/integrations/google-fit/connect"
                 className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
               >
-                {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
+                {googleFitConnected ? "Ganti Akun Google Fit" : "Konek Google Fit"}
               </a>
             ) : (
               <span className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500">
@@ -5418,9 +5483,7 @@ function DevicesTab({
             >
               {syncing === "google-fit"
                 ? "Sync..."
-                : nativeGoogleFitBridgeV79N()
-                  ? "Sync Google Fit Live"
-                  : "Sync Google Fit Cloud"}
+                : "Sync Google Fit"}
             </button>
           </div>
         </div>

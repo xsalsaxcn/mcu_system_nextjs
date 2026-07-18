@@ -4,7 +4,6 @@ import { useState } from "react";
 
 // WELLNESS_MOMENTUM_UI_POLISH_V69
 // WELLNESS_GOOGLE_FIT_TOTAL_DISPLAY_V79O
-// WELLNESS_MOMENTUM_PROPS_BUILD_FIX_V79P
 // Improves mobile card proportions, full day labels, and interactive bar values without changing calculations or data sources.
 
 // WELLNESS_MOMENTUM_STREAK_V66

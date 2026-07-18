@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_CHART_DEVICE_PRIMARY_SOURCE_V72
 // WELLNESS_CHART_TODAY_ONLY_SUMMARY_V73
 // WELLNESS_CHART_NO_GOOGLE_FIT_CALORIE_GUESS_V79N
+// WELLNESS_CHART_GOOGLE_FIT_TOTAL_DISPLAY_V79O
 
 type ChartPoint = {
   date: string;
@@ -124,10 +125,21 @@ export default function AchievementChartsTab({
     });
   }, [JSON.stringify(nutritionData?.logs || [])]);
 
+  const googleFitTotalOnlyModeV79O = useMemo(
+    () =>
+      normalizeWorkoutItemsForChartV72(workoutItems || []).some((item: any) =>
+        googleFitTotalOnlyRowV79O(item),
+      ),
+    [JSON.stringify(workoutItems || [])],
+  );
+
   const workoutSeries = useMemo(() => {
     return aggregateChartSeries(normalizeWorkoutItemsForChartV72(workoutItems || []), {
       dateKeys: ["log_date", "created_at", "updated_at", "date"],
-      valueGetter: (item: any) => chartCaloriesValue(item),
+      valueGetter: (item: any) =>
+        googleFitTotalOnlyRowV79O(item)
+          ? chartGoogleFitTotalCaloriesV79O(item)
+          : chartCaloriesValue(item),
       average: false,
     });
   }, [JSON.stringify(workoutItems || [])]);
@@ -233,7 +245,10 @@ export default function AchievementChartsTab({
   );
 
   const nutritionRedFlag = todayNutrition > nutritionLimit;
-  const workoutRedFlag = todayWorkout > 0 && todayWorkout < workoutMinTarget;
+  const workoutRedFlag =
+    !googleFitTotalOnlyModeV79O &&
+    todayWorkout > 0 &&
+    todayWorkout < workoutMinTarget;
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
@@ -281,15 +296,25 @@ export default function AchievementChartsTab({
           />
 
           <ChartStatusCard
-            title="Workout hari ini"
+            title={
+              googleFitTotalOnlyModeV79O
+                ? "Energi total Google Fit hari ini"
+                : "Workout hari ini"
+            }
             value={`${fmtNumber(todayWorkout, 0)} kkal`}
-            note={`Target minimal ${fmtNumber(workoutMinTarget, 0)} kkal per hari`}
+            note={
+              googleFitTotalOnlyModeV79O
+                ? "Nilai exact provider, termasuk energi basal; bukan poin workout"
+                : `Target minimal ${fmtNumber(workoutMinTarget, 0)} kkal per hari`
+            }
             danger={workoutRedFlag}
             dangerText="Red flag: kalori terbakar masih rendah"
             safeText={
-              todayWorkout > 0
-                ? "Aktivitas memenuhi target minimal"
-                : "Belum ada workout hari ini"
+              googleFitTotalOnlyModeV79O
+                ? "Ditampilkan sesuai snapshot Google Fit"
+                : todayWorkout > 0
+                  ? "Aktivitas memenuhi target minimal"
+                  : "Belum ada workout hari ini"
             }
           />
         </div>
@@ -307,13 +332,25 @@ export default function AchievementChartsTab({
         />
 
         <SmoothDashboardChart
-          title="Grafik Workout Kalori Terbakar"
-          description="Total kalori aktivitas per hari dari manual, Google Fit, atau Health Connect."
+          title={
+            googleFitTotalOnlyModeV79O
+              ? "Grafik Energi Total Google Fit"
+              : "Grafik Workout Kalori Terbakar"
+          }
+          description={
+            googleFitTotalOnlyModeV79O
+              ? "Nilai total energi exact dari Google Fit, termasuk energi basal. Tidak digunakan sebagai poin workout."
+              : "Total kalori aktivitas per hari dari manual, Google Fit, atau Health Connect."
+          }
           unit="kkal"
           data={workoutSeries}
-          limit={workoutMinTarget}
-          dangerMode="below"
-          emptyText="Belum ada data workout untuk dibuat grafik."
+          limit={googleFitTotalOnlyModeV79O ? undefined : workoutMinTarget}
+          dangerMode={googleFitTotalOnlyModeV79O ? undefined : "below"}
+          emptyText={
+            googleFitTotalOnlyModeV79O
+              ? "Belum ada snapshot total energi Google Fit."
+              : "Belum ada data workout untuk dibuat grafik."
+          }
         />
       </div>
 
@@ -1256,6 +1293,28 @@ function chartCaloriesValue(item: any) {
     raw?.original_payload?.calories,
     raw?.original_payload?.active_calories,
   ]);
+}
+
+
+function chartGoogleFitTotalCaloriesV79O(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  return firstNumber([
+    raw?.google_fit_total_calories,
+    raw?.google_fit_calories_expended,
+    raw?.exact_snapshot?.total_calories,
+    raw?.last_sync_snapshot?.total_calories,
+    raw?.original_payload?.calories_expended,
+    raw?.original_payload?.calories,
+  ]);
+}
+
+function googleFitTotalOnlyRowV79O(item: any) {
+  const raw = parseRawPayloadForChart(item);
+  return (
+    chartDeviceProviderV72(item) === "google_fit" &&
+    raw?.active_calories_available === false &&
+    chartGoogleFitTotalCaloriesV79O(item) > 0
+  );
 }
 
 function chartDailyPriorityV72(item: any) {
