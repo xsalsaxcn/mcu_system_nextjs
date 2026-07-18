@@ -5,7 +5,6 @@
   // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
 // WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
 // WELLNESS_GOOGLE_FIT_NATIVE_BRIDGE_V79N
-// WELLNESS_GOOGLE_FIT_STABLE_SYNC_AND_TOTAL_DISPLAY_V79O
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -95,7 +94,7 @@ function todayDate() {
   return `${year}-${month}-${day}`;
 }
 
-function nativeGoogleFitBridgeV79Q() {
+function nativeGoogleFitBridgeV79N() {
   if (typeof window === "undefined") return null;
   const bridge = (window as any).HarmonyNativeFitness;
   return bridge && typeof bridge.syncGoogleFit === "function" ? bridge : null;
@@ -943,34 +942,6 @@ export default function WellnessParticipantPortalPage() {
     setMessage("Session peserta keluar. Masuk ulang dengan OTP.");
   }
 
-  function connectNativeGoogleFit(changeAccount = false) {
-    const bridge = nativeGoogleFitBridgeV79Q();
-    const participantId = Number(participant?.id || 0);
-    if (!bridge || participantId <= 0) return false;
-
-    setSyncing("google-fit");
-    setMessage(
-      changeAccount
-        ? "Membuka pilihan akun Google Fit..."
-        : "Menghubungkan akun Google Fit pada perangkat...",
-    );
-
-    try {
-      if (changeAccount && typeof bridge.changeGoogleFitAccount === "function") {
-        bridge.changeGoogleFitAccount(participantId);
-      } else if (typeof bridge.connectGoogleFit === "function") {
-        bridge.connectGoogleFit(participantId);
-      } else {
-        setSyncing("");
-        setMessage("APK belum mendukung koneksi Google Fit V79Q.");
-      }
-    } catch (error: any) {
-      setSyncing("");
-      setMessage(error?.message || "Google Fit tidak dapat dihubungkan.");
-    }
-    return true;
-  }
-
   async function syncProvider(
     provider: "strava" | "google-fit",
     options?: { silent?: boolean; days?: number },
@@ -982,7 +953,7 @@ export default function WellnessParticipantPortalPage() {
     }
 
     const nativeBridge =
-      provider === "google-fit" ? nativeGoogleFitBridgeV79Q() : null;
+      provider === "google-fit" ? nativeGoogleFitBridgeV79N() : null;
     if (nativeBridge && Number(participant?.id || 0) > 0) {
       try {
         nativeBridge.syncGoogleFit(Number(participant.id));
@@ -1214,12 +1185,7 @@ export default function WellnessParticipantPortalPage() {
 
       setSyncing("");
       if (!detail.ok) {
-        setMessage(
-          detail.message ||
-            (detail.requires_connect
-              ? "Tekan Hubungkan Google Fit satu kali, lalu gunakan tombol Sync berikutnya tanpa memilih email lagi."
-              : "Google Fit Live gagal."),
-        );
+        setMessage(detail.message || "Google Fit Live gagal.");
         return;
       }
 
@@ -1253,7 +1219,7 @@ export default function WellnessParticipantPortalPage() {
     if (step !== "portal") return;
     if (!fitnessEnabled || activeFitnessSource !== "google_fit") return;
     if (!googleFitConnected) return;
-    if (nativeGoogleFitBridgeV79Q()) return;
+    if (nativeGoogleFitBridgeV79N()) return;
 
     const intervalId = window.setInterval(
       () => {
@@ -1568,7 +1534,6 @@ export default function WellnessParticipantPortalPage() {
                 fitnessSettings={fitnessSettings}
                 syncing={syncing}
                 syncProvider={syncProvider}
-                connectNativeGoogleFit={connectNativeGoogleFit}
               />
             ) : null}
 
@@ -1790,7 +1755,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/18 text-lg font-black backdrop-blur"
             aria-label="Refresh chat"
           >
-            â†»
+            ↻
           </button>
         </div>
       </div>
@@ -1854,10 +1819,10 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                       </span>
                       {fromParticipant ? (
                         <span>
-                          {item.is_read ? "Â· Sudah dibaca" : "Â· Terkirim"}
+                          {item.is_read ? "· Sudah dibaca" : "· Terkirim"}
                         </span>
                       ) : (
-                        <span>Â· {coachDisplayName}</span>
+                        <span>· {coachDisplayName}</span>
                       )}
                     </div>
                   </div>
@@ -1890,7 +1855,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             {sending ? (
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
             ) : (
-              "âž¤"
+              "➤"
             )}
           </button>
         </div>
@@ -2640,56 +2605,6 @@ function HomeTab({
       return raw?.active_calories_available === false;
     });
 
-  // WELLNESS_GOOGLE_FIT_EXACT_TOTAL_DISPLAY_V79O
-  // When Google Fit exposes only total energy, show that exact provider value
-  // instead of a fake 0. It is explicitly not compared with the workout target.
-  const googleFitTotalByDateV79O = useMemo(() => {
-    const values = new Map<string, { value: number; updatedAt: number }>();
-
-    for (const item of workoutItems || []) {
-      if (!isGoogleFitDailyRow(item)) continue;
-
-      const date = activityDateKey(item);
-      const value = googleFitTotalCaloriesValueV73(item);
-      const updatedAt = activityUpdatedAtMs(item);
-
-      if (!date || !(value > 0)) continue;
-
-      const current = values.get(date);
-      if (!current || updatedAt >= current.updatedAt) {
-        values.set(date, { value, updatedAt });
-      }
-    }
-
-    return values;
-  }, [JSON.stringify(workoutItems || [])]);
-
-  const todayGoogleFitTotalCaloriesV79O =
-    googleFitTotalByDateV79O.get(todayKeyV73)?.value || 0;
-
-  const googleFitTotalDisplayModeV79O =
-    googleFitActiveCaloriesUnavailable &&
-    todayGoogleFitTotalCaloriesV79O > 0;
-
-  const participantMomentumDisplayV79O = useMemo(() => {
-    if (!googleFitTotalDisplayModeV79O) return participantMomentum;
-
-    return {
-      ...participantMomentum,
-      days: (participantMomentum.days || []).map((day: any) => ({
-        ...day,
-        workoutCalories:
-          googleFitTotalByDateV79O.get(day.date)?.value ||
-          day.workoutCalories ||
-          0,
-      })),
-    };
-  }, [
-    participantMomentum,
-    googleFitTotalDisplayModeV79O,
-    googleFitTotalByDateV79O,
-  ]);
-
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
       <CoachNoticeCenter participant={participant} />
@@ -2727,36 +2642,22 @@ function HomeTab({
 
         {googleFitActiveCaloriesUnavailable ? (
           <div className="mt-5 rounded-[1.5rem] border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
-            Google Fit mengirim steps dan kalori total secara langsung. Karena
-            kalori total mencakup energi basal, nilainya ditampilkan sebagai
-            <strong> Kalori Google Fit</strong> dan tidak dihitung sebagai poin
-            atau target workout.
+            Google Fit Live sudah mengirim steps secara langsung. Google Fit hanya
+            memberikan kalori total yang termasuk energi basal; kalori workout
+            exact belum tersedia dan tidak akan ditebak. Karena itu kartu Kalori
+            Workout tetap kosong sampai ada workout manual atau active calories
+            dari Health Connect.
           </div>
         ) : null}
 
         <div className="mt-5">
           <WellnessMomentumDashboard
-            days={participantMomentumDisplayV79O.days}
-            currentStreak={participantMomentumDisplayV79O.currentStreak}
-            successDates={participantMomentumDisplayV79O.successDates}
+            days={participantMomentum.days}
+            currentStreak={participantMomentum.currentStreak}
+            successDates={participantMomentum.successDates}
             nutritionCount={todayRowCount}
             nutritionCalories={todayCalories}
-            workoutCalories={
-              googleFitTotalDisplayModeV79O
-                ? todayGoogleFitTotalCaloriesV79O
-                : asNumber(totals.workoutCalories || 0)
-            }
-            workoutTitle={
-              googleFitTotalDisplayModeV79O
-                ? "Kalori Google Fit"
-                : "Kalori Workout"
-            }
-            workoutSubtitle={
-              googleFitTotalDisplayModeV79O
-                ? "Total energi, termasuk basal"
-                : "Target terbakar"
-            }
-            workoutTargetEnabled={!googleFitTotalDisplayModeV79O}
+            workoutCalories={asNumber(totals.workoutCalories || 0)}
             steps={asNumber(totals.steps || 0)}
             nutritionTarget={nutritionTarget}
             workoutTarget={workoutTarget}
@@ -3115,7 +3016,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
           }`}
           aria-hidden="true"
         >
-          ðŸ””
+          🔔
           {hasAlarm ? (
             <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
               {unreadNotes.length > 99 ? "99+" : unreadNotes.length}
@@ -3146,7 +3047,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
           }`}
           aria-hidden="true"
         >
-          âŒ„
+          ⌄
         </span>
       </button>
 
@@ -3728,7 +3629,7 @@ function NutritionTab({
             </div>
 
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-xl font-black text-slate-700 shadow-sm">
-              {nutritionHistoryOpen ? "âˆ’" : "+"}
+              {nutritionHistoryOpen ? "−" : "+"}
             </span>
           </button>
 
@@ -3738,7 +3639,7 @@ function NutritionTab({
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-50 text-base font-black text-teal-700"
             aria-label="Refresh riwayat nutrisi"
           >
-            {loadingHistory ? "â€¦" : "â†»"}
+            {loadingHistory ? "…" : "↻"}
           </button>
         </div>
 
@@ -3771,7 +3672,7 @@ function NutritionTab({
               {directNutrition?.sources ? (
                 <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
                   Supabase {directNutrition.sources.supabase_rows || 0} data
-                  {" â€¢ "}
+                  {" • "}
                   Google Sheet {directNutrition.sources.google_sheet_rows ||
                     0}{" "}
                   data
@@ -4973,11 +4874,11 @@ function HistoryTab({
                     daily
                       ? selected
                         ? isGoogleFitDailyRow(item)
-                          ? "Dipakai untuk steps & grafik â€” data exact Last Sync"
+                          ? "Dipakai untuk steps & grafik — data exact Last Sync"
                           : "Dipakai untuk total & grafik"
                         : isGoogleFitDailyRow(item)
-                          ? "Tidak dipakai â€” total Google Fit termasuk kalori istirahat"
-                          : "Tidak dipakai â€” sumber lain yang aktif"
+                          ? "Tidak dipakai — total Google Fit termasuk kalori istirahat"
+                          : "Tidak dipakai — sumber lain yang aktif"
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
@@ -5255,8 +5156,6 @@ function formatDateTextV37(value: any) {
 
   return raw.slice(0, 10);
 }
-// WELLNESS_GOOGLE_FIT_DEVICES_PROP_V79Q1
-// WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
@@ -5266,7 +5165,6 @@ function DevicesTab({
   fitnessSettings,
   syncing,
   syncProvider,
-  connectNativeGoogleFit,
 }: {
   healthConnectConnected: boolean;
   googleFitConnected: boolean;
@@ -5276,7 +5174,6 @@ function DevicesTab({
   fitnessSettings: any;
   syncing: string;
   syncProvider: (provider: "strava" | "google-fit") => void;
-  connectNativeGoogleFit: (changeAccount?: boolean) => boolean;
 }) {
   // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
   const enabled = fitnessSettings?.fitness_enabled === true;
@@ -5320,7 +5217,7 @@ function DevicesTab({
 
       {hasMultiple ? (
         <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
-          âš ï¸ Hanya boleh memilih satu aplikasi fitness. Hubungi Admin untuk
+          ⚠️ Hanya boleh memilih satu aplikasi fitness. Hubungi Admin untuk
           menonaktifkan salah satu koneksi.
         </div>
       ) : null}
@@ -5415,9 +5312,9 @@ function DevicesTab({
               }`}
             >
               {googleSelected && googleFitConnected
-                ? "Aktif Â· Connected"
+                ? "Aktif · Connected"
                 : googleSelected
-                  ? "Dipilih Â· Belum terhubung"
+                  ? "Dipilih · Belum terhubung"
                   : googleFitConnected
                     ? "Connected"
                     : "Not connected"}
@@ -5486,10 +5383,9 @@ function DevicesTab({
                   </div>
                 </div>
                 <div className="col-span-2 break-all rounded-xl bg-white/60 px-3 py-2 text-[9px] font-bold leading-4 text-blue-700">
-                  Sumber: {clean(
-                    googleFitLastSyncSnapshot.source ||
-                      googleFitLastSyncSnapshot.step_data_source_id ||
-                      "google_fit_android_read_daily_total",
+                  Sumber steps: {clean(
+                    googleFitLastSyncSnapshot.step_data_source_id ||
+                      "estimated_steps",
                   )}
                 </div>
               </div>
@@ -5498,37 +5394,12 @@ function DevicesTab({
 
           <div className="mt-5 flex flex-wrap gap-3">
             {googleSelected ? (
-              nativeGoogleFitBridgeV79Q() ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => connectNativeGoogleFit(false)}
-                    disabled={syncing === "google-fit"}
-                    className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100 disabled:opacity-40"
-                  >
-                    {googleFitConnected
-                      ? "Siapkan Akun di Perangkat"
-                      : "Hubungkan Google Fit"}
-                  </button>
-                  {googleFitConnected ? (
-                    <button
-                      type="button"
-                      onClick={() => connectNativeGoogleFit(true)}
-                      disabled={syncing === "google-fit"}
-                      className="rounded-full border border-blue-200 bg-white px-4 py-3 text-xs font-black text-blue-700 disabled:opacity-40"
-                    >
-                      Ganti Akun
-                    </button>
-                  ) : null}
-                </>
-              ) : (
-                <a
-                  href="/api/wellness/integrations/google-fit/connect"
-                  className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
-                >
-                  {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
-                </a>
-              )
+              <a
+                href="/api/wellness/integrations/google-fit/connect"
+                className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
+              >
+                {googleFitConnected ? "Reconnect Google Fit" : "Konek Google Fit"}
+              </a>
             ) : (
               <span className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500">
                 Pilih melalui Portal Admin
@@ -5547,7 +5418,9 @@ function DevicesTab({
             >
               {syncing === "google-fit"
                 ? "Sync..."
-                : "Sync Google Fit"}
+                : nativeGoogleFitBridgeV79N()
+                  ? "Sync Google Fit Live"
+                  : "Sync Google Fit Cloud"}
             </button>
           </div>
         </div>
@@ -5704,7 +5577,7 @@ function NutritionMiniCard({ item }: { item: any }) {
             {item.food_name || "-"}
           </div>
           <div className="mt-0.5 text-xs font-bold capitalize text-slate-500">
-            {item.meal_type || "-"} â€¢ {item.portion || "-"}
+            {item.meal_type || "-"} • {item.portion || "-"}
           </div>
           {item.photo_url ? (
             <img
@@ -5746,7 +5619,7 @@ function NutritionLogCard({ item }: { item: any }) {
             {item.food_name || "-"}
           </div>
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {item.log_date} â€¢ {item.meal_type || "-"} â€¢ {item.portion || "-"}
+            {item.log_date} • {item.meal_type || "-"} • {item.portion || "-"}
           </div>
           <div className="mt-2 text-xs font-black text-blue-700">
             {Number.isFinite(Number(item.calories))
@@ -5780,7 +5653,7 @@ function HealthtalkLogCard({ item }: { item: any }) {
             {item.healthtalk_title || item.healthtalk_type || "Health Talk"}
           </div>
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {item.log_date || "-"} â€¢ {item.healthtalk_type || "-"}
+            {item.log_date || "-"} • {item.healthtalk_type || "-"}
           </div>
           {item.notes ? (
             <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
@@ -6151,4 +6024,3 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
-
