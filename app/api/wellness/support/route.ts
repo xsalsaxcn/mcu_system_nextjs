@@ -27,6 +27,8 @@ function clampLimit(value: any, fallback = 30, max = 50) {
 
 
 // WELLNESS_SUPPORT_RESPONSE_NORMALIZATION_V79Q
+// WELLNESS_SUPPORT_GOOGLE_SHEET_HEADERS_V79Q5
+// WELLNESS_SUPPORT_EXACT_RESPONSE_AND_ADMIN_CONTEXT_V79R2
 function firstValue(source: any, keys: string[], fallback: any = "") {
   for (const key of keys) {
     if (source?.[key] !== undefined && source?.[key] !== null) {
@@ -38,37 +40,37 @@ function firstValue(source: any, keys: string[], fallback: any = "") {
 
 function normalizeThread(item: any) {
   const ticketId = clean(
-    firstValue(item, ["ticket_id", "ticketId", "thread_id", "threadId", "id"]),
+    firstValue(item, ["ticket_id", "ticketId", "thread_id", "threadId", "id", "Ticket ID"]),
   );
   return {
     ...item,
     ticket_id: ticketId,
     ticketId,
-    actor_type: clean(firstValue(item, ["actor_type", "actorType", "role"])),
+    actor_type: clean(firstValue(item, ["actor_type", "actorType", "role", "Actor Type"])),
     actor_name: clean(
-      firstValue(item, ["actor_name", "actorName", "name", "user_name", "userName"]),
+      firstValue(item, ["actor_name", "actorName", "name", "user_name", "userName", "Actor Name"]),
     ),
-    actor_code: clean(firstValue(item, ["actor_code", "actorCode", "code"])),
+    actor_code: clean(firstValue(item, ["actor_code", "actorCode", "code", "Actor Code"])),
     company: clean(
-      firstValue(item, ["company", "company_name", "companyName", "actor_company", "actorCompany"]),
+      firstValue(item, ["company", "company_name", "companyName", "actor_company", "actorCompany", "Company"]),
     ),
     kelompok: clean(
-      firstValue(item, ["kelompok", "group", "group_name", "groupName", "actor_group", "actorGroup"]),
+      firstValue(item, ["kelompok", "group", "group_name", "groupName", "actor_group", "actorGroup", "Kelompok"]),
     ),
-    status: clean(firstValue(item, ["status"], "Open")) || "Open",
+    status: clean(firstValue(item, ["status", "Status"], "Open")) || "Open",
     last_message: clean(
-      firstValue(item, ["last_message", "lastMessage", "message", "latest_message", "latestMessage"]),
+      firstValue(item, ["last_message", "lastMessage", "message", "latest_message", "latestMessage", "Last Message"]),
     ),
     updated_at: clean(
-      firstValue(item, ["updated_at", "updatedAt", "last_message_at", "lastMessageAt", "created_at", "createdAt"]),
+      firstValue(item, ["updated_at", "updatedAt", "last_message_at", "lastMessageAt", "created_at", "createdAt", "Updated At", "Created At"]),
     ),
     unread_admin: Math.max(
       0,
-      Number(firstValue(item, ["unread_admin", "unreadAdmin", "admin_unread", "adminUnread"], 0)) || 0,
+      Number(firstValue(item, ["unread_admin", "unreadAdmin", "admin_unread", "adminUnread", "Unread Admin"], 0)) || 0,
     ),
     unread_user: Math.max(
       0,
-      Number(firstValue(item, ["unread_user", "unreadUser", "user_unread", "userUnread"], 0)) || 0,
+      Number(firstValue(item, ["unread_user", "unreadUser", "user_unread", "userUnread", "Unread User"], 0)) || 0,
     ),
   };
 }
@@ -76,21 +78,21 @@ function normalizeThread(item: any) {
 function normalizeMessage(item: any) {
   return {
     ...item,
-    message_id: clean(firstValue(item, ["message_id", "messageId", "id"])),
+    message_id: clean(firstValue(item, ["message_id", "messageId", "id", "Message ID"])),
     ticket_id: clean(firstValue(item, ["ticket_id", "ticketId", "thread_id", "threadId"])),
-    sender_type: clean(firstValue(item, ["sender_type", "senderType"])),
-    sender_name: clean(firstValue(item, ["sender_name", "senderName", "name"])),
-    message: clean(firstValue(item, ["message", "text", "body"])),
-    created_at: clean(firstValue(item, ["created_at", "createdAt", "timestamp"])),
-    attachment_name: clean(firstValue(item, ["attachment_name", "attachmentName"])),
-    attachment_type: clean(firstValue(item, ["attachment_type", "attachmentType"])),
-    attachment_size: Number(firstValue(item, ["attachment_size", "attachmentSize"], 0)) || 0,
-    attachment_url: clean(firstValue(item, ["attachment_url", "attachmentUrl"])),
+    sender_type: clean(firstValue(item, ["sender_type", "senderType", "Sender Type"])),
+    sender_name: clean(firstValue(item, ["sender_name", "senderName", "name", "Sender Name"])),
+    message: clean(firstValue(item, ["message", "text", "body", "Message"])),
+    created_at: clean(firstValue(item, ["created_at", "createdAt", "timestamp", "Created At"])),
+    attachment_name: clean(firstValue(item, ["attachment_name", "attachmentName", "Attachment Name"])),
+    attachment_type: clean(firstValue(item, ["attachment_type", "attachmentType", "Attachment Type"])),
+    attachment_size: Number(firstValue(item, ["attachment_size", "attachmentSize", "Attachment Size"], 0)) || 0,
+    attachment_url: clean(firstValue(item, ["attachment_url", "attachmentUrl", "Attachment URL"])),
     attachment_preview_url: clean(
-      firstValue(item, ["attachment_preview_url", "attachmentPreviewUrl", "attachment_url", "attachmentUrl"]),
+      firstValue(item, ["attachment_preview_url", "attachmentPreviewUrl", "attachment_url", "attachmentUrl", "Attachment Preview URL", "Attachment URL"]),
     ),
-    read_by_user_at: clean(firstValue(item, ["read_by_user_at", "readByUserAt"])),
-    read_by_admin_at: clean(firstValue(item, ["read_by_admin_at", "readByAdminAt"])),
+    read_by_user_at: clean(firstValue(item, ["read_by_user_at", "readByUserAt", "Read By User At"])),
+    read_by_admin_at: clean(firstValue(item, ["read_by_admin_at", "readByAdminAt", "Read By Admin At"])),
   };
 }
 
@@ -113,6 +115,82 @@ function normalizeSummary(summary: any, threads: any[]) {
   };
 }
 
+function parseJsonLike(value: any) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed || !["{", "["].includes(trimmed[0])) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function tableRowsToObjects(value: any) {
+  if (!Array.isArray(value) || value.length < 2) return [];
+  const headers = value[0];
+  if (!Array.isArray(headers) || !headers.every((item: any) => typeof item === "string")) {
+    return [];
+  }
+  return value.slice(1).filter(Array.isArray).map((row: any[]) =>
+    Object.fromEntries(headers.map((header: string, index: number) => [header, row[index]])),
+  );
+}
+
+function extractArray(result: any, keys: string[]) {
+  const seen = new Set<any>();
+
+  function visit(raw: any, depth: number): any[] {
+    if (depth > 7) return [];
+    const value = parseJsonLike(raw);
+    if (value && typeof value === "object") {
+      if (seen.has(value)) return [];
+      seen.add(value);
+    }
+
+    if (Array.isArray(value)) {
+      const tableRows = tableRowsToObjects(value);
+      if (tableRows.length) return tableRows;
+      if (value.every((item: any) => item && typeof item === "object" && !Array.isArray(item))) {
+        return value;
+      }
+      for (const item of value) {
+        const nested = visit(item, depth + 1);
+        if (nested.length) return nested;
+      }
+      return [];
+    }
+
+    if (!value || typeof value !== "object") return [];
+
+    for (const key of keys) {
+      if (value[key] !== undefined) {
+        const nested = visit(value[key], depth + 1);
+        if (nested.length) return nested;
+      }
+    }
+
+    for (const nestedValue of Object.values(value)) {
+      const nested = visit(nestedValue, depth + 1);
+      if (nested.length) return nested;
+    }
+
+    return [];
+  }
+
+  return visit(result, 0);
+}
+
+function extractSummary(result: any) {
+  return (
+    result?.summary ||
+    result?.data?.summary ||
+    result?.result?.summary ||
+    result?.payload?.summary ||
+    result
+  );
+}
+
 export async function GET(request: NextRequest) {
   try {
     const mode = clean(request.nextUrl.searchParams.get("mode") || "messages");
@@ -128,20 +206,19 @@ export async function GET(request: NextRequest) {
         limit: clampLimit(request.nextUrl.searchParams.get("limit"), 40, 80),
       });
 
-      const rawThreads = Array.isArray(result.threads)
-        ? result.threads
-        : Array.isArray(result.items)
-          ? result.items
-          : Array.isArray(result.rows)
-            ? result.rows
-            : Array.isArray(result.data)
-              ? result.data
-              : [];
+      const rawThreads = extractArray(result, ["threads", "items", "rows", "data"]);
       const threads = rawThreads.map(normalizeThread).filter((item: any) => item.ticket_id);
-      return ok({ threads, summary: normalizeSummary(result.summary || result, threads) });
+      return ok({ threads, summary: normalizeSummary(extractSummary(result), threads) });
     }
 
-    const actor = await getSupportActor(request);
+    const requestedContext = clean(
+      request.headers.get("x-wellness-actor-context") ||
+        request.nextUrl.searchParams.get("actor_context"),
+    ).toLowerCase();
+    const actor =
+      requestedContext === "admin"
+        ? getSupportAdminActor(request)
+        : await getSupportActor(request);
     if (!actor) return fail("Session Wellness belum aktif.", 401);
 
     if (mode === "summary" && !actor.isAdmin) {
@@ -172,7 +249,7 @@ export async function GET(request: NextRequest) {
         limit,
         markRead: true,
       });
-      return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: (result.messages || result.items || result.rows || []).map(normalizeMessage) });
+      return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: extractArray(result, ["messages", "items", "rows", "data"]).map(normalizeMessage) });
     }
 
     await postSupportWebhook("supportEnsureThread", {
@@ -185,7 +262,7 @@ export async function GET(request: NextRequest) {
       markRead: true,
     });
 
-    return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: (result.messages || result.items || result.rows || []).map(normalizeMessage) });
+    return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: extractArray(result, ["messages", "items", "rows", "data"]).map(normalizeMessage) });
   } catch (error: any) {
     return fail(error?.message || "Gagal memuat Chat with Admin.", 500);
   }
@@ -193,7 +270,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const actor = await getSupportActor(request);
+    const requestedContext = clean(
+      request.headers.get("x-wellness-actor-context") ||
+        request.nextUrl.searchParams.get("actor_context"),
+    ).toLowerCase();
+    const actor =
+      requestedContext === "admin"
+        ? getSupportAdminActor(request)
+        : await getSupportActor(request);
     if (!actor) return fail("Session Wellness belum aktif.", 401);
 
     const body = await request.json().catch(() => ({}));

@@ -177,14 +177,19 @@ export default function WellnessAdminMobilePage() {
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [supportUnread, setSupportUnread] = useState(0);
   // WELLNESS_ADMIN_SUPPORT_BADGE_V79P
+  // WELLNESS_ADMIN_SUPPORT_CONTEXT_EXACT_V79R2
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
   const [controlNotice, setControlNotice] = useState("");
 
   async function loadSupportUnread() {
-    const result = await fetch("/api/wellness/support?mode=threads&status=all&limit=1", {
-      cache: "no-store",
-      credentials: "include",
-    })
+    const result = await fetch(
+      "/api/wellness/support?mode=threads&status=all&limit=1&actor_context=admin",
+      {
+        cache: "no-store",
+        credentials: "include",
+        headers: { "x-wellness-actor-context": "admin" },
+      },
+    )
       .then((response) => response.json())
       .catch(() => null);
 

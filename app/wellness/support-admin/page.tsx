@@ -8,6 +8,8 @@ import {
 } from "@/components/wellness/supportFiles";
 
 // WELLNESS_SUPPORT_ADMIN_DIRECT_INBOX_V79Q
+// WELLNESS_SUPPORT_GOOGLE_SHEET_HEADERS_V79Q5
+// WELLNESS_SUPPORT_ADMIN_CONTEXT_EXACT_V79R2
 // Compact WhatsApp-style inbox. No Wellness menu card or oversized hero.
 
 function clean(value: any) {
@@ -22,36 +24,36 @@ function pick(item: any, keys: string[], fallback: any = "") {
 }
 
 function normalizeThread(item: any) {
-  const ticketId = clean(pick(item, ["ticket_id", "ticketId", "thread_id", "threadId", "id"]));
+  const ticketId = clean(pick(item, ["ticket_id", "ticketId", "thread_id", "threadId", "id", "Ticket ID"]));
   return {
     ...item,
     ticket_id: ticketId,
-    actor_type: clean(pick(item, ["actor_type", "actorType", "role"])),
-    actor_name: clean(pick(item, ["actor_name", "actorName", "name"])) || "Pengguna Wellness",
-    actor_code: clean(pick(item, ["actor_code", "actorCode", "code"])),
-    company: clean(pick(item, ["company", "company_name", "companyName", "actorCompany"])) || "-",
-    kelompok: clean(pick(item, ["kelompok", "group", "group_name", "groupName", "actorGroup"])),
-    last_message: clean(pick(item, ["last_message", "lastMessage", "message"])),
-    updated_at: clean(pick(item, ["updated_at", "updatedAt", "last_message_at", "lastMessageAt", "created_at"])),
-    unread_admin: Math.max(0, Number(pick(item, ["unread_admin", "unreadAdmin", "adminUnread"], 0)) || 0),
-    status: clean(pick(item, ["status"], "Open")) || "Open",
+    actor_type: clean(pick(item, ["actor_type", "actorType", "role", "Actor Type"])),
+    actor_name: clean(pick(item, ["actor_name", "actorName", "name", "Actor Name"])) || "Pengguna Wellness",
+    actor_code: clean(pick(item, ["actor_code", "actorCode", "code", "Actor Code"])),
+    company: clean(pick(item, ["company", "company_name", "companyName", "actorCompany", "Company"])) || "-",
+    kelompok: clean(pick(item, ["kelompok", "group", "group_name", "groupName", "actorGroup", "Kelompok"])),
+    last_message: clean(pick(item, ["last_message", "lastMessage", "message", "Last Message"])),
+    updated_at: clean(pick(item, ["updated_at", "updatedAt", "last_message_at", "lastMessageAt", "created_at", "Updated At", "Created At"])),
+    unread_admin: Math.max(0, Number(pick(item, ["unread_admin", "unreadAdmin", "adminUnread", "Unread Admin"], 0)) || 0),
+    status: clean(pick(item, ["status", "Status"], "Open")) || "Open",
   };
 }
 
 function normalizeMessage(item: any) {
   return {
     ...item,
-    message_id: clean(pick(item, ["message_id", "messageId", "id"])),
-    sender_type: clean(pick(item, ["sender_type", "senderType"])),
-    sender_name: clean(pick(item, ["sender_name", "senderName", "name"])),
-    message: clean(pick(item, ["message", "text", "body"])),
-    created_at: clean(pick(item, ["created_at", "createdAt", "timestamp"])),
-    attachment_url: clean(pick(item, ["attachment_url", "attachmentUrl"])),
-    attachment_preview_url: clean(pick(item, ["attachment_preview_url", "attachmentPreviewUrl", "attachment_url", "attachmentUrl"])),
-    attachment_name: clean(pick(item, ["attachment_name", "attachmentName"])),
-    attachment_type: clean(pick(item, ["attachment_type", "attachmentType"])),
-    attachment_size: Number(pick(item, ["attachment_size", "attachmentSize"], 0)) || 0,
-    read_by_user_at: clean(pick(item, ["read_by_user_at", "readByUserAt"])),
+    message_id: clean(pick(item, ["message_id", "messageId", "id", "Message ID"])),
+    sender_type: clean(pick(item, ["sender_type", "senderType", "Sender Type"])),
+    sender_name: clean(pick(item, ["sender_name", "senderName", "name", "Sender Name"])),
+    message: clean(pick(item, ["message", "text", "body", "Message"])),
+    created_at: clean(pick(item, ["created_at", "createdAt", "timestamp", "Created At"])),
+    attachment_url: clean(pick(item, ["attachment_url", "attachmentUrl", "Attachment URL"])),
+    attachment_preview_url: clean(pick(item, ["attachment_preview_url", "attachmentPreviewUrl", "attachment_url", "attachmentUrl", "Attachment Preview URL", "Attachment URL"])),
+    attachment_name: clean(pick(item, ["attachment_name", "attachmentName", "Attachment Name"])),
+    attachment_type: clean(pick(item, ["attachment_type", "attachmentType", "Attachment Type"])),
+    attachment_size: Number(pick(item, ["attachment_size", "attachmentSize", "Attachment Size"], 0)) || 0,
+    read_by_user_at: clean(pick(item, ["read_by_user_at", "readByUserAt", "Read By User At"])),
   };
 }
 
@@ -133,8 +135,12 @@ export default function WellnessSupportAdminPage() {
 
   async function loadThreads(options?: { quiet?: boolean }) {
     if (!options?.quiet && threads.length === 0) setLoadingThreads(true);
-    const params = new URLSearchParams({ mode: "threads", status, limit: "80" });
-    const result = await fetch(`/api/wellness/support?${params}`, { cache: "no-store" })
+    const params = new URLSearchParams({ mode: "threads", status, limit: "80", actor_context: "admin" });
+    const result = await fetch(`/api/wellness/support?${params}`, {
+      cache: "no-store",
+      credentials: "include",
+      headers: { "x-wellness-actor-context": "admin" },
+    })
       .then((response) => response.json())
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
@@ -165,7 +171,11 @@ export default function WellnessSupportAdminPage() {
     if (cache?.messages?.length) setMessages(cache.messages.map(normalizeMessage));
     if (!options?.quiet && !cache?.messages?.length) setLoadingMessages(true);
 
-    const result = await fetch(`/api/wellness/support?mode=messages&thread_id=${encodeURIComponent(item.ticket_id)}&limit=60`, { cache: "no-store" })
+    const result = await fetch(`/api/wellness/support?mode=messages&thread_id=${encodeURIComponent(item.ticket_id)}&limit=60&actor_context=admin`, {
+      cache: "no-store",
+      credentials: "include",
+      headers: { "x-wellness-actor-context": "admin" },
+    })
       .then((response) => response.json())
       .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
 
@@ -228,7 +238,11 @@ export default function WellnessSupportAdminPage() {
       if (attachment) uploaded = await uploadSupportAttachment(attachment, ticketId);
       const result = await fetch("/api/wellness/support", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-wellness-actor-context": "admin",
+        },
+        credentials: "include",
         body: JSON.stringify({ action: "send_message", thread_id: ticketId, message: messageText, attachment: uploaded?.attachment || null }),
       }).then((response) => response.json());
       if (!result.ok) throw new Error(result.message || "Balasan gagal dikirim.");
@@ -248,7 +262,11 @@ export default function WellnessSupportAdminPage() {
     if (!selected?.ticket_id) return;
     const result = await fetch("/api/wellness/support", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-wellness-actor-context": "admin",
+      },
+      credentials: "include",
       body: JSON.stringify({ action: "update_status", thread_id: selected.ticket_id, status: nextStatus }),
     }).then((response) => response.json());
     if (result.ok) {
@@ -277,7 +295,7 @@ export default function WellnessSupportAdminPage() {
             </div>
 
             <div className="max-h-[calc(100vh-10rem)] divide-y divide-slate-100 overflow-y-auto">
-              {loadingThreads && threads.length === 0 ? <div className="p-10 text-center text-sm font-bold text-slate-400">Memuat percakapan...</div> : filteredThreads.length === 0 ? <div className="p-10 text-center"><div className="text-4xl">💬</div><div className="mt-3 text-sm font-black">Belum ada percakapan</div><div className="mt-1 text-xs font-bold text-slate-500">Tekan refresh bila badge menunjukkan pesan baru.</div></div> : filteredThreads.map((item) => {
+              {loadingThreads && threads.length === 0 ? <div className="p-10 text-center text-sm font-bold text-slate-400">Memuat percakapan...</div> : filteredThreads.length === 0 ? <div className="p-10 text-center"><div className="text-4xl">💬</div><div className="mt-3 text-sm font-black">Belum ada percakapan</div><div className="mt-1 text-xs font-bold text-slate-500">Data pesan terdeteksi tetapi format daftar belum terbaca. Setelah V79Q5, nama pengirim akan muncul di sini.</div></div> : filteredThreads.map((item) => {
                 const unread = Number(item.unread_admin || 0);
                 return <button key={item.ticket_id} type="button" onClick={() => void openThread(item)} className="flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-slate-50"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 text-sm font-black text-white">{initials(item.actor_name)}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div className={`min-w-0 break-words text-sm leading-5 ${unread ? "font-black" : "font-bold"}`}>{item.actor_name}</div><div className={`shrink-0 text-[10px] font-bold ${unread ? "text-teal-700" : "text-slate-400"}`}>{formatTime(item.updated_at)}</div></div><div className="mt-0.5 truncate text-[10px] font-bold text-slate-400">{roleLabel(item.actor_type)} · {item.company}{item.kelompok ? ` · ${item.kelompok}` : ""}</div><div className="mt-1 flex items-center justify-between gap-2"><div className={`min-w-0 truncate text-xs ${unread ? "font-bold text-slate-800" : "font-semibold text-slate-500"}`}>{item.last_message || "Belum ada pesan"}</div>{unread ? <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-teal-600 px-1.5 text-[10px] font-black text-white">{unread}</span> : null}</div></div></button>;
               })}

@@ -1790,7 +1790,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/18 text-lg font-black backdrop-blur"
             aria-label="Refresh chat"
           >
-            ↻
+            â†»
           </button>
         </div>
       </div>
@@ -1854,10 +1854,10 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
                       </span>
                       {fromParticipant ? (
                         <span>
-                          {item.is_read ? "· Sudah dibaca" : "· Terkirim"}
+                          {item.is_read ? "Â· Sudah dibaca" : "Â· Terkirim"}
                         </span>
                       ) : (
-                        <span>· {coachDisplayName}</span>
+                        <span>Â· {coachDisplayName}</span>
                       )}
                     </div>
                   </div>
@@ -1890,7 +1890,7 @@ function ParticipantCoachChat({ participant }: { participant: any }) {
             {sending ? (
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
             ) : (
-              "➤"
+              "âž¤"
             )}
           </button>
         </div>
@@ -3115,7 +3115,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
           }`}
           aria-hidden="true"
         >
-          🔔
+          ðŸ””
           {hasAlarm ? (
             <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
               {unreadNotes.length > 99 ? "99+" : unreadNotes.length}
@@ -3146,7 +3146,7 @@ function CoachNoticeCenter({ participant }: { participant: any }) {
           }`}
           aria-hidden="true"
         >
-          ⌄
+          âŒ„
         </span>
       </button>
 
@@ -3728,7 +3728,7 @@ function NutritionTab({
             </div>
 
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-xl font-black text-slate-700 shadow-sm">
-              {nutritionHistoryOpen ? "−" : "+"}
+              {nutritionHistoryOpen ? "âˆ’" : "+"}
             </span>
           </button>
 
@@ -3738,7 +3738,7 @@ function NutritionTab({
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-50 text-base font-black text-teal-700"
             aria-label="Refresh riwayat nutrisi"
           >
-            {loadingHistory ? "…" : "↻"}
+            {loadingHistory ? "â€¦" : "â†»"}
           </button>
         </div>
 
@@ -3771,7 +3771,7 @@ function NutritionTab({
               {directNutrition?.sources ? (
                 <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
                   Supabase {directNutrition.sources.supabase_rows || 0} data
-                  {" • "}
+                  {" â€¢ "}
                   Google Sheet {directNutrition.sources.google_sheet_rows ||
                     0}{" "}
                   data
@@ -4973,11 +4973,11 @@ function HistoryTab({
                     daily
                       ? selected
                         ? isGoogleFitDailyRow(item)
-                          ? "Dipakai untuk steps & grafik — data exact Last Sync"
+                          ? "Dipakai untuk steps & grafik â€” data exact Last Sync"
                           : "Dipakai untuk total & grafik"
                         : isGoogleFitDailyRow(item)
-                          ? "Tidak dipakai — total Google Fit termasuk kalori istirahat"
-                          : "Tidak dipakai — sumber lain yang aktif"
+                          ? "Tidak dipakai â€” total Google Fit termasuk kalori istirahat"
+                          : "Tidak dipakai â€” sumber lain yang aktif"
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
@@ -5255,7 +5255,7 @@ function formatDateTextV37(value: any) {
 
   return raw.slice(0, 10);
 }
-// WELLNESS_GOOGLE_FIT_DEVICES_PROP_V79Q1
+// WELLNESS_GOOGLE_FIT_DEVICES_PROP_EXACT_V79R2
 function DevicesTab({
   healthConnectConnected,
   googleFitConnected,
@@ -5319,7 +5319,7 @@ function DevicesTab({
 
       {hasMultiple ? (
         <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
-          ⚠️ Hanya boleh memilih satu aplikasi fitness. Hubungi Admin untuk
+          âš ï¸ Hanya boleh memilih satu aplikasi fitness. Hubungi Admin untuk
           menonaktifkan salah satu koneksi.
         </div>
       ) : null}
@@ -5414,9 +5414,9 @@ function DevicesTab({
               }`}
             >
               {googleSelected && googleFitConnected
-                ? "Aktif · Connected"
+                ? "Aktif Â· Connected"
                 : googleSelected
-                  ? "Dipilih · Belum terhubung"
+                  ? "Dipilih Â· Belum terhubung"
                   : googleFitConnected
                     ? "Connected"
                     : "Not connected"}
@@ -5690,7 +5690,7 @@ function NutritionMiniCard({ item }: { item: any }) {
             {item.food_name || "-"}
           </div>
           <div className="mt-0.5 text-xs font-bold capitalize text-slate-500">
-            {item.meal_type || "-"} • {item.portion || "-"}
+            {item.meal_type || "-"} â€¢ {item.portion || "-"}
           </div>
           {item.photo_url ? (
             <img
@@ -5732,7 +5732,7 @@ function NutritionLogCard({ item }: { item: any }) {
             {item.food_name || "-"}
           </div>
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {item.log_date} • {item.meal_type || "-"} • {item.portion || "-"}
+            {item.log_date} â€¢ {item.meal_type || "-"} â€¢ {item.portion || "-"}
           </div>
           <div className="mt-2 text-xs font-black text-blue-700">
             {Number.isFinite(Number(item.calories))
@@ -5766,7 +5766,7 @@ function HealthtalkLogCard({ item }: { item: any }) {
             {item.healthtalk_title || item.healthtalk_type || "Health Talk"}
           </div>
           <div className="mt-1 text-xs font-bold capitalize text-slate-500">
-            {item.log_date || "-"} • {item.healthtalk_type || "-"}
+            {item.log_date || "-"} â€¢ {item.healthtalk_type || "-"}
           </div>
           {item.notes ? (
             <div className="mt-2 text-xs font-bold leading-5 text-slate-500">
@@ -6137,3 +6137,4 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>) {
 
   return path;
 }
+
