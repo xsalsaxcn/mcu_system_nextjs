@@ -1,7 +1,6 @@
 // WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
 // WELLNESS_GOOGLE_FIT_EXACT_LAST_SYNC_V79K
-// WELLNESS_GOOGLE_FIT_CLOUD_RECONCILIATION_V79M
-// WELLNESS_GOOGLE_FIT_NATIVE_FRESHNESS_GUARD_V79N
+// WELLNESS_GOOGLE_FIT_REST_STABLE_V80A
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -20,13 +19,8 @@ import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
 export const runtime = "nodejs";
 
-const MARKER = "WELLNESS_GOOGLE_FIT_CLOUD_RECONCILIATION_V79M";
+const MARKER = "WELLNESS_GOOGLE_FIT_REST_STABLE_V80A";
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
-const CLOUD_RECONCILIATION_DELAYS_MS = [0, 3500, 6500] as const;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -387,47 +381,7 @@ async function safeReadAggregate(params: {
 }
 
 
-function mergeAggregatePasses(passes: any[]) {
-  const rows = new Map<string, number>();
-  const messages: string[] = [];
-  let successCount = 0;
-  let dataTypeName = "";
-  let dataSourceId = "";
 
-  for (const pass of passes) {
-    dataTypeName ||= clean(pass?.dataTypeName);
-    dataSourceId ||= clean(pass?.dataSourceId);
-
-    if (!pass?.ok) {
-      if (clean(pass?.message)) messages.push(clean(pass.message));
-      continue;
-    }
-
-    successCount += 1;
-    for (const [date, value] of pass.rows.entries()) {
-      rows.set(date, Math.max(Number(rows.get(date) || 0), Number(value || 0)));
-    }
-  }
-
-  return {
-    ok: successCount > 0,
-    dataTypeName,
-    dataSourceId,
-    rows,
-    message: messages.join(" | "),
-    successCount,
-    passCount: passes.length,
-  };
-}
-
-function rawPayloadTotalCalories(rawPayload: any) {
-  return Math.max(
-    0,
-    Number(rawPayload?.google_fit_total_calories || 0),
-    Number(rawPayload?.google_fit_calories_expended || 0),
-    Number(rawPayload?.exact_snapshot?.total_calories || 0),
-  );
-}
 
 async function upsertDailyRow(params: {
   supabase: any;
@@ -448,79 +402,7 @@ async function upsertDailyRow(params: {
 
   if (existing.error) throw existing.error;
 
-  const previousSteps = Math.max(0, Number(existing.data?.steps || 0));
-  const previousDistanceKm = Math.max(
-    0,
-    Number(existing.data?.distance_km || 0),
-  );
-  const previousDurationMinutes = Math.max(
-    0,
-    Number(existing.data?.duration_minutes || 0),
-  );
-  const previousTotalCalories = rawPayloadTotalCalories(
-    existing.data?.raw_payload,
-  );
-
-  const existingRaw =
-    typeof existing.data?.raw_payload === "string"
-      ? (() => {
-          try {
-            return JSON.parse(existing.data.raw_payload);
-          } catch {
-            return {};
-          }
-        })()
-      : existing.data?.raw_payload || {};
-  const nativeMeasuredAt = clean(
-    existingRaw?.native_measured_at ||
-      existingRaw?.exact_snapshot?.measured_at ||
-      existingRaw?.exact_snapshot?.synced_at,
-  );
-  const nativeMeasuredAtMs = new Date(nativeMeasuredAt).getTime();
-  const nativeFresh =
-    clean(existingRaw?.sync_mode) === "native_live_daily" &&
-    Number.isFinite(nativeMeasuredAtMs) &&
-    Date.now() - nativeMeasuredAtMs < 20 * 60 * 1000;
-
-  // A fresh Android readDailyTotal snapshot is closer to the device than the
-  // REST fitness store. Do not replace it with a delayed cloud aggregate.
-  if (existing.data?.id && nativeFresh) {
-    return {
-      action: "native_preserved",
-      row: existing.data,
-      resolvedRow: {
-        ...params.row,
-        steps: previousSteps,
-        distance_km: previousDistanceKm,
-        duration_minutes: previousDurationMinutes,
-        google_fit_total_calories: previousTotalCalories,
-        step_data_source_id:
-          existingRaw?.exact_snapshot?.source ||
-          "google_fit_android_read_daily_total",
-      },
-      nativePreserved: true,
-    };
-  }
-
-  // Daily cumulative Google Fit cloud values must never regress during the same day.
-  // A temporary cloud lag can return a smaller partial value; preserve the
-  // highest canonical value already observed for this participant and date.
-  const resolvedRow = {
-    ...params.row,
-    steps: Math.max(previousSteps, Number(params.row.steps || 0)),
-    distance_km: Math.max(
-      previousDistanceKm,
-      Number(params.row.distance_km || 0),
-    ),
-    duration_minutes: Math.max(
-      previousDurationMinutes,
-      Number(params.row.duration_minutes || 0),
-    ),
-    google_fit_total_calories: Math.max(
-      previousTotalCalories,
-      Number(params.row.google_fit_total_calories || 0),
-    ),
-  };
+  const resolvedRow = { ...params.row };
 
   const payload: any = {
     participant_id: Number(params.participant.id),
@@ -540,7 +422,7 @@ async function upsertDailyRow(params: {
       marker: MARKER,
       log_date: resolvedRow.date,
       provider: "google_fit",
-      sync_mode: "aggregate_daily_cloud_reconciled",
+      sync_mode: "aggregate_daily_rest",
       display_time_note:
         "started_at is latest sync time. log_date is the Google Fit daily date in Asia/Jakarta.",
       last_sync_at: nowIso,
@@ -573,13 +455,7 @@ async function upsertDailyRow(params: {
       calories_source: "google_fit_total_exact_no_active_guess",
       distance_source: resolvedRow.distance_source,
       duration_source: resolvedRow.duration_source,
-      cloud_reconciliation: resolvedRow.cloud_reconciliation,
-      monotonic_floor: {
-        previous_steps: previousSteps,
-        previous_total_calories: previousTotalCalories,
-        previous_distance_km: previousDistanceKm,
-        previous_duration_minutes: previousDurationMinutes,
-      },
+      rest_sync: resolvedRow.rest_sync,
       exact_snapshot: {
         synced_at: nowIso,
         date: resolvedRow.date,
@@ -591,7 +467,7 @@ async function upsertDailyRow(params: {
         calories_data_type: "com.google.calories.expended",
       },
       calculation_note:
-        "Steps use estimated_steps. Google Fit cloud is read repeatedly and the highest canonical cumulative value is persisted. Total calories are com.google.calories.expended including BMR. No active-calorie estimate is fabricated.",
+        "Steps use the canonical estimated_steps aggregate through the stored Google Fit OAuth connection. Total calories are com.google.calories.expended including BMR. No active-calorie estimate is fabricated.",
       synced_at: nowIso,
     },
   };
@@ -657,66 +533,39 @@ export async function POST(req: NextRequest) {
     const startKey = addDays(today, -(days - 1));
     const start = jakartaDayStartUtc(startKey);
 
-    // Diagnostic V79L proved that the first Google Fit REST read can be stale
-    // while the same canonical estimated_steps source catches up minutes later.
-    // Read the exact same sources repeatedly, then persist the highest canonical
-    // cumulative value observed. No source substitution and no estimation.
-    const cloudPasses: any[] = [];
-
-    for (const delayMs of CLOUD_RECONCILIATION_DELAYS_MS) {
-      if (delayMs > 0) await sleep(delayMs);
-      const passEnd = new Date();
-
-      const [steps, distance, calories, activeMinutes] = await Promise.all([
+    // Stable REST flow: one aggregate request per data type. The stored OAuth
+    // refresh token is reused, so pressing Sync does not trigger Android account
+    // selection and does not wait for multiple delayed cloud reads.
+    const readEnd = new Date();
+    const [stepsResult, distanceResult, caloriesResult, activeMinutesResult] =
+      await Promise.all([
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.step_count.delta",
           dataSourceId:
             "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
           start,
-          end: passEnd,
+          end: readEnd,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.distance.delta",
           start,
-          end: passEnd,
+          end: readEnd,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.calories.expended",
           start,
-          end: passEnd,
+          end: readEnd,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.active_minutes",
           start,
-          end: passEnd,
+          end: readEnd,
         }),
       ]);
-
-      cloudPasses.push({
-        ended_at: passEnd.toISOString(),
-        steps,
-        distance,
-        calories,
-        activeMinutes,
-      });
-    }
-
-    const stepsResult = mergeAggregatePasses(
-      cloudPasses.map((item) => item.steps),
-    );
-    const distanceResult = mergeAggregatePasses(
-      cloudPasses.map((item) => item.distance),
-    );
-    const caloriesResult = mergeAggregatePasses(
-      cloudPasses.map((item) => item.calories),
-    );
-    const activeMinutesResult = mergeAggregatePasses(
-      cloudPasses.map((item) => item.activeMinutes),
-    );
 
     const dateKeys = new Set<string>();
 
@@ -779,17 +628,13 @@ export async function POST(req: NextRequest) {
             activeMinutesFromGoogle > 0
               ? "google_fit_active_minutes"
               : "estimated_from_steps",
-          cloud_reconciliation: {
+          rest_sync: {
             marker: MARKER,
-            selected_rule:
-              "maximum canonical value across repeated reads of the same Google Fit REST sources",
-            passes: cloudPasses.map((pass) => ({
-              ended_at: pass.ended_at,
-              steps: Number(pass.steps.rows.get(date) || 0),
-              total_calories: Number(pass.calories.rows.get(date) || 0),
-              distance_m: Number(pass.distance.rows.get(date) || 0),
-              active_minutes: Number(pass.activeMinutes.rows.get(date) || 0),
-            })),
+            read_ended_at: readEnd.toISOString(),
+            steps: Number(stepsResult.rows.get(date) || 0),
+            total_calories: Number(caloriesResult.rows.get(date) || 0),
+            distance_m: Number(distanceResult.rows.get(date) || 0),
+            active_minutes: Number(activeMinutesResult.rows.get(date) || 0),
           },
         };
       })
@@ -835,19 +680,11 @@ export async function POST(req: NextRequest) {
       dailyRows.find((row) => row.date === today) ||
       null;
 
-    const todayPasses = cloudPasses.map((pass) => ({
-      ended_at: pass.ended_at,
-      steps: Number(pass.steps.rows.get(today) || 0),
-      total_calories: Number(pass.calories.rows.get(today) || 0),
-      distance_m: Number(pass.distance.rows.get(today) || 0),
-      active_minutes: Number(pass.activeMinutes.rows.get(today) || 0),
-    }));
-
     return NextResponse.json({
       ok: true,
       marker: MARKER,
       message: todaySnapshot
-        ? `Google Fit cloud sync selesai. ${todaySnapshot.steps} steps dan ${Math.round(Number(todaySnapshot.google_fit_total_calories || 0) * 10) / 10} kkal total pada Last Sync.`
+        ? `Google Fit sync selesai. ${todaySnapshot.steps} steps dan ${Math.round(Number(todaySnapshot.google_fit_total_calories || 0) * 10) / 10} kkal total pada Last Sync.`
         : `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
       sync_mode: "aggregate_daily",
       timezone: JAKARTA_TIME_ZONE,
@@ -876,13 +713,9 @@ export async function POST(req: NextRequest) {
         calories: caloriesResult.ok,
         active_minutes: activeMinutesResult.ok,
       },
-      cloud_reconciliation: {
+      rest_sync: {
         marker: MARKER,
-        pass_count: cloudPasses.length,
-        delays_ms: [...CLOUD_RECONCILIATION_DELAYS_MS],
-        selected_rule:
-          "highest canonical cumulative value from repeated reads; same-day stored value is a non-regression floor",
-        today_passes: todayPasses,
+        read_ended_at: readEnd.toISOString(),
         persisted_today: todaySnapshot
           ? {
               steps: todaySnapshot.steps,
@@ -899,7 +732,7 @@ export async function POST(req: NextRequest) {
       daily: dailyRows,
     });
   } catch (error: any) {
-    console.error("WELLNESS_GOOGLE_FIT_CLOUD_RECONCILIATION_V79M_ERROR", error);
+    console.error("WELLNESS_GOOGLE_FIT_REST_STABLE_V80A_ERROR", error);
 
     return NextResponse.json(
       {

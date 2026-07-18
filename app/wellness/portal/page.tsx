@@ -95,12 +95,6 @@ function todayDate() {
   return `${year}-${month}-${day}`;
 }
 
-function nativeGoogleFitBridgeV79N() {
-  if (typeof window === "undefined") return null;
-  const bridge = (window as any).HarmonyNativeFitness;
-  return bridge && typeof bridge.syncGoogleFit === "function" ? bridge : null;
-}
-
 function nutritionLogDateV73(item: any) {
   const raw = clean(
     item?.log_date ||
@@ -953,21 +947,6 @@ export default function WellnessParticipantPortalPage() {
       setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
     }
 
-    const nativeBridge =
-      provider === "google-fit" ? nativeGoogleFitBridgeV79N() : null;
-    if (nativeBridge && Number(participant?.id || 0) > 0) {
-      try {
-        nativeBridge.syncGoogleFit(Number(participant.id));
-        return;
-      } catch (error: any) {
-        setSyncing("");
-        setMessage(
-          error?.message || "Tidak dapat memulai Google Fit Live dari Android.",
-        );
-        return;
-      }
-    }
-
     const result = await fetch(`/api/wellness/integrations/${provider}/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1174,54 +1153,9 @@ export default function WellnessParticipantPortalPage() {
   const fitnessEnabled = fitnessSettings?.fitness_enabled === true;
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handler = async (event: Event) => {
-      const detail = (event as CustomEvent<any>).detail || {};
-      if (detail.progress) {
-        setSyncing("google-fit");
-        setMessage(detail.message || "Membaca Google Fit Live...");
-        return;
-      }
-
-      setSyncing("");
-      if (!detail.ok) {
-        setMessage(detail.message || "Google Fit Live gagal.");
-        return;
-      }
-
-      const completedAt = clean(detail.last_sync_at) || new Date().toISOString();
-      setFitnessLastSyncAt((current) => ({
-        ...current,
-        google_fit: completedAt,
-      }));
-      if (detail.last_sync_snapshot) {
-        setFitnessLastSyncSnapshot((current) => ({
-          ...current,
-          google_fit: detail.last_sync_snapshot,
-        }));
-      }
-      setMessage(detail.message || "Google Fit Live berhasil tersinkron.");
-      await loadMe({ keepMessage: true });
-    };
-
-    window.addEventListener(
-      "harmony-native-google-fit-sync",
-      handler as EventListener,
-    );
-    return () =>
-      window.removeEventListener(
-        "harmony-native-google-fit-sync",
-        handler as EventListener,
-      );
-  }, [participant?.id]);
-
-  useEffect(() => {
     if (step !== "portal") return;
     if (!fitnessEnabled || activeFitnessSource !== "google_fit") return;
     if (!googleFitConnected) return;
-    if (nativeGoogleFitBridgeV79N()) return;
-
     const intervalId = window.setInterval(
       () => {
         syncProvider("google-fit", { silent: true, days: 2 });
@@ -5394,10 +5328,9 @@ function DevicesTab({
 
           <div className="mt-5 rounded-3xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
             <div>
-              Di aplikasi Android, tombol Sync memakai Google Fit native
-              <span className="font-black"> readDailyTotal</span> agar membaca
-              total harian langsung dari akun pada perangkat. Browser memakai
-              Google Fit cloud sebagai fallback.
+              Tombol Sync menggunakan koneksi Google Fit yang sudah tersimpan
+              di server. Setelah akun terhubung satu kali, sinkronisasi berikutnya
+              tidak perlu memilih email kembali.
             </div>
             <div className="mt-1">
               Kalori yang disinkronkan adalah total Google Fit termasuk energi
