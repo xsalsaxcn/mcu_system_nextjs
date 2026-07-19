@@ -54,6 +54,36 @@ function actorHeaders(actorType: SupportChatPanelProps["actorType"]) {
   return { "x-wellness-actor-context": actorType };
 }
 
+
+function messageIdentity(item: any) {
+  return (
+    clean(item?.message_id || item?.messageId) ||
+    [
+      clean(item?.created_at || item?.createdAt),
+      clean(item?.sender_type || item?.senderType),
+      clean(item?.message),
+      clean(item?.attachment_url || item?.attachmentUrl),
+    ].join("|")
+  );
+}
+
+function mergeSupportMessages(current: any[], incoming: any[]) {
+  const map = new Map<string, any>();
+  for (const item of [...(current || []), ...(incoming || [])]) {
+    const key = messageIdentity(item);
+    if (!key) continue;
+    const previous = map.get(key);
+    map.set(key, previous ? { ...previous, ...item } : item);
+  }
+  return Array.from(map.values())
+    .sort((left, right) =>
+      clean(left?.created_at || left?.createdAt).localeCompare(
+        clean(right?.created_at || right?.createdAt),
+      ),
+    )
+    .slice(-60);
+}
+
 function cacheKey(actorType: string) {
   return `wellness-support-cache-v79p:${actorType}`;
 }
@@ -132,7 +162,7 @@ export default function SupportChatPanel({ actorType, onClose }: SupportChatPane
   async function loadMessages(options?: { quiet?: boolean }) {
     if (!options?.quiet && messages.length === 0) setLoading(true);
 
-    const result = await fetch("/api/wellness/support?mode=messages&limit=40", {
+    const result = await fetch("/api/wellness/support?mode=messages&limit=30", {
       cache: "no-store",
       headers: actorHeaders(actorType),
     })
@@ -141,10 +171,13 @@ export default function SupportChatPanel({ actorType, onClose }: SupportChatPane
 
     if (result.ok) {
       const nextThread = result.thread || null;
-      const nextMessages = result.messages || [];
+      const incomingMessages = result.messages || [];
       setThread(nextThread);
-      setMessages(nextMessages);
-      writeCache(actorType, nextThread, nextMessages);
+      setMessages((current) => {
+        const nextMessages = mergeSupportMessages(current, incomingMessages);
+        writeCache(actorType, nextThread, nextMessages);
+        return nextMessages;
+      });
       setNotice("");
       scrollToEnd(options?.quiet ? "auto" : "smooth");
     } else if (!options?.quiet || messages.length === 0) {

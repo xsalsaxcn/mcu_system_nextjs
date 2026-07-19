@@ -96,6 +96,33 @@ function cacheWrite(key: string, value: any) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
+function messageIdentity(item: any) {
+  return (
+    clean(item?.message_id || item?.messageId) ||
+    [
+      clean(item?.created_at || item?.createdAt),
+      clean(item?.sender_type || item?.senderType),
+      clean(item?.message),
+      clean(item?.attachment_url || item?.attachmentUrl),
+    ].join("|")
+  );
+}
+
+function mergeMessages(current: any[], incoming: any[]) {
+  const map = new Map<string, any>();
+  for (const item of [...(current || []), ...(incoming || [])]) {
+    const key = messageIdentity(item);
+    if (!key) continue;
+    const previous = map.get(key);
+    map.set(key, previous ? { ...previous, ...item } : item);
+  }
+  return Array.from(map.values()).sort((left, right) =>
+    clean(left?.created_at || left?.createdAt).localeCompare(
+      clean(right?.created_at || right?.createdAt),
+    ),
+  );
+}
+
 function Attachment({ message }: { message: any }) {
   const url = clean(message.attachment_url);
   if (!url) return null;
@@ -130,6 +157,7 @@ export default function WellnessSupportAdminPage() {
   const [loadingThreads, setLoadingThreads] = useState(!cached?.threads?.length);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -181,13 +209,27 @@ export default function WellnessSupportAdminPage() {
 
     if (result.ok) {
       const nextThread = normalizeThread(result.thread || item);
-      const nextMessages = (result.messages || []).map(normalizeMessage);
+      const incomingMessages = (result.messages || []).map(normalizeMessage);
       setSelected(nextThread);
-      setMessages(nextMessages);
-      cacheWrite(`wellness-support-thread-v79q:${item.ticket_id}`, { thread: nextThread, messages: nextMessages });
-      setThreads((current) => current.map((thread) => thread.ticket_id === item.ticket_id ? { ...thread, ...nextThread, unread_admin: 0 } : thread));
-      window.setTimeout(() => endRef.current?.scrollIntoView({ behavior: options?.quiet ? "auto" : "smooth" }), 30);
-      void loadThreads({ quiet: true });
+      setMessages((current) => {
+        const nextMessages = mergeMessages(current, incomingMessages);
+        cacheWrite(`wellness-support-thread-v79q:${item.ticket_id}`, {
+          thread: nextThread,
+          messages: nextMessages,
+        });
+        return nextMessages;
+      });
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.ticket_id === item.ticket_id
+            ? { ...thread, ...nextThread, unread_admin: 0 }
+            : thread,
+        ),
+      );
+      window.setTimeout(() =>
+        endRef.current?.scrollIntoView({
+          behavior: options?.quiet ? "auto" : "smooth",
+        }), 30);
     } else if (!options?.quiet) {
       setNotice(result.message || "Percakapan tidak dapat dimuat.");
     }
@@ -195,14 +237,29 @@ export default function WellnessSupportAdminPage() {
   }
 
   useEffect(() => { void loadThreads(); }, [status]);
+
+  // WELLNESS_SUPPORT_ADMIN_STAGGERED_POLLING_V82
+  // Avoid sending the thread-list and message requests together every six
+  // seconds. Staggered polling reduces Google Apps Script queueing and keeps
+  // cached messages visible while refresh runs in the background.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible" || sending) return;
-      void loadThreads({ quiet: true });
-      if (selected) void openThread(selected, { quiet: true });
-    }, 6000);
+      if (document.visibilityState === "visible" && !sending) {
+        void loadThreads({ quiet: true });
+      }
+    }, 15000);
     return () => window.clearInterval(timer);
-  }, [status, selected?.ticket_id, sending]);
+  }, [status, sending]);
+
+  useEffect(() => {
+    if (!selected?.ticket_id) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !sending) {
+        void openThread(selected, { quiet: true });
+      }
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [selected?.ticket_id, sending]);
 
   const filteredThreads = useMemo(() => {
     const q = clean(query).toLowerCase();
@@ -282,7 +339,7 @@ export default function WellnessSupportAdminPage() {
       <div className="mx-auto w-full max-w-6xl px-0 py-0 sm:px-4 sm:py-4">
         <header className={`${selected ? "hidden lg:flex" : "flex"} sticky top-0 z-30 items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:rounded-t-2xl sm:border`}>
           <div><div className="text-[9px] font-black uppercase tracking-[0.15em] text-indigo-600">Admin Support</div><h1 className="mt-0.5 text-lg font-black">Percakapan</h1></div>
-          <div className="flex items-center gap-2">{unreadTotal > 0 ? <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">{unreadTotal > 99 ? "99+" : unreadTotal}</span> : null}<button onClick={() => void loadThreads()} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg">↻</button></div>
+          <div className="flex items-center gap-2">{unreadTotal > 0 ? <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">{unreadTotal > 99 ? "99+" : unreadTotal}</span> : null}<button onClick={() => void loadThreads()} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg" aria-label="Refresh inbox">↻</button><button onClick={() => setMenuOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-950 text-lg font-black text-white" aria-label="Buka menu admin">☰</button></div>
         </header>
 
         {notice ? <div className="mx-3 mt-2 rounded-xl bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-800 sm:mx-0">{notice}</div> : null}
@@ -311,6 +368,69 @@ export default function WellnessSupportAdminPage() {
           </section>
         </section>
       </div>
+
+      {menuOpen ? (
+        <div className="fixed inset-0 z-[120]">
+          <button
+            type="button"
+            aria-label="Tutup menu"
+            onClick={() => setMenuOpen(false)}
+            className="absolute inset-0 bg-slate-950/55"
+          />
+          <aside className="absolute bottom-2 right-2 top-2 flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-[1.8rem] bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-slate-950 via-blue-900 to-teal-600 p-5 text-white">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/65">
+                  Harmony Health
+                </div>
+                <div className="mt-1 text-xl font-black">Menu Admin</div>
+                <div className="mt-1 text-xs font-bold text-white/75">
+                  Admin Support
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMenuOpen(false)}
+                className="rounded-full bg-white/15 px-3 py-2 text-xs font-black"
+              >
+                Tutup
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3">
+              {[
+                ["🏠", "Portal Admin", "/wellness/admin"],
+                ["💬", "Admin Support", "/wellness/support-admin"],
+                ["🍽️", "Master Nutrisi", "/wellness/master"],
+                ["⚙️", "Setting Wellness", "/wellness/settings"],
+                ["📥", "Import Peserta", "/wellness/import"],
+                ["🔗", "Signup Peserta", "/wellness/signup"],
+              ].map(([icon, label, href]) => (
+                <a
+                  key={href}
+                  href={href}
+                  className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"
+                >
+                  <span className="text-xl">{icon}</span>
+                  <span className="text-sm font-black text-slate-800">{label}</span>
+                </a>
+              ))}
+              <div className="my-3 border-t border-slate-200" />
+              <a
+                href="/wellness/dashboard"
+                className="mb-2 block rounded-2xl bg-blue-50 px-4 py-3 text-sm font-black text-blue-800"
+              >
+                Wellness Management
+              </a>
+              <a
+                href="/dashboard"
+                className="block rounded-2xl bg-slate-200 px-4 py-3 text-sm font-black text-slate-800"
+              >
+                Dashboard Operasional
+              </a>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }

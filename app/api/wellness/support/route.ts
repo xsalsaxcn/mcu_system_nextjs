@@ -252,17 +252,32 @@ export async function GET(request: NextRequest) {
       return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: extractArray(result, ["messages", "items", "rows", "data"]).map(normalizeMessage) });
     }
 
-    await postSupportWebhook("supportEnsureThread", {
-      ...actorWebhookPayload(actor),
-    });
-
-    const result = await postSupportWebhook("supportGetThread", {
+    // WELLNESS_SUPPORT_FAST_EXISTING_THREAD_V82
+    // Most participants already have a support thread. Read it first so the
+    // common path uses one Google Apps Script request instead of two.
+    let result = await postSupportWebhook("supportGetThread", {
       ...actorWebhookPayload(actor),
       limit,
       markRead: true,
     });
 
-    return ok({ thread: result.thread ? normalizeThread(result.thread) : null, messages: extractArray(result, ["messages", "items", "rows", "data"]).map(normalizeMessage) });
+    let messages = extractArray(result, ["messages", "items", "rows", "data"]);
+    if (!result?.thread && messages.length === 0) {
+      await postSupportWebhook("supportEnsureThread", {
+        ...actorWebhookPayload(actor),
+      });
+      result = await postSupportWebhook("supportGetThread", {
+        ...actorWebhookPayload(actor),
+        limit,
+        markRead: true,
+      });
+      messages = extractArray(result, ["messages", "items", "rows", "data"]);
+    }
+
+    return ok({
+      thread: result.thread ? normalizeThread(result.thread) : null,
+      messages: messages.map(normalizeMessage),
+    });
   } catch (error: any) {
     return fail(error?.message || "Gagal memuat Chat with Admin.", 500);
   }

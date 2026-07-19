@@ -11,7 +11,7 @@
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
@@ -689,7 +689,7 @@ export default function WellnessParticipantPortalPage() {
 
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
-    meal_type: "breakfast",
+    meal_type: "",
     food_name: "",
     portion: "",
     notes: "",
@@ -994,10 +994,16 @@ export default function WellnessParticipantPortalPage() {
     setSyncing("");
   }
 
-  async function saveNutrition() {
-    if (!clean(nutritionForm.food_name)) {
-      setMessage("Nama makanan wajib diisi.");
-      return;
+  async function saveNutrition(): Promise<{ ok: boolean; message: string }> {
+    const missing: string[] = [];
+    if (!clean(nutritionForm.log_date)) missing.push("Tanggal");
+    if (!clean(nutritionForm.meal_type)) missing.push("Waktu Makan");
+    if (!clean(nutritionForm.food_name)) missing.push("Nama Makanan");
+
+    if (missing.length > 0) {
+      const validationMessage = `Data belum lengkap: ${missing.join(", ")}.`;
+      setMessage(validationMessage);
+      return { ok: false, message: validationMessage };
     }
 
     setMessage("Menyimpan nutrisi ke Google Sheet...");
@@ -1008,6 +1014,21 @@ export default function WellnessParticipantPortalPage() {
     body.append("food_name", nutritionForm.food_name);
     body.append("portion", nutritionForm.portion);
     body.append("notes", nutritionForm.notes);
+    body.append("food_breakdown", clean((nutritionForm as any).food_breakdown));
+    body.append(
+      "portion_breakdown",
+      clean((nutritionForm as any).portion_breakdown),
+    );
+    body.append(
+      "estimated_calories",
+      clean((nutritionForm as any).estimated_calories),
+    );
+    body.append("calories", clean((nutritionForm as any).calories));
+    body.append("portion_group", clean((nutritionForm as any).portion_group));
+    body.append(
+      "portion_fraction",
+      clean((nutritionForm as any).portion_fraction),
+    );
 
     if (nutritionPhoto) {
       body.append("photo", nutritionPhoto);
@@ -1024,9 +1045,8 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      setMessage(
-        result.message || "Nutrisi harian berhasil masuk Google Sheet.",
-      );
+      const successMessage = "Laporan nutrisi berhasil tersimpan.";
+      setMessage(successMessage);
 
       if (result.log) {
         setNutritionLogs((previous) => [result.log, ...previous]);
@@ -1034,17 +1054,26 @@ export default function WellnessParticipantPortalPage() {
 
       setNutritionForm((previous) => ({
         ...previous,
+        meal_type: "",
         food_name: "",
         portion: "",
         notes: "",
+        food_breakdown: "",
+        portion_breakdown: "",
+        estimated_calories: "",
+        calories: "",
+        portion_group: "",
+        portion_fraction: "",
       }));
 
       setNutritionPhoto(null);
-      setActiveTab("home");
-      return;
+      return { ok: true, message: successMessage };
     }
 
-    setMessage(result.message || result.detail || "Gagal menyimpan nutrisi.");
+    const errorMessage =
+      result.message || result.detail || "Gagal menyimpan nutrisi.";
+    setMessage(errorMessage);
+    return { ok: false, message: errorMessage };
   }
 
   async function saveWorkout() {
@@ -3285,7 +3314,7 @@ function NutritionTab({
   photo: File | null;
   setPhoto: (file: File | null) => void;
   setValue: (key: string, value: string) => void;
-  saveNutrition: () => void;
+  saveNutrition: () => Promise<{ ok: boolean; message: string }>;
   logs: any[];
 }) {
   const participantId = Number(
@@ -3312,8 +3341,15 @@ function NutritionTab({
 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [savingSmart, setSavingSmart] = useState(false);
+  const [foodMasterLoading, setFoodMasterLoading] = useState(true);
+  const [foodMasterMessage, setFoodMasterMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formNotice, setFormNotice] = useState("");
   const [nutritionHistoryOpen, setNutritionHistoryOpen] = useState(false);
   const [nutritionHistoryDate, setNutritionHistoryDate] = useState("");
+  const dateFieldRef = useRef<HTMLInputElement | null>(null);
+  const mealFieldRef = useRef<HTMLDivElement | null>(null);
+  const foodFieldRef = useRef<HTMLTextAreaElement | null>(null);
 
   const foodText = clean(
     form.food_name ||
@@ -3331,11 +3367,29 @@ function NutritionTab({
   ];
 
   async function loadFoodMaster() {
+    setFoodMasterLoading(true);
+    setFoodMasterMessage("");
+
+    if (typeof window !== "undefined") {
+      try {
+        const cached = window.sessionStorage.getItem(
+          "wellness-food-master-cache-v82",
+        );
+        const rows = cached ? JSON.parse(cached) : [];
+        if (Array.isArray(rows) && rows.length > 0) setFoodMaster(rows);
+      } catch {
+        // Cache is optional; continue with the server request.
+      }
+    }
+
     const result = await fetch("/api/wellness/reference/foods?limit=2000", {
       cache: "no-store",
     })
       .then((response) => response.json())
-      .catch(() => null);
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Master KaloriData gagal dimuat.",
+      }));
 
     const rows = Array.isArray(result)
       ? result
@@ -3347,7 +3401,24 @@ function NutritionTab({
             ? result.items
             : [];
 
-    setFoodMaster(rows);
+    if (rows.length > 0) {
+      setFoodMaster(rows);
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.setItem(
+            "wellness-food-master-cache-v82",
+            JSON.stringify(rows),
+          );
+        } catch {
+          // Cache is optional.
+        }
+      }
+    } else {
+      setFoodMasterMessage(
+        result?.message || "Master KaloriData belum dapat dimuat.",
+      );
+    }
+    setFoodMasterLoading(false);
   }
 
   async function loadDirectNutrition() {
@@ -3376,6 +3447,10 @@ function NutritionTab({
   useEffect(() => {
     loadDirectNutrition();
   }, [participantId]);
+
+  useEffect(() => {
+    if (!foodText) setPortionMap({});
+  }, [foodText]);
 
   const parsedFoods = useMemo(() => {
     return buildAutoFoodBreakdownV29(foodText, foodMaster, portionMap);
@@ -3462,13 +3537,36 @@ function NutritionTab({
     : historyLogs.slice(0, 8);
 
   async function submitNutritionSmart() {
-    setSavingSmart(true);
-    await Promise.resolve(saveNutrition());
+    const errors: Record<string, string> = {};
+    if (!clean(form.log_date)) errors.log_date = "Tanggal belum diisi.";
+    if (!clean(form.meal_type)) errors.meal_type = "Waktu makan belum dipilih.";
+    if (!foodText) errors.food_name = "Nama makanan belum diisi.";
 
-    window.setTimeout(() => {
-      loadDirectNutrition();
-      setSavingSmart(false);
-    }, 1200);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      const missing = Object.values(errors);
+      setFormNotice(`Data belum lengkap: ${missing.join(" ")}`);
+      const firstKey = Object.keys(errors)[0];
+      window.setTimeout(() => {
+        if (firstKey === "log_date") dateFieldRef.current?.focus();
+        if (firstKey === "meal_type") {
+          mealFieldRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        if (firstKey === "food_name") foodFieldRef.current?.focus();
+      }, 30);
+      return;
+    }
+
+    setSavingSmart(true);
+    setFormNotice("Menyimpan laporan nutrisi...");
+    const result = await saveNutrition();
+    setFormNotice(result.message);
+    if (result.ok) {
+      setFieldErrors({});
+      setPortionMap({});
+      await loadDirectNutrition();
+    }
+    setSavingSmart(false);
   }
 
   function changePortion(key: string, value: string) {
@@ -3476,6 +3574,11 @@ function NutritionTab({
       ...previous,
       [key]: value,
     }));
+    setFieldErrors((previous) => {
+      const next = { ...previous };
+      delete next.portion;
+      return next;
+    });
   }
 
   return (
@@ -3510,24 +3613,54 @@ function NutritionTab({
 
         <div className="mt-4 grid gap-3">
           <label className="grid gap-2 text-xs font-black text-slate-700">
-            Tanggal
+            <span className="flex items-center gap-2">
+              Tanggal
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </span>
             <input
+              ref={dateFieldRef}
               type="date"
               value={form.log_date}
-              onChange={(e) => setValue("log_date", e.target.value)}
-              className={`${fieldClass} w-full text-sm`}
+              onChange={(e) => {
+                setValue("log_date", e.target.value);
+                setFieldErrors((previous) => ({ ...previous, log_date: "" }));
+              }}
+              aria-invalid={Boolean(fieldErrors.log_date)}
+              className={`${fieldClass} w-full text-sm ${
+                fieldErrors.log_date ? "border-rose-400 ring-4 ring-rose-50" : ""
+              }`}
             />
+            {fieldErrors.log_date ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.log_date}
+              </span>
+            ) : null}
           </label>
 
-          <div className="grid gap-2">
-            <div className="text-xs font-black text-slate-700">Waktu Makan</div>
+          <div
+            ref={mealFieldRef}
+            className={`grid gap-2 rounded-2xl ${
+              fieldErrors.meal_type ? "border border-rose-300 bg-rose-50/40 p-3" : ""
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs font-black text-slate-700">
+              Waktu Makan
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </div>
 
             <div className="grid grid-cols-4 gap-2">
               {mealChips.map((item) => (
                 <button
                   key={item.value}
                   type="button"
-                  onClick={() => setValue("meal_type", item.value)}
+                  onClick={() => {
+                    setValue("meal_type", item.value);
+                    setFieldErrors((previous) => ({ ...previous, meal_type: "" }));
+                  }}
                   className={`rounded-2xl px-2 py-3 text-[11px] font-black transition ${
                     form.meal_type === item.value
                       ? "bg-teal-600 text-white shadow-md shadow-teal-100"
@@ -3538,20 +3671,52 @@ function NutritionTab({
                 </button>
               ))}
             </div>
+            {fieldErrors.meal_type ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.meal_type}
+              </span>
+            ) : null}
           </div>
 
           <label className="grid gap-2 text-xs font-black text-slate-700">
-            <span>Nama Makanan</span>
+            <span className="flex items-center gap-2">
+              Nama Makanan
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </span>
             <span className="rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold leading-5 text-teal-800">
               Cara pengisian: Nasi Putih, Sayur Sop, Es Campur
             </span>
             <textarea
+              ref={foodFieldRef}
               value={form.food_name}
-              onChange={(e) => setValue("food_name", e.target.value)}
-              className={`${fieldClass} min-h-[92px] w-full resize-none text-sm`}
+              onChange={(e) => {
+                setValue("food_name", e.target.value);
+                setFieldErrors((previous) => ({ ...previous, food_name: "" }));
+              }}
+              aria-invalid={Boolean(fieldErrors.food_name)}
+              className={`${fieldClass} min-h-[92px] w-full resize-none text-sm ${
+                fieldErrors.food_name ? "border-rose-400 ring-4 ring-rose-50" : ""
+              }`}
               placeholder="Nasi Putih, Sayur Sop, Es Campur"
             />
+            {fieldErrors.food_name ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.food_name}
+              </span>
+            ) : null}
           </label>
+
+          {foodMasterLoading ? (
+            <div className="rounded-2xl bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700">
+              Memuat Master KaloriData agar estimasi porsi akurat...
+            </div>
+          ) : foodMasterMessage ? (
+            <div className="rounded-2xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+              {foodMasterMessage}
+            </div>
+          ) : null}
 
           <CompactAutoFoodBreakdownV43
             foods={parsedFoods}
@@ -3594,13 +3759,32 @@ function NutritionTab({
             makanan dengan Master KaloriData.
           </div>
 
+          {formNotice ? (
+            <div
+              className={`rounded-[1.3rem] px-4 py-3 text-xs font-black leading-5 ${
+                /berhasil|tersimpan/i.test(formNotice)
+                  ? "bg-emerald-50 text-emerald-800"
+                  : /belum lengkap|gagal/i.test(formNotice)
+                    ? "bg-rose-50 text-rose-700"
+                    : "bg-blue-50 text-blue-800"
+              }`}
+              role="status"
+            >
+              {formNotice}
+            </div>
+          ) : null}
+
           <button
             type="button"
             onClick={submitNutritionSmart}
-            disabled={savingSmart}
+            disabled={savingSmart || foodMasterLoading}
             className="w-full rounded-[1.4rem] bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
           >
-            {savingSmart ? "Menyimpan..." : "Simpan Nutrisi"}
+            {savingSmart
+              ? "Menyimpan..."
+              : foodMasterLoading
+                ? "Menyiapkan KaloriData..."
+                : "Simpan Nutrisi"}
           </button>
         </div>
       </div>
@@ -3747,11 +3931,14 @@ function CompactAutoFoodBreakdownV43({
     <div className="rounded-[1.4rem] border border-teal-100 bg-[#f4fbfa] p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-xs font-black text-slate-950">
+          <div className="flex items-center gap-2 text-xs font-black text-slate-950">
             Auto Breakdown
+            <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+              Porsi Required
+            </span>
           </div>
           <div className="text-[11px] font-bold text-slate-500">
-            {foods.length} item makanan
+            {foods.length} item makanan · kalori dihitung dari 1 porsi × porsi dipilih
           </div>
         </div>
 
@@ -3772,7 +3959,7 @@ function CompactAutoFoodBreakdownV43({
 
             <div className="mt-1 text-[11px] font-bold leading-5 text-slate-500">
               {item.match_status === "matched"
-                ? `${item.matched_name} | ${item.category || "Umum"} | ${fmtNumber(item.base_calories, 0)} kkal dasar`
+                ? `${item.matched_name} | ${item.category || "Umum"} | 1 porsi ${fmtNumber(item.base_calories, 0)} kkal`
                 : "Belum match di Master KaloriData"}
             </div>
 
