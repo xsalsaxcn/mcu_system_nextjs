@@ -1,6 +1,7 @@
 // WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
 // WELLNESS_GOOGLE_FIT_EXACT_LAST_SYNC_V79K
 // WELLNESS_GOOGLE_FIT_REST_STABLE_V80A
+// WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -19,7 +20,7 @@ import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
 export const runtime = "nodejs";
 
-const MARKER = "WELLNESS_GOOGLE_FIT_REST_STABLE_V80A";
+const MARKER = "WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B";
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
@@ -314,7 +315,12 @@ async function readAggregateByDataType(params: {
         : { dataTypeName: params.dataTypeName },
     ],
     bucketByTime: {
-      durationMillis: 24 * 60 * 60 * 1000,
+      // Use Jakarta calendar days, not fixed UTC-aligned 24-hour buckets.
+      period: {
+        type: "day",
+        value: 1,
+        timeZoneId: JAKARTA_TIME_ZONE,
+      },
     },
     startTimeMillis,
     endTimeMillis,
@@ -422,7 +428,7 @@ async function upsertDailyRow(params: {
       marker: MARKER,
       log_date: resolvedRow.date,
       provider: "google_fit",
-      sync_mode: "aggregate_daily_rest",
+      sync_mode: "aggregate_daily_rest_jakarta_calendar",
       display_time_note:
         "started_at is latest sync time. log_date is the Google Fit daily date in Asia/Jakarta.",
       last_sync_at: nowIso,
@@ -686,7 +692,7 @@ export async function POST(req: NextRequest) {
       message: todaySnapshot
         ? `Google Fit sync selesai. ${todaySnapshot.steps} steps dan ${Math.round(Number(todaySnapshot.google_fit_total_calories || 0) * 10) / 10} kkal total pada Last Sync.`
         : `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
-      sync_mode: "aggregate_daily",
+      sync_mode: "aggregate_daily_jakarta_calendar",
       timezone: JAKARTA_TIME_ZONE,
       last_sync_at: nowIso,
       last_sync_at_jakarta: jakartaNowLabel(),
@@ -732,7 +738,7 @@ export async function POST(req: NextRequest) {
       daily: dailyRows,
     });
   } catch (error: any) {
-    console.error("WELLNESS_GOOGLE_FIT_REST_STABLE_V80A_ERROR", error);
+    console.error("WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B_ERROR", error);
 
     return NextResponse.json(
       {
