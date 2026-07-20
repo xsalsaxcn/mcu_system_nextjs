@@ -198,7 +198,11 @@ export async function POST(req: NextRequest) {
       log_date: date,
       started_at: measuredAtText,
       duration_minutes: 0,
-      calories: Math.round(totalCalories * 100) / 100,
+      // Total calories tetap disimpan pada exact_snapshot/raw_payload.
+      // Kolom calories adalah kalori aktivitas/workout, bukan total termasuk BMR.
+      calories: activeCaloriesAvailable
+        ? Math.round(activeCalories * 100) / 100
+        : 0,
       distance_km: distanceKm,
       steps,
       updated_at: nowIso,
@@ -309,4 +313,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 
