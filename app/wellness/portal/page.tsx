@@ -5,8 +5,6 @@
   // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
 // WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
 // WELLNESS_GOOGLE_FIT_NATIVE_BRIDGE_V79N
-// WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_PRIORITY_V84A
-// WELLNESS_NUTRITION_HIDE_ZERO_ESTIMATE_V84A
 // WELLNESS_GOOGLE_FIT_STABLE_SYNC_AND_TOTAL_DISPLAY_V79O
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
@@ -647,31 +645,6 @@ const activityOptions = [
 const fieldClass =
   "rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100";
 
-type HarmonyNativeFitnessBridgeV84A = {
-  available?: () => boolean;
-  syncGoogleFit?: (participantId: number) => void;
-};
-
-function nativeGoogleFitBridgeV84A(): HarmonyNativeFitnessBridgeV84A | null {
-  if (typeof window === "undefined") return null;
-
-  const candidate = (window as any).HarmonyNativeFitness as
-    | HarmonyNativeFitnessBridgeV84A
-    | undefined;
-
-  if (!candidate || typeof candidate.syncGoogleFit !== "function") return null;
-
-  try {
-    if (typeof candidate.available === "function" && !candidate.available()) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return candidate;
-}
-
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
   const [activeTab, setActiveTab] = useState<PortalTab>("home");
@@ -713,7 +686,6 @@ export default function WellnessParticipantPortalPage() {
   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
   const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
   const [syncing, setSyncing] = useState("");
-  const nativeGoogleFitTimeoutRef = useRef<number | null>(null);
 
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
@@ -853,69 +825,6 @@ export default function WellnessParticipantPortalPage() {
     }
   }, []);
 
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<any>)?.detail || {};
-
-      if (detail?.progress) {
-        setSyncing("google-fit");
-        setMessage(clean(detail?.message) || "Membaca Google Fit dari perangkat...");
-        return;
-      }
-
-      if (nativeGoogleFitTimeoutRef.current !== null) {
-        window.clearTimeout(nativeGoogleFitTimeoutRef.current);
-        nativeGoogleFitTimeoutRef.current = null;
-      }
-
-      setSyncing("");
-
-      if (!detail?.ok) {
-        setMessage(
-          clean(detail?.message) ||
-            "Google Fit dari perangkat belum berhasil disinkronkan.",
-        );
-        return;
-      }
-
-      const completedAt = clean(detail?.last_sync_at) || new Date().toISOString();
-      setFitnessLastSyncAt((current) => ({
-        ...current,
-        google_fit: completedAt,
-      }));
-
-      if (detail?.last_sync_snapshot) {
-        setFitnessLastSyncSnapshot((current) => ({
-          ...current,
-          google_fit: detail.last_sync_snapshot,
-        }));
-      }
-
-      setMessage(
-        clean(detail?.message) ||
-          "Google Fit berhasil disinkronkan dari status terakhir perangkat.",
-      );
-
-      void loadMe({ keepMessage: true });
-    };
-
-    window.addEventListener(
-      "harmony-native-google-fit-sync",
-      handler as EventListener,
-    );
-
-    return () => {
-      window.removeEventListener(
-        "harmony-native-google-fit-sync",
-        handler as EventListener,
-      );
-      if (nativeGoogleFitTimeoutRef.current !== null) {
-        window.clearTimeout(nativeGoogleFitTimeoutRef.current);
-        nativeGoogleFitTimeoutRef.current = null;
-      }
-    };
-  }, [participant?.id]);
-
   function setValue(key: string, value: string) {
     setForm((previous) => ({ ...previous, [key]: value }));
   }
@@ -1036,41 +945,6 @@ export default function WellnessParticipantPortalPage() {
 
     if (!options?.silent) {
       setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
-    }
-
-    if (provider === "google-fit" && !options?.silent) {
-      const nativeBridge = nativeGoogleFitBridgeV84A();
-      const participantId = Number(
-        participant?.id ||
-          participant?.participant_id ||
-          participant?.wellness_participant_id ||
-          0,
-      );
-
-      if (nativeBridge && participantId > 0) {
-        try {
-          setMessage("Membaca status terakhir Google Fit dari perangkat...");
-          nativeGoogleFitTimeoutRef.current = window.setTimeout(() => {
-            nativeGoogleFitTimeoutRef.current = null;
-            setSyncing("");
-            setMessage(
-              "Google Fit perangkat belum merespons. Tekan Sync kembali atau gunakan koneksi REST sebagai fallback dari browser.",
-            );
-          }, 90_000);
-          nativeBridge.syncGoogleFit?.(participantId);
-          return;
-        } catch (error: any) {
-          if (nativeGoogleFitTimeoutRef.current !== null) {
-            window.clearTimeout(nativeGoogleFitTimeoutRef.current);
-            nativeGoogleFitTimeoutRef.current = null;
-          }
-          setMessage(
-            `Google Fit perangkat gagal dibuka. Menggunakan koneksi server: ${
-              error?.message || "unknown error"
-            }`,
-          );
-        }
-      }
     }
 
     const result = await fetch(`/api/wellness/integrations/${provider}/sync`, {
@@ -1311,7 +1185,6 @@ export default function WellnessParticipantPortalPage() {
     if (step !== "portal") return;
     if (!fitnessEnabled || activeFitnessSource !== "google_fit") return;
     if (!googleFitConnected) return;
-    if (nativeGoogleFitBridgeV84A()) return;
     const intervalId = window.setInterval(
       () => {
         syncProvider("google-fit", { silent: true, days: 2 });
@@ -3727,17 +3600,15 @@ function NutritionTab({
             </p>
           </div>
 
-          {totalEstimatedCalories > 0 ? (
-            <div className="shrink-0 rounded-[1.3rem] bg-teal-50 px-4 py-3 text-right">
-              <div className="text-[10px] font-black uppercase tracking-wide text-teal-700/70">
-                Estimasi
-              </div>
-              <div className="text-xl font-black text-teal-900">
-                {fmtNumber(totalEstimatedCalories, 0)}
-              </div>
-              <div className="text-[10px] font-bold text-teal-700/70">kkal</div>
+          <div className="shrink-0 rounded-[1.3rem] bg-teal-50 px-4 py-3 text-right">
+            <div className="text-[10px] font-black uppercase tracking-wide text-teal-700/70">
+              Estimasi
             </div>
-          ) : null}
+            <div className="text-xl font-black text-teal-900">
+              {fmtNumber(totalEstimatedCalories, 0)}
+            </div>
+            <div className="text-[10px] font-bold text-teal-700/70">kkal</div>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -4071,11 +3942,9 @@ function CompactAutoFoodBreakdownV43({
           </div>
         </div>
 
-        {total > 0 ? (
-          <div className="rounded-full bg-white px-3 py-2 text-[11px] font-black text-teal-700">
-            {fmtNumber(total, 0)} kkal
-          </div>
-        ) : null}
+        <div className="rounded-full bg-white px-3 py-2 text-[11px] font-black text-teal-700">
+          {fmtNumber(total, 0)} kkal
+        </div>
       </div>
 
       <div className="mt-3 space-y-2">
@@ -4090,12 +3959,8 @@ function CompactAutoFoodBreakdownV43({
 
             <div className="mt-1 text-[11px] font-bold leading-5 text-slate-500">
               {item.match_status === "matched"
-                ? `${item.matched_name} | ${item.category || "Umum"}${
-                    Number(item.base_calories || 0) > 0
-                      ? ` | 1 porsi ${fmtNumber(item.base_calories, 0)} kkal`
-                      : ""
-                  }`
-                : "Estimasi kalori diproses sistem"}
+                ? `${item.matched_name} | ${item.category || "Umum"} | 1 porsi ${fmtNumber(item.base_calories, 0)} kkal`
+                : "Belum match di Master KaloriData"}
             </div>
 
             <div className="mt-3 flex items-center gap-2">
@@ -4112,11 +3977,9 @@ function CompactAutoFoodBreakdownV43({
                 <option value="1">1 porsi</option>
               </select>
 
-              {Number(item.subtotal_calories || 0) > 0 ? (
-                <div className="shrink-0 rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-700">
-                  {fmtNumber(item.subtotal_calories, 0)} kkal
-                </div>
-              ) : null}
+              <div className="shrink-0 rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-700">
+                {fmtNumber(item.subtotal_calories, 0)} kkal
+              </div>
             </div>
           </div>
         ))}
@@ -4214,11 +4077,9 @@ function AutoFoodBreakdownV29({
           </p>
         </div>
 
-        {total > 0 ? (
-          <div className="rounded-full bg-white px-4 py-2 text-xs font-black text-teal-700 shadow-sm">
-            Total {fmtNumber(total, 0)} kkal
-          </div>
-        ) : null}
+        <div className="rounded-full bg-white px-4 py-2 text-xs font-black text-teal-700 shadow-sm">
+          Total {fmtNumber(total, 0)} kkal
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3">
@@ -4235,12 +4096,8 @@ function AutoFoodBreakdownV29({
 
                 <div className="mt-1 text-xs font-bold text-slate-500">
                   {item.match_status === "matched"
-                    ? `Match: ${item.matched_name} | ${item.category || "Umum"}${
-                        Number(item.base_calories || 0) > 0
-                          ? ` | ${fmtNumber(item.base_calories, 0)} kkal dasar`
-                          : ""
-                      }`
-                    : "Estimasi kalori diproses sistem"}
+                    ? `Match: ${item.matched_name} | ${item.category || "Umum"} | ${fmtNumber(item.base_calories, 0)} kkal dasar`
+                    : "Belum match di Master KaloriData"}
                 </div>
               </div>
 
@@ -4258,11 +4115,9 @@ function AutoFoodBreakdownV29({
                   <option value="1">1 porsi</option>
                 </select>
 
-                {Number(item.subtotal_calories || 0) > 0 ? (
-                  <div className="rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-700">
-                    {fmtNumber(item.subtotal_calories, 0)} kkal
-                  </div>
-                ) : null}
+                <div className="rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-700">
+                  {fmtNumber(item.subtotal_calories, 0)} kkal
+                </div>
               </div>
             </div>
           </div>
