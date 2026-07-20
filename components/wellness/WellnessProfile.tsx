@@ -90,7 +90,7 @@ export function WellnessAvatar({
     >
       {usableSrc && !imageFailed ? (
         <img
-          src={usableSrc}
+          src={`${usableSrc}?v=${Date.now()}`}
           alt={clean(name) || "Foto profil"}
           className="h-full w-full object-cover"
           onError={() => setImageFailed(true)}
