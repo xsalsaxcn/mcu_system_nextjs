@@ -6,6 +6,7 @@
 // WELLNESS_PARTICIPANT_FITNESS_LAST_SYNC_V79J
 // WELLNESS_GOOGLE_FIT_NATIVE_BRIDGE_V79N
 // WELLNESS_GOOGLE_FIT_STABLE_SYNC_AND_TOTAL_DISPLAY_V79O
+// WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_BUTTON_V86B
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -55,6 +56,35 @@ type PortalTab =
 
 function clean(value: any) {
   return String(value ?? "").trim();
+}
+
+function nativeGoogleFitBridgeV86B() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const bridge =
+    (window as any).HarmonyNativeFitness;
+
+  if (
+    !bridge ||
+    typeof bridge.syncGoogleFit !== "function"
+  ) {
+    return null;
+  }
+
+  try {
+    if (
+      typeof bridge.available === "function" &&
+      bridge.available() !== true
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return bridge;
 }
 
 function asNumber(value: any) {
@@ -686,6 +716,10 @@ export default function WellnessParticipantPortalPage() {
   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
   const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
   const [syncing, setSyncing] = useState("");
+  const [
+    nativeGoogleFitAvailable,
+    setNativeGoogleFitAvailable,
+  ] = useState(false);
 
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
@@ -759,8 +793,29 @@ export default function WellnessParticipantPortalPage() {
       setFitnessSettings(
         result.fitness_settings || result.participant?.wellness_control || null,
       );
-      const nextIntegrations = result.integrations || [];
+      const nextIntegrations =
+        result.integrations || [];
+
       setIntegrations(nextIntegrations);
+
+      const googleFitIntegrationV86B =
+        nextIntegrations.find(
+          (integration: any) =>
+            clean(integration?.provider)
+              .toLowerCase()
+              .replace(/-/g, "_") ===
+            "google_fit",
+        );
+
+      const googleFitIntegrationRawV86B =
+        activityRawPayloadV72(
+          googleFitIntegrationV86B,
+        );
+
+      const nativeGoogleFitSnapshotV86B =
+        googleFitIntegrationRawV86B
+          ?.native_last_snapshot || null;
+
       setFitnessLastSyncAt((current) => {
         const next = { ...current };
         for (const integration of nextIntegrations) {
@@ -783,12 +838,24 @@ export default function WellnessParticipantPortalPage() {
             clean(left?.updated_at || left?.raw_payload?.last_sync_at),
           ),
         )[0];
-      const latestGoogleRaw = activityRawPayloadV72(latestGoogleFitDaily);
-      if (latestGoogleRaw?.exact_snapshot) {
-        setFitnessLastSyncSnapshot((current) => ({
-          ...current,
-          google_fit: latestGoogleRaw.exact_snapshot,
-        }));
+      const latestGoogleRaw =
+        activityRawPayloadV72(
+          latestGoogleFitDaily,
+        );
+
+      const preferredGoogleSnapshotV86B =
+        nativeGoogleFitSnapshotV86B ||
+        latestGoogleRaw?.exact_snapshot ||
+        null;
+
+      if (preferredGoogleSnapshotV86B) {
+        setFitnessLastSyncSnapshot(
+          (current) => ({
+            ...current,
+            google_fit:
+              preferredGoogleSnapshotV86B,
+          }),
+        );
       }
       setClinicalHistory(result.clinical_history || []);
       setStep("portal");
@@ -824,6 +891,198 @@ export default function WellnessParticipantPortalPage() {
       loadMe();
     }
   }, []);
+
+  useEffect(() => {
+    function updateNativeAvailabilityV86B() {
+      setNativeGoogleFitAvailable(
+        Boolean(nativeGoogleFitBridgeV86B()),
+      );
+    }
+
+    function handleNativeGoogleFitV86B(
+      event: Event,
+    ) {
+      const detail =
+        (event as CustomEvent<any>)?.detail ||
+        {};
+
+      if (detail?.progress) {
+        setSyncing("google-fit-native");
+
+        setMessage(
+          clean(detail?.message) ||
+            "Membaca Google Fit langsung dari HP...",
+        );
+
+        return;
+      }
+
+      setSyncing("");
+
+      if (!detail?.ok) {
+        setMessage(
+          clean(detail?.message) ||
+            "Gagal memperbarui Google Fit dari HP.",
+        );
+
+        return;
+      }
+
+      const completedAt =
+        clean(detail?.last_sync_at) ||
+        new Date().toISOString();
+
+      setFitnessLastSyncAt((current) => ({
+        ...current,
+        google_fit: completedAt,
+      }));
+
+      if (detail?.last_sync_snapshot) {
+        setFitnessLastSyncSnapshot(
+          (current) => ({
+            ...current,
+            google_fit:
+              detail.last_sync_snapshot,
+          }),
+        );
+      }
+
+      setMessage(
+        clean(detail?.message) ||
+          "Steps dan kalori total berhasil diperbarui dari HP.",
+      );
+
+      void loadMe({
+        keepMessage: true,
+      });
+    }
+
+    updateNativeAvailabilityV86B();
+
+    window.addEventListener(
+      "harmony-native-google-fit-sync",
+      handleNativeGoogleFitV86B as EventListener,
+    );
+
+    window.addEventListener(
+      "focus",
+      updateNativeAvailabilityV86B,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "harmony-native-google-fit-sync",
+        handleNativeGoogleFitV86B as EventListener,
+      );
+
+      window.removeEventListener(
+        "focus",
+        updateNativeAvailabilityV86B,
+      );
+    };
+  }, []);
+
+  function connectNativeGoogleFitV86B() {
+    const participantId = Number(
+      participant?.id ||
+        participant?.participant_id ||
+        participant
+          ?.wellness_participant_id ||
+        0,
+    );
+
+    const bridge =
+      nativeGoogleFitBridgeV86B();
+
+    if (
+      !bridge ||
+      typeof bridge.connectGoogleFit !==
+        "function"
+    ) {
+      setMessage(
+        "Aktivasi akses perangkat hanya tersedia pada aplikasi Android versi 2.6.",
+      );
+
+      return;
+    }
+
+    if (!(participantId > 0)) {
+      setMessage(
+        "Participant ID belum tersedia. Muat ulang portal.",
+      );
+
+      return;
+    }
+
+    setSyncing(
+      "google-fit-native-connect",
+    );
+
+    setMessage(
+      "Membuka aktivasi akses Google Fit pada perangkat...",
+    );
+
+    try {
+      bridge.connectGoogleFit(
+        participantId,
+      );
+    } catch (error: any) {
+      setSyncing("");
+
+      setMessage(
+        error?.message ||
+          "Tidak dapat membuka akses Google Fit perangkat.",
+      );
+    }
+  }
+
+  function syncNativeGoogleFitV86B() {
+    const participantId = Number(
+      participant?.id ||
+        participant?.participant_id ||
+        participant
+          ?.wellness_participant_id ||
+        0,
+    );
+
+    const bridge =
+      nativeGoogleFitBridgeV86B();
+
+    if (!bridge) {
+      setMessage(
+        "Pembaruan dari HP hanya tersedia pada aplikasi Android versi 2.6.",
+      );
+
+      return;
+    }
+
+    if (!(participantId > 0)) {
+      setMessage(
+        "Participant ID belum tersedia. Muat ulang portal.",
+      );
+
+      return;
+    }
+
+    setSyncing("google-fit-native");
+
+    setMessage(
+      "Membaca steps dan kalori total dari Google Fit HP...",
+    );
+
+    try {
+      bridge.syncGoogleFit(
+        participantId,
+      );
+    } catch (error: any) {
+      setSyncing("");
+
+      setMessage(
+        error?.message ||
+          "Tidak dapat membaca Google Fit dari perangkat.",
+      );
+    }
+  }
 
   function setValue(key: string, value: string) {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -1479,26 +1738,98 @@ export default function WellnessParticipantPortalPage() {
             ) : null}
 
             {activeTab === "devices" ? (
-              <DevicesTab
-                healthConnectConnected={!!healthConnectConnected}
-                googleFitConnected={!!googleFitConnected}
-                healthConnectLastSyncAt={
-                  fitnessLastSyncAt.health_connect ||
-                  healthConnectConnected?.last_sync_at ||
-                  ""
-                }
-                googleFitLastSyncAt={
-                  fitnessLastSyncAt.google_fit ||
-                  googleFitConnected?.last_sync_at ||
-                  ""
-                }
-                googleFitLastSyncSnapshot={
-                  fitnessLastSyncSnapshot.google_fit || null
-                }
-                fitnessSettings={fitnessSettings}
-                syncing={syncing}
-                syncProvider={syncProvider}
-              />
+              <>
+                <DevicesTab
+                  healthConnectConnected={
+                    !!healthConnectConnected
+                  }
+                  googleFitConnected={
+                    !!googleFitConnected
+                  }
+                  healthConnectLastSyncAt={
+                    fitnessLastSyncAt
+                      .health_connect ||
+                    healthConnectConnected
+                      ?.last_sync_at ||
+                    ""
+                  }
+                  googleFitLastSyncAt={
+                    fitnessLastSyncAt
+                      .google_fit ||
+                    googleFitConnected
+                      ?.last_sync_at ||
+                    ""
+                  }
+                  googleFitLastSyncSnapshot={
+                    fitnessLastSyncSnapshot
+                      .google_fit || null
+                  }
+                  fitnessSettings={
+                    fitnessSettings
+                  }
+                  syncing={syncing}
+                  syncProvider={syncProvider}
+                />
+
+                {nativeGoogleFitAvailable ? (
+                  <section className="rounded-[2rem] border border-blue-200 bg-white p-5 shadow-sm md:p-6">
+                    <div className="text-xs font-black uppercase tracking-[0.18em] text-blue-500">
+                      Google Fit Android
+                    </div>
+
+                    <h2 className="mt-2 text-xl font-black text-slate-950">
+                      Perbarui dari HP
+                    </h2>
+
+                    <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+                      Steps dan kalori total dibaca dari satu snapshot Google Fit pada HP.
+                      Kalori total hanya ditampilkan sebagai informasi dan tidak menjadi
+                      kalori workout, target, ranking, atau poin.
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={
+                          connectNativeGoogleFitV86B
+                        }
+                        disabled={
+                          syncing !== "" ||
+                          !fitnessEnabled ||
+                          activeFitnessSource !==
+                            "google_fit"
+                        }
+                        className="rounded-full border border-blue-200 bg-white px-5 py-3 text-xs font-black text-blue-700 disabled:opacity-40"
+                      >
+                        {syncing ===
+                        "google-fit-native-connect"
+                          ? "Membuka akses..."
+                          : "Aktifkan Akses Perangkat"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={
+                          syncNativeGoogleFitV86B
+                        }
+                        disabled={
+                          syncing !== "" ||
+                          !fitnessEnabled ||
+                          activeFitnessSource !==
+                            "google_fit" ||
+                          !googleFitConnected
+                        }
+                        className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100 disabled:opacity-40"
+                      >
+                        {syncing ===
+                        "google-fit-native"
+                          ? "Membaca dari HP..."
+                          : "Perbarui Steps dan Kalori dari HP"}
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+              </>
             ) : null}
 
             {activeTab === "chat" ? (

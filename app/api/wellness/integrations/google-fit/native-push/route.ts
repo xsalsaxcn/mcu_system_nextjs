@@ -1,6 +1,7 @@
-﻿// WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N
+// WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N
 // Exact Android HistoryClient.readDailyTotal snapshot. No calorie estimation.
 // WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
+// WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_ONLY_V86B
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -10,7 +11,8 @@ import { loadParticipantControl } from "@/lib/wellness/participantControls";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MARKER = "WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N";
+const MARKER =
+  "WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_ONLY_V86B";
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
@@ -171,9 +173,7 @@ export async function POST(req: NextRequest) {
       ? Math.max(0, numberValue(body?.active_calories))
       : 0;
     const nowIso = new Date().toISOString();
-    const externalId = `google_fit_daily_${participantId}_${date}`;
-
-    const exactSnapshot = {
+const exactSnapshot = {
       date,
       measured_at: measuredAtText,
       synced_at: nowIso,
@@ -188,92 +188,53 @@ export async function POST(req: NextRequest) {
       account_email: nativeEmail || null,
     };
 
-    const payload: any = {
-      participant_id: participantId,
-      source: "google_fit",
-      external_activity_id: externalId,
-      provider_activity_id: externalId,
-      activity_type: "Google Fit Daily",
-      activity_name: `Google Fit Live - ${steps} steps`,
-      log_date: date,
-      started_at: measuredAtText,
-      duration_minutes: 0,
-      calories: Math.round(totalCalories * 100) / 100,
-      distance_km: distanceKm,
-      steps,
-      updated_at: nowIso,
-      raw_payload: {
-        marker: MARKER,
-        provider: "google_fit",
-        sync_mode: "native_live_daily",
-        native_live: true,
-        native_measured_at: measuredAtText,
-        native_account_email: nativeEmail || null,
-        google_fit_steps: steps,
-        google_fit_total_calories: totalCalories,
-        google_fit_calories_expended: totalCalories,
-        google_fit_active_calories: activeCaloriesAvailable
-          ? activeCalories
-          : null,
-        active_calories_available: activeCaloriesAvailable,
-        sanitized_active_calories: activeCaloriesAvailable
-          ? activeCalories
-          : 0,
-        calories_source: activeCaloriesAvailable
-          ? "google_fit_native_reported_active"
-          : "google_fit_native_total_only_no_active_guess",
-        google_fit_calories_include_bmr: true,
-        exact_snapshot: exactSnapshot,
-        calculation_note:
-          "Steps and total calories are read directly with Google Fit Android HistoryClient.readDailyTotal. Active calories are never estimated.",
-        synced_at: nowIso,
-        last_sync_at: nowIso,
-      },
-    };
+    const previousSnapshot =
+      integrationRaw
+        ?.native_last_snapshot || null;
 
-    const existingResult = await supabase
-      .from("wellness_activity_logs")
-      .select("id,raw_payload,updated_at")
-      .eq("participant_id", participantId)
-      .eq("source", "google_fit")
-      .eq("external_activity_id", externalId)
-      .maybeSingle();
-    if (existingResult.error) throw existingResult.error;
+    const previousMeasuredAtText =
+      clean(
+        previousSnapshot?.measured_at,
+      );
 
-    const previousRaw = parseRawPayload(existingResult.data?.raw_payload);
-    const previousMeasuredAtText = clean(
-      previousRaw?.native_measured_at || previousRaw?.exact_snapshot?.measured_at,
-    );
-    const previousMeasuredAtMs = new Date(previousMeasuredAtText).getTime();
+    const previousMeasuredAtMs =
+      new Date(
+        previousMeasuredAtText,
+      ).getTime();
+
     if (
-      existingResult.data?.id &&
-      Number.isFinite(previousMeasuredAtMs) &&
-      previousMeasuredAtMs > measuredAtMs
+      Number.isFinite(
+        previousMeasuredAtMs,
+      ) &&
+      previousMeasuredAtMs >
+        measuredAtMs
     ) {
       return NextResponse.json({
         ok: true,
         marker: MARKER,
-        action: "newer_native_preserved",
-        message: "Snapshot native yang lebih baru sudah tersimpan.",
-        last_sync_at: clean(existingResult.data?.updated_at) || nowIso,
-        last_sync_snapshot: previousRaw?.exact_snapshot || null,
+        action:
+          "newer_native_preserved",
+        message:
+          "Snapshot native yang lebih baru sudah tersimpan.",
+        last_sync_at:
+          clean(
+            integration?.last_sync_at,
+          ) || nowIso,
+        last_sync_snapshot:
+          previousSnapshot,
         active_calories_available:
-          previousRaw?.active_calories_available === true,
+          previousSnapshot
+            ?.active_calories_available ===
+          true,
       });
     }
 
-    let action = "inserted";
-    if (existingResult.data?.id) {
-      const update = await supabase
-        .from("wellness_activity_logs")
-        .update(payload)
-        .eq("id", existingResult.data.id);
-      if (update.error) throw update.error;
-      action = "updated";
-    } else {
-      const insert = await supabase.from("wellness_activity_logs").insert(payload);
-      if (insert.error) throw insert.error;
-    }
+    // Snapshot native hanya disimpan
+    // sebagai data tampilan perangkat.
+    // Total calories tidak masuk ke
+    // workout, target, ranking, atau poin.
+    const action =
+      "native_snapshot_updated";
 
     const integrationUpdate = await supabase
       .from("wellness_integrations")
@@ -285,8 +246,10 @@ export async function POST(req: NextRequest) {
           ...integrationRaw,
           native_account_email: nativeEmail || expectedEmail || null,
           native_last_sync_at: nowIso,
-          native_last_snapshot: exactSnapshot,
-          marker: integrationRaw?.marker || MARKER,
+          native_last_snapshot:
+            exactSnapshot,
+          native_snapshot_only: true,
+          marker: MARKER,
         },
       })
       .eq("id", integration.id);
