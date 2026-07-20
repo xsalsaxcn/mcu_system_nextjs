@@ -1,4 +1,4 @@
-// WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N
+﻿// WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_V79N
 // Exact Android HistoryClient.readDailyTotal snapshot. No calorie estimation.
 // WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
 
@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
       log_date: date,
       started_at: measuredAtText,
       duration_minutes: 0,
-      calories: activeCaloriesAvailable ? activeCalories : 0,
+      calories: Math.round(totalCalories * 100) / 100,
       distance_km: distanceKm,
       steps,
       updated_at: nowIso,
@@ -309,3 +309,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
