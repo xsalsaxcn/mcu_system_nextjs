@@ -150,7 +150,14 @@ export default function WellnessProfilePanel({
   const actorEmail = clean(
     profile?.email || actor?.email || actor?.portal_email,
   );
-  const photo = clean(profile?.photo_preview_url || profile?.photo_url);
+  const photoBase = clean(
+    profile?.photo_preview_url ||
+    profile?.photo_url
+  );
+
+  const photo = photoBase
+    ? `${photoBase}${photoBase.includes("?") ? "&" : "?"}v=${Date.now()}`
+    : "";
 
   const lastUpdated = useMemo(() => {
     if (!profile?.updated_at) return "Belum ada foto profil";
@@ -181,7 +188,14 @@ export default function WellnessProfilePanel({
       if (!result?.ok) throw new Error(result?.message || "Upload foto gagal.");
       setNotice("Foto profil berhasil diperbarui.");
       await reload();
-      window.dispatchEvent(new Event("wellness-profile-updated"));
+
+      setTimeout(() => {
+        void reload();
+      }, 500);
+
+      window.dispatchEvent(
+        new Event("wellness-profile-updated")
+      );
     } catch (error: any) {
       const rawMessage = clean(error?.message || "Upload foto gagal.");
       setNotice(
