@@ -6,6 +6,7 @@ import { fail, ok } from "@/lib/server/response";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { clearPortalCookie, getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { postSupportWebhook } from "@/lib/wellness/supportServer";
 
 export const runtime = "nodejs";
 
@@ -175,8 +176,35 @@ export async function GET(req: NextRequest) {
     );
     const activity_summary = buildActivitySummary(selectedActivities, participant);
 
+
+    // PROFILE PHOTO ONLY PATCH
+    // Tidak mengubah data participant lain.
+    const profileResult = await postSupportWebhook(
+      "wellnessProfileList",
+      {
+        actorType: "participant",
+        actorIds: [
+          String(participant.id),
+        ],
+      },
+    ).catch(() => ({
+      profiles: [],
+    }));
+
+
+    const profilePhoto =
+      profileResult?.profiles?.[0] || {};
+
     return ok({
-      participant: { ...participant, wellness_control: fitnessSettings },
+      participant: {
+        ...participant,
+        photo_url:
+          profilePhoto.photo_url || "",
+        photo_preview_url:
+          profilePhoto.photo_preview_url || "",
+        wellness_control:
+          fitnessSettings,
+      },
       fitness_settings: fitnessSettings,
       integrations: integrations || [],
       activities: selectedActivities,
