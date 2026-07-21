@@ -12,6 +12,7 @@
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
@@ -1621,14 +1622,28 @@ export default function WellnessParticipantPortalPage() {
                 ) : null}
 
                 {step === "request" ? (
-                  <button
-                    type="button"
-                    onClick={requestOtp}
-                    className="rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-100"
-                  >
-                    Kirim OTP
-                  </button>
-                ) : (
+  <div className="grid gap-4">
+
+    <button
+      type="button"
+      onClick={requestOtp}
+      className="rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-100"
+    >
+      Kirim OTP
+    </button>
+
+    <div className="text-center text-sm text-slate-500">
+      Belum punya akun?
+      <Link
+        href="/wellness/signup"
+        className="ml-2 font-bold text-blue-600"
+      >
+        Sign Up
+      </Link>
+    </div>
+
+  </div>
+) : (
                   <div className="grid gap-3">
                     <button
                       type="button"
