@@ -1557,8 +1557,8 @@ export default function WellnessParticipantPortalPage() {
               <h2 className="text-xl font-black">Login Peserta</h2>
 
               <p className="mt-1 text-sm font-bold text-slate-500">
-                Gunakan Kode Karyawan sesuai data program wellness. Username
-                digunakan sebagai identitas portal peserta.
+                Masuk menggunakan Kode Karyawan dan email terdaftar.
+                Belum memiliki akun? Silakan Sign Up.
               </p>
 
               <PortalLoginStatusNoticeV43
@@ -1579,16 +1579,6 @@ export default function WellnessParticipantPortalPage() {
                 </label>
 
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Buat Username
-                  <input
-                    className={fieldClass}
-                    value={form.username}
-                    onChange={(e) => setValue("username", e.target.value)}
-                    placeholder="Contoh: samsul278"
-                  />
-                </label>
-
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
                   Email
                   <input
                     type="email"
@@ -1596,16 +1586,6 @@ export default function WellnessParticipantPortalPage() {
                     value={form.email}
                     onChange={(e) => setValue("email", e.target.value)}
                     placeholder="nama@email.com"
-                  />
-                </label>
-
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Nomor HP
-                  <input
-                    className={fieldClass}
-                    value={form.phone}
-                    onChange={(e) => setValue("phone", e.target.value)}
-                    placeholder="08xxxx"
                   />
                 </label>
 
