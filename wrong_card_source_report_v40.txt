@@ -1,0 +1,3395 @@
+﻿WRONG CARD SOURCE REPORT V40
+File: C:\Users\Lenovo\Documents\mcu_system_nextjs\app\wellness\portal\page.tsx
+Generated: 2026-07-10 17:07:08
+
+
+============================================================
+PATTERN: CALORIES IN
+MATCH LINE: 1181
+NEAREST FUNCTION: isLegacyCaloriesCard
+CONTEXT: 1156 - 1216
+============================================================
+    1156 |   );
+    1157 | }
+    1158 | 
+    1159 | 
+    1160 | 
+    1161 | 
+    1162 | function HideOldInvalidSummaryCardV39() {
+    1163 |   useEffect(() => {
+    1164 |     if (typeof window === "undefined") return;
+    1165 | 
+    1166 |     function compactText(element: Element | null) {
+    1167 |       return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+    1168 |     }
+    1169 | 
+    1170 |     function hide(element: HTMLElement | null, reason: string) {
+    1171 |       if (!element) return;
+    1172 |       element.style.display = "none";
+    1173 |       element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+>>> 1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+    1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+    1196 |           text.includes("CALORIES IN") &&
+    1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+    1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+
+============================================================
+PATTERN: CALORIES IN
+MATCH LINE: 1196
+NEAREST FUNCTION: findMetricGridFromCaloriesCard
+CONTEXT: 1171 - 1231
+============================================================
+    1171 |       if (!element) return;
+    1172 |       element.style.display = "none";
+    1173 |       element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+    1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+    1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+>>> 1196 |           text.includes("CALORIES IN") &&
+    1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+    1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+    1217 |     }
+    1218 | 
+    1219 |     function hideEmptyIntroArtifacts() {
+    1220 |       const candidates = Array.from(
+    1221 |         document.body.querySelectorAll("section, div, article")
+    1222 |       ) as HTMLElement[];
+    1223 | 
+    1224 |       candidates.forEach((element) => {
+    1225 |         const text = compactText(element);
+    1226 |         const rect = element.getBoundingClientRect();
+    1227 |         const className = element.getAttribute("class") || "";
+    1228 | 
+    1229 |         const cardLike =
+    1230 |           className.includes("rounded") ||
+    1231 |           className.includes("shadow") ||
+
+============================================================
+PATTERN: CALORIES IN
+MATCH LINE: 1266
+NEAREST FUNCTION: scan
+CONTEXT: 1241 - 1301
+============================================================
+    1241 |         ) {
+    1242 |           hide(element, "empty-intro-artifact");
+    1243 |         }
+    1244 |       });
+    1245 |     }
+    1246 | 
+    1247 |     function scan() {
+    1248 |       if (!document.body) return;
+    1249 | 
+    1250 |       const all = Array.from(
+    1251 |         document.body.querySelectorAll("section, div, article")
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+>>> 1266 |             parentText.includes("CALORIES IN") &&
+    1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+    1276 |                 childText.includes("CALORIES IN") &&
+    1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+
+============================================================
+PATTERN: CALORIES IN
+MATCH LINE: 1276
+NEAREST FUNCTION: scan
+CONTEXT: 1251 - 1311
+============================================================
+    1251 |         document.body.querySelectorAll("section, div, article")
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+    1266 |             parentText.includes("CALORIES IN") &&
+    1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+>>> 1276 |                 childText.includes("CALORIES IN") &&
+    1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+    1303 | 
+    1304 |     return () => {
+    1305 |       observer.disconnect();
+    1306 |       window.clearInterval(timer);
+    1307 |     };
+    1308 |   }, []);
+    1309 | 
+    1310 |   return null;
+    1311 | }
+
+============================================================
+PATTERN: Calories In
+MATCH LINE: 975
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 950 - 1010
+============================================================
+     950 |                     >
+     951 |                       Kirim Ulang OTP
+     952 |                     </button>
+     953 |                   </div>
+     954 |                 )}
+     955 |               </div>
+     956 |             </div>
+     957 | 
+     958 |             <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     959 |               <h2 className="text-lg font-black">Akses Peserta</h2>
+     960 | 
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+>>>  975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+     980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+
+============================================================
+PATTERN: Calories In
+MATCH LINE: 1432
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1407 - 1467
+============================================================
+    1407 |           <div>
+    1408 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+    1409 |               Today Wellness
+    1410 |             </div>
+    1411 | 
+    1412 |             <h2 className="mt-2 text-3xl font-black text-slate-950">
+    1413 |               Halo, {participant?.name || "Peserta"}
+    1414 |             </h2>
+    1415 | 
+    1416 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+    1417 |               Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
+    1418 |             </p>
+    1419 |           </div>
+    1420 | 
+    1421 |           <button
+    1422 |             type="button"
+    1423 |             onClick={loadDirectNutrition}
+    1424 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+    1425 |           >
+    1426 |             {nutritionLoading ? "Memuat..." : "Refresh Nutrisi"}
+    1427 |           </button>
+    1428 |         </div>
+    1429 | 
+    1430 |         <div className="mt-5 grid gap-4 md:grid-cols-4">
+    1431 |           <PortalMetricCardV34
+>>> 1432 |             label="Calories In"
+    1433 |             value={`${fmtNumber(todayCalories, 0)} kkal`}
+    1434 |             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+    1435 |             tone="sky"
+    1436 |           />
+    1437 | 
+    1438 |           <PortalMetricCardV34
+    1439 |             label="Workout Calories"
+    1440 |             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
+    1441 |             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+    1442 |             tone="teal"
+    1443 |           />
+    1444 | 
+    1445 |           <PortalMetricCardV34
+    1446 |             label="Steps"
+    1447 |             value={fmtNumber(totals.steps || 0)}
+    1448 |             note="hari ini dari manual/device bila tersedia"
+    1449 |             tone="peach"
+    1450 |           />
+    1451 | 
+    1452 |           <PortalMetricCardV34
+    1453 |             label="BMI / Tensi"
+    1454 |             value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
+    1455 |             note={
+    1456 |               latestClinical?.systolic
+    1457 |                 ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg`
+    1458 |                 : "110/80 mmHg"
+    1459 |             }
+    1460 |             tone="slate"
+    1461 |           />
+    1462 |         </div>
+    1463 |       </div>
+    1464 | 
+    1465 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1466 |         <div className="flex items-start justify-between gap-3">
+    1467 |           <div>
+
+============================================================
+PATTERN: 0 input nutrisi hari ini
+MATCH LINE: 1183
+NEAREST FUNCTION: isLegacyCaloriesCard
+CONTEXT: 1158 - 1218
+============================================================
+    1158 | 
+    1159 | 
+    1160 | 
+    1161 | 
+    1162 | function HideOldInvalidSummaryCardV39() {
+    1163 |   useEffect(() => {
+    1164 |     if (typeof window === "undefined") return;
+    1165 | 
+    1166 |     function compactText(element: Element | null) {
+    1167 |       return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+    1168 |     }
+    1169 | 
+    1170 |     function hide(element: HTMLElement | null, reason: string) {
+    1171 |       if (!element) return;
+    1172 |       element.style.display = "none";
+    1173 |       element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+    1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+>>> 1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+    1196 |           text.includes("CALORIES IN") &&
+    1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+    1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+    1217 |     }
+    1218 | 
+
+============================================================
+PATTERN: 0 input nutrisi hari ini
+MATCH LINE: 1267
+NEAREST FUNCTION: scan
+CONTEXT: 1242 - 1302
+============================================================
+    1242 |           hide(element, "empty-intro-artifact");
+    1243 |         }
+    1244 |       });
+    1245 |     }
+    1246 | 
+    1247 |     function scan() {
+    1248 |       if (!document.body) return;
+    1249 | 
+    1250 |       const all = Array.from(
+    1251 |         document.body.querySelectorAll("section, div, article")
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+    1266 |             parentText.includes("CALORIES IN") &&
+>>> 1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+    1276 |                 childText.includes("CALORIES IN") &&
+    1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+
+============================================================
+PATTERN: 0 input nutrisi hari ini
+MATCH LINE: 1277
+NEAREST FUNCTION: scan
+CONTEXT: 1252 - 1312
+============================================================
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+    1266 |             parentText.includes("CALORIES IN") &&
+    1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+    1276 |                 childText.includes("CALORIES IN") &&
+>>> 1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+    1303 | 
+    1304 |     return () => {
+    1305 |       observer.disconnect();
+    1306 |       window.clearInterval(timer);
+    1307 |     };
+    1308 |   }, []);
+    1309 | 
+    1310 |   return null;
+    1311 | }
+    1312 | function HomeTab({
+
+============================================================
+PATTERN: input nutrisi hari ini
+MATCH LINE: 980
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 955 - 1015
+============================================================
+     955 |               </div>
+     956 |             </div>
+     957 | 
+     958 |             <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     959 |               <h2 className="text-lg font-black">Akses Peserta</h2>
+     960 | 
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+>>>  980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+
+============================================================
+PATTERN: input nutrisi hari ini
+MATCH LINE: 1183
+NEAREST FUNCTION: isLegacyCaloriesCard
+CONTEXT: 1158 - 1218
+============================================================
+    1158 | 
+    1159 | 
+    1160 | 
+    1161 | 
+    1162 | function HideOldInvalidSummaryCardV39() {
+    1163 |   useEffect(() => {
+    1164 |     if (typeof window === "undefined") return;
+    1165 | 
+    1166 |     function compactText(element: Element | null) {
+    1167 |       return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+    1168 |     }
+    1169 | 
+    1170 |     function hide(element: HTMLElement | null, reason: string) {
+    1171 |       if (!element) return;
+    1172 |       element.style.display = "none";
+    1173 |       element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+    1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+>>> 1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+    1196 |           text.includes("CALORIES IN") &&
+    1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+    1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+    1217 |     }
+    1218 | 
+
+============================================================
+PATTERN: input nutrisi hari ini
+MATCH LINE: 1267
+NEAREST FUNCTION: scan
+CONTEXT: 1242 - 1302
+============================================================
+    1242 |           hide(element, "empty-intro-artifact");
+    1243 |         }
+    1244 |       });
+    1245 |     }
+    1246 | 
+    1247 |     function scan() {
+    1248 |       if (!document.body) return;
+    1249 | 
+    1250 |       const all = Array.from(
+    1251 |         document.body.querySelectorAll("section, div, article")
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+    1266 |             parentText.includes("CALORIES IN") &&
+>>> 1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+    1276 |                 childText.includes("CALORIES IN") &&
+    1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+
+============================================================
+PATTERN: input nutrisi hari ini
+MATCH LINE: 1277
+NEAREST FUNCTION: scan
+CONTEXT: 1252 - 1312
+============================================================
+    1252 |       ) as HTMLElement[];
+    1253 | 
+    1254 |       all.forEach((element) => {
+    1255 |         if (!isLegacyCaloriesCard(element)) return;
+    1256 | 
+    1257 |         const grid = findMetricGridFromCaloriesCard(element);
+    1258 |         hide(grid, "legacy-metric-grid");
+    1259 | 
+    1260 |         let parent = grid.parentElement as HTMLElement | null;
+    1261 | 
+    1262 |         if (parent) {
+    1263 |           const parentText = compactText(parent);
+    1264 | 
+    1265 |           if (
+    1266 |             parentText.includes("CALORIES IN") &&
+    1267 |             parentText.includes("0 input nutrisi hari ini") &&
+    1268 |             parentText.includes("Halo,") &&
+    1269 |             parentText.length < 2500
+    1270 |           ) {
+    1271 |             Array.from(parent.children).forEach((child) => {
+    1272 |               const childElement = child as HTMLElement;
+    1273 |               const childText = compactText(childElement);
+    1274 | 
+    1275 |               if (
+    1276 |                 childText.includes("CALORIES IN") &&
+>>> 1277 |                 childText.includes("0 input nutrisi hari ini") &&
+    1278 |                 !childText.includes("Halo,")
+    1279 |               ) {
+    1280 |                 hide(childElement, "legacy-summary-child");
+    1281 |               }
+    1282 |             });
+    1283 |           }
+    1284 |         }
+    1285 |       });
+    1286 | 
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+    1303 | 
+    1304 |     return () => {
+    1305 |       observer.disconnect();
+    1306 |       window.clearInterval(timer);
+    1307 |     };
+    1308 |   }, []);
+    1309 | 
+    1310 |   return null;
+    1311 | }
+    1312 | function HomeTab({
+
+============================================================
+PATTERN: WORKOUT CALORIES
+MATCH LINE: 1197
+NEAREST FUNCTION: findMetricGridFromCaloriesCard
+CONTEXT: 1172 - 1232
+============================================================
+    1172 |       element.style.display = "none";
+    1173 |       element.setAttribute("data-hidden-by", "HideOldInvalidSummaryCardV39");
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+    1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+    1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+    1196 |           text.includes("CALORIES IN") &&
+>>> 1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+    1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+    1217 |     }
+    1218 | 
+    1219 |     function hideEmptyIntroArtifacts() {
+    1220 |       const candidates = Array.from(
+    1221 |         document.body.querySelectorAll("section, div, article")
+    1222 |       ) as HTMLElement[];
+    1223 | 
+    1224 |       candidates.forEach((element) => {
+    1225 |         const text = compactText(element);
+    1226 |         const rect = element.getBoundingClientRect();
+    1227 |         const className = element.getAttribute("class") || "";
+    1228 | 
+    1229 |         const cardLike =
+    1230 |           className.includes("rounded") ||
+    1231 |           className.includes("shadow") ||
+    1232 |           className.includes("border") ||
+
+============================================================
+PATTERN: Workout Calories
+MATCH LINE: 9
+NEAREST FUNCTION: UNKNOWN
+CONTEXT: 1 - 44
+============================================================
+       1 | "use client";
+       2 | 
+       3 | import { useEffect, useMemo, useState } from "react";
+       4 | import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
+       5 | import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
+       6 | 
+       7 | // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
+       8 | // Base dari V415:
+>>>    9 | // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
+      10 | // - History Workout tetap menampilkan semua riwayat.
+      11 | // - Google Fit Daily pada tanggal yang sama dipilih row terbaru.
+      12 | // - Health Connect Daily pada tanggal yang sama dipilih row terbaru.
+      13 | // - todayDate dan activity date key pakai Asia/Jakarta.
+      14 | // - Auto sync Google Fit tetap setiap 10 menit saat portal terbuka.
+      15 | // - Strava card diganti menjadi Health Connect.
+      16 | // - Health Connect saat ini menunggu Android companion app.
+      17 | // - Data Health Connect yang masuk ke wellness_activity_logs akan langsung ikut summary.
+      18 | 
+      19 | type Step = "request" | "verify" | "portal";
+      20 | type PortalTab =
+      21 |   | "home"
+      22 |   | "nutrition"
+      23 |   | "workout"
+      24 |   | "healthtalk"
+      25 |   | "history"
+      26 |   | "devices"
+      27 |   | "profile";
+      28 | 
+      29 | function clean(value: any) {
+      30 |   return String(value ?? "").trim();
+      31 | }
+      32 | 
+      33 | function asNumber(value: any) {
+      34 |   const n = Number(value);
+      35 |   return Number.isFinite(n) ? n : 0;
+      36 | }
+      37 | 
+      38 | function fmt(value: any, suffix = "") {
+      39 |   const text = clean(value);
+      40 |   if (!text) return "-";
+      41 |   return `${text}${suffix ? ` ${suffix}` : ""}`;
+      42 | }
+      43 | 
+      44 | function fmtNumber(value: any, digits = 0) {
+
+============================================================
+PATTERN: Workout Calories
+MATCH LINE: 986
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 961 - 1021
+============================================================
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+     980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+>>>  986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+    1016 |                 setActiveTab={setActiveTab}
+    1017 |                 healthConnectConnected={!!healthConnectConnected}
+    1018 |                 googleFitConnected={!!googleFitConnected}
+    1019 |                 clinicalHistory={clinicalHistory}
+    1020 |               />
+    1021 |             ) : null}
+
+============================================================
+PATTERN: Workout Calories
+MATCH LINE: 1439
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1414 - 1474
+============================================================
+    1414 |             </h2>
+    1415 | 
+    1416 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+    1417 |               Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
+    1418 |             </p>
+    1419 |           </div>
+    1420 | 
+    1421 |           <button
+    1422 |             type="button"
+    1423 |             onClick={loadDirectNutrition}
+    1424 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+    1425 |           >
+    1426 |             {nutritionLoading ? "Memuat..." : "Refresh Nutrisi"}
+    1427 |           </button>
+    1428 |         </div>
+    1429 | 
+    1430 |         <div className="mt-5 grid gap-4 md:grid-cols-4">
+    1431 |           <PortalMetricCardV34
+    1432 |             label="Calories In"
+    1433 |             value={`${fmtNumber(todayCalories, 0)} kkal`}
+    1434 |             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+    1435 |             tone="sky"
+    1436 |           />
+    1437 | 
+    1438 |           <PortalMetricCardV34
+>>> 1439 |             label="Workout Calories"
+    1440 |             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
+    1441 |             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+    1442 |             tone="teal"
+    1443 |           />
+    1444 | 
+    1445 |           <PortalMetricCardV34
+    1446 |             label="Steps"
+    1447 |             value={fmtNumber(totals.steps || 0)}
+    1448 |             note="hari ini dari manual/device bila tersedia"
+    1449 |             tone="peach"
+    1450 |           />
+    1451 | 
+    1452 |           <PortalMetricCardV34
+    1453 |             label="BMI / Tensi"
+    1454 |             value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
+    1455 |             note={
+    1456 |               latestClinical?.systolic
+    1457 |                 ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg`
+    1458 |                 : "110/80 mmHg"
+    1459 |             }
+    1460 |             tone="slate"
+    1461 |           />
+    1462 |         </div>
+    1463 |       </div>
+    1464 | 
+    1465 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1466 |         <div className="flex items-start justify-between gap-3">
+    1467 |           <div>
+    1468 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+    1469 |               Meal Log
+    1470 |             </div>
+    1471 | 
+    1472 |             <h3 className="mt-2 text-2xl font-black text-slate-950">
+    1473 |               {mealTitle}
+    1474 |             </h3>
+
+============================================================
+PATTERN: hari ini dari manual/device
+MATCH LINE: 995
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 970 - 1030
+============================================================
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+     980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+>>>  995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+    1016 |                 setActiveTab={setActiveTab}
+    1017 |                 healthConnectConnected={!!healthConnectConnected}
+    1018 |                 googleFitConnected={!!googleFitConnected}
+    1019 |                 clinicalHistory={clinicalHistory}
+    1020 |               />
+    1021 |             ) : null}
+    1022 | 
+    1023 |             {activeTab === "nutrition" ? (
+    1024 |               <NutritionTab participant={participant}
+    1025 |                 form={nutritionForm}
+    1026 |                 photo={nutritionPhoto}
+    1027 |                 setPhoto={setNutritionPhoto}
+    1028 |                 setValue={setNutritionValue}
+    1029 |                 saveNutrition={saveNutrition}
+    1030 |                 logs={nutritionLogs}
+
+============================================================
+PATTERN: hari ini dari manual/device
+MATCH LINE: 1448
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1423 - 1483
+============================================================
+    1423 |             onClick={loadDirectNutrition}
+    1424 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+    1425 |           >
+    1426 |             {nutritionLoading ? "Memuat..." : "Refresh Nutrisi"}
+    1427 |           </button>
+    1428 |         </div>
+    1429 | 
+    1430 |         <div className="mt-5 grid gap-4 md:grid-cols-4">
+    1431 |           <PortalMetricCardV34
+    1432 |             label="Calories In"
+    1433 |             value={`${fmtNumber(todayCalories, 0)} kkal`}
+    1434 |             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+    1435 |             tone="sky"
+    1436 |           />
+    1437 | 
+    1438 |           <PortalMetricCardV34
+    1439 |             label="Workout Calories"
+    1440 |             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
+    1441 |             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+    1442 |             tone="teal"
+    1443 |           />
+    1444 | 
+    1445 |           <PortalMetricCardV34
+    1446 |             label="Steps"
+    1447 |             value={fmtNumber(totals.steps || 0)}
+>>> 1448 |             note="hari ini dari manual/device bila tersedia"
+    1449 |             tone="peach"
+    1450 |           />
+    1451 | 
+    1452 |           <PortalMetricCardV34
+    1453 |             label="BMI / Tensi"
+    1454 |             value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
+    1455 |             note={
+    1456 |               latestClinical?.systolic
+    1457 |                 ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg`
+    1458 |                 : "110/80 mmHg"
+    1459 |             }
+    1460 |             tone="slate"
+    1461 |           />
+    1462 |         </div>
+    1463 |       </div>
+    1464 | 
+    1465 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1466 |         <div className="flex items-start justify-between gap-3">
+    1467 |           <div>
+    1468 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+    1469 |               Meal Log
+    1470 |             </div>
+    1471 | 
+    1472 |             <h3 className="mt-2 text-2xl font-black text-slate-950">
+    1473 |               {mealTitle}
+    1474 |             </h3>
+    1475 | 
+    1476 |             <p className="mt-2 text-sm font-black leading-5 text-slate-500">
+    1477 |               {mealSubtitle}
+    1478 |             </p>
+    1479 |           </div>
+    1480 | 
+    1481 |           <button
+    1482 |             type="button"
+    1483 |             onClick={() => setActiveTab("nutrition")}
+
+============================================================
+PATTERN: BMI / TENSI
+MATCH LINE: 1199
+NEAREST FUNCTION: findMetricGridFromCaloriesCard
+CONTEXT: 1174 - 1234
+============================================================
+    1174 |       element.setAttribute("data-hidden-reason", reason);
+    1175 |     }
+    1176 | 
+    1177 |     function isLegacyCaloriesCard(element: HTMLElement) {
+    1178 |       const text = compactText(element);
+    1179 | 
+    1180 |       return (
+    1181 |         text.includes("CALORIES IN") &&
+    1182 |         text.includes("0 kkal") &&
+    1183 |         text.includes("0 input nutrisi hari ini") &&
+    1184 |         !text.includes("Halo,")
+    1185 |       );
+    1186 |     }
+    1187 | 
+    1188 |     function findMetricGridFromCaloriesCard(card: HTMLElement) {
+    1189 |       let current: HTMLElement | null = card;
+    1190 | 
+    1191 |       for (let level = 0; current && level < 8; level++) {
+    1192 |         const text = compactText(current);
+    1193 |         const className = current.getAttribute("class") || "";
+    1194 | 
+    1195 |         const hasLegacySummary =
+    1196 |           text.includes("CALORIES IN") &&
+    1197 |           text.includes("WORKOUT CALORIES") &&
+    1198 |           text.includes("STEPS") &&
+>>> 1199 |           text.includes("BMI / TENSI") &&
+    1200 |           !text.includes("Halo,");
+    1201 | 
+    1202 |         const looksLikeLayout =
+    1203 |           className.includes("grid") ||
+    1204 |           className.includes("space-y") ||
+    1205 |           className.includes("rounded") ||
+    1206 |           className.includes("shadow") ||
+    1207 |           className.includes("border");
+    1208 | 
+    1209 |         if (hasLegacySummary && looksLikeLayout) {
+    1210 |           return current;
+    1211 |         }
+    1212 | 
+    1213 |         current = current.parentElement;
+    1214 |       }
+    1215 | 
+    1216 |       return card;
+    1217 |     }
+    1218 | 
+    1219 |     function hideEmptyIntroArtifacts() {
+    1220 |       const candidates = Array.from(
+    1221 |         document.body.querySelectorAll("section, div, article")
+    1222 |       ) as HTMLElement[];
+    1223 | 
+    1224 |       candidates.forEach((element) => {
+    1225 |         const text = compactText(element);
+    1226 |         const rect = element.getBoundingClientRect();
+    1227 |         const className = element.getAttribute("class") || "";
+    1228 | 
+    1229 |         const cardLike =
+    1230 |           className.includes("rounded") ||
+    1231 |           className.includes("shadow") ||
+    1232 |           className.includes("border") ||
+    1233 |           className.includes("bg-white");
+    1234 | 
+
+============================================================
+PATTERN: Today Wellness
+MATCH LINE: 1409
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1384 - 1444
+============================================================
+    1384 |       ? directNutrition.today_logs
+    1385 |       : directNutrition?.latest_logs?.length > 0
+    1386 |         ? directNutrition.latest_logs
+    1387 |         : nutritionLogs || [];
+    1388 | 
+    1389 |   const mealTitle =
+    1390 |     directNutrition?.today_logs?.length > 0
+    1391 |       ? "Nutrisi Hari Ini"
+    1392 |       : directNutrition?.latest_logs?.length > 0
+    1393 |         ? "Riwayat Nutrisi Terakhir"
+    1394 |         : "Nutrisi Hari Ini";
+    1395 | 
+    1396 |   const mealSubtitle =
+    1397 |     directNutrition?.today_logs?.length > 0
+    1398 |       ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(todayFoodCount, 0)} item makanan hari ini`
+    1399 |       : directNutrition?.latest_logs?.length > 0
+    1400 |         ? "Belum ada input hari ini. Menampilkan data terakhir."
+    1401 |         : "Belum ada input nutrisi.";
+    1402 | 
+    1403 |   return (
+    1404 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+    1405 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1406 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    1407 |           <div>
+    1408 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+>>> 1409 |               Today Wellness
+    1410 |             </div>
+    1411 | 
+    1412 |             <h2 className="mt-2 text-3xl font-black text-slate-950">
+    1413 |               Halo, {participant?.name || "Peserta"}
+    1414 |             </h2>
+    1415 | 
+    1416 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+    1417 |               Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
+    1418 |             </p>
+    1419 |           </div>
+    1420 | 
+    1421 |           <button
+    1422 |             type="button"
+    1423 |             onClick={loadDirectNutrition}
+    1424 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+    1425 |           >
+    1426 |             {nutritionLoading ? "Memuat..." : "Refresh Nutrisi"}
+    1427 |           </button>
+    1428 |         </div>
+    1429 | 
+    1430 |         <div className="mt-5 grid gap-4 md:grid-cols-4">
+    1431 |           <PortalMetricCardV34
+    1432 |             label="Calories In"
+    1433 |             value={`${fmtNumber(todayCalories, 0)} kkal`}
+    1434 |             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+    1435 |             tone="sky"
+    1436 |           />
+    1437 | 
+    1438 |           <PortalMetricCardV34
+    1439 |             label="Workout Calories"
+    1440 |             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
+    1441 |             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+    1442 |             tone="teal"
+    1443 |           />
+    1444 | 
+
+============================================================
+PATTERN: Refresh Nutrisi
+MATCH LINE: 1426
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1401 - 1461
+============================================================
+    1401 |         : "Belum ada input nutrisi.";
+    1402 | 
+    1403 |   return (
+    1404 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+    1405 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1406 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    1407 |           <div>
+    1408 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+    1409 |               Today Wellness
+    1410 |             </div>
+    1411 | 
+    1412 |             <h2 className="mt-2 text-3xl font-black text-slate-950">
+    1413 |               Halo, {participant?.name || "Peserta"}
+    1414 |             </h2>
+    1415 | 
+    1416 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+    1417 |               Ringkasan aktivitas, nutrisi, dan progres kesehatan hari ini.
+    1418 |             </p>
+    1419 |           </div>
+    1420 | 
+    1421 |           <button
+    1422 |             type="button"
+    1423 |             onClick={loadDirectNutrition}
+    1424 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+    1425 |           >
+>>> 1426 |             {nutritionLoading ? "Memuat..." : "Refresh Nutrisi"}
+    1427 |           </button>
+    1428 |         </div>
+    1429 | 
+    1430 |         <div className="mt-5 grid gap-4 md:grid-cols-4">
+    1431 |           <PortalMetricCardV34
+    1432 |             label="Calories In"
+    1433 |             value={`${fmtNumber(todayCalories, 0)} kkal`}
+    1434 |             note={`${fmtNumber(todayFoodCount, 0)} item dari ${fmtNumber(todayRowCount, 0)} input hari ini`}
+    1435 |             tone="sky"
+    1436 |           />
+    1437 | 
+    1438 |           <PortalMetricCardV34
+    1439 |             label="Workout Calories"
+    1440 |             value={`${fmtNumber(totals.workoutCalories || 0)} kkal`}
+    1441 |             note={`${fmtNumber(totals.workoutMinutes || 0, 1)} menit aktivitas hari ini`}
+    1442 |             tone="teal"
+    1443 |           />
+    1444 | 
+    1445 |           <PortalMetricCardV34
+    1446 |             label="Steps"
+    1447 |             value={fmtNumber(totals.steps || 0)}
+    1448 |             note="hari ini dari manual/device bila tersedia"
+    1449 |             tone="peach"
+    1450 |           />
+    1451 | 
+    1452 |           <PortalMetricCardV34
+    1453 |             label="BMI / Tensi"
+    1454 |             value={latestClinical?.bmi ? fmtNumber(latestClinical.bmi, 1) : "-"}
+    1455 |             note={
+    1456 |               latestClinical?.systolic
+    1457 |                 ? `${latestClinical.systolic}/${latestClinical.diastolic || "-"} mmHg`
+    1458 |                 : "110/80 mmHg"
+    1459 |             }
+    1460 |             tone="slate"
+    1461 |           />
+
+============================================================
+PATTERN: Portal Individu Peserta
+MATCH LINE: 841
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 816 - 876
+============================================================
+     816 |     message.toLowerCase().includes("belum") ||
+     817 |     message.toLowerCase().includes("error") ||
+     818 |     message.toLowerCase().includes("invalid") ||
+     819 |     message.toLowerCase().includes("wajib");
+     820 | 
+     821 |   return (
+     822 |     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+     823 |       <HideOldInvalidSummaryCardV39 />
+     824 |       {step === "portal" ? (
+     825 |         <ParticipantPortalMenu
+     826 |           activeTab={activeTab}
+     827 |           onChangeTab={setActiveTab}
+     828 |           onLogout={logout}
+     829 |           participant={participant}
+     830 |         />
+     831 |       ) : null}
+     832 | 
+     833 |       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+     834 |         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
+     835 |           <div className="flex flex-col gap-3 pr-14 md:pr-0">
+     836 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+     837 |               Wellness Participant Portal
+     838 |             </div>
+     839 | 
+     840 |             <h1 className="text-3xl font-black md:text-4xl">
+>>>  841 |               {step === "portal" ? "Portal Individu Peserta" : "Aktivasi Portal Peserta"}
+     842 |             </h1>
+     843 | 
+     844 |             <p className="max-w-3xl text-sm font-bold leading-6 text-slate-700">
+     845 |               {step === "portal"
+     846 |                 ? "Pantau aktivitas, input nutrisi harian, catat workout manual, dan sinkronkan perangkat wellness kamu."
+     847 |                 : "Masukkan Kode Karyawan, buat username, lengkapi email/nomor HP, lalu verifikasi OTP untuk masuk."}
+     848 |             </p>
+     849 |           </div>
+     850 |         </section>
+     851 | 
+     852 |         <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+     853 |           <div
+     854 |             className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
+     855 |               isWarningMessage
+     856 |                 ? "bg-amber-50 text-amber-900"
+     857 |                 : "bg-blue-50 text-blue-800"
+     858 |             }`}
+     859 |           >
+     860 |             {loading ? "Memuat portal..." : message}
+     861 |           </div>
+     862 |         </section>
+     863 | 
+     864 |         {step !== "portal" ? (
+     865 |           <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+     866 |             <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     867 |               <h2 className="text-xl font-black">Login Peserta</h2>
+     868 | 
+     869 |               <p className="mt-1 text-sm font-bold text-slate-500">
+     870 |                 Gunakan Kode Karyawan sesuai data program wellness. Username
+     871 |                 digunakan sebagai identitas portal peserta.
+     872 |               </p>
+     873 | 
+     874 |               <div className="mt-5 grid gap-4">
+     875 |                 <label className="grid gap-2 text-sm font-bold text-slate-700">
+     876 |                   Kode Karyawan
+
+============================================================
+PATTERN: Portal peserta aktif
+MATCH LINE: 418
+NEAREST FUNCTION: noticeText
+CONTEXT: 393 - 453
+============================================================
+     393 |     }
+     394 |   }
+     395 | 
+     396 |   async function loadMe(options?: { keepMessage?: boolean }) {
+     397 |     setLoading(true);
+     398 | 
+     399 |     const result = await fetch("/api/wellness/participant/me", {
+     400 |       cache: "no-store",
+     401 |     })
+     402 |       .then((response) => response.json())
+     403 |       .catch((error) => ({
+     404 |         ok: false,
+     405 |         message: error?.message || "Network error",
+     406 |       }));
+     407 | 
+     408 |     if (result.ok) {
+     409 |       setParticipant(result.participant);
+     410 |       setIntegrations(result.integrations || []);
+     411 |       setActivities(result.activities || []);
+     412 |       setActivitySummary(result.activity_summary || []);
+     413 |       setClinicalHistory(result.clinical_history || []);
+     414 |       setStep("portal");
+     415 | 
+     416 |       if (!options?.keepMessage) {
+     417 |         setMessage(
+>>>  418 |           "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device."
+     419 |         );
+     420 |       }
+     421 | 
+     422 |       await Promise.all([loadNutrition(), loadHealthtalk()]);
+     423 |     }
+     424 | 
+     425 |     setLoading(false);
+     426 |     return result;
+     427 |   }
+     428 | 
+     429 |   useEffect(() => {
+     430 |     const params = new URLSearchParams(window.location.search);
+     431 |     const notice = params.get("notice");
+     432 | 
+     433 |     if (notice) {
+     434 |       setMessage(noticeText(notice));
+     435 |       loadMe({ keepMessage: true });
+     436 |     } else {
+     437 |       loadMe();
+     438 |     }
+     439 |   }, []);
+     440 | 
+     441 |   function setValue(key: string, value: string) {
+     442 |     setForm((previous) => ({ ...previous, [key]: value }));
+     443 |   }
+     444 | 
+     445 |   function setNutritionValue(key: string, value: string) {
+     446 |     setNutritionForm((previous) => ({ ...previous, [key]: value }));
+     447 |   }
+     448 | 
+     449 |   function setWorkoutValue(key: string, value: string) {
+     450 |     setWorkoutForm((previous) => ({ ...previous, [key]: value }));
+     451 |   }
+     452 | 
+     453 |   function setHealthtalkValue(key: string, value: string) {
+
+============================================================
+PATTERN: foodCalories
+MATCH LINE: 773
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 748 - 808
+============================================================
+     748 |   }, [step, googleFitConnected]);
+     749 | 
+     750 |   const workoutItems = useMemo(() => {
+     751 |     if (Array.isArray(activities) && activities.length > 0) return activities;
+     752 | 
+     753 |     if (Array.isArray(activitySummary) && activitySummary.length > 0) {
+     754 |       return activitySummary;
+     755 |     }
+     756 | 
+     757 |     return [];
+     758 |   }, [activities, activitySummary]);
+     759 | 
+     760 |   const todayWorkoutItems = useMemo(() => {
+     761 |     return normalizeTodayWorkoutItems(workoutItems);
+     762 |   }, [workoutItems]);
+     763 | 
+     764 |   const todayNutrition = useMemo(() => {
+     765 |     const today = todayDate();
+     766 |     return nutritionLogs.filter((item) => clean(item.log_date).slice(0, 10) === today);
+     767 |   }, [nutritionLogs]);
+     768 | 
+     769 |   const totals = useMemo(() => {
+     770 |     let workoutMinutes = 0;
+     771 |     let workoutCalories = 0;
+     772 |     let steps = 0;
+>>>  773 |     let foodCalories = 0;
+     774 |     let protein = 0;
+     775 |     let carbs = 0;
+     776 |     let fat = 0;
+     777 |     let pendingCalories = 0;
+     778 | 
+     779 |     for (const item of todayWorkoutItems || []) {
+     780 |       workoutMinutes += activityMinutesValue(item);
+     781 |       workoutCalories += activityCaloriesValue(item);
+     782 |       steps += activityStepsValue(item);
+     783 |     }
+     784 | 
+     785 |     for (const item of todayNutrition || []) {
+     786 |       const calories = Number(item.calories);
+     787 |       if (Number.isFinite(calories)) foodCalories += calories;
+     788 |       else pendingCalories += 1;
+     789 | 
+     790 |       protein += asNumber(item.protein_g);
+     791 |       carbs += asNumber(item.carbs_g);
+     792 |       fat += asNumber(item.fat_g);
+     793 |     }
+     794 | 
+     795 |     return {
+     796 |       workoutMinutes,
+     797 |       workoutCalories,
+     798 |       steps,
+     799 |       workoutCount: todayWorkoutItems?.length || 0,
+     800 |       foodCalories,
+     801 |       protein,
+     802 |       carbs,
+     803 |       fat,
+     804 |       foodCount: todayNutrition.length,
+     805 |       pendingCalories,
+     806 |     };
+     807 |   }, [todayWorkoutItems, todayNutrition]);
+     808 | 
+
+============================================================
+PATTERN: foodCalories
+MATCH LINE: 787
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 762 - 822
+============================================================
+     762 |   }, [workoutItems]);
+     763 | 
+     764 |   const todayNutrition = useMemo(() => {
+     765 |     const today = todayDate();
+     766 |     return nutritionLogs.filter((item) => clean(item.log_date).slice(0, 10) === today);
+     767 |   }, [nutritionLogs]);
+     768 | 
+     769 |   const totals = useMemo(() => {
+     770 |     let workoutMinutes = 0;
+     771 |     let workoutCalories = 0;
+     772 |     let steps = 0;
+     773 |     let foodCalories = 0;
+     774 |     let protein = 0;
+     775 |     let carbs = 0;
+     776 |     let fat = 0;
+     777 |     let pendingCalories = 0;
+     778 | 
+     779 |     for (const item of todayWorkoutItems || []) {
+     780 |       workoutMinutes += activityMinutesValue(item);
+     781 |       workoutCalories += activityCaloriesValue(item);
+     782 |       steps += activityStepsValue(item);
+     783 |     }
+     784 | 
+     785 |     for (const item of todayNutrition || []) {
+     786 |       const calories = Number(item.calories);
+>>>  787 |       if (Number.isFinite(calories)) foodCalories += calories;
+     788 |       else pendingCalories += 1;
+     789 | 
+     790 |       protein += asNumber(item.protein_g);
+     791 |       carbs += asNumber(item.carbs_g);
+     792 |       fat += asNumber(item.fat_g);
+     793 |     }
+     794 | 
+     795 |     return {
+     796 |       workoutMinutes,
+     797 |       workoutCalories,
+     798 |       steps,
+     799 |       workoutCount: todayWorkoutItems?.length || 0,
+     800 |       foodCalories,
+     801 |       protein,
+     802 |       carbs,
+     803 |       fat,
+     804 |       foodCount: todayNutrition.length,
+     805 |       pendingCalories,
+     806 |     };
+     807 |   }, [todayWorkoutItems, todayNutrition]);
+     808 | 
+     809 |   const lastClinical =
+     810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+     811 |       ? clinicalHistory[0]
+     812 |       : null;
+     813 | 
+     814 |   const isWarningMessage =
+     815 |     message.toLowerCase().includes("gagal") ||
+     816 |     message.toLowerCase().includes("belum") ||
+     817 |     message.toLowerCase().includes("error") ||
+     818 |     message.toLowerCase().includes("invalid") ||
+     819 |     message.toLowerCase().includes("wajib");
+     820 | 
+     821 |   return (
+     822 |     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+
+============================================================
+PATTERN: foodCalories
+MATCH LINE: 800
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 775 - 835
+============================================================
+     775 |     let carbs = 0;
+     776 |     let fat = 0;
+     777 |     let pendingCalories = 0;
+     778 | 
+     779 |     for (const item of todayWorkoutItems || []) {
+     780 |       workoutMinutes += activityMinutesValue(item);
+     781 |       workoutCalories += activityCaloriesValue(item);
+     782 |       steps += activityStepsValue(item);
+     783 |     }
+     784 | 
+     785 |     for (const item of todayNutrition || []) {
+     786 |       const calories = Number(item.calories);
+     787 |       if (Number.isFinite(calories)) foodCalories += calories;
+     788 |       else pendingCalories += 1;
+     789 | 
+     790 |       protein += asNumber(item.protein_g);
+     791 |       carbs += asNumber(item.carbs_g);
+     792 |       fat += asNumber(item.fat_g);
+     793 |     }
+     794 | 
+     795 |     return {
+     796 |       workoutMinutes,
+     797 |       workoutCalories,
+     798 |       steps,
+     799 |       workoutCount: todayWorkoutItems?.length || 0,
+>>>  800 |       foodCalories,
+     801 |       protein,
+     802 |       carbs,
+     803 |       fat,
+     804 |       foodCount: todayNutrition.length,
+     805 |       pendingCalories,
+     806 |     };
+     807 |   }, [todayWorkoutItems, todayNutrition]);
+     808 | 
+     809 |   const lastClinical =
+     810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+     811 |       ? clinicalHistory[0]
+     812 |       : null;
+     813 | 
+     814 |   const isWarningMessage =
+     815 |     message.toLowerCase().includes("gagal") ||
+     816 |     message.toLowerCase().includes("belum") ||
+     817 |     message.toLowerCase().includes("error") ||
+     818 |     message.toLowerCase().includes("invalid") ||
+     819 |     message.toLowerCase().includes("wajib");
+     820 | 
+     821 |   return (
+     822 |     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+     823 |       <HideOldInvalidSummaryCardV39 />
+     824 |       {step === "portal" ? (
+     825 |         <ParticipantPortalMenu
+     826 |           activeTab={activeTab}
+     827 |           onChangeTab={setActiveTab}
+     828 |           onLogout={logout}
+     829 |           participant={participant}
+     830 |         />
+     831 |       ) : null}
+     832 | 
+     833 |       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+     834 |         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
+     835 |           <div className="flex flex-col gap-3 pr-14 md:pr-0">
+
+============================================================
+PATTERN: foodCalories
+MATCH LINE: 976
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 951 - 1011
+============================================================
+     951 |                       Kirim Ulang OTP
+     952 |                     </button>
+     953 |                   </div>
+     954 |                 )}
+     955 |               </div>
+     956 |             </div>
+     957 | 
+     958 |             <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     959 |               <h2 className="text-lg font-black">Akses Peserta</h2>
+     960 | 
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+>>>  976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+     980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+
+============================================================
+PATTERN: foodCount
+MATCH LINE: 804
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 779 - 839
+============================================================
+     779 |     for (const item of todayWorkoutItems || []) {
+     780 |       workoutMinutes += activityMinutesValue(item);
+     781 |       workoutCalories += activityCaloriesValue(item);
+     782 |       steps += activityStepsValue(item);
+     783 |     }
+     784 | 
+     785 |     for (const item of todayNutrition || []) {
+     786 |       const calories = Number(item.calories);
+     787 |       if (Number.isFinite(calories)) foodCalories += calories;
+     788 |       else pendingCalories += 1;
+     789 | 
+     790 |       protein += asNumber(item.protein_g);
+     791 |       carbs += asNumber(item.carbs_g);
+     792 |       fat += asNumber(item.fat_g);
+     793 |     }
+     794 | 
+     795 |     return {
+     796 |       workoutMinutes,
+     797 |       workoutCalories,
+     798 |       steps,
+     799 |       workoutCount: todayWorkoutItems?.length || 0,
+     800 |       foodCalories,
+     801 |       protein,
+     802 |       carbs,
+     803 |       fat,
+>>>  804 |       foodCount: todayNutrition.length,
+     805 |       pendingCalories,
+     806 |     };
+     807 |   }, [todayWorkoutItems, todayNutrition]);
+     808 | 
+     809 |   const lastClinical =
+     810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+     811 |       ? clinicalHistory[0]
+     812 |       : null;
+     813 | 
+     814 |   const isWarningMessage =
+     815 |     message.toLowerCase().includes("gagal") ||
+     816 |     message.toLowerCase().includes("belum") ||
+     817 |     message.toLowerCase().includes("error") ||
+     818 |     message.toLowerCase().includes("invalid") ||
+     819 |     message.toLowerCase().includes("wajib");
+     820 | 
+     821 |   return (
+     822 |     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+     823 |       <HideOldInvalidSummaryCardV39 />
+     824 |       {step === "portal" ? (
+     825 |         <ParticipantPortalMenu
+     826 |           activeTab={activeTab}
+     827 |           onChangeTab={setActiveTab}
+     828 |           onLogout={logout}
+     829 |           participant={participant}
+     830 |         />
+     831 |       ) : null}
+     832 | 
+     833 |       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+     834 |         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
+     835 |           <div className="flex flex-col gap-3 pr-14 md:pr-0">
+     836 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+     837 |               Wellness Participant Portal
+     838 |             </div>
+     839 | 
+
+============================================================
+PATTERN: foodCount
+MATCH LINE: 979
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 954 - 1014
+============================================================
+     954 |                 )}
+     955 |               </div>
+     956 |             </div>
+     957 | 
+     958 |             <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     959 |               <h2 className="text-lg font-black">Akses Peserta</h2>
+     960 | 
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+>>>  979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+     980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+
+============================================================
+PATTERN: foodCount
+MATCH LINE: 980
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 955 - 1015
+============================================================
+     955 |               </div>
+     956 |             </div>
+     957 | 
+     958 |             <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+     959 |               <h2 className="text-lg font-black">Akses Peserta</h2>
+     960 | 
+     961 |               <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
+     962 |                 <p>Portal ini khusus peserta program wellness.</p>
+     963 |                 <p>Setelah masuk, peserta dapat input nutrisi harian dan workout manual.</p>
+     964 |                 <p>Peserta juga bisa menghubungkan Google Fit dan Health Connect untuk sinkronisasi aktivitas.</p>
+     965 |                 <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
+     966 |                   Kalori nutrisi dan workout dihitung otomatis dari master data, sehingga peserta tidak perlu mengisi angka kalori manual.
+     967 |                 </p>
+     968 |               </div>
+     969 |             </aside>
+     970 |           </section>
+     971 |         ) : (
+     972 |           <div className="mt-6 space-y-6">
+     973 |             <section className="grid gap-4 md:grid-cols-4">
+     974 |               <SummaryCard
+     975 |                 label="Calories In"
+     976 |                 value={`${fmtNumber(totals.foodCalories, 0)} kkal`}
+     977 |                 note={
+     978 |                   totals.pendingCalories > 0
+     979 |                     ? `${totals.foodCount} input, ${totals.pendingCalories} belum match master`
+>>>  980 |                     : `${totals.foodCount} input nutrisi hari ini`
+     981 |                 }
+     982 |                 tone="blue"
+     983 |               />
+     984 | 
+     985 |               <SummaryCard
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+
+============================================================
+PATTERN: today_calories
+MATCH LINE: 1344
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1319 - 1379
+============================================================
+    1319 |   clinicalHistory,
+    1320 | }: {
+    1321 |   participant: any;
+    1322 |   nutritionLogs: any[];
+    1323 |   totals: any;
+    1324 |   setActiveTab: (tab: PortalTab) => void;
+    1325 |   healthConnectConnected: boolean;
+    1326 |   googleFitConnected: boolean;
+    1327 |   clinicalHistory: any[];
+    1328 | }) {
+    1329 |   const participantId = Number(
+    1330 |     participant?.id ||
+    1331 |       participant?.participant_id ||
+    1332 |       participant?.wellness_participant_id ||
+    1333 |       0
+    1334 |   );
+    1335 | 
+    1336 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    1337 |     ok: false,
+    1338 |     today: todayDate(),
+    1339 |     logs: [],
+    1340 |     today_logs: [],
+    1341 |     latest_logs: [],
+    1342 |     today_count: 0,
+    1343 |     today_row_count: 0,
+>>> 1344 |     today_calories: 0,
+    1345 |     sources: null,
+    1346 |   });
+    1347 | 
+    1348 |   const [nutritionLoading, setNutritionLoading] = useState(false);
+    1349 | 
+    1350 |   async function loadDirectNutrition() {
+    1351 |     if (!participantId) return;
+    1352 | 
+    1353 |     setNutritionLoading(true);
+    1354 | 
+    1355 |     const result = await fetch(
+    1356 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    1357 |       { cache: "no-store" }
+    1358 |     )
+    1359 |       .then((response) => response.json())
+    1360 |       .catch(() => null);
+    1361 | 
+    1362 |     if (result?.ok) {
+    1363 |       setDirectNutrition(result);
+    1364 |     }
+    1365 | 
+    1366 |     setNutritionLoading(false);
+    1367 |   }
+    1368 | 
+    1369 |   useEffect(() => {
+    1370 |     loadDirectNutrition();
+    1371 |   }, [participantId]);
+    1372 | 
+    1373 |   const latestClinical =
+    1374 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    1375 |       ? clinicalHistory[0]
+    1376 |       : null;
+    1377 | 
+    1378 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+    1379 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+
+============================================================
+PATTERN: today_calories
+MATCH LINE: 1378
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1353 - 1413
+============================================================
+    1353 |     setNutritionLoading(true);
+    1354 | 
+    1355 |     const result = await fetch(
+    1356 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    1357 |       { cache: "no-store" }
+    1358 |     )
+    1359 |       .then((response) => response.json())
+    1360 |       .catch(() => null);
+    1361 | 
+    1362 |     if (result?.ok) {
+    1363 |       setDirectNutrition(result);
+    1364 |     }
+    1365 | 
+    1366 |     setNutritionLoading(false);
+    1367 |   }
+    1368 | 
+    1369 |   useEffect(() => {
+    1370 |     loadDirectNutrition();
+    1371 |   }, [participantId]);
+    1372 | 
+    1373 |   const latestClinical =
+    1374 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    1375 |       ? clinicalHistory[0]
+    1376 |       : null;
+    1377 | 
+>>> 1378 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+    1379 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+    1380 |   const todayRowCount = Number(directNutrition?.today_row_count || 0);
+    1381 | 
+    1382 |   const mealLogs =
+    1383 |     directNutrition?.today_logs?.length > 0
+    1384 |       ? directNutrition.today_logs
+    1385 |       : directNutrition?.latest_logs?.length > 0
+    1386 |         ? directNutrition.latest_logs
+    1387 |         : nutritionLogs || [];
+    1388 | 
+    1389 |   const mealTitle =
+    1390 |     directNutrition?.today_logs?.length > 0
+    1391 |       ? "Nutrisi Hari Ini"
+    1392 |       : directNutrition?.latest_logs?.length > 0
+    1393 |         ? "Riwayat Nutrisi Terakhir"
+    1394 |         : "Nutrisi Hari Ini";
+    1395 | 
+    1396 |   const mealSubtitle =
+    1397 |     directNutrition?.today_logs?.length > 0
+    1398 |       ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(todayFoodCount, 0)} item makanan hari ini`
+    1399 |       : directNutrition?.latest_logs?.length > 0
+    1400 |         ? "Belum ada input hari ini. Menampilkan data terakhir."
+    1401 |         : "Belum ada input nutrisi.";
+    1402 | 
+    1403 |   return (
+    1404 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+    1405 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1406 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    1407 |           <div>
+    1408 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+    1409 |               Today Wellness
+    1410 |             </div>
+    1411 | 
+    1412 |             <h2 className="mt-2 text-3xl font-black text-slate-950">
+    1413 |               Halo, {participant?.name || "Peserta"}
+
+============================================================
+PATTERN: today_calories
+MATCH LINE: 2046
+NEAREST FUNCTION: NutritionTab
+CONTEXT: 2021 - 2081
+============================================================
+    2021 |   form: any;
+    2022 |   photo: File | null;
+    2023 |   setPhoto: (file: File | null) => void;
+    2024 |   setValue: (key: string, value: string) => void;
+    2025 |   saveNutrition: () => void;
+    2026 |   logs: any[];
+    2027 | }) {
+    2028 |   const participantId = Number(
+    2029 |     participant?.id ||
+    2030 |       participant?.participant_id ||
+    2031 |       participant?.wellness_participant_id ||
+    2032 |       form?.participant_id ||
+    2033 |       form?.participantId ||
+    2034 |       form?.wellness_participant_id ||
+    2035 |       0
+    2036 |   );
+    2037 | 
+    2038 |   const [foodMaster, setFoodMaster] = useState<any[]>([]);
+    2039 |   const [portionMap, setPortionMap] = useState<Record<string, string>>({});
+    2040 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    2041 |     ok: false,
+    2042 |     logs: [],
+    2043 |     today_logs: [],
+    2044 |     latest_logs: [],
+    2045 |     today_count: 0,
+>>> 2046 |     today_calories: 0,
+    2047 |     sources: null,
+    2048 |   });
+    2049 |   const [loadingHistory, setLoadingHistory] = useState(false);
+    2050 |   const [savingSmart, setSavingSmart] = useState(false);
+    2051 | 
+    2052 |   const foodText = clean(
+    2053 |     form.food_name ||
+    2054 |       form.foodName ||
+    2055 |       form.meal_text ||
+    2056 |       form.mealText ||
+    2057 |       form.makanan
+    2058 |   );
+    2059 | 
+    2060 |   const mealChips = [
+    2061 |     { value: "Breakfast / Sarapan", label: "Sarapan" },
+    2062 |     { value: "Lunch / Makan Siang", label: "Makan Siang" },
+    2063 |     { value: "Dinner / Makan Malam", label: "Makan Malam" },
+    2064 |     { value: "Snack", label: "Snack" },
+    2065 |   ];
+    2066 | 
+    2067 |   async function loadFoodMaster() {
+    2068 |     const result = await fetch("/api/wellness/reference/foods?limit=2000", {
+    2069 |       cache: "no-store",
+    2070 |     })
+    2071 |       .then((response) => response.json())
+    2072 |       .catch(() => null);
+    2073 | 
+    2074 |     const rows = Array.isArray(result)
+    2075 |       ? result
+    2076 |       : Array.isArray(result?.data)
+    2077 |         ? result.data
+    2078 |         : Array.isArray(result?.foods)
+    2079 |           ? result.foods
+    2080 |           : Array.isArray(result?.items)
+    2081 |             ? result.items
+
+============================================================
+PATTERN: today_calories
+MATCH LINE: 3052
+NEAREST FUNCTION: HistoryTab
+CONTEXT: 3027 - 3087
+============================================================
+    3027 |   healthTalkLogs?: any[];
+    3028 |   healthtalkLogs?: any[];
+    3029 |   clinicalHistory?: any[];
+    3030 |   refresh?: () => any;
+    3031 | }) {
+    3032 |   const participantId = Number(
+    3033 |     participant?.id ||
+    3034 |       participant?.participant_id ||
+    3035 |       participant?.wellness_participant_id ||
+    3036 |       0
+    3037 |   );
+    3038 | 
+    3039 |   const [openSection, setOpenSection] = useState("");
+    3040 |   const [startDate, setStartDate] = useState("");
+    3041 |   const [endDate, setEndDate] = useState("");
+    3042 |   const [loadingKey, setLoadingKey] = useState("");
+    3043 | 
+    3044 |   const [nutritionLoaded, setNutritionLoaded] = useState(false);
+    3045 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    3046 |     ok: false,
+    3047 |     logs: [],
+    3048 |     today_logs: [],
+    3049 |     latest_logs: [],
+    3050 |     today_count: 0,
+    3051 |     today_row_count: 0,
+>>> 3052 |     today_calories: 0,
+    3053 |     sources: null,
+    3054 |   });
+    3055 | 
+    3056 |   async function loadNutritionHistory() {
+    3057 |     if (!participantId) return;
+    3058 | 
+    3059 |     setLoadingKey("nutrition");
+    3060 | 
+    3061 |     const result = await fetch(
+    3062 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    3063 |       { cache: "no-store" }
+    3064 |     )
+    3065 |       .then((response) => response.json())
+    3066 |       .catch(() => null);
+    3067 | 
+    3068 |     if (result?.ok) {
+    3069 |       setDirectNutrition(result);
+    3070 |       setNutritionLoaded(true);
+    3071 |     }
+    3072 | 
+    3073 |     setLoadingKey("");
+    3074 |   }
+    3075 | 
+    3076 |   async function openDropdown(key: "nutrition" | "workout" | "healthtalk") {
+    3077 |     if (openSection === key) {
+    3078 |       setOpenSection("");
+    3079 |       return;
+    3080 |     }
+    3081 | 
+    3082 |     setOpenSection(key);
+    3083 | 
+    3084 |     if (key === "nutrition" && !nutritionLoaded) {
+    3085 |       await loadNutritionHistory();
+    3086 |       return;
+    3087 |     }
+
+============================================================
+PATTERN: today_count
+MATCH LINE: 1342
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1317 - 1377
+============================================================
+    1317 |   healthConnectConnected,
+    1318 |   googleFitConnected,
+    1319 |   clinicalHistory,
+    1320 | }: {
+    1321 |   participant: any;
+    1322 |   nutritionLogs: any[];
+    1323 |   totals: any;
+    1324 |   setActiveTab: (tab: PortalTab) => void;
+    1325 |   healthConnectConnected: boolean;
+    1326 |   googleFitConnected: boolean;
+    1327 |   clinicalHistory: any[];
+    1328 | }) {
+    1329 |   const participantId = Number(
+    1330 |     participant?.id ||
+    1331 |       participant?.participant_id ||
+    1332 |       participant?.wellness_participant_id ||
+    1333 |       0
+    1334 |   );
+    1335 | 
+    1336 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    1337 |     ok: false,
+    1338 |     today: todayDate(),
+    1339 |     logs: [],
+    1340 |     today_logs: [],
+    1341 |     latest_logs: [],
+>>> 1342 |     today_count: 0,
+    1343 |     today_row_count: 0,
+    1344 |     today_calories: 0,
+    1345 |     sources: null,
+    1346 |   });
+    1347 | 
+    1348 |   const [nutritionLoading, setNutritionLoading] = useState(false);
+    1349 | 
+    1350 |   async function loadDirectNutrition() {
+    1351 |     if (!participantId) return;
+    1352 | 
+    1353 |     setNutritionLoading(true);
+    1354 | 
+    1355 |     const result = await fetch(
+    1356 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    1357 |       { cache: "no-store" }
+    1358 |     )
+    1359 |       .then((response) => response.json())
+    1360 |       .catch(() => null);
+    1361 | 
+    1362 |     if (result?.ok) {
+    1363 |       setDirectNutrition(result);
+    1364 |     }
+    1365 | 
+    1366 |     setNutritionLoading(false);
+    1367 |   }
+    1368 | 
+    1369 |   useEffect(() => {
+    1370 |     loadDirectNutrition();
+    1371 |   }, [participantId]);
+    1372 | 
+    1373 |   const latestClinical =
+    1374 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    1375 |       ? clinicalHistory[0]
+    1376 |       : null;
+    1377 | 
+
+============================================================
+PATTERN: today_count
+MATCH LINE: 1379
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1354 - 1414
+============================================================
+    1354 | 
+    1355 |     const result = await fetch(
+    1356 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    1357 |       { cache: "no-store" }
+    1358 |     )
+    1359 |       .then((response) => response.json())
+    1360 |       .catch(() => null);
+    1361 | 
+    1362 |     if (result?.ok) {
+    1363 |       setDirectNutrition(result);
+    1364 |     }
+    1365 | 
+    1366 |     setNutritionLoading(false);
+    1367 |   }
+    1368 | 
+    1369 |   useEffect(() => {
+    1370 |     loadDirectNutrition();
+    1371 |   }, [participantId]);
+    1372 | 
+    1373 |   const latestClinical =
+    1374 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    1375 |       ? clinicalHistory[0]
+    1376 |       : null;
+    1377 | 
+    1378 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+>>> 1379 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+    1380 |   const todayRowCount = Number(directNutrition?.today_row_count || 0);
+    1381 | 
+    1382 |   const mealLogs =
+    1383 |     directNutrition?.today_logs?.length > 0
+    1384 |       ? directNutrition.today_logs
+    1385 |       : directNutrition?.latest_logs?.length > 0
+    1386 |         ? directNutrition.latest_logs
+    1387 |         : nutritionLogs || [];
+    1388 | 
+    1389 |   const mealTitle =
+    1390 |     directNutrition?.today_logs?.length > 0
+    1391 |       ? "Nutrisi Hari Ini"
+    1392 |       : directNutrition?.latest_logs?.length > 0
+    1393 |         ? "Riwayat Nutrisi Terakhir"
+    1394 |         : "Nutrisi Hari Ini";
+    1395 | 
+    1396 |   const mealSubtitle =
+    1397 |     directNutrition?.today_logs?.length > 0
+    1398 |       ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(todayFoodCount, 0)} item makanan hari ini`
+    1399 |       : directNutrition?.latest_logs?.length > 0
+    1400 |         ? "Belum ada input hari ini. Menampilkan data terakhir."
+    1401 |         : "Belum ada input nutrisi.";
+    1402 | 
+    1403 |   return (
+    1404 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+    1405 |       <div className="rounded-[2.3rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+    1406 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    1407 |           <div>
+    1408 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+    1409 |               Today Wellness
+    1410 |             </div>
+    1411 | 
+    1412 |             <h2 className="mt-2 text-3xl font-black text-slate-950">
+    1413 |               Halo, {participant?.name || "Peserta"}
+    1414 |             </h2>
+
+============================================================
+PATTERN: today_count
+MATCH LINE: 2045
+NEAREST FUNCTION: NutritionTab
+CONTEXT: 2020 - 2080
+============================================================
+    2020 |   participant?: any;
+    2021 |   form: any;
+    2022 |   photo: File | null;
+    2023 |   setPhoto: (file: File | null) => void;
+    2024 |   setValue: (key: string, value: string) => void;
+    2025 |   saveNutrition: () => void;
+    2026 |   logs: any[];
+    2027 | }) {
+    2028 |   const participantId = Number(
+    2029 |     participant?.id ||
+    2030 |       participant?.participant_id ||
+    2031 |       participant?.wellness_participant_id ||
+    2032 |       form?.participant_id ||
+    2033 |       form?.participantId ||
+    2034 |       form?.wellness_participant_id ||
+    2035 |       0
+    2036 |   );
+    2037 | 
+    2038 |   const [foodMaster, setFoodMaster] = useState<any[]>([]);
+    2039 |   const [portionMap, setPortionMap] = useState<Record<string, string>>({});
+    2040 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    2041 |     ok: false,
+    2042 |     logs: [],
+    2043 |     today_logs: [],
+    2044 |     latest_logs: [],
+>>> 2045 |     today_count: 0,
+    2046 |     today_calories: 0,
+    2047 |     sources: null,
+    2048 |   });
+    2049 |   const [loadingHistory, setLoadingHistory] = useState(false);
+    2050 |   const [savingSmart, setSavingSmart] = useState(false);
+    2051 | 
+    2052 |   const foodText = clean(
+    2053 |     form.food_name ||
+    2054 |       form.foodName ||
+    2055 |       form.meal_text ||
+    2056 |       form.mealText ||
+    2057 |       form.makanan
+    2058 |   );
+    2059 | 
+    2060 |   const mealChips = [
+    2061 |     { value: "Breakfast / Sarapan", label: "Sarapan" },
+    2062 |     { value: "Lunch / Makan Siang", label: "Makan Siang" },
+    2063 |     { value: "Dinner / Makan Malam", label: "Makan Malam" },
+    2064 |     { value: "Snack", label: "Snack" },
+    2065 |   ];
+    2066 | 
+    2067 |   async function loadFoodMaster() {
+    2068 |     const result = await fetch("/api/wellness/reference/foods?limit=2000", {
+    2069 |       cache: "no-store",
+    2070 |     })
+    2071 |       .then((response) => response.json())
+    2072 |       .catch(() => null);
+    2073 | 
+    2074 |     const rows = Array.isArray(result)
+    2075 |       ? result
+    2076 |       : Array.isArray(result?.data)
+    2077 |         ? result.data
+    2078 |         : Array.isArray(result?.foods)
+    2079 |           ? result.foods
+    2080 |           : Array.isArray(result?.items)
+
+============================================================
+PATTERN: today_count
+MATCH LINE: 3050
+NEAREST FUNCTION: HistoryTab
+CONTEXT: 3025 - 3085
+============================================================
+    3025 |   workoutLogs?: any[];
+    3026 |   workoutItems?: any[];
+    3027 |   healthTalkLogs?: any[];
+    3028 |   healthtalkLogs?: any[];
+    3029 |   clinicalHistory?: any[];
+    3030 |   refresh?: () => any;
+    3031 | }) {
+    3032 |   const participantId = Number(
+    3033 |     participant?.id ||
+    3034 |       participant?.participant_id ||
+    3035 |       participant?.wellness_participant_id ||
+    3036 |       0
+    3037 |   );
+    3038 | 
+    3039 |   const [openSection, setOpenSection] = useState("");
+    3040 |   const [startDate, setStartDate] = useState("");
+    3041 |   const [endDate, setEndDate] = useState("");
+    3042 |   const [loadingKey, setLoadingKey] = useState("");
+    3043 | 
+    3044 |   const [nutritionLoaded, setNutritionLoaded] = useState(false);
+    3045 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    3046 |     ok: false,
+    3047 |     logs: [],
+    3048 |     today_logs: [],
+    3049 |     latest_logs: [],
+>>> 3050 |     today_count: 0,
+    3051 |     today_row_count: 0,
+    3052 |     today_calories: 0,
+    3053 |     sources: null,
+    3054 |   });
+    3055 | 
+    3056 |   async function loadNutritionHistory() {
+    3057 |     if (!participantId) return;
+    3058 | 
+    3059 |     setLoadingKey("nutrition");
+    3060 | 
+    3061 |     const result = await fetch(
+    3062 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    3063 |       { cache: "no-store" }
+    3064 |     )
+    3065 |       .then((response) => response.json())
+    3066 |       .catch(() => null);
+    3067 | 
+    3068 |     if (result?.ok) {
+    3069 |       setDirectNutrition(result);
+    3070 |       setNutritionLoaded(true);
+    3071 |     }
+    3072 | 
+    3073 |     setLoadingKey("");
+    3074 |   }
+    3075 | 
+    3076 |   async function openDropdown(key: "nutrition" | "workout" | "healthtalk") {
+    3077 |     if (openSection === key) {
+    3078 |       setOpenSection("");
+    3079 |       return;
+    3080 |     }
+    3081 | 
+    3082 |     setOpenSection(key);
+    3083 | 
+    3084 |     if (key === "nutrition" && !nutritionLoaded) {
+    3085 |       await loadNutritionHistory();
+
+============================================================
+PATTERN: nutrition-direct
+MATCH LINE: 1356
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1331 - 1391
+============================================================
+    1331 |       participant?.participant_id ||
+    1332 |       participant?.wellness_participant_id ||
+    1333 |       0
+    1334 |   );
+    1335 | 
+    1336 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    1337 |     ok: false,
+    1338 |     today: todayDate(),
+    1339 |     logs: [],
+    1340 |     today_logs: [],
+    1341 |     latest_logs: [],
+    1342 |     today_count: 0,
+    1343 |     today_row_count: 0,
+    1344 |     today_calories: 0,
+    1345 |     sources: null,
+    1346 |   });
+    1347 | 
+    1348 |   const [nutritionLoading, setNutritionLoading] = useState(false);
+    1349 | 
+    1350 |   async function loadDirectNutrition() {
+    1351 |     if (!participantId) return;
+    1352 | 
+    1353 |     setNutritionLoading(true);
+    1354 | 
+    1355 |     const result = await fetch(
+>>> 1356 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    1357 |       { cache: "no-store" }
+    1358 |     )
+    1359 |       .then((response) => response.json())
+    1360 |       .catch(() => null);
+    1361 | 
+    1362 |     if (result?.ok) {
+    1363 |       setDirectNutrition(result);
+    1364 |     }
+    1365 | 
+    1366 |     setNutritionLoading(false);
+    1367 |   }
+    1368 | 
+    1369 |   useEffect(() => {
+    1370 |     loadDirectNutrition();
+    1371 |   }, [participantId]);
+    1372 | 
+    1373 |   const latestClinical =
+    1374 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+    1375 |       ? clinicalHistory[0]
+    1376 |       : null;
+    1377 | 
+    1378 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+    1379 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+    1380 |   const todayRowCount = Number(directNutrition?.today_row_count || 0);
+    1381 | 
+    1382 |   const mealLogs =
+    1383 |     directNutrition?.today_logs?.length > 0
+    1384 |       ? directNutrition.today_logs
+    1385 |       : directNutrition?.latest_logs?.length > 0
+    1386 |         ? directNutrition.latest_logs
+    1387 |         : nutritionLogs || [];
+    1388 | 
+    1389 |   const mealTitle =
+    1390 |     directNutrition?.today_logs?.length > 0
+    1391 |       ? "Nutrisi Hari Ini"
+
+============================================================
+PATTERN: nutrition-direct
+MATCH LINE: 2093
+NEAREST FUNCTION: NutritionTab
+CONTEXT: 2068 - 2128
+============================================================
+    2068 |     const result = await fetch("/api/wellness/reference/foods?limit=2000", {
+    2069 |       cache: "no-store",
+    2070 |     })
+    2071 |       .then((response) => response.json())
+    2072 |       .catch(() => null);
+    2073 | 
+    2074 |     const rows = Array.isArray(result)
+    2075 |       ? result
+    2076 |       : Array.isArray(result?.data)
+    2077 |         ? result.data
+    2078 |         : Array.isArray(result?.foods)
+    2079 |           ? result.foods
+    2080 |           : Array.isArray(result?.items)
+    2081 |             ? result.items
+    2082 |             : [];
+    2083 | 
+    2084 |     setFoodMaster(rows);
+    2085 |   }
+    2086 | 
+    2087 |   async function loadDirectNutrition() {
+    2088 |     if (!participantId) return;
+    2089 | 
+    2090 |     setLoadingHistory(true);
+    2091 | 
+    2092 |     const result = await fetch(
+>>> 2093 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    2094 |       { cache: "no-store" }
+    2095 |     )
+    2096 |       .then((response) => response.json())
+    2097 |       .catch(() => null);
+    2098 | 
+    2099 |     if (result?.ok) {
+    2100 |       setDirectNutrition(result);
+    2101 |     }
+    2102 | 
+    2103 |     setLoadingHistory(false);
+    2104 |   }
+    2105 | 
+    2106 |   useEffect(() => {
+    2107 |     loadFoodMaster();
+    2108 |   }, []);
+    2109 | 
+    2110 |   useEffect(() => {
+    2111 |     loadDirectNutrition();
+    2112 |   }, [participantId]);
+    2113 | 
+    2114 |   const parsedFoods = useMemo(() => {
+    2115 |     return buildAutoFoodBreakdownV29(foodText, foodMaster, portionMap);
+    2116 |   }, [foodText, foodMaster, portionMap]);
+    2117 | 
+    2118 |   const totalEstimatedCalories = parsedFoods.reduce((sum, item) => {
+    2119 |     return sum + Number(item.subtotal_calories || 0);
+    2120 |   }, 0);
+    2121 | 
+    2122 |   const breakdownPayload = useMemo(() => {
+    2123 |     return parsedFoods.map((item) => ({
+    2124 |       input_name: item.input_name,
+    2125 |       matched_name: item.matched_name,
+    2126 |       category: item.category,
+    2127 |       portion_fraction: item.portion_fraction,
+    2128 |       portion_multiplier: item.portion_multiplier,
+
+============================================================
+PATTERN: nutrition-direct
+MATCH LINE: 3062
+NEAREST FUNCTION: HistoryTab
+CONTEXT: 3037 - 3097
+============================================================
+    3037 |   );
+    3038 | 
+    3039 |   const [openSection, setOpenSection] = useState("");
+    3040 |   const [startDate, setStartDate] = useState("");
+    3041 |   const [endDate, setEndDate] = useState("");
+    3042 |   const [loadingKey, setLoadingKey] = useState("");
+    3043 | 
+    3044 |   const [nutritionLoaded, setNutritionLoaded] = useState(false);
+    3045 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    3046 |     ok: false,
+    3047 |     logs: [],
+    3048 |     today_logs: [],
+    3049 |     latest_logs: [],
+    3050 |     today_count: 0,
+    3051 |     today_row_count: 0,
+    3052 |     today_calories: 0,
+    3053 |     sources: null,
+    3054 |   });
+    3055 | 
+    3056 |   async function loadNutritionHistory() {
+    3057 |     if (!participantId) return;
+    3058 | 
+    3059 |     setLoadingKey("nutrition");
+    3060 | 
+    3061 |     const result = await fetch(
+>>> 3062 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+    3063 |       { cache: "no-store" }
+    3064 |     )
+    3065 |       .then((response) => response.json())
+    3066 |       .catch(() => null);
+    3067 | 
+    3068 |     if (result?.ok) {
+    3069 |       setDirectNutrition(result);
+    3070 |       setNutritionLoaded(true);
+    3071 |     }
+    3072 | 
+    3073 |     setLoadingKey("");
+    3074 |   }
+    3075 | 
+    3076 |   async function openDropdown(key: "nutrition" | "workout" | "healthtalk") {
+    3077 |     if (openSection === key) {
+    3078 |       setOpenSection("");
+    3079 |       return;
+    3080 |     }
+    3081 | 
+    3082 |     setOpenSection(key);
+    3083 | 
+    3084 |     if (key === "nutrition" && !nutritionLoaded) {
+    3085 |       await loadNutritionHistory();
+    3086 |       return;
+    3087 |     }
+    3088 | 
+    3089 |     if ((key === "workout" || key === "healthtalk") && refresh) {
+    3090 |       setLoadingKey(key);
+    3091 |       await Promise.resolve(refresh());
+    3092 |       setLoadingKey("");
+    3093 |     }
+    3094 |   }
+    3095 | 
+    3096 |   function setTodayFilter() {
+    3097 |     const today = todayDate();
+
+============================================================
+PATTERN: HomeTab
+MATCH LINE: 1012
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 987 - 1047
+============================================================
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+>>> 1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+    1016 |                 setActiveTab={setActiveTab}
+    1017 |                 healthConnectConnected={!!healthConnectConnected}
+    1018 |                 googleFitConnected={!!googleFitConnected}
+    1019 |                 clinicalHistory={clinicalHistory}
+    1020 |               />
+    1021 |             ) : null}
+    1022 | 
+    1023 |             {activeTab === "nutrition" ? (
+    1024 |               <NutritionTab participant={participant}
+    1025 |                 form={nutritionForm}
+    1026 |                 photo={nutritionPhoto}
+    1027 |                 setPhoto={setNutritionPhoto}
+    1028 |                 setValue={setNutritionValue}
+    1029 |                 saveNutrition={saveNutrition}
+    1030 |                 logs={nutritionLogs}
+    1031 |               />
+    1032 |             ) : null}
+    1033 | 
+    1034 |             {activeTab === "workout" ? (
+    1035 |               <WorkoutTab
+    1036 |                 form={workoutForm}
+    1037 |                 evidence={workoutEvidence}
+    1038 |                 setEvidence={setWorkoutEvidence}
+    1039 |                 setValue={setWorkoutValue}
+    1040 |                 saveWorkout={saveWorkout}
+    1041 |               />
+    1042 |             ) : null}
+    1043 | 
+    1044 |             {activeTab === "healthtalk" ? (
+    1045 |               <HealthtalkTab
+    1046 |                 form={healthtalkForm}
+    1047 |                 evidence={healthtalkEvidence}
+
+============================================================
+PATTERN: HomeTab
+MATCH LINE: 1312
+NEAREST FUNCTION: HomeTab
+CONTEXT: 1287 - 1347
+============================================================
+    1287 |       hideEmptyIntroArtifacts();
+    1288 |     }
+    1289 | 
+    1290 |     scan();
+    1291 | 
+    1292 |     const observer = new MutationObserver(() => {
+    1293 |       scan();
+    1294 |     });
+    1295 | 
+    1296 |     observer.observe(document.body, {
+    1297 |       childList: true,
+    1298 |       subtree: true,
+    1299 |       characterData: true,
+    1300 |     });
+    1301 | 
+    1302 |     const timer = window.setInterval(scan, 800);
+    1303 | 
+    1304 |     return () => {
+    1305 |       observer.disconnect();
+    1306 |       window.clearInterval(timer);
+    1307 |     };
+    1308 |   }, []);
+    1309 | 
+    1310 |   return null;
+    1311 | }
+>>> 1312 | function HomeTab({
+    1313 |   participant,
+    1314 |   nutritionLogs,
+    1315 |   totals,
+    1316 |   setActiveTab,
+    1317 |   healthConnectConnected,
+    1318 |   googleFitConnected,
+    1319 |   clinicalHistory,
+    1320 | }: {
+    1321 |   participant: any;
+    1322 |   nutritionLogs: any[];
+    1323 |   totals: any;
+    1324 |   setActiveTab: (tab: PortalTab) => void;
+    1325 |   healthConnectConnected: boolean;
+    1326 |   googleFitConnected: boolean;
+    1327 |   clinicalHistory: any[];
+    1328 | }) {
+    1329 |   const participantId = Number(
+    1330 |     participant?.id ||
+    1331 |       participant?.participant_id ||
+    1332 |       participant?.wellness_participant_id ||
+    1333 |       0
+    1334 |   );
+    1335 | 
+    1336 |   const [directNutrition, setDirectNutrition] = useState<any>({
+    1337 |     ok: false,
+    1338 |     today: todayDate(),
+    1339 |     logs: [],
+    1340 |     today_logs: [],
+    1341 |     latest_logs: [],
+    1342 |     today_count: 0,
+    1343 |     today_row_count: 0,
+    1344 |     today_calories: 0,
+    1345 |     sources: null,
+    1346 |   });
+    1347 | 
+
+============================================================
+PATTERN: ParticipantPortalMenu
+MATCH LINE: 4
+NEAREST FUNCTION: UNKNOWN
+CONTEXT: 1 - 39
+============================================================
+       1 | "use client";
+       2 | 
+       3 | import { useEffect, useMemo, useState } from "react";
+>>>    4 | import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
+       5 | import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
+       6 | 
+       7 | // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
+       8 | // Base dari V415:
+       9 | // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
+      10 | // - History Workout tetap menampilkan semua riwayat.
+      11 | // - Google Fit Daily pada tanggal yang sama dipilih row terbaru.
+      12 | // - Health Connect Daily pada tanggal yang sama dipilih row terbaru.
+      13 | // - todayDate dan activity date key pakai Asia/Jakarta.
+      14 | // - Auto sync Google Fit tetap setiap 10 menit saat portal terbuka.
+      15 | // - Strava card diganti menjadi Health Connect.
+      16 | // - Health Connect saat ini menunggu Android companion app.
+      17 | // - Data Health Connect yang masuk ke wellness_activity_logs akan langsung ikut summary.
+      18 | 
+      19 | type Step = "request" | "verify" | "portal";
+      20 | type PortalTab =
+      21 |   | "home"
+      22 |   | "nutrition"
+      23 |   | "workout"
+      24 |   | "healthtalk"
+      25 |   | "history"
+      26 |   | "devices"
+      27 |   | "profile";
+      28 | 
+      29 | function clean(value: any) {
+      30 |   return String(value ?? "").trim();
+      31 | }
+      32 | 
+      33 | function asNumber(value: any) {
+      34 |   const n = Number(value);
+      35 |   return Number.isFinite(n) ? n : 0;
+      36 | }
+      37 | 
+      38 | function fmt(value: any, suffix = "") {
+      39 |   const text = clean(value);
+
+============================================================
+PATTERN: ParticipantPortalMenu
+MATCH LINE: 825
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 800 - 860
+============================================================
+     800 |       foodCalories,
+     801 |       protein,
+     802 |       carbs,
+     803 |       fat,
+     804 |       foodCount: todayNutrition.length,
+     805 |       pendingCalories,
+     806 |     };
+     807 |   }, [todayWorkoutItems, todayNutrition]);
+     808 | 
+     809 |   const lastClinical =
+     810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+     811 |       ? clinicalHistory[0]
+     812 |       : null;
+     813 | 
+     814 |   const isWarningMessage =
+     815 |     message.toLowerCase().includes("gagal") ||
+     816 |     message.toLowerCase().includes("belum") ||
+     817 |     message.toLowerCase().includes("error") ||
+     818 |     message.toLowerCase().includes("invalid") ||
+     819 |     message.toLowerCase().includes("wajib");
+     820 | 
+     821 |   return (
+     822 |     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+     823 |       <HideOldInvalidSummaryCardV39 />
+     824 |       {step === "portal" ? (
+>>>  825 |         <ParticipantPortalMenu
+     826 |           activeTab={activeTab}
+     827 |           onChangeTab={setActiveTab}
+     828 |           onLogout={logout}
+     829 |           participant={participant}
+     830 |         />
+     831 |       ) : null}
+     832 | 
+     833 |       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+     834 |         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-6 text-white shadow-xl shadow-sky-100 md:p-8">
+     835 |           <div className="flex flex-col gap-3 pr-14 md:pr-0">
+     836 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+     837 |               Wellness Participant Portal
+     838 |             </div>
+     839 | 
+     840 |             <h1 className="text-3xl font-black md:text-4xl">
+     841 |               {step === "portal" ? "Portal Individu Peserta" : "Aktivasi Portal Peserta"}
+     842 |             </h1>
+     843 | 
+     844 |             <p className="max-w-3xl text-sm font-bold leading-6 text-slate-700">
+     845 |               {step === "portal"
+     846 |                 ? "Pantau aktivitas, input nutrisi harian, catat workout manual, dan sinkronkan perangkat wellness kamu."
+     847 |                 : "Masukkan Kode Karyawan, buat username, lengkapi email/nomor HP, lalu verifikasi OTP untuk masuk."}
+     848 |             </p>
+     849 |           </div>
+     850 |         </section>
+     851 | 
+     852 |         <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+     853 |           <div
+     854 |             className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
+     855 |               isWarningMessage
+     856 |                 ? "bg-amber-50 text-amber-900"
+     857 |                 : "bg-blue-50 text-blue-800"
+     858 |             }`}
+     859 |           >
+     860 |             {loading ? "Memuat portal..." : message}
+
+============================================================
+PATTERN: activeTab === "home"
+MATCH LINE: 1011
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 986 - 1046
+============================================================
+     986 |                 label="Workout Calories"
+     987 |                 value={`${fmtNumber(totals.workoutCalories, 0)} kkal`}
+     988 |                 note={`${fmtNumber(totals.workoutMinutes, 1)} menit aktivitas hari ini`}
+     989 |                 tone="emerald"
+     990 |               />
+     991 | 
+     992 |               <SummaryCard
+     993 |                 label="Steps"
+     994 |                 value={fmtNumber(totals.steps, 0)}
+     995 |                 note="hari ini dari manual/device bila tersedia"
+     996 |                 tone="amber"
+     997 |               />
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+>>> 1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+    1016 |                 setActiveTab={setActiveTab}
+    1017 |                 healthConnectConnected={!!healthConnectConnected}
+    1018 |                 googleFitConnected={!!googleFitConnected}
+    1019 |                 clinicalHistory={clinicalHistory}
+    1020 |               />
+    1021 |             ) : null}
+    1022 | 
+    1023 |             {activeTab === "nutrition" ? (
+    1024 |               <NutritionTab participant={participant}
+    1025 |                 form={nutritionForm}
+    1026 |                 photo={nutritionPhoto}
+    1027 |                 setPhoto={setNutritionPhoto}
+    1028 |                 setValue={setNutritionValue}
+    1029 |                 saveNutrition={saveNutrition}
+    1030 |                 logs={nutritionLogs}
+    1031 |               />
+    1032 |             ) : null}
+    1033 | 
+    1034 |             {activeTab === "workout" ? (
+    1035 |               <WorkoutTab
+    1036 |                 form={workoutForm}
+    1037 |                 evidence={workoutEvidence}
+    1038 |                 setEvidence={setWorkoutEvidence}
+    1039 |                 setValue={setWorkoutValue}
+    1040 |                 saveWorkout={saveWorkout}
+    1041 |               />
+    1042 |             ) : null}
+    1043 | 
+    1044 |             {activeTab === "healthtalk" ? (
+    1045 |               <HealthtalkTab
+    1046 |                 form={healthtalkForm}
+
+============================================================
+PATTERN: activeTab === "nutrition"
+MATCH LINE: 1023
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 998 - 1058
+============================================================
+     998 | 
+     999 |               <SummaryCard
+    1000 |                 label="BMI / Tensi"
+    1001 |                 value={lastClinical?.bmi ? fmtNumber(lastClinical.bmi, 1) : "-"}
+    1002 |                 note={
+    1003 |                   lastClinical?.systolic
+    1004 |                     ? `${lastClinical.systolic}/${lastClinical.diastolic || "-"} mmHg`
+    1005 |                     : "data klinis terakhir"
+    1006 |                 }
+    1007 |                 tone="slate"
+    1008 |               />
+    1009 |             </section>
+    1010 | 
+    1011 |             {activeTab === "home" ? (
+    1012 |               <HomeTab
+    1013 |                 participant={participant}
+    1014 |                 nutritionLogs={todayNutrition}
+    1015 |                 totals={totals}
+    1016 |                 setActiveTab={setActiveTab}
+    1017 |                 healthConnectConnected={!!healthConnectConnected}
+    1018 |                 googleFitConnected={!!googleFitConnected}
+    1019 |                 clinicalHistory={clinicalHistory}
+    1020 |               />
+    1021 |             ) : null}
+    1022 | 
+>>> 1023 |             {activeTab === "nutrition" ? (
+    1024 |               <NutritionTab participant={participant}
+    1025 |                 form={nutritionForm}
+    1026 |                 photo={nutritionPhoto}
+    1027 |                 setPhoto={setNutritionPhoto}
+    1028 |                 setValue={setNutritionValue}
+    1029 |                 saveNutrition={saveNutrition}
+    1030 |                 logs={nutritionLogs}
+    1031 |               />
+    1032 |             ) : null}
+    1033 | 
+    1034 |             {activeTab === "workout" ? (
+    1035 |               <WorkoutTab
+    1036 |                 form={workoutForm}
+    1037 |                 evidence={workoutEvidence}
+    1038 |                 setEvidence={setWorkoutEvidence}
+    1039 |                 setValue={setWorkoutValue}
+    1040 |                 saveWorkout={saveWorkout}
+    1041 |               />
+    1042 |             ) : null}
+    1043 | 
+    1044 |             {activeTab === "healthtalk" ? (
+    1045 |               <HealthtalkTab
+    1046 |                 form={healthtalkForm}
+    1047 |                 evidence={healthtalkEvidence}
+    1048 |                 setEvidence={setHealthtalkEvidence}
+    1049 |                 setValue={setHealthtalkValue}
+    1050 |                 saveHealthtalk={saveHealthtalk}
+    1051 |                 logs={healthtalkLogs}
+    1052 |               />
+    1053 |             ) : null}
+    1054 | 
+    1055 |             {activeTab === "history" ? (
+    1056 |               <HistoryTab participant={participant}
+    1057 |                 workoutItems={workoutItems}
+    1058 |                 nutritionLogs={nutritionLogs}
+
+============================================================
+PATTERN: activeTab === "history"
+MATCH LINE: 1055
+NEAREST FUNCTION: setHealthtalkValue
+CONTEXT: 1030 - 1090
+============================================================
+    1030 |                 logs={nutritionLogs}
+    1031 |               />
+    1032 |             ) : null}
+    1033 | 
+    1034 |             {activeTab === "workout" ? (
+    1035 |               <WorkoutTab
+    1036 |                 form={workoutForm}
+    1037 |                 evidence={workoutEvidence}
+    1038 |                 setEvidence={setWorkoutEvidence}
+    1039 |                 setValue={setWorkoutValue}
+    1040 |                 saveWorkout={saveWorkout}
+    1041 |               />
+    1042 |             ) : null}
+    1043 | 
+    1044 |             {activeTab === "healthtalk" ? (
+    1045 |               <HealthtalkTab
+    1046 |                 form={healthtalkForm}
+    1047 |                 evidence={healthtalkEvidence}
+    1048 |                 setEvidence={setHealthtalkEvidence}
+    1049 |                 setValue={setHealthtalkValue}
+    1050 |                 saveHealthtalk={saveHealthtalk}
+    1051 |                 logs={healthtalkLogs}
+    1052 |               />
+    1053 |             ) : null}
+    1054 | 
+>>> 1055 |             {activeTab === "history" ? (
+    1056 |               <HistoryTab participant={participant}
+    1057 |                 workoutItems={workoutItems}
+    1058 |                 nutritionLogs={nutritionLogs}
+    1059 |                 healthtalkLogs={healthtalkLogs}
+    1060 |                 refresh={() => loadMe()}
+    1061 |               />
+    1062 |             ) : null}
+    1063 | 
+    1064 |             {activeTab === "devices" ? (
+    1065 |               <DevicesTab
+    1066 |                 healthConnectConnected={!!healthConnectConnected}
+    1067 |                 googleFitConnected={!!googleFitConnected}
+    1068 |                 syncing={syncing}
+    1069 |                 syncProvider={syncProvider}
+    1070 |               />
+    1071 |             ) : null}
+    1072 | 
+    1073 |             {activeTab === "profile" ? (
+    1074 |               <ProfileTab
+    1075 |                 participant={participant}
+    1076 |                 integrations={integrations}
+    1077 |                 logout={logout}
+    1078 |               />
+    1079 |             ) : null}
+    1080 |           </div>
+    1081 |         )}
+    1082 |       </div>
+    1083 |     </main>
+    1084 |   );
+    1085 | }
+    1086 | 
+    1087 | function SummaryCard({
+    1088 |   label,
+    1089 |   value,
+    1090 |   note,
+
+============================================================
+SUMMARY OF FUNCTION DEFINITIONS
+============================================================
+   29 | clean
+   33 | asNumber
+   38 | fmt
+   44 | fmtNumber
+   54 | todayDate
+   71 | jakartaDateFromAny
+  100 | activityDateKey
+  118 | activityUpdatedAtMs
+  135 | isGoogleFitDailyRow
+  156 | isHealthConnectDailyRow
+  177 | normalizeTodayWorkoutItems
+  219 | activityCaloriesValue
+  231 | activityMinutesValue
+  241 | activityStepsValue
+  250 | providerStatus
+  261 | noticeText
+  441 | setValue
+  445 | setNutritionValue
+  449 | setWorkoutValue
+  453 | setHealthtalkValue
+ 1087 | SummaryCard
+ 1136 | MiniDecorChart
+ 1162 | HideOldInvalidSummaryCardV39
+ 1166 | compactText
+ 1170 | hide
+ 1177 | isLegacyCaloriesCard
+ 1188 | findMetricGridFromCaloriesCard
+ 1219 | hideEmptyIntroArtifacts
+ 1247 | scan
+ 1312 | HomeTab
+ 1519 | PortalMetricCardV34
+ 1548 | normalizeImageUrlV34
+ 1565 | PortalMealLogItemV34
+ 1615 | CoachNoticeCenter
+ 1887 | CoachNoticeCard
+ 1998 | formatCoachDate
+ 2011 | NutritionTab
+ 2195 | changePortion
+ 2398 | AutoFoodBreakdownV29
+ 2480 | NutritionHistoryItemV29
+ 2527 | buildAutoFoodBreakdownV29
+ 2559 | splitFoodInputV29
+ 2566 | normalizeFoodTextV29
+ 2576 | buildFoodMasterIndexV29
+ 2622 | matchFoodMasterV29
+ 2644 | guessFoodCategoryV29
+ 2700 | defaultPortionByCategoryV29
+ 2711 | portionMultiplierV29
+ 2719 | WorkoutTab
+ 2851 | HealthtalkTab
+ 3013 | HistoryTab
+ 3096 | setTodayFilter
+ 3102 | setLast7DaysFilter
+ 3109 | clearFilter
+ 3340 | HistoryAccordionCardV37
+ 3386 | EmptyHistoryCardV37
+ 3394 | HistoryGenericItemV37
+ 3418 | normalizeImageUrlV37
+ 3435 | HistoryMealItemV37
+ 3486 | filterHistoryByDateV37
+ 3503 | extractDateFromItemV37
+ 3521 | formatDateTextV37
+ 3536 | DevicesTab
+ 3650 | ProfileTab
+ 3720 | ProfileRow
+ 3733 | Input
+ 3748 | NutritionMiniCard
+ 3782 | NutritionLogCard
+ 3815 | HealthtalkLogCard
+ 3846 | getDateValue
+ 3857 | getNumeric
+ 3865 | buildSeries
+ 3882 | HealthProgressSection
+ 3952 | MiniLineChart
+ 3992 | BloodPressureChart
+ 4031 | SimpleSvgLine
+ 4035 | SmoothSvgChart
+ 4174 | buildSmoothPath
+
+============================================================
+SUMMARY OF JSX ACTIVE TAB CALLS
+============================================================
+ 1011 | setHealthtalkValue | {activeTab === "home" ? (
+ 1012 | setHealthtalkValue | <HomeTab
+ 1023 | setHealthtalkValue | {activeTab === "nutrition" ? (
+ 1024 | setHealthtalkValue | <NutritionTab participant={participant}
+ 1034 | setHealthtalkValue | {activeTab === "workout" ? (
+ 1035 | setHealthtalkValue | <WorkoutTab
+ 1044 | setHealthtalkValue | {activeTab === "healthtalk" ? (
+ 1045 | setHealthtalkValue | <HealthtalkTab
+ 1055 | setHealthtalkValue | {activeTab === "history" ? (
+ 1056 | setHealthtalkValue | <HistoryTab participant={participant}
+ 1064 | setHealthtalkValue | {activeTab === "devices" ? (
+ 1073 | setHealthtalkValue | {activeTab === "profile" ? (

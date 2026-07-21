@@ -11,9 +11,9 @@ type DemoUser = {
 
 const demoUsers: DemoUser[] = [
   { label: "Admin", username: "admin", password: "admin123" },
-  { label: "Operator Mata", username: "capaska_mata", password: "mata123" },
-  { label: "Operator THT", username: "capaska_tht", password: "tht123" },
-  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123" },
+  { label: "Operator Mata", username: "capaska_mata", password: "mata741!" },
+  { label: "Operator THT", username: "capaska_tht", password: "tht926!" },
+  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi258!" },
 ];
 
 export default function LoginPage() {

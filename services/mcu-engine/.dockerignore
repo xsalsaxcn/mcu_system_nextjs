@@ -6,4 +6,4 @@ credentials.json
 gdrive_token.json
 *.log
 .env
-.env.local
+.env.localcredentials.json

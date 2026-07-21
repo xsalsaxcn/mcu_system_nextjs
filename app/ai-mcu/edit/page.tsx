@@ -402,7 +402,7 @@ export default function AiMcuEditPage() {
                   </button>
 
                   <a
-                    href="/ai-mcu/generate"
+                    href="/ai-mcu/corporate/generate"
                     className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700"
                   >
                     Lanjut Generate PDF

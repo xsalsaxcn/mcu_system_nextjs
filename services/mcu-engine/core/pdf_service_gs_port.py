@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 LAB_MAX_UNITS_PER_PAGE = 46
+_GDRIVE_DATA_URI_CACHE: Dict[str, str] = {}
 
 
 # =========================
@@ -104,7 +105,8 @@ APP_CONFIG: Dict[str, Any] = {
         "tensiBawah": ["FS:TensiBawah", "Diastol", "Diastolik", "Tensi Bawah"],
         "nadi": ["FS:Nadi", "Nadi"],
         "nafas": ["FS:Nafas", "Nafas", "Pernafasan"],
-        "lingkarPerut": ["FS:LPerut", "FS:LP", "Lingkar Perut"],
+        "lingkarPerut": ["FS:LPerut", "FS:LP", "FS:LiPe", "Lingkar Perut"],
+        "refraksi": ["FS:Ref", "Refraksi", "Refraksi Mata"],
         "kcMata": ["FS:KcMata", "KcMata"],
         "tnpKcMata": ["FS:TnpKcMata", "TnpKcMata", "Tanpa Kacamata"],
         "dgnKcMata": ["FS:DgnKcMata", "DgnKcMata", "Dengan Kacamata"],
@@ -500,6 +502,89 @@ def _is_lab_value_abnormal(result: Any, normal_text: Any, data: Dict[str, Any]) 
     return False
 
 
+
+# CORPORATE_LAB_ABNORMAL_RED_V412
+def _lab_status_v412(result: Any, normal_text: Any, data: Dict[str, Any]) -> str:
+    """Klasifikasi LAB secara konservatif: Rendah, Tinggi, Abnormal, atau kosong."""
+    value = _safe(result).strip()
+    normal = _safe(normal_text).strip()
+    if not value or not normal:
+        return ""
+
+    # Flag eksplisit dari laboratorium/vendor.
+    upper_value = value.upper()
+    if re.search(r"(?:^|\s)(?:H|HIGH|TINGGI|\u2191)(?:\s|$)", upper_value):
+        return "Tinggi"
+    if re.search(r"(?:^|\s)(?:L|LOW|RENDAH|\u2193)(?:\s|$)", upper_value):
+        return "Rendah"
+    if re.search(r"(?:^|\s)(?:ABN|ABNORMAL)(?:\s|$)", upper_value):
+        return "Abnormal"
+
+    gender_key = _gender_key_from_data(data)
+    selected_normal = _pick_gender_normal(normal, gender_key)
+    selected_normal = selected_normal.replace(",", ".").replace("\u2013", "-").replace("\u2014", "-")
+    numeric_value = _num_from_text(value)
+
+    if numeric_value is not None:
+        # <= x
+        m = re.search(r"<=\s*(-?\d+(?:\.\d+)?)", selected_normal)
+        if m:
+            return "Tinggi" if numeric_value > float(m.group(1)) else ""
+
+        # < x
+        m = re.search(r"(?<![<>=])<\s*(-?\d+(?:\.\d+)?)", selected_normal)
+        if m:
+            return "Tinggi" if numeric_value >= float(m.group(1)) else ""
+
+        # >= x
+        m = re.search(r">=\s*(-?\d+(?:\.\d+)?)", selected_normal)
+        if m:
+            return "Rendah" if numeric_value < float(m.group(1)) else ""
+
+        # > x
+        m = re.search(r"(?<![<>=])>\s*(-?\d+(?:\.\d+)?)", selected_normal)
+        if m:
+            return "Rendah" if numeric_value <= float(m.group(1)) else ""
+
+        bounds = _parse_normal_range_bounds(selected_normal)
+        if bounds:
+            low, high = bounds
+            if numeric_value < low:
+                return "Rendah"
+            if numeric_value > high:
+                return "Tinggi"
+            return ""
+
+    # Pembanding teks yang umum di laboratorium.
+    v = _norm(value)
+    n = _norm(selected_normal)
+    negative_values = {"negatif", "negative", "nonreaktif", "nonreactive", "tidakreaktif", "tidakditemukan", "absent"}
+    positive_values = {"positif", "positive", "reaktif", "reactive", "trace", "+", "1+", "2+", "3+", "4+"}
+
+    if any(token in n for token in negative_values):
+        if any(token in v for token in positive_values):
+            return "Abnormal"
+        if v in negative_values:
+            return ""
+
+    # Normal teks tunggal: jernih, kuning, normal, dan sejenisnya.
+    canonical = {
+        "jernih": {"jernih", "clear"},
+        "kuning": {"kuning", "yellow"},
+        "normal": {"normal", "dbn", "dalambatasnormal", "withinnormallimit"},
+        "negatif": negative_values,
+        "nonreaktif": negative_values,
+    }
+    for key, accepted in canonical.items():
+        if key in n:
+            return "" if v in accepted else "Abnormal"
+
+    # Gunakan classifier existing sebagai fallback terakhir.
+    try:
+        return "Abnormal" if _is_lab_value_abnormal(value, normal, data) else ""
+    except Exception:
+        return ""
+
 def _pick(row: Dict[str, Any], aliases: List[str]) -> str:
     if not row:
         return ""
@@ -663,6 +748,27 @@ def _data_uri(path: str, base_dir: Optional[Path] = None) -> str:
     src = _safe(path)
     if not src:
         return ""
+
+    # CORPORATE_MCU_GOOGLE_DRIVE_ASSET_V401
+    # Aset Corporate disimpan privat di Google Drive. Referensi gdrive://fileId
+    # diunduh oleh Python Engine memakai service account lalu di-embed sebagai
+    # data URI, sehingga file tidak perlu dibuat public dan kualitas asli tetap.
+    if src.lower().startswith("gdrive://"):
+        cached = _GDRIVE_DATA_URI_CACHE.get(src)
+        if cached:
+            return cached
+        try:
+            from core.corporate_drive_assets import download_file_bytes
+            content, mime = download_file_bytes(src, _project_root())
+            if content:
+                safe_mime = mime if str(mime).startswith("image/") else "image/jpeg"
+                encoded = base64.b64encode(content).decode("ascii")
+                data_uri = f"data:{safe_mime};base64,{encoded}"
+                _GDRIVE_DATA_URI_CACHE[src] = data_uri
+                return data_uri
+        except Exception:
+            return ""
+
     if src.startswith(("data:", "http://", "https://", "file:///")):
         return src
     p = Path(src)
@@ -1366,7 +1472,9 @@ def _support_from_sheet_only(
         result = _pick_from_rows(rows, APP_CONFIG["otherHeaders"].get(result_key, []))
 
     if image_key:
-        image = _pick_from_rows(rows, APP_CONFIG["otherHeaders"].get(image_key, []))
+        # Attachment harus exact header. Partial matching dapat salah membaca
+        # kolom teks "USG" / "Audiometri" sebagai Link USG / Link Audiometri.
+        image = _pick_from_rows_exact(rows, APP_CONFIG["otherHeaders"].get(image_key, []))
 
     # fallback text untuk vendor header yang berbeda, tapi tetap dibatasi per jenis pemeriksaan.
     # Jangan pernah mengambil Kesimpulan/Saran MCU umum atau parameter lab ke halaman penunjang.
@@ -1482,6 +1590,7 @@ def build_physical_rows(data: Dict[str, Any]) -> List[Dict[str, str]]:
     _push_heading(rows, "Visus Mata")
     _push_item(rows, "Tanpa Kacamata", _ph(data, "tnpKcMata"))
     _push_item(rows, "Dengan Kacamata", _ph(data, "dgnKcMata"))
+    _push_item(rows, "Refraksi", _ph(data, "refraksi"))
     _push_item(rows, "Buta Warna", _ph(data, "butaWarna"))
     _push_item(rows, "Lain-lain", _ph(data, "mataLain"), "Tidak Ada")
 
@@ -1920,8 +2029,9 @@ def build_report_data(nama: str, rekap_rows: pd.DataFrame, abn_rows: Optional[pd
     identity = _build_identity(allrow, nama)
     doctors = _build_doctors(allrow)
 
-    # Halaman kesimpulan koordinator selalu memakai dokter tetap klinik.
-    doctors["summaryDoctor"] = APP_CONFIG["clinic"].get("doctorName", "")
+    # Koordinator dari payload Corporate dipakai bila tersedia.
+    # Jika kosong, tetap gunakan default klinik agar output existing tidak berubah.
+    doctors["summaryDoctor"] = doctors.get("summaryDoctor") or APP_CONFIG["clinic"].get("doctorName", "")
 
     sheet_doctors = {
         "lab": _pick_from_rows_exact(lab_rows, APP_CONFIG["doctorHeaders"].get("labDoctor", [])) or "-",
@@ -2006,8 +2116,19 @@ def build_report_data(nama: str, rekap_rows: pd.DataFrame, abn_rows: Optional[pd
     # UNFIT/FIT WITH NOTE dari Excel tetap diprioritaskan.
     identity["fitStatus"] = _auto_fit_status(identity, conditions, lab_pages, support)
 
+    clinic = dict(APP_CONFIG["clinic"])
+    clinic["doctorName"] = doctors.get("summaryDoctor") or clinic.get("doctorName", "")
+
+    selected_sections_raw = _pick(allrow, ["PDF_SECTION_SELECTION"])
+    selected_sections = {_norm(x) for x in selected_sections_raw.split(",") if _safe(x)} if selected_sections_raw else set()
+    if selected_sections:
+        if "physical" not in selected_sections:
+            physical = {"left": [], "right": []}
+        if "lab" not in selected_sections:
+            lab_pages = []
+
     return {
-        "clinic": dict(APP_CONFIG["clinic"]),
+        "clinic": clinic,
         "patient": identity,
         "doctors": doctors,
         "sheetDoctors": sheet_doctors,
@@ -2126,9 +2247,14 @@ def _render_physical(data: Dict[str, Any], page_no: int, page_count: int, tdir: 
                 x.append(f'<tr><td class="label">{_e(r.get("label"))}</td><td class="value">{_e(r.get("value"))}</td></tr>')
         return "".join(x)
     out = _page_header(data, "HASIL PEMERIKSAAN FISIK", page_no, page_count, tdir)
+    physical_doctor = _safe(data.get("sheetDoctors", {}).get("physical"))
+    if _norm(physical_doctor) == _norm(data.get("patient", {}).get("name")):
+        physical_doctor = ""
+    signature = f'<div class="support-signature">Penanggung Jawab : {_e(physical_doctor)}</div>' if physical_doctor and physical_doctor != "-" else ""
     out += f"""
       <table class="physical-head-table"><tr><td>ITEM PEMERIKSAAN</td><td>H A S I L</td><td>ITEM PEMERIKSAAN</td><td>H A S I L</td></tr></table>
       <table class="physical-wrap"><tr><td><table class="physical-mini">{mini(data['physical']['left'])}</table></td><td><table class="physical-mini">{mini(data['physical']['right'])}</table></td></tr></table>
+      {signature}
     """
     out += _page_footer(data, page_no, page_count)
     return out
@@ -2147,12 +2273,25 @@ def _render_lab_page(data: Dict[str, Any], rows: List[Dict[str, str]], page_no: 
         if r.get("subgroup") and r.get("subgroup") != last_s:
             last_s = r.get("subgroup", "")
             body.append(f'<tr class="lab-subgroup-row"><td colspan="5">{_e(last_s)}</td></tr>')
-        is_abnormal = _is_lab_value_abnormal(r.get("value"), r.get("normal"), data)
+        # CORPORATE_LAB_ABNORMAL_RED_V412
+        abnormal_status = _lab_status_v412(r.get("value"), r.get("normal"), data)
+        is_abnormal = bool(abnormal_status)
         result_cls = "center lab-result-abnormal" if is_abnormal else "center"
-        # Inline style sengaja ditambahkan agar renderer HTML->PDF tetap mewarnai
-        # hasil abnormal walaupun prioritas CSS class diabaikan.
-        result_style = ' style="color:#c00000 !important; font-weight:bold !important;"' if is_abnormal else ""
-        body.append(f'<tr><td>{_e(r.get("label"))}</td><td class="{result_cls}"{result_style}>{_e(r.get("value"))}</td><td class="center">{_e(r.get("normal"))}</td><td class="center">{_e(r.get("unit"))}</td><td class="center"></td></tr>')
+        note_cls = "center lab-result-abnormal" if is_abnormal else "center"
+        red_style = (
+            ' style="color:#d00000 !important; font-weight:800 !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;"'
+            if is_abnormal
+            else ""
+        )
+        body.append(
+            f'<tr data-abnormal="{str(is_abnormal).lower()}">'
+            f'<td>{_e(r.get("label"))}</td>'
+            f'<td class="{result_cls}"{red_style}>{_e(r.get("value"))}</td>'
+            f'<td class="center">{_e(r.get("normal"))}</td>'
+            f'<td class="center">{_e(r.get("unit"))}</td>'
+            f'<td class="{note_cls}"{red_style}>{_e(abnormal_status)}</td>'
+            f'</tr>'
+        )
     sig = ""
     if is_last:
         d = data.get("sheetDoctors", {}).get("lab") or "-"
@@ -2229,16 +2368,17 @@ def _build_pages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for section, exam_name, doctor_key in support_specs:
         item = sup.get(section, {})
-        if not item.get("has_any"):
+        if not item.get("has_any") and not _has(item.get("image")):
             continue
 
-        pages.append({
+        if item.get("has_any"):
+            pages.append({
             "type": "support",
             "section": section,
             "exam_name": exam_name,
             "sup": item,
             "doctor_key": doctor_key,
-        })
+            })
 
         if _has(item.get("image")):
             pages.append({
@@ -2306,7 +2446,9 @@ body { margin: 0; padding: 0; background: #fff; color:#111; font-family: Arial, 
 .lab-table th{ background:#d9d9d9; border:1px solid #777; text-align:center; font-weight:bold; font-family:"Courier New", monospace; font-size:11.3px; padding:4.8px 6px; line-height:1.35; }
 .lab-group-row td{ font-weight:bold; background:#fff; border-bottom:0; padding-top:6px; padding-bottom:2px; font-size:11.5px; line-height:1.45; page-break-after:avoid; }
 .lab-subgroup-row td{ font-weight:bold; background:#fff; border-bottom:0; padding-left:16px; padding-top:4.8px; padding-bottom:2px; font-size:11.2px; line-height:1.45; page-break-after:avoid; }
-.center{text-align:center;}.half-line{display:block;height:6px;}.lab-result-abnormal{ color:#c00000!important; font-weight:700!important; }.support-signature{ margin-top:8px; text-align:right; font-size:10px; font-style:italic; font-weight:bold; }
+.center{text-align:center;}.half-line{display:block;height:6px;}.lab-result-abnormal{ color:#c00000!important; font-weight:700!important; }
+/* CORPORATE_LAB_PRINT_COLOR_V412 */
+.lab-table,.lab-table *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}.support-signature{ margin-top:8px; text-align:right; font-size:10px; font-style:italic; font-weight:bold; }
 .attached-title{ font-size:11px; font-style:italic; font-weight:bold; text-decoration:underline; margin:10px 0 10px 10px; }
 .xray-wrap{ text-align:center; margin-top:8px; }.xray-wrap img{ max-width:88%; max-height:225mm; border:1px solid #888; padding:2px; }
 .footer{ position:absolute; left:7mm; right:7mm; bottom:4mm; font-size:9px; color:#333; }

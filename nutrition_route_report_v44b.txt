@@ -1,0 +1,2197 @@
+﻿NUTRITION ROUTE REPORT V44B
+File: C:\Users\Lenovo\Documents\mcu_system_nextjs\app\api\wellness\participant\nutrition\route.ts
+Generated: 2026-07-13 17:32:12
+
+
+============================================================
+PATTERN: export async function POST
+MATCH LINE: 497
+CONTEXT: 472 - 532
+============================================================
+     472 | }
+     473 | 
+     474 | export async function GET(req: NextRequest) {
+     475 |   const { participant } = await getParticipant(req);
+     476 | 
+     477 |   if (!participant?.id) {
+     478 |     return NextResponse.json(
+     479 |       {
+     480 |         ok: false,
+     481 |         message: "OTP/session peserta belum aktif.",
+     482 |       },
+     483 |       { status: 401 }
+     484 |     );
+     485 |   }
+     486 | 
+     487 |   return NextResponse.json({
+     488 |     ok: true,
+     489 |     mode: "google_sheet_only",
+     490 |     participant_id: participant.id,
+     491 |     logs: [],
+     492 |     message:
+     493 |       "Nutrisi disimpan di Google Sheet. Route ini tidak membaca Supabase agar database tidak penuh.",
+     494 |   });
+     495 | }
+     496 | 
+>>>  497 | export async function POST(req: NextRequest) {
+     498 |   const { supabase, participant } = await getParticipant(req);
+     499 | 
+     500 |   if (!participant?.id) {
+     501 |     return NextResponse.json(
+     502 |       {
+     503 |         ok: false,
+     504 |         message: "OTP/session peserta belum aktif.",
+     505 |       },
+     506 |       { status: 401 }
+     507 |     );
+     508 |   }
+     509 | 
+     510 |   try {
+     511 |     assertWebhookConfigured();
+     512 | 
+     513 |     const { body, photo } = await parseRequestBody(req);
+     514 | 
+     515 |     const foodName = clean(body?.food_name || body?.foodName || body?.makanan);
+     516 | 
+     517 |     if (!foodName) {
+     518 |       return NextResponse.json(
+     519 |         {
+     520 |           ok: false,
+     521 |           message: "Nama makanan wajib diisi.",
+     522 |         },
+     523 |         { status: 400 }
+     524 |       );
+     525 |     }
+     526 | 
+     527 |     const logDate = safeIsoDate(body?.log_date || body?.logDate);
+     528 |     const mealType = clean(body?.meal_type || body?.mealType) || "meal";
+     529 | 
+     530 | // PORTION_PAYLOAD_V21
+     531 | const portionGroup = clean(
+     532 |   body?.portion_group ||
+
+============================================================
+PATTERN: formData
+MATCH LINE: 133
+CONTEXT: 108 - 168
+============================================================
+     108 | }
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+>>>  133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+
+============================================================
+PATTERN: formData
+MATCH LINE: 136
+CONTEXT: 111 - 171
+============================================================
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+>>>  136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+
+============================================================
+PATTERN: formData
+MATCH LINE: 141
+CONTEXT: 116 - 176
+============================================================
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+>>>  141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+
+============================================================
+PATTERN: formData
+MATCH LINE: 142
+CONTEXT: 117 - 177
+============================================================
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+>>>  142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+
+============================================================
+PATTERN: formData
+MATCH LINE: 143
+CONTEXT: 118 - 178
+============================================================
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+>>>  143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+
+============================================================
+PATTERN: formData
+MATCH LINE: 144
+CONTEXT: 119 - 179
+============================================================
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+>>>  144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+     179 |   const response = await fetch(url, {
+
+============================================================
+PATTERN: .formData
+MATCH LINE: 133
+CONTEXT: 108 - 168
+============================================================
+     108 | }
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+>>>  133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+
+============================================================
+PATTERN: req.formData
+MATCH LINE: 133
+CONTEXT: 108 - 168
+============================================================
+     108 | }
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+>>>  133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+
+============================================================
+PATTERN: await req.json
+MATCH LINE: 150
+CONTEXT: 125 - 185
+============================================================
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+>>>  150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+     179 |   const response = await fetch(url, {
+     180 |     method: "POST",
+     181 |     headers: {
+     182 |       "Content-Type": "application/json",
+     183 |     },
+     184 |     body: JSON.stringify({
+     185 |       secret: getWebhookSecret(),
+
+============================================================
+PATTERN: const body
+MATCH LINE: 134
+CONTEXT: 109 - 169
+============================================================
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+>>>  134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+
+============================================================
+PATTERN: const body
+MATCH LINE: 150
+CONTEXT: 125 - 185
+============================================================
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+>>>  150 |   const body = await req.json().catch(() => ({}));
+     151 |   return { body: body || {}, photo: null };
+     152 | }
+     153 | 
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+     179 |   const response = await fetch(url, {
+     180 |     method: "POST",
+     181 |     headers: {
+     182 |       "Content-Type": "application/json",
+     183 |     },
+     184 |     body: JSON.stringify({
+     185 |       secret: getWebhookSecret(),
+
+============================================================
+PATTERN: totalCalories
+MATCH LINE: 331
+CONTEXT: 306 - 366
+============================================================
+     306 |     const matched = matchOneFoodFromMaster(foods, item);
+     307 | 
+     308 |     if (!matched) {
+     309 |       return {
+     310 |         input_name: item,
+     311 |         matched: false,
+     312 |         matched_name: null,
+     313 |         calories: null,
+     314 |         reference_id: null,
+     315 |         category: null,
+     316 |         status: "not_found_master",
+     317 |       };
+     318 |     }
+     319 | 
+     320 |     return {
+     321 |       input_name: item,
+     322 |       matched: true,
+     323 |       matched_name: matched.food_name,
+     324 |       calories: matched.calories,
+     325 |       reference_id: matched.id,
+     326 |       category: matched.category,
+     327 |       status: "matched_master",
+     328 |     };
+     329 |   });
+     330 | 
+>>>  331 |   let totalCalories = 0;
+     332 |   let matchedCount = 0;
+     333 |   let unmatchedCount = 0;
+     334 | 
+     335 |   for (const item of breakdown) {
+     336 |     if (item.matched && Number.isFinite(Number(item.calories))) {
+     337 |       totalCalories += Number(item.calories);
+     338 |       matchedCount += 1;
+     339 |     } else {
+     340 |       unmatchedCount += 1;
+     341 |     }
+     342 |   }
+     343 | 
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+     360 | portion_group: portionGroup || null,
+     361 | portion_fraction: portionFraction || null,
+     362 | portion_multiplier: portionMultiplier || null,
+     363 | plate_group: portionGroup || null,
+     364 | plate_fraction: portionFraction || null,
+     365 | isi_piringku_group: portionGroup || null,
+     366 | isi_piringku_fraction: portionFraction || null,
+
+============================================================
+PATTERN: totalCalories
+MATCH LINE: 337
+CONTEXT: 312 - 372
+============================================================
+     312 |         matched_name: null,
+     313 |         calories: null,
+     314 |         reference_id: null,
+     315 |         category: null,
+     316 |         status: "not_found_master",
+     317 |       };
+     318 |     }
+     319 | 
+     320 |     return {
+     321 |       input_name: item,
+     322 |       matched: true,
+     323 |       matched_name: matched.food_name,
+     324 |       calories: matched.calories,
+     325 |       reference_id: matched.id,
+     326 |       category: matched.category,
+     327 |       status: "matched_master",
+     328 |     };
+     329 |   });
+     330 | 
+     331 |   let totalCalories = 0;
+     332 |   let matchedCount = 0;
+     333 |   let unmatchedCount = 0;
+     334 | 
+     335 |   for (const item of breakdown) {
+     336 |     if (item.matched && Number.isFinite(Number(item.calories))) {
+>>>  337 |       totalCalories += Number(item.calories);
+     338 |       matchedCount += 1;
+     339 |     } else {
+     340 |       unmatchedCount += 1;
+     341 |     }
+     342 |   }
+     343 | 
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+     360 | portion_group: portionGroup || null,
+     361 | portion_fraction: portionFraction || null,
+     362 | portion_multiplier: portionMultiplier || null,
+     363 | plate_group: portionGroup || null,
+     364 | plate_fraction: portionFraction || null,
+     365 | isi_piringku_group: portionGroup || null,
+     366 | isi_piringku_fraction: portionFraction || null,
+     367 |     items,
+     368 |     breakdown,
+     369 |     total_calories: matchedCount > 0 ? totalCalories : null,
+     370 |     matched_count: matchedCount,
+     371 |     unmatched_count: unmatchedCount,
+     372 |     calorie_match_status: allMatched
+
+============================================================
+PATTERN: totalCalories
+MATCH LINE: 369
+CONTEXT: 344 - 404
+============================================================
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+     360 | portion_group: portionGroup || null,
+     361 | portion_fraction: portionFraction || null,
+     362 | portion_multiplier: portionMultiplier || null,
+     363 | plate_group: portionGroup || null,
+     364 | plate_fraction: portionFraction || null,
+     365 | isi_piringku_group: portionGroup || null,
+     366 | isi_piringku_fraction: portionFraction || null,
+     367 |     items,
+     368 |     breakdown,
+>>>  369 |     total_calories: matchedCount > 0 ? totalCalories : null,
+     370 |     matched_count: matchedCount,
+     371 |     unmatched_count: unmatchedCount,
+     372 |     calorie_match_status: allMatched
+     373 |       ? "matched_master"
+     374 |       : partiallyMatched
+     375 |         ? "partial_match_master"
+     376 |         : noneMatched
+     377 |           ? "not_found_master"
+     378 |           : "not_found_master",
+     379 |     detected_foods_text: detectedFoodsText,
+     380 |   };
+     381 | }
+     382 | 
+     383 | function buildSheetRow(params: {
+     384 |   participant: any;
+     385 |   body: any;
+     386 |   logDate: string;
+     387 |   mealType: string;
+     388 |   foodName: string;
+     389 |   portion: string | null;
+     390 |   notes: string | null;
+     391 |   calorieResult: any;
+     392 |   photoResult: any;
+     393 | }) {
+     394 |   const participant = params.participant || {};
+     395 |   const photo = params.photoResult || {};
+     396 | 
+     397 |   const previewUrl =
+     398 |     photo.previewUrl ||
+     399 |     photo.thumbnailUrl ||
+     400 |     photo.publicUrl ||
+     401 |     photo.driveUrl ||
+     402 |     "";
+     403 | 
+     404 |   const driveUrl = photo.driveUrl || photo.publicUrl || "";
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 292
+CONTEXT: 267 - 327
+============================================================
+     267 | 
+     268 |     for (const candidate of candidates) {
+     269 |       let score = 0;
+     270 | 
+     271 |       if (keyword === candidate) {
+     272 |         score = 1000 + candidate.length;
+     273 |       } else if (keyword.includes(candidate) && candidate.length >= 3) {
+     274 |         score = 500 + candidate.length;
+     275 |       } else if (candidate.includes(keyword) && keyword.length >= 3) {
+     276 |         score = 300 + keyword.length;
+     277 |       }
+     278 | 
+     279 |       if (score > bestScore) {
+     280 |         bestScore = score;
+     281 |         best = food;
+     282 |       }
+     283 |     }
+     284 |   }
+     285 | 
+     286 |   if (!best) return null;
+     287 | 
+     288 |   return {
+     289 |     input_name: foodName,
+     290 |     id: best.id,
+     291 |     food_name: best.food_name,
+>>>  292 |     calories: toNumberOrNull(best.calories),
+     293 |     category: best.category || null,
+     294 |     aliases: best.aliases || null,
+     295 |     match_score: bestScore,
+     296 |   };
+     297 | }
+     298 | 
+     299 | async function calculateMultiFoodCalories(supabase: any, foodName: string) {
+     300 |   const foodItems = splitFoodItems(foodName);
+     301 |   const items = foodItems.length ? foodItems : [clean(foodName)];
+     302 | 
+     303 |   const foods = await loadFoodMaster(supabase);
+     304 | 
+     305 |   const breakdown = items.map((item) => {
+     306 |     const matched = matchOneFoodFromMaster(foods, item);
+     307 | 
+     308 |     if (!matched) {
+     309 |       return {
+     310 |         input_name: item,
+     311 |         matched: false,
+     312 |         matched_name: null,
+     313 |         calories: null,
+     314 |         reference_id: null,
+     315 |         category: null,
+     316 |         status: "not_found_master",
+     317 |       };
+     318 |     }
+     319 | 
+     320 |     return {
+     321 |       input_name: item,
+     322 |       matched: true,
+     323 |       matched_name: matched.food_name,
+     324 |       calories: matched.calories,
+     325 |       reference_id: matched.id,
+     326 |       category: matched.category,
+     327 |       status: "matched_master",
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 313
+CONTEXT: 288 - 348
+============================================================
+     288 |   return {
+     289 |     input_name: foodName,
+     290 |     id: best.id,
+     291 |     food_name: best.food_name,
+     292 |     calories: toNumberOrNull(best.calories),
+     293 |     category: best.category || null,
+     294 |     aliases: best.aliases || null,
+     295 |     match_score: bestScore,
+     296 |   };
+     297 | }
+     298 | 
+     299 | async function calculateMultiFoodCalories(supabase: any, foodName: string) {
+     300 |   const foodItems = splitFoodItems(foodName);
+     301 |   const items = foodItems.length ? foodItems : [clean(foodName)];
+     302 | 
+     303 |   const foods = await loadFoodMaster(supabase);
+     304 | 
+     305 |   const breakdown = items.map((item) => {
+     306 |     const matched = matchOneFoodFromMaster(foods, item);
+     307 | 
+     308 |     if (!matched) {
+     309 |       return {
+     310 |         input_name: item,
+     311 |         matched: false,
+     312 |         matched_name: null,
+>>>  313 |         calories: null,
+     314 |         reference_id: null,
+     315 |         category: null,
+     316 |         status: "not_found_master",
+     317 |       };
+     318 |     }
+     319 | 
+     320 |     return {
+     321 |       input_name: item,
+     322 |       matched: true,
+     323 |       matched_name: matched.food_name,
+     324 |       calories: matched.calories,
+     325 |       reference_id: matched.id,
+     326 |       category: matched.category,
+     327 |       status: "matched_master",
+     328 |     };
+     329 |   });
+     330 | 
+     331 |   let totalCalories = 0;
+     332 |   let matchedCount = 0;
+     333 |   let unmatchedCount = 0;
+     334 | 
+     335 |   for (const item of breakdown) {
+     336 |     if (item.matched && Number.isFinite(Number(item.calories))) {
+     337 |       totalCalories += Number(item.calories);
+     338 |       matchedCount += 1;
+     339 |     } else {
+     340 |       unmatchedCount += 1;
+     341 |     }
+     342 |   }
+     343 | 
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 324
+CONTEXT: 299 - 359
+============================================================
+     299 | async function calculateMultiFoodCalories(supabase: any, foodName: string) {
+     300 |   const foodItems = splitFoodItems(foodName);
+     301 |   const items = foodItems.length ? foodItems : [clean(foodName)];
+     302 | 
+     303 |   const foods = await loadFoodMaster(supabase);
+     304 | 
+     305 |   const breakdown = items.map((item) => {
+     306 |     const matched = matchOneFoodFromMaster(foods, item);
+     307 | 
+     308 |     if (!matched) {
+     309 |       return {
+     310 |         input_name: item,
+     311 |         matched: false,
+     312 |         matched_name: null,
+     313 |         calories: null,
+     314 |         reference_id: null,
+     315 |         category: null,
+     316 |         status: "not_found_master",
+     317 |       };
+     318 |     }
+     319 | 
+     320 |     return {
+     321 |       input_name: item,
+     322 |       matched: true,
+     323 |       matched_name: matched.food_name,
+>>>  324 |       calories: matched.calories,
+     325 |       reference_id: matched.id,
+     326 |       category: matched.category,
+     327 |       status: "matched_master",
+     328 |     };
+     329 |   });
+     330 | 
+     331 |   let totalCalories = 0;
+     332 |   let matchedCount = 0;
+     333 |   let unmatchedCount = 0;
+     334 | 
+     335 |   for (const item of breakdown) {
+     336 |     if (item.matched && Number.isFinite(Number(item.calories))) {
+     337 |       totalCalories += Number(item.calories);
+     338 |       matchedCount += 1;
+     339 |     } else {
+     340 |       unmatchedCount += 1;
+     341 |     }
+     342 |   }
+     343 | 
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 369
+CONTEXT: 344 - 404
+============================================================
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+     360 | portion_group: portionGroup || null,
+     361 | portion_fraction: portionFraction || null,
+     362 | portion_multiplier: portionMultiplier || null,
+     363 | plate_group: portionGroup || null,
+     364 | plate_fraction: portionFraction || null,
+     365 | isi_piringku_group: portionGroup || null,
+     366 | isi_piringku_fraction: portionFraction || null,
+     367 |     items,
+     368 |     breakdown,
+>>>  369 |     total_calories: matchedCount > 0 ? totalCalories : null,
+     370 |     matched_count: matchedCount,
+     371 |     unmatched_count: unmatchedCount,
+     372 |     calorie_match_status: allMatched
+     373 |       ? "matched_master"
+     374 |       : partiallyMatched
+     375 |         ? "partial_match_master"
+     376 |         : noneMatched
+     377 |           ? "not_found_master"
+     378 |           : "not_found_master",
+     379 |     detected_foods_text: detectedFoodsText,
+     380 |   };
+     381 | }
+     382 | 
+     383 | function buildSheetRow(params: {
+     384 |   participant: any;
+     385 |   body: any;
+     386 |   logDate: string;
+     387 |   mealType: string;
+     388 |   foodName: string;
+     389 |   portion: string | null;
+     390 |   notes: string | null;
+     391 |   calorieResult: any;
+     392 |   photoResult: any;
+     393 | }) {
+     394 |   const participant = params.participant || {};
+     395 |   const photo = params.photoResult || {};
+     396 | 
+     397 |   const previewUrl =
+     398 |     photo.previewUrl ||
+     399 |     photo.thumbnailUrl ||
+     400 |     photo.publicUrl ||
+     401 |     photo.driveUrl ||
+     402 |     "";
+     403 | 
+     404 |   const driveUrl = photo.driveUrl || photo.publicUrl || "";
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 603
+CONTEXT: 578 - 638
+============================================================
+     578 |     const sheetRow = buildSheetRow({
+     579 |       participant,
+     580 |       body,
+     581 |       logDate,
+     582 |       mealType,
+     583 |       foodName,
+     584 |       portion,
+     585 |       notes,
+     586 |       calorieResult,
+     587 |       photoResult,
+     588 |     });
+     589 | 
+     590 |     const sheetResult = await postToWebhook({
+     591 |       sheet: getSheetName(),
+     592 |       row: sheetRow,
+     593 |       marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
+     594 |     });
+     595 | 
+     596 |     const returnedLog = {
+     597 |       id: `sheet_${sheetResult?.rowNumber || Date.now()}`,
+     598 |       participant_id: participant.id,
+     599 |       log_date: logDate,
+     600 |       meal_type: mealType,
+     601 |       food_name: foodName,
+     602 |       portion,
+>>>  603 |       calories: calorieResult.total_calories,
+     604 |       protein_g: null,
+     605 |       carbs_g: null,
+     606 |       fat_g: null,
+     607 |       notes,
+     608 |       source: "google_sheet",
+     609 |       photo_url:
+     610 |         photoResult?.previewUrl ||
+     611 |         photoResult?.thumbnailUrl ||
+     612 |         photoResult?.publicUrl ||
+     613 |         photoResult?.driveUrl ||
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+     618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+
+============================================================
+PATTERN: calories:
+MATCH LINE: 635
+CONTEXT: 610 - 659
+============================================================
+     610 |         photoResult?.previewUrl ||
+     611 |         photoResult?.thumbnailUrl ||
+     612 |         photoResult?.publicUrl ||
+     613 |         photoResult?.driveUrl ||
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+     618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+>>>  635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+     639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+     653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+     654 |         detail: error?.message || String(error),
+     655 |       },
+     656 |       { status: 500 }
+     657 |     );
+     658 |   }
+     659 | }
+
+============================================================
+PATTERN: total_calories:
+MATCH LINE: 369
+CONTEXT: 344 - 404
+============================================================
+     344 |   const allMatched = breakdown.length > 0 && unmatchedCount === 0;
+     345 |   const partiallyMatched = matchedCount > 0 && unmatchedCount > 0;
+     346 |   const noneMatched = matchedCount === 0;
+     347 | 
+     348 |   const detectedFoodsText = breakdown
+     349 |     .map((item) => {
+     350 |       if (item.matched) {
+     351 |         return `${item.input_name}: ${item.calories ?? 0} kkal (${item.matched_name})`;
+     352 |       }
+     353 | 
+     354 |       return `${item.input_name}: belum match`;
+     355 |     })
+     356 |     .join(" | ");
+     357 | 
+     358 |   return {
+     359 |     original_food_name: clean(foodName),
+     360 | portion_group: portionGroup || null,
+     361 | portion_fraction: portionFraction || null,
+     362 | portion_multiplier: portionMultiplier || null,
+     363 | plate_group: portionGroup || null,
+     364 | plate_fraction: portionFraction || null,
+     365 | isi_piringku_group: portionGroup || null,
+     366 | isi_piringku_fraction: portionFraction || null,
+     367 |     items,
+     368 |     breakdown,
+>>>  369 |     total_calories: matchedCount > 0 ? totalCalories : null,
+     370 |     matched_count: matchedCount,
+     371 |     unmatched_count: unmatchedCount,
+     372 |     calorie_match_status: allMatched
+     373 |       ? "matched_master"
+     374 |       : partiallyMatched
+     375 |         ? "partial_match_master"
+     376 |         : noneMatched
+     377 |           ? "not_found_master"
+     378 |           : "not_found_master",
+     379 |     detected_foods_text: detectedFoodsText,
+     380 |   };
+     381 | }
+     382 | 
+     383 | function buildSheetRow(params: {
+     384 |   participant: any;
+     385 |   body: any;
+     386 |   logDate: string;
+     387 |   mealType: string;
+     388 |   foodName: string;
+     389 |   portion: string | null;
+     390 |   notes: string | null;
+     391 |   calorieResult: any;
+     392 |   photoResult: any;
+     393 | }) {
+     394 |   const participant = params.participant || {};
+     395 |   const photo = params.photoResult || {};
+     396 | 
+     397 |   const previewUrl =
+     398 |     photo.previewUrl ||
+     399 |     photo.thumbnailUrl ||
+     400 |     photo.publicUrl ||
+     401 |     photo.driveUrl ||
+     402 |     "";
+     403 | 
+     404 |   const driveUrl = photo.driveUrl || photo.publicUrl || "";
+
+============================================================
+PATTERN: food_breakdown
+MATCH LINE: 618
+CONTEXT: 593 - 653
+============================================================
+     593 |       marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
+     594 |     });
+     595 | 
+     596 |     const returnedLog = {
+     597 |       id: `sheet_${sheetResult?.rowNumber || Date.now()}`,
+     598 |       participant_id: participant.id,
+     599 |       log_date: logDate,
+     600 |       meal_type: mealType,
+     601 |       food_name: foodName,
+     602 |       portion,
+     603 |       calories: calorieResult.total_calories,
+     604 |       protein_g: null,
+     605 |       carbs_g: null,
+     606 |       fat_g: null,
+     607 |       notes,
+     608 |       source: "google_sheet",
+     609 |       photo_url:
+     610 |         photoResult?.previewUrl ||
+     611 |         photoResult?.thumbnailUrl ||
+     612 |         photoResult?.publicUrl ||
+     613 |         photoResult?.driveUrl ||
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+>>>  618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+     639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+     653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+
+============================================================
+PATTERN: food_breakdown
+MATCH LINE: 639
+CONTEXT: 614 - 659
+============================================================
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+     618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+>>>  639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+     653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+     654 |         detail: error?.message || String(error),
+     655 |       },
+     656 |       { status: 500 }
+     657 |     );
+     658 |   }
+     659 | }
+
+============================================================
+PATTERN: raw_payload
+MATCH LINE: 17
+CONTEXT: 1 - 52
+============================================================
+       1 | // WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
+       2 | // Nutrition submission is stored ONLY in existing Google Sheet + Google Drive.
+       3 | // V402:
+       4 | // - support comma-separated foods
+       5 | // - each food item is matched to wellness_food_calories
+       6 | // - total calories = sum of all matched items
+       7 | // - Detected Foods contains item-by-item breakdown
+       8 | // - Supabase is used only for participant session and master calorie lookup.
+       9 | // - No insert into wellness_food_logs.
+      10 | 
+      11 | import { NextRequest, NextResponse } from "next/server";
+      12 | import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+      13 | import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+      14 | 
+      15 | // PORTION_SCOPE_FALLBACK_V24
+      16 | // Fallback untuk helper function lama yang berada di luar scope POST.
+>>>   17 | // Nilai porsi sebenarnya tetap dikirim dari body POST dan/atau raw_payload.
+      18 | const portionGroup = "";
+      19 | const portionFraction = "";
+      20 | const portionMultiplier = 0;
+      21 | 
+      22 | 
+      23 | export const runtime = "nodejs";
+      24 | 
+      25 | function clean(value: any) {
+      26 |   return String(value ?? "").trim();
+      27 | }
+      28 | 
+      29 | function toNumberOrNull(value: any) {
+      30 |   const text = clean(value);
+      31 |   if (!text) return null;
+      32 | 
+      33 |   const n = Number(text.replace(",", "."));
+      34 |   return Number.isFinite(n) ? n : null;
+      35 | }
+      36 | 
+      37 | function todayDate() {
+      38 |   return new Date().toISOString().slice(0, 10);
+      39 | }
+      40 | 
+      41 | function safeIsoDate(value: any) {
+      42 |   const text = clean(value);
+      43 |   if (!text) return todayDate();
+      44 | 
+      45 |   const date = new Date(text);
+      46 |   if (Number.isNaN(date.getTime())) {
+      47 |     return text.slice(0, 10) || todayDate();
+      48 |   }
+      49 | 
+      50 |   return date.toISOString().slice(0, 10);
+      51 | }
+      52 | 
+
+============================================================
+PATTERN: Google Sheet
+MATCH LINE: 2
+CONTEXT: 1 - 37
+============================================================
+       1 | // WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
+>>>    2 | // Nutrition submission is stored ONLY in existing Google Sheet + Google Drive.
+       3 | // V402:
+       4 | // - support comma-separated foods
+       5 | // - each food item is matched to wellness_food_calories
+       6 | // - total calories = sum of all matched items
+       7 | // - Detected Foods contains item-by-item breakdown
+       8 | // - Supabase is used only for participant session and master calorie lookup.
+       9 | // - No insert into wellness_food_logs.
+      10 | 
+      11 | import { NextRequest, NextResponse } from "next/server";
+      12 | import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+      13 | import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+      14 | 
+      15 | // PORTION_SCOPE_FALLBACK_V24
+      16 | // Fallback untuk helper function lama yang berada di luar scope POST.
+      17 | // Nilai porsi sebenarnya tetap dikirim dari body POST dan/atau raw_payload.
+      18 | const portionGroup = "";
+      19 | const portionFraction = "";
+      20 | const portionMultiplier = 0;
+      21 | 
+      22 | 
+      23 | export const runtime = "nodejs";
+      24 | 
+      25 | function clean(value: any) {
+      26 |   return String(value ?? "").trim();
+      27 | }
+      28 | 
+      29 | function toNumberOrNull(value: any) {
+      30 |   const text = clean(value);
+      31 |   if (!text) return null;
+      32 | 
+      33 |   const n = Number(text.replace(",", "."));
+      34 |   return Number.isFinite(n) ? n : null;
+      35 | }
+      36 | 
+      37 | function todayDate() {
+
+============================================================
+PATTERN: Google Sheet
+MATCH LINE: 493
+CONTEXT: 468 - 528
+============================================================
+     468 |     "Evidence Count": driveUrl ? 1 : 0,
+     469 |     "Created By": "participant_portal",
+     470 |     "Marker": "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
+     471 |   };
+     472 | }
+     473 | 
+     474 | export async function GET(req: NextRequest) {
+     475 |   const { participant } = await getParticipant(req);
+     476 | 
+     477 |   if (!participant?.id) {
+     478 |     return NextResponse.json(
+     479 |       {
+     480 |         ok: false,
+     481 |         message: "OTP/session peserta belum aktif.",
+     482 |       },
+     483 |       { status: 401 }
+     484 |     );
+     485 |   }
+     486 | 
+     487 |   return NextResponse.json({
+     488 |     ok: true,
+     489 |     mode: "google_sheet_only",
+     490 |     participant_id: participant.id,
+     491 |     logs: [],
+     492 |     message:
+>>>  493 |       "Nutrisi disimpan di Google Sheet. Route ini tidak membaca Supabase agar database tidak penuh.",
+     494 |   });
+     495 | }
+     496 | 
+     497 | export async function POST(req: NextRequest) {
+     498 |   const { supabase, participant } = await getParticipant(req);
+     499 | 
+     500 |   if (!participant?.id) {
+     501 |     return NextResponse.json(
+     502 |       {
+     503 |         ok: false,
+     504 |         message: "OTP/session peserta belum aktif.",
+     505 |       },
+     506 |       { status: 401 }
+     507 |     );
+     508 |   }
+     509 | 
+     510 |   try {
+     511 |     assertWebhookConfigured();
+     512 | 
+     513 |     const { body, photo } = await parseRequestBody(req);
+     514 | 
+     515 |     const foodName = clean(body?.food_name || body?.foodName || body?.makanan);
+     516 | 
+     517 |     if (!foodName) {
+     518 |       return NextResponse.json(
+     519 |         {
+     520 |           ok: false,
+     521 |           message: "Nama makanan wajib diisi.",
+     522 |         },
+     523 |         { status: 400 }
+     524 |       );
+     525 |     }
+     526 | 
+     527 |     const logDate = safeIsoDate(body?.log_date || body?.logDate);
+     528 |     const mealType = clean(body?.meal_type || body?.mealType) || "meal";
+
+============================================================
+PATTERN: Google Sheet
+MATCH LINE: 632
+CONTEXT: 607 - 659
+============================================================
+     607 |       notes,
+     608 |       source: "google_sheet",
+     609 |       photo_url:
+     610 |         photoResult?.previewUrl ||
+     611 |         photoResult?.thumbnailUrl ||
+     612 |         photoResult?.publicUrl ||
+     613 |         photoResult?.driveUrl ||
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+     618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+>>>  632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+     639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+     653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+     654 |         detail: error?.message || String(error),
+     655 |       },
+     656 |       { status: 500 }
+     657 |     );
+     658 |   }
+     659 | }
+
+============================================================
+PATTERN: Google Sheet
+MATCH LINE: 633
+CONTEXT: 608 - 659
+============================================================
+     608 |       source: "google_sheet",
+     609 |       photo_url:
+     610 |         photoResult?.previewUrl ||
+     611 |         photoResult?.thumbnailUrl ||
+     612 |         photoResult?.publicUrl ||
+     613 |         photoResult?.driveUrl ||
+     614 |         null,
+     615 |       calorie_source: "wellness_food_calories",
+     616 |       calorie_match_status: calorieResult.calorie_match_status,
+     617 |       detected_foods_text: calorieResult.detected_foods_text,
+     618 |       food_breakdown: calorieResult.breakdown,
+     619 |       google_sheet_row_number: sheetResult?.rowNumber || null,
+     620 |       google_drive: photoResult || null,
+     621 |       google_sheet: sheetResult || null,
+     622 |     };
+     623 | 
+     624 |     const total = calorieResult.total_calories;
+     625 |     const breakdownText = calorieResult.detected_foods_text;
+     626 | 
+     627 |     return NextResponse.json({
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+>>>  633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+     639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+     653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+     654 |         detail: error?.message || String(error),
+     655 |       },
+     656 |       { status: 500 }
+     657 |     );
+     658 |   }
+     659 | }
+
+============================================================
+PATTERN: Google Sheet
+MATCH LINE: 653
+CONTEXT: 628 - 659
+============================================================
+     628 |       ok: true,
+     629 |       mode: "google_sheet_only",
+     630 |       message:
+     631 |         total !== null
+     632 |           ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
+     633 |           : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+     634 |       log: returnedLog,
+     635 |       calories: total,
+     636 |       point: 5,
+     637 |       calorie_match_status: calorieResult.calorie_match_status,
+     638 |       detected_foods_text: calorieResult.detected_foods_text,
+     639 |       food_breakdown: calorieResult.breakdown,
+     640 |       google_drive: photoResult,
+     641 |       google_sheet: sheetResult,
+     642 |     });
+     643 |   } catch (error: any) {
+     644 |     console.error(
+     645 |       "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD_ERROR",
+     646 |       error
+     647 |     );
+     648 | 
+     649 |     return NextResponse.json(
+     650 |       {
+     651 |         ok: false,
+     652 |         mode: "google_sheet_only",
+>>>  653 |         message: "Gagal menyimpan nutrisi ke Google Sheet.",
+     654 |         detail: error?.message || String(error),
+     655 |       },
+     656 |       { status: 500 }
+     657 |     );
+     658 |   }
+     659 | }
+
+============================================================
+PATTERN: webhook
+MATCH LINE: 198
+CONTEXT: 173 - 233
+============================================================
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+     179 |   const response = await fetch(url, {
+     180 |     method: "POST",
+     181 |     headers: {
+     182 |       "Content-Type": "application/json",
+     183 |     },
+     184 |     body: JSON.stringify({
+     185 |       secret: getWebhookSecret(),
+     186 |       ...payload,
+     187 |     }),
+     188 |   });
+     189 | 
+     190 |   const text = await response.text();
+     191 | 
+     192 |   let json: any = {};
+     193 |   try {
+     194 |     json = text ? JSON.parse(text) : {};
+     195 |   } catch {
+     196 |     json = {
+     197 |       ok: false,
+>>>  198 |       message: text || "Invalid webhook response",
+     199 |     };
+     200 |   }
+     201 | 
+     202 |   if (!response.ok || json?.ok === false) {
+     203 |     throw new Error(json?.message || `Webhook gagal: HTTP ${response.status}`);
+     204 |   }
+     205 | 
+     206 |   return json;
+     207 | }
+     208 | 
+     209 | async function uploadNutritionPhoto(params: {
+     210 |   photo: any;
+     211 |   participant: any;
+     212 |   companyName: string;
+     213 |   logDate: string;
+     214 | }) {
+     215 |   const converted = await fileToBase64(params.photo);
+     216 |   if (!converted) return null;
+     217 | 
+     218 |   return await postToWebhook({
+     219 |     action: "uploadEvidence",
+     220 |     filename: converted.filename,
+     221 |     originalFilename: converted.filename,
+     222 |     contentType: converted.contentType,
+     223 |     dataBase64: converted.dataBase64,
+     224 | 
+     225 |     folderName: "wellness program",
+     226 |     companyName: params.companyName || "Tanpa Perusahaan",
+     227 | 
+     228 |     participantId: params.participant?.id,
+     229 |     participant_id: params.participant?.id,
+     230 |     participantCode: params.participant?.code,
+     231 |     participant_code: params.participant?.code,
+     232 |     participantName: params.participant?.name,
+     233 |     participant_name: params.participant?.name,
+
+============================================================
+PATTERN: WELLNESS_GOOGLE_SHEET_WEBHOOK_URL
+MATCH LINE: 95
+CONTEXT: 70 - 130
+============================================================
+      70 |   return clean(value)
+      71 |     .split(/[,;\n]+/g)
+      72 |     .map((item) => clean(item))
+      73 |     .filter(Boolean);
+      74 | }
+      75 | 
+      76 | function mealLabel(value: any) {
+      77 |   const text = clean(value).toLowerCase();
+      78 | 
+      79 |   const map: Record<string, string> = {
+      80 |     breakfast: "Breakfast / Sarapan",
+      81 |     sarapan: "Breakfast / Sarapan",
+      82 |     lunch: "Lunch / Makan Siang",
+      83 |     makan_siang: "Lunch / Makan Siang",
+      84 |     dinner: "Dinner / Makan Malam",
+      85 |     makan_malam: "Dinner / Makan Malam",
+      86 |     snack: "Snack / Camilan",
+      87 |     camilan: "Snack / Camilan",
+      88 |     meal: "Meal",
+      89 |   };
+      90 | 
+      91 |   return map[text] || clean(value) || "Meal";
+      92 | }
+      93 | 
+      94 | function getWebhookUrl() {
+>>>   95 |   return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+      96 | }
+      97 | 
+      98 | function getWebhookSecret() {
+      99 |   return clean(
+     100 |     process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET ||
+     101 |       process.env.WELLNESS_WEBHOOK_SECRET ||
+     102 |       ""
+     103 |   );
+     104 | }
+     105 | 
+     106 | function getSheetName() {
+     107 |   return clean(process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME) || "Form Responses";
+     108 | }
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+     115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+
+============================================================
+PATTERN: WELLNESS_GOOGLE_SHEET_WEBHOOK_URL
+MATCH LINE: 115
+CONTEXT: 90 - 150
+============================================================
+      90 | 
+      91 |   return map[text] || clean(value) || "Meal";
+      92 | }
+      93 | 
+      94 | function getWebhookUrl() {
+      95 |   return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+      96 | }
+      97 | 
+      98 | function getWebhookSecret() {
+      99 |   return clean(
+     100 |     process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_SECRET ||
+     101 |       process.env.WELLNESS_WEBHOOK_SECRET ||
+     102 |       ""
+     103 |   );
+     104 | }
+     105 | 
+     106 | function getSheetName() {
+     107 |   return clean(process.env.WELLNESS_GOOGLE_SHEET_TAB_NAME) || "Form Responses";
+     108 | }
+     109 | 
+     110 | function assertWebhookConfigured() {
+     111 |   const url = getWebhookUrl();
+     112 | 
+     113 |   if (!url) {
+     114 |     throw new Error(
+>>>  115 |       "WELLNESS_GOOGLE_SHEET_WEBHOOK_URL belum diisi di Vercel Production. Data tidak disimpan agar tidak masuk ke Supabase."
+     116 |     );
+     117 |   }
+     118 | 
+     119 |   return url;
+     120 | }
+     121 | 
+     122 | async function getParticipant(req: NextRequest) {
+     123 |   const supabase = getSupabaseAdmin();
+     124 |   const participant = await getParticipantFromPortalSession(supabase, req);
+     125 | 
+     126 |   return { supabase, participant };
+     127 | }
+     128 | 
+     129 | async function parseRequestBody(req: NextRequest) {
+     130 |   const contentType = clean(req.headers.get("content-type")).toLowerCase();
+     131 | 
+     132 |   if (contentType.includes("multipart/form-data")) {
+     133 |     const formData = await req.formData();
+     134 |     const body: Record<string, any> = {};
+     135 | 
+     136 |     for (const [key, value] of formData.entries()) {
+     137 |       if (typeof value === "string") body[key] = value;
+     138 |     }
+     139 | 
+     140 |     const photo =
+     141 |       formData.get("food_photo") ||
+     142 |       formData.get("photo") ||
+     143 |       formData.get("file") ||
+     144 |       formData.get("evidence") ||
+     145 |       null;
+     146 | 
+     147 |     return { body, photo };
+     148 |   }
+     149 | 
+     150 |   const body = await req.json().catch(() => ({}));
+
+============================================================
+PATTERN: fetch(
+MATCH LINE: 179
+CONTEXT: 154 - 214
+============================================================
+     154 | async function fileToBase64(fileLike: any) {
+     155 |   if (!fileLike || typeof fileLike !== "object") return null;
+     156 |   if (typeof fileLike.arrayBuffer !== "function") return null;
+     157 | 
+     158 |   const arrayBuffer = await fileLike.arrayBuffer();
+     159 |   const buffer = Buffer.from(arrayBuffer);
+     160 | 
+     161 |   if (!buffer.length) return null;
+     162 | 
+     163 |   const maxBytes = 4 * 1024 * 1024;
+     164 |   if (buffer.length > maxBytes) {
+     165 |     throw new Error("Ukuran foto maksimal 4 MB. Silakan upload foto yang lebih kecil.");
+     166 |   }
+     167 | 
+     168 |   return {
+     169 |     dataBase64: buffer.toString("base64"),
+     170 |     filename: clean(fileLike.name) || `nutrition-${Date.now()}.jpg`,
+     171 |     contentType: clean(fileLike.type) || "application/octet-stream",
+     172 |     size: buffer.length,
+     173 |   };
+     174 | }
+     175 | 
+     176 | async function postToWebhook(payload: any) {
+     177 |   const url = assertWebhookConfigured();
+     178 | 
+>>>  179 |   const response = await fetch(url, {
+     180 |     method: "POST",
+     181 |     headers: {
+     182 |       "Content-Type": "application/json",
+     183 |     },
+     184 |     body: JSON.stringify({
+     185 |       secret: getWebhookSecret(),
+     186 |       ...payload,
+     187 |     }),
+     188 |   });
+     189 | 
+     190 |   const text = await response.text();
+     191 | 
+     192 |   let json: any = {};
+     193 |   try {
+     194 |     json = text ? JSON.parse(text) : {};
+     195 |   } catch {
+     196 |     json = {
+     197 |       ok: false,
+     198 |       message: text || "Invalid webhook response",
+     199 |     };
+     200 |   }
+     201 | 
+     202 |   if (!response.ok || json?.ok === false) {
+     203 |     throw new Error(json?.message || `Webhook gagal: HTTP ${response.status}`);
+     204 |   }
+     205 | 
+     206 |   return json;
+     207 | }
+     208 | 
+     209 | async function uploadNutritionPhoto(params: {
+     210 |   photo: any;
+     211 |   participant: any;
+     212 |   companyName: string;
+     213 |   logDate: string;
+     214 | }) {
+
+============================================================
+FUNCTION DEFINITIONS
+============================================================
+   25 | clean
+   29 | toNumberOrNull
+   37 | todayDate
+   41 | safeIsoDate
+   53 | normalizeText
+   62 | splitAliases
+   69 | splitFoodItems
+   76 | mealLabel
+   94 | getWebhookUrl
+   98 | getWebhookSecret
+  106 | getSheetName
+  110 | assertWebhookConfigured
+  256 | matchOneFoodFromMaster
+  383 | buildSheetRow
+  474 | export async GET
+  497 | export async POST

@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
       program_type: "wellness" as const,
     };
 
-    const res = NextResponse.json({ ok: true, user: sessionUser, redirect: "/wellness/dashboard" });
+    const res = NextResponse.json({ ok: true, user: sessionUser, redirect: "/wellness/portal" });
     setSessionCookie(res, sessionUser);
     return res;
   } catch (error: any) {

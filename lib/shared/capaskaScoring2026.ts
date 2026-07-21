@@ -44,27 +44,27 @@ const SCORE_RULES: Record<string, number> = {
   "Pemeriksaan Visus OD  / OS::<6/12": 0,
 
   "Karang Gigi::Negative": 2,
-  "Karang Gigi::Positive": 0,
-  "Caries Dentis::0 caries": 2,
-  "Caries Dentis::1 caries": 1,
-  "Caries Dentis::2 caries": 1,
-  "Caries Dentis::3 caries": 0,
-  "Caries Dentis::>3 caries": 0,
+  "Karang Gigi::Positive": -1,
+  "Caries Dentis::0 caries": 3,
+  "Caries Dentis::1 caries": -1,
+  "Caries Dentis::2 caries": -2,
+  "Caries Dentis::3 caries": -3,
+  "Caries Dentis::>3 caries": -10,
   "Tumpatan Gigi::0 tumpatan": 2,
   "Tumpatan Gigi::<3 tumpatan": 1,
-  "Tumpatan Gigi::>3 tumpatan": 0,
-  "Impaksi gigi::0 gigi": 2,
-  "Impaksi gigi::1 gigi": 1,
-  "Impaksi gigi::2 gigi": 0,
-  "Impaksi gigi::>2 gigi": 0,
+  "Tumpatan Gigi::>3 tumpatan": -5,
+  "Impaksi gigi::0 gigi": 3,
+  "Impaksi gigi::1 gigi": 2,
+  "Impaksi gigi::2 gigi": 1,
+  "Impaksi gigi::>2 gigi": -5,
   "Kehilangan Gigi (Baik depan maupun belakang)::0 gigi": 2,
   "Kehilangan Gigi (Baik depan maupun belakang)::1 gigi": 1,
   "Kehilangan Gigi (Baik depan maupun belakang)::2 gigi": 0,
-  "Kehilangan Gigi (Baik depan maupun belakang)::>2 gigi": 0,
-  "Infeksi Gusi::Negative": 2,
-  "Infeksi Gusi::Positive": 0,
-  "Dental panoramic::Normal": 2,
-  "Dental panoramic::ditemukan kelainan": 0,
+  "Kehilangan Gigi (Baik depan maupun belakang)::>2 gigi": -10,
+  "Infeksi Gusi::Negative": 1,
+  "Infeksi Gusi::Positive": -1,
+  "Dental panoramic::Normal": 3,
+  "Dental panoramic::ditemukan kelainan": -1,
 
   "Membran timpani::Intak": 2,
   "Membran timpani::Tidak Intak": 0,
@@ -474,13 +474,19 @@ export function computeCapaskaDerivedValues(parameters: any[], inputValues: Reco
     const totalParam = byName.get(normalizeCapaskaKey(domain.totalParameterName));
     if (!totalParam) continue;
 
-    const rawMax = domain.components.length * 2;
+    const rawMax = getDomainRawMaxV238(domain);
     const rawTotal = domain.components.reduce((sum, name) => sum + scoreOf(name), 0);
     const normalized = normalizeDomainScore(rawTotal, rawMax, domain.maxScore);
     next[totalParam.id] = String(normalized);
   }
 
   return next;
+}
+
+
+function getDomainRawMaxV238(domain: any) {
+  if (domain?.key === "gigi_mulut") return 16;
+  return (domain?.components?.length || 0) * 2;
 }
 
 function emptyScoring(): CapaskaScoringResult {
@@ -617,7 +623,7 @@ export function computeMcuParticipantScoring2026(args: {
   for (const domain of CAPASKA_DOMAIN_RULES) {
     let rawTotal = 0;
     let rawCount = 0;
-    const rawMax = domain.components.length * 2;
+    const rawMax = getDomainRawMaxV238(domain);
 
     for (const componentName of domain.components) {
       const { param, value } = getSelected(componentName);

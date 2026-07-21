@@ -94,7 +94,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Kesehatan Mata",
     "description": "Pemeriksaan mata CAPASKA sesuai reference",
     "username": "capaska_mata",
-    "password": "mata123",
+    "password": "mata741!",
     "operator_name": "Operator CAPASKA Mata",
     "sort_order": 20,
     "parameters": [
@@ -219,7 +219,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Kesehatan Gigi & Mulut + Dental panoramik",
     "description": "Pemeriksaan kesehatan gigi, mulut, dan dental panoramic sesuai reference",
     "username": "capaska_gigi",
-    "password": "gigi123",
+    "password": "gigi583!",
     "operator_name": "Operator CAPASKA Gigi",
     "sort_order": 40,
     "parameters": [
@@ -434,7 +434,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Kesehatan THT",
     "description": "Pemeriksaan THT sesuai reference",
     "username": "capaska_tht",
-    "password": "tht123",
+    "password": "tht926!",
     "operator_name": "Operator CAPASKA THT",
     "sort_order": 50,
     "parameters": [
@@ -607,7 +607,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Penyakit Dalam",
     "description": "Pemeriksaan penyakit dalam sesuai reference",
     "username": "capaska_pd",
-    "password": "pd123",
+    "password": "pd472!",
     "operator_name": "Operator CAPASKA Penyakit Dalam",
     "sort_order": 30,
     "parameters": [
@@ -1135,7 +1135,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Kesehatan Jantung dan Pembuluh Darah",
     "description": "Pemeriksaan kesehatan jantung dan pembuluh darah sesuai reference",
     "username": "capaska_jantung",
-    "password": "jantung123",
+    "password": "jantung819!",
     "operator_name": "Operator CAPASKA Jantung",
     "sort_order": 60,
     "parameters": [
@@ -1306,7 +1306,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Ortopedi",
     "description": "Pemeriksaan ortopedi sesuai reference",
     "username": "capaska_ortopedi",
-    "password": "ortopedi123",
+    "password": "ortopedi634!",
     "operator_name": "Operator CAPASKA Ortopedi",
     "sort_order": 70,
     "parameters": [
@@ -1587,7 +1587,7 @@ export const CAPASKA_STAGES: StageSeed[] = [
     "post_name": "Radiologi",
     "description": "Pemeriksaan radiologi sesuai reference",
     "username": "capaska_radiologi",
-    "password": "radiologi123",
+    "password": "radiologi258!",
     "operator_name": "Operator CAPASKA Radiologi",
     "sort_order": 80,
     "parameters": [

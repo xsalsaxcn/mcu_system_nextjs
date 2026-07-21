@@ -12,13 +12,13 @@ type DemoCredential = {
 const CREDENTIALS: DemoCredential[] = [
   { label: "Admin", username: "admin", password: "admin123", tag: "admin" },
   { label: "Registrasi Ulang", username: "capaska_registrasi", password: "registrasi123", tag: "registrasi" },
-  { label: "Operator Mata", username: "capaska_mata", password: "mata123", tag: "mata" },
-  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd123", tag: "penyakit dalam" },
-  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi123", tag: "gigi" },
-  { label: "Operator THT", username: "capaska_tht", password: "tht123", tag: "tht" },
-  { label: "Operator Jantung", username: "capaska_jantung", password: "jantung123", tag: "jantung" },
-  { label: "Operator Ortopedi", username: "capaska_ortopedi", password: "ortopedi123", tag: "ortopedi" },
-  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi123", tag: "radiologi" },
+  { label: "Operator Mata", username: "capaska_mata", password: "mata741!", tag: "mata" },
+  { label: "Operator Penyakit Dalam", username: "capaska_pd", password: "pd472!", tag: "penyakit dalam" },
+  { label: "Operator Gigi & Mulut", username: "capaska_gigi", password: "gigi583!", tag: "gigi" },
+  { label: "Operator THT", username: "capaska_tht", password: "tht926!", tag: "tht" },
+  { label: "Operator Jantung", username: "capaska_jantung", password: "jantung819!", tag: "jantung" },
+  { label: "Operator Ortopedi", username: "capaska_ortopedi", password: "ortopedi634!", tag: "ortopedi" },
+  { label: "Operator Radiologi", username: "capaska_radiologi", password: "radiologi258!", tag: "radiologi" },
 ];
 
 function clean(value: any) {

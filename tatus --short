@@ -1,0 +1,5 @@
+[33m9ec4d41[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Redeploy rollback to 83419fa
+[33m83419fa[m restore ortopedi staff options alias
+[33m7281fda[m fix capaska ortopedi scoring to max 16
+[33m47c7ff9[m fix capaska staff editor duplicate save
+[33mdaff684[m add capaska staff editor page

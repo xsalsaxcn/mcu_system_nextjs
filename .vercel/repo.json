@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_3kJdL15BgOHcjgtms2yn3hqAV1YN",
+      "name": "mcu-system-nextjs",
+      "directory": ".",
+      "orgId": "team_3qMHkxCCl5Y0GwapZCdSIiMU"
+    }
+  ]
+}

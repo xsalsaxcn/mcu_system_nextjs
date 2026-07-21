@@ -71,8 +71,13 @@ export default function WellnessSignupPage() {
       return;
     }
 
-    setMessage("Signup berhasil. Mengarahkan ke dashboard peserta...");
-    window.location.href = json.redirect || "/wellness/portal";
+    setMessage(
+  "✅ Sign Up berhasil.\n\nMengalihkan ke halaman Login...",
+);
+
+setTimeout(() => {
+  window.location.replace("/wellness/portal");
+}, 1800);
   }
 
   return (

@@ -689,7 +689,7 @@ export default function AiMcuAnalyzePage() {
             <a href="/ai-mcu/upload" className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100">
               Upload MCU
             </a>
-            <a href="/ai-mcu/generate" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">
+            <a href="/ai-mcu/corporate/generate" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">
               Generate PDF
             </a>
           </div>

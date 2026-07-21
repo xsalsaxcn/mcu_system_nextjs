@@ -1,0 +1,340 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import {
+  CORPORATE_PDF_SECTIONS,
+  CORPORATE_SIGNATORY_FIELDS,
+  cleanCellValue,
+  isLabParameter,
+  isPhysicalParameter,
+  isRequiredParameter,
+  pickRowValue,
+  parseSupportExamination,
+  supportConfigForCode,
+} from "@/lib/shared/corporatePdf";
+
+export const dynamic = "force-dynamic";
+
+function fail(message: string, status = 400, extra: Record<string, unknown> = {}) {
+  return NextResponse.json({ ok: false, message, ...extra }, { status });
+}
+
+function engineUrl() {
+  return String(process.env.AI_MCU_ENGINE_URL || "").replace(/\/$/, "");
+}
+
+function driveBaseFolder() {
+  return String(
+    process.env.AI_MCU_GOOGLE_DRIVE_FOLDER_ID ||
+    process.env.AI_MCU_GOOGLE_DRIVE_FOLDER_URL ||
+    process.env.AI_MCU_GDRIVE_BASE_FOLDER ||
+    process.env.GDRIVE_BASE_FOLDER ||
+    process.env.GOOGLE_DRIVE_FOLDER_ID ||
+    ""
+  ).trim();
+}
+
+function pick(...values: unknown[]) {
+  for (const value of values) {
+    const text = cleanCellValue(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function formatDateId(value: unknown) {
+  const text = cleanCellValue(value);
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+async function fetchParticipants(supabase: any, sourceId: number, ids: number[]) {
+  const { data, error } = await supabase
+    .from("participants")
+    .select("*")
+    .eq("source_id", sourceId)
+    .eq("program_type", "corporate")
+    .in("id", ids);
+  if (error) throw new Error(error.message);
+  const order = new Map(ids.map((id, index) => [id, index]));
+  return (data || []).sort((a: any, b: any) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
+async function fetchImportRows(supabase: any, ids: number[]) {
+  const { data, error } = await supabase
+    .from("ai_mcu_import_rows")
+    .select("id,participant_id,row_data,participant_name,mcu_id,nik,company_name,database_name")
+    .in("participant_id", ids)
+    .order("id", { ascending: true });
+  if (error) throw new Error(error.message);
+  const map = new Map<number, any>();
+  for (const row of data || []) {
+    const id = Number(row.participant_id);
+    if (!map.has(id)) map.set(id, row);
+  }
+  return map;
+}
+
+async function loadMaps(supabase: any) {
+  const [packages, sources, companies] = await Promise.all([
+    supabase.from("packages").select("id,name"),
+    supabase.from("participant_sources").select("id,name,institution_name,program_type"),
+    supabase.from("companies").select("id,name"),
+  ]);
+  return {
+    packageMap: new Map((packages.data || []).map((x: any) => [x.id, x.name])),
+    sourceMap: new Map((sources.data || []).map((x: any) => [x.id, x])),
+    companyMap: new Map((companies.data || []).map((x: any) => [x.id, x.name])),
+  };
+}
+
+function identityRow(p: any, imported: any, maps: any) {
+  const row = imported?.row_data && typeof imported.row_data === "object" ? imported.row_data : {};
+  const source = maps.sourceMap.get(p.source_id) || {};
+  const companyName = maps.companyMap.get(p.company_id);
+  const packageName = maps.packageMap.get(p.package_id);
+  const name = pick(row.NAMA, row.Nama, imported?.participant_name, p.name, p.nama);
+  const mcuId = pick(row.NOMCU, row["NO MCU"], imported?.mcu_id, p.mcu_id, p.no_mcu, p.barcode_value, p.external_id, p.id);
+  const nik = pick(row.NIK, row["NIK/NRP/ID"], imported?.nik, p.nik, p.external_id, p.employee_id, p.id);
+  const medicalRecordNo = pick(row.MEDICAL_RECORD_NO, row.NO_MR, row["No. Medical Record"], p.medical_record_no, p.no_mr);
+  // CORPORATE_MCU_DATE_FROM_EXCEL_V409
+  // Tanggal MCU wajib diprioritaskan dari kolom Excel/import row.
+  // created_at dan waktu generate tidak boleh dipakai sebagai Tanggal MCU.
+  const excelMcuDate = pickRowValue(row, [
+    "Tanggal MCU",
+    "TANGGAL MCU",
+    "TANGGAL_MCU",
+    "TGL MCU",
+    "TGL_MCU",
+    "TGLMCU",
+    "Tanggal Pemeriksaan",
+    "TANGGAL PEMERIKSAAN",
+    "Tanggal Periksa",
+    "SERVICE DATE",
+    "SERVICE_DATE",
+  ]);
+  const mcuDate = formatDateId(pick(excelMcuDate, p.mcu_date, p.service_date));
+  const department = pick(row.DEPARTEMEN, row.DEPT, row.Department, row.Departemen, p.department, p.division, p.unit);
+  const bagian = pick(row.BAGIAN, row.Bagian, row["Dept/Bagian"], row.Unit, p.bagian, p.section, p.unit);
+  const jabatan = pick(row.JABATAN, row.Jabatan, row.Position, row["Job Title"], p.jabatan, p.position);
+  // Sumber database/perusahaan diprioritaskan. Pada beberapa workbook, auto-mapping
+  // lama pernah salah mengisi "Nama PT" dengan nama peserta.
+  const company = pick(imported?.company_name, companyName, source.institution_name, source.name, p.company_name, row.PERUSAHAAN, row.Perusahaan, row.Company, row["Nama PT"]);
+
+  return {
+    "Nama PT": company,
+    PERUSAHAAN: company,
+    Perusahaan: company,
+    "Tanggal MCU": mcuDate,
+    TANGGAL_MCU: mcuDate,
+    // Corporate memakai tanggal pemeriksaan dari Excel, bukan tanggal PDF dibuat.
+    Issueddate: mcuDate,
+    IssuedDate: mcuDate,
+    NOMCU: mcuId,
+    "NO MCU": mcuId,
+    "NO.MCU": mcuId,
+    "No. Medical Record": medicalRecordNo,
+    MEDICAL_RECORD_NO: medicalRecordNo,
+    NAMA: name,
+    Nama: name,
+    JK: pick(row.JK, row.Gender, p.gender, p.sex, p.jenis_kelamin),
+    TGLLAHIR: formatDateId(pick(row.TGLLAHIR, row["Tanggal Lahir"], p.birth_date, p.date_of_birth, p.tanggal_lahir)),
+    USIA: pick(row.USIA, row.Usia, p.age, p.usia),
+    NIK: nik,
+    "NIK/NRP/ID": nik,
+    DEPARTEMEN: department,
+    Department: department,
+    DEPT: department,
+    Bagian: bagian,
+    BAGIAN: bagian,
+    Jabatan: jabatan,
+    JABATAN: jabatan,
+    PAKET: pick(row.PAKET, row.Paket, packageName, p.package_name, p.paket),
+    KATEGORI: pick(row.KATEGORI, "corporate"),
+    KESIMPULAN: pick(row.KESIMPULAN, row.Kesimpulan, p.conclusion, p.kesimpulan),
+    SARAN: pick(row.SARAN, row.Saran, p.recommendation, p.saran),
+    FIT_STATUS: pick(row.FIT_STATUS, row.fitStatus, row.KATEGORI, row.Kategori, p.fit_status, p.status_fit),
+  };
+}
+
+function selectedUploadedRow(row: Record<string, unknown>, selectedParameters: Set<string>) {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (selectedParameters.size === 0 || selectedParameters.has(key) || isRequiredParameter(key)) out[key] = value;
+  }
+  return out;
+}
+
+function buildParticipantRows(
+  p: any,
+  imported: any,
+  maps: any,
+  sections: Set<string>,
+  selectedParameters: Set<string>,
+  signatories: Record<string, string>
+) {
+  const raw = imported?.row_data && typeof imported.row_data === "object"
+    ? imported.row_data as Record<string, unknown>
+    : {};
+  const selectedRaw = selectedUploadedRow(raw, selectedParameters);
+  const identity = identityRow(p, imported, maps);
+  const rows: Record<string, unknown>[] = [];
+  const sectionList = Array.from(sections).join(",");
+
+  const summary: Record<string, unknown> = {
+    ...identity,
+    _SheetName: "KESIMPULAN & SARAN",
+    PDF_SECTION_SELECTION: sectionList,
+    "Koordinator MCU": signatories.coordinator || "",
+  };
+  // CORPORATE_STRICT_PROFILE_PHOTO_V410
+  // Hanya field profil yang boleh masuk cover. Link Foto Rontgen tidak pernah menjadi fallback.
+  if (sections.has("PROFILE_PHOTO")) {
+    summary.PhotoUrl = pick(
+      raw.PhotoUrl,
+      raw.PHOTOURL,
+      raw["PHOTO URL"],
+      raw.PHOTO_URL,
+      raw["Link Foto"],
+      raw["Foto URL"],
+      raw["URL FOTO"]
+    );
+  } else {
+    summary.PhotoUrl = "";
+  }
+rows.push(summary);
+
+  if (sections.has("PHYSICAL")) {
+    const physical: Record<string, unknown> = { ...identity, _SheetName: "FISIK", PDF_SECTION_SELECTION: sectionList };
+    for (const [key, value] of Object.entries(selectedRaw)) if (isPhysicalParameter(key)) physical[key] = value;
+
+    // CORPORATE_LIPE_TO_WAIST_V416
+    // Canonical mapping: FS:LiPe / LIPE adalah Lingkar Perut, bukan parameter lain.
+    const waistCircumference = pickRowValue(selectedRaw, [
+      "Lingkar Perut", "LINGKAR PERUT", "FS:LiPe", "FS:LIPE", "FS:Lipe",
+      "FS:LPerut", "FS:LP", "LIPE", "LiPe", "Lipe",
+      "Waist Circumference", "Waist"
+    ]);
+    if (waistCircumference) {
+      physical["Lingkar Perut"] = waistCircumference;
+      physical["FS:LiPe"] = waistCircumference;
+    }
+
+    physical["Dokter MCU"] = signatories.physical || "";
+    rows.push(physical);
+  }
+
+  if (sections.has("LAB")) {
+    const lab: Record<string, unknown> = { ...identity, _SheetName: "LAB", PDF_SECTION_SELECTION: sectionList };
+    for (const [key, value] of Object.entries(selectedRaw)) if (isLabParameter(key)) lab[key] = value;
+    lab["Penanggung Jawab Laboratorium"] = signatories.lab || "";
+    rows.push(lab);
+  }
+
+  const supportCodes = ["XRAY_THORAX", "EKG", "TREADMILL", "SPIROMETRY", "AUDIOMETRY", "USG"];
+  for (const code of supportCodes) {
+    const imageCode = `${code}_IMAGE`;
+    if (!sections.has(code) && !sections.has(imageCode)) continue;
+    const config = supportConfigForCode(code);
+    if (!config) continue;
+    const support: Record<string, unknown> = { ...identity, _SheetName: config.sheetName, PDF_SECTION_SELECTION: sectionList };
+    if (sections.has(code)) {
+      const parsedSupport = parseSupportExamination(selectedRaw, code);
+      support[config.resultField] = parsedSupport.result;
+      support[config.conclusionField] = parsedSupport.conclusion;
+    }
+    if (sections.has(imageCode)) support[config.imageField] = pick(raw[config.imageField]);
+    const signatoryKey = code === "XRAY_THORAX" ? "radiology" : code.toLowerCase().replace("spirometry", "spirometry").replace("audiometry", "audiometry");
+    support[config.doctorField] = signatories[signatoryKey] || "";
+    if (Object.values(support).some((value) => cleanCellValue(value))) rows.push(support);
+  }
+
+  return rows;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const user = getSessionUser(req);
+    if (!user) return fail("Unauthorized", 401);
+    const body = await req.json().catch(() => ({}));
+    const sourceId = Number(body.sourceId);
+    const participantIds = Array.isArray(body.participantIds)
+      ? body.participantIds.map(Number).filter((id: number) => Number.isFinite(id) && id > 0)
+      : [];
+    if (!sourceId) return fail("Pilih database MCU Corporate.");
+    if (!participantIds.length) return fail("Pilih minimal 1 peserta.");
+
+    const allowedSections = new Set(CORPORATE_PDF_SECTIONS.map((item) => item.code));
+    const sections = new Set<string>(
+      (Array.isArray(body.selectedSections) ? body.selectedSections : [])
+        .map(String)
+        .filter((code: string) => allowedSections.has(code as any))
+    );
+    sections.add("COVER");
+    sections.add("CONCLUSION");
+
+    const selectedParameters = new Set<string>(Array.isArray(body.selectedParameters) ? body.selectedParameters.map(String) : []);
+    const signatories: Record<string, string> = {};
+    for (const item of CORPORATE_SIGNATORY_FIELDS) signatories[item.key] = cleanCellValue(body.signatories?.[item.key]);
+
+    const supabase = getSupabaseAdmin();
+    const sourceRes = await supabase.from("participant_sources").select("id,name,institution_name,program_type").eq("id", sourceId).maybeSingle();
+    if (sourceRes.error) return fail(sourceRes.error.message, 500);
+    if (!sourceRes.data) return fail("Database tidak ditemukan.", 404);
+    if (String(sourceRes.data.program_type || "").toLowerCase() !== "corporate") return fail("Route ini hanya untuk MCU Corporate.", 403);
+
+    const participants = await fetchParticipants(supabase, sourceId, participantIds);
+    if (participants.length !== participantIds.length) return fail("Sebagian peserta bukan berasal dari database Corporate yang dipilih.", 403);
+
+    const importRows = await fetchImportRows(supabase, participantIds);
+    const maps = await loadMaps(supabase);
+    const rekapRows = participants.flatMap((participant: any) =>
+      buildParticipantRows(participant, importRows.get(Number(participant.id)), maps, sections, selectedParameters, signatories)
+    );
+    const names = participants.map((participant: any) => pick(participant.name)).filter(Boolean);
+    const url = engineUrl();
+    if (!url) return fail("AI_MCU_ENGINE_URL belum dikonfigurasi.", 500);
+
+    const mergePdf = Boolean(body.mergePdf) && participants.length > 1;
+    const res = await fetch(`${url}/generate-pdf-async`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        mode: participants.length > 1 ? "batch" : "single",
+        uploadDrive: Boolean(body.uploadDrive),
+        mergePdf,
+        baseFolder: driveBaseFolder(),
+        baseUrl: url,
+        names,
+        rekapRows,
+        abnRows: [],
+        condRows: [],
+        company: pick(sourceRes.data.institution_name, sourceRes.data.name, "MCU Corporate"),
+        year: new Date().getFullYear(),
+        template: "corporate",
+        program: "corporate",
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.ok) return fail(json.message || "Gagal memulai job PDF Corporate.", 500, { engineStatus: res.status, response: json });
+
+    return NextResponse.json({
+      ok: true,
+      status: json.status || "queued",
+      message: json.message || "Generate PDF MCU Corporate dimulai.",
+      jobId: json.jobId,
+      progress: Number(json.progress || 0),
+      current: Number(json.current || 0),
+      total: Number(json.total || participants.length),
+      selectedCount: participants.length,
+      importedRowsUsed: importRows.size,
+      sections: Array.from(sections),
+      engineMode: json.engineMode || "python-engine-async",
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Generate PDF MCU Corporate gagal.", 500);
+  }
+}

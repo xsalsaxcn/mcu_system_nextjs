@@ -1,0 +1,1778 @@
+﻿GAGAL MENEMUKAN MENU HISTORY UNTUK INSERT GRAFIK
+Cari manual lokasi menu dari hasil di bawah:
+
+============================================================
+LINE 10
+============================================================
+    1 | "use client";
+    2 | 
+    3 | import { useEffect, useMemo, useState } from "react";
+    4 | import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
+    5 | import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
+    6 | 
+    7 | // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
+    8 | // Base dari V415:
+    9 | // - Summary card Workout Calories dan Steps tetap hanya menghitung HARI INI.
+   10 | // - History Workout tetap menampilkan semua riwayat.
+   11 | // - Google Fit Daily pada tanggal yang sama dipilih row terbaru.
+   12 | // - Health Connect Daily pada tanggal yang sama dipilih row terbaru.
+   13 | // - todayDate dan activity date key pakai Asia/Jakarta.
+   14 | // - Auto sync Google Fit tetap setiap 10 menit saat portal terbuka.
+   15 | // - Strava card diganti menjadi Health Connect.
+   16 | // - Health Connect saat ini menunggu Android companion app.
+   17 | // - Data Health Connect yang masuk ke wellness_activity_logs akan langsung ikut summary.
+   18 | 
+   19 | type Step = "request" | "verify" | "portal";
+   20 | type PortalTab =
+============================================================
+LINE 25
+============================================================
+   15 | // - Strava card diganti menjadi Health Connect.
+   16 | // - Health Connect saat ini menunggu Android companion app.
+   17 | // - Data Health Connect yang masuk ke wellness_activity_logs akan langsung ikut summary.
+   18 | 
+   19 | type Step = "request" | "verify" | "portal";
+   20 | type PortalTab =
+   21 |   | "home"
+   22 |   | "nutrition"
+   23 |   | "workout"
+   24 |   | "healthtalk"
+   25 |   | "history"
+   26 |   | "devices"
+   27 |   | "profile" | "charts";
+   28 | 
+   29 | function clean(value: any) {
+   30 |   return String(value ?? "").trim();
+   31 | }
+   32 | 
+   33 | function asNumber(value: any) {
+   34 |   const n = Number(value);
+   35 |   return Number.isFinite(n) ? n : 0;
+============================================================
+LINE 338
+============================================================
+  328 |     code: "",
+  329 |     username: "",
+  330 |     email: "",
+  331 |     phone: "",
+  332 |     otp: "",
+  333 |   });
+  334 |   const [participant, setParticipant] = useState<any>(null);
+  335 |   const [integrations, setIntegrations] = useState<any[]>([]);
+  336 |   const [activities, setActivities] = useState<any[]>([]);
+  337 |   const [activitySummary, setActivitySummary] = useState<any[]>([]);
+  338 |   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
+  339 |   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
+  340 |   const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
+  341 |   const [syncing, setSyncing] = useState("");
+  342 | 
+  343 |   const [nutritionForm, setNutritionForm] = useState({
+  344 |     log_date: todayDate(),
+  345 |     meal_type: "breakfast",
+  346 |     food_name: "",
+  347 |     portion: "",
+  348 |     notes: "",
+============================================================
+LINE 413
+============================================================
+  403 |       .catch((error) => ({
+  404 |         ok: false,
+  405 |         message: error?.message || "Network error",
+  406 |       }));
+  407 | 
+  408 |     if (result.ok) {
+  409 |       setParticipant(result.participant);
+  410 |       setIntegrations(result.integrations || []);
+  411 |       setActivities(result.activities || []);
+  412 |       setActivitySummary(result.activity_summary || []);
+  413 |       setClinicalHistory(result.clinical_history || []);
+  414 |       setStep("portal");
+  415 | 
+  416 |       if (!options?.keepMessage) {
+  417 |         setMessage(
+  418 |           "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device."
+  419 |         );
+  420 |       }
+  421 | 
+  422 |       await Promise.all([loadNutrition(), loadHealthtalk()]);
+  423 |     }
+============================================================
+LINE 540
+============================================================
+  530 | 
+  531 |   async function logout() {
+  532 |     await fetch("/api/wellness/participant/me", {
+  533 |       method: "DELETE",
+  534 |     }).catch(() => null);
+  535 | 
+  536 |     setParticipant(null);
+  537 |     setIntegrations([]);
+  538 |     setActivities([]);
+  539 |     setActivitySummary([]);
+  540 |     setClinicalHistory([]);
+  541 |     setNutritionLogs([]);
+  542 |     setHealthtalkLogs([]);
+  543 |     setStep("request");
+  544 |     setActiveTab("home");
+  545 |     setMessage("Session peserta keluar. Masuk ulang dengan OTP.");
+  546 |   }
+  547 | 
+  548 |   async function syncProvider(
+  549 |     provider: "strava" | "google-fit",
+  550 |     options?: { silent?: boolean; days?: number }
+============================================================
+LINE 690
+============================================================
+  680 |         ...previous,
+  681 |         started_at: "",
+  682 |         activity_name: "",
+  683 |         duration_minutes: "",
+  684 |         distance_km: "",
+  685 |         steps: "",
+  686 |         notes: "",
+  687 |       }));
+  688 |       setWorkoutEvidence(null);
+  689 |       await loadMe({ keepMessage: true });
+  690 |       setActiveTab("history");
+  691 |     } else {
+  692 |       setMessage(result.detail || result.message || "Gagal menyimpan workout.");
+  693 |     }
+  694 |   }
+  695 | 
+  696 |   async function saveHealthtalk() {
+  697 |     if (!clean(healthtalkForm.healthtalk_title)) {
+  698 |       setMessage("Jenis atau judul Health Talk wajib diisi.");
+  699 |       return;
+  700 |     }
+============================================================
+LINE 730
+============================================================
+  720 | 
+  721 |     if (result.ok) {
+  722 |       setMessage(result.message || "Health Talk berhasil disimpan.");
+  723 |       setHealthtalkForm((previous) => ({
+  724 |         ...previous,
+  725 |         healthtalk_title: "",
+  726 |         notes: "",
+  727 |       }));
+  728 |       setHealthtalkEvidence(null);
+  729 |       await loadHealthtalk();
+  730 |       setActiveTab("history");
+  731 |     } else {
+  732 |       setMessage(result.detail || result.message || "Gagal menyimpan Health Talk.");
+  733 |     }
+  734 |   }
+  735 | 
+  736 |   const healthConnectConnected = providerStatus(integrations, "health_connect");
+  737 |   const googleFitConnected = providerStatus(integrations, "google_fit");
+  738 | 
+  739 |   useEffect(() => {
+  740 |     if (step !== "portal") return;
+============================================================
+LINE 810
+============================================================
+  800 |       foodCalories,
+  801 |       protein,
+  802 |       carbs,
+  803 |       fat,
+  804 |       foodCount: todayNutrition.length,
+  805 |       pendingCalories,
+  806 |     };
+  807 |   }, [todayWorkoutItems, todayNutrition]);
+  808 | 
+  809 |   const lastClinical =
+  810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+  811 |       ? clinicalHistory[0]
+  812 |       : null;
+  813 | 
+  814 |   const isWarningMessage =
+  815 |     message.toLowerCase().includes("gagal") ||
+  816 |     message.toLowerCase().includes("belum") ||
+  817 |     message.toLowerCase().includes("error") ||
+  818 |     message.toLowerCase().includes("invalid") ||
+  819 |     message.toLowerCase().includes("wajib");
+  820 | 
+============================================================
+LINE 811
+============================================================
+  801 |       protein,
+  802 |       carbs,
+  803 |       fat,
+  804 |       foodCount: todayNutrition.length,
+  805 |       pendingCalories,
+  806 |     };
+  807 |   }, [todayWorkoutItems, todayNutrition]);
+  808 | 
+  809 |   const lastClinical =
+  810 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+  811 |       ? clinicalHistory[0]
+  812 |       : null;
+  813 | 
+  814 |   const isWarningMessage =
+  815 |     message.toLowerCase().includes("gagal") ||
+  816 |     message.toLowerCase().includes("belum") ||
+  817 |     message.toLowerCase().includes("error") ||
+  818 |     message.toLowerCase().includes("invalid") ||
+  819 |     message.toLowerCase().includes("wajib");
+  820 | 
+  821 |   return (
+============================================================
+LINE 960
+============================================================
+  950 |           <div className="mt-6 space-y-6">
+  951 | 
+  952 |             {activeTab === "home" ? (
+  953 |               <HomeTab
+  954 |                 participant={participant}
+  955 |                 nutritionLogs={todayNutrition}
+  956 |                 totals={totals}
+  957 |                 setActiveTab={setActiveTab}
+  958 |                 healthConnectConnected={!!healthConnectConnected}
+  959 |                 googleFitConnected={!!googleFitConnected}
+  960 |                 clinicalHistory={clinicalHistory}
+  961 |               />
+  962 |             ) : null}
+  963 | 
+  964 |             {activeTab === "nutrition" ? (
+  965 |               <NutritionTab participant={participant}
+  966 |                 form={nutritionForm}
+  967 |                 photo={nutritionPhoto}
+  968 |                 setPhoto={setNutritionPhoto}
+  969 |                 setValue={setNutritionValue}
+  970 |                 saveNutrition={saveNutrition}
+============================================================
+LINE 996
+============================================================
+  986 |               <HealthtalkTab
+  987 |                 form={healthtalkForm}
+  988 |                 evidence={healthtalkEvidence}
+  989 |                 setEvidence={setHealthtalkEvidence}
+  990 |                 setValue={setHealthtalkValue}
+  991 |                 saveHealthtalk={saveHealthtalk}
+  992 |                 logs={healthtalkLogs}
+  993 |               />
+  994 |             ) : null}
+  995 | 
+  996 |             {activeTab === "history" ? (
+  997 |               <HistoryTab participant={participant}
+  998 |                 workoutItems={workoutItems}
+  999 |                 nutritionLogs={nutritionLogs}
+ 1000 |                 healthtalkLogs={healthtalkLogs}
+ 1001 |                 refresh={() => loadMe()}
+ 1002 |               />
+ 1003 |             ) : null}
+ 1004 | 
+ 1005 |             {activeTab === "devices" ? (
+ 1006 |               <DevicesTab
+============================================================
+LINE 997
+============================================================
+  987 |                 form={healthtalkForm}
+  988 |                 evidence={healthtalkEvidence}
+  989 |                 setEvidence={setHealthtalkEvidence}
+  990 |                 setValue={setHealthtalkValue}
+  991 |                 saveHealthtalk={saveHealthtalk}
+  992 |                 logs={healthtalkLogs}
+  993 |               />
+  994 |             ) : null}
+  995 | 
+  996 |             {activeTab === "history" ? (
+  997 |               <HistoryTab participant={participant}
+  998 |                 workoutItems={workoutItems}
+  999 |                 nutritionLogs={nutritionLogs}
+ 1000 |                 healthtalkLogs={healthtalkLogs}
+ 1001 |                 refresh={() => loadMe()}
+ 1002 |               />
+ 1003 |             ) : null}
+ 1004 | 
+ 1005 |             {activeTab === "devices" ? (
+ 1006 |               <DevicesTab
+ 1007 |                 healthConnectConnected={!!healthConnectConnected}
+============================================================
+LINE 1327
+============================================================
+ 1317 | 
+ 1318 |   return null;
+ 1319 | }
+ 1320 | function HomeTab({
+ 1321 |   participant,
+ 1322 |   nutritionLogs,
+ 1323 |   totals,
+ 1324 |   setActiveTab,
+ 1325 |   healthConnectConnected,
+ 1326 |   googleFitConnected,
+ 1327 |   clinicalHistory,
+ 1328 | }: {
+ 1329 |   participant: any;
+ 1330 |   nutritionLogs: any[];
+ 1331 |   totals: any;
+ 1332 |   setActiveTab: (tab: PortalTab) => void;
+ 1333 |   healthConnectConnected: boolean;
+ 1334 |   googleFitConnected: boolean;
+ 1335 |   clinicalHistory: any[];
+ 1336 | }) {
+ 1337 |   const participantId = Number(
+============================================================
+LINE 1335
+============================================================
+ 1325 |   healthConnectConnected,
+ 1326 |   googleFitConnected,
+ 1327 |   clinicalHistory,
+ 1328 | }: {
+ 1329 |   participant: any;
+ 1330 |   nutritionLogs: any[];
+ 1331 |   totals: any;
+ 1332 |   setActiveTab: (tab: PortalTab) => void;
+ 1333 |   healthConnectConnected: boolean;
+ 1334 |   googleFitConnected: boolean;
+ 1335 |   clinicalHistory: any[];
+ 1336 | }) {
+ 1337 |   const participantId = Number(
+ 1338 |     participant?.id ||
+ 1339 |       participant?.participant_id ||
+ 1340 |       participant?.wellness_participant_id ||
+ 1341 |       0
+ 1342 |   );
+ 1343 | 
+ 1344 |   const [directNutrition, setDirectNutrition] = useState<any>({
+ 1345 |     ok: false,
+============================================================
+LINE 1382
+============================================================
+ 1372 |     }
+ 1373 | 
+ 1374 |     setNutritionLoading(false);
+ 1375 |   }
+ 1376 | 
+ 1377 |   useEffect(() => {
+ 1378 |     loadDirectNutrition();
+ 1379 |   }, [participantId]);
+ 1380 | 
+ 1381 |   const latestClinical =
+ 1382 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+ 1383 |       ? clinicalHistory[0]
+ 1384 |       : null;
+ 1385 | 
+ 1386 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+ 1387 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+ 1388 |   const todayRowCount = Number(directNutrition?.today_row_count || 0);
+ 1389 | 
+ 1390 |   const mealLogs =
+ 1391 |     directNutrition?.today_logs?.length > 0
+ 1392 |       ? directNutrition.today_logs
+============================================================
+LINE 1383
+============================================================
+ 1373 | 
+ 1374 |     setNutritionLoading(false);
+ 1375 |   }
+ 1376 | 
+ 1377 |   useEffect(() => {
+ 1378 |     loadDirectNutrition();
+ 1379 |   }, [participantId]);
+ 1380 | 
+ 1381 |   const latestClinical =
+ 1382 |     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
+ 1383 |       ? clinicalHistory[0]
+ 1384 |       : null;
+ 1385 | 
+ 1386 |   const todayCalories = Number(directNutrition?.today_calories || 0);
+ 1387 |   const todayFoodCount = Number(directNutrition?.today_count || 0);
+ 1388 |   const todayRowCount = Number(directNutrition?.today_row_count || 0);
+ 1389 | 
+ 1390 |   const mealLogs =
+ 1391 |     directNutrition?.today_logs?.length > 0
+ 1392 |       ? directNutrition.today_logs
+ 1393 |       : directNutrition?.latest_logs?.length > 0
+============================================================
+LINE 1401
+============================================================
+ 1391 |     directNutrition?.today_logs?.length > 0
+ 1392 |       ? directNutrition.today_logs
+ 1393 |       : directNutrition?.latest_logs?.length > 0
+ 1394 |         ? directNutrition.latest_logs
+ 1395 |         : nutritionLogs || [];
+ 1396 | 
+ 1397 |   const mealTitle =
+ 1398 |     directNutrition?.today_logs?.length > 0
+ 1399 |       ? "Nutrisi Hari Ini"
+ 1400 |       : directNutrition?.latest_logs?.length > 0
+ 1401 |         ? "Riwayat Nutrisi Terakhir"
+ 1402 |         : "Nutrisi Hari Ini";
+ 1403 | 
+ 1404 |   const mealSubtitle =
+ 1405 |     directNutrition?.today_logs?.length > 0
+ 1406 |       ? `${fmtNumber(todayCalories, 0)} kkal dari ${fmtNumber(todayFoodCount, 0)} item makanan hari ini`
+ 1407 |       : directNutrition?.latest_logs?.length > 0
+ 1408 |         ? "Belum ada input hari ini. Menampilkan data terakhir."
+ 1409 |         : "Belum ada input nutrisi.";
+ 1410 | 
+ 1411 |   return (
+============================================================
+LINE 2059
+============================================================
+ 2049 |   const [directNutrition, setDirectNutrition] = useState<any>({
+ 2050 |     ok: false,
+ 2051 |     logs: [],
+ 2052 |     today_logs: [],
+ 2053 |     latest_logs: [],
+ 2054 |     today_count: 0,
+ 2055 |     today_calories: 0,
+ 2056 |     sources: null,
+ 2057 |   });
+ 2058 | 
+ 2059 |   const [loadingHistory, setLoadingHistory] = useState(false);
+ 2060 |   const [savingSmart, setSavingSmart] = useState(false);
+ 2061 | 
+ 2062 |   const foodText = clean(
+ 2063 |     form.food_name ||
+ 2064 |       form.foodName ||
+ 2065 |       form.meal_text ||
+ 2066 |       form.mealText ||
+ 2067 |       form.makanan
+ 2068 |   );
+ 2069 | 
+============================================================
+LINE 2100
+============================================================
+ 2090 |           : Array.isArray(result?.items)
+ 2091 |             ? result.items
+ 2092 |             : [];
+ 2093 | 
+ 2094 |     setFoodMaster(rows);
+ 2095 |   }
+ 2096 | 
+ 2097 |   async function loadDirectNutrition() {
+ 2098 |     if (!participantId) return;
+ 2099 | 
+ 2100 |     setLoadingHistory(true);
+ 2101 | 
+ 2102 |     const result = await fetch(
+ 2103 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+ 2104 |       { cache: "no-store" }
+ 2105 |     )
+ 2106 |       .then((response) => response.json())
+ 2107 |       .catch(() => null);
+ 2108 | 
+ 2109 |     if (result?.ok) {
+ 2110 |       setDirectNutrition(result);
+============================================================
+LINE 2113
+============================================================
+ 2103 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+ 2104 |       { cache: "no-store" }
+ 2105 |     )
+ 2106 |       .then((response) => response.json())
+ 2107 |       .catch(() => null);
+ 2108 | 
+ 2109 |     if (result?.ok) {
+ 2110 |       setDirectNutrition(result);
+ 2111 |     }
+ 2112 | 
+ 2113 |     setLoadingHistory(false);
+ 2114 |   }
+ 2115 | 
+ 2116 |   useEffect(() => {
+ 2117 |     loadFoodMaster();
+ 2118 |   }, []);
+ 2119 | 
+ 2120 |   useEffect(() => {
+ 2121 |     loadDirectNutrition();
+ 2122 |   }, [participantId]);
+ 2123 | 
+============================================================
+LINE 2180
+============================================================
+ 2170 | 
+ 2171 |     if (clean(form.portion_group) !== "auto_breakdown") {
+ 2172 |       setValue("portion_group", "auto_breakdown");
+ 2173 |     }
+ 2174 | 
+ 2175 |     if (clean(form.portion_fraction) !== "multi_food") {
+ 2176 |       setValue("portion_fraction", "multi_food");
+ 2177 |     }
+ 2178 |   }, [JSON.stringify(breakdownPayload), totalEstimatedCalories]);
+ 2179 | 
+ 2180 |   const historyLogs =
+ 2181 |     directNutrition?.today_logs?.length > 0
+ 2182 |       ? directNutrition.today_logs
+ 2183 |       : directNutrition?.latest_logs?.length > 0
+ 2184 |         ? directNutrition.latest_logs
+ 2185 |         : logs || [];
+ 2186 | 
+ 2187 |   async function submitNutritionSmart() {
+ 2188 |     setSavingSmart(true);
+ 2189 |     await Promise.resolve(saveNutrition());
+ 2190 | 
+============================================================
+LINE 2332
+============================================================
+ 2322 |           >
+ 2323 |             {savingSmart ? "Menyimpan..." : "Simpan Nutrisi"}
+ 2324 |           </button>
+ 2325 |         </div>
+ 2326 |       </div>
+ 2327 | 
+ 2328 |       <div className="rounded-[1.8rem] border border-white bg-white p-4 shadow-lg shadow-slate-200/50">
+ 2329 |         <div className="flex items-start justify-between gap-3">
+ 2330 |           <div>
+ 2331 |             <div className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+ 2332 |               Meal History
+ 2333 |             </div>
+ 2334 | 
+ 2335 |             <h3 className="mt-2 text-xl font-black text-slate-950">
+ 2336 |               Riwayat Nutrisi
+ 2337 |             </h3>
+ 2338 | 
+ 2339 |             {directNutrition?.sources ? (
+ 2340 |               <p className="mt-1 text-[11px] font-bold leading-5 text-slate-500">
+ 2341 |                 Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
+ 2342 |                 {directNutrition.sources.google_sheet_rows || 0} row
+============================================================
+LINE 2336
+============================================================
+ 2326 |       </div>
+ 2327 | 
+ 2328 |       <div className="rounded-[1.8rem] border border-white bg-white p-4 shadow-lg shadow-slate-200/50">
+ 2329 |         <div className="flex items-start justify-between gap-3">
+ 2330 |           <div>
+ 2331 |             <div className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+ 2332 |               Meal History
+ 2333 |             </div>
+ 2334 | 
+ 2335 |             <h3 className="mt-2 text-xl font-black text-slate-950">
+ 2336 |               Riwayat Nutrisi
+ 2337 |             </h3>
+ 2338 | 
+ 2339 |             {directNutrition?.sources ? (
+ 2340 |               <p className="mt-1 text-[11px] font-bold leading-5 text-slate-500">
+ 2341 |                 Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
+ 2342 |                 {directNutrition.sources.google_sheet_rows || 0} row
+ 2343 |               </p>
+ 2344 |             ) : null}
+ 2345 |           </div>
+ 2346 | 
+============================================================
+LINE 2352
+============================================================
+ 2342 |                 {directNutrition.sources.google_sheet_rows || 0} row
+ 2343 |               </p>
+ 2344 |             ) : null}
+ 2345 |           </div>
+ 2346 | 
+ 2347 |           <button
+ 2348 |             type="button"
+ 2349 |             onClick={loadDirectNutrition}
+ 2350 |             className="rounded-full bg-teal-50 px-3 py-2 text-[11px] font-black text-teal-700"
+ 2351 |           >
+ 2352 |             {loadingHistory ? "..." : "Refresh"}
+ 2353 |           </button>
+ 2354 |         </div>
+ 2355 | 
+ 2356 |         <div className="mt-4 space-y-3">
+ 2357 |           {historyLogs.length === 0 ? (
+ 2358 |             <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+ 2359 |               Belum ada input nutrisi.
+ 2360 |             </div>
+ 2361 |           ) : (
+ 2362 |             historyLogs.slice(0, 6).map((item: any, index: number) => (
+============================================================
+LINE 2357
+============================================================
+ 2347 |           <button
+ 2348 |             type="button"
+ 2349 |             onClick={loadDirectNutrition}
+ 2350 |             className="rounded-full bg-teal-50 px-3 py-2 text-[11px] font-black text-teal-700"
+ 2351 |           >
+ 2352 |             {loadingHistory ? "..." : "Refresh"}
+ 2353 |           </button>
+ 2354 |         </div>
+ 2355 | 
+ 2356 |         <div className="mt-4 space-y-3">
+ 2357 |           {historyLogs.length === 0 ? (
+ 2358 |             <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+ 2359 |               Belum ada input nutrisi.
+ 2360 |             </div>
+ 2361 |           ) : (
+ 2362 |             historyLogs.slice(0, 6).map((item: any, index: number) => (
+ 2363 |               <CompactNutritionHistoryItemV43 key={`${item.id || index}-${index}`} item={item} />
+ 2364 |             ))
+ 2365 |           )}
+ 2366 |         </div>
+ 2367 |       </div>
+============================================================
+LINE 2362
+============================================================
+ 2352 |             {loadingHistory ? "..." : "Refresh"}
+ 2353 |           </button>
+ 2354 |         </div>
+ 2355 | 
+ 2356 |         <div className="mt-4 space-y-3">
+ 2357 |           {historyLogs.length === 0 ? (
+ 2358 |             <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+ 2359 |               Belum ada input nutrisi.
+ 2360 |             </div>
+ 2361 |           ) : (
+ 2362 |             historyLogs.slice(0, 6).map((item: any, index: number) => (
+ 2363 |               <CompactNutritionHistoryItemV43 key={`${item.id || index}-${index}`} item={item} />
+ 2364 |             ))
+ 2365 |           )}
+ 2366 |         </div>
+ 2367 |       </div>
+ 2368 |     </section>
+ 2369 |   );
+ 2370 | }
+ 2371 | 
+ 2372 | function CompactAutoFoodBreakdownV43({
+============================================================
+LINE 2363
+============================================================
+ 2353 |           </button>
+ 2354 |         </div>
+ 2355 | 
+ 2356 |         <div className="mt-4 space-y-3">
+ 2357 |           {historyLogs.length === 0 ? (
+ 2358 |             <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+ 2359 |               Belum ada input nutrisi.
+ 2360 |             </div>
+ 2361 |           ) : (
+ 2362 |             historyLogs.slice(0, 6).map((item: any, index: number) => (
+ 2363 |               <CompactNutritionHistoryItemV43 key={`${item.id || index}-${index}`} item={item} />
+ 2364 |             ))
+ 2365 |           )}
+ 2366 |         </div>
+ 2367 |       </div>
+ 2368 |     </section>
+ 2369 |   );
+ 2370 | }
+ 2371 | 
+ 2372 | function CompactAutoFoodBreakdownV43({
+ 2373 |   foods,
+============================================================
+LINE 2447
+============================================================
+ 2437 |                 {fmtNumber(item.subtotal_calories, 0)} kkal
+ 2438 |               </div>
+ 2439 |             </div>
+ 2440 |           </div>
+ 2441 |         ))}
+ 2442 |       </div>
+ 2443 |     </div>
+ 2444 |   );
+ 2445 | }
+ 2446 | 
+ 2447 | function CompactNutritionHistoryItemV43({ item }: { item: any }) {
+ 2448 |   const photo = normalizeImageUrlV37 ? normalizeImageUrlV37(item.photo_url) : clean(item.photo_url);
+ 2449 |   const sourceLabel =
+ 2450 |     item.source === "google_sheet"
+ 2451 |       ? "Google Sheet"
+ 2452 |       : item.source === "supabase"
+ 2453 |         ? "Supabase"
+ 2454 |         : item.source || "Food log";
+ 2455 | 
+ 2456 |   return (
+ 2457 |     <div className="rounded-[1.4rem] bg-slate-50 p-3">
+============================================================
+LINE 2579
+============================================================
+ 2569 |                 </div>
+ 2570 |               </div>
+ 2571 |             </div>
+ 2572 |           </div>
+ 2573 |         ))}
+ 2574 |       </div>
+ 2575 |     </div>
+ 2576 |   );
+ 2577 | }
+ 2578 | 
+ 2579 | function NutritionHistoryItemV29({ item }: { item: any }) {
+ 2580 |   const sourceLabel =
+ 2581 |     item.source === "google_sheet"
+ 2582 |       ? "Google Sheet"
+ 2583 |       : item.source === "supabase"
+ 2584 |         ? "Supabase"
+ 2585 |         : item.source || "Food log";
+ 2586 | 
+ 2587 |   return (
+ 2588 |     <div className="rounded-[1.7rem] bg-slate-50 p-3">
+ 2589 |       <div className="flex items-center gap-3">
+============================================================
+LINE 3069
+============================================================
+ 3059 |               Simpan Health Talk
+ 3060 |             </button>
+ 3061 |           </div>
+ 3062 |         </div>
+ 3063 |       </div>
+ 3064 | 
+ 3065 |       <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+ 3066 |         <div className="flex items-start justify-between gap-3">
+ 3067 |           <div>
+ 3068 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+ 3069 |               Health Talk History
+ 3070 |             </div>
+ 3071 | 
+ 3072 |             <h3 className="mt-2 text-2xl font-black text-slate-950">
+ 3073 |               Riwayat Health Talk
+ 3074 |             </h3>
+ 3075 |           </div>
+ 3076 | 
+ 3077 |           <div className="rounded-full bg-teal-50 px-3 py-2 text-xs font-black text-teal-700">
+ 3078 |             {logs.length} log
+ 3079 |           </div>
+============================================================
+LINE 3073
+============================================================
+ 3063 |       </div>
+ 3064 | 
+ 3065 |       <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+ 3066 |         <div className="flex items-start justify-between gap-3">
+ 3067 |           <div>
+ 3068 |             <div className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">
+ 3069 |               Health Talk History
+ 3070 |             </div>
+ 3071 | 
+ 3072 |             <h3 className="mt-2 text-2xl font-black text-slate-950">
+ 3073 |               Riwayat Health Talk
+ 3074 |             </h3>
+ 3075 |           </div>
+ 3076 | 
+ 3077 |           <div className="rounded-full bg-teal-50 px-3 py-2 text-xs font-black text-teal-700">
+ 3078 |             {logs.length} log
+ 3079 |           </div>
+ 3080 |         </div>
+ 3081 | 
+ 3082 |         <div className="mt-5 space-y-3">
+ 3083 |           {logs.length === 0 ? (
+============================================================
+LINE 3161
+============================================================
+ 3151 | 
+ 3152 | function numberFromTextPatternV41(text: any, pattern: RegExp) {
+ 3153 |   const raw = clean(text);
+ 3154 |   const match = raw.match(pattern);
+ 3155 | 
+ 3156 |   if (!match?.[1]) return 0;
+ 3157 | 
+ 3158 |   return numberFromMixedV41(match[1]);
+ 3159 | }
+ 3160 | 
+ 3161 | function historyStepsValueV41(item: any) {
+ 3162 |   const raw = parseRawPayloadV41(item);
+ 3163 |   const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
+ 3164 | 
+ 3165 |   const direct = firstPositiveNumberV41([
+ 3166 |     item?.steps,
+ 3167 |     item?.total_steps,
+ 3168 |     item?.step_count,
+ 3169 |     item?.health_connect_steps,
+ 3170 |     item?.google_fit_steps,
+ 3171 |     raw?.steps,
+============================================================
+LINE 3194
+============================================================
+ 3184 |   if (direct > 0) return direct;
+ 3185 | 
+ 3186 |   return (
+ 3187 |     numberFromTextPatternV41(item?.activity_name, /([0-9][0-9.,]*)\s*steps/i) ||
+ 3188 |     numberFromTextPatternV41(item?.activity_type, /([0-9][0-9.,]*)\s*steps/i) ||
+ 3189 |     numberFromTextPatternV41(item?.notes, /([0-9][0-9.,]*)\s*steps/i) ||
+ 3190 |     0
+ 3191 |   );
+ 3192 | }
+ 3193 | 
+ 3194 | function historyCaloriesValueV41(item: any) {
+ 3195 |   const raw = parseRawPayloadV41(item);
+ 3196 |   const original = raw?.original_payload || raw?.original || raw?.diagnostic || {};
+ 3197 | 
+ 3198 |   return firstPositiveNumberV41([
+ 3199 |     item?.calories,
+ 3200 |     item?.total_calories,
+ 3201 |     item?.calorie,
+ 3202 |     item?.kcal,
+ 3203 |     raw?.calories,
+ 3204 |     raw?.total_calories,
+============================================================
+LINE 3213
+============================================================
+ 3203 |     raw?.calories,
+ 3204 |     raw?.total_calories,
+ 3205 |     raw?.calorie,
+ 3206 |     raw?.kcal,
+ 3207 |     raw?.active_calories,
+ 3208 |     original?.calories,
+ 3209 |     original?.total_calories,
+ 3210 |     original?.active_calories,
+ 3211 |   ]);
+ 3212 | }
+ 3213 | function HistoryTab({
+ 3214 |   participant,
+ 3215 |   nutritionLogs,
+ 3216 |   workoutLogs,
+ 3217 |   workoutItems,
+ 3218 |   healthTalkLogs,
+ 3219 |   healthtalkLogs,
+ 3220 |   clinicalHistory,
+ 3221 |   refresh,
+ 3222 | }: {
+ 3223 |   participant?: any;
+============================================================
+LINE 3220
+============================================================
+ 3210 |     original?.active_calories,
+ 3211 |   ]);
+ 3212 | }
+ 3213 | function HistoryTab({
+ 3214 |   participant,
+ 3215 |   nutritionLogs,
+ 3216 |   workoutLogs,
+ 3217 |   workoutItems,
+ 3218 |   healthTalkLogs,
+ 3219 |   healthtalkLogs,
+ 3220 |   clinicalHistory,
+ 3221 |   refresh,
+ 3222 | }: {
+ 3223 |   participant?: any;
+ 3224 |   nutritionLogs?: any[];
+ 3225 |   workoutLogs?: any[];
+ 3226 |   workoutItems?: any[];
+ 3227 |   healthTalkLogs?: any[];
+ 3228 |   healthtalkLogs?: any[];
+ 3229 |   clinicalHistory?: any[];
+ 3230 |   refresh?: () => any;
+============================================================
+LINE 3229
+============================================================
+ 3219 |   healthtalkLogs,
+ 3220 |   clinicalHistory,
+ 3221 |   refresh,
+ 3222 | }: {
+ 3223 |   participant?: any;
+ 3224 |   nutritionLogs?: any[];
+ 3225 |   workoutLogs?: any[];
+ 3226 |   workoutItems?: any[];
+ 3227 |   healthTalkLogs?: any[];
+ 3228 |   healthtalkLogs?: any[];
+ 3229 |   clinicalHistory?: any[];
+ 3230 |   refresh?: () => any;
+ 3231 | }) {
+ 3232 |   const participantId = Number(
+ 3233 |     participant?.id ||
+ 3234 |       participant?.participant_id ||
+ 3235 |       participant?.wellness_participant_id ||
+ 3236 |       0
+ 3237 |   );
+ 3238 | 
+ 3239 |   const [openSection, setOpenSection] = useState("");
+============================================================
+LINE 3256
+============================================================
+ 3246 |     ok: false,
+ 3247 |     logs: [],
+ 3248 |     today_logs: [],
+ 3249 |     latest_logs: [],
+ 3250 |     today_count: 0,
+ 3251 |     today_row_count: 0,
+ 3252 |     today_calories: 0,
+ 3253 |     sources: null,
+ 3254 |   });
+ 3255 | 
+ 3256 |   async function loadNutritionHistory() {
+ 3257 |     if (!participantId) return;
+ 3258 | 
+ 3259 |     setLoadingKey("nutrition");
+ 3260 | 
+ 3261 |     const result = await fetch(
+ 3262 |       `/api/wellness/portal/nutrition-direct?participant_id=${participantId}&t=${Date.now()}`,
+ 3263 |       { cache: "no-store" }
+ 3264 |     )
+ 3265 |       .then((response) => response.json())
+ 3266 |       .catch(() => null);
+============================================================
+LINE 3285
+============================================================
+ 3275 | 
+ 3276 |   async function openDropdown(key: "nutrition" | "workout" | "healthtalk") {
+ 3277 |     if (openSection === key) {
+ 3278 |       setOpenSection("");
+ 3279 |       return;
+ 3280 |     }
+ 3281 | 
+ 3282 |     setOpenSection(key);
+ 3283 | 
+ 3284 |     if (key === "nutrition" && !nutritionLoaded) {
+ 3285 |       await loadNutritionHistory();
+ 3286 |       return;
+ 3287 |     }
+ 3288 | 
+ 3289 |     if ((key === "workout" || key === "healthtalk") && refresh) {
+ 3290 |       setLoadingKey(key);
+ 3291 |       await Promise.resolve(refresh());
+ 3292 |       setLoadingKey("");
+ 3293 |     }
+ 3294 |   }
+ 3295 | 
+============================================================
+LINE 3321
+============================================================
+ 3311 |     setEndDate("");
+ 3312 |   }
+ 3313 | 
+ 3314 |   const rawNutrition =
+ 3315 |     nutritionLoaded && directNutrition?.logs?.length > 0
+ 3316 |       ? directNutrition.logs
+ 3317 |       : nutritionLogs || [];
+ 3318 | 
+ 3319 |   const rawWorkout = workoutLogs || workoutItems || [];
+ 3320 |   const rawHealthTalk = healthTalkLogs || healthtalkLogs || [];
+ 3321 |   const rawClinical = clinicalHistory || [];
+ 3322 | 
+ 3323 |   const nutrition = filterHistoryByDateV37(rawNutrition, startDate, endDate, [
+ 3324 |     "log_date",
+ 3325 |     "created_at",
+ 3326 |     "updated_at",
+ 3327 |   ]);
+ 3328 | 
+ 3329 |   const workout = filterHistoryByDateV37(rawWorkout, startDate, endDate, [
+ 3330 |     "log_date",
+ 3331 |     "created_at",
+============================================================
+LINE 3323
+============================================================
+ 3313 | 
+ 3314 |   const rawNutrition =
+ 3315 |     nutritionLoaded && directNutrition?.logs?.length > 0
+ 3316 |       ? directNutrition.logs
+ 3317 |       : nutritionLogs || [];
+ 3318 | 
+ 3319 |   const rawWorkout = workoutLogs || workoutItems || [];
+ 3320 |   const rawHealthTalk = healthTalkLogs || healthtalkLogs || [];
+ 3321 |   const rawClinical = clinicalHistory || [];
+ 3322 | 
+ 3323 |   const nutrition = filterHistoryByDateV37(rawNutrition, startDate, endDate, [
+ 3324 |     "log_date",
+ 3325 |     "created_at",
+ 3326 |     "updated_at",
+ 3327 |   ]);
+ 3328 | 
+ 3329 |   const workout = filterHistoryByDateV37(rawWorkout, startDate, endDate, [
+ 3330 |     "log_date",
+ 3331 |     "created_at",
+ 3332 |     "updated_at",
+ 3333 |     "date",
+============================================================
+LINE 3329
+============================================================
+ 3319 |   const rawWorkout = workoutLogs || workoutItems || [];
+ 3320 |   const rawHealthTalk = healthTalkLogs || healthtalkLogs || [];
+ 3321 |   const rawClinical = clinicalHistory || [];
+ 3322 | 
+ 3323 |   const nutrition = filterHistoryByDateV37(rawNutrition, startDate, endDate, [
+ 3324 |     "log_date",
+ 3325 |     "created_at",
+ 3326 |     "updated_at",
+ 3327 |   ]);
+ 3328 | 
+ 3329 |   const workout = filterHistoryByDateV37(rawWorkout, startDate, endDate, [
+ 3330 |     "log_date",
+ 3331 |     "created_at",
+ 3332 |     "updated_at",
+ 3333 |     "date",
+ 3334 |   ]);
+ 3335 | 
+ 3336 |   const healthTalk = filterHistoryByDateV37(rawHealthTalk, startDate, endDate, [
+ 3337 |     "event_date",
+ 3338 |     "log_date",
+ 3339 |     "created_at",
+============================================================
+LINE 3336
+============================================================
+ 3326 |     "updated_at",
+ 3327 |   ]);
+ 3328 | 
+ 3329 |   const workout = filterHistoryByDateV37(rawWorkout, startDate, endDate, [
+ 3330 |     "log_date",
+ 3331 |     "created_at",
+ 3332 |     "updated_at",
+ 3333 |     "date",
+ 3334 |   ]);
+ 3335 | 
+ 3336 |   const healthTalk = filterHistoryByDateV37(rawHealthTalk, startDate, endDate, [
+ 3337 |     "event_date",
+ 3338 |     "log_date",
+ 3339 |     "created_at",
+ 3340 |     "updated_at",
+ 3341 |   ]);
+ 3342 | 
+ 3343 |   const clinical = filterHistoryByDateV37(rawClinical, startDate, endDate, [
+ 3344 |     "exam_date",
+ 3345 |     "log_date",
+ 3346 |     "created_at",
+============================================================
+LINE 3343
+============================================================
+ 3333 |     "date",
+ 3334 |   ]);
+ 3335 | 
+ 3336 |   const healthTalk = filterHistoryByDateV37(rawHealthTalk, startDate, endDate, [
+ 3337 |     "event_date",
+ 3338 |     "log_date",
+ 3339 |     "created_at",
+ 3340 |     "updated_at",
+ 3341 |   ]);
+ 3342 | 
+ 3343 |   const clinical = filterHistoryByDateV37(rawClinical, startDate, endDate, [
+ 3344 |     "exam_date",
+ 3345 |     "log_date",
+ 3346 |     "created_at",
+ 3347 |     "updated_at",
+ 3348 |   ]);
+ 3349 | 
+ 3350 |   const nutritionCalories = nutrition.reduce((sum: number, item: any) => {
+ 3351 |     return sum + Number(item.calories || item.total_calories || 0);
+ 3352 |   }, 0);
+ 3353 | 
+============================================================
+LINE 3368
+============================================================
+ 3358 |   const workoutSteps = workout.reduce((sum: number, item: any) => {
+ 3359 |     return sum + Number(item.steps || item.total_steps || 0);
+ 3360 |   }, 0);
+ 3361 | 
+ 3362 |   return (
+ 3363 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+ 3364 |       <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+ 3365 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+ 3366 |           <div>
+ 3367 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+ 3368 |               Participant History
+ 3369 |             </div>
+ 3370 | 
+ 3371 |             <h2 className="mt-2 text-2xl font-black text-slate-950">
+ 3372 |               History Peserta
+ 3373 |             </h2>
+ 3374 | 
+ 3375 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+ 3376 |               Buka dropdown sesuai kebutuhan. Data nutrisi akan diretrieve saat dropdown dibuka.
+ 3377 |             </p>
+ 3378 |           </div>
+============================================================
+LINE 3372
+============================================================
+ 3362 |   return (
+ 3363 |     <section className="w-full max-w-full space-y-5 overflow-hidden">
+ 3364 |       <div className="rounded-[2rem] border border-white bg-white p-5 shadow-xl shadow-slate-200/60 md:p-6">
+ 3365 |         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+ 3366 |           <div>
+ 3367 |             <div className="text-xs font-black uppercase tracking-[0.22em] text-teal-700/70">
+ 3368 |               Participant History
+ 3369 |             </div>
+ 3370 | 
+ 3371 |             <h2 className="mt-2 text-2xl font-black text-slate-950">
+ 3372 |               History Peserta
+ 3373 |             </h2>
+ 3374 | 
+ 3375 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+ 3376 |               Buka dropdown sesuai kebutuhan. Data nutrisi akan diretrieve saat dropdown dibuka.
+ 3377 |             </p>
+ 3378 |           </div>
+ 3379 | 
+ 3380 |           <button
+ 3381 |             type="button"
+ 3382 |             onClick={() => {
+============================================================
+LINE 3383
+============================================================
+ 3373 |             </h2>
+ 3374 | 
+ 3375 |             <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
+ 3376 |               Buka dropdown sesuai kebutuhan. Data nutrisi akan diretrieve saat dropdown dibuka.
+ 3377 |             </p>
+ 3378 |           </div>
+ 3379 | 
+ 3380 |           <button
+ 3381 |             type="button"
+ 3382 |             onClick={() => {
+ 3383 |               if (openSection === "nutrition") loadNutritionHistory();
+ 3384 |               if (openSection !== "nutrition" && refresh) refresh();
+ 3385 |             }}
+ 3386 |             className="rounded-full bg-slate-950 px-5 py-3 text-xs font-black text-white"
+ 3387 |           >
+ 3388 |             {loadingKey ? "Memuat..." : "Refresh"}
+ 3389 |           </button>
+ 3390 |         </div>
+ 3391 | 
+ 3392 |         <div className="mt-5 rounded-[1.8rem] bg-slate-50 p-4">
+ 3393 |           <div className="text-xs font-black uppercase tracking-wide text-slate-400">
+============================================================
+LINE 3439
+============================================================
+ 3429 |               type="button"
+ 3430 |               onClick={clearFilter}
+ 3431 |               className="rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white"
+ 3432 |             >
+ 3433 |               Semua
+ 3434 |             </button>
+ 3435 |           </div>
+ 3436 |         </div>
+ 3437 |       </div>
+ 3438 | 
+ 3439 |       <HistoryAccordionCardV37
+ 3440 |         title="History Nutrisi"
+ 3441 |         subtitle={
+ 3442 |           nutritionLoaded
+ 3443 |             ? `${nutrition.length} log | ${fmtNumber(nutritionCalories, 0)} kkal`
+ 3444 |             : "Klik untuk retrieve data nutrisi"
+ 3445 |         }
+ 3446 |         open={openSection === "nutrition"}
+ 3447 |         loading={loadingKey === "nutrition"}
+ 3448 |         onClick={() => openDropdown("nutrition")}
+ 3449 |       >
+============================================================
+LINE 3440
+============================================================
+ 3430 |               onClick={clearFilter}
+ 3431 |               className="rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white"
+ 3432 |             >
+ 3433 |               Semua
+ 3434 |             </button>
+ 3435 |           </div>
+ 3436 |         </div>
+ 3437 |       </div>
+ 3438 | 
+ 3439 |       <HistoryAccordionCardV37
+ 3440 |         title="History Nutrisi"
+ 3441 |         subtitle={
+ 3442 |           nutritionLoaded
+ 3443 |             ? `${nutrition.length} log | ${fmtNumber(nutritionCalories, 0)} kkal`
+ 3444 |             : "Klik untuk retrieve data nutrisi"
+ 3445 |         }
+ 3446 |         open={openSection === "nutrition"}
+ 3447 |         loading={loadingKey === "nutrition"}
+ 3448 |         onClick={() => openDropdown("nutrition")}
+ 3449 |       >
+ 3450 |         {directNutrition?.sources ? (
+============================================================
+LINE 3458
+============================================================
+ 3448 |         onClick={() => openDropdown("nutrition")}
+ 3449 |       >
+ 3450 |         {directNutrition?.sources ? (
+ 3451 |           <div className="mb-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
+ 3452 |             Source: Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
+ 3453 |             {directNutrition.sources.google_sheet_rows || 0} row
+ 3454 |           </div>
+ 3455 |         ) : null}
+ 3456 | 
+ 3457 |         {nutrition.length === 0 ? (
+ 3458 |           <EmptyHistoryCardV37 text={nutritionLoaded ? "Belum ada input nutrisi pada periode ini." : "Klik dropdown untuk memuat data nutrisi."} />
+ 3459 |         ) : (
+ 3460 |           <div className="space-y-3">
+ 3461 |             {nutrition.slice(0, 30).map((item: any, index: number) => (
+ 3462 |               <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+ 3463 |             ))}
+ 3464 |           </div>
+ 3465 |         )}
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+============================================================
+LINE 3462
+============================================================
+ 3452 |             Source: Supabase {directNutrition.sources.supabase_rows || 0} row | Google Sheet{" "}
+ 3453 |             {directNutrition.sources.google_sheet_rows || 0} row
+ 3454 |           </div>
+ 3455 |         ) : null}
+ 3456 | 
+ 3457 |         {nutrition.length === 0 ? (
+ 3458 |           <EmptyHistoryCardV37 text={nutritionLoaded ? "Belum ada input nutrisi pada periode ini." : "Klik dropdown untuk memuat data nutrisi."} />
+ 3459 |         ) : (
+ 3460 |           <div className="space-y-3">
+ 3461 |             {nutrition.slice(0, 30).map((item: any, index: number) => (
+ 3462 |               <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+ 3463 |             ))}
+ 3464 |           </div>
+ 3465 |         )}
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+ 3469 |         title="History Workout"
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+============================================================
+LINE 3466
+============================================================
+ 3456 | 
+ 3457 |         {nutrition.length === 0 ? (
+ 3458 |           <EmptyHistoryCardV37 text={nutritionLoaded ? "Belum ada input nutrisi pada periode ini." : "Klik dropdown untuk memuat data nutrisi."} />
+ 3459 |         ) : (
+ 3460 |           <div className="space-y-3">
+ 3461 |             {nutrition.slice(0, 30).map((item: any, index: number) => (
+ 3462 |               <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+ 3463 |             ))}
+ 3464 |           </div>
+ 3465 |         )}
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+ 3469 |         title="History Workout"
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+ 3473 |         onClick={() => openDropdown("workout")}
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+============================================================
+LINE 3468
+============================================================
+ 3458 |           <EmptyHistoryCardV37 text={nutritionLoaded ? "Belum ada input nutrisi pada periode ini." : "Klik dropdown untuk memuat data nutrisi."} />
+ 3459 |         ) : (
+ 3460 |           <div className="space-y-3">
+ 3461 |             {nutrition.slice(0, 30).map((item: any, index: number) => (
+ 3462 |               <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+ 3463 |             ))}
+ 3464 |           </div>
+ 3465 |         )}
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+ 3469 |         title="History Workout"
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+ 3473 |         onClick={() => openDropdown("workout")}
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+ 3477 |         ) : (
+ 3478 |           <div className="space-y-3">
+============================================================
+LINE 3469
+============================================================
+ 3459 |         ) : (
+ 3460 |           <div className="space-y-3">
+ 3461 |             {nutrition.slice(0, 30).map((item: any, index: number) => (
+ 3462 |               <HistoryMealItemV37 key={`${item.id || index}-${index}`} item={item} />
+ 3463 |             ))}
+ 3464 |           </div>
+ 3465 |         )}
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+ 3469 |         title="History Workout"
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+ 3473 |         onClick={() => openDropdown("workout")}
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+ 3477 |         ) : (
+ 3478 |           <div className="space-y-3">
+ 3479 |             {workout.slice(0, 30).map((item: any, index: number) => (
+============================================================
+LINE 3476
+============================================================
+ 3466 |       </HistoryAccordionCardV37>
+ 3467 | 
+ 3468 |       <HistoryAccordionCardV37
+ 3469 |         title="History Workout"
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+ 3473 |         onClick={() => openDropdown("workout")}
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+ 3477 |         ) : (
+ 3478 |           <div className="space-y-3">
+ 3479 |             {workout.slice(0, 30).map((item: any, index: number) => (
+ 3480 |               <HistoryGenericItemV37
+ 3481 |                 key={`${item.id || index}-${index}`}
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+============================================================
+LINE 3480
+============================================================
+ 3470 |         subtitle={`${workout.length} log | ${fmtNumber(workoutCalories, 0)} kkal | ${fmtNumber(workoutSteps, 0)} steps`}
+ 3471 |         open={openSection === "workout"}
+ 3472 |         loading={loadingKey === "workout"}
+ 3473 |         onClick={() => openDropdown("workout")}
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+ 3477 |         ) : (
+ 3478 |           <div className="space-y-3">
+ 3479 |             {workout.slice(0, 30).map((item: any, index: number) => (
+ 3480 |               <HistoryGenericItemV37
+ 3481 |                 key={`${item.id || index}-${index}`}
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+ 3487 |           </div>
+ 3488 |         )}
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+============================================================
+LINE 3484
+============================================================
+ 3474 |       >
+ 3475 |         {workout.length === 0 ? (
+ 3476 |           <EmptyHistoryCardV37 text="Belum ada input workout pada periode ini." />
+ 3477 |         ) : (
+ 3478 |           <div className="space-y-3">
+ 3479 |             {workout.slice(0, 30).map((item: any, index: number) => (
+ 3480 |               <HistoryGenericItemV37
+ 3481 |                 key={`${item.id || index}-${index}`}
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+ 3487 |           </div>
+ 3488 |         )}
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+ 3491 |       <HistoryAccordionCardV37
+ 3492 |         title="History Health Talk"
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+============================================================
+LINE 3489
+============================================================
+ 3479 |             {workout.slice(0, 30).map((item: any, index: number) => (
+ 3480 |               <HistoryGenericItemV37
+ 3481 |                 key={`${item.id || index}-${index}`}
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+ 3487 |           </div>
+ 3488 |         )}
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+ 3491 |       <HistoryAccordionCardV37
+ 3492 |         title="History Health Talk"
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+ 3495 |         loading={loadingKey === "healthtalk"}
+ 3496 |         onClick={() => openDropdown("healthtalk")}
+ 3497 |       >
+ 3498 |         {healthTalk.length === 0 ? (
+ 3499 |           <EmptyHistoryCardV37 text="Belum ada input Health Talk pada periode ini." />
+============================================================
+LINE 3491
+============================================================
+ 3481 |                 key={`${item.id || index}-${index}`}
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+ 3487 |           </div>
+ 3488 |         )}
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+ 3491 |       <HistoryAccordionCardV37
+ 3492 |         title="History Health Talk"
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+ 3495 |         loading={loadingKey === "healthtalk"}
+ 3496 |         onClick={() => openDropdown("healthtalk")}
+ 3497 |       >
+ 3498 |         {healthTalk.length === 0 ? (
+ 3499 |           <EmptyHistoryCardV37 text="Belum ada input Health Talk pada periode ini." />
+ 3500 |         ) : (
+ 3501 |           <div className="space-y-3">
+============================================================
+LINE 3492
+============================================================
+ 3482 |                 title={item.activity_name || item.activity_type || item.source || "Workout"}
+ 3483 |                 subtitle={formatDateTextV37(item.log_date || item.created_at || item.updated_at)}
+ 3484 |                 note={`${fmtNumber(historyCaloriesValueV41(item), 0)} kkal | ${fmtNumber(historyStepsValueV41(item), 0)} steps`}
+ 3485 |               />
+ 3486 |             ))}
+ 3487 |           </div>
+ 3488 |         )}
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+ 3491 |       <HistoryAccordionCardV37
+ 3492 |         title="History Health Talk"
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+ 3495 |         loading={loadingKey === "healthtalk"}
+ 3496 |         onClick={() => openDropdown("healthtalk")}
+ 3497 |       >
+ 3498 |         {healthTalk.length === 0 ? (
+ 3499 |           <EmptyHistoryCardV37 text="Belum ada input Health Talk pada periode ini." />
+ 3500 |         ) : (
+ 3501 |           <div className="space-y-3">
+ 3502 |             {healthTalk.slice(0, 30).map((item: any, index: number) => (
+============================================================
+LINE 3499
+============================================================
+ 3489 |       </HistoryAccordionCardV37>
+ 3490 | 
+ 3491 |       <HistoryAccordionCardV37
+ 3492 |         title="History Health Talk"
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+ 3495 |         loading={loadingKey === "healthtalk"}
+ 3496 |         onClick={() => openDropdown("healthtalk")}
+ 3497 |       >
+ 3498 |         {healthTalk.length === 0 ? (
+ 3499 |           <EmptyHistoryCardV37 text="Belum ada input Health Talk pada periode ini." />
+ 3500 |         ) : (
+ 3501 |           <div className="space-y-3">
+ 3502 |             {healthTalk.slice(0, 30).map((item: any, index: number) => (
+ 3503 |               <HistoryGenericItemV37
+ 3504 |                 key={`${item.id || index}-${index}`}
+ 3505 |                 title={item.title || item.topic || "Health Talk"}
+ 3506 |                 subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+ 3507 |                 note={item.notes || item.description || "-"}
+ 3508 |               />
+ 3509 |             ))}
+============================================================
+LINE 3503
+============================================================
+ 3493 |         subtitle={`${healthTalk.length} log`}
+ 3494 |         open={openSection === "healthtalk"}
+ 3495 |         loading={loadingKey === "healthtalk"}
+ 3496 |         onClick={() => openDropdown("healthtalk")}
+ 3497 |       >
+ 3498 |         {healthTalk.length === 0 ? (
+ 3499 |           <EmptyHistoryCardV37 text="Belum ada input Health Talk pada periode ini." />
+ 3500 |         ) : (
+ 3501 |           <div className="space-y-3">
+ 3502 |             {healthTalk.slice(0, 30).map((item: any, index: number) => (
+ 3503 |               <HistoryGenericItemV37
+ 3504 |                 key={`${item.id || index}-${index}`}
+ 3505 |                 title={item.title || item.topic || "Health Talk"}
+ 3506 |                 subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+ 3507 |                 note={item.notes || item.description || "-"}
+ 3508 |               />
+ 3509 |             ))}
+ 3510 |           </div>
+ 3511 |         )}
+ 3512 |       </HistoryAccordionCardV37>
+ 3513 | 
+============================================================
+LINE 3512
+============================================================
+ 3502 |             {healthTalk.slice(0, 30).map((item: any, index: number) => (
+ 3503 |               <HistoryGenericItemV37
+ 3504 |                 key={`${item.id || index}-${index}`}
+ 3505 |                 title={item.title || item.topic || "Health Talk"}
+ 3506 |                 subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+ 3507 |                 note={item.notes || item.description || "-"}
+ 3508 |               />
+ 3509 |             ))}
+ 3510 |           </div>
+ 3511 |         )}
+ 3512 |       </HistoryAccordionCardV37>
+ 3513 | 
+ 3514 |       {clinical.length > 0 ? (
+ 3515 |         <HistoryAccordionCardV37
+ 3516 |           title="History Klinis"
+ 3517 |           subtitle={`${clinical.length} data`}
+ 3518 |           open={openSection === "clinical"}
+ 3519 |           loading={false}
+ 3520 |           onClick={() => setOpenSection(openSection === "clinical" ? "" : "clinical")}
+ 3521 |         >
+ 3522 |           <div className="space-y-3">
+============================================================
+LINE 3515
+============================================================
+ 3505 |                 title={item.title || item.topic || "Health Talk"}
+ 3506 |                 subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+ 3507 |                 note={item.notes || item.description || "-"}
+ 3508 |               />
+ 3509 |             ))}
+ 3510 |           </div>
+ 3511 |         )}
+ 3512 |       </HistoryAccordionCardV37>
+ 3513 | 
+ 3514 |       {clinical.length > 0 ? (
+ 3515 |         <HistoryAccordionCardV37
+ 3516 |           title="History Klinis"
+ 3517 |           subtitle={`${clinical.length} data`}
+ 3518 |           open={openSection === "clinical"}
+ 3519 |           loading={false}
+ 3520 |           onClick={() => setOpenSection(openSection === "clinical" ? "" : "clinical")}
+ 3521 |         >
+ 3522 |           <div className="space-y-3">
+ 3523 |             {clinical.slice(0, 20).map((item: any, index: number) => (
+ 3524 |               <HistoryGenericItemV37
+ 3525 |                 key={`${item.id || index}-${index}`}
+============================================================
+LINE 3516
+============================================================
+ 3506 |                 subtitle={formatDateTextV37(item.event_date || item.log_date || item.created_at)}
+ 3507 |                 note={item.notes || item.description || "-"}
+ 3508 |               />
+ 3509 |             ))}
+ 3510 |           </div>
+ 3511 |         )}
+ 3512 |       </HistoryAccordionCardV37>
+ 3513 | 
+ 3514 |       {clinical.length > 0 ? (
+ 3515 |         <HistoryAccordionCardV37
+ 3516 |           title="History Klinis"
+ 3517 |           subtitle={`${clinical.length} data`}
+ 3518 |           open={openSection === "clinical"}
+ 3519 |           loading={false}
+ 3520 |           onClick={() => setOpenSection(openSection === "clinical" ? "" : "clinical")}
+ 3521 |         >
+ 3522 |           <div className="space-y-3">
+ 3523 |             {clinical.slice(0, 20).map((item: any, index: number) => (
+ 3524 |               <HistoryGenericItemV37
+ 3525 |                 key={`${item.id || index}-${index}`}
+ 3526 |                 title={formatDateTextV37(item.exam_date || item.log_date || item.created_at)}
+============================================================
+LINE 3524
+============================================================
+ 3514 |       {clinical.length > 0 ? (
+ 3515 |         <HistoryAccordionCardV37
+ 3516 |           title="History Klinis"
+ 3517 |           subtitle={`${clinical.length} data`}
+ 3518 |           open={openSection === "clinical"}
+ 3519 |           loading={false}
+ 3520 |           onClick={() => setOpenSection(openSection === "clinical" ? "" : "clinical")}
+ 3521 |         >
+ 3522 |           <div className="space-y-3">
+ 3523 |             {clinical.slice(0, 20).map((item: any, index: number) => (
+ 3524 |               <HistoryGenericItemV37
+ 3525 |                 key={`${item.id || index}-${index}`}
+ 3526 |                 title={formatDateTextV37(item.exam_date || item.log_date || item.created_at)}
+ 3527 |                 subtitle={`BMI ${item.bmi || item.imt || "-"} | Tensi ${
+ 3528 |                   item.systolic ? `${item.systolic}/${item.diastolic || "-"}` : "-"
+ 3529 |                 }`}
+ 3530 |                 note={item.summary || item.notes || item.risk_category || "-"}
+ 3531 |               />
+ 3532 |             ))}
+ 3533 |           </div>
+ 3534 |         </HistoryAccordionCardV37>
+============================================================
+LINE 3534
+============================================================
+ 3524 |               <HistoryGenericItemV37
+ 3525 |                 key={`${item.id || index}-${index}`}
+ 3526 |                 title={formatDateTextV37(item.exam_date || item.log_date || item.created_at)}
+ 3527 |                 subtitle={`BMI ${item.bmi || item.imt || "-"} | Tensi ${
+ 3528 |                   item.systolic ? `${item.systolic}/${item.diastolic || "-"}` : "-"
+ 3529 |                 }`}
+ 3530 |                 note={item.summary || item.notes || item.risk_category || "-"}
+ 3531 |               />
+ 3532 |             ))}
+ 3533 |           </div>
+ 3534 |         </HistoryAccordionCardV37>
+ 3535 |       ) : null}
+ 3536 |     </section>
+ 3537 |   );
+ 3538 | }
+ 3539 | 
+ 3540 | function HistoryAccordionCardV37({
+ 3541 |   title,
+ 3542 |   subtitle,
+ 3543 |   open,
+ 3544 |   loading,
+============================================================
+LINE 3540
+============================================================
+ 3530 |                 note={item.summary || item.notes || item.risk_category || "-"}
+ 3531 |               />
+ 3532 |             ))}
+ 3533 |           </div>
+ 3534 |         </HistoryAccordionCardV37>
+ 3535 |       ) : null}
+ 3536 |     </section>
+ 3537 |   );
+ 3538 | }
+ 3539 | 
+ 3540 | function HistoryAccordionCardV37({
+ 3541 |   title,
+ 3542 |   subtitle,
+ 3543 |   open,
+ 3544 |   loading,
+ 3545 |   onClick,
+ 3546 |   children,
+ 3547 | }: {
+ 3548 |   title: string;
+ 3549 |   subtitle: string;
+ 3550 |   open: boolean;
+============================================================
+LINE 3586
+============================================================
+ 3576 | 
+ 3577 |       {open ? (
+ 3578 |         <div className="mt-5">
+ 3579 |           {children}
+ 3580 |         </div>
+ 3581 |       ) : null}
+ 3582 |     </div>
+ 3583 |   );
+ 3584 | }
+ 3585 | 
+ 3586 | function EmptyHistoryCardV37({ text }: { text: string }) {
+ 3587 |   return (
+ 3588 |     <div className="rounded-[1.8rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
+ 3589 |       {text}
+ 3590 |     </div>
+ 3591 |   );
+ 3592 | }
+ 3593 | 
+ 3594 | function HistoryGenericItemV37({
+ 3595 |   title,
+ 3596 |   subtitle,
+============================================================
+LINE 3594
+============================================================
+ 3584 | }
+ 3585 | 
+ 3586 | function EmptyHistoryCardV37({ text }: { text: string }) {
+ 3587 |   return (
+ 3588 |     <div className="rounded-[1.8rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
+ 3589 |       {text}
+ 3590 |     </div>
+ 3591 |   );
+ 3592 | }
+ 3593 | 
+ 3594 | function HistoryGenericItemV37({
+ 3595 |   title,
+ 3596 |   subtitle,
+ 3597 |   note,
+ 3598 | }: {
+ 3599 |   title: string;
+ 3600 |   subtitle: string;
+ 3601 |   note: string;
+ 3602 | }) {
+ 3603 |   return (
+ 3604 |     <div className="rounded-[1.7rem] bg-slate-50 p-4">
+============================================================
+LINE 3635
+============================================================
+ 3625 |   }
+ 3626 | 
+ 3627 |   const idMatch = raw.match(/[?&]id=([^&]+)/i);
+ 3628 |   if (idMatch?.[1]) {
+ 3629 |     return `https://drive.google.com/thumbnail?id=${idMatch[1]}&sz=w600`;
+ 3630 |   }
+ 3631 | 
+ 3632 |   return raw;
+ 3633 | }
+ 3634 | 
+ 3635 | function HistoryMealItemV37({ item }: { item: any }) {
+ 3636 |   const photo = normalizeImageUrlV37(item.photo_url);
+ 3637 |   const sourceLabel =
+ 3638 |     item.source === "google_sheet"
+ 3639 |       ? "Google Sheet"
+ 3640 |       : item.source === "supabase"
+ 3641 |         ? "Supabase"
+ 3642 |         : item.source || "Food log";
+ 3643 | 
+ 3644 |   return (
+ 3645 |     <div className="rounded-[1.7rem] bg-slate-50 p-3">
+============================================================
+LINE 3686
+============================================================
+ 3676 |             <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-slate-500">
+ 3677 |               {sourceLabel}
+ 3678 |             </span>
+ 3679 |           </div>
+ 3680 |         </div>
+ 3681 |       </div>
+ 3682 |     </div>
+ 3683 |   );
+ 3684 | }
+ 3685 | 
+ 3686 | function filterHistoryByDateV37(
+ 3687 |   items: any[],
+ 3688 |   startDate: string,
+ 3689 |   endDate: string,
+ 3690 |   keys: string[]
+ 3691 | ) {
+ 3692 |   return (items || []).filter((item) => {
+ 3693 |     const dateText = extractDateFromItemV37(item, keys);
+ 3694 | 
+ 3695 |     if (!dateText) return true;
+ 3696 |     if (startDate && dateText < startDate) return false;
+============================================================
+LINE 4083
+============================================================
+ 4073 |       value: number;
+ 4074 |     }>;
+ 4075 | 
+ 4076 |   const unique = new Map<string, { date: string; value: number }>();
+ 4077 |   for (const row of mapped) unique.set(row.date, row);
+ 4078 | 
+ 4079 |   return Array.from(unique.values()).sort((a, b) => a.date.localeCompare(b.date));
+ 4080 | }
+ 4081 | 
+ 4082 | function HealthProgressSection({
+ 4083 |   clinicalHistory,
+ 4084 |   participant,
+ 4085 | }: {
+ 4086 |   clinicalHistory: any[];
+ 4087 |   participant: any;
+ 4088 | }) {
+ 4089 |   const sourceRows = Array.isArray(clinicalHistory) ? clinicalHistory : [];
+ 4090 | 
+ 4091 |   const weightSeries = buildSeries(sourceRows, [
+ 4092 |     "weight_kg",
+ 4093 |     "weight",
+============================================================
+LINE 4086
+============================================================
+ 4076 |   const unique = new Map<string, { date: string; value: number }>();
+ 4077 |   for (const row of mapped) unique.set(row.date, row);
+ 4078 | 
+ 4079 |   return Array.from(unique.values()).sort((a, b) => a.date.localeCompare(b.date));
+ 4080 | }
+ 4081 | 
+ 4082 | function HealthProgressSection({
+ 4083 |   clinicalHistory,
+ 4084 |   participant,
+ 4085 | }: {
+ 4086 |   clinicalHistory: any[];
+ 4087 |   participant: any;
+ 4088 | }) {
+ 4089 |   const sourceRows = Array.isArray(clinicalHistory) ? clinicalHistory : [];
+ 4090 | 
+ 4091 |   const weightSeries = buildSeries(sourceRows, [
+ 4092 |     "weight_kg",
+ 4093 |     "weight",
+ 4094 |     "body_weight",
+ 4095 |     "bb",
+ 4096 |     "berat_badan",
+============================================================
+LINE 4089
+============================================================
+ 4079 |   return Array.from(unique.values()).sort((a, b) => a.date.localeCompare(b.date));
+ 4080 | }
+ 4081 | 
+ 4082 | function HealthProgressSection({
+ 4083 |   clinicalHistory,
+ 4084 |   participant,
+ 4085 | }: {
+ 4086 |   clinicalHistory: any[];
+ 4087 |   participant: any;
+ 4088 | }) {
+ 4089 |   const sourceRows = Array.isArray(clinicalHistory) ? clinicalHistory : [];
+ 4090 | 
+ 4091 |   const weightSeries = buildSeries(sourceRows, [
+ 4092 |     "weight_kg",
+ 4093 |     "weight",
+ 4094 |     "body_weight",
+ 4095 |     "bb",
+ 4096 |     "berat_badan",
+ 4097 |   ]);
+ 4098 | 
+ 4099 |   const bmiSeries = buildSeries(sourceRows, ["bmi", "imt"]);

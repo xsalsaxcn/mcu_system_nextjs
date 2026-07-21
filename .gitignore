@@ -9,4 +9,4 @@ services/mcu-engine/storage/
 services/mcu-engine/credentials.json
 services/mcu-engine/gdrive_token.json
 services/mcu-engine/core/__pycache__/
-services/mcu-engine/__pycache__/
+services/mcu-engine/__pycache__/services/mcu-engine/credentials.json
