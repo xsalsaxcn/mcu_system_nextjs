@@ -1107,15 +1107,8 @@ export default function WellnessParticipantPortalPage() {
       return;
     }
 
-    if (!clean(form.username)) {
-      setMessage(
-        "Username wajib dibuat agar peserta bisa mengenali akun portalnya.",
-      );
-      return;
-    }
-
-    if (!clean(form.email) && !clean(form.phone)) {
-      setMessage("Isi minimal email atau nomor HP untuk pengiriman OTP.");
+        if (!clean(form.email)) {
+      setMessage("Email wajib diisi untuk pengiriman OTP.");
       return;
     }
 
@@ -1123,9 +1116,7 @@ export default function WellnessParticipantPortalPage() {
 
     const payload = {
       ...form,
-      portal_username: form.username,
       portal_email: form.email,
-      portal_phone: form.phone,
     };
 
     const result = await fetch("/api/wellness/participant/request-otp", {
