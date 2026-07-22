@@ -828,12 +828,13 @@ export default function WellnessCoachPortalPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4fbfa] text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-5 md:px-8 md:py-8">
+    <main className="min-h-screen bg-[linear-gradient(180deg,#fbfefe_0%,#f4f9fb_44%,#f8fafc_100%)] text-slate-900">
+      {/* WELLNESS_COACH_UI_REFRESH_V107: visual-only redesign; all business logic remains unchanged. */}
+      <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:px-5 md:px-8 md:pb-12 md:pt-6">
         {/* WELLNESS_COACH_CHAT_DIRECT_HEADER_V77D */}
         {!isLoggedIn || coachView === "monitoring" ? (
           <>
-            <section className="overflow-visible rounded-[1.5rem] bg-gradient-to-br from-teal-400 via-sky-400 to-blue-500 p-4 text-white shadow-lg shadow-sky-100 sm:rounded-[1.75rem] sm:p-5 md:rounded-[2rem] md:p-8 md:shadow-xl">
+            <section className="overflow-visible rounded-[1.75rem] border border-slate-200/80 bg-white p-4 text-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.07)] sm:p-5 md:p-6">
               <div className="flex items-start justify-between gap-3 md:items-end">
                 <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
                   {isLoggedIn ? (
@@ -841,21 +842,20 @@ export default function WellnessCoachPortalPage() {
                       actorType="coach"
                       name={dashboard?.coach?.name || "Coach Wellness"}
                       size="lg"
-                      className="ring-white/40"
+                      className="ring-4 ring-teal-50"
                     />
                   ) : null}
                   <div className="min-w-0">
-                    <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80 sm:text-xs sm:tracking-[0.2em]">
+                    <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 sm:text-xs sm:tracking-[0.2em]">
                       Wellness Coach Portal
                     </div>
-                    <h1 className="mt-1.5 break-words text-2xl font-black leading-tight sm:text-3xl md:mt-2 md:text-4xl">
+                    <h1 className="mt-1.5 break-words text-2xl font-black leading-tight text-slate-950 sm:text-3xl md:mt-2">
                       {isLoggedIn
                         ? `Halo, ${dashboard?.coach?.name || "Coach"}`
                         : "Portal Coach"}
                     </h1>
-                    <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-white/90 sm:text-sm sm:leading-6 md:mt-2">
-                      Monitoring kepatuhan, target individual, dan instruksi untuk
-                      assigned group.
+                    <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-slate-500 sm:text-sm sm:leading-6 md:mt-2">
+                      {fmtNumber(participants.length)} peserta aktif · {fmtNumber(reminderSummary.reminder)} peserta membutuhkan perhatian hari ini.
                     </p>
                   </div>
                 </div>
@@ -885,7 +885,7 @@ export default function WellnessCoachPortalPage() {
                     <button
                       type="button"
                       onClick={() => setCoachMenuOpen(true)}
-                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-xl font-black text-white shadow-sm backdrop-blur sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
+                      className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-950 text-xl font-black text-white shadow-sm transition hover:bg-slate-800 sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
                       aria-label="Buka menu coach"
                     >
                       ☰
@@ -934,17 +934,19 @@ export default function WellnessCoachPortalPage() {
               </div>
             </section>
 
-            <section className="mt-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-              <div
-                className={`rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
-                  /gagal|wajib|belum|pilih/i.test(message)
-                    ? "bg-amber-50 text-amber-900"
-                    : "bg-sky-50 text-sky-800"
-                }`}
-              >
-                {loading ? "Memuat Portal Coach..." : message}
-              </div>
-            </section>
+            {loading || message !== "Portal Coach aktif." ? (
+              <section className="mt-3">
+                <div
+                  className={`rounded-2xl border px-4 py-3 text-sm font-bold leading-6 shadow-sm ${
+                    /gagal|wajib|belum|pilih/i.test(message)
+                      ? "border-amber-200 bg-amber-50 text-amber-900"
+                      : "border-sky-100 bg-sky-50 text-sky-800"
+                  }`}
+                >
+                  {loading ? "Memuat Portal Coach..." : message}
+                </div>
+              </section>
+            ) : null}
           </>
         ) : coachView === "chat" ? (
           <section className="relative flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-1 pb-2 pt-1">
@@ -1052,7 +1054,7 @@ export default function WellnessCoachPortalPage() {
         ) : (
           <section className={coachView === "chat" ? "mt-2" : "mt-6"}>
             {coachView === "monitoring" ? (
-              <div className="space-y-6">
+              <div className="space-y-5 md:space-y-6">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                   <ReminderSummaryCard
                     label="Sudah Lengkap"
@@ -1088,12 +1090,15 @@ export default function WellnessCoachPortalPage() {
                   />
                 </div>
 
-                <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                <section className="rounded-[1.75rem] border border-slate-200/80 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.05)] md:p-5">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h2 className="text-lg font-black">Prioritas Reminder Hari Ini</h2>
+                      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700">
+                        Tindak lanjut harian
+                      </div>
+                      <h2 className="mt-1 text-xl font-black text-slate-950">Prioritas Reminder Hari Ini</h2>
                       <p className="mt-1 text-sm font-bold text-slate-500">
-                        Daftar otomatis diurutkan dari peserta yang paling perlu diingatkan.
+                        Peserta yang paling perlu diingatkan ditampilkan lebih dulu.
                       </p>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:justify-end">
@@ -1110,8 +1115,8 @@ export default function WellnessCoachPortalPage() {
                           onClick={() => setReminderFilter(value as ReminderFilter)}
                           className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
                             reminderFilter === value
-                              ? "bg-slate-950 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              ? "bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-sm"
+                              : "border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50"
                           }`}
                         >
                           {label}
@@ -1123,28 +1128,30 @@ export default function WellnessCoachPortalPage() {
 
                 <section
                   id="coach-participant-table"
-                  className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-6"
+                  className="rounded-[1.75rem] border border-slate-200/80 bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.06)] md:p-6"
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                     <div>
-                      <h2 className="text-xl font-black">Monitoring Anggota</h2>
+                      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700">
+                        Assigned group
+                      </div>
+                      <h2 className="mt-1 text-xl font-black text-slate-950">Daftar Peserta</h2>
                       <p className="mt-1 text-sm font-bold text-slate-500">
-                        Coach: {dashboard?.coach?.name || "-"} · Klik nama untuk
-                        membuka grafik dan detail peserta.
+                        Klik peserta untuk membuka grafik, target, history, dan detail lengkap.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => openInstruction("group")}
-                        className="rounded-full bg-teal-600 px-4 py-2 text-xs font-black text-white"
+                        className="rounded-full bg-gradient-to-r from-teal-600 to-cyan-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:from-teal-700 hover:to-cyan-700"
                       >
                         + Instruksi Kelompok
                       </button>
                       <button
                         type="button"
                         onClick={() => loadDashboard({ keepSelection: true })}
-                        className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
                       >
                         Refresh
                       </button>
@@ -1206,10 +1213,10 @@ export default function WellnessCoachPortalPage() {
                         return (
                           <article
                             key={item.id}
-                            className={`rounded-[1.5rem] border p-3.5 transition sm:p-4 ${
+                            className={`rounded-[1.65rem] border p-3.5 transition sm:p-4 ${
                               Number(selectedParticipant?.id) === Number(item.id)
-                                ? "border-teal-200 bg-teal-50/70"
-                                : "border-slate-100 bg-white shadow-sm"
+                                ? "border-teal-300 bg-teal-50/70 shadow-[0_12px_30px_rgba(13,148,136,0.10)]"
+                                : "border-slate-200/80 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.05)] hover:border-teal-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
                             }`}
                           >
                             <button
@@ -1242,45 +1249,44 @@ export default function WellnessCoachPortalPage() {
                                 />
                               </div>
 
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <div className="rounded-xl bg-orange-50 px-3 py-2 text-orange-950">
-                                  <div className="text-[9px] font-black uppercase tracking-wide text-orange-700/70">
-                                    Nutrisi
-                                  </div>
-                                  <div className="mt-1 break-words text-xs font-black leading-4">
-                                    {formatDaysWithoutInput(
-                                      item.compliance?.days_since_nutrition,
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-950">
-                                  <div className="text-[9px] font-black uppercase tracking-wide text-sky-700/70">
-                                    Workout
-                                  </div>
-                                  <div className="mt-1 break-words text-xs font-black leading-4">
-                                    {formatDaysWithoutInput(
-                                      item.compliance?.days_since_workout,
-                                    )}
-                                  </div>
-                                </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-100 bg-orange-50 px-3 py-1.5 text-[10px] font-black text-orange-800 sm:text-xs">
+                                  <span aria-hidden="true">🍴</span>
+                                  {formatDaysWithoutInput(
+                                    item.compliance?.days_since_nutrition,
+                                  )}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-100 bg-sky-50 px-3 py-1.5 text-[10px] font-black text-sky-800 sm:text-xs">
+                                  <span aria-hidden="true">🏋</span>
+                                  {formatDaysWithoutInput(
+                                    item.compliance?.days_since_workout,
+                                  )}
+                                </span>
+                                {meta.urgent ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-rose-50 px-3 py-1.5 text-[10px] font-black text-rose-700 sm:text-xs">
+                                    <span aria-hidden="true">🔔</span>
+                                    Perlu reminder
+                                  </span>
+                                ) : null}
                               </div>
 
-                              <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black text-slate-600">
-                                <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
-                                  {fmtNumber(item.today?.steps || 0)} step
-                                </span>
-                                <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
-                                  {fmtNumber(item.today?.calories || 0)} kkal
-                                </span>
-                                <span className="rounded-full bg-violet-50 px-2.5 py-1.5 text-violet-700">
+                              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-slate-600">
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
+                                    {fmtNumber(item.today?.steps || 0)} step
+                                  </span>
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
+                                    {fmtNumber(item.today?.calories || 0)} kkal
+                                  </span>
+                                </div>
+                                <span className="rounded-full bg-violet-50 px-3 py-1.5 text-[10px] font-black text-violet-700">
                                   Kepatuhan {fmtNumber(
                                     item.compliance?.compliance_percent || 0,
                                   )}%
                                 </span>
                               </div>
 
-                              <div className="mt-3 text-[10px] font-bold text-slate-400">
+                              <div className="mt-2 text-[10px] font-bold text-slate-400">
                                 Terakhir aktivitas: {formatLastActivityDate(
                                   item.compliance?.last_input_date,
                                 )}
@@ -1292,9 +1298,9 @@ export default function WellnessCoachPortalPage() {
                                 <button
                                   type="button"
                                   onClick={() => openReminder(item)}
-                                  className="rounded-xl bg-amber-500 px-3 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
+                                  className="rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-3 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-teal-700 hover:to-cyan-700"
                                 >
-                                  🔔 Kirim Reminder
+                                  ✈ Kirim Reminder
                                 </button>
                               ) : (
                                 <div className="flex items-center justify-center rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-black text-emerald-700">
@@ -1304,9 +1310,9 @@ export default function WellnessCoachPortalPage() {
                               <button
                                 type="button"
                                 onClick={() => chooseParticipant(item)}
-                                className="rounded-xl bg-teal-50 px-3 py-2.5 text-xs font-black text-teal-700 transition hover:bg-teal-100"
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                               >
-                                Buka Detail →
+                                ▣ Buka Detail
                               </button>
                             </div>
                           </article>
@@ -2025,25 +2031,70 @@ function ReminderSummaryCard({
   active,
   onClick,
 }: any) {
-  const toneClass: Record<string, string> = {
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-800",
-    orange: "border-orange-100 bg-orange-50 text-orange-900",
-    sky: "border-sky-100 bg-sky-50 text-sky-800",
-    rose: "border-rose-100 bg-rose-50 text-rose-800",
+  const config: Record<
+    string,
+    { icon: string; iconClass: string; valueClass: string; ringClass: string }
+  > = {
+    emerald: {
+      icon: "✓",
+      iconClass: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+      valueClass: "text-emerald-700",
+      ringClass: "ring-emerald-200",
+    },
+    orange: {
+      icon: "🍴",
+      iconClass: "bg-orange-50 text-orange-700 ring-orange-100",
+      valueClass: "text-orange-600",
+      ringClass: "ring-orange-200",
+    },
+    sky: {
+      icon: "🏋",
+      iconClass: "bg-sky-50 text-sky-700 ring-sky-100",
+      valueClass: "text-sky-700",
+      ringClass: "ring-sky-200",
+    },
+    rose: {
+      icon: "🔔",
+      iconClass: "bg-rose-50 text-rose-700 ring-rose-100",
+      valueClass: "text-rose-600",
+      ringClass: "ring-rose-200",
+    },
   };
+  const selected = config[tone] || config.emerald;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-2xl border p-4 text-left shadow-sm transition ${toneClass[tone]} ${
-        active ? "ring-4 ring-slate-200" : "hover:-translate-y-0.5"
+      aria-pressed={active}
+      className={`group min-h-[108px] rounded-[1.4rem] border border-slate-200/80 bg-white p-3.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.05)] transition sm:p-4 ${
+        active
+          ? `ring-4 ${selected.ringClass}`
+          : "hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
       }`}
     >
-      <div className="text-[10px] font-black uppercase tracking-wide opacity-70 sm:text-xs">
-        {label}
+      <div className="flex items-center gap-3">
+        <div
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-black ring-1 sm:h-12 sm:w-12 ${selected.iconClass}`}
+          aria-hidden="true"
+        >
+          {selected.icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-xs">
+            {label}
+          </div>
+          <div className={`mt-0.5 text-2xl font-black leading-none ${selected.valueClass}`}>
+            {value}
+          </div>
+          <div className="mt-1.5 text-[10px] font-bold leading-4 text-slate-500 sm:text-xs">
+            {note}
+          </div>
+        </div>
+        <span className="text-lg font-black text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-teal-500">
+          ›
+        </span>
       </div>
-      <div className="mt-1 text-xl font-black md:text-2xl">{value}</div>
-      <div className="mt-1 text-[10px] font-bold opacity-70 sm:text-xs">{note}</div>
     </button>
   );
 }
