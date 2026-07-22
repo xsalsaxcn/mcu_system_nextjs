@@ -795,6 +795,62 @@ export default function WellnessCoachPortalPage() {
       });
   }, [participants, selectedGroup, flagFilter, reminderFilter, search]);
 
+
+  const priorityParticipants = useMemo(() => {
+    const q = search.toLowerCase();
+
+    return participants
+      .filter((item: any) => {
+        const meta = reminderMeta(item);
+        const byGroup =
+          selectedGroup === "all" ||
+          clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
+          clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
+          clean(item.raw?.group_unit_id) === selectedGroup;
+        const byFlag = flagFilter === "all" || item.flag === flagFilter;
+        const haystack = [
+          item.name,
+          item.code,
+          item.group_name,
+          item.risk,
+          item.status,
+          item.flag_reason,
+          meta.label,
+        ]
+          .map((value) => clean(value).toLowerCase())
+          .join(" ");
+
+        return (
+          byGroup &&
+          byFlag &&
+          !meta.complete &&
+          (!q || haystack.includes(q))
+        );
+      })
+      .sort((left: any, right: any) => {
+        const leftMeta = reminderMeta(left);
+        const rightMeta = reminderMeta(right);
+
+        if (leftMeta.priority !== rightMeta.priority) {
+          return leftMeta.priority - rightMeta.priority;
+        }
+
+        const leftDelay = Math.max(
+          leftMeta.nutritionDays || 0,
+          leftMeta.workoutDays || 0,
+        );
+        const rightDelay = Math.max(
+          rightMeta.nutritionDays || 0,
+          rightMeta.workoutDays || 0,
+        );
+
+        if (leftDelay !== rightDelay) return rightDelay - leftDelay;
+
+        return clean(left.name).localeCompare(clean(right.name), "id");
+      })
+      .slice(0, 3);
+  }, [participants, selectedGroup, flagFilter, search]);
+
   function openReminder(item: any) {
     const meta = reminderMeta(item);
     const firstName = clean(item?.name).split(/\s+/)[0] || "Peserta";
@@ -829,7 +885,8 @@ export default function WellnessCoachPortalPage() {
 
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#fbfefe_0%,#f4f9fb_44%,#f8fafc_100%)] text-slate-900">
-      {/* WELLNESS_COACH_UI_REFRESH_V107: visual-only redesign; all business logic remains unchanged. */}
+      {/* WELLNESS_COACH_UI_REFRESH_V107 */}
+      {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109: monitoring UI only; existing functions remain unchanged. */}
       <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:px-5 md:px-8 md:pb-12 md:pt-6">
         {/* WELLNESS_COACH_CHAT_DIRECT_HEADER_V77D */}
         {!isLoggedIn || coachView === "monitoring" ? (
@@ -1054,270 +1111,277 @@ export default function WellnessCoachPortalPage() {
         ) : (
           <section className={coachView === "chat" ? "mt-2" : "mt-6"}>
             {coachView === "monitoring" ? (
-              <div className="space-y-5 md:space-y-6">
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <ReminderSummaryCard
-                    label="Sudah Lengkap"
-                    value={fmtNumber(reminderSummary.complete)}
-                    note="nutrisi + workout hari ini"
-                    tone="emerald"
-                    active={reminderFilter === "complete"}
-                    onClick={() => setReminderFilter("complete")}
-                  />
-                  <ReminderSummaryCard
-                    label="Belum Nutrisi"
-                    value={fmtNumber(reminderSummary.nutrition)}
-                    note="perlu isi nutrisi hari ini"
-                    tone="orange"
-                    active={reminderFilter === "nutrition"}
-                    onClick={() => setReminderFilter("nutrition")}
-                  />
-                  <ReminderSummaryCard
-                    label="Belum Workout"
-                    value={fmtNumber(reminderSummary.workout)}
-                    note="perlu isi workout hari ini"
-                    tone="sky"
-                    active={reminderFilter === "workout"}
-                    onClick={() => setReminderFilter("workout")}
-                  />
-                  <ReminderSummaryCard
-                    label="Perlu Reminder"
-                    value={fmtNumber(reminderSummary.reminder)}
-                    note="tidak input ≥2 hari"
-                    tone="rose"
-                    active={reminderFilter === "reminder"}
-                    onClick={() => setReminderFilter("reminder")}
-                  />
-                </div>
-
-                <section className="rounded-[1.75rem] border border-slate-200/80 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.05)] md:p-5">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-6">
+                {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109 */}
+                <section>
+                  <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700">
-                        Tindak lanjut harian
-                      </div>
-                      <h2 className="mt-1 text-xl font-black text-slate-950">Prioritas Reminder Hari Ini</h2>
-                      <p className="mt-1 text-sm font-bold text-slate-500">
-                        Peserta yang paling perlu diingatkan ditampilkan lebih dulu.
+                      <h2 className="text-lg font-black text-slate-950 sm:text-xl">
+                        Ringkasan Hari Ini
+                      </h2>
+                      <p className="mt-0.5 text-xs font-bold text-slate-500">
+                        Status input peserta assigned group.
                       </p>
                     </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:justify-end">
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReminderFilter("all");
+                        window.setTimeout(() => {
+                          document
+                            .getElementById("coach-participant-table")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }, 60);
+                      }}
+                      className="shrink-0 text-xs font-black text-teal-700"
+                    >
+                      Lihat semua ›
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <ReminderSummaryCard
+                      label="Lengkap"
+                      value={fmtNumber(reminderSummary.complete)}
+                      note="peserta"
+                      tone="emerald"
+                      active={reminderFilter === "complete"}
+                      onClick={() => setReminderFilter("complete")}
+                    />
+                    <ReminderSummaryCard
+                      label="Belum Nutrisi"
+                      value={fmtNumber(reminderSummary.nutrition)}
+                      note="peserta"
+                      tone="orange"
+                      active={reminderFilter === "nutrition"}
+                      onClick={() => setReminderFilter("nutrition")}
+                    />
+                    <ReminderSummaryCard
+                      label="Belum Workout"
+                      value={fmtNumber(reminderSummary.workout)}
+                      note="peserta"
+                      tone="sky"
+                      active={reminderFilter === "workout"}
+                      onClick={() => setReminderFilter("workout")}
+                    />
+                    <ReminderSummaryCard
+                      label="Perlu Follow-up"
+                      value={fmtNumber(reminderSummary.reminder)}
+                      note="peserta"
+                      tone="rose"
+                      active={reminderFilter === "reminder"}
+                      onClick={() => setReminderFilter("reminder")}
+                    />
+                  </div>
+                </section>
+
+                <section className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_rgba(15,23,42,0.05)]">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-black text-slate-950 sm:text-xl">
+                          Prioritas Hari Ini
+                        </h2>
+                        <span
+                          className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[10px] font-black text-slate-400"
+                          title="Peserta yang paling membutuhkan tindak lanjut."
+                        >
+                          i
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        Peserta yang paling perlu ditindaklanjuti.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReminderFilter("reminder");
+                        window.setTimeout(() => {
+                          document
+                            .getElementById("coach-participant-table")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }, 60);
+                      }}
+                      className="shrink-0 text-xs font-black text-teal-700"
+                    >
+                      Lihat semua ›
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-slate-100">
+                    {priorityParticipants.length === 0 ? (
+                      <div className="px-5 py-10 text-center">
+                        <div className="text-sm font-black text-emerald-700">
+                          Semua peserta sudah lengkap
+                        </div>
+                        <p className="mt-1 text-xs font-bold text-slate-400">
+                          Belum ada peserta yang membutuhkan follow-up.
+                        </p>
+                      </div>
+                    ) : (
+                      priorityParticipants.map((item: any) => (
+                        <CoachPriorityParticipantRow
+                          key={item.id}
+                          item={item}
+                          onDetail={() => chooseParticipant(item)}
+                          onChat={() => {
+                            chooseParticipant(item, { openDetail: false });
+                            setCoachView("chat");
+                          }}
+                          onReminder={() => openReminder(item)}
+                        />
+                      ))
+                    )}
+                  </div>
+                </section>
+
+                <section
+                  id="coach-participant-table"
+                  className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_rgba(15,23,42,0.05)]"
+                >
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
+                    <div>
+                      <h2 className="text-lg font-black text-slate-950 sm:text-xl">
+                        Daftar Peserta
+                      </h2>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        Buka peserta untuk melihat grafik, target, dan history.
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openInstruction("group")}
+                        className="rounded-full bg-teal-600 px-3 py-2 text-[10px] font-black text-white shadow-sm sm:px-4 sm:text-xs"
+                      >
+                        + Instruksi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          loadDashboard({ keepSelection: true })
+                        }
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-black text-slate-700 shadow-sm"
+                        aria-label="Refresh peserta"
+                      >
+                        ↻
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+                    <div className="text-sm font-black text-slate-950">
+                      Filter Cepat
+                    </div>
+
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                       {[
                         ["all", "Semua"],
-                        ["reminder", "Perlu Reminder"],
                         ["nutrition", "Belum Nutrisi"],
                         ["workout", "Belum Workout"],
-                        ["complete", "Sudah Lengkap"],
+                        ["reminder", "Reminder"],
+                        ["complete", "Lengkap"],
                       ].map(([value, label]) => (
                         <button
                           key={value}
                           type="button"
-                          onClick={() => setReminderFilter(value as ReminderFilter)}
+                          onClick={() =>
+                            setReminderFilter(value as ReminderFilter)
+                          }
                           className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
                             reminderFilter === value
-                              ? "bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-sm"
-                              : "border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50"
+                              ? "bg-teal-600 text-white shadow-sm"
+                              : "border border-teal-200 bg-white text-teal-700"
                           }`}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
-                  </div>
-                </section>
 
-                <section
-                  id="coach-participant-table"
-                  className="rounded-[1.75rem] border border-slate-200/80 bg-white p-4 shadow-[0_16px_40px_rgba(15,23,42,0.06)] md:p-6"
-                >
-                  <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                    <div>
-                      <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700">
-                        Assigned group
+                    <div className="mt-3 grid gap-2 sm:grid-cols-[210px_1fr]">
+                      <select
+                        className={`${fieldClass} min-h-[44px] py-2.5`}
+                        value={selectedGroup}
+                        onChange={(event) =>
+                          setSelectedGroup(event.target.value)
+                        }
+                      >
+                        <option value="all">Semua Assigned Group</option>
+                        {groups.map((group: any) => (
+                          <option
+                            key={group.id}
+                            value={String(
+                              group.wellness_group_unit_id ||
+                                group.group_name,
+                            )}
+                          >
+                            {group.group_name} ({group.member_count || 0})
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                          🔍
+                        </span>
+                        <input
+                          className={`${fieldClass} min-h-[44px] w-full py-2.5 pl-9`}
+                          value={search}
+                          onChange={(event) => setSearch(event.target.value)}
+                          placeholder="Cari nama, kode, atau kelompok"
+                        />
                       </div>
-                      <h2 className="mt-1 text-xl font-black text-slate-950">Daftar Peserta</h2>
-                      <p className="mt-1 text-sm font-bold text-slate-500">
-                        Klik peserta untuk membuka grafik, target, history, dan detail lengkap.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openInstruction("group")}
-                        className="rounded-full bg-gradient-to-r from-teal-600 to-cyan-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:from-teal-700 hover:to-cyan-700"
-                      >
-                        + Instruksi Kelompok
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => loadDashboard({ keepSelection: true })}
-                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
-                      >
-                        Refresh
-                      </button>
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
-                    <select
-                      className={fieldClass}
-                      value={selectedGroup}
-                      onChange={(e) => setSelectedGroup(e.target.value)}
-                    >
-                      <option value="all">Semua Assigned Group</option>
-                      {groups.map((group: any) => (
-                        <option
-                          key={group.id}
-                          value={String(
-                            group.wellness_group_unit_id || group.group_name,
-                          )}
-                        >
-                          {group.group_name} ({group.member_count || 0})
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      className={fieldClass}
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Cari nama, kode, kelompok, atau status"
-                    />
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between gap-3 text-xs font-black uppercase tracking-wide text-slate-400">
-                    <span>
-                      Menampilkan {filteredParticipants.length} anggota
-                    </span>
+                  <div className="flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 text-[10px] font-black uppercase tracking-wide text-slate-400 sm:px-5">
+                    <span>{filteredParticipants.length} peserta</span>
                     <span>
                       {reminderFilter === "all"
-                        ? "Semua prioritas"
+                        ? "Semua"
                         : reminderFilter === "reminder"
-                          ? "Perlu reminder"
+                          ? "Reminder"
                           : reminderFilter === "nutrition"
                             ? "Belum nutrisi"
                             : reminderFilter === "workout"
                               ? "Belum workout"
-                              : "Sudah lengkap"}
+                              : "Lengkap"}
                     </span>
                   </div>
 
-                  {/* WELLNESS_COACH_MONITORING_RESPONSIVE_V77C */}
-                  <div className="mt-3 grid gap-3">
+                  <div className="divide-y divide-slate-100">
                     {filteredParticipants.length === 0 ? (
-                      <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm font-bold text-slate-400">
-                        Tidak ada peserta pada filter ini.
+                      <div className="px-5 py-12 text-center">
+                        <div className="text-sm font-black text-slate-700">
+                          Tidak ada peserta
+                        </div>
+                        <p className="mt-1 text-xs font-bold text-slate-400">
+                          Tidak ada peserta yang sesuai dengan filter.
+                        </p>
                       </div>
                     ) : (
-                      filteredParticipants.map((item: any) => {
-                        const meta = reminderMeta(item);
-                        return (
-                          <article
-                            key={item.id}
-                            className={`rounded-[1.65rem] border p-3.5 transition sm:p-4 ${
-                              Number(selectedParticipant?.id) === Number(item.id)
-                                ? "border-teal-300 bg-teal-50/70 shadow-[0_12px_30px_rgba(13,148,136,0.10)]"
-                                : "border-slate-200/80 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.05)] hover:border-teal-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => chooseParticipant(item)}
-                              className="block w-full rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
-                            >
-                              <div className="flex min-w-0 items-start gap-3">
-                                <WellnessAvatar
-                                  name={item.name}
-                                  src={
-                                    item.profile_photo_preview_url ||
-                                    item.profile_photo_url
-                                  }
-                                  size="md"
-                                />
-
-                                <div className="min-w-0 flex-1">
-                                  <div className="break-words text-[15px] font-black leading-5 text-slate-950 sm:text-base">
-                                    {item.name}
-                                  </div>
-                                  <div className="mt-1 break-words text-[11px] font-bold leading-4 text-slate-500 sm:text-xs">
-                                    {item.code} · {item.group_name}
-                                  </div>
-                                </div>
-
-                                <ReminderStatusBadge
-                                  tone={meta.tone}
-                                  label={meta.label}
-                                />
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-100 bg-orange-50 px-3 py-1.5 text-[10px] font-black text-orange-800 sm:text-xs">
-                                  <span aria-hidden="true">🍴</span>
-                                  {formatDaysWithoutInput(
-                                    item.compliance?.days_since_nutrition,
-                                  )}
-                                </span>
-                                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-100 bg-sky-50 px-3 py-1.5 text-[10px] font-black text-sky-800 sm:text-xs">
-                                  <span aria-hidden="true">🏋</span>
-                                  {formatDaysWithoutInput(
-                                    item.compliance?.days_since_workout,
-                                  )}
-                                </span>
-                                {meta.urgent ? (
-                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-rose-50 px-3 py-1.5 text-[10px] font-black text-rose-700 sm:text-xs">
-                                    <span aria-hidden="true">🔔</span>
-                                    Perlu reminder
-                                  </span>
-                                ) : null}
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                                <div className="flex flex-wrap items-center gap-2 text-[10px] font-black text-slate-600">
-                                  <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
-                                    {fmtNumber(item.today?.steps || 0)} step
-                                  </span>
-                                  <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
-                                    {fmtNumber(item.today?.calories || 0)} kkal
-                                  </span>
-                                </div>
-                                <span className="rounded-full bg-violet-50 px-3 py-1.5 text-[10px] font-black text-violet-700">
-                                  Kepatuhan {fmtNumber(
-                                    item.compliance?.compliance_percent || 0,
-                                  )}%
-                                </span>
-                              </div>
-
-                              <div className="mt-2 text-[10px] font-bold text-slate-400">
-                                Terakhir aktivitas: {formatLastActivityDate(
-                                  item.compliance?.last_input_date,
-                                )}
-                              </div>
-                            </button>
-
-                            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
-                              {!meta.complete ? (
-                                <button
-                                  type="button"
-                                  onClick={() => openReminder(item)}
-                                  className="rounded-xl bg-gradient-to-r from-teal-600 to-cyan-600 px-3 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-teal-700 hover:to-cyan-700"
-                                >
-                                  ✈ Kirim Reminder
-                                </button>
-                              ) : (
-                                <div className="flex items-center justify-center rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-black text-emerald-700">
-                                  ✓ Sudah lengkap
-                                </div>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => chooseParticipant(item)}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                              >
-                                ▣ Buka Detail
-                              </button>
-                            </div>
-                          </article>
-                        );
-                      })
+                      filteredParticipants.map((item: any) => (
+                        <CoachParticipantCompactRow
+                          key={item.id}
+                          item={item}
+                          active={
+                            Number(selectedParticipant?.id) ===
+                            Number(item.id)
+                          }
+                          onClick={() => chooseParticipant(item)}
+                        />
+                      ))
                     )}
                   </div>
                 </section>
@@ -2023,6 +2087,228 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
   );
 }
 
+
+function coachCompactStatus(
+  label: "Nutrisi" | "Workout",
+  missing: boolean,
+  days: any,
+) {
+  if (!missing) return `${label} lengkap`;
+
+  const age = formatDaysWithoutInput(days);
+
+  if (age === "Belum pernah input") {
+    return `${label} belum pernah input`;
+  }
+
+  if (age === "Data belum tersedia") {
+    return `${label} belum tersedia`;
+  }
+
+  return `Belum ${label.toLowerCase()} ${age}`;
+}
+
+
+function CoachPriorityParticipantRow({
+  item,
+  onDetail,
+  onChat,
+  onReminder,
+}: any) {
+  const meta = reminderMeta(item);
+  const maxDelay = Math.max(
+    meta.nutritionDays || 0,
+    meta.workoutDays || 0,
+  );
+
+  const priority =
+    meta.neverInput || maxDelay >= 3
+      ? {
+          label: "Prioritas tinggi",
+          className: "bg-rose-50 text-rose-600",
+        }
+      : maxDelay >= 2 ||
+          (meta.nutritionMissing && meta.workoutMissing)
+        ? {
+            label: "Prioritas sedang",
+            className: "bg-orange-50 text-orange-600",
+          }
+        : {
+            label: "Prioritas rendah",
+            className: "bg-emerald-50 text-emerald-600",
+          };
+
+  const nutritionStatus = coachCompactStatus(
+    "Nutrisi",
+    meta.nutritionMissing,
+    item.compliance?.days_since_nutrition,
+  );
+
+  const workoutStatus = coachCompactStatus(
+    "Workout",
+    meta.workoutMissing,
+    item.compliance?.days_since_workout,
+  );
+
+  return (
+    <article className="flex items-center gap-2 px-3 py-3.5 sm:gap-3 sm:px-5">
+      <button
+        type="button"
+        onClick={onDetail}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+      >
+        <WellnessAvatar
+          name={item.name}
+          src={
+            item.profile_photo_preview_url ||
+            item.profile_photo_url
+          }
+          size="sm"
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="break-words text-sm font-black leading-5 text-slate-950">
+              {item.name}
+            </div>
+            <span
+              className={`rounded-full px-2 py-1 text-[8px] font-black leading-none sm:text-[9px] ${priority.className}`}
+            >
+              {priority.label}
+            </span>
+          </div>
+
+          <div className="mt-0.5 text-[10px] font-bold text-slate-400">
+            {item.code} · {item.group_name}
+          </div>
+
+          <div className="mt-1 text-[10px] font-bold leading-4 text-slate-500 sm:text-[11px]">
+            {nutritionStatus}
+            <span className="mx-1 text-slate-300">•</span>
+            {workoutStatus}
+          </div>
+        </div>
+      </button>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onChat}
+          className="flex h-12 w-12 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white text-[9px] font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50"
+          aria-label={`Chat dengan ${item.name}`}
+        >
+          <span className="text-base leading-none">◯</span>
+          <span className="mt-1">Chat</span>
+        </button>
+
+        {!meta.complete ? (
+          <button
+            type="button"
+            onClick={onReminder}
+            className="flex h-12 w-12 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white text-[9px] font-black text-slate-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-50"
+            aria-label={`Ingatkan ${item.name}`}
+          >
+            <span className="text-base leading-none">♧</span>
+            <span className="mt-1">Ingatkan</span>
+          </button>
+        ) : (
+          <div className="flex h-12 w-12 flex-col items-center justify-center rounded-xl bg-emerald-50 text-[9px] font-black text-emerald-700">
+            <span className="text-base leading-none">✓</span>
+            <span className="mt-1">Lengkap</span>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+
+function CoachParticipantCompactRow({
+  item,
+  active,
+  onClick,
+}: any) {
+  const meta = reminderMeta(item);
+
+  const nutritionStatus = coachCompactStatus(
+    "Nutrisi",
+    meta.nutritionMissing,
+    item.compliance?.days_since_nutrition,
+  );
+
+  const workoutStatus = coachCompactStatus(
+    "Workout",
+    meta.workoutMissing,
+    item.compliance?.days_since_workout,
+  );
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 text-left transition sm:px-5 ${
+        active
+          ? "bg-teal-50"
+          : "bg-white hover:bg-slate-50"
+      }`}
+    >
+      <WellnessAvatar
+        name={item.name}
+        src={
+          item.profile_photo_preview_url ||
+          item.profile_photo_url
+        }
+        size="sm"
+      />
+
+      <div className="min-w-0">
+        <div className="break-words text-sm font-black leading-5 text-slate-950">
+          {item.name}
+        </div>
+
+        <div className="mt-0.5 text-[10px] font-bold text-slate-400">
+          {item.code} · {item.group_name}
+        </div>
+
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold sm:text-[11px]">
+          <span
+            className={
+              meta.nutritionMissing
+                ? "text-orange-600"
+                : "text-emerald-600"
+            }
+          >
+            {meta.nutritionMissing ? "🍴" : "✓"} {nutritionStatus}
+          </span>
+
+          <span
+            className={
+              meta.workoutMissing
+                ? "text-sky-600"
+                : "text-emerald-600"
+            }
+          >
+            {meta.workoutMissing ? "🏋" : "✓"} {workoutStatus}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="hidden rounded-full bg-slate-50 px-2.5 py-1 text-[9px] font-black text-slate-500 sm:inline-flex">
+          {fmtNumber(
+            item.compliance?.compliance_percent || 0,
+          )}%
+        </span>
+
+        <span className="text-2xl font-black text-slate-300">
+          ›
+        </span>
+      </div>
+    </button>
+  );
+}
+
+
 function ReminderSummaryCard({
   label,
   value,
@@ -2033,33 +2319,39 @@ function ReminderSummaryCard({
 }: any) {
   const config: Record<
     string,
-    { icon: string; iconClass: string; valueClass: string; ringClass: string }
+    {
+      icon: string;
+      iconClass: string;
+      valueClass: string;
+      ringClass: string;
+    }
   > = {
     emerald: {
       icon: "✓",
-      iconClass: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+      iconClass: "bg-emerald-50 text-emerald-700",
       valueClass: "text-emerald-700",
       ringClass: "ring-emerald-200",
     },
     orange: {
-      icon: "🍴",
-      iconClass: "bg-orange-50 text-orange-700 ring-orange-100",
+      icon: "♜",
+      iconClass: "bg-orange-50 text-orange-600",
       valueClass: "text-orange-600",
       ringClass: "ring-orange-200",
     },
     sky: {
-      icon: "🏋",
-      iconClass: "bg-sky-50 text-sky-700 ring-sky-100",
+      icon: "H",
+      iconClass: "bg-sky-50 text-sky-600",
       valueClass: "text-sky-700",
       ringClass: "ring-sky-200",
     },
     rose: {
-      icon: "🔔",
-      iconClass: "bg-rose-50 text-rose-700 ring-rose-100",
+      icon: "♧",
+      iconClass: "bg-rose-50 text-rose-600",
       valueClass: "text-rose-600",
       ringClass: "ring-rose-200",
     },
   };
+
   const selected = config[tone] || config.emerald;
 
   return (
@@ -2067,31 +2359,37 @@ function ReminderSummaryCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`group min-h-[108px] rounded-[1.4rem] border border-slate-200/80 bg-white p-3.5 text-left shadow-[0_10px_28px_rgba(15,23,42,0.05)] transition sm:p-4 ${
+      className={`group min-h-[94px] rounded-[1.25rem] border border-slate-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition sm:p-3.5 ${
         active
           ? `ring-4 ${selected.ringClass}`
-          : "hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.08)]"
+          : "hover:-translate-y-0.5 hover:border-teal-200"
       }`}
     >
       <div className="flex items-center gap-3">
         <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-black ring-1 sm:h-12 sm:w-12 ${selected.iconClass}`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-black sm:h-11 sm:w-11 ${selected.iconClass}`}
           aria-hidden="true"
         >
           {selected.icon}
         </div>
+
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-black uppercase tracking-wide text-slate-500 sm:text-xs">
+          <div className="text-[10px] font-black text-slate-700 sm:text-xs">
             {label}
           </div>
-          <div className={`mt-0.5 text-2xl font-black leading-none ${selected.valueClass}`}>
+
+          <div
+            className={`mt-0.5 text-2xl font-black leading-none ${selected.valueClass}`}
+          >
             {value}
           </div>
-          <div className="mt-1.5 text-[10px] font-bold leading-4 text-slate-500 sm:text-xs">
+
+          <div className="mt-1 text-[10px] font-bold text-slate-500">
             {note}
           </div>
         </div>
-        <span className="text-lg font-black text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-teal-500">
+
+        <span className="text-xl font-black text-slate-300">
           ›
         </span>
       </div>
