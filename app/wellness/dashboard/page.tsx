@@ -1996,13 +1996,6 @@ function WellnessDashboard() {
                 </a>
 
                 <a
-                  href="/wellness/nakes-input"
-                  className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white shadow-sm hover:bg-slate-800"
-                >
-                  Input NAKES
-                </a>
-
-                <a
                   href="/wellness/import-history"
                   className="rounded-full border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-700 shadow-sm hover:bg-slate-50"
                 >

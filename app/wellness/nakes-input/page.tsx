@@ -1,6 +1,6 @@
 "use client";
 
-import WellnessQuickNav from "@/components/wellness/WellnessQuickNav";
+import Image from "next/image";
 
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -189,6 +189,7 @@ function WellnessNakesInput() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [kelompokFilter, setKelompokFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const [form, setForm] = useState<any>({
     checkup_date: today(),
@@ -289,6 +290,20 @@ function WellnessNakesInput() {
     setForm((previous: any) => ({ ...previous, [key]: value }));
   }
 
+  async function copyPageLink() {
+    if (typeof window === "undefined") return;
+
+    const currentUrl = window.location.href;
+
+    try {
+      await navigator.clipboard.writeText(currentUrl);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2200);
+    } catch {
+      window.prompt("Salin link Form NAKES:", currentUrl);
+    }
+  }
+
   function selectVisitType(value: VisitType) {
     const option = VISIT_OPTIONS.find((item) => item.value === value);
 
@@ -351,52 +366,66 @@ function WellnessNakesInput() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900 md:px-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        {/* WELLNESS_QUICK_NAV_V374 */}
-        <WellnessQuickNav />
-
-        <section className="rounded-[2rem] bg-gradient-to-r from-blue-700 via-indigo-600 to-emerald-500 p-6 text-white shadow-2xl shadow-blue-100 md:p-8">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-blue-100">
-                Input NAKES Wellness
+    <main className="min-h-screen bg-[#f4f8fb] px-4 py-6 text-slate-900 md:px-8 md:py-8">
+      <div className="mx-auto max-w-6xl space-y-5">
+        <header className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+          <div className="bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 px-5 py-3 text-white md:px-7">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-[11px] font-black uppercase tracking-[0.2em] text-cyan-50">
+                Harmony Health • Form Klinis NAKES
               </div>
-              <h1 className="mt-2 text-3xl font-black md:text-4xl">Input Klinis NAKES</h1>
-              <p className="mt-2 max-w-3xl text-sm font-bold text-blue-50">
-                Digunakan oleh NAKES perusahaan untuk input pemeriksaan awal, pemeriksaan berkala,
-                evaluasi akhir, follow-up klinis, atau label custom. Data ini masuk ke history MCU
-                dan grafik before-after per peserta.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <a
-                href="/wellness/dashboard"
-                className="rounded-full bg-white px-5 py-3 text-xs font-black text-blue-700 shadow-sm"
-              >
-                Dashboard
-              </a>
-              <a
-                href="/wellness/input"
-                className="rounded-full bg-white/15 px-5 py-3 text-xs font-black text-white ring-1 ring-white/30"
-              >
-                Input Harian
-              </a>
-              <a
-                href="/wellness/history-import"
-                className="rounded-full bg-white/15 px-5 py-3 text-xs font-black text-white ring-1 ring-white/30"
-              >
-                Import History MCU
-              </a>
+              <span className="rounded-full bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide ring-1 ring-white/25">
+                Direct Link
+              </span>
             </div>
           </div>
+
+          <div className="grid gap-5 p-5 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center md:p-7">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-teal-50 ring-1 ring-teal-100">
+              <Image
+                src="/wellness-pwa/icon-192.png"
+                alt="Harmony Health"
+                width={64}
+                height={64}
+                className="h-14 w-14 object-contain"
+                priority
+              />
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">
+                Form Pemeriksaan NAKES
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+                Form khusus tenaga kesehatan untuk pemeriksaan awal, berkala, evaluasi akhir,
+                follow-up klinis, atau pemeriksaan custom peserta Wellness.
+              </p>
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-teal-50 px-3 py-2 text-xs font-black text-teal-700 ring-1 ring-teal-100">
+                <span className="h-2 w-2 rounded-full bg-teal-500" />
+                Tidak ditampilkan di menu aplikasi
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={copyPageLink}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800"
+            >
+              <span aria-hidden="true">↗</span>
+              {linkCopied ? "Link tersalin" : "Salin Link Form"}
+            </button>
+          </div>
+        </header>
+
+        <section className="rounded-2xl border border-cyan-100 bg-cyan-50/80 px-5 py-4 text-sm font-semibold leading-6 text-cyan-950">
+          Simpan atau bagikan URL halaman ini kepada NAKES yang berwenang. Akses autentikasi,
+          proses simpan, field pemeriksaan, dan sumber data tetap mengikuti sistem Wellness yang sudah berjalan.
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <form
             onSubmit={submit}
-            className="space-y-6 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-100 md:p-6"
+            className="space-y-5 rounded-[2rem] border border-slate-200 bg-white p-4 shadow-xl shadow-slate-200/50 md:p-6"
           >
             <section className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -807,13 +836,13 @@ function WellnessNakesInput() {
             <button
               type="submit"
               disabled={saving || !form.participant_id}
-              className="w-full rounded-2xl bg-rose-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-rose-100 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-2xl bg-gradient-to-r from-teal-600 to-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 transition hover:from-teal-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Menyimpan..." : "Simpan Input NAKES"}
             </button>
           </form>
 
-          <aside className="space-y-5">
+          <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
             <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-100">
               <h2 className="text-lg font-black">Status</h2>
 
@@ -868,7 +897,7 @@ function WellnessNakesInput() {
             </section>
 
             <section className="rounded-[2rem] border border-amber-200 bg-amber-50 p-5">
-              <h2 className="text-lg font-black text-amber-900">Catatan database</h2>
+              <h2 className="text-lg font-black text-amber-900">Catatan teknis</h2>
 
               <p className="mt-3 text-sm font-bold leading-6 text-amber-900">
                 Jika muncul error tabel <code>wellness_checkup_history</code> belum ada, jalankan

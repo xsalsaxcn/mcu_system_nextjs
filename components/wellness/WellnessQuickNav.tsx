@@ -8,7 +8,6 @@ const WELLNESS_QUICK_NAV_MARKER = "WELLNESS_QUICK_NAV_V374_SUPPORT_V61";
 const ITEMS = [
   { href: "/wellness/dashboard", label: "Dashboard" },
   { href: "/wellness/input", label: "Input Harian" },
-  { href: "/wellness/nakes-input", label: "Input NAKES" },
   { href: "/wellness/history-import", label: "Import History MCU" },
   { href: "/wellness/support-admin", label: "Support Admin" },
 ];
@@ -27,7 +26,7 @@ export default function WellnessQuickNav() {
         <div>
           <div className="text-sm font-black uppercase tracking-wide text-blue-700">Menu Wellness</div>
           <div className="mt-1 text-sm font-semibold text-slate-600">
-            Pilih menu sesuai kebutuhan: input harian peserta, input klinis NAKES, dashboard, atau import history MCU.
+            Pilih menu sesuai kebutuhan: dashboard, input harian peserta, import history MCU, atau support.
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

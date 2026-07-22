@@ -27,12 +27,6 @@ const menuItems: MenuItem[] = [
     badge: "INPUT",
   },
   {
-    label: "Input NAKES",
-    href: "/wellness/nakes-input",
-    description: "Input data klinis oleh tim medis",
-    badge: "NAKES",
-  },
-  {
     label: "Import Peserta",
     href: "/wellness/import",
     description: "Import data peserta program wellness",
