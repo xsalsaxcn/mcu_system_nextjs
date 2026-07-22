@@ -4,7 +4,7 @@ import Image from "next/image";
 
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import AuthGate from "@/components/AuthGate";
+import NakesAuthGate from "@/components/wellness/NakesAuthGate";
 
 // WELLNESS_NAKES_GENERAL_CHECKUP_INPUT_V372_PAGE
 // Wellness-only page for NAKES/company medical team to input any clinical checkpoint.
@@ -174,10 +174,23 @@ function Field({
 }
 
 export default function WellnessNakesInputPage() {
-  return <AuthGate>{() => <WellnessNakesInput />}</AuthGate>;
+  return (
+    <NakesAuthGate>
+      {(user, logout) => (
+        <WellnessNakesInput nakesUser={user} onLogout={logout} />
+      )}
+    </NakesAuthGate>
+  );
 }
 
-function WellnessNakesInput() {
+// WELLNESS_NAKES_DEDICATED_AUTH_V92
+function WellnessNakesInput({
+  nakesUser,
+  onLogout,
+}: {
+  nakesUser: any;
+  onLogout: () => Promise<void>;
+}) {
   const [participants, setParticipants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -434,6 +447,23 @@ function WellnessNakesInput() {
   return (
     <main className="min-h-screen bg-[#f4f8fb] px-4 py-6 text-slate-900 md:px-8 md:py-8">
       <div className="mx-auto max-w-6xl space-y-5">
+        <section className="flex flex-col gap-3 rounded-2xl border border-teal-100 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-teal-600">
+              Session NAKES
+            </div>
+            <div className="mt-1 truncate text-sm font-black text-slate-900">
+              {nakesUser?.name || nakesUser?.username || "NAKES"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="rounded-xl bg-rose-50 px-4 py-2.5 text-xs font-black text-rose-700"
+          >
+            Keluar
+          </button>
+        </section>
         <header className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
           <div className="bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 px-5 py-3 text-white md:px-7">
             <div className="flex flex-wrap items-center justify-between gap-3">

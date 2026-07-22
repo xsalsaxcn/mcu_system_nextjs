@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSessionUser } from "@/lib/server/session";
+import { getWellnessNakesUser } from "@/lib/wellness/nakesSession";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { calculateBmi, interpretBmi, weightDelta } from "@/lib/wellness/bmi";
 import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules";
@@ -1057,7 +1058,7 @@ async function writeNakesHistory(params: {
 }
 
 export async function POST(req: NextRequest) {
-  const user = getSessionUser(req);
+  const user = getWellnessNakesUser(req) || getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
 
   const body = await req.json().catch(() => ({}));
@@ -1296,7 +1297,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
+  const user = getWellnessNakesUser(req) || getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
 
   try {

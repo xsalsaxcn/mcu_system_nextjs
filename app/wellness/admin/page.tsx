@@ -196,6 +196,46 @@ export default function WellnessAdminMobilePage() {
   // WELLNESS_ADMIN_SUPPORT_CONTEXT_EXACT_V79R2
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
   const [controlNotice, setControlNotice] = useState("");
+  // WELLNESS_COMPANY_NAKES_DIRECT_LINK_V90_1
+  const [nakesLinkCompany, setNakesLinkCompany] = useState<any>(null);
+  const [nakesLinkCopied, setNakesLinkCopied] = useState(false);
+
+  function companyNakesFormPath(company: any) {
+    const companyId = Number(company?.id || 0);
+    const params = new URLSearchParams();
+    if (companyId > 0) params.set("company_id", String(companyId));
+    const companyName = clean(company?.name);
+    if (companyName) params.set("company_name", companyName);
+    const queryString = params.toString();
+    return `/wellness/nakes-input${queryString ? `?${queryString}` : ""}`;
+  }
+
+  function companyNakesFormUrl(company: any) {
+    const path = companyNakesFormPath(company);
+    if (typeof window === "undefined") return path;
+    return `${window.location.origin}${path}`;
+  }
+
+  async function copyCompanyNakesLink() {
+    if (!nakesLinkCompany) return;
+    const url = companyNakesFormUrl(nakesLinkCompany);
+    try {
+      await navigator.clipboard.writeText(url);
+      setNakesLinkCopied(true);
+      window.setTimeout(() => setNakesLinkCopied(false), 2200);
+    } catch {
+      window.prompt("Salin Link Input NAKES:", url);
+    }
+  }
+
+  function openCompanyNakesLink() {
+    if (!nakesLinkCompany || typeof window === "undefined") return;
+    window.open(
+      companyNakesFormPath(nakesLinkCompany),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
 
   async function loadSupportUnread() {
     const result = await fetch(
@@ -1160,12 +1200,24 @@ export default function WellnessAdminMobilePage() {
                       </div>
                     ))}
                   </div>
-                  <a
-                    href={`/wellness/company?company_id=${company.id}`}
-                    className="mt-3 block rounded-2xl bg-slate-950 px-4 py-3 text-center text-xs font-black text-white"
-                  >
-                    Buka Portal Perusahaan
-                  </a>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <a
+                      href={`/wellness/company?company_id=${company.id}`}
+                      className="block rounded-2xl bg-slate-950 px-4 py-3 text-center text-xs font-black text-white transition hover:bg-slate-800"
+                    >
+                      Buka Portal Perusahaan
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNakesLinkCompany(company);
+                        setNakesLinkCopied(false);
+                      }}
+                      className="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-center text-xs font-black text-teal-800 transition hover:bg-teal-100"
+                    >
+                      🔗 Link Input NAKES
+                    </button>
+                  </div>
                 </article>
               ))}
               {enrichedCompanies.length === 0 ? (
@@ -1846,6 +1898,89 @@ export default function WellnessAdminMobilePage() {
         </div>
       </nav>
 
+      {nakesLinkCompany ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Tutup Link Input NAKES"
+            onClick={() => setNakesLinkCompany(null)}
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+          />
+          <section className="relative w-full max-w-2xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-slate-950 via-blue-900 to-teal-600 px-5 py-5 text-white md:px-7">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/65">
+                  Direct Link Form NAKES
+                </div>
+                <h2 className="mt-1 text-2xl font-black">Link Input NAKES</h2>
+                <p className="mt-1 text-sm font-bold text-white/75">
+                  {clean(nakesLinkCompany.name)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNakesLinkCompany(null)}
+                className="rounded-full bg-white/15 px-3 py-2 text-xs font-black ring-1 ring-white/20"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5 md:p-7">
+              <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4 text-emerald-950">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-lg text-white">
+                    🔗
+                  </div>
+                  <div>
+                    <div className="text-sm font-black">Direct link perusahaan</div>
+                    <div className="mt-1 text-xs font-bold leading-5 text-emerald-800">
+                      Link otomatis membuka Form NAKES dengan peserta dari perusahaan ini sebagai scope awal.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                  Share with link
+                </label>
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                  <span className="pl-2 text-slate-400">🔗</span>
+                  <input
+                    readOnly
+                    value={companyNakesFormUrl(nakesLinkCompany)}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs font-bold text-slate-700 outline-none md:text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={copyCompanyNakesLink}
+                  className="rounded-2xl bg-emerald-600 px-5 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-700"
+                >
+                  {nakesLinkCopied ? "✓ Link tersalin" : "Copy Link"}
+                </button>
+                <button
+                  type="button"
+                  onClick={openCompanyNakesLink}
+                  className="rounded-2xl bg-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-100 transition hover:bg-blue-700"
+                >
+                  Open in New Tab
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900">
+                Form tetap memakai autentikasi, field pemeriksaan, API, dan proses simpan NAKES yang sudah berjalan. Tidak ada perubahan database atau rules.
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {menuOpen ? (
         <div className="fixed inset-0 z-[100]">
           <button type="button" aria-label="Tutup menu" onClick={() => setMenuOpen(false)} className="absolute inset-0 bg-slate-950/55" />
@@ -1868,6 +2003,13 @@ export default function WellnessAdminMobilePage() {
               ].map(([icon, label, nextView]) => (
                 <button key={String(label)} type="button" onClick={() => openView(nextView as View)} className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"><span className="text-xl">{icon}</span><span className="text-sm font-black text-slate-800">{label}</span></button>
               ))}
+              <a
+                href="/wellness/admin/users"
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"
+              >
+                <span className="text-xl">👤</span>
+                <span className="text-sm font-black text-slate-800">User</span>
+              </a>
               <a
                 href={exportExcelUrl}
                 className="mb-2 block rounded-2xl bg-emerald-700 px-4 py-3 text-sm font-black text-white"

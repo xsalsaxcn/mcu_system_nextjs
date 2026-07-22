@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSessionUser } from "@/lib/server/session";
+import { getWellnessNakesUser } from "@/lib/wellness/nakesSession";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { canManageWellness, isWellnessParticipant } from "@/lib/wellness/auth";
 import { calculateBmi, interpretBmi, toNumber } from "@/lib/wellness/bmi";
@@ -51,7 +52,7 @@ function makeParticipantDisplay(participant: any, riskFromName: boolean) {
 }
 
 export async function GET(req: NextRequest) {
-  const user = getSessionUser(req);
+  const user = getWellnessNakesUser(req) || getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
 
   try {
