@@ -26,8 +26,8 @@ export default function InstallIosPage() {
   }, []);
 
   return (
-    <main className="mx-auto min-h-[100dvh] max-w-xl px-4 py-6 sm:py-10">
-      <section className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-xl">
+    <main className="min-h-[100dvh] bg-[radial-gradient(circle_at_top,#e5fbf8_0,#f6fafc_42%,#eef4f8_100%)] px-4 pb-[calc(28px+env(safe-area-inset-bottom,0px))] pt-[calc(24px+env(safe-area-inset-top,0px))] text-slate-950 sm:py-10">
+      <section className="mx-auto max-w-xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-xl">
         <header className="bg-gradient-to-br from-[#042e66] via-[#0b4b91] to-[#138c8c] px-6 py-7 text-white">
           <div className="flex items-center gap-4">
             <img
@@ -35,7 +35,7 @@ export default function InstallIosPage() {
               alt="Harmony Wellness"
               width={72}
               height={72}
-              className="h-[72px] w-[72px] rounded-[22px] shadow-lg"
+              className="h-[72px] w-[72px] rounded-[22px] shadow-lg ring-2 ring-white/20"
             />
             <div>
               <p className="m-0 text-xs font-black uppercase tracking-[0.16em] text-blue-100">
@@ -45,7 +45,7 @@ export default function InstallIosPage() {
                 Pasang Wellness di iPhone
               </h1>
               <p className="mt-2 text-sm font-semibold leading-5 text-blue-50">
-                Gunakan Safari dan buka sebagai Web App. Tidak perlu App Store.
+                Tambahkan ke Home Screen dan buka seperti aplikasi tanpa App Store.
               </p>
             </div>
           </div>
@@ -53,52 +53,50 @@ export default function InstallIosPage() {
 
         <div className="space-y-5 p-5 sm:p-7">
           {standalone ? (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-800">
               Harmony Wellness sudah dibuka dalam mode aplikasi di perangkat ini.
             </div>
           ) : (
-            <ol className="space-y-3">
-              {[
-                "Buka halaman ini menggunakan Safari di iPhone.",
-                "Tekan tombol Bagikan pada toolbar Safari.",
-                "Pilih Tambahkan ke Layar Utama.",
-                "Aktifkan Buka sebagai App Web, lalu tekan Tambah.",
-                "Buka ikon Harmony Wellness dari Home Screen.",
-              ].map((step, index) => (
-                <li
-                  key={step}
-                  className="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#042e66] text-sm font-black text-white">
-                    {index + 1}
-                  </span>
-                  <p className="m-0 pt-1 text-sm font-bold leading-6 text-slate-700">
-                    {step}
-                  </p>
-                </li>
-              ))}
-            </ol>
+            <>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
+                Pada menu seperti di gambar, tekan <strong>Share</strong> terlebih dahulu. Opsi <strong>Add to Home Screen</strong> muncul pada panel Share berikutnya, bukan pada menu awal Safari.
+              </div>
+
+              <ol className="space-y-3">
+                {[
+                  "Pastikan halaman dibuka langsung menggunakan Safari, bukan browser di dalam WhatsApp.",
+                  "Tekan tombol More, lalu pilih Share. Pada layout Safari tertentu, tekan ikon Share langsung di toolbar.",
+                  "Pada panel Share, geser ke bawah lalu pilih Add to Home Screen atau Tambahkan ke Layar Utama.",
+                  "Jika opsi belum ada, pilih Edit Actions di bagian paling bawah lalu aktifkan Add to Home Screen.",
+                  "Aktifkan Open as Web App atau Buka sebagai App Web, kemudian tekan Add atau Tambah.",
+                  "Buka ikon Harmony Wellness dari Home Screen. Aplikasi akan masuk ke halaman pilihan portal.",
+                ].map((step, index) => (
+                  <li
+                    key={step}
+                    className="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#042e66] text-sm font-black text-white">
+                      {index + 1}
+                    </span>
+                    <p className="m-0 pt-1 text-sm font-bold leading-6 text-slate-700">
+                      {step}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </>
           )}
 
           <div className="rounded-2xl bg-blue-50 p-4 text-sm font-semibold leading-6 text-blue-950">
-            Setelah terpasang, portal dibuka dalam tampilan standalone dengan ikon
-            sendiri dan area layar yang menyesuaikan safe area iPhone.
+            Ikon Wellness sudah disiapkan untuk Home Screen. Setelah terpasang, aplikasi membuka Main Screen berisi pilihan Peserta, Coach, Perusahaan, dan Admin.
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Link
-              href="/wellness"
-              className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-[#042e66] px-5 text-sm font-black text-white"
-            >
-              Buka Wellness
-            </Link>
-            <Link
-              href="/wellness/portal"
-              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 text-sm font-black text-slate-700"
-            >
-              Portal Peserta
-            </Link>
-          </div>
+          <Link
+            href="/wellness"
+            className="inline-flex min-h-13 w-full items-center justify-center rounded-2xl bg-[#042e66] px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-100 transition hover:bg-[#073a7c]"
+          >
+            Kembali ke Pilihan Portal
+          </Link>
         </div>
       </section>
     </main>
