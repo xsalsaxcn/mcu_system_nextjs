@@ -165,6 +165,26 @@ function foodCalories(row: any) {
   );
 }
 
+function pointLogDate(row: any) {
+  return dateOnly(row?.log_date || row?.created_at);
+}
+
+function isNutritionInputPoint(row: any) {
+  const sourceType = clean(row?.source_type).toLowerCase();
+  const pointKey = clean(row?.point_key).toLowerCase();
+  const description = clean(row?.description).toLowerCase();
+
+  return (
+    sourceType === "nutrition_google_sheet" ||
+    pointKey.startsWith("nutrition_input_") ||
+    description.startsWith("input nutrisi:")
+  );
+}
+
+function nutritionPointIdentity(row: any) {
+  return clean(row?.source_id) || clean(row?.point_key) || clean(row?.id);
+}
+
 function activitySteps(row: any) {
   return number(
     row.steps ||
@@ -440,7 +460,7 @@ export async function GET(request: NextRequest) {
             .from("wellness_point_logs")
             .select("*")
             .in("participant_id", participantIds)
-            .gte("log_date", fromDate)
+            .order("log_date", { ascending: false })
             .limit(20000),
         ),
         safeRows(
@@ -501,7 +521,12 @@ export async function GET(request: NextRequest) {
     const dbActivity = groupRows(selectedActivityRows);
     const dbHealthtalk = groupRows(healthtalkRows);
     const sheetHealthtalk = rowsByParticipantOrCode(sheetHealthtalkRows);
-    const points = groupRows(pointRows);
+    const pointRowsInPeriod = pointRows.filter((row: any) => {
+      const date = pointLogDate(row);
+      return !date || (date >= fromDate && date <= today);
+    });
+    const points = groupRows(pointRowsInPeriod);
+    const pointHistory = groupRows(pointRows);
     const weights = groupRows(weightRows);
     const mini = groupRows(miniRows);
     const history = groupRows(historyRows);
@@ -544,6 +569,15 @@ export async function GET(request: NextRequest) {
     const participantCards = participants.map((participant: any) => {
       const id = number(participant.id);
       const code = clean(participant.code || participant.employee_code);
+      const participantPointRows = points.get(id) || [];
+      const participantPointHistory = pointHistory.get(id) || [];
+      const nutritionPointInputs = [
+        ...new Map(
+          participantPointHistory
+            .filter(isNutritionInputPoint)
+            .map((item: any) => [nutritionPointIdentity(item), item]),
+        ).values(),
+      ];
       const sheetFoods = dedupeRows([
         ...(sheetFood.byId.get(id) || []),
         ...(sheetFood.byCode.get(code) || []),
@@ -602,6 +636,32 @@ export async function GET(request: NextRequest) {
         nutritionInputCount += 1;
       }
 
+      const nutritionPointInputsByDate = new Map<string, Set<string>>();
+      for (const row of nutritionPointInputs) {
+        const date = pointLogDate(row);
+        if (!date || date < fromDate || date > today) continue;
+        if (!nutritionPointInputsByDate.has(date)) {
+          nutritionPointInputsByDate.set(date, new Set());
+        }
+        nutritionPointInputsByDate
+          .get(date)!
+          .add(nutritionPointIdentity(row));
+      }
+
+      for (const [date, inputKeys] of nutritionPointInputsByDate.entries()) {
+        const slots = nutritionByDate.get(date) || new Set<string>();
+        const targetSize = Math.max(slots.size, inputKeys.size);
+        while (slots.size < targetSize) {
+          slots.add(`point-input:${date}:${slots.size + 1}`);
+        }
+        nutritionByDate.set(date, slots);
+      }
+
+      nutritionInputCount = [...nutritionByDate.values()].reduce(
+        (sum, slots) => sum + slots.size,
+        0,
+      );
+
       const workoutByDate = new Map<string, { calories: number; steps: number }>();
       for (const row of activities) {
         const date = dateOnly(row.log_date || row.started_at || row.created_at);
@@ -645,6 +705,26 @@ export async function GET(request: NextRequest) {
         ...nutritionByDate.keys(),
         ...workoutByDate.keys(),
       ]);
+      const nutritionHistoryDates = [
+        ...new Set(
+          nutritionPointInputs.map(pointLogDate).filter(Boolean),
+        ),
+      ];
+      const nutritionPeriodDates = [...nutritionByDate.keys()];
+      const allNutritionDates = [
+        ...new Set([...nutritionHistoryDates, ...nutritionPeriodDates]),
+      ].sort();
+      const workoutPeriodDates = [...workoutByDate.keys()].sort();
+      const lastNutritionDate =
+        allNutritionDates[allNutritionDates.length - 1] || "";
+      const lastWorkoutDate =
+        workoutPeriodDates[workoutPeriodDates.length - 1] || "";
+      const daysSinceNutrition = lastNutritionDate
+        ? daysBetween(lastNutritionDate, today)
+        : 99;
+      const daysSinceWorkout = lastWorkoutDate
+        ? daysBetween(lastWorkoutDate, today)
+        : 99;
       const diligencePercent = Math.round(
         (activeDates.size / effectiveDays) * 100,
       );
@@ -681,7 +761,7 @@ export async function GET(request: NextRequest) {
       );
 
       const pointLedger = resolveWellnessPointBreakdown({
-        ledgerRows: points.get(id) || [],
+        ledgerRows: participantPointRows,
         calculated: {
           nutrition: nutritionPoints,
           workout: workoutPoints,
@@ -754,6 +834,12 @@ export async function GET(request: NextRequest) {
         current_streak: streak,
         healthtalk_count: healthtalkCount,
         active_days: activeDates.size,
+        last_nutrition_date: lastNutritionDate || null,
+        last_workout_date: lastWorkoutDate || null,
+        days_since_nutrition: daysSinceNutrition,
+        days_since_workout: daysSinceWorkout,
+        nutrition_count_today: nutritionByDate.get(today)?.size || 0,
+        workout_count_today: workoutByDate.has(today) ? 1 : 0,
         nutrition_target_days: nutritionTargetDates.size,
         workout_target_days: workoutTargetDates.size,
         nutrition_target_calories: nutritionTarget,

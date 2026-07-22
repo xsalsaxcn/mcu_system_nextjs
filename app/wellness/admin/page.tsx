@@ -87,6 +87,16 @@ function flagTone(flag: string) {
   return "border-rose-100 bg-rose-50 text-rose-800";
 }
 
+function dailyInputLabel(value: any, lastDate?: any) {
+  const days = Number(value);
+  if (Number.isFinite(days) && days <= 0) return "Hari ini ✓";
+  if (Number.isFinite(days) && days === 1) return "1 hari lalu";
+  if (Number.isFinite(days) && days > 1 && days < 99) {
+    return `${Math.floor(days)} hari lalu`;
+  }
+  return clean(lastDate) ? "Riwayat tersedia" : "Belum pernah input";
+}
+
 function avatarTone(index: number) {
   return [
     "from-teal-500 to-cyan-600",
@@ -1525,6 +1535,20 @@ export default function WellnessAdminMobilePage() {
                         <span className="rounded-full bg-rose-600 px-2.5 py-1 text-[9px] font-black text-white">RED</span>
                       </div>
                       <div className="mt-2 text-xs font-bold leading-5 text-rose-800">{(item.risk_flags || []).join(" · ") || item.compliance_status || "Membutuhkan follow-up"}</div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-orange-50 px-3 py-2 text-orange-900">
+                          <div className="text-[8px] font-black uppercase tracking-wide opacity-60">Nutrisi</div>
+                          <div className="mt-1 text-[10px] font-black leading-4">
+                            {dailyInputLabel(item.days_since_nutrition, item.last_nutrition_date)}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-900">
+                          <div className="text-[8px] font-black uppercase tracking-wide opacity-60">Workout</div>
+                          <div className="mt-1 text-[10px] font-black leading-4">
+                            {dailyInputLabel(item.days_since_workout, item.last_workout_date)}
+                          </div>
+                        </div>
+                      </div>
                       <div className="mt-2 flex items-center justify-between gap-3 text-[10px] font-black text-slate-400">
                         <span>Klik untuk melihat detail peserta</span>
                         <span aria-hidden="true" className="text-sm text-rose-500">›</span>
@@ -1794,6 +1818,27 @@ export default function WellnessAdminMobilePage() {
                     <div className="mt-1 text-xl font-black">{fmt(value)}</div>
                   </div>
                 ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-2xl bg-orange-50 p-4 text-orange-900">
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] opacity-60">Input Nutrisi</div>
+                  <div className="mt-2 text-sm font-black">
+                    {dailyInputLabel(
+                      selectedParticipant.days_since_nutrition,
+                      selectedParticipant.last_nutrition_date,
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-sky-50 p-4 text-sky-900">
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] opacity-60">Input Workout</div>
+                  <div className="mt-2 text-sm font-black">
+                    {dailyInputLabel(
+                      selectedParticipant.days_since_workout,
+                      selectedParticipant.last_workout_date,
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">

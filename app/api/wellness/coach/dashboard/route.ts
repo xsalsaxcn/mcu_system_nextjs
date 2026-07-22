@@ -178,6 +178,26 @@ function foodDate(row: any) {
   return clean(row?.log_date || row?.date || row?.created_at).slice(0, 10);
 }
 
+function pointLogDate(row: any) {
+  return clean(row?.log_date || row?.created_at).slice(0, 10);
+}
+
+function isNutritionInputPoint(row: any) {
+  const sourceType = clean(row?.source_type).toLowerCase();
+  const pointKey = clean(row?.point_key).toLowerCase();
+  const description = clean(row?.description).toLowerCase();
+
+  return (
+    sourceType === "nutrition_google_sheet" ||
+    pointKey.startsWith("nutrition_input_") ||
+    description.startsWith("input nutrisi:")
+  );
+}
+
+function nutritionPointIdentity(row: any) {
+  return clean(row?.source_id) || clean(row?.point_key) || clean(row?.id);
+}
+
 function activitySteps(row: any) {
   return asNumber(
     row?.steps ||
@@ -291,6 +311,7 @@ function participantTargets(row: any, latestTargetNote: any) {
 function makeFlag(params: {
   today: string;
   nutritionDates: string[];
+  nutritionHistoryDates?: string[];
   workoutDates: string[];
   latestNote: any;
 }) {
@@ -299,11 +320,16 @@ function makeFlag(params: {
   const compliancePercent = Math.round(
     ((nutritionDays + workoutDays) / 14) * 100,
   );
-  const nutritionDateList = params.nutritionDates.filter(Boolean).sort();
-  const workoutDateList = params.workoutDates.filter(Boolean).sort();
+  const nutritionDateList = [...new Set(params.nutritionDates.filter(Boolean))].sort();
+  const nutritionHistoryDateList = [
+    ...new Set(
+      (params.nutritionHistoryDates || params.nutritionDates).filter(Boolean),
+    ),
+  ].sort();
+  const workoutDateList = [...new Set(params.workoutDates.filter(Boolean))].sort();
   const lastNutritionDate =
-    nutritionDateList.length > 0
-      ? nutritionDateList[nutritionDateList.length - 1]
+    nutritionHistoryDateList.length > 0
+      ? nutritionHistoryDateList[nutritionHistoryDateList.length - 1]
       : "";
   const lastWorkoutDate =
     workoutDateList.length > 0
@@ -315,7 +341,7 @@ function makeFlag(params: {
   const daysSinceWorkout = lastWorkoutDate
     ? daysBetween(lastWorkoutDate, params.today)
     : 99;
-  const allDates = [...nutritionDateList, ...workoutDateList].sort();
+  const allDates = [...nutritionHistoryDateList, ...workoutDateList].sort();
   const lastDate = allDates.length > 0 ? allDates[allDates.length - 1] : "";
   const daysSinceLastInput = lastDate
     ? daysBetween(lastDate, params.today)
@@ -473,10 +499,16 @@ export async function GET(request: NextRequest) {
     let noteRows: any[] = [];
     let noteReadRows: any[] = [];
     let sheetFoodRows: any[] = [];
+    let pointRows: any[] = [];
 
     if (participantIds.length > 0) {
-      const [activityResult, foodResult, clinicalResult, noteResult] =
-        await Promise.all([
+      const [
+        activityResult,
+        foodResult,
+        clinicalResult,
+        noteResult,
+        pointResult,
+      ] = await Promise.all([
           supabase
             .from("wellness_activity_logs")
             .select("*")
@@ -500,6 +532,14 @@ export async function GET(request: NextRequest) {
             .in("participant_id", participantIds)
             .order("created_at", { ascending: false })
             .limit(3000),
+          supabase
+            .from("wellness_point_logs")
+            .select(
+              "id,participant_id,log_date,point_key,source_type,source_id,description,status,points",
+            )
+            .in("participant_id", participantIds)
+            .order("log_date", { ascending: false })
+            .limit(20000),
         ]);
 
       activityRows = filterActivityRowsByFitnessSource(
@@ -509,6 +549,7 @@ export async function GET(request: NextRequest) {
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
       noteRows = noteResult.data || [];
+      pointRows = pointResult.error ? [] : pointResult.data || [];
 
       const noteIds = noteRows
         .map((note: any) => asNumber(note.id))
@@ -572,6 +613,30 @@ export async function GET(request: NextRequest) {
         : foodRows.filter(
             (item) => asNumber(item.participant_id) === id,
           );
+      const nutritionPointInputs = [
+        ...new Map(
+          pointRows
+            .filter(
+              (item) =>
+                asNumber(item.participant_id) === id &&
+                isNutritionInputPoint(item),
+            )
+            .map((item) => [nutritionPointIdentity(item), item]),
+        ).values(),
+      ];
+      const nutritionPointDates = nutritionPointInputs
+        .map(pointLogDate)
+        .filter(Boolean);
+      const recentNutritionDates = nutritionPointDates.filter(
+        (date) => date >= fromDate && date <= today,
+      );
+      const foodDates = foods.map(foodDate).filter(Boolean);
+      const nutritionDates = [
+        ...new Set([...foodDates, ...recentNutritionDates]),
+      ];
+      const nutritionHistoryDates = [
+        ...new Set([...foodDates, ...nutritionPointDates]),
+      ];
       const participantNotes = noteRows.filter(
         (note) => asNumber(note.participant_id) === id,
       );
@@ -585,12 +650,16 @@ export async function GET(request: NextRequest) {
       );
       const todayActs = acts.filter((item) => activityDate(item) === today);
       const todayFoods = foods.filter((item) => foodDate(item) === today);
+      const todayNutritionPointCount = nutritionPointInputs.filter(
+        (item) => pointLogDate(item) === today,
+      ).length;
       const latestNoteReadAt = latestNote
         ? readMap.get(`${asNumber(latestNote.id)}:${id}`) || null
         : null;
       const flag = makeFlag({
         today,
-        nutritionDates: foods.map(foodDate),
+        nutritionDates,
+        nutritionHistoryDates,
         workoutDates: acts
           .filter(
             (item) => activitySteps(item) > 0 || activityCalories(item) > 0,
@@ -630,7 +699,10 @@ export async function GET(request: NextRequest) {
             0,
           ),
           activity_count: todayActs.length,
-          nutrition_count: todayFoods.length,
+          nutrition_count: Math.max(
+            todayFoods.length,
+            todayNutritionPointCount,
+          ),
         },
         compliance: flag,
         flag: flag.level,
