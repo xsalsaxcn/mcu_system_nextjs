@@ -10,9 +10,24 @@ import {
 } from "@/lib/wellness/googleSheetResponses";
 import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules";
 import {
+  resolveWellnessPointBreakdown,
+  wellnessPointCategory,
+} from "@/lib/wellness/pointLedger";
+import {
+  healthtalkPointsFromRow,
+  nutritionDailyBonusPoints,
+  participantNutritionCalorieLimit,
+  participantWorkoutCalorieTarget,
+  workoutDailyPoints,
+} from "@/lib/wellness/pointRules";
+import {
   getAllowedWellnessParticipants,
   latestByDate,
 } from "@/app/api/wellness/_utils";
+import {
+  filterActivityRowsByFitnessSource,
+  loadParticipantControlMap,
+} from "@/lib/wellness/participantControls";
 
 // WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_HEALTHTALK_V413
 // Dashboard admin reads Nutrition + Health Talk from existing Google Sheet Form Responses.
@@ -24,7 +39,7 @@ import {
 // - Google Sheet-only supported.
 // - Online / Daring = +10.
 // - Offline / Luring + evidence = +20.
-// - Offline / Luring without evidence = 0.
+// - Online OR any submission without evidence = +10.
 // - Google Sheet is source of truth when available.
 // Supabase logs remain supported for backward compatibility.
 
@@ -249,75 +264,12 @@ function getFoodCalories(row: any) {
   );
 }
 
-function getNutritionPoint(row: any) {
-  const raw = row?.raw_payload || {};
-
-  const explicitPoint = pickNumber(
-    row?.points,
-    row?.point,
-    row?.total_points,
-    raw?.["Total Point"],
-    raw?.points,
-    raw?.point,
-    raw?.total_points
-  );
-
-  return explicitPoint !== null ? explicitPoint : 5;
+function getNutritionPoint(_row: any) {
+  return 5;
 }
 
 function getHealthtalkPoint(row: any) {
-  const raw = row?.raw_payload || {};
-
-  const explicitPoint = pickNumber(
-    row?.points,
-    row?.point,
-    row?.total_points,
-    raw?.["Total Point"],
-    raw?.points,
-    raw?.point,
-    raw?.total_points
-  );
-
-  if (explicitPoint !== null) return explicitPoint;
-
-  const typeText = String(
-    row?.healthtalk_type ||
-      row?.attendance_type ||
-      row?.type ||
-      raw?.["Jenis Healthtalk"] ||
-      raw?.healthtalk_type ||
-      ""
-  ).toLowerCase();
-
-  const evidenceUrl = String(
-    row?.evidence_url ||
-      row?.evidence_preview_url ||
-      row?.google_drive_url ||
-      row?.google_drive_preview_url ||
-      raw?.["Bukti Healthtalk"] ||
-      raw?.["Preview Bukti Healthtalk"] ||
-      ""
-  ).trim();
-
-  if (
-    typeText.includes("offline") ||
-    typeText.includes("luring") ||
-    typeText.includes("onsite") ||
-    typeText.includes("tatap muka")
-  ) {
-    return evidenceUrl ? 20 : 0;
-  }
-
-  if (
-    typeText.includes("online") ||
-    typeText.includes("daring") ||
-    typeText.includes("webinar") ||
-    typeText.includes("zoom")
-  ) {
-    return 10;
-  }
-
-  return 0;
+  return healthtalkPointsFromRow(row);
 }
 
 function mergeUniqueRows(...lists: any[][]) {
@@ -1236,7 +1188,7 @@ export async function GET(req: NextRequest) {
     if (activityRes.error) throw activityRes.error;
 
     const googleSheetResult = await fetchWellnessGoogleSheetRows({
-      limit: 3000,
+      limit: 30000,
     }).catch((error) => ({
       ok: false,
       rows: [],
@@ -1267,9 +1219,18 @@ export async function GET(req: NextRequest) {
     const googleSheetHealthtalkGrouped =
       groupFoodRowsByParticipantOrCode(googleSheetHealthtalkRows);
 
+    const participantControlMap = await loadParticipantControlMap(
+      supabase,
+      participantIds,
+    );
+    const selectedActivityRows = filterActivityRowsByFitnessSource(
+      activityRes.data || [],
+      participantControlMap,
+    );
+
     const weightsByParticipant = groupByParticipant(weightRes.data || []);
     const foodsByParticipant = groupByParticipant(foodRes.data || []);
-    const activitiesByParticipant = groupByParticipant(activityRes.data || []);
+    const activitiesByParticipant = groupByParticipant(selectedActivityRows);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
 
     const combinedHistoryRows = mergeUniqueRows(
@@ -1515,39 +1476,108 @@ export async function GET(req: NextRequest) {
         weight_kg: currentWeight,
       };
 
-      const sheetFoodPoints = foodRows
-        .filter((row: any) => row.source === "google_sheet")
-        .reduce((sum: number, row: any) => sum + getNutritionPoint(row), 0);
+      const nutritionTarget = participantNutritionCalorieLimit(participant);
+      const workoutTarget = participantWorkoutCalorieTarget(participant) || 300;
 
-      const sheetHealthtalkPoints = healthtalkParticipantRows
-        .filter((row: any) => row.source === "google_sheet")
-        .reduce((sum: number, row: any) => sum + getHealthtalkPoint(row), 0);
+      const nutritionByDate = new Map<
+        string,
+        { count: number; calories: number }
+      >();
+      for (const row of foodRows) {
+        const date = String(row?.log_date || row?.created_at || "").slice(0, 10);
+        if (!date) continue;
+        const bucket = nutritionByDate.get(date) || { count: 0, calories: 0 };
+        bucket.count += 1;
+        bucket.calories += Number(getFoodCalories(row) || 0);
+        nutritionByDate.set(date, bucket);
+      }
 
-      const totalPoints =
-        Math.round(
-          (pointParticipantRows.reduce(
-            (sum: number, row: any) => sum + Number(row.points || 0),
-            0
-          ) +
-            sheetFoodPoints +
-            sheetHealthtalkPoints) *
-            10
-        ) / 10;
+      let nutritionPoints = 0;
+      const nutritionPointRows: any[] = [];
+      for (const [date, bucket] of nutritionByDate.entries()) {
+        const inputPoints = bucket.count * 5;
+        const bonusPoints = nutritionDailyBonusPoints({
+          totalCalories: bucket.calories,
+          calorieLimit: nutritionTarget,
+          hasNutritionInput: bucket.count > 0,
+        });
+        nutritionPoints += inputPoints + bonusPoints;
+        if (inputPoints > 0) {
+          nutritionPointRows.push({ log_date: date, points: inputPoints });
+        }
+        if (bonusPoints > 0) {
+          nutritionPointRows.push({ log_date: date, points: bonusPoints });
+        }
+      }
+
+      const workoutByDate = new Map<
+        string,
+        { calories: number; hasActivity: boolean }
+      >();
+      for (const row of activityRows) {
+        const date = getActivityDate(row);
+        if (!date) continue;
+        const bucket = workoutByDate.get(date) || {
+          calories: 0,
+          hasActivity: false,
+        };
+        bucket.calories += Number(estimateCalories(row, participantForCalc) || 0);
+        bucket.hasActivity =
+          bucket.hasActivity ||
+          Number(estimateCalories(row, participantForCalc) || 0) > 0 ||
+          Number(getActivityDuration(row) || 0) > 0;
+        workoutByDate.set(date, bucket);
+      }
+
+      let workoutPoints = 0;
+      const workoutPointRows: any[] = [];
+      for (const [date, bucket] of workoutByDate.entries()) {
+        const points = workoutDailyPoints({
+          calories: bucket.calories,
+          calorieTarget: workoutTarget,
+          hasActivity: bucket.hasActivity,
+        });
+        workoutPoints += points;
+        if (points > 0) workoutPointRows.push({ log_date: date, points });
+      }
+
+      const healthtalkPoints = healthtalkParticipantRows.reduce(
+        (sum: number, row: any) => sum + getHealthtalkPoint(row),
+        0,
+      );
+      const healthtalkPointRows = healthtalkParticipantRows.map((row: any) => ({
+        log_date: row.event_date || row.log_date || row.created_at,
+        points: getHealthtalkPoint(row),
+      }));
+      const otherPointRows = pointParticipantRows.filter(
+        (row: any) => wellnessPointCategory(row) === "other",
+      );
+      const otherPoints = otherPointRows.reduce(
+        (sum: number, row: any) => sum + Number(row?.points || 0),
+        0,
+      );
+
+      const pointLedger = resolveWellnessPointBreakdown({
+        ledgerRows: pointParticipantRows,
+        calculated: {
+          nutrition: nutritionPoints,
+          workout: workoutPoints,
+          healthtalk: healthtalkPoints,
+          other: otherPoints,
+        },
+        preferCalculated: {
+          nutrition: true,
+          workout: true,
+          healthtalk: true,
+        },
+      });
+      const totalPoints = Math.round(pointLedger.total * 10) / 10;
 
       const pointRowsForChart = [
-        ...pointParticipantRows,
-        ...foodRows
-          .filter((row: any) => row.source === "google_sheet")
-          .map((row: any) => ({
-            log_date: row.log_date,
-            points: getNutritionPoint(row),
-          })),
-        ...healthtalkParticipantRows
-          .filter((row: any) => row.source === "google_sheet")
-          .map((row: any) => ({
-            log_date: row.event_date || row.log_date,
-            points: getHealthtalkPoint(row),
-          })),
+        ...nutritionPointRows,
+        ...workoutPointRows,
+        ...healthtalkPointRows,
+        ...otherPointRows,
       ];
 
       const parameterCharts = buildParticipantCharts({
@@ -1674,6 +1704,14 @@ export async function GET(req: NextRequest) {
         activity_summary: activitySummary,
         activity_history: activitySummary,
         total_points: totalPoints,
+        nutrition_points: pointLedger.nutrition,
+        workout_points: pointLedger.workout,
+        healthtalk_points: pointLedger.healthtalk,
+        other_points: pointLedger.other,
+        point_source: pointLedger.source,
+        point_ledger_rows: pointLedger.ledger_row_count,
+        nutrition_target_calories: nutritionTarget,
+        workout_target_calories: workoutTarget,
         evidence_count: evidenceGallery.length,
         pending_evidence_count: pendingEvidence,
         latest_evidence_date:

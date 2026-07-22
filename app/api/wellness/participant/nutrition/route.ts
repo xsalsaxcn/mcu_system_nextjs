@@ -1,16 +1,30 @@
-﻿// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
+// WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
 // Nutrition submission is stored ONLY in existing Google Sheet + Google Drive.
 // V402:
 // - support comma-separated foods
 // - each food item is matched to wellness_food_calories
 // - total calories = sum of all matched items
 // - Detected Foods contains item-by-item breakdown
-// - Supabase is used only for participant session and master calorie lookup.
-// - No insert into wellness_food_logs.
+// - Supabase is used for participant session, calorie master, and point ledger.
+// - No insert into wellness_food_logs; source submission remains Google Sheet.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import {
+  fetchWellnessGoogleSheetRows,
+  googleSheetRowsToFoodLogs,
+} from "@/lib/wellness/googleSheetResponses";
+import {
+  nutritionDailyBonusPoints,
+  nutritionInputPoints,
+  pointNumber,
+} from "@/lib/wellness/pointRules";
+import {
+  insertPointOnce,
+  resolveParticipantPointTargets,
+  setDailyPoint,
+} from "@/lib/wellness/pointWriter";
 
 // PORTION_SCOPE_FALLBACK_V24
 // Fallback untuk helper function lama yang berada di luar scope POST.
@@ -783,19 +797,139 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
       google_sheet: sheetResult || null,
     };
 
+    const inputPointValue = nutritionInputPoints();
+    const sheetRowNumber = pointNumber(
+      sheetResult?.rowNumber || sheetResult?.row_number || sheetResult?._rowNumber,
+    );
+    const inputPointResult = await insertPointOnce({
+      supabase,
+      participant,
+      logDate,
+      pointKey: `nutrition_input_sheet_${sheetRowNumber || Date.now()}`,
+      sourceType: "nutrition_google_sheet",
+      sourceId: sheetRowNumber || null,
+      points: inputPointValue,
+      description: `Input nutrisi: ${foodName}`,
+    });
+
+    let nutritionBonusResult: any = {
+      ok: true,
+      points: 0,
+      delta: 0,
+      totalCalories: calorieResult.total_calories || 0,
+      calorieLimit: 0,
+      warning: "",
+    };
+
+    try {
+      const targets = await resolveParticipantPointTargets(supabase, participant);
+      const sheetRead = await fetchWellnessGoogleSheetRows({
+        participantId: participant.id,
+        code: participant.code,
+        logType: "nutrition",
+        limit: 10000,
+      });
+
+      const rows = googleSheetRowsToFoodLogs(sheetRead?.rows || []).filter(
+        (row: any) => {
+          const sameParticipant =
+            pointNumber(row?.participant_id) === pointNumber(participant.id) ||
+            (clean(participant.code) &&
+              clean(row?.participant_code) === clean(participant.code));
+          return sameParticipant && clean(row?.log_date).slice(0, 10) === logDate;
+        },
+      );
+
+      const rowMap = new Map<string, any>();
+      for (const row of [...rows, returnedLog] as any[]) {
+        const rowNumber = pointNumber(
+          row?.google_sheet_row_number || row?.raw_payload?._rowNumber,
+        );
+        const key = rowNumber
+          ? `sheet-row:${rowNumber}`
+          : clean(row?.id) ||
+            JSON.stringify([
+              row?.participant_id,
+              row?.log_date,
+              row?.meal_type,
+              row?.food_name,
+              row?.created_at,
+            ]);
+        rowMap.set(key, row);
+      }
+
+      const dailyRows = [...rowMap.values()];
+      const totalCalories = dailyRows.reduce(
+        (sum: number, row: any) =>
+          sum +
+          pointNumber(
+            row?.calories ??
+              row?.total_calories ??
+              row?.estimated_calories ??
+              row?.raw_payload?.["Kalori Makanan"],
+          ),
+        0,
+      );
+      const bonusPoints = nutritionDailyBonusPoints({
+        totalCalories,
+        calorieLimit: targets.nutrition,
+        hasNutritionInput: dailyRows.length > 0,
+      });
+
+      const savedBonus = await setDailyPoint({
+        supabase,
+        participant,
+        logDate,
+        pointKey: "nutrition_daily_bonus",
+        sourceType: "nutrition_daily_bonus",
+        sourceId: null,
+        points: bonusPoints,
+        description:
+          bonusPoints > 0
+            ? `Bonus nutrisi harian (${Math.round(totalCalories)}/${Math.round(targets.nutrition)} kkal)`
+            : `Batas kalori nutrisi harian terlampaui (${Math.round(totalCalories)}/${Math.round(targets.nutrition)} kkal)`,
+      });
+
+      nutritionBonusResult = {
+        ...savedBonus,
+        totalCalories,
+        calorieLimit: targets.nutrition,
+      };
+    } catch (bonusError: any) {
+      nutritionBonusResult = {
+        ok: false,
+        points: 0,
+        delta: 0,
+        totalCalories: calorieResult.total_calories || 0,
+        calorieLimit: 0,
+        warning: bonusError?.message || "Bonus nutrisi belum dapat dihitung.",
+      };
+    }
+
     const total = calorieResult.total_calories;
     const breakdownText = calorieResult.detected_foods_text;
+    const pointWarnings = [
+      inputPointResult.warning,
+      nutritionBonusResult.warning,
+    ].filter(Boolean);
+    const pointDelta =
+      (inputPointResult.inserted ? inputPointValue : 0) +
+      pointNumber(nutritionBonusResult.delta);
 
     return NextResponse.json({
       ok: true,
       mode: "google_sheet_only",
       message:
         total !== null
-          ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +5`
-          : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +5`,
+          ? `Berhasil masuk Google Sheet · Total ${total} kalori · Breakdown: ${breakdownText} · Point +${inputPointValue}${nutritionBonusResult.delta > 0 ? ` · Bonus +${nutritionBonusResult.delta}` : ""}`
+          : `Berhasil masuk Google Sheet · Kalori belum ditemukan di Master KaloriData · Breakdown: ${breakdownText} · Point +${inputPointValue}`,
       log: returnedLog,
       calories: total,
-      point: 5,
+      point: inputPointValue,
+      points_total_delta: pointDelta,
+      point_ledger: inputPointResult,
+      nutrition_daily_bonus: nutritionBonusResult,
+      point_warnings: pointWarnings,
       calorie_match_status: calorieResult.calorie_match_status,
       detected_foods_text: calorieResult.detected_foods_text,
       food_breakdown: calorieResult.breakdown,

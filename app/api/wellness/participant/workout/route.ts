@@ -17,6 +17,7 @@ import {
   safeLogDate,
   uploadEvidenceToDrive,
 } from "@/lib/wellness/googleSheetWebhook";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 export const runtime = "nodejs";
 
@@ -395,10 +396,20 @@ export async function POST(req: NextRequest) {
 
     if (error) throw error;
 
+    const workoutPoint = await reconcileWorkoutDailyPoint({
+      supabase,
+      participant,
+      logDate,
+      sourceId: data?.id || null,
+    });
+
     return NextResponse.json({
       ok: true,
-      message: `Workout berhasil disimpan ke Google Sheet. Kalori otomatis: ${calculated.calories} kkal.`,
+      message: `Workout berhasil disimpan ke Google Sheet. Kalori otomatis: ${calculated.calories} kkal. Point harian: +${workoutPoint.points || 0}.`,
       log: data,
+      points_total_delta: workoutPoint.delta || 0,
+      workout_point: workoutPoint,
+      point_warnings: workoutPoint.warning ? [workoutPoint.warning] : [],
       google_drive: evidenceResult,
       google_sheet: sheetResult,
     });

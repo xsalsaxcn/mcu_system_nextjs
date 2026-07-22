@@ -477,25 +477,33 @@ function buildActivityTrend(participants: any[] = []) {
 function buildPointBreakdown(participant: any) {
   const responses = safeResponses(participant);
 
-  const nutrition = responses
-    .filter(isNutrition)
-    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const nutrition =
+    toNumber(participant?.nutrition_points) ??
+    responses
+      .filter(isNutrition)
+      .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
 
-  const activity = responses
-    .filter(isActivity)
-    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const activity =
+    toNumber(participant?.workout_points) ??
+    responses
+      .filter(isActivity)
+      .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
 
-  const healthtalk = responses
-    .filter(isHealthtalk)
-    .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
+  const healthtalk =
+    toNumber(participant?.healthtalk_points) ??
+    responses
+      .filter(isHealthtalk)
+      .reduce((sum: number, item: any) => sum + (responsePoints(item) || 0), 0);
 
-  const total = toNumber(participant?.total_points) || nutrition + activity + healthtalk;
+  const total =
+    toNumber(participant?.total_points) ??
+    nutrition + activity + healthtalk + (toNumber(participant?.other_points) || 0);
 
   return {
-    nutrition,
-    activity,
-    healthtalk,
-    total,
+    nutrition: nutrition || 0,
+    activity: activity || 0,
+    healthtalk: healthtalk || 0,
+    total: total || 0,
   };
 }
 

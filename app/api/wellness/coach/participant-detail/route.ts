@@ -7,6 +7,12 @@ import {
 } from "@/lib/wellness/googleSheetResponses";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
+import {
+  healthtalkPointsFromRow,
+  nutritionDailyBonusPoints,
+  participantNutritionCalorieLimit,
+  workoutDailyPoints,
+} from "@/lib/wellness/pointRules";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -347,16 +353,7 @@ function foodCalories(row: any) {
 }
 
 function healthtalkPoint(row: any) {
-  const type = clean(
-    row?.healthtalk_type ||
-      row?.attendance_type ||
-      row?.participation_type ||
-      row?.type
-  ).toLowerCase();
-
-  if (/offline|luring|onsite|tatap muka/.test(type)) return 10;
-  if (/online|daring|webinar|zoom/.test(type)) return 5;
-  return 0;
+  return healthtalkPointsFromRow(row);
 }
 
 function parseTargetsFromNote(note: any) {
@@ -369,8 +366,23 @@ function parseTargetsFromNote(note: any) {
     return match ? asNumber(String(match[1]).replace(",", ".")) : 0;
   };
   return {
+    nutrition_max_calories: find(/Target\s+Nutrisi\s*:\s*([0-9.,]+)/i),
     workout_min_calories: find(/Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i),
   };
+}
+
+function nutritionTargetForParticipant(participant: any, notes: any[]) {
+  const direct = participantNutritionCalorieLimit(participant);
+  if (direct > 0) return direct;
+
+  for (const note of notes || []) {
+    const parsed = parseTargetsFromNote(note);
+    if (parsed.nutrition_max_calories > 0) {
+      return parsed.nutrition_max_calories;
+    }
+  }
+
+  return 0;
 }
 
 function workoutTargetForParticipant(participant: any, notes: any[]) {
@@ -505,7 +517,8 @@ export async function GET(request: NextRequest) {
     const mergedHealthtalkRows = mergeRows(healthtalkRows, sheetHealthtalkRows);
     const clinicalAll = mergeRows(clinicalRows, historyById, historyByCode, miniMcuRows);
 
-    const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes);
+    const nutritionTargetCalories = nutritionTargetForParticipant(participant, targetNotes);
+    const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes) || 300;
     const dailyPoints = new Map<string, number>();
 
     const nutritionRowsByDate = rowsByDate(
@@ -514,8 +527,17 @@ export async function GET(request: NextRequest) {
     );
     let nutritionPoints = 0;
     for (const [date, rows] of nutritionRowsByDate.entries()) {
-      const mealCount = nutritionMealCount(rows);
-      const points = mealCount >= 3 ? 10 : mealCount > 0 ? 5 : 0;
+      const inputPoints = rows.length * 5;
+      const totalCalories = rows.reduce(
+        (sum, row) => sum + foodCalories(row),
+        0,
+      );
+      const bonusPoints = nutritionDailyBonusPoints({
+        totalCalories,
+        calorieLimit: nutritionTargetCalories,
+        hasNutritionInput: rows.length > 0,
+      });
+      const points = inputPoints + bonusPoints;
       nutritionPoints += points;
       addDailyPoint(dailyPoints, date, points);
     }
@@ -527,12 +549,16 @@ export async function GET(request: NextRequest) {
     let activityPoints = 0;
     for (const [date, rows] of workoutRowsByDate.entries()) {
       const calories = rows.reduce((sum, row) => sum + activityCalories(row), 0);
-      const points =
-        calories <= 0
-          ? 0
-          : workoutTargetCalories > 0 && calories >= workoutTargetCalories
-            ? 10
-            : 5;
+      const points = workoutDailyPoints({
+        calories,
+        calorieTarget: workoutTargetCalories,
+        hasActivity: rows.some(
+          (row) =>
+            activityCalories(row) > 0 ||
+            activitySteps(row) > 0 ||
+            asNumber(row?.duration_minutes) > 0,
+        ),
+      });
       activityPoints += points;
       addDailyPoint(dailyPoints, date, points);
     }
@@ -564,6 +590,11 @@ export async function GET(request: NextRequest) {
         workout: activityPoints,
         healthtalk: healthtalkPoints,
         other: otherPoints,
+      },
+      preferCalculated: {
+        nutrition: true,
+        workout: true,
+        healthtalk: true,
       },
     });
     const pointBreakdown = {
@@ -653,14 +684,14 @@ export async function GET(request: NextRequest) {
         point_source: resolvedPointLedger.source,
         point_ledger_rows: resolvedPointLedger.ledger_row_count,
       point_rules: {
-        nutrition_full_meals: 3,
-        nutrition_full_points: 10,
-        nutrition_partial_points: 5,
+        nutrition_input_points: 5,
+        nutrition_daily_bonus_points: 10,
+        nutrition_target_calories: nutritionTargetCalories,
         workout_target_calories: workoutTargetCalories,
         workout_target_points: 10,
         workout_partial_points: 5,
-        healthtalk_offline_points: 10,
-        healthtalk_online_points: 5,
+        healthtalk_offline_with_evidence_points: 20,
+        healthtalk_online_or_without_evidence_points: 10,
       },
       charts,
       streak,

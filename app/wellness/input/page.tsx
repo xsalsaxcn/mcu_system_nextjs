@@ -639,12 +639,12 @@ function WellnessInput() {
           <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-lg font-black text-slate-950">Panduan Point</div>
             <div className="mt-4 space-y-3 text-sm font-bold text-slate-600">
-              <div className="flex justify-between gap-3"><span>Nutrisi lengkap</span><b>+5</b></div>
-              <div className="flex justify-between gap-3"><span>BB / lingkar perut</span><b>+5</b></div>
-              <div className="flex justify-between gap-3"><span>Aktivitas &ge; 30 menit</span><b>+10</b></div>
-              <div className="flex justify-between gap-3"><span>Bukti aktivitas</span><b>+5</b></div>
-              <div className="flex justify-between gap-3"><span>Healthtalk online</span><b>+10</b></div>
-              <div className="flex justify-between gap-3"><span>Healthtalk offline</span><b>+15</b></div>
+              <div className="flex justify-between gap-3"><span>Setiap input nutrisi</span><b>+5</b></div>
+              <div className="flex justify-between gap-3"><span>Bonus kalori harian sesuai batas</span><b>+10</b></div>
+              <div className="flex justify-between gap-3"><span>Workout target tercapai</span><b>+10</b></div>
+              <div className="flex justify-between gap-3"><span>Workout belum mencapai target</span><b>+5</b></div>
+              <div className="flex justify-between gap-3"><span>Health Talk online / tanpa bukti</span><b>+10</b></div>
+              <div className="flex justify-between gap-3"><span>Health Talk offline + bukti</span><b>+20</b></div>
             </div>
           </div>
 

@@ -1,7 +1,7 @@
 // WELLNESS_POINT_LEDGER_SOURCE_OF_TRUTH_V79G
-// wellness_point_logs is the canonical ledger when a category has ledger rows.
-// Calculated values are used only as a fallback for older/direct-import data
-// that has no point ledger rows for that category.
+// Event categories can be recalculated from their actual source data to avoid
+// partial-ledger suppression and double counting. Ledger remains canonical for
+// categories that are not explicitly configured as source-derived.
 
 export type WellnessPointBreakdown = {
   nutrition: number;
@@ -37,11 +37,13 @@ export function wellnessPointCategory(row: any) {
 export function resolveWellnessPointBreakdown(params: {
   ledgerRows?: any[];
   calculated?: Partial<Record<"nutrition" | "workout" | "healthtalk" | "other", number>>;
+  preferCalculated?: Partial<Record<"nutrition" | "workout" | "healthtalk" | "other", boolean>>;
 }): WellnessPointBreakdown {
   const rows = (params.ledgerRows || []).filter(
     (row: any) => numberValue(row?.points) !== 0,
   );
   const calculated = params.calculated || {};
+  const preferCalculated = params.preferCalculated || {};
   const sums = { nutrition: 0, workout: 0, healthtalk: 0, other: 0 };
   const counts = { nutrition: 0, workout: 0, healthtalk: 0, other: 0 };
 
@@ -56,7 +58,15 @@ export function resolveWellnessPointBreakdown(params: {
   let fallbackCount = 0;
 
   for (const category of categories) {
-    if (counts[category] > 0) {
+    const calculatedWasProvided = Object.prototype.hasOwnProperty.call(
+      calculated,
+      category,
+    );
+
+    if (preferCalculated[category] && calculatedWasProvided) {
+      resolved[category] = numberValue(calculated[category]);
+      if (counts[category] > 0) fallbackCount += 1;
+    } else if (counts[category] > 0) {
       resolved[category] = sums[category];
     } else {
       resolved[category] = numberValue(calculated[category]);

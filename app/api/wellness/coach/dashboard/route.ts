@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import {
+  fetchWellnessGoogleSheetRows,
+  googleSheetRowsToFoodLogs,
+} from "@/lib/wellness/googleSheetResponses";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -197,6 +201,28 @@ function foodCalories(row: any) {
   return asNumber(
     row?.calories || row?.total_calories || row?.estimated_calories,
   );
+}
+
+function foodRowKey(row: any) {
+  const raw = row?.raw_payload || {};
+  return [
+    clean(row?.id || raw?._rowNumber),
+    clean(row?.participant_id || row?.participant_code),
+    foodDate(row),
+    clean(row?.log_time || row?.created_at),
+    clean(row?.meal_type || row?.meal_time),
+    clean(row?.food_name || row?.meal_text),
+    String(foodCalories(row)),
+  ].join("|");
+}
+
+function dedupeFoodRows(rows: any[] = []) {
+  const unique = new Map<string, any>();
+  for (const row of rows) {
+    const key = foodRowKey(row);
+    if (!unique.has(key)) unique.set(key, row);
+  }
+  return [...unique.values()];
 }
 
 function latestClinicalFor(participantId: number, clinicalRows: any[]) {
@@ -446,6 +472,7 @@ export async function GET(request: NextRequest) {
     let clinicalRows: any[] = [];
     let noteRows: any[] = [];
     let noteReadRows: any[] = [];
+    let sheetFoodRows: any[] = [];
 
     if (participantIds.length > 0) {
       const [activityResult, foodResult, clinicalResult, noteResult] =
@@ -494,6 +521,19 @@ export async function GET(request: NextRequest) {
           .limit(5000);
         if (!reads.error) noteReadRows = reads.data || [];
       }
+
+      const participantCodes = participants
+        .map(participantCode)
+        .filter((value) => value && value !== "-");
+      const sheetResult = await fetchWellnessGoogleSheetRows({
+        limit: 10000,
+      }).catch(() => ({ ok: false, rows: [] as any[] }));
+
+      sheetFoodRows = googleSheetRowsToFoodLogs(sheetResult.rows || []).filter(
+        (item: any) =>
+          participantIds.includes(asNumber(item.participant_id)) ||
+          participantCodes.includes(clean(item.participant_code)),
+      );
     }
 
     const readMap = new Map(
@@ -519,9 +559,19 @@ export async function GET(request: NextRequest) {
       const acts = activityRows.filter(
         (item) => asNumber(item.participant_id) === id,
       );
-      const foods = foodRows.filter(
-        (item) => asNumber(item.participant_id) === id,
-      );
+      const code = participantCode(row);
+      const sheetFoods = dedupeFoodRows(
+        sheetFoodRows.filter(
+          (item) =>
+            asNumber(item.participant_id) === id ||
+            (code !== "-" && clean(item.participant_code) === code),
+        ),
+      ).filter((item) => foodDate(item) >= fromDate);
+      const foods = sheetFoods.length
+        ? sheetFoods
+        : foodRows.filter(
+            (item) => asNumber(item.participant_id) === id,
+          );
       const participantNotes = noteRows.filter(
         (note) => asNumber(note.participant_id) === id,
       );

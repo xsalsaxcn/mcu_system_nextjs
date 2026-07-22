@@ -693,7 +693,7 @@ export default function WellnessParticipantPortalPage() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(
-    "Masuk menggunakan Kode Karyawan. Lengkapi username, email, dan nomor HP untuk aktivasi portal peserta.",
+    "Gunakan Kode Karyawan dan email terdaftar untuk menerima OTP dan masuk ke portal peserta.",
   );
   const [form, setForm] = useState({
     code: "",
@@ -716,6 +716,11 @@ export default function WellnessParticipantPortalPage() {
   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
   const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
+  const [pointSummary, setPointSummary] = useState<any>({
+    total_points: 0,
+    point_breakdown: {},
+    healthtalk_count: 0,
+  });
   const [syncing, setSyncing] = useState("");
   const [
     nativeGoogleFitAvailable,
@@ -775,6 +780,21 @@ export default function WellnessParticipantPortalPage() {
     if (result.ok) {
       setHealthtalkLogs(result.logs || []);
     }
+  }
+
+  async function loadPoints() {
+    const result = await fetch(
+      `/api/wellness/participant/points?t=${Date.now()}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch(() => ({ ok: false }));
+
+    if (result.ok) {
+      setPointSummary(result);
+    }
+
+    return result;
   }
 
   async function loadMe(options?: { keepMessage?: boolean }) {
@@ -867,7 +887,7 @@ export default function WellnessParticipantPortalPage() {
         );
       }
 
-      await Promise.all([loadNutrition(), loadHealthtalk()]);
+      await Promise.all([loadNutrition(), loadHealthtalk(), loadPoints()]);
     } else {
       setMessage(result.message || "Session Wellness belum aktif.");
       if (/dinonaktifkan|session|otp/i.test(clean(result.message))) {
@@ -1183,6 +1203,7 @@ export default function WellnessParticipantPortalPage() {
     setClinicalHistory([]);
     setNutritionLogs([]);
     setHealthtalkLogs([]);
+    setPointSummary({ total_points: 0, point_breakdown: {}, healthtalk_count: 0 });
     setStep("request");
     setActiveTab("home");
     setMessage("Session peserta keluar. Masuk ulang dengan OTP.");
@@ -1318,6 +1339,7 @@ export default function WellnessParticipantPortalPage() {
       }));
 
       setNutritionPhoto(null);
+      await loadPoints();
       return { ok: true, message: successMessage };
     }
 
@@ -1416,7 +1438,7 @@ export default function WellnessParticipantPortalPage() {
         notes: "",
       }));
       setHealthtalkEvidence(null);
-      await loadHealthtalk();
+      await Promise.all([loadHealthtalk(), loadPoints()]);
       setActiveTab("history");
     } else {
       setMessage(
@@ -1543,119 +1565,218 @@ export default function WellnessParticipantPortalPage() {
 
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
         {step !== "portal" ? (
-          <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-black">Login Peserta</h2>
+          loading ? (
+            <section className="relative mx-auto flex min-h-[calc(100vh-9rem)] max-w-xl items-center justify-center py-6 md:py-10">
+              {/* WELLNESS_AUTH_UI_UX_V88 */}
+              <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2.5rem]">
+                <div className="absolute -left-24 top-12 h-56 w-56 rounded-full bg-cyan-100/55 blur-3xl" />
+                <div className="absolute -right-20 bottom-8 h-64 w-64 rounded-full bg-teal-100/60 blur-3xl" />
+              </div>
 
-              <p className="mt-1 text-sm font-bold text-slate-500">
-                Masuk menggunakan Kode Karyawan dan email terdaftar.
-                Belum memiliki akun? Silakan Sign Up.
-              </p>
-
-              <PortalLoginStatusNoticeV43
-                message={message}
-                isWarning={isWarningMessage}
-                step={step}
-              />
-
-              <div className="mt-5 grid gap-4">
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Kode Karyawan
-                  <input
-                    className={fieldClass}
-                    value={form.code}
-                    onChange={(e) => setValue("code", e.target.value)}
-                    placeholder="Contoh: 278"
+              <div className="relative z-10 w-full">
+                <div className="mb-6 text-center">
+                  <img
+                    src="/wellness-pwa/icon-192.png"
+                    alt="Harmony Health"
+                    className="mx-auto h-20 w-20 rounded-[1.6rem] shadow-xl shadow-blue-950/10"
                   />
-                </label>
-
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  Email
-                  <input
-                    type="email"
-                    className={fieldClass}
-                    value={form.email}
-                    onChange={(e) => setValue("email", e.target.value)}
-                    placeholder="nama@email.com"
-                  />
-                </label>
-
-                {step === "verify" ? (
-                  <label className="grid gap-2 text-sm font-bold text-slate-700">
-                    OTP
-                    <input
-                      className={fieldClass}
-                      value={form.otp}
-                      onChange={(e) => setValue("otp", e.target.value)}
-                      placeholder="6 digit OTP"
-                    />
-                  </label>
-                ) : null}
-
-                {step === "request" ? (
-  <div className="grid gap-4">
-
-    <button
-      type="button"
-      onClick={requestOtp}
-      className="rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-100"
-    >
-      Kirim OTP
-    </button>
-
-    <div className="text-center text-sm text-slate-500">
-      Belum punya akun?
-      <Link
-        href="/wellness/signup"
-        className="ml-2 font-bold text-blue-600"
-      >
-        Sign Up
-      </Link>
-    </div>
-
-  </div>
-) : (
-                  <div className="grid gap-3">
-                    <button
-                      type="button"
-                      onClick={verifyOtp}
-                      className="rounded-2xl bg-emerald-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-emerald-100"
-                    >
-                      Verifikasi OTP & Masuk
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={requestOtp}
-                      className="rounded-2xl bg-slate-100 px-5 py-3 text-xs font-black text-slate-700"
-                    >
-                      Kirim Ulang OTP
-                    </button>
+                  <div className="mt-4 text-2xl font-black tracking-tight text-slate-950">
+                    Harmony Health
                   </div>
-                )}
-              </div>
-            </div>
+                  <div className="mt-1 text-xs font-black uppercase tracking-[0.2em] text-teal-600">
+                    Wellness Participant Portal
+                  </div>
+                </div>
 
-            <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-black">Akses Peserta</h2>
+                <div className="rounded-[2.25rem] border border-white/80 bg-white/95 px-6 py-10 text-center shadow-2xl shadow-slate-200/70 backdrop-blur md:px-10 md:py-12">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-cyan-50 to-teal-100 text-teal-700 shadow-inner">
+                    <svg viewBox="0 0 24 24" className="h-10 w-10" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 3.75H7.5A1.5 1.5 0 0 0 6 5.25v13.5a1.5 1.5 0 0 0 1.5 1.5H15" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m13 8 4 4-4 4M9 12h8" />
+                    </svg>
+                  </div>
 
-              <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-600">
-                <p>Portal ini khusus peserta program wellness.</p>
-                <p>
-                  Setelah masuk, peserta dapat input nutrisi harian dan workout
-                  manual.
-                </p>
-                <p>
-                  Peserta juga bisa menghubungkan Google Fit dan Health Connect
-                  untuk sinkronisasi aktivitas.
-                </p>
-                <p className="rounded-2xl bg-blue-50 p-3 text-blue-900">
-                  Kalori nutrisi dan workout dihitung otomatis dari master data,
-                  sehingga peserta tidak perlu mengisi angka kalori manual.
-                </p>
+                  <h1 className="mt-7 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+                    Sedang membuka Portal
+                  </h1>
+                  <p className="mx-auto mt-3 max-w-md text-sm font-semibold leading-6 text-slate-500 md:text-base">
+                    Mohon tunggu sebentar, kami sedang menyiapkan data dan progress Anda.
+                  </p>
+
+                  <div className="mx-auto mt-8 h-12 w-12 animate-spin rounded-full border-4 border-teal-100 border-t-teal-600" aria-label="Memuat portal" />
+
+                  <div className="mt-8 flex items-center justify-center gap-3 text-xs font-bold text-slate-400">
+                    <span className="h-px w-14 bg-slate-200" />
+                    <svg viewBox="0 0 24 24" className="h-5 w-5 text-teal-500" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 5.5 6v5.2c0 4.1 2.7 7.9 6.5 9.1 3.8-1.2 6.5-5 6.5-9.1V6L12 3Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m9.5 12 1.6 1.6 3.5-3.7" />
+                    </svg>
+                    <span className="h-px w-14 bg-slate-200" />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-slate-500">
+                    Anda akan masuk otomatis.
+                  </p>
+                </div>
               </div>
-            </aside>
-          </section>
+            </section>
+          ) : (
+            <section className="relative mx-auto max-w-xl py-6 md:py-10">
+              <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2.5rem]">
+                <div className="absolute -left-24 top-10 h-56 w-56 rounded-full bg-cyan-100/55 blur-3xl" />
+                <div className="absolute -right-20 bottom-6 h-64 w-64 rounded-full bg-teal-100/60 blur-3xl" />
+              </div>
+
+              <div className="relative z-10">
+                <div className="mb-6 text-center">
+                  <img
+                    src="/wellness-pwa/icon-192.png"
+                    alt="Harmony Health"
+                    className="mx-auto h-20 w-20 rounded-[1.6rem] shadow-xl shadow-blue-950/10"
+                  />
+                  <div className="mt-4 text-2xl font-black tracking-tight text-slate-950">
+                    Harmony Health
+                  </div>
+                  <div className="mt-1 text-xs font-black uppercase tracking-[0.2em] text-teal-600">
+                    Wellness Participant Portal
+                  </div>
+                </div>
+
+                <div className="rounded-[2.25rem] border border-white/80 bg-white/95 p-6 shadow-2xl shadow-slate-200/70 backdrop-blur md:p-8">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-50 to-teal-100 text-teal-700">
+                      <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 5.5 6v5.2c0 4.1 2.7 7.9 6.5 9.1 3.8-1.2 6.5-5 6.5-9.1V6L12 3Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 11.2V9.9a2.5 2.5 0 0 1 5 0v1.3M9 11.2h6v4.7H9z" />
+                      </svg>
+                    </div>
+                    <div className="min-w-0">
+                      <h1 className="text-3xl font-black tracking-tight text-slate-950">
+                        Login Peserta
+                      </h1>
+                      <p className="mt-1 text-sm font-semibold leading-6 text-slate-500">
+                        Masuk menggunakan Kode Karyawan dan email terdaftar.
+                      </p>
+                    </div>
+                  </div>
+
+                  <PortalLoginStatusNoticeV43
+                    message={message}
+                    isWarning={isWarningMessage}
+                    step={step}
+                  />
+
+                  <div className="mt-6 grid gap-5">
+                    <label className="grid gap-2 text-sm font-black text-slate-700">
+                      Kode Karyawan
+                      <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100">
+                        <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+                          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                            <circle cx="12" cy="8" r="3" />
+                            <path strokeLinecap="round" d="M5.5 20c.5-4 2.7-6 6.5-6s6 2 6.5 6" />
+                          </svg>
+                        </span>
+                        <input
+                          className="min-w-0 flex-1 bg-transparent py-4 text-sm font-bold text-slate-900 outline-none placeholder:text-slate-400"
+                          value={form.code}
+                          onChange={(e) => setValue("code", e.target.value)}
+                          placeholder="Contoh: 278"
+                        />
+                      </div>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-black text-slate-700">
+                      Email
+                      <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100">
+                        <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+                          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                            <rect x="3.5" y="5" width="17" height="14" rx="2" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m5 7 7 5 7-5" />
+                          </svg>
+                        </span>
+                        <input
+                          type="email"
+                          className="min-w-0 flex-1 bg-transparent py-4 text-sm font-bold text-slate-900 outline-none placeholder:text-slate-400"
+                          value={form.email}
+                          onChange={(e) => setValue("email", e.target.value)}
+                          placeholder="nama@email.com"
+                        />
+                      </div>
+                    </label>
+
+                    {step === "verify" ? (
+                      <label className="grid gap-2 text-sm font-black text-slate-700">
+                        Kode OTP
+                        <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100">
+                          <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-600">
+                            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                              <circle cx="8" cy="12" r="3" />
+                              <path strokeLinecap="round" d="M11 12h9M17 12v3M14 12v2" />
+                            </svg>
+                          </span>
+                          <input
+                            inputMode="numeric"
+                            className="min-w-0 flex-1 bg-transparent py-4 text-center text-lg font-black tracking-[0.25em] text-slate-900 outline-none placeholder:text-sm placeholder:font-bold placeholder:tracking-normal placeholder:text-slate-400"
+                            value={form.otp}
+                            onChange={(e) => setValue("otp", e.target.value)}
+                            placeholder="6 digit OTP"
+                          />
+                        </div>
+                      </label>
+                    ) : null}
+
+                    {step === "request" ? (
+                      <button
+                        type="button"
+                        onClick={requestOtp}
+                        className="mt-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-700 px-5 py-4 text-sm font-black text-white shadow-xl shadow-teal-100 transition hover:-translate-y-0.5 hover:shadow-2xl active:translate-y-0"
+                      >
+                        Kirim OTP
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m21 3-7.5 18-2.4-8.1L3 10.5 21 3Z" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <div className="grid gap-3">
+                        <button
+                          type="button"
+                          onClick={verifyOtp}
+                          className="mt-1 flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-700 px-5 py-4 text-sm font-black text-white shadow-xl shadow-teal-100 transition hover:-translate-y-0.5 hover:shadow-2xl active:translate-y-0"
+                        >
+                          Verifikasi OTP & Masuk
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={requestOtp}
+                          className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                        >
+                          Kirim Ulang OTP
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-7 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-slate-200" />
+                    <svg viewBox="0 0 24 24" className="h-5 w-5 text-teal-400" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 5.5 6v5.2c0 4.1 2.7 7.9 6.5 9.1 3.8-1.2 6.5-5 6.5-9.1V6L12 3Z" />
+                    </svg>
+                    <span className="h-px flex-1 bg-slate-200" />
+                  </div>
+
+                  <div className="mt-5 text-center text-sm font-semibold text-slate-500">
+                    Belum punya akun?
+                    <Link
+                      href="/wellness/signup"
+                      className="ml-2 font-black text-teal-700 transition hover:text-teal-900 hover:underline"
+                    >
+                      Sign Up
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )
         ) : (
           <div className="mt-6 space-y-6">
             {activeTab === "home" ? (
@@ -1670,6 +1791,7 @@ export default function WellnessParticipantPortalPage() {
                 workoutItems={workoutItems}
                 healthtalkLogs={healthtalkLogs}
                 fitnessSettings={fitnessSettings}
+                pointSummary={pointSummary}
               />
             ) : null}
 
@@ -2682,6 +2804,7 @@ function HomeTab({
   workoutItems,
   healthtalkLogs,
   fitnessSettings,
+  pointSummary,
 }: {
   participant: any;
   nutritionLogs: any[];
@@ -2693,6 +2816,7 @@ function HomeTab({
   workoutItems: any[];
   healthtalkLogs: any[];
   fitnessSettings: any;
+  pointSummary: any;
 }) {
   const participantId = Number(
     participant?.id ||
@@ -3013,6 +3137,8 @@ function HomeTab({
             bmi={latestClinical?.bmi || null}
             systolic={latestClinical?.systolic || null}
             diastolic={latestClinical?.diastolic || null}
+            totalPoints={asNumber(pointSummary?.total_points || 0)}
+            healthTalkCount={asNumber(pointSummary?.healthtalk_count || 0)}
             mode="participant"
           />
         </div>

@@ -369,7 +369,6 @@ export default function WellnessMomentumDashboard({
   diastolic = null,
   totalPoints = 0,
   healthTalkCount = 0,
-  mode = "participant",
 }: Props) {
   const normalizedDays = days.length > 0 ? days.slice(-7) : [];
   const fillerCount = Math.max(0, 7 - normalizedDays.length);
@@ -493,18 +492,16 @@ export default function WellnessMomentumDashboard({
               <span className="text-xs font-black text-rose-800">❤️ Tensi</span>
               <span className="text-sm font-black text-slate-950">{systolic ? `${fmt(Number(systolic))}/${fmt(Number(diastolic || 0))}` : "-"}</span>
             </div>
-            {mode === "coach" ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-2xl bg-amber-50 px-3 py-3 text-center">
-                  <div className="text-[9px] font-black uppercase text-amber-700">Poin</div>
-                  <div className="mt-1 text-base font-black text-slate-950">{fmt(totalPoints)}</div>
-                </div>
-                <div className="rounded-2xl bg-indigo-50 px-3 py-3 text-center">
-                  <div className="text-[9px] font-black uppercase text-indigo-700">Health Talk</div>
-                  <div className="mt-1 text-base font-black text-slate-950">{fmt(healthTalkCount)}x</div>
-                </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-amber-50 px-3 py-3 text-center">
+                <div className="text-[9px] font-black uppercase text-amber-700">Poin</div>
+                <div className="mt-1 text-base font-black text-slate-950">{fmt(totalPoints)}</div>
               </div>
-            ) : null}
+              <div className="rounded-2xl bg-indigo-50 px-3 py-3 text-center">
+                <div className="text-[9px] font-black uppercase text-indigo-700">Health Talk</div>
+                <div className="mt-1 text-base font-black text-slate-950">{fmt(healthTalkCount)}x</div>
+              </div>
+            </div>
           </div>
         </div>
       </article>

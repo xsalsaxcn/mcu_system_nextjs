@@ -5,6 +5,17 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { matchCalories } from "@/lib/wellness/calorieMatcher";
 import { calculateBmi, interpretBmi, toNumber } from "@/lib/wellness/bmi";
 import { ensureParticipantAccess, getAllowedWellnessParticipants, todayIso } from "@/app/api/wellness/_utils";
+import {
+  healthtalkPoints,
+  nutritionDailyBonusPoints,
+  nutritionInputPoints,
+} from "@/lib/wellness/pointRules";
+import {
+  insertPointOnce,
+  reconcileWorkoutDailyPoint,
+  resolveParticipantPointTargets,
+  setDailyPoint,
+} from "@/lib/wellness/pointWriter";
 
 // WELLNESS_DAILY_INPUT_PRO_V360_API
 // WELLNESS_GOOGLE_SHEET_RESPONSE_V362_API
@@ -35,29 +46,6 @@ async function addEvidence(supabase: any, payload: Record<string, any>, warnings
   if (error) warnings.push(`Evidence belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
   return data;
 }
-
-async function addPoint(supabase: any, payload: Record<string, any>, warnings: string[]) {
-  const { data, error } = await safeInsertSingle(supabase, "wellness_point_logs", payload);
-  if (error) warnings.push(`Point belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
-  return data;
-}
-
-async function recordPoints({ supabase, participantId, companyId, logDate, createdBy, sourceType, sourceId, points, pointKey, description, warnings }: any) {
-  if (!points || points <= 0) return null;
-  return addPoint(supabase, {
-    participant_id: participantId,
-    company_id: companyId || null,
-    log_date: logDate,
-    point_key: pointKey,
-    source_type: sourceType,
-    source_id: sourceId || null,
-    points,
-    description,
-    status: "saved",
-    created_by: createdBy,
-  }, warnings);
-}
-
 
 function publicParticipantName(participant: any) {
   return cleanText(participant?.participant_display_name) || cleanText(participant?.name) || `Peserta #${participant?.id || ""}`;
@@ -253,22 +241,58 @@ export async function POST(req: NextRequest) {
       saved.food_log = data;
       saved.calorie_result = matched;
 
-      const nutritionPoints = 5;
-      pointsTotal += nutritionPoints;
-      const point = await recordPoints({
+      const nutritionPoints = nutritionInputPoints();
+      const nutritionPoint = await insertPointOnce({
         supabase,
-        participantId: participant.id,
-        companyId,
+        participant,
         logDate,
-        createdBy: user.id,
-        sourceType: "food_log",
+        pointKey: `nutrition_food_log_${data.id}`,
+        sourceType: "nutrition_food_log",
         sourceId: data.id,
         points: nutritionPoints,
-        pointKey: "nutrition_log",
         description: `Input nutrisi ${cleanText(body.meal_time) || "harian"}`,
-        warnings,
       });
-      if (point) pointLogs.push(point);
+      if (nutritionPoint.warning) warnings.push(nutritionPoint.warning);
+      if ("row" in nutritionPoint && nutritionPoint.row) pointLogs.push(nutritionPoint.row);
+      if (nutritionPoint.inserted) pointsTotal += nutritionPoints;
+
+      const targets = await resolveParticipantPointTargets(supabase, participant);
+      const { data: dailyFoods, error: dailyFoodError } = await supabase
+        .from("wellness_food_logs")
+        .select("total_calories,calories,estimated_calories")
+        .eq("participant_id", participant.id)
+        .eq("log_date", logDate)
+        .limit(1000);
+
+      if (dailyFoodError) {
+        warnings.push(`Bonus nutrisi belum dihitung (${dailyFoodError.message}).`);
+      } else {
+        const totalCalories = (dailyFoods || []).reduce(
+          (sum: number, item: any) =>
+            sum + Number(item?.total_calories ?? item?.calories ?? item?.estimated_calories ?? 0),
+          0,
+        );
+        const bonusPoints = nutritionDailyBonusPoints({
+          totalCalories,
+          calorieLimit: targets.nutrition,
+          hasNutritionInput: (dailyFoods || []).length > 0,
+        });
+        const bonusResult = await setDailyPoint({
+          supabase,
+          participant,
+          logDate,
+          pointKey: "nutrition_daily_bonus",
+          sourceType: "nutrition_daily_bonus",
+          points: bonusPoints,
+          description:
+            bonusPoints > 0
+              ? `Bonus nutrisi harian (${Math.round(totalCalories)}/${Math.round(targets.nutrition)} kkal)`
+              : `Batas kalori nutrisi harian terlampaui (${Math.round(totalCalories)}/${Math.round(targets.nutrition)} kkal)`,
+        });
+        if (bonusResult.warning) warnings.push(bonusResult.warning);
+        if ("row" in bonusResult && bonusResult.row) pointLogs.push(bonusResult.row);
+        pointsTotal += Number(bonusResult.delta || 0);
+      }
 
       const photoUrl = cleanText(body.photo_url);
       if (photoUrl) {
@@ -306,22 +330,6 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
       saved.weight_log = data;
 
-      const weightPoints = 5;
-      pointsTotal += weightPoints;
-      const point = await recordPoints({
-        supabase,
-        participantId: participant.id,
-        companyId,
-        logDate,
-        createdBy: user.id,
-        sourceType: "weight_log",
-        sourceId: data.id,
-        points: weightPoints,
-        pointKey: "weight_log",
-        description: "Input BB / lingkar perut",
-        warnings,
-      });
-      if (point) pointLogs.push(point);
     }
 
     const activityName = cleanText(body.activity_type);
@@ -349,22 +357,15 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
       saved.activity_log = data;
 
-      const activityPoints = duration && duration >= 30 ? 10 : 5;
-      pointsTotal += activityPoints;
-      const point = await recordPoints({
+      const workoutPoint = await reconcileWorkoutDailyPoint({
         supabase,
-        participantId: participant.id,
-        companyId,
+        participant,
         logDate,
-        createdBy: user.id,
-        sourceType: "activity_log",
         sourceId: data.id,
-        points: activityPoints,
-        pointKey: duration && duration >= 30 ? "activity_30_min" : "activity_log",
-        description: duration && duration >= 30 ? "Aktivitas minimal 30 menit" : "Input aktivitas",
-        warnings,
       });
-      if (point) pointLogs.push(point);
+      if (workoutPoint.warning) warnings.push(workoutPoint.warning);
+      if ("row" in workoutPoint && workoutPoint.row) pointLogs.push(workoutPoint.row);
+      pointsTotal += Number(workoutPoint.delta || 0);
 
       if (activityEvidenceUrl) {
         const evidence = await addEvidence(supabase, {
@@ -382,22 +383,6 @@ export async function POST(req: NextRequest) {
         }, warnings);
         if (evidence) evidenceLogs.push(evidence);
 
-        const proofPoints = 5;
-        pointsTotal += proofPoints;
-        const proofPoint = await recordPoints({
-          supabase,
-          participantId: participant.id,
-          companyId,
-          logDate,
-          createdBy: user.id,
-          sourceType: "activity_evidence",
-          sourceId: evidence?.id || data.id,
-          points: proofPoints,
-          pointKey: "activity_evidence",
-          description: "Upload/link bukti aktivitas",
-          warnings,
-        });
-        if (proofPoint) pointLogs.push(proofPoint);
       }
     }
 
@@ -406,7 +391,6 @@ export async function POST(req: NextRequest) {
       const attendanceType = cleanText(body.healthtalk_type || "Online");
       const healthtalkDate = cleanText(body.healthtalk_date || logDate).slice(0, 10);
       const evidenceUrl = cleanText(body.healthtalk_evidence_url);
-      if (!evidenceUrl) return fail("Lampirkan link gambar bukti healthtalk terlebih dahulu.", 400);
       const { data, error } = await safeInsertSingle(supabase, "wellness_healthtalk_logs", {
         participant_id: participant.id,
         company_id: companyId,
@@ -422,22 +406,23 @@ export async function POST(req: NextRequest) {
         warnings.push(`Healthtalk belum tersimpan (${error.message || "tabel v360 belum tersedia"}).`);
       } else {
         saved.healthtalk_log = data;
-        const healthtalkPoints = attendanceType.toLowerCase() === "offline" ? 15 : 10;
-        pointsTotal += healthtalkPoints;
-        const point = await recordPoints({
+        const healthtalkPointValue = healthtalkPoints({
+          healthtalkType: attendanceType,
+          hasEvidence: Boolean(evidenceUrl),
+        });
+        const healthtalkPoint = await insertPointOnce({
           supabase,
-          participantId: participant.id,
-          companyId,
+          participant,
           logDate: healthtalkDate,
-          createdBy: user.id,
+          pointKey: `healthtalk_log_${data.id}`,
           sourceType: "healthtalk_log",
           sourceId: data.id,
-          points: healthtalkPoints,
-          pointKey: attendanceType.toLowerCase() === "offline" ? "healthtalk_offline" : "healthtalk_online",
+          points: healthtalkPointValue,
           description: `Mengikuti healthtalk ${attendanceType}`,
-          warnings,
         });
-        if (point) pointLogs.push(point);
+        if (healthtalkPoint.warning) warnings.push(healthtalkPoint.warning);
+        if ("row" in healthtalkPoint && healthtalkPoint.row) pointLogs.push(healthtalkPoint.row);
+        if (healthtalkPoint.inserted) pointsTotal += healthtalkPointValue;
 
         if (evidenceUrl) {
           const evidence = await addEvidence(supabase, {

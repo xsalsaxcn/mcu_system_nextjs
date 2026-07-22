@@ -2295,13 +2295,11 @@ function ParticipantDetail({
               Aturan Point Wellness
             </h3>
             <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
-              Point dihitung otomatis per hari dari input aktual peserta.
+              Point dihitung otomatis dari setiap input dan pencapaian harian peserta.
             </p>
             <div className="mt-3 grid gap-2 text-xs font-bold text-slate-700">
               <div className="rounded-2xl bg-white px-3 py-3">
-                <span className="font-black text-sky-700">Nutrisi:</span> 3 kali
-                atau lebih = 10 point; 1–2 kali = 5 point; tidak input = 0
-                point.
+                <span className="font-black text-sky-700">Nutrisi:</span> setiap input makanan = 5 point; total kalori harian tidak melebihi batas coach = bonus 10 point.
               </div>
               <div className="rounded-2xl bg-white px-3 py-3">
                 <span className="font-black text-teal-700">Workout:</span>{" "}
@@ -2311,7 +2309,7 @@ function ParticipantDetail({
               </div>
               <div className="rounded-2xl bg-white px-3 py-3">
                 <span className="font-black text-violet-700">Health Talk:</span>{" "}
-                offline = 10 point; online = 5 point; tidak ikut = 0 point.
+                offline dengan bukti = 20 point; online atau tanpa bukti = 10 point; tidak ikut = 0 point.
               </div>
             </div>
           </section>

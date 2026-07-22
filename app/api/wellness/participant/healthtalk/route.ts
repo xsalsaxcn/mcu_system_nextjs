@@ -12,7 +12,7 @@
 // POINT RULES:
 // - Online / Daring Health Talk = +10
 // - Offline / Luring Health Talk + evidence photo = +20
-// - Offline / Luring without evidence = 0
+// - Online OR any submission without evidence = +10
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -31,6 +31,8 @@ import {
   fetchWellnessGoogleSheetRows,
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
+import { healthtalkPoints, pointNumber } from "@/lib/wellness/pointRules";
+import { insertPointOnce } from "@/lib/wellness/pointWriter";
 
 export const runtime = "nodejs";
 
@@ -38,10 +40,6 @@ const MARKER = "WELLNESS_PARTICIPANT_HEALTHTALK_GOOGLE_SHEET_ONLY_V406";
 
 function clean(value: any) {
   return String(value ?? "").trim();
-}
-
-function normalizeText(value: any) {
-  return clean(value).toLowerCase();
 }
 
 function hasEvidenceResult(evidenceResult: any) {
@@ -60,27 +58,7 @@ function calculateHealthtalkPoint(params: {
   healthtalkType: string;
   hasEvidence: boolean;
 }) {
-  const type = normalizeText(params.healthtalkType);
-
-  if (
-    type.includes("offline") ||
-    type.includes("luring") ||
-    type.includes("onsite") ||
-    type.includes("tatap muka")
-  ) {
-    return params.hasEvidence ? 20 : 0;
-  }
-
-  if (
-    type.includes("online") ||
-    type.includes("daring") ||
-    type.includes("webinar") ||
-    type.includes("zoom")
-  ) {
-    return 10;
-  }
-
-  return 0;
+  return healthtalkPoints(params);
 }
 
 function pointMessage(params: {
@@ -88,22 +66,13 @@ function pointMessage(params: {
   point: number;
   hasEvidence: boolean;
 }) {
-  const type = normalizeText(params.healthtalkType);
-
   if (params.point > 0) {
     return `Health Talk berhasil masuk Google Sheet · Point +${params.point}`;
   }
 
-  if (
-    type.includes("offline") ||
-    type.includes("luring") ||
-    type.includes("onsite") ||
-    type.includes("tatap muka")
-  ) {
-    return "Health Talk berhasil masuk Google Sheet, tetapi point belum diberikan karena bukti offline belum dilampirkan.";
-  }
-
-  return "Health Talk berhasil masuk Google Sheet.";
+  return params.hasEvidence
+    ? "Health Talk berhasil masuk Google Sheet."
+    : "Health Talk berhasil masuk Google Sheet tanpa bukti · Point +10";
 }
 
 async function getParticipant(req: NextRequest) {
@@ -220,7 +189,7 @@ function buildReturnedLog(params: {
       ...params.body,
       "Total Point": params.calculatedPoint,
       point_rule:
-        "Online/Daring = +10. Offline/Luring with evidence = +20. Offline without evidence = 0.",
+        "Offline/Luring dengan bukti = +20. Online atau tanpa bukti = +10.",
       has_evidence: hasEvidenceResult(params.evidenceResult),
       marker: MARKER,
     },
@@ -295,7 +264,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { participant } = await getParticipant(req);
+  const { supabase, participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
@@ -387,6 +356,20 @@ export async function POST(req: NextRequest) {
       body,
     });
 
+    const sheetRowNumber = pointNumber(
+      sheetResult?.rowNumber || sheetResult?.row_number || sheetResult?._rowNumber,
+    );
+    const pointResult = await insertPointOnce({
+      supabase,
+      participant,
+      logDate,
+      pointKey: `healthtalk_sheet_${sheetRowNumber || Date.now()}`,
+      sourceType: "healthtalk_google_sheet",
+      sourceId: sheetRowNumber || null,
+      points: calculatedPoint,
+      description: `${healthtalkTitle} (${healthtalkType})`,
+    });
+
     return NextResponse.json({
       ok: true,
       mode: "google_sheet_only",
@@ -397,6 +380,9 @@ export async function POST(req: NextRequest) {
       }),
       point: calculatedPoint,
       points: calculatedPoint,
+      points_total_delta: pointResult.inserted ? calculatedPoint : 0,
+      point_ledger: pointResult,
+      point_warnings: pointResult.warning ? [pointResult.warning] : [],
       log,
       google_drive: evidenceResult,
       google_sheet: sheetResult,
