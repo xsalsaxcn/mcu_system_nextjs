@@ -88,12 +88,105 @@ function formatChatTime(value: any) {
   }).format(date);
 }
 
-function formatDaysWithoutInput(value: any) {
+type ReminderFilter =
+  | "all"
+  | "reminder"
+  | "nutrition"
+  | "workout"
+  | "complete";
+
+function normalizedMissingDays(value: any) {
+  if (value === null || value === undefined || value === "") return null;
   const days = Number(value);
-  if (!Number.isFinite(days) || days >= 99) return "Belum pernah";
-  if (days <= 0) return "Hari ini";
-  if (days === 1) return "1 hari";
-  return `${Math.floor(days)} hari`;
+  return Number.isFinite(days) ? Math.max(0, Math.floor(days)) : null;
+}
+
+function formatDaysWithoutInput(value: any) {
+  const days = normalizedMissingDays(value);
+  if (days === null) return "Data belum tersedia";
+  if (days >= 99) return "Belum pernah input";
+  if (days <= 0) return "Hari ini ✓";
+  if (days === 1) return "1 hari lalu";
+  return `${days} hari lalu`;
+}
+
+function reminderMeta(item: any) {
+  const nutritionDays = normalizedMissingDays(
+    item?.compliance?.days_since_nutrition,
+  );
+  const workoutDays = normalizedMissingDays(
+    item?.compliance?.days_since_workout,
+  );
+  const nutritionMissing = nutritionDays === null || nutritionDays > 0;
+  const workoutMissing = workoutDays === null || workoutDays > 0;
+  const complete = !nutritionMissing && !workoutMissing;
+  const neverInput =
+    nutritionDays !== null &&
+    nutritionDays >= 99 &&
+    workoutDays !== null &&
+    workoutDays >= 99;
+  const urgent =
+    !complete &&
+    (neverInput ||
+      (nutritionDays !== null && nutritionDays >= 2) ||
+      (workoutDays !== null && workoutDays >= 2));
+
+  let label = "Belum lengkap hari ini";
+  let tone = "amber";
+  if (complete) {
+    label = "Lengkap hari ini";
+    tone = "emerald";
+  } else if (neverInput) {
+    label = "Belum pernah input";
+    tone = "rose";
+  } else if (urgent) {
+    label = "Perlu segera diingatkan";
+    tone = "rose";
+  } else if (nutritionMissing && workoutMissing) {
+    label = "Belum isi hari ini";
+    tone = "amber";
+  } else if (nutritionMissing) {
+    label = "Belum isi nutrisi";
+    tone = "orange";
+  } else if (workoutMissing) {
+    label = "Belum isi workout";
+    tone = "sky";
+  }
+
+  const priority = complete
+    ? 5
+    : neverInput
+      ? 0
+      : urgent
+        ? 1
+        : nutritionMissing && workoutMissing
+          ? 2
+          : 3;
+
+  return {
+    nutritionDays,
+    workoutDays,
+    nutritionMissing,
+    workoutMissing,
+    complete,
+    urgent,
+    neverInput,
+    label,
+    tone,
+    priority,
+  };
+}
+
+function formatLastActivityDate(value: any) {
+  const raw = clean(value);
+  if (!raw) return "Belum ada aktivitas tercatat";
+  const date = new Date(`${raw.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
 }
 
 const fieldClass =
@@ -106,6 +199,8 @@ export default function WellnessCoachPortalPage() {
   const [dashboard, setDashboard] = useState<CoachDashboard | null>(null);
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
+  const [reminderFilter, setReminderFilter] =
+    useState<ReminderFilter>("all");
   const [search, setSearch] = useState("");
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
   const [participantDetail, setParticipantDetail] =
@@ -635,28 +730,86 @@ export default function WellnessCoachPortalPage() {
 
   const participants = dashboard?.participants || [];
   const groups = dashboard?.groups || [];
+  const reminderSummary = useMemo(() => {
+    return participants.reduce(
+      (summary: any, item: any) => {
+        const meta = reminderMeta(item);
+        if (meta.complete) summary.complete += 1;
+        if (meta.nutritionMissing) summary.nutrition += 1;
+        if (meta.workoutMissing) summary.workout += 1;
+        if (meta.urgent) summary.reminder += 1;
+        return summary;
+      },
+      { complete: 0, nutrition: 0, workout: 0, reminder: 0 },
+    );
+  }, [participants]);
+
   const filteredParticipants = useMemo(() => {
     const q = search.toLowerCase();
-    return participants.filter((item: any) => {
-      const byGroup =
-        selectedGroup === "all" ||
-        clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
-        clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
-        clean(item.raw?.group_unit_id) === selectedGroup;
-      const byFlag = flagFilter === "all" || item.flag === flagFilter;
-      const haystack = [
-        item.name,
-        item.code,
-        item.group_name,
-        item.risk,
-        item.status,
-        item.flag_reason,
-      ]
-        .map((x) => clean(x).toLowerCase())
-        .join(" ");
-      return byGroup && byFlag && (!q || haystack.includes(q));
-    });
-  }, [participants, selectedGroup, flagFilter, search]);
+    return participants
+      .filter((item: any) => {
+        const meta = reminderMeta(item);
+        const byGroup =
+          selectedGroup === "all" ||
+          clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
+          clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
+          clean(item.raw?.group_unit_id) === selectedGroup;
+        const byFlag = flagFilter === "all" || item.flag === flagFilter;
+        const byReminder =
+          reminderFilter === "all" ||
+          (reminderFilter === "reminder" && meta.urgent) ||
+          (reminderFilter === "nutrition" && meta.nutritionMissing) ||
+          (reminderFilter === "workout" && meta.workoutMissing) ||
+          (reminderFilter === "complete" && meta.complete);
+        const haystack = [
+          item.name,
+          item.code,
+          item.group_name,
+          item.risk,
+          item.status,
+          item.flag_reason,
+          meta.label,
+        ]
+          .map((x) => clean(x).toLowerCase())
+          .join(" ");
+        return byGroup && byFlag && byReminder && (!q || haystack.includes(q));
+      })
+      .sort((a: any, b: any) => {
+        const aMeta = reminderMeta(a);
+        const bMeta = reminderMeta(b);
+        if (aMeta.priority !== bMeta.priority) {
+          return aMeta.priority - bMeta.priority;
+        }
+        const aDelay = Math.max(
+          aMeta.nutritionDays || 0,
+          aMeta.workoutDays || 0,
+        );
+        const bDelay = Math.max(
+          bMeta.nutritionDays || 0,
+          bMeta.workoutDays || 0,
+        );
+        if (aDelay !== bDelay) return bDelay - aDelay;
+        return clean(a.name).localeCompare(clean(b.name), "id");
+      });
+  }, [participants, selectedGroup, flagFilter, reminderFilter, search]);
+
+  function openReminder(item: any) {
+    const meta = reminderMeta(item);
+    const firstName = clean(item?.name).split(/\s+/)[0] || "Peserta";
+    let reminderText = `Halo ${firstName}, jangan lupa melengkapi input Wellness hari ini ya.`;
+    if (meta.nutritionMissing && meta.workoutMissing) {
+      reminderText = `Halo ${firstName}, jangan lupa melengkapi input nutrisi dan workout hari ini ya. Terima kasih.`;
+    } else if (meta.nutritionMissing) {
+      reminderText = `Halo ${firstName}, jangan lupa melengkapi input nutrisi hari ini ya. Terima kasih.`;
+    } else if (meta.workoutMissing) {
+      reminderText = `Halo ${firstName}, jangan lupa melengkapi input workout hari ini ya. Terima kasih.`;
+    }
+
+    chooseParticipant(item, { openDetail: false });
+    setChatText(reminderText);
+    setCoachView("chat");
+    setMessage(`Reminder untuk ${item?.name || "peserta"} sudah disiapkan.`);
+  }
 
   const isLoggedIn = !!dashboard?.coach;
 
@@ -899,75 +1052,70 @@ export default function WellnessCoachPortalPage() {
             {coachView === "monitoring" ? (
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <SummaryCard
-                    label="Total Peserta"
-                    value={fmtNumber(
-                      dashboard?.summary?.total_participants || 0,
-                    )}
-                    note="anggota assigned group"
-                    tone="teal"
+                  <ReminderSummaryCard
+                    label="Sudah Lengkap"
+                    value={fmtNumber(reminderSummary.complete)}
+                    note="nutrisi + workout hari ini"
+                    tone="emerald"
+                    active={reminderFilter === "complete"}
+                    onClick={() => setReminderFilter("complete")}
                   />
-                  <SummaryCard
-                    label="Aktif Hari Ini"
-                    value={fmtNumber(dashboard?.summary?.active_today || 0)}
-                    note="input nutrisi atau workout"
+                  <ReminderSummaryCard
+                    label="Belum Nutrisi"
+                    value={fmtNumber(reminderSummary.nutrition)}
+                    note="perlu isi nutrisi hari ini"
+                    tone="orange"
+                    active={reminderFilter === "nutrition"}
+                    onClick={() => setReminderFilter("nutrition")}
+                  />
+                  <ReminderSummaryCard
+                    label="Belum Workout"
+                    value={fmtNumber(reminderSummary.workout)}
+                    note="perlu isi workout hari ini"
                     tone="sky"
+                    active={reminderFilter === "workout"}
+                    onClick={() => setReminderFilter("workout")}
                   />
-                  <SummaryCard
-                    label="Perlu Follow Up"
-                    value={fmtNumber(dashboard?.summary?.need_follow_up || 0)}
-                    note="yellow + red flag"
-                    tone="amber"
-                  />
-                  <SummaryCard
-                    label="Instruksi Belum Dibaca"
-                    value={fmtNumber(
-                      dashboard?.summary?.unread_instructions || 0,
-                    )}
-                    note="seluruh catatan peserta"
+                  <ReminderSummaryCard
+                    label="Perlu Reminder"
+                    value={fmtNumber(reminderSummary.reminder)}
+                    note="tidak input ≥2 hari"
                     tone="rose"
+                    active={reminderFilter === "reminder"}
+                    onClick={() => setReminderFilter("reminder")}
                   />
                 </div>
 
-                <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                <section className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <h2 className="text-xl font-black">
-                        Status Kepatuhan 7 Hari
-                      </h2>
+                      <h2 className="text-lg font-black">Prioritas Reminder Hari Ini</h2>
                       <p className="mt-1 text-sm font-bold text-slate-500">
-                        Klik status untuk menampilkan daftar peserta pada tabel.
+                        Daftar otomatis diurutkan dari peserta yang paling perlu diingatkan.
                       </p>
                     </div>
-                    {flagFilter !== "all" ? (
-                      <button
-                        type="button"
-                        onClick={() => setFlagFilter("all")}
-                        className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700"
-                      >
-                        Tampilkan Semua
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-2 md:gap-3">
-                    <FlagCard
-                      level="green"
-                      count={dashboard?.summary?.flags?.green || 0}
-                      active={flagFilter === "green"}
-                      onClick={() => applyFlagFilter("green")}
-                    />
-                    <FlagCard
-                      level="yellow"
-                      count={dashboard?.summary?.flags?.yellow || 0}
-                      active={flagFilter === "yellow"}
-                      onClick={() => applyFlagFilter("yellow")}
-                    />
-                    <FlagCard
-                      level="red"
-                      count={dashboard?.summary?.flags?.red || 0}
-                      active={flagFilter === "red"}
-                      onClick={() => applyFlagFilter("red")}
-                    />
+                    <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:justify-end">
+                      {[
+                        ["all", "Semua"],
+                        ["reminder", "Perlu Reminder"],
+                        ["nutrition", "Belum Nutrisi"],
+                        ["workout", "Belum Workout"],
+                        ["complete", "Sudah Lengkap"],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setReminderFilter(value as ReminderFilter)}
+                          className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
+                            reminderFilter === value
+                              ? "bg-slate-950 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </section>
 
@@ -1032,9 +1180,15 @@ export default function WellnessCoachPortalPage() {
                       Menampilkan {filteredParticipants.length} anggota
                     </span>
                     <span>
-                      {flagFilter === "all"
-                        ? "Semua status"
-                        : `${flagFilter} flag`}
+                      {reminderFilter === "all"
+                        ? "Semua prioritas"
+                        : reminderFilter === "reminder"
+                          ? "Perlu reminder"
+                          : reminderFilter === "nutrition"
+                            ? "Belum nutrisi"
+                            : reminderFilter === "workout"
+                              ? "Belum workout"
+                              : "Sudah lengkap"}
                     </span>
                   </div>
 
@@ -1045,68 +1199,72 @@ export default function WellnessCoachPortalPage() {
                         Tidak ada peserta pada filter ini.
                       </div>
                     ) : (
-                      filteredParticipants.map((item: any) => (
-                        <article
-                          key={item.id}
-                          className={`rounded-[1.5rem] border p-3.5 transition sm:p-4 ${
-                            Number(selectedParticipant?.id) === Number(item.id)
-                              ? "border-teal-200 bg-teal-50/70"
-                              : "border-slate-100 bg-white shadow-sm"
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => chooseParticipant(item)}
-                            className="block w-full rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+                      filteredParticipants.map((item: any) => {
+                        const meta = reminderMeta(item);
+                        return (
+                          <article
+                            key={item.id}
+                            className={`rounded-[1.5rem] border p-3.5 transition sm:p-4 ${
+                              Number(selectedParticipant?.id) === Number(item.id)
+                                ? "border-teal-200 bg-teal-50/70"
+                                : "border-slate-100 bg-white shadow-sm"
+                            }`}
                           >
-                            <div className="flex min-w-0 items-start gap-3">
-                              <WellnessAvatar
-                                name={item.name}
-                                src={
-                                  item.profile_photo_preview_url ||
-                                  item.profile_photo_url
-                                }
-                                size="md"
-                              />
+                            <button
+                              type="button"
+                              onClick={() => chooseParticipant(item)}
+                              className="block w-full rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+                            >
+                              <div className="flex min-w-0 items-start gap-3">
+                                <WellnessAvatar
+                                  name={item.name}
+                                  src={
+                                    item.profile_photo_preview_url ||
+                                    item.profile_photo_url
+                                  }
+                                  size="md"
+                                />
 
-                              <div className="min-w-0 flex-1">
-                                <div className="break-words text-[15px] font-black leading-5 text-slate-950 sm:text-base">
-                                  {item.name}
+                                <div className="min-w-0 flex-1">
+                                  <div className="break-words text-[15px] font-black leading-5 text-slate-950 sm:text-base">
+                                    {item.name}
+                                  </div>
+                                  <div className="mt-1 break-words text-[11px] font-bold leading-4 text-slate-500 sm:text-xs">
+                                    {item.code} · {item.group_name}
+                                  </div>
                                 </div>
-                                <div className="mt-1 break-words text-[11px] font-bold leading-4 text-slate-500 sm:text-xs">
-                                  {item.code} · {item.group_name}
+
+                                <ReminderStatusBadge
+                                  tone={meta.tone}
+                                  label={meta.label}
+                                />
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-2 gap-2">
+                                <div className="rounded-xl bg-orange-50 px-3 py-2 text-orange-950">
+                                  <div className="text-[9px] font-black uppercase tracking-wide text-orange-700/70">
+                                    Nutrisi
+                                  </div>
+                                  <div className="mt-1 break-words text-xs font-black leading-4">
+                                    {formatDaysWithoutInput(
+                                      item.compliance?.days_since_nutrition,
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-950">
+                                  <div className="text-[9px] font-black uppercase tracking-wide text-sky-700/70">
+                                    Workout
+                                  </div>
+                                  <div className="mt-1 break-words text-xs font-black leading-4">
+                                    {formatDaysWithoutInput(
+                                      item.compliance?.days_since_workout,
+                                    )}
+                                  </div>
                                 </div>
                               </div>
 
-                              <FlagBadge level={item.flag} label={item.status} />
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                              <div className="rounded-xl bg-orange-50 px-3 py-2 text-orange-950">
-                                <div className="text-[9px] font-black uppercase tracking-wide text-orange-700/70">
-                                  Nutrisi
-                                </div>
-                                <div className="mt-1 break-words text-xs font-black leading-4">
-                                  {formatDaysWithoutInput(
-                                    item.compliance?.days_since_nutrition,
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="rounded-xl bg-sky-50 px-3 py-2 text-sky-950">
-                                <div className="text-[9px] font-black uppercase tracking-wide text-sky-700/70">
-                                  Workout
-                                </div>
-                                <div className="mt-1 break-words text-xs font-black leading-4">
-                                  {formatDaysWithoutInput(
-                                    item.compliance?.days_since_workout,
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap gap-2 text-[10px] font-black text-slate-600">
+                              <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black text-slate-600">
                                 <span className="rounded-full bg-slate-100 px-2.5 py-1.5">
                                   {fmtNumber(item.today?.steps || 0)} step
                                 </span>
@@ -1114,21 +1272,44 @@ export default function WellnessCoachPortalPage() {
                                   {fmtNumber(item.today?.calories || 0)} kkal
                                 </span>
                                 <span className="rounded-full bg-violet-50 px-2.5 py-1.5 text-violet-700">
-                                  Kepatuhan{" "}
-                                  {fmtNumber(
+                                  Kepatuhan {fmtNumber(
                                     item.compliance?.compliance_percent || 0,
-                                  )}
-                                  %
+                                  )}%
                                 </span>
                               </div>
 
-                              <span className="text-[10px] font-black text-teal-700">
-                                Buka detail peserta →
-                              </span>
+                              <div className="mt-3 text-[10px] font-bold text-slate-400">
+                                Terakhir aktivitas: {formatLastActivityDate(
+                                  item.compliance?.last_input_date,
+                                )}
+                              </div>
+                            </button>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                              {!meta.complete ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openReminder(item)}
+                                  className="rounded-xl bg-amber-500 px-3 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-amber-600"
+                                >
+                                  🔔 Kirim Reminder
+                                </button>
+                              ) : (
+                                <div className="flex items-center justify-center rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-black text-emerald-700">
+                                  ✓ Sudah lengkap
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => chooseParticipant(item)}
+                                className="rounded-xl bg-teal-50 px-3 py-2.5 text-xs font-black text-teal-700 transition hover:bg-teal-100"
+                              >
+                                Buka Detail →
+                              </button>
                             </div>
-                          </button>
-                        </article>
-                      ))
+                          </article>
+                        );
+                      })
                     )}
                   </div>
                 </section>
@@ -1831,6 +2012,56 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
         </div>
       </aside>
     </section>
+  );
+}
+
+function ReminderSummaryCard({
+  label,
+  value,
+  note,
+  tone,
+  active,
+  onClick,
+}: any) {
+  const toneClass: Record<string, string> = {
+    emerald: "border-emerald-100 bg-emerald-50 text-emerald-800",
+    orange: "border-orange-100 bg-orange-50 text-orange-900",
+    sky: "border-sky-100 bg-sky-50 text-sky-800",
+    rose: "border-rose-100 bg-rose-50 text-rose-800",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl border p-4 text-left shadow-sm transition ${toneClass[tone]} ${
+        active ? "ring-4 ring-slate-200" : "hover:-translate-y-0.5"
+      }`}
+    >
+      <div className="text-[10px] font-black uppercase tracking-wide opacity-70 sm:text-xs">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-black md:text-2xl">{value}</div>
+      <div className="mt-1 text-[10px] font-bold opacity-70 sm:text-xs">{note}</div>
+    </button>
+  );
+}
+
+function ReminderStatusBadge({ tone, label }: any) {
+  const classes: Record<string, string> = {
+    emerald: "bg-emerald-100 text-emerald-800",
+    orange: "bg-orange-100 text-orange-800",
+    sky: "bg-sky-100 text-sky-800",
+    amber: "bg-amber-100 text-amber-800",
+    rose: "bg-rose-100 text-rose-800",
+  };
+  return (
+    <span
+      className={`inline-flex max-w-[128px] shrink-0 items-center justify-center rounded-full px-2 py-1 text-center text-[9px] font-black leading-3 sm:max-w-[180px] sm:px-3 sm:py-2 sm:text-xs ${
+        classes[tone] || "bg-slate-100 text-slate-700"
+      }`}
+    >
+      {label}
+    </span>
   );
 }
 
