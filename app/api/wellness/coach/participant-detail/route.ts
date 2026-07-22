@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   fetchWellnessGoogleSheetRows,
-  googleSheetRowsToFoodLogs,
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
+import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 import {
@@ -500,20 +500,24 @@ export async function GET(request: NextRequest) {
       participantControlMap,
     );
 
-    const sheetResult = await fetchWellnessGoogleSheetRows({
-      participantId,
-      code,
-      limit: 2000,
-    }).catch(() => ({ ok: false, rows: [] as any[] }));
+    const [nutritionHistory, sheetResult] = await Promise.all([
+      loadCanonicalNutritionHistory({
+        supabase,
+        participant,
+        dbRows: foodRows,
+      }),
+      fetchWellnessGoogleSheetRows({
+        participantId,
+        code,
+        limit: 2000,
+      }).catch(() => ({ ok: false, rows: [] as any[] })),
+    ]);
 
-    const sheetFoodRows = googleSheetRowsToFoodLogs(sheetResult.rows || []).filter((row: any) => {
-      return asNumber(row.participant_id) === participantId || (code && clean(row.participant_code) === code);
-    });
     const sheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(sheetResult.rows || []).filter((row: any) => {
       return asNumber(row.participant_id) === participantId || (code && clean(row.participant_code) === code);
     });
 
-    const mergedFoodRows = mergeRows(foodRows, sheetFoodRows);
+    const mergedFoodRows = nutritionHistory.logs || [];
     const mergedHealthtalkRows = mergeRows(healthtalkRows, sheetHealthtalkRows);
     const clinicalAll = mergeRows(clinicalRows, historyById, historyByCode, miniMcuRows);
 
@@ -695,10 +699,12 @@ export async function GET(request: NextRequest) {
       },
       charts,
       streak,
+      nutrition_logs: mergedFoodRows,
+      nutrition_sources: nutritionHistory.sources,
       healthtalks,
       google_sheet: {
-        ok: Boolean(sheetResult.ok),
-        nutrition_count: sheetFoodRows.length,
+        ok: Boolean(nutritionHistory.sources.google_sheet_ok),
+        nutrition_count: nutritionHistory.sources.google_sheet_rows,
         healthtalk_count: sheetHealthtalkRows.length,
       },
     });

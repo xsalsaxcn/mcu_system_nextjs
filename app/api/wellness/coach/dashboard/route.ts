@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
-import {
-  fetchWellnessGoogleSheetRows,
-  googleSheetRowsToFoodLogs,
-} from "@/lib/wellness/googleSheetResponses";
+import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -498,7 +495,6 @@ export async function GET(request: NextRequest) {
     let clinicalRows: any[] = [];
     let noteRows: any[] = [];
     let noteReadRows: any[] = [];
-    let sheetFoodRows: any[] = [];
     let pointRows: any[] = [];
 
     if (participantIds.length > 0) {
@@ -519,8 +515,8 @@ export async function GET(request: NextRequest) {
             .from("wellness_food_logs")
             .select("*")
             .in("participant_id", participantIds)
-            .gte("log_date", fromDate)
-            .limit(10000),
+            .order("log_date", { ascending: false })
+            .limit(20000),
           supabase
             .from("wellness_clinical_history")
             .select("*")
@@ -563,18 +559,6 @@ export async function GET(request: NextRequest) {
         if (!reads.error) noteReadRows = reads.data || [];
       }
 
-      const participantCodes = participants
-        .map(participantCode)
-        .filter((value) => value && value !== "-");
-      const sheetResult = await fetchWellnessGoogleSheetRows({
-        limit: 10000,
-      }).catch(() => ({ ok: false, rows: [] as any[] }));
-
-      sheetFoodRows = googleSheetRowsToFoodLogs(sheetResult.rows || []).filter(
-        (item: any) =>
-          participantIds.includes(asNumber(item.participant_id)) ||
-          participantCodes.includes(clean(item.participant_code)),
-      );
     }
 
     const readMap = new Map(
@@ -595,24 +579,23 @@ export async function GET(request: NextRequest) {
       ]),
     );
 
+    const nutritionHistory = await loadCanonicalNutritionHistories({
+      supabase,
+      participants,
+      dbRows: foodRows,
+    });
+
     const participantCards = participants.map((row: any) => {
       const id = getParticipantId(row);
       const acts = activityRows.filter(
         (item) => asNumber(item.participant_id) === id,
       );
-      const code = participantCode(row);
-      const sheetFoods = dedupeFoodRows(
-        sheetFoodRows.filter(
-          (item) =>
-            asNumber(item.participant_id) === id ||
-            (code !== "-" && clean(item.participant_code) === code),
-        ),
-      ).filter((item) => foodDate(item) >= fromDate);
-      const foods = sheetFoods.length
-        ? sheetFoods
-        : foodRows.filter(
-            (item) => asNumber(item.participant_id) === id,
-          );
+      const canonicalHistory = nutritionHistory.byParticipantId.get(id);
+      const allFoods = canonicalHistory?.logs || [];
+      const foods = allFoods.filter((item: any) => {
+        const date = foodDate(item);
+        return date >= fromDate && date <= today;
+      });
       const nutritionPointInputs = [
         ...new Map(
           pointRows
@@ -631,11 +614,12 @@ export async function GET(request: NextRequest) {
         (date) => date >= fromDate && date <= today,
       );
       const foodDates = foods.map(foodDate).filter(Boolean);
+      const allFoodDates = allFoods.map(foodDate).filter(Boolean);
       const nutritionDates = [
         ...new Set([...foodDates, ...recentNutritionDates]),
       ];
       const nutritionHistoryDates = [
-        ...new Set([...foodDates, ...nutritionPointDates]),
+        ...new Set([...allFoodDates, ...nutritionPointDates]),
       ];
       const participantNotes = noteRows.filter(
         (note) => asNumber(note.participant_id) === id,
@@ -708,6 +692,7 @@ export async function GET(request: NextRequest) {
         flag: flag.level,
         flag_label: flag.label,
         flag_reason: flag.reason,
+        nutrition_history_sources: canonicalHistory?.sources || null,
         clinical: latestClinicalFor(id, clinicalRows),
         targets: participantTargets(row, latestTargetNote),
         latest_note: latestNote

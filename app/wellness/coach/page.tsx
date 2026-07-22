@@ -33,6 +33,8 @@ type CoachParticipantDetail = {
   summary?: any;
   point_breakdown?: any;
   charts?: Record<string, any[]>;
+  nutrition_logs?: any[];
+  nutrition_sources?: any;
   healthtalks?: any[];
   streak?: any;
 };
@@ -2286,6 +2288,49 @@ function ParticipantDetailModal({ onClose, ...props }: any) {
   );
 }
 
+
+function CoachNutritionHistoryItemV105({ item }: { item: any }) {
+  const photo = clean(item?.photo_url);
+  const calories = Number(item?.calories || item?.total_calories || 0);
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+      <div className="flex items-center gap-3">
+        {photo ? (
+          <img
+            src={photo}
+            alt="Foto makanan"
+            className="h-14 w-14 shrink-0 rounded-2xl object-cover"
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+          />
+        ) : (
+          <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-[10px] font-black text-teal-700">
+            FOOD
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="break-words text-sm font-black text-slate-950">
+            {item?.food_name || item?.meal_text || "-"}
+          </div>
+          <div className="mt-1 text-[11px] font-bold text-slate-500">
+            {clean(item?.log_date || item?.created_at).slice(0, 10) || "-"} · {item?.meal_time || item?.meal_type || "-"}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="rounded-full bg-teal-50 px-3 py-1 text-[10px] font-black text-teal-700">
+              {fmtNumber(calories)} kkal
+            </span>
+            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-slate-500">
+              {item?.source === "google_sheet" ? "Google Sheet" : "Supabase"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // WELLNESS_COACH_PARTICIPANT_PROGRESS_BARS_V65
 function coachClampProgress(value: number) {
   return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
@@ -2367,6 +2412,10 @@ function ParticipantDetail({
   const summary = detail?.summary || {};
   const breakdown = detail?.point_breakdown || {};
   const charts = detail?.charts || {};
+  const nutritionLogs = Array.isArray(detail?.nutrition_logs)
+    ? detail.nutrition_logs
+    : [];
+  const nutritionSources = detail?.nutrition_sources || null;
   const healthtalks = detail?.healthtalks || [];
   const pointRules = detail?.point_rules || {};
   const streak = detail?.streak || {};
@@ -2599,6 +2648,42 @@ function ParticipantDetail({
                 points={charts.points || []}
                 suffix="pt"
               />
+            </div>
+          </section>
+
+
+          <section className="rounded-3xl border border-slate-100 bg-white p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">
+                  History Nutrisi
+                </h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Flow yang sama dengan Portal Peserta: Supabase dan Google Sheet digabung, dinormalisasi, lalu dideduplikasi.
+                </p>
+              </div>
+              <div className="rounded-full bg-teal-50 px-3 py-2 text-[10px] font-black text-teal-700">
+                {fmtNumber(nutritionLogs.length)} log
+              </div>
+            </div>
+            {nutritionSources ? (
+              <div className="mt-3 rounded-2xl bg-slate-50 px-3 py-2 text-[10px] font-bold text-slate-500">
+                Supabase {fmtNumber(nutritionSources.supabase_rows || 0)} row · Google Sheet {fmtNumber(nutritionSources.google_sheet_rows || 0)} row
+              </div>
+            ) : null}
+            <div className="mt-4 max-h-[34rem] space-y-3 overflow-y-auto pr-1">
+              {nutritionLogs.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-bold text-slate-400">
+                  Belum ada history nutrisi yang terbaca.
+                </div>
+              ) : (
+                nutritionLogs.map((item: any, index: number) => (
+                  <CoachNutritionHistoryItemV105
+                    key={`${item?.id || index}-${index}`}
+                    item={item}
+                  />
+                ))
+              )}
             </div>
           </section>
 

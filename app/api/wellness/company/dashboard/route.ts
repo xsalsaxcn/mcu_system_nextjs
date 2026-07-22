@@ -3,9 +3,9 @@ import { fail, ok } from "@/lib/server/response";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import {
   fetchWellnessGoogleSheetRows,
-  googleSheetRowsToFoodLogs,
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
+import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { resolveCompanyPortalContext } from "@/lib/wellness/companyAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
@@ -445,8 +445,8 @@ export async function GET(request: NextRequest) {
             .from("wellness_food_logs")
             .select("*")
             .in("participant_id", participantIds)
-            .gte("log_date", fromDate)
-            .limit(20000),
+            .order("log_date", { ascending: false })
+            .limit(30000),
         ),
         safeRows(
           supabase
@@ -499,11 +499,6 @@ export async function GET(request: NextRequest) {
       () => ({ rows: [] }),
     );
 
-    const sheetFoodRows = googleSheetRowsToFoodLogs(sheetResult.rows || []).filter(
-      (row: any) =>
-        participantIds.includes(number(row.participant_id)) ||
-        participantCodes.includes(clean(row.participant_code)),
-    );
     const sheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(
       sheetResult.rows || [],
     ).filter(
@@ -512,8 +507,11 @@ export async function GET(request: NextRequest) {
         participantCodes.includes(clean(row.participant_code)),
     );
 
-    const dbFood = groupRows(foodRows);
-    const sheetFood = rowsByParticipantOrCode(sheetFoodRows);
+    const nutritionHistory = await loadCanonicalNutritionHistories({
+      supabase,
+      participants,
+      dbRows: foodRows,
+    });
     const selectedActivityRows = filterActivityRowsByFitnessSource(
       activityRows,
       participantControlMap,
@@ -578,15 +576,12 @@ export async function GET(request: NextRequest) {
             .map((item: any) => [nutritionPointIdentity(item), item]),
         ).values(),
       ];
-      const sheetFoods = dedupeRows([
-        ...(sheetFood.byId.get(id) || []),
-        ...(sheetFood.byCode.get(code) || []),
-      ]).filter((item: any) => dateOnly(item.log_date || item.created_at) >= fromDate);
-      const foods = sheetFoods.length
-        ? sheetFoods
-        : (dbFood.get(id) || []).filter(
-            (item: any) => dateOnly(item.log_date || item.created_at) >= fromDate,
-          );
+      const canonicalHistory = nutritionHistory.byParticipantId.get(id);
+      const allFoods = canonicalHistory?.logs || [];
+      const foods = allFoods.filter((item: any) => {
+        const date = dateOnly(item.log_date || item.created_at);
+        return date >= fromDate && date <= today;
+      });
       const activities = dbActivity.get(id) || [];
       const sheetTalks = dedupeRows([
         ...(sheetHealthtalk.byId.get(id) || []),
@@ -706,9 +701,12 @@ export async function GET(request: NextRequest) {
         ...workoutByDate.keys(),
       ]);
       const nutritionHistoryDates = [
-        ...new Set(
-          nutritionPointInputs.map(pointLogDate).filter(Boolean),
-        ),
+        ...new Set([
+          ...allFoods
+            .map((item: any) => dateOnly(item.log_date || item.created_at))
+            .filter(Boolean),
+          ...nutritionPointInputs.map(pointLogDate).filter(Boolean),
+        ]),
       ];
       const nutritionPeriodDates = [...nutritionByDate.keys()];
       const allNutritionDates = [
@@ -839,6 +837,7 @@ export async function GET(request: NextRequest) {
         days_since_nutrition: daysSinceNutrition,
         days_since_workout: daysSinceWorkout,
         nutrition_count_today: nutritionByDate.get(today)?.size || 0,
+        nutrition_history_sources: canonicalHistory?.sources || null,
         workout_count_today: workoutByDate.has(today) ? 1 : 0,
         nutrition_target_days: nutritionTargetDates.size,
         workout_target_days: workoutTargetDates.size,

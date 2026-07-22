@@ -202,6 +202,9 @@ export default function WellnessAdminMobilePage() {
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [supportUnread, setSupportUnread] = useState(0);
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
+  const [participantNutritionDetail, setParticipantNutritionDetail] = useState<any>(null);
+  const [participantNutritionLoading, setParticipantNutritionLoading] = useState(false);
+  const [participantNutritionError, setParticipantNutritionError] = useState("");
   // WELLNESS_ADMIN_SUPPORT_BADGE_V79P
   // WELLNESS_ADMIN_SUPPORT_CONTEXT_EXACT_V79R2
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
@@ -586,6 +589,46 @@ export default function WellnessAdminMobilePage() {
   const rows = wellnessData?.rows || [];
   const companyDashboards = wellnessData?.company_dashboards || [];
 
+
+  async function loadParticipantNutritionDetail(item: any) {
+    const participantId = Number(item?.participant_id || item?.id || 0);
+    if (!participantId) return;
+
+    setParticipantNutritionLoading(true);
+    setParticipantNutritionError("");
+    setParticipantNutritionDetail(null);
+
+    const result = await fetch(
+      `/api/wellness/admin/participant-detail?participant_id=${encodeURIComponent(String(participantId))}&t=${Date.now()}`,
+      { cache: "no-store", credentials: "include" },
+    )
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
+
+    if (result?.ok) {
+      setParticipantNutritionDetail(result);
+    } else {
+      setParticipantNutritionError(
+        result?.message || "History nutrisi belum dapat dimuat.",
+      );
+    }
+
+    setParticipantNutritionLoading(false);
+  }
+
+  function closeParticipantDetail() {
+    setSelectedParticipant(null);
+    setParticipantNutritionDetail(null);
+    setParticipantNutritionError("");
+    setParticipantNutritionLoading(false);
+  }
+
   function openParticipantDetail(item: any) {
     const participantId = Number(item?.participant_id || item?.id || 0);
     const participantCode = clean(item?.code).toLowerCase();
@@ -597,9 +640,11 @@ export default function WellnessAdminMobilePage() {
       );
     });
 
+    const selected = { ...item, ...(latestRow || {}) };
     setMenuOpen(false);
     setNotificationOpen(false);
-    setSelectedParticipant({ ...item, ...(latestRow || {}) });
+    setSelectedParticipant(selected);
+    void loadParticipantNutritionDetail(selected);
   }
   const companies = data?.companies || [];
   const coaches = data?.coaches || [];
@@ -1770,7 +1815,7 @@ export default function WellnessAdminMobilePage() {
           <button
             type="button"
             aria-label="Tutup detail peserta"
-            onClick={() => setSelectedParticipant(null)}
+            onClick={closeParticipantDetail}
             className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
           />
 
@@ -1796,7 +1841,7 @@ export default function WellnessAdminMobilePage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedParticipant(null)}
+                  onClick={closeParticipantDetail}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-600 hover:bg-slate-200"
                   aria-label="Tutup"
                 >
@@ -1886,6 +1931,103 @@ export default function WellnessAdminMobilePage() {
                 </div>
               </div>
 
+
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-950">History Nutrisi</div>
+                    <div className="mt-1 text-[10px] font-bold leading-5 text-slate-500">
+                      Sumber dan flow sama dengan Portal Peserta.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadParticipantNutritionDetail(selectedParticipant)}
+                    className="rounded-full bg-teal-50 px-3 py-2 text-[10px] font-black text-teal-700"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {participantNutritionLoading ? (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+                    Memuat history nutrisi...
+                  </div>
+                ) : participantNutritionError ? (
+                  <div className="mt-4 rounded-2xl bg-rose-50 p-4 text-xs font-bold leading-5 text-rose-700">
+                    {participantNutritionError}
+                  </div>
+                ) : (
+                  <>
+                    {participantNutritionDetail?.nutrition?.sources ? (
+                      <div className="mt-3 rounded-2xl bg-slate-50 px-3 py-2 text-[10px] font-bold text-slate-500">
+                        Supabase {fmt(participantNutritionDetail.nutrition.sources.supabase_rows || 0)} row · Google Sheet {fmt(participantNutritionDetail.nutrition.sources.google_sheet_rows || 0)} row
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4">
+                      <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
+                        Kalori per Hari
+                      </div>
+                      <div className="mt-2 flex min-h-24 items-end gap-1 overflow-x-auto rounded-2xl bg-slate-50 p-3">
+                        {(participantNutritionDetail?.nutrition?.daily_calories || []).slice(-14).map((point: any, index: number, items: any[]) => {
+                          const maxCalories = Math.max(
+                            1,
+                            ...items.map((item: any) => Number(item?.calories || 0)),
+                          );
+                          const height = Math.max(
+                            8,
+                            Math.round((Number(point?.calories || 0) / maxCalories) * 70),
+                          );
+                          return (
+                            <div key={`${point?.date || index}-${index}`} className="flex min-w-8 flex-1 flex-col items-center justify-end gap-1">
+                              <div className="text-[8px] font-black text-teal-700">{fmt(point?.calories)}</div>
+                              <div className="w-full rounded-t-lg bg-teal-500" style={{ height: `${height}px` }} />
+                              <div className="text-[8px] font-bold text-slate-400">{point?.label || "-"}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 max-h-[30rem] space-y-2 overflow-y-auto pr-1">
+                      {(participantNutritionDetail?.nutrition?.logs || []).length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-bold text-slate-400">
+                          Belum ada history nutrisi yang terbaca.
+                        </div>
+                      ) : (
+                        (participantNutritionDetail?.nutrition?.logs || []).map((item: any, index: number) => (
+                          <div key={`${item?.id || index}-${index}`} className="rounded-2xl bg-slate-50 p-3">
+                            <div className="flex items-center gap-3">
+                              {clean(item?.photo_url) ? (
+                                <img
+                                  src={item.photo_url}
+                                  alt="Foto makanan"
+                                  className="h-12 w-12 shrink-0 rounded-xl object-cover"
+                                  onError={(event) => {
+                                    event.currentTarget.style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white text-[9px] font-black text-teal-700">FOOD</div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="break-words text-xs font-black text-slate-900">{item?.food_name || item?.meal_text || "-"}</div>
+                                <div className="mt-1 text-[9px] font-bold text-slate-500">{clean(item?.log_date || item?.created_at).slice(0, 10) || "-"} · {item?.meal_time || item?.meal_type || "-"}</div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <span className="rounded-full bg-teal-50 px-2.5 py-1 text-[9px] font-black text-teal-700">{fmt(item?.calories || item?.total_calories)} kkal</span>
+                                  <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-black text-slate-500">{item?.source === "google_sheet" ? "Google Sheet" : "Supabase"}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
                 <div className="text-sm font-black text-slate-950">Akses & Fitness</div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1906,7 +2048,7 @@ export default function WellnessAdminMobilePage() {
 
               <button
                 type="button"
-                onClick={() => setSelectedParticipant(null)}
+                onClick={closeParticipantDetail}
                 className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-sm font-black text-white"
               >
                 Tutup Detail
