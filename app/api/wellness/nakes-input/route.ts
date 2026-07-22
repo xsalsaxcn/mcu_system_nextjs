@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { calculateBmi, interpretBmi, weightDelta } from "@/lib/wellness/bmi";
 import { classifyWellnessRisk, complianceStatus } from "@/lib/wellness/riskRules";
 import { getAllowedWellnessParticipants, latestByDate } from "@/app/api/wellness/_utils";
+import { getWellnessSheetName, postToWellnessWebhook } from "@/lib/wellness/googleSheetWebhook";
 
 // WELLNESS_PARTICIPANT_CHARTS_V351_DASHBOARD
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
@@ -844,6 +845,453 @@ async function safeSelect(supabase: any, table: string, queryBuilder: (query: an
     return result.data || [];
   } catch {
     return [];
+  }
+}
+
+
+
+// WELLNESS_NAKES_SAVE_SHEET_HISTORY_V91
+const NAKES_SAVE_MARKER = "WELLNESS_NAKES_SAVE_SHEET_HISTORY_V91";
+
+function cleanNakesValue(value: any) {
+  return String(value ?? "").trim();
+}
+
+function nullableNakesText(value: any) {
+  const text = cleanNakesValue(value);
+  return text || null;
+}
+
+function nakesDate(value: any, fallback = new Date().toISOString().slice(0, 10)) {
+  const text = cleanNakesValue(value);
+  if (!text) return fallback;
+  const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+  return match?.[0] || fallback;
+}
+
+function nakesParticipantName(participant: any) {
+  return cleanNakesValue(
+    participant?.participant_display_name ||
+      participant?.participant_name ||
+      participant?.name,
+  );
+}
+
+function nakesSourceKey(params: {
+  participantId: number;
+  checkupDate: string;
+  historyType: string;
+  visitLabel: string;
+  visitSequence: string;
+  labNo: string;
+}) {
+  return [
+    "nakes",
+    params.participantId,
+    params.checkupDate,
+    params.historyType,
+    params.visitSequence || params.labNo || params.visitLabel || "checkup",
+  ].join(":");
+}
+
+function buildNakesSheetRow(params: {
+  body: any;
+  participant: any;
+  user: any;
+  historyRow: any;
+  sourceKey: string;
+}) {
+  const { body, participant, user, historyRow, sourceKey } = params;
+  const participantName = nakesParticipantName(participant);
+  const companyName = cleanNakesValue(
+    participant?.company_name || body?.company_name || historyRow?.company_name,
+  );
+  const groupName = cleanNakesValue(
+    participant?.kelompok_name || participant?.old_group_name,
+  );
+  const groupUnitName = cleanNakesValue(
+    participant?.group_unit_name || participant?.group_name,
+  );
+
+  return {
+    "Submission Date": new Date().toISOString(),
+    "Pilih Nama Anda": participantName,
+    "Nama Peserta": participantName,
+    "Berat badan Awal": participant?.baseline_weight_kg || participant?.initial_weight_kg || "",
+    "BB anda per hari ini (diisi sekali saja perminggu)": historyRow?.weight_kg ?? "",
+    "BB Monitoring terbaru": historyRow?.weight_kg ?? "",
+    "Lingkar Perut (cm)": historyRow?.waist_cm ?? "",
+    "BMI": historyRow?.bmi ?? "",
+    "Company": companyName,
+    "Kelompok": groupName,
+    "Group Upload": groupUnitName,
+    "Risk Cluster": historyRow?.risk_cluster || "",
+    "KODE": participant?.code || body?.employee_code || "",
+    "Participant ID": participant?.id || body?.participant_id || "",
+    "Log Date": historyRow?.checkup_date || body?.checkup_date || "",
+    "Log Type": "nakes_checkup",
+    "Evidence Count": 0,
+    "Created By": `nakes:${cleanNakesValue(user?.id) || "system"}`,
+    "Marker": NAKES_SAVE_MARKER,
+
+    "NAKES Source Key": sourceKey,
+    "Jenis Pemeriksaan NAKES": historyRow?.history_type || "",
+    "Label Pemeriksaan NAKES": historyRow?.visit_label || "",
+    "Urutan Pemeriksaan NAKES": cleanNakesValue(body?.visit_sequence),
+    "Nomor Lab NAKES": historyRow?.lab_no || "",
+    "Tinggi Badan NAKES (cm)": historyRow?.height_cm ?? "",
+    "Berat Badan NAKES (kg)": historyRow?.weight_kg ?? "",
+    "Lingkar Perut NAKES (cm)": historyRow?.waist_cm ?? "",
+    "Sistolik NAKES": historyRow?.systolic ?? "",
+    "Diastolik NAKES": historyRow?.diastolic ?? "",
+    "Nadi NAKES": historyRow?.pulse ?? "",
+    "HbA1c NAKES (%)": historyRow?.hba1c_percent ?? "",
+    "Gula Darah NAKES": historyRow?.glucose_value ?? "",
+    "Kolesterol Total NAKES": historyRow?.cholesterol_total ?? "",
+    "LDL NAKES": historyRow?.ldl ?? "",
+    "HDL NAKES": historyRow?.hdl ?? "",
+    "Trigliserida NAKES": historyRow?.triglyceride ?? "",
+    "Asam Urat NAKES": historyRow?.uric_acid ?? "",
+    "SGOT NAKES": historyRow?.sgot ?? "",
+    "SGPT NAKES": historyRow?.sgpt ?? "",
+    "Status Program NAKES": historyRow?.program_status || "",
+    "Fokus Intervensi NAKES": historyRow?.intervention_focus || "",
+    "Rencana Monitoring NAKES": historyRow?.monitoring_plan || "",
+    "Catatan Validasi Medis NAKES": historyRow?.medical_validation_notes || "",
+    "Tanggal Follow-up NAKES": historyRow?.next_followup_date || "",
+    "Alert Klinis NAKES": cleanNakesValue(body?.clinical_alert),
+  };
+}
+
+function nakesCoreHistoryPayload(payload: any) {
+  return {
+    company_name: payload.company_name,
+    participant_id: payload.participant_id,
+    employee_code: payload.employee_code,
+    lab_no: payload.lab_no,
+    checkup_date: payload.checkup_date,
+    history_type: payload.history_type,
+    visit_label: payload.visit_label,
+    risk_cluster: payload.risk_cluster,
+    risk_level: payload.risk_level,
+    hba1c_percent: payload.hba1c_percent,
+    glucose_value: payload.glucose_value,
+    bp_raw: payload.bp_raw,
+    systolic: payload.systolic,
+    diastolic: payload.diastolic,
+    bmi: payload.bmi,
+    weight_kg: payload.weight_kg,
+    height_cm: payload.height_cm,
+    waist_cm: payload.waist_cm,
+    intervention_focus: payload.intervention_focus,
+    monitoring_plan: payload.monitoring_plan,
+    medical_validation_notes: payload.medical_validation_notes,
+    program_status: payload.program_status,
+    raw_payload: payload.raw_payload,
+    created_by: payload.created_by,
+    updated_at: payload.updated_at,
+  };
+}
+
+async function findExistingNakesHistory(
+  supabase: any,
+  participantId: number,
+  checkupDate: string,
+  historyType: string,
+  sourceKey: string,
+) {
+  const { data, error } = await supabase
+    .from("wellness_checkup_history")
+    .select("id,raw_payload")
+    .eq("participant_id", participantId)
+    .eq("checkup_date", checkupDate)
+    .eq("history_type", historyType)
+    .order("id", { ascending: false })
+    .limit(50);
+
+  if (error) return null;
+
+  return (
+    (data || []).find(
+      (row: any) => cleanNakesValue(row?.raw_payload?.nakes_source_key) === sourceKey,
+    ) || null
+  );
+}
+
+async function writeNakesHistory(params: {
+  supabase: any;
+  fullPayload: any;
+  existingId?: number | null;
+}) {
+  const { supabase, fullPayload, existingId } = params;
+
+  const execute = (payload: any) =>
+    existingId
+      ? supabase
+          .from("wellness_checkup_history")
+          .update(payload)
+          .eq("id", existingId)
+          .select("*")
+          .single()
+      : supabase
+          .from("wellness_checkup_history")
+          .insert(payload)
+          .select("*")
+          .single();
+
+  const fullResult = await execute(fullPayload);
+  if (!fullResult.error) {
+    return { row: fullResult.data, compatibilityWarning: "" };
+  }
+
+  // Compatibility fallback only: use columns already present in the original
+  // Wellness NAKES table. This never creates/alters any database object.
+  const coreResult = await execute(nakesCoreHistoryPayload(fullPayload));
+  if (coreResult.error) throw fullResult.error;
+
+  return {
+    row: coreResult.data,
+    compatibilityWarning:
+      "Sebagian parameter lanjutan disimpan di raw_payload karena kolom opsional belum tersedia.",
+  };
+}
+
+export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  const body = await req.json().catch(() => ({}));
+  const participantId = Number(body?.participant_id || 0);
+  if (!(participantId > 0)) return fail("Peserta wajib dipilih.", 400);
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const allowedParticipants = await getAllowedWellnessParticipants(supabase, user);
+    const participant = (allowedParticipants || []).find(
+      (item: any) => Number(item?.id) === participantId,
+    );
+
+    if (!participant) {
+      return fail("Peserta tidak ditemukan atau akses NAKES ditolak.", 404);
+    }
+
+    const checkupDate = nakesDate(body?.checkup_date);
+    const historyType =
+      cleanNakesValue(body?.history_type) || "periodic_checkup";
+    const visitLabel =
+      cleanNakesValue(body?.visit_label) || "Pemeriksaan Berkala";
+    const visitSequence = cleanNakesValue(body?.visit_sequence);
+    const labNo = cleanNakesValue(body?.lab_no);
+
+    const heightCm = pickNumber(body?.height_cm, participant?.height_cm);
+    const weightKg = pickNumber(body?.weight_kg);
+    const bmi = pickNumber(body?.bmi, calculateBmi(weightKg, heightCm));
+    const systolic = pickNumber(body?.systolic);
+    const diastolic = pickNumber(body?.diastolic);
+    const hba1c = pickNumber(body?.hba1c_percent);
+    const glucose = pickNumber(body?.glucose_value);
+    const risk = classifyWellnessRisk({
+      hba1c,
+      glucose,
+      bmi,
+      sbp: systolic,
+      dbp: diastolic,
+    });
+
+    const sourceKey = nakesSourceKey({
+      participantId,
+      checkupDate,
+      historyType,
+      visitLabel,
+      visitSequence,
+      labNo,
+    });
+
+    const existing = await findExistingNakesHistory(
+      supabase,
+      participantId,
+      checkupDate,
+      historyType,
+      sourceKey,
+    );
+
+    const existingRaw =
+      existing?.raw_payload && typeof existing.raw_payload === "object"
+        ? existing.raw_payload
+        : {};
+
+    const createdByNumber = Number(user?.id);
+    const nowIso = new Date().toISOString();
+    const companyId =
+      Number(participant?.wellness_company_id || body?.company_id || 0) || null;
+    const companyName = cleanNakesValue(
+      participant?.company_name || body?.company_name,
+    );
+    const participantName = nakesParticipantName(participant);
+
+    const rawPayload = {
+      ...existingRaw,
+      ...body,
+      nakes_source_key: sourceKey,
+      nakes_marker: NAKES_SAVE_MARKER,
+      participant_snapshot: {
+        id: participant?.id,
+        code: participant?.code,
+        name: participantName,
+        company_name: companyName,
+        kelompok_name: participant?.kelompok_name || "",
+        group_unit_name: participant?.group_unit_name || "",
+      },
+      saved_from: "wellness_nakes_input",
+      saved_at: nowIso,
+    };
+
+    const historyPayload: any = {
+      company_id: companyId,
+      company_name: companyName || null,
+      participant_id: participantId,
+      employee_code: cleanNakesValue(participant?.code || body?.employee_code) || null,
+      participant_name: participantName || null,
+      sex: nullableNakesText(participant?.gender || participant?.sex),
+      department: nullableNakesText(participant?.department),
+      position: nullableNakesText(participant?.position),
+      lab_no: labNo || null,
+      checkup_date: checkupDate,
+      history_type: historyType,
+      visit_label: visitLabel,
+      risk_cluster:
+        cleanNakesValue(
+          body?.risk_cluster ||
+            participant?.risk_cluster ||
+            participant?.baseline_risk_group,
+        ) || risk.group,
+      risk_level: risk.level,
+      hba1c_percent: hba1c,
+      glucose_value: glucose,
+      bp_raw:
+        systolic !== null || diastolic !== null
+          ? `${systolic ?? ""}/${diastolic ?? ""}`
+          : null,
+      systolic,
+      diastolic,
+      pulse: pickNumber(body?.pulse),
+      height_cm: heightCm,
+      weight_kg: weightKg,
+      bmi,
+      waist_cm: pickNumber(body?.waist_cm),
+      cholesterol_total: pickNumber(body?.cholesterol_total),
+      ldl: pickNumber(body?.ldl),
+      hdl: pickNumber(body?.hdl),
+      triglyceride: pickNumber(body?.triglyceride),
+      uric_acid: pickNumber(body?.uric_acid),
+      sgot: pickNumber(body?.sgot),
+      sgpt: pickNumber(body?.sgpt),
+      criteria_count: risk.flags.length,
+      intervention_focus: nullableNakesText(body?.intervention_focus),
+      monitoring_plan: nullableNakesText(body?.monitoring_plan),
+      medical_validation_notes: nullableNakesText(body?.medical_validation_notes),
+      program_status: nullableNakesText(body?.program_status),
+      next_followup_date: nullableNakesText(body?.follow_up_date),
+      raw_payload: rawPayload,
+      created_by:
+        Number.isFinite(createdByNumber) && createdByNumber > 0
+          ? createdByNumber
+          : null,
+      updated_at: nowIso,
+    };
+
+    Object.keys(historyPayload).forEach((key) => {
+      if (historyPayload[key] === "" || historyPayload[key] === undefined) {
+        historyPayload[key] = null;
+      }
+    });
+
+    const historyWrite = await writeNakesHistory({
+      supabase,
+      fullPayload: historyPayload,
+      existingId: Number(existing?.id || 0) || null,
+    });
+    const historyRow = historyWrite.row;
+
+    let sheetResult: any = null;
+    let sheetError = "";
+
+    if (existingRaw?.google_sheet_synced_at) {
+      sheetResult = {
+        ok: true,
+        skipped: true,
+        message: "Google Sheet sudah tersinkron untuk input ini.",
+        rowNumber: existingRaw?.google_sheet_row_number || null,
+      };
+    } else {
+      try {
+        sheetResult = await postToWellnessWebhook({
+          sheet: getWellnessSheetName(),
+          row: buildNakesSheetRow({
+            body,
+            participant,
+            user,
+            historyRow,
+            sourceKey,
+          }),
+        });
+
+        const syncedRawPayload = {
+          ...(historyRow?.raw_payload || rawPayload),
+          google_sheet_synced_at: new Date().toISOString(),
+          google_sheet_row_number: sheetResult?.rowNumber || null,
+          google_sheet_name: sheetResult?.sheet || getWellnessSheetName(),
+        };
+
+        await supabase
+          .from("wellness_checkup_history")
+          .update({ raw_payload: syncedRawPayload, updated_at: new Date().toISOString() })
+          .eq("id", historyRow.id);
+
+        historyRow.raw_payload = syncedRawPayload;
+      } catch (error: any) {
+        sheetError = error?.message || "Google Sheet gagal disinkronkan.";
+      }
+    }
+
+    const summary = {
+      history_id: historyRow?.id || null,
+      visit_label: historyRow?.visit_label || visitLabel,
+      risk_cluster: historyRow?.risk_cluster || risk.group,
+      program_status: historyRow?.program_status || "",
+      checkup_date: historyRow?.checkup_date || checkupDate,
+      created: !existing,
+      updated: Boolean(existing),
+    };
+
+    if (sheetError) {
+      return fail(
+        `Data NAKES sudah tersimpan untuk grafik seluruh portal, tetapi Google Sheet belum tersinkron: ${sheetError}`,
+        502,
+        {
+          saved_to_history: true,
+          saved_to_graphs: true,
+          retry_safe: true,
+          history: historyRow,
+          summary,
+          google_sheet: { ok: false, message: sheetError },
+          warning: historyWrite.compatibilityWarning || "",
+        },
+      );
+    }
+
+    return ok({
+      message:
+        "Input NAKES berhasil disimpan ke Google Sheet dan history pemeriksaan. Data dapat ditampilkan pada grafik peserta setelah portal di-refresh.",
+      saved_to_history: true,
+      saved_to_graphs: true,
+      history: historyRow,
+      summary,
+      google_sheet: sheetResult,
+      warning: historyWrite.compatibilityWarning || "",
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Gagal menyimpan input NAKES.", 500);
   }
 }
 

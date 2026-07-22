@@ -187,6 +187,9 @@ function WellnessNakesInput() {
   const [lastResult, setLastResult] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  // WELLNESS_COMPANY_NAKES_DIRECT_LINK_V90_1
+  const [companyScopeId, setCompanyScopeId] = useState("");
+  const [companyScopeName, setCompanyScopeName] = useState("");
   const [kelompokFilter, setKelompokFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
@@ -209,10 +212,47 @@ function WellnessNakesInput() {
     const list = data.participants || [];
     setParticipants(list);
 
+    const params =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : new URLSearchParams();
+    const requestedCompanyId = clean(params.get("company_id"));
+    const requestedCompanyName = clean(params.get("company_name"));
+    const scopedParticipant =
+      list.find(
+        (participant: any) =>
+          requestedCompanyId &&
+          String(participant.company_id || "") === requestedCompanyId,
+      ) ||
+      list.find(
+        (participant: any) =>
+          requestedCompanyName &&
+          clean(participant.company_name).toLowerCase() ===
+            requestedCompanyName.toLowerCase(),
+      ) ||
+      null;
+    const resolvedCompanyName = clean(
+      scopedParticipant?.company_name || requestedCompanyName,
+    );
+    const scopedList = resolvedCompanyName
+      ? list.filter(
+          (participant: any) =>
+            clean(participant.company_name) === resolvedCompanyName,
+        )
+      : list;
+
+    setCompanyScopeId(requestedCompanyId);
+    setCompanyScopeName(resolvedCompanyName);
+    if (resolvedCompanyName) {
+      setCompanyFilter(resolvedCompanyName);
+      setKelompokFilter("");
+      setGroupFilter("");
+    }
+
     setForm((previous: any) =>
-      previous.participant_id || !list.length
+      previous.participant_id || !scopedList.length
         ? previous
-        : { ...previous, participant_id: list[0].id }
+        : { ...previous, participant_id: scopedList[0].id }
     );
 
     setLoading(false);
@@ -333,16 +373,42 @@ function WellnessNakesInput() {
       employee_code: clean(participant.code),
     };
 
-    const result = await fetch("/api/wellness/nakes-input", {
+    // WELLNESS_NAKES_SAVE_SHEET_HISTORY_V91_CLIENT
+    const response = await fetch("/api/wellness/nakes-input", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    })
-      .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Network error",
-      }));
+    }).catch((error) => null);
+
+    let result: any = {
+      ok: false,
+      message: "Tidak dapat menghubungi server NAKES.",
+    };
+
+    if (response) {
+      const responseText = await response.text().catch(() => "");
+      try {
+        result = responseText ? JSON.parse(responseText) : {
+          ok: false,
+          message: `Server mengembalikan respons kosong (HTTP ${response.status}).`,
+        };
+      } catch {
+        result = {
+          ok: false,
+          message:
+            responseText ||
+            `Respons server NAKES tidak valid (HTTP ${response.status}).`,
+        };
+      }
+
+      if (!response.ok && result?.ok !== false) {
+        result = {
+          ...result,
+          ok: false,
+          message: result?.message || `Gagal menyimpan (HTTP ${response.status}).`,
+        };
+      }
+    };
 
     setSaving(false);
     setLastResult(result);
@@ -418,8 +484,16 @@ function WellnessNakesInput() {
         </header>
 
         <section className="rounded-2xl border border-cyan-100 bg-cyan-50/80 px-5 py-4 text-sm font-semibold leading-6 text-cyan-950">
-          Simpan atau bagikan URL halaman ini kepada NAKES yang berwenang. Akses autentikasi,
-          proses simpan, field pemeriksaan, dan sumber data tetap mengikuti sistem Wellness yang sudah berjalan.
+          <div>
+            Simpan atau bagikan URL halaman ini kepada NAKES yang berwenang. Akses autentikasi,
+            proses simpan, field pemeriksaan, dan sumber data tetap mengikuti sistem Wellness yang sudah berjalan.
+          </div>
+          {companyScopeName ? (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-black text-teal-800 ring-1 ring-cyan-100">
+              <span aria-hidden="true">🏢</span>
+              Scope perusahaan: {companyScopeName}
+            </div>
+          ) : null}
         </section>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -458,6 +532,7 @@ function WellnessNakesInput() {
                   <select
                     className={inputClass()}
                     value={companyFilter}
+                    disabled={Boolean(companyScopeId || companyScopeName)}
                     onChange={(event) => {
                       setCompanyFilter(event.target.value);
                       setKelompokFilter("");
