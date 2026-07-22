@@ -1,8 +1,10 @@
 "use client";
 
 // WELLNESS_ADMIN_SUPPORT_UNREAD_NORMALIZED_V79Q
+// WELLNESS_ADMIN_PARTICIPANT_DETAIL_UI_V89
 
 import { useEffect, useMemo, useState } from "react";
+import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
 // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
@@ -176,6 +178,7 @@ export default function WellnessAdminMobilePage() {
   const [query, setQuery] = useState("");
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [supportUnread, setSupportUnread] = useState(0);
+  const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
   // WELLNESS_ADMIN_SUPPORT_BADGE_V79P
   // WELLNESS_ADMIN_SUPPORT_CONTEXT_EXACT_V79R2
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
@@ -1229,14 +1232,25 @@ export default function WellnessAdminMobilePage() {
                   return (
                     <article
                       key={item.id || index}
-                      className="rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-sm"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Buka detail peserta ${item.name || ""}`}
+                      onClick={() => setSelectedParticipant(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedParticipant(item);
+                        }
+                      }}
+                      className="cursor-pointer rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-teal-100"
                     >
                       <div className="flex items-start gap-3">
-                        <div
-                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${avatarTone(index + 2)} text-xs font-black text-white`}
-                        >
-                          {initials(item.name)}
-                        </div>
+                        <WellnessAvatar
+                          name={item.name}
+                          src={item.profile_photo_preview_url || item.profile_photo_url}
+                          size="md"
+                          className="h-11 w-11 ring-2"
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="break-words text-sm font-black leading-5 text-slate-950">
                             {item.name}
@@ -1269,7 +1283,11 @@ export default function WellnessAdminMobilePage() {
                         </div>
                       </div>
 
-                      <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                      <div
+                        className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-3"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
                         <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
                           Kontrol Pengembangan
                         </div>
@@ -1403,15 +1421,37 @@ export default function WellnessAdminMobilePage() {
                   .filter((item: any) => flagOf(item) === "red")
                   .slice(0, 50)
                   .map((item: any, index: number) => (
-                    <article key={item.id || index} className="rounded-[1.4rem] border border-rose-100 bg-white p-3.5 shadow-sm">
+                    <article
+                      key={item.id || index}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Buka detail peserta ${item.name || ""}`}
+                      onClick={() => setSelectedParticipant(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedParticipant(item);
+                        }
+                      }}
+                      className="cursor-pointer rounded-[1.4rem] border border-rose-100 bg-white p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100"
+                    >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="break-words text-sm font-black leading-5 text-slate-950">{item.name}</div>
-                          <div className="mt-1 break-words text-[10px] font-bold text-slate-500">{item.company_name} · {item.group_name}</div>
+                        <div className="flex min-w-0 items-start gap-3">
+                          <WellnessAvatar
+                            name={item.name}
+                            src={item.profile_photo_preview_url || item.profile_photo_url}
+                            size="md"
+                            className="h-11 w-11 ring-2"
+                          />
+                          <div className="min-w-0">
+                            <div className="break-words text-sm font-black leading-5 text-slate-950">{item.name}</div>
+                            <div className="mt-1 break-words text-[10px] font-bold text-slate-500">{item.company_name} · {item.group_name}</div>
+                          </div>
                         </div>
                         <span className="rounded-full bg-rose-600 px-2.5 py-1 text-[9px] font-black text-white">RED</span>
                       </div>
                       <div className="mt-2 text-xs font-bold leading-5 text-rose-800">{(item.risk_flags || []).join(" · ") || item.compliance_status || "Membutuhkan follow-up"}</div>
+                      <div className="mt-2 text-[10px] font-black text-slate-400">Klik untuk melihat detail peserta</div>
                     </article>
                   ))}
               </div>
@@ -1609,6 +1649,136 @@ export default function WellnessAdminMobilePage() {
           ) : null}
         </div>
       </div>
+
+      {selectedParticipant ? (
+        <div className="fixed inset-0 z-[120] flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Tutup detail peserta"
+            onClick={() => setSelectedParticipant(null)}
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+          />
+
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Detail peserta ${selectedParticipant.name || ""}`}
+            className="relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-t-[2rem] bg-slate-50 shadow-2xl sm:max-w-3xl sm:rounded-[2rem]"
+          >
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
+              <div className="flex items-start gap-3">
+                <WellnessAvatar
+                  name={selectedParticipant.name}
+                  src={selectedParticipant.profile_photo_preview_url || selectedParticipant.profile_photo_url}
+                  size="lg"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-teal-600">Detail Peserta</div>
+                  <h2 className="mt-1 break-words text-xl font-black text-slate-950">{selectedParticipant.name || "Peserta Wellness"}</h2>
+                  <div className="mt-1 break-words text-xs font-bold leading-5 text-slate-500">
+                    {selectedParticipant.code || "-"} · {selectedParticipant.company_name || "-"} · {selectedParticipant.group_name || "-"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedParticipant(null)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg font-black text-slate-600 hover:bg-slate-200"
+                  aria-label="Tutup"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-4 sm:p-5">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  ["Total Point", selectedParticipant.total_points, "bg-violet-50 text-violet-800"],
+                  ["Nutrisi", selectedParticipant.nutrition_points, "bg-orange-50 text-orange-800"],
+                  ["Workout", selectedParticipant.workout_points, "bg-sky-50 text-sky-800"],
+                  ["Health Talk", selectedParticipant.healthtalk_points, "bg-fuchsia-50 text-fuchsia-800"],
+                ].map(([label, value, tone]) => (
+                  <div key={String(label)} className={`rounded-2xl p-3 ${tone}`}>
+                    <div className="text-[9px] font-black uppercase tracking-wide opacity-70">{label}</div>
+                    <div className="mt-1 text-xl font-black">{fmt(value)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Status</div>
+                  <span className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-[10px] font-black uppercase ${flagTone(flagOf(selectedParticipant))}`}>
+                    {selectedParticipant.compliance_status || flagOf(selectedParticipant)}
+                  </span>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Streak</div>
+                  <div className="mt-2 text-xl font-black text-slate-950">{fmt(selectedParticipant.current_streak)} hari</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">Hari Aktif</div>
+                  <div className="mt-2 text-xl font-black text-slate-950">{fmt(selectedParticipant.active_days)} hari</div>
+                </div>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-950">Perkembangan Kesehatan</div>
+                    <div className="mt-1 text-[10px] font-bold text-slate-500">Baseline dibandingkan data terbaru dari backend.</div>
+                  </div>
+                  <span className="rounded-full bg-teal-50 px-3 py-1.5 text-[9px] font-black text-teal-700">READ ONLY</span>
+                </div>
+                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100">
+                  <div className="grid grid-cols-[1.4fr_1fr_1fr] bg-slate-50 px-3 py-2 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                    <div>Parameter</div><div className="text-right">Baseline</div><div className="text-right">Terbaru</div>
+                  </div>
+                  {[
+                    ["Berat Badan", "weight", "kg"],
+                    ["BMI", "bmi", ""],
+                    ["Lingkar Pinggang", "waist", "cm"],
+                    ["HbA1c", "hba1c", "%"],
+                    ["Tekanan Darah Sistolik", "sbp", "mmHg"],
+                  ].map(([label, key, unit]) => (
+                    <div key={String(key)} className="grid grid-cols-[1.4fr_1fr_1fr] border-t border-slate-100 px-3 py-3 text-xs">
+                      <div className="font-black text-slate-700">{label}</div>
+                      <div className="text-right font-bold text-slate-500">{fmt(selectedParticipant.baseline?.[String(key)], 1)}{unit ? ` ${unit}` : ""}</div>
+                      <div className="text-right font-black text-teal-700">{fmt(selectedParticipant.current?.[String(key)], 1)}{unit ? ` ${unit}` : ""}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
+                <div className="text-sm font-black text-slate-950">Akses & Fitness</div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <div className="text-[9px] font-black uppercase text-slate-400">Session Wellness</div>
+                    <div className="mt-1 text-sm font-black text-slate-900">{selectedParticipant.wellness_control?.session_enabled === false ? "Nonaktif" : "Aktif"}</div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-3">
+                    <div className="text-[9px] font-black uppercase text-slate-400">Fitness App</div>
+                    <div className="mt-1 text-sm font-black text-slate-900">
+                      {selectedParticipant.wellness_control?.fitness_enabled
+                        ? fitnessSourceLabel(selectedParticipant.wellness_control?.fitness_source)
+                        : "Nonaktif"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedParticipant(null)}
+                className="w-full rounded-2xl bg-slate-950 px-5 py-4 text-sm font-black text-white"
+              >
+                Tutup Detail
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1">
