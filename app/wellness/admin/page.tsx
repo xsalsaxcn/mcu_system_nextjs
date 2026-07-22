@@ -43,6 +43,19 @@ function initials(name: any) {
   return (words[0]?.[0] || "A") + (words[1]?.[0] || "");
 }
 
+function profilePhotoOf(item: any) {
+  return clean(
+    item?.profile_photo_preview_url ||
+      item?.profile_photo_url ||
+      item?.photo_preview_url ||
+      item?.photo_url ||
+      item?.avatar_url ||
+      item?.profile_picture_url ||
+      item?.raw_payload?.profile_photo_preview_url ||
+      item?.raw_payload?.profile_photo_url,
+  );
+}
+
 function roleLabel(role: any) {
   return clean(role)
     .replace(/_/g, " ")
@@ -522,6 +535,22 @@ export default function WellnessAdminMobilePage() {
 
   const rows = wellnessData?.rows || [];
   const companyDashboards = wellnessData?.company_dashboards || [];
+
+  function openParticipantDetail(item: any) {
+    const participantId = Number(item?.participant_id || item?.id || 0);
+    const participantCode = clean(item?.code).toLowerCase();
+    const latestRow = rows.find((row: any) => {
+      const rowId = Number(row?.participant_id || row?.id || 0);
+      if (participantId > 0 && rowId === participantId) return true;
+      return Boolean(
+        participantCode && clean(row?.code).toLowerCase() === participantCode,
+      );
+    });
+
+    setMenuOpen(false);
+    setNotificationOpen(false);
+    setSelectedParticipant({ ...item, ...(latestRow || {}) });
+  }
   const companies = data?.companies || [];
   const coaches = data?.coaches || [];
   const groups = data?.groups || [];
@@ -1235,11 +1264,11 @@ export default function WellnessAdminMobilePage() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Buka detail peserta ${item.name || ""}`}
-                      onClick={() => setSelectedParticipant(item)}
+                      onClick={() => openParticipantDetail(item)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setSelectedParticipant(item);
+                          openParticipantDetail(item);
                         }
                       }}
                       className="cursor-pointer rounded-[1.45rem] border border-slate-100 bg-white p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-teal-100"
@@ -1247,7 +1276,7 @@ export default function WellnessAdminMobilePage() {
                       <div className="flex items-start gap-3">
                         <WellnessAvatar
                           name={item.name}
-                          src={item.profile_photo_preview_url || item.profile_photo_url}
+                          src={profilePhotoOf(item)}
                           size="md"
                           className="h-11 w-11 ring-2"
                         />
@@ -1421,25 +1450,18 @@ export default function WellnessAdminMobilePage() {
                   .filter((item: any) => flagOf(item) === "red")
                   .slice(0, 50)
                   .map((item: any, index: number) => (
-                    <article
+                    <button
                       key={item.id || index}
-                      role="button"
-                      tabIndex={0}
+                      type="button"
                       aria-label={`Buka detail peserta ${item.name || ""}`}
-                      onClick={() => setSelectedParticipant(item)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setSelectedParticipant(item);
-                        }
-                      }}
-                      className="cursor-pointer rounded-[1.4rem] border border-rose-100 bg-white p-3.5 shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100"
+                      onClick={() => openParticipantDetail(item)}
+                      className="w-full cursor-pointer rounded-[1.4rem] border border-rose-100 bg-white p-3.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-rose-200 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100 active:scale-[0.995]"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-start gap-3">
                           <WellnessAvatar
                             name={item.name}
-                            src={item.profile_photo_preview_url || item.profile_photo_url}
+                            src={profilePhotoOf(item)}
                             size="md"
                             className="h-11 w-11 ring-2"
                           />
@@ -1451,8 +1473,11 @@ export default function WellnessAdminMobilePage() {
                         <span className="rounded-full bg-rose-600 px-2.5 py-1 text-[9px] font-black text-white">RED</span>
                       </div>
                       <div className="mt-2 text-xs font-bold leading-5 text-rose-800">{(item.risk_flags || []).join(" · ") || item.compliance_status || "Membutuhkan follow-up"}</div>
-                      <div className="mt-2 text-[10px] font-black text-slate-400">Klik untuk melihat detail peserta</div>
-                    </article>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-[10px] font-black text-slate-400">
+                        <span>Klik untuk melihat detail peserta</span>
+                        <span aria-hidden="true" className="text-sm text-rose-500">›</span>
+                      </div>
+                    </button>
                   ))}
               </div>
               {flags.red === 0 ? (
@@ -1532,10 +1557,24 @@ export default function WellnessAdminMobilePage() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {topParticipants.map((item: any, index: number) => (
-                    <div key={item.id || index} className="rounded-2xl bg-slate-50 p-3">
+                    <button
+                      key={item.id || index}
+                      type="button"
+                      onClick={() => openParticipantDetail(item)}
+                      aria-label={`Buka detail ranking peserta ${item.name || ""}`}
+                      className="w-full rounded-2xl bg-slate-50 p-3 text-left transition hover:bg-violet-50 focus:outline-none focus:ring-4 focus:ring-violet-100 active:scale-[0.995]"
+                    >
                       <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-600 text-xs font-black text-white">
-                          {index + 1}
+                        <div className="relative shrink-0">
+                          <WellnessAvatar
+                            name={item.name}
+                            src={profilePhotoOf(item)}
+                            size="sm"
+                            className="h-10 w-10 ring-2"
+                          />
+                          <span className="absolute -bottom-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1 text-[9px] font-black text-white ring-2 ring-slate-50">
+                            {index + 1}
+                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="break-words text-sm font-black leading-5">
@@ -1571,7 +1610,7 @@ export default function WellnessAdminMobilePage() {
                           </span>
                         ) : null}
                       </div>
-                    </div>
+                    </button>
                   ))}
                   {topParticipants.length === 0 ? (
                     <EmptyState
@@ -1669,7 +1708,7 @@ export default function WellnessAdminMobilePage() {
               <div className="flex items-start gap-3">
                 <WellnessAvatar
                   name={selectedParticipant.name}
-                  src={selectedParticipant.profile_photo_preview_url || selectedParticipant.profile_photo_url}
+                  src={profilePhotoOf(selectedParticipant)}
                   size="lg"
                 />
                 <div className="min-w-0 flex-1">
