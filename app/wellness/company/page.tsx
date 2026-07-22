@@ -78,6 +78,9 @@ export default function WellnessCompanyPortalPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  // WELLNESS_COMPANY_PORTAL_NAKES_LINK_V90_2
+  const [nakesLinkOpen, setNakesLinkOpen] = useState(false);
+  const [nakesLinkCopied, setNakesLinkCopied] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [metric, setMetric] = useState<Metric>("overall");
   const [unreadCoach, setUnreadCoach] = useState(0);
@@ -173,6 +176,52 @@ export default function WellnessCompanyPortalPage() {
   const summary = data?.summary || {};
   const groupRanking = data?.group_ranking || [];
   const topParticipants = data?.rankings?.[metric] || [];
+
+  // WELLNESS_COMPANY_PORTAL_NAKES_LINK_V90_2
+  function companyNakesFormPath() {
+    const params = new URLSearchParams();
+    const companyId = clean(company?.id);
+    const companyName = clean(company?.name);
+
+    if (companyId) params.set("company_id", companyId);
+    if (companyName) params.set("company_name", companyName);
+
+    const query = params.toString();
+    return `/wellness/nakes-input${query ? `?${query}` : ""}`;
+  }
+
+  function companyNakesFormUrl() {
+    const path = companyNakesFormPath();
+    if (typeof window === "undefined") return path;
+    return `${window.location.origin}${path}`;
+  }
+
+  async function copyCompanyNakesLink() {
+    const url = companyNakesFormUrl();
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setNakesLinkCopied(true);
+      window.setTimeout(() => setNakesLinkCopied(false), 2200);
+      return;
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = url;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setNakesLinkCopied(true);
+      window.setTimeout(() => setNakesLinkCopied(false), 2200);
+    }
+  }
+
+  function openCompanyNakesForm() {
+    window.open(companyNakesFormPath(), "_blank", "noopener,noreferrer");
+  }
 
   // WELLNESS_COMPANY_INLINE_LOGIN_V78A
   async function loginCompany(event: React.FormEvent) {
@@ -370,6 +419,20 @@ export default function WellnessCompanyPortalPage() {
             </div>
           </div>
 
+          {/* WELLNESS_COMPANY_PORTAL_NAKES_LINK_V90_2 */}
+          <button
+            type="button"
+            onClick={() => {
+              setNakesLinkCopied(false);
+              setNakesLinkOpen(true);
+            }}
+            className="flex h-11 shrink-0 items-center gap-2 rounded-full bg-teal-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-teal-700 active:scale-[0.98]"
+            aria-label="Buka Link Input NAKES"
+          >
+            <span aria-hidden="true">🔗</span>
+            <span className="hidden sm:inline">Link Input NAKES</span>
+          </button>
+
           <div className="relative">
             <button
               type="button"
@@ -512,6 +575,98 @@ export default function WellnessCompanyPortalPage() {
         />
       ) : null}
 
+      {/* WELLNESS_COMPANY_PORTAL_NAKES_LINK_V90_2 */}
+      {nakesLinkOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => setNakesLinkOpen(false)}
+            className="absolute inset-0"
+            aria-label="Tutup Link Input NAKES"
+          />
+
+          <section className="relative w-full max-w-xl overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+            <div className="bg-gradient-to-br from-indigo-950 via-blue-800 to-teal-600 p-5 text-white md:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
+                    Direct Link Input NAKES
+                  </div>
+                  <h2 className="mt-2 text-2xl font-black">{company.name || "Perusahaan"}</h2>
+                  <p className="mt-2 text-sm font-bold leading-6 text-white/80">
+                    Form ini otomatis membatasi pilihan peserta pada perusahaan ini.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNakesLinkOpen(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-xl font-black"
+                  aria-label="Tutup"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-5 p-5 md:p-6">
+              <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-lg text-white">
+                  🔗
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-600">
+                    Direct link form
+                  </div>
+                  <div className="mt-1 text-sm font-black text-emerald-950">
+                    Siap dibagikan kepada tim NAKES
+                  </div>
+                </div>
+                <span className="ml-auto shrink-0 rounded-full bg-white px-3 py-1 text-[10px] font-black text-emerald-700 shadow-sm">
+                  Company Scoped
+                </span>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                  Share with link
+                </label>
+                <div className="mt-2 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                  <span className="pl-2 text-slate-400" aria-hidden="true">🔗</span>
+                  <input
+                    readOnly
+                    value={companyNakesFormUrl()}
+                    className="min-w-0 flex-1 bg-transparent px-1 py-2 text-xs font-bold text-slate-600 outline-none md:text-sm"
+                    aria-label="Link Input NAKES"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void copyCompanyNakesLink()}
+                  className="h-13 rounded-2xl bg-emerald-600 px-5 text-sm font-black text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-700"
+                >
+                  {nakesLinkCopied ? "✓ Link Tersalin" : "Copy Link"}
+                </button>
+                <button
+                  type="button"
+                  onClick={openCompanyNakesForm}
+                  className="h-13 rounded-2xl bg-blue-600 px-5 text-sm font-black text-white shadow-lg shadow-blue-100 transition hover:bg-blue-700"
+                >
+                  Open in New Tab ↗
+                </button>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800">
+                Link membawa parameter perusahaan pada URL. Struktur form, rules pemeriksaan,
+                autentikasi, API, dan penyimpanan tetap memakai sistem yang sudah berjalan.
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {menuOpen ? (
         <div className="fixed inset-0 z-[100] bg-slate-950/45 backdrop-blur-sm">
           <button
@@ -548,6 +703,16 @@ export default function WellnessCompanyPortalPage() {
               <MenuButton icon="💬" title="Chat With Coach" description="Komunikasi dengan Coach kelompok" badge={unreadCoach} onClick={() => { setView("coach_chat"); setMenuOpen(false); }} />
               <MenuButton icon="🛠️" title="Chat With Admin" description="Bantuan teknis dan penggunaan aplikasi" badge={unreadAdmin} onClick={() => { setSupportOpen(true); setMenuOpen(false); }} />
               <MenuButton icon="🏢" title="Profil Perusahaan" description="Data dan foto profil perusahaan" onClick={() => { setView("profile"); setMenuOpen(false); }} />
+              <MenuButton
+                icon="🔗"
+                title="Link Input NAKES"
+                description="Salin atau buka form pemeriksaan khusus perusahaan"
+                onClick={() => {
+                  setNakesLinkCopied(false);
+                  setNakesLinkOpen(true);
+                  setMenuOpen(false);
+                }}
+              />
             </div>
 
             {data?.can_select_company && (data?.companies || []).length > 1 ? (
