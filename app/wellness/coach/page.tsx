@@ -891,60 +891,33 @@ export default function WellnessCoachPortalPage() {
     <main className="min-h-screen bg-[linear-gradient(180deg,#fbfefe_0%,#f4f9fb_44%,#f8fafc_100%)] text-slate-900">
       {/* WELLNESS_COACH_UI_REFRESH_V107 */}
       {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109 */}
-      {/* WELLNESS_COACH_COMMAND_CENTER_V112: dashboard UI only; existing functions remain unchanged. */}
-      <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:px-5 md:px-8 md:pb-12 md:pt-6">
+      {/* WELLNESS_COACH_COMMAND_CENTER_V112 */}
+      {/* WELLNESS_COACH_PROFESSIONAL_DASHBOARD_V113: UI/UX only; all existing functions remain unchanged. */}
+      <div className="mx-auto max-w-7xl px-3 pb-10 pt-3 sm:px-5 md:px-8 md:pb-12 md:pt-5">
         {/* WELLNESS_COACH_CHAT_DIRECT_HEADER_V77D */}
         {!isLoggedIn || coachView === "monitoring" ? (
           <>
-            <section
-              className={`relative overflow-visible rounded-[1.75rem] p-4 sm:p-5 md:p-6 ${
-                isLoggedIn
-                  ? "border border-teal-900/10 bg-[linear-gradient(135deg,#062f37_0%,#075e5a_58%,#0b8f88_100%)] text-white shadow-[0_22px_55px_rgba(6,78,75,0.24)]"
-                  : "border border-slate-200/80 bg-white text-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.07)]"
-              }`}
-            >
-              {isLoggedIn ? (
-                <>
-                  <div className="pointer-events-none absolute -right-12 -top-14 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
-                  <div className="pointer-events-none absolute -bottom-16 -left-12 h-36 w-36 rounded-full bg-cyan-300/10 blur-2xl" />
-                </>
-              ) : null}
-              <div className="relative flex items-start justify-between gap-3 md:items-end">
-                <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-                  {isLoggedIn ? (
-                    <WellnessProfileAvatar
-                      actorType="coach"
-                      name={dashboard?.coach?.name || "Coach Wellness"}
-                      size="lg"
-                      className="ring-4 ring-white/20"
-                    />
-                  ) : null}
-                  <div className="min-w-0">
-                    <div
-                      className={`text-[10px] font-black uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.2em] ${
-                        isLoggedIn ? "text-cyan-100/80" : "text-teal-700"
-                      }`}
-                    >
+            <section className="overflow-hidden rounded-[1.65rem] border border-slate-200/80 bg-white p-3 shadow-[0_16px_44px_rgba(15,23,42,0.06)] sm:p-4">
+              {/* WELLNESS_COACH_PROFESSIONAL_DASHBOARD_V113 */}
+              <div className="flex items-center justify-between gap-3 px-1 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setCoachMenuOpen(true)}
+                  className="flex min-w-0 items-center gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+                  aria-label="Buka menu Coach"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-800">
+                    <CoachDashboardIcon name="menu" className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[9px] font-black uppercase tracking-[0.18em] text-teal-600">
+                      Wellness Coach
+                    </span>
+                    <span className="block truncate text-sm font-black text-slate-950 sm:text-base">
                       Coach Command Center
-                    </div>
-                    <h1
-                      className={`mt-1.5 break-words text-2xl font-black leading-tight sm:text-3xl md:mt-2 ${
-                        isLoggedIn ? "text-white" : "text-slate-950"
-                      }`}
-                    >
-                      {isLoggedIn
-                        ? `Halo, ${dashboard?.coach?.name || "Coach"}`
-                        : "Portal Coach"}
-                    </h1>
-                    <p
-                      className={`mt-1.5 max-w-3xl text-xs font-bold leading-5 sm:text-sm sm:leading-6 md:mt-2 ${
-                        isLoggedIn ? "text-white/65" : "text-slate-500"
-                      }`}
-                    >
-                      {fmtNumber(participants.length)} peserta aktif · {fmtNumber(reminderSummary.reminder)} peserta membutuhkan perhatian hari ini.
-                    </p>
-                  </div>
-                </div>
+                    </span>
+                  </span>
+                </button>
 
                 {isLoggedIn ? (
                   <div className="relative flex shrink-0 items-center gap-2">
@@ -953,32 +926,28 @@ export default function WellnessCoachPortalPage() {
                       onClick={() =>
                         setCoachNotificationOpen((previous) => !previous)
                       }
-                      className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-lg text-white shadow-sm backdrop-blur transition hover:bg-white/20 sm:h-12 sm:w-12 sm:rounded-2xl"
+                      className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                       aria-label="Buka notifikasi Coach"
                     >
-                      🔔
+                      <CoachDashboardIcon name="bell" className="h-5 w-5" />
                       {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
-                        <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                        <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-black text-white ring-2 ring-white">
                           {Number(dashboard?.summary?.unread_chat_messages || 0) > 99
                             ? "99+"
-                            : Number(
-                                dashboard?.summary?.unread_chat_messages || 0,
-                              )}
+                            : Number(dashboard?.summary?.unread_chat_messages || 0)}
                         </span>
                       ) : null}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setCoachMenuOpen(true)}
-                      className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-white text-xl font-black text-teal-900 shadow-sm transition hover:bg-teal-50 sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
-                      aria-label="Buka menu coach"
-                    >
-                      ☰
-                    </button>
+                    <WellnessProfileAvatar
+                      actorType="coach"
+                      name={dashboard?.coach?.name || "Coach Wellness"}
+                      size="sm"
+                      className="ring-2 ring-teal-100"
+                    />
 
                     {coachNotificationOpen ? (
-                      <div className="absolute right-0 top-14 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.5rem] border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl">
+                      <div className="absolute right-0 top-12 z-[80] w-[min(19rem,calc(100vw-2rem))] rounded-[1.35rem] border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl">
                         <button
                           type="button"
                           onClick={() => {
@@ -988,18 +957,14 @@ export default function WellnessCoachPortalPage() {
                             setCoachView("chat");
                             setCoachNotificationOpen(false);
                           }}
-                          className="flex w-full items-center justify-between gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-left"
+                          className="flex w-full items-center justify-between gap-3 rounded-xl bg-sky-50 px-4 py-3 text-left"
                         >
                           <span className="text-sm font-black text-sky-950">
-                            💬 Chat With Member
+                            Chat With Member
                           </span>
-                          {Number(
-                            dashboard?.summary?.unread_chat_messages || 0,
-                          ) > 0 ? (
-                            <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
-                              {Number(
-                                dashboard?.summary?.unread_chat_messages || 0,
-                              )}
+                          {Number(dashboard?.summary?.unread_chat_messages || 0) > 0 ? (
+                            <span className="rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black text-white">
+                              {Number(dashboard?.summary?.unread_chat_messages || 0)}
                             </span>
                           ) : null}
                         </button>
@@ -1009,9 +974,9 @@ export default function WellnessCoachPortalPage() {
                             setCoachView("support");
                             setCoachNotificationOpen(false);
                           }}
-                          className="mt-2 w-full rounded-2xl bg-indigo-50 px-4 py-3 text-left text-sm font-black text-indigo-950"
+                          className="mt-2 w-full rounded-xl bg-indigo-50 px-4 py-3 text-left text-sm font-black text-indigo-950"
                         >
-                          🛠️ Chat With Admin
+                          Chat With Admin
                         </button>
                       </div>
                     ) : null}
@@ -1019,33 +984,58 @@ export default function WellnessCoachPortalPage() {
                 ) : null}
               </div>
 
-              {isLoggedIn ? (
-                <>
-                  <div className="relative mt-5 grid grid-cols-3 gap-2.5">
-                    <CoachHeroStat label="Peserta" value={fmtNumber(participants.length)} />
-                    <CoachHeroStat label="Lengkap" value={fmtNumber(reminderSummary.complete)} />
-                    <CoachHeroStat label="Follow-up" value={fmtNumber(reminderSummary.reminder)} />
-                  </div>
-                  <div className="relative mt-4 rounded-2xl border border-white/10 bg-black/10 p-3 backdrop-blur-sm">
-                    <div className="flex items-center justify-between gap-3 text-[10px] font-black">
-                      <span className="text-white/70">Penyelesaian input hari ini</span>
-                      <span>{todayCompletionPercent}%</span>
+              <div
+                className={`relative overflow-hidden rounded-[1.45rem] p-4 sm:p-5 ${
+                  isLoggedIn
+                    ? "bg-[linear-gradient(135deg,#064e4b_0%,#08766f_58%,#0f9289_100%)] text-white"
+                    : "border border-slate-200 bg-slate-50 text-slate-900"
+                }`}
+              >
+                {isLoggedIn ? (
+                  <>
+                    <div className="pointer-events-none absolute -right-14 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+                    <div className="pointer-events-none absolute -bottom-20 left-1/3 h-44 w-44 rounded-full bg-cyan-200/10 blur-3xl" />
+                  </>
+                ) : null}
+
+                <div className="relative grid grid-cols-[5.4rem_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[6.7rem_minmax(0,1fr)] sm:gap-5">
+                  <CoachCompletionRing value={todayCompletionPercent} />
+
+                  <div className="min-w-0">
+                    <div className={`text-[10px] font-black uppercase tracking-[0.15em] ${isLoggedIn ? "text-cyan-100/80" : "text-teal-700"}`}>
+                      Selamat datang
                     </div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-200 transition-all"
-                        style={{
-                          width: `${
-                            todayCompletionPercent > 0
-                              ? Math.max(3, todayCompletionPercent)
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
+                    <h1 className={`mt-1 break-words text-2xl font-black leading-tight sm:text-3xl ${isLoggedIn ? "text-white" : "text-slate-950"}`}>
+                      {isLoggedIn
+                        ? `Coach ${dashboard?.coach?.name || "Wellness"}`
+                        : "Portal Coach"}
+                    </h1>
+                    <p className={`mt-1.5 text-[11px] font-bold leading-5 sm:text-xs ${isLoggedIn ? "text-white/70" : "text-slate-500"}`}>
+                      Kelola peserta dan bantu mereka mencapai target Wellness hari ini.
+                    </p>
                   </div>
-                </>
-              ) : null}
+                </div>
+
+                {isLoggedIn ? (
+                  <div className="relative mt-4 grid grid-cols-3 gap-2">
+                    <CoachHeroStat
+                      icon="users"
+                      label="Peserta aktif"
+                      value={fmtNumber(participants.length)}
+                    />
+                    <CoachHeroStat
+                      icon="check"
+                      label="Lengkap"
+                      value={fmtNumber(reminderSummary.complete)}
+                    />
+                    <CoachHeroStat
+                      icon="bell"
+                      label="Perlu follow-up"
+                      value={fmtNumber(reminderSummary.reminder)}
+                    />
+                  </div>
+                ) : null}
+              </div>
             </section>
 
             {loading || message !== "Portal Coach aktif." ? (
@@ -1169,134 +1159,236 @@ export default function WellnessCoachPortalPage() {
           <section className={coachView === "chat" ? "mt-2" : "mt-6"}>
             {coachView === "monitoring" ? (
               <div className="space-y-5">
-                {/* WELLNESS_COACH_COMMAND_CENTER_V112 */}
-                <section className="rounded-[1.6rem] border border-slate-200/80 bg-white p-4 shadow-[0_14px_38px_rgba(15,23,42,0.055)] sm:p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[9px] font-black uppercase tracking-[0.18em] text-teal-600">
-                        Daily Monitoring
+                {/* WELLNESS_COACH_PROFESSIONAL_DASHBOARD_V113 */}
+                <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.22fr)_minmax(21rem,0.78fr)]">
+                  <div className="space-y-5">
+                    <section className="rounded-[1.55rem] border border-slate-200/80 bg-white p-4 shadow-[0_12px_34px_rgba(15,23,42,0.045)] sm:p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[9px] font-black uppercase tracking-[0.17em] text-teal-600">
+                            Ringkasan Harian
+                          </div>
+                          <h2 className="mt-1 text-lg font-black text-slate-950 sm:text-xl">
+                            Status Peserta Hari Ini
+                          </h2>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReminderFilter("all");
+                            window.setTimeout(() => {
+                              document
+                                .getElementById("coach-participant-table")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }, 60);
+                          }}
+                          className="shrink-0 text-[10px] font-black text-teal-700 sm:text-xs"
+                        >
+                          Lihat semua ›
+                        </button>
                       </div>
-                      <h2 className="mt-1 text-lg font-black text-slate-950 sm:text-xl">
-                        Status Hari Ini
-                      </h2>
-                      <p className="mt-0.5 text-[11px] font-bold text-slate-500">
-                        Ringkasan kepatuhan seluruh peserta assigned group.
-                      </p>
-                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReminderFilter("all");
-                        window.setTimeout(() => {
-                          document
-                            .getElementById("coach-participant-table")
-                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                        }, 60);
-                      }}
-                      className="shrink-0 rounded-full bg-teal-50 px-3 py-2 text-[10px] font-black text-teal-700 transition hover:bg-teal-100"
-                    >
-                      Semua peserta
-                    </button>
-                  </div>
+                      <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                        <ReminderSummaryCard
+                          label="Lengkap"
+                          value={fmtNumber(reminderSummary.complete)}
+                          note="peserta"
+                          tone="emerald"
+                          active={reminderFilter === "complete"}
+                          onClick={() => setReminderFilter("complete")}
+                        />
+                        <ReminderSummaryCard
+                          label="Belum Nutrisi"
+                          value={fmtNumber(reminderSummary.nutrition)}
+                          note="peserta"
+                          tone="orange"
+                          active={reminderFilter === "nutrition"}
+                          onClick={() => setReminderFilter("nutrition")}
+                        />
+                        <ReminderSummaryCard
+                          label="Belum Workout"
+                          value={fmtNumber(reminderSummary.workout)}
+                          note="peserta"
+                          tone="sky"
+                          active={reminderFilter === "workout"}
+                          onClick={() => setReminderFilter("workout")}
+                        />
+                        <ReminderSummaryCard
+                          label="Perlu Follow-up"
+                          value={fmtNumber(reminderSummary.reminder)}
+                          note="peserta"
+                          tone="rose"
+                          active={reminderFilter === "reminder"}
+                          onClick={() => setReminderFilter("reminder")}
+                        />
+                      </div>
+                    </section>
 
-                  <div className="mt-4 grid grid-cols-2 gap-2.5 md:grid-cols-4">
-                    <ReminderSummaryCard
-                      label="Lengkap"
-                      value={fmtNumber(reminderSummary.complete)}
-                      note="input selesai"
-                      tone="emerald"
-                      active={reminderFilter === "complete"}
-                      onClick={() => setReminderFilter("complete")}
-                    />
-                    <ReminderSummaryCard
-                      label="Belum Nutrisi"
-                      value={fmtNumber(reminderSummary.nutrition)}
-                      note="perlu input"
-                      tone="orange"
-                      active={reminderFilter === "nutrition"}
-                      onClick={() => setReminderFilter("nutrition")}
-                    />
-                    <ReminderSummaryCard
-                      label="Belum Workout"
-                      value={fmtNumber(reminderSummary.workout)}
-                      note="perlu aktivitas"
-                      tone="sky"
-                      active={reminderFilter === "workout"}
-                      onClick={() => setReminderFilter("workout")}
-                    />
-                    <ReminderSummaryCard
-                      label="Follow-up"
-                      value={fmtNumber(reminderSummary.reminder)}
-                      note="prioritas Coach"
-                      tone="rose"
-                      active={reminderFilter === "reminder"}
-                      onClick={() => setReminderFilter("reminder")}
-                    />
-                  </div>
-                </section>
-
-                <section className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_14px_38px_rgba(15,23,42,0.055)]">
-                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-lg font-black text-slate-950 sm:text-xl">
-                          Prioritas Hari Ini
-                        </h2>
-                        <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[9px] font-black text-rose-600">
-                          {priorityParticipants.length} teratas
+                    <section className="rounded-[1.55rem] border border-slate-200/80 bg-white p-4 shadow-[0_12px_34px_rgba(15,23,42,0.045)] sm:p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[9px] font-black uppercase tracking-[0.17em] text-teal-600">
+                            Progress Kelompok
+                          </div>
+                          <h2 className="mt-1 text-lg font-black text-slate-950">
+                            Penyelesaian Input
+                          </h2>
+                        </div>
+                        <span className="rounded-full bg-slate-50 px-3 py-2 text-[9px] font-black text-slate-500">
+                          Hari ini
                         </span>
                       </div>
-                      <p className="mt-1 text-[11px] font-bold text-slate-500">
-                        Peserta yang membutuhkan tindak lanjut paling cepat.
-                      </p>
-                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReminderFilter("reminder");
-                        window.setTimeout(() => {
-                          document
-                            .getElementById("coach-participant-table")
-                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                        }, 60);
-                      }}
-                      className="shrink-0 text-[10px] font-black text-teal-700"
-                    >
-                      Lihat semua ›
-                    </button>
+                      <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-4">
+                        <CoachProgressMetric
+                          label="Lengkap"
+                          value={todayCompletionPercent}
+                          tone="emerald"
+                        />
+                        <CoachProgressMetric
+                          label="Nutrisi"
+                          value={participants.length
+                            ? Math.round(
+                                ((participants.length - reminderSummary.nutrition) /
+                                  participants.length) *
+                                  100,
+                              )
+                            : 0}
+                          tone="orange"
+                        />
+                        <CoachProgressMetric
+                          label="Workout"
+                          value={participants.length
+                            ? Math.round(
+                                ((participants.length - reminderSummary.workout) /
+                                  participants.length) *
+                                  100,
+                              )
+                            : 0}
+                          tone="sky"
+                        />
+                      </div>
+                    </section>
                   </div>
 
-                  <div className="divide-y divide-slate-100">
-                    {priorityParticipants.length === 0 ? (
-                      <div className="px-5 py-10 text-center">
-                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-lg font-black text-emerald-600">
-                          ✓
+                  <div className="space-y-5">
+                    <section className="overflow-hidden rounded-[1.55rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_rgba(15,23,42,0.045)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
+                        <div>
+                          <div className="text-[9px] font-black uppercase tracking-[0.17em] text-rose-500">
+                            Peserta Perlu Perhatian
+                          </div>
+                          <h2 className="mt-1 text-lg font-black text-slate-950">
+                            Prioritas Hari Ini
+                          </h2>
                         </div>
-                        <div className="mt-3 text-sm font-black text-slate-800">
-                          Semua peserta sudah lengkap
-                        </div>
-                        <p className="mt-1 text-xs font-bold text-slate-400">
-                          Belum ada peserta yang membutuhkan follow-up.
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReminderFilter("reminder");
+                            window.setTimeout(() => {
+                              document
+                                .getElementById("coach-participant-table")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }, 60);
+                          }}
+                          className="shrink-0 text-[10px] font-black text-teal-700 sm:text-xs"
+                        >
+                          Lihat semua ›
+                        </button>
                       </div>
-                    ) : (
-                      priorityParticipants.map((item: any) => (
-                        <CoachPriorityParticipantRow
-                          key={item.id}
-                          item={item}
-                          onDetail={() => chooseParticipant(item)}
-                          onChat={() => {
-                            chooseParticipant(item, { openDetail: false });
+
+                      <div className="divide-y divide-slate-100">
+                        {priorityParticipants.length === 0 ? (
+                          <div className="px-5 py-10 text-center">
+                            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                              <CoachDashboardIcon name="check" className="h-5 w-5" />
+                            </div>
+                            <div className="mt-3 text-sm font-black text-slate-800">
+                              Semua peserta sudah lengkap
+                            </div>
+                            <p className="mt-1 text-xs font-bold text-slate-400">
+                              Belum ada peserta yang membutuhkan follow-up.
+                            </p>
+                          </div>
+                        ) : (
+                          priorityParticipants.map((item: any) => (
+                            <CoachPriorityParticipantRow
+                              key={item.id}
+                              item={item}
+                              onDetail={() => chooseParticipant(item)}
+                              onChat={() => {
+                                chooseParticipant(item, { openDetail: false });
+                                setCoachView("chat");
+                              }}
+                              onReminder={() => openReminder(item)}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="rounded-[1.55rem] border border-slate-200/80 bg-white p-4 shadow-[0_12px_34px_rgba(15,23,42,0.045)] sm:p-5">
+                      <div className="text-[9px] font-black uppercase tracking-[0.17em] text-teal-600">
+                        Aksi Cepat
+                      </div>
+                      <h2 className="mt-1 text-lg font-black text-slate-950">
+                        Shortcut Coach
+                      </h2>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-2">
+                        <CoachQuickAction
+                          icon="bell"
+                          label="Kirim Pengingat"
+                          tone="emerald"
+                          onClick={() => {
+                            setReminderFilter("reminder");
+                            window.setTimeout(() => {
+                              document
+                                .getElementById("coach-participant-table")
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }, 60);
+                          }}
+                        />
+                        <CoachQuickAction
+                          icon="clipboard"
+                          label="Instruksi Grup"
+                          tone="sky"
+                          onClick={() => openInstruction("group")}
+                        />
+                        <CoachQuickAction
+                          icon="message"
+                          label="Chat Member"
+                          tone="violet"
+                          onClick={() => {
+                            setSelectedGroup("all");
+                            setSelectedParticipant(null);
+                            setChatMessages([]);
                             setCoachView("chat");
                           }}
-                          onReminder={() => openReminder(item)}
                         />
-                      ))
-                    )}
+                        <CoachQuickAction
+                          icon="trophy"
+                          label="Ranking"
+                          tone="amber"
+                          onClick={() => setCoachView("ranking")}
+                        />
+                        <CoachQuickAction
+                          icon="support"
+                          label="Chat Admin"
+                          tone="rose"
+                          onClick={() => setCoachView("support")}
+                        />
+                        <CoachQuickAction
+                          icon="refresh"
+                          label="Refresh Data"
+                          tone="slate"
+                          onClick={() => loadDashboard({ keepSelection: true })}
+                        />
+                      </div>
+                    </section>
                   </div>
-                </section>
+                </div>
 
                 <section
                   id="coach-participant-table"
@@ -2163,16 +2255,213 @@ function coachCompactStatus(
 }
 
 
-function CoachHeroStat({ label, value }: any) {
+function CoachDashboardIcon({ name, className = "h-5 w-5" }: any) {
+  const common = {
+    className,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.9,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (name === "menu") {
+    return (
+      <svg {...common}>
+        <path d="M4 7h16M4 12h16M4 17h16" />
+      </svg>
+    );
+  }
+  if (name === "bell") {
+    return (
+      <svg {...common}>
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+        <path d="M10 21h4" />
+      </svg>
+    );
+  }
+  if (name === "users") {
+    return (
+      <svg {...common}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    );
+  }
+  if (name === "check") {
+    return (
+      <svg {...common}>
+        <path d="m5 12 4 4L19 6" />
+      </svg>
+    );
+  }
+  if (name === "nutrition") {
+    return (
+      <svg {...common}>
+        <path d="M7 3v8M4 3v4a3 3 0 0 0 6 0V3M7 11v10M17 3v18M17 3c3 2 3 7 0 9" />
+      </svg>
+    );
+  }
+  if (name === "workout") {
+    return (
+      <svg {...common}>
+        <path d="M6 7v10M18 7v10M3 9v6M21 9v6M6 12h12" />
+      </svg>
+    );
+  }
+  if (name === "alert") {
+    return (
+      <svg {...common}>
+        <path d="M12 9v4M12 17h.01" />
+        <path d="M10.3 3.4 2.4 17a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0Z" />
+      </svg>
+    );
+  }
+  if (name === "message") {
+    return (
+      <svg {...common}>
+        <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+      </svg>
+    );
+  }
+  if (name === "clipboard") {
+    return (
+      <svg {...common}>
+        <rect x="5" y="4" width="14" height="17" rx="2" />
+        <path d="M9 4a3 3 0 0 1 6 0M9 10h6M9 14h6" />
+      </svg>
+    );
+  }
+  if (name === "trophy") {
+    return (
+      <svg {...common}>
+        <path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0Z" />
+        <path d="M7 6H4v2a4 4 0 0 0 4 4M17 6h3v2a4 4 0 0 1-4 4" />
+      </svg>
+    );
+  }
+  if (name === "support") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8.5 9a3.5 3.5 0 0 1 7 0c0 2-3.5 2.5-3.5 5M12 18h.01" />
+      </svg>
+    );
+  }
+  if (name === "refresh") {
+    return (
+      <svg {...common}>
+        <path d="M20 11a8 8 0 1 0 2 5M20 4v7h-7" />
+      </svg>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/10 px-3 py-3 backdrop-blur-sm">
-      <div className="text-[9px] font-black uppercase tracking-wide text-white/55">
-        {label}
-      </div>
-      <div className="mt-1 text-xl font-black leading-none text-white sm:text-2xl">
-        {value}
+    <svg {...common}>
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  );
+}
+
+
+function CoachCompletionRing({ value }: any) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+  return (
+    <div
+      className="relative flex h-[5.4rem] w-[5.4rem] shrink-0 items-center justify-center rounded-full sm:h-[6.7rem] sm:w-[6.7rem]"
+      style={{
+        background: `conic-gradient(#d1fae5 ${safeValue * 3.6}deg, rgba(255,255,255,0.18) 0deg)`,
+      }}
+    >
+      <div className="flex h-[4.35rem] w-[4.35rem] flex-col items-center justify-center rounded-full bg-teal-900/85 text-center text-white sm:h-[5.35rem] sm:w-[5.35rem]">
+        <div className="text-xl font-black leading-none sm:text-2xl">
+          {safeValue}%
+        </div>
+        <div className="mt-1 text-[7px] font-black uppercase leading-3 tracking-wide text-white/70 sm:text-[8px]">
+          Input selesai
+        </div>
       </div>
     </div>
+  );
+}
+
+
+function CoachHeroStat({ icon, label, value }: any) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/10 px-2.5 py-3 text-center backdrop-blur-sm sm:px-3">
+      <div className="mx-auto flex h-7 w-7 items-center justify-center text-cyan-100">
+        <CoachDashboardIcon name={icon} className="h-5 w-5" />
+      </div>
+      <div className="mt-1 text-lg font-black leading-none text-white sm:text-xl">
+        {value}
+      </div>
+      <div className="mt-1 text-[7px] font-black uppercase leading-3 tracking-wide text-white/65 sm:text-[8px]">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+
+function CoachProgressMetric({ label, value, tone }: any) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+  const tones: Record<string, any> = {
+    emerald: { ring: "#34d399", text: "text-emerald-700", icon: "check" },
+    orange: { ring: "#fb923c", text: "text-orange-600", icon: "nutrition" },
+    sky: { ring: "#38bdf8", text: "text-sky-700", icon: "workout" },
+  };
+  const selected = tones[tone] || tones.emerald;
+
+  return (
+    <div className="min-w-0 text-center">
+      <div
+        className="relative mx-auto flex h-[4.4rem] w-[4.4rem] items-center justify-center rounded-full sm:h-24 sm:w-24"
+        style={{
+          background: `conic-gradient(${selected.ring} ${safeValue * 3.6}deg, #eef2f7 0deg)`,
+        }}
+      >
+        <div className="flex h-[3.45rem] w-[3.45rem] flex-col items-center justify-center rounded-full bg-white sm:h-[4.7rem] sm:w-[4.7rem]">
+          <CoachDashboardIcon name={selected.icon} className={`h-4 w-4 ${selected.text}`} />
+          <div className={`mt-0.5 text-base font-black leading-none sm:text-lg ${selected.text}`}>
+            {safeValue}%
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 truncate text-[10px] font-black text-slate-800 sm:text-xs">
+        {label}
+      </div>
+      <div className="mt-0.5 text-[8px] font-bold text-slate-400 sm:text-[9px]">
+        rata-rata penyelesaian
+      </div>
+    </div>
+  );
+}
+
+
+function CoachQuickAction({ icon, label, tone, onClick }: any) {
+  const tones: Record<string, string> = {
+    emerald: "bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+    sky: "bg-sky-50 text-sky-700 hover:bg-sky-100",
+    violet: "bg-violet-50 text-violet-700 hover:bg-violet-100",
+    amber: "bg-amber-50 text-amber-700 hover:bg-amber-100",
+    rose: "bg-rose-50 text-rose-700 hover:bg-rose-100",
+    slate: "bg-slate-50 text-slate-700 hover:bg-slate-100",
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-[5.4rem] flex-col items-center justify-center rounded-[1.15rem] px-3 py-3 text-center transition ${tones[tone] || tones.slate}`}
+    >
+      <CoachDashboardIcon name={icon} className="h-5 w-5" />
+      <span className="mt-2 text-[9px] font-black leading-4 sm:text-[10px]">
+        {label}
+      </span>
+    </button>
   );
 }
 
@@ -2187,29 +2476,32 @@ function CoachPriorityParticipantRow({
   const maxDelay = Math.max(meta.nutritionDays || 0, meta.workoutDays || 0);
   const priority =
     meta.neverInput || maxDelay >= 3
-      ? { label: "Tinggi", className: "bg-rose-50 text-rose-600" }
+      ? { label: "Prioritas Tinggi", className: "bg-rose-50 text-rose-600" }
       : maxDelay >= 2 || (meta.nutritionMissing && meta.workoutMissing)
-        ? { label: "Sedang", className: "bg-orange-50 text-orange-600" }
-        : { label: "Rendah", className: "bg-emerald-50 text-emerald-600" };
+        ? { label: "Prioritas Sedang", className: "bg-orange-50 text-orange-600" }
+        : { label: "Prioritas Rendah", className: "bg-emerald-50 text-emerald-600" };
 
-  const nutritionStatus = coachCompactStatus(
-    "Nutrisi",
-    meta.nutritionMissing,
-    item.compliance?.days_since_nutrition,
-  );
-  const workoutStatus = coachCompactStatus(
-    "Workout",
-    meta.workoutMissing,
-    item.compliance?.days_since_workout,
-  );
+  const primaryStatus = meta.nutritionMissing
+    ? coachCompactStatus(
+        "Nutrisi",
+        true,
+        item.compliance?.days_since_nutrition,
+      )
+    : meta.workoutMissing
+      ? coachCompactStatus(
+          "Workout",
+          true,
+          item.compliance?.days_since_workout,
+        )
+      : "Input hari ini lengkap";
 
   return (
-    <article className="px-4 py-4 transition hover:bg-slate-50/70 sm:px-5">
-      <div className="flex items-start gap-3">
+    <article className="px-4 py-3.5 transition hover:bg-slate-50/70 sm:px-5">
+      <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onDetail}
-          className="flex min-w-0 flex-1 items-start gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
         >
           <WellnessAvatar
             name={item.name}
@@ -2218,36 +2510,27 @@ function CoachPriorityParticipantRow({
           />
 
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <div className="break-words text-sm font-black leading-5 text-slate-950">
-                {item.name}
-              </div>
-              <span className={`rounded-full px-2 py-1 text-[8px] font-black leading-none ${priority.className}`}>
-                Prioritas {priority.label.toLowerCase()}
-              </span>
+            <div className="truncate text-sm font-black text-slate-950">
+              {item.name}
             </div>
-            <div className="mt-0.5 text-[10px] font-bold text-slate-400">
-              {item.code} · {item.group_name}
-            </div>
-            <div className="mt-1.5 space-y-0.5 text-[10px] font-bold leading-4 text-slate-500 sm:text-[11px]">
-              <div className={meta.nutritionMissing ? "text-orange-600" : "text-emerald-600"}>
-                {meta.nutritionMissing ? "N" : "✓"} · {nutritionStatus}
-              </div>
-              <div className={meta.workoutMissing ? "text-sky-600" : "text-emerald-600"}>
-                {meta.workoutMissing ? "W" : "✓"} · {workoutStatus}
-              </div>
+            <div className="mt-0.5 truncate text-[10px] font-bold text-slate-400">
+              {item.group_name} · {primaryStatus}
             </div>
           </div>
         </button>
+
+        <span className={`max-w-[5.6rem] rounded-xl px-2.5 py-2 text-center text-[8px] font-black leading-3 sm:max-w-none sm:text-[9px] ${priority.className}`}>
+          {priority.label}
+        </span>
       </div>
 
-      <div className="ml-[52px] mt-3 flex gap-2">
+      <div className="ml-[52px] mt-2.5 flex gap-2">
         <button
           type="button"
           onClick={onChat}
-          className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+          className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[9px] font-black text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
         >
-          <span className="text-sm">◯</span>
+          <CoachDashboardIcon name="message" className="h-3.5 w-3.5" />
           Chat
         </button>
 
@@ -2255,14 +2538,15 @@ function CoachPriorityParticipantRow({
           <button
             type="button"
             onClick={onReminder}
-            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-slate-950 px-3 text-[10px] font-black text-white shadow-sm transition hover:bg-slate-800"
+            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[9px] font-black text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
           >
-            <span className="text-sm">!</span>
+            <CoachDashboardIcon name="bell" className="h-3.5 w-3.5" />
             Ingatkan
           </button>
         ) : (
-          <div className="inline-flex min-h-9 items-center justify-center rounded-xl bg-emerald-50 px-3 text-[10px] font-black text-emerald-700">
-            ✓ Lengkap
+          <div className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-lg bg-emerald-50 px-3 text-[9px] font-black text-emerald-700">
+            <CoachDashboardIcon name="check" className="h-3.5 w-3.5" />
+            Lengkap
           </div>
         )}
       </div>
@@ -2366,25 +2650,25 @@ function ReminderSummaryCard({
 }: any) {
   const config: Record<string, any> = {
     emerald: {
-      icon: "✓",
+      icon: "check",
       iconClass: "bg-emerald-50 text-emerald-700",
       valueClass: "text-emerald-700",
       ringClass: "ring-emerald-200",
     },
     orange: {
-      icon: "N",
+      icon: "nutrition",
       iconClass: "bg-orange-50 text-orange-600",
       valueClass: "text-orange-600",
       ringClass: "ring-orange-200",
     },
     sky: {
-      icon: "W",
+      icon: "workout",
       iconClass: "bg-sky-50 text-sky-700",
       valueClass: "text-sky-700",
       ringClass: "ring-sky-200",
     },
     rose: {
-      icon: "!",
+      icon: "alert",
       iconClass: "bg-rose-50 text-rose-600",
       valueClass: "text-rose-600",
       ringClass: "ring-rose-200",
@@ -2397,27 +2681,23 @@ function ReminderSummaryCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`group rounded-[1.15rem] border border-slate-200/80 bg-slate-50/60 p-3 text-left transition ${
+      className={`group min-h-[7.2rem] rounded-[1.15rem] border border-slate-200/80 bg-white p-3 text-center transition sm:min-h-[8rem] ${
         active
-          ? `bg-white ring-4 ${selected.ringClass}`
-          : "hover:-translate-y-0.5 hover:border-teal-200 hover:bg-white hover:shadow-sm"
+          ? `ring-4 ${selected.ringClass}`
+          : "hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-sm"
       }`}
     >
-      <div className="flex items-center gap-2.5">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-black ${selected.iconClass}`}>
-          {selected.icon}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[9px] font-black leading-3 text-slate-600 sm:text-[10px]">
-            {label}
-          </div>
-          <div className={`mt-0.5 text-xl font-black leading-none ${selected.valueClass}`}>
-            {value}
-          </div>
-          <div className="mt-1 truncate text-[8px] font-bold text-slate-400 sm:text-[9px]">
-            {note}
-          </div>
-        </div>
+      <div className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full ${selected.iconClass}`}>
+        <CoachDashboardIcon name={selected.icon} className="h-5 w-5" />
+      </div>
+      <div className="mt-2 text-[9px] font-black leading-3 text-slate-600 sm:text-[10px]">
+        {label}
+      </div>
+      <div className={`mt-1 text-2xl font-black leading-none ${selected.valueClass}`}>
+        {value}
+      </div>
+      <div className="mt-1 text-[8px] font-bold text-slate-400 sm:text-[9px]">
+        {note}
       </div>
     </button>
   );
