@@ -875,6 +875,14 @@ export default function WellnessCoachPortalPage() {
 
   const isLoggedIn = !!dashboard?.coach;
 
+  // WELLNESS_COACH_OPENING_LOADING_V114
+  // Selama request pengecekan session/dashboard berlangsung, jangan render
+  // Login Coach. Setelah loading selesai, existing flow menentukan apakah
+  // dashboard atau Login Coach yang ditampilkan.
+  if (loading) {
+    return <CoachOpeningLoadingScreen />;
+  }
+
   // WELLNESS_COACH_SUPPORT_ISOLATED_V64
   // Chat with Admin memakai workspace yang sama persis dengan Portal Peserta,
   // tanpa card header/status Portal Coach di belakangnya.
@@ -2166,6 +2174,211 @@ function CoachChatPanel({
         </button>
       </div>
     </section>
+  );
+}
+
+
+
+function CoachOpeningLoadingScreen() {
+  return (
+    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#e6fffb_0%,transparent_36%),linear-gradient(180deg,#fbfefe_0%,#f3f9fb_52%,#f8fafc_100%)] text-slate-900">
+      {/* WELLNESS_COACH_OPENING_LOADING_V114 */}
+      <div className="mx-auto flex min-h-screen w-full max-w-xl items-center px-4 py-8 sm:px-6">
+        <section className="relative w-full overflow-hidden rounded-[2rem] border border-white/80 bg-white/95 p-5 shadow-[0_26px_80px_rgba(15,23,42,0.12)] backdrop-blur-xl sm:p-7">
+          <div
+            className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full bg-cyan-100/70 blur-3xl"
+            aria-hidden="true"
+          />
+          <div
+            className="pointer-events-none absolute -bottom-20 -left-16 h-48 w-48 rounded-full bg-emerald-100/60 blur-3xl"
+            aria-hidden="true"
+          />
+
+          <div className="relative">
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-700 to-cyan-600 text-white shadow-lg shadow-teal-100">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-7 w-7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 7h16M4 12h16M4 17h10" />
+                </svg>
+                <span className="absolute -right-1 -top-1 h-3.5 w-3.5 animate-ping rounded-full bg-emerald-400 opacity-70" />
+                <span className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-700">
+                  Wellness Coach
+                </div>
+                <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                  Membuka Portal Coach
+                </h1>
+                <p className="mt-1 text-xs font-bold leading-5 text-slate-500 sm:text-sm">
+                  Memeriksa sesi dan menyiapkan dashboard Anda.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-[1.55rem] border border-teal-100 bg-gradient-to-br from-teal-950 via-teal-900 to-cyan-800 p-5 text-white shadow-[0_18px_44px_rgba(13,148,136,0.18)]">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100/75">
+                    Session Check
+                  </div>
+                  <div className="mt-1 text-lg font-black">
+                    Menyiapkan ruang kerja Coach
+                  </div>
+                </div>
+
+                <div className="relative flex h-14 w-14 shrink-0 items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border-4 border-white/15" />
+                  <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-r-cyan-200 border-t-emerald-300" />
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-6 w-6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M19 8v6M16 11h6" />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="mt-5 h-2.5 overflow-hidden rounded-full bg-white/15">
+                <div className="h-full w-3/4 animate-pulse rounded-full bg-gradient-to-r from-emerald-300 via-cyan-200 to-white" />
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3 text-[10px] font-bold text-white/70">
+                <span>Mohon tunggu sebentar</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-300 [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-200 [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white" />
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              {[
+                {
+                  title: "Memeriksa sesi Coach",
+                  note: "Memastikan akses masih aktif dan aman.",
+                  icon: "shield",
+                },
+                {
+                  title: "Memuat assigned group",
+                  note: "Menyiapkan peserta dan status monitoring.",
+                  icon: "users",
+                },
+                {
+                  title: "Menyusun dashboard",
+                  note: "Menampilkan prioritas, chat, dan reminder terbaru.",
+                  icon: "dashboard",
+                },
+              ].map((item, index) => (
+                <div
+                  key={item.title}
+                  className="flex items-center gap-3 rounded-[1.25rem] border border-slate-100 bg-slate-50/80 px-3.5 py-3"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-teal-700 shadow-sm">
+                    {item.icon === "shield" ? (
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M12 3 5.5 6v5.2c0 4.1 2.7 7.9 6.5 9.1 3.8-1.2 6.5-5 6.5-9.1V6L12 3Z" />
+                        <path d="m9.5 12 1.7 1.7 3.5-4" />
+                      </svg>
+                    ) : item.icon === "users" ? (
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                      </svg>
+                    ) : (
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.9"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="3" width="7" height="7" rx="2" />
+                        <rect x="14" y="3" width="7" height="7" rx="2" />
+                        <rect x="3" y="14" width="7" height="7" rx="2" />
+                        <rect x="14" y="14" width="7" height="7" rx="2" />
+                      </svg>
+                    )}
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-black text-slate-800 sm:text-sm">
+                      {item.title}
+                    </div>
+                    <div className="mt-0.5 text-[10px] font-bold leading-4 text-slate-400 sm:text-xs">
+                      {item.note}
+                    </div>
+                  </div>
+
+                  <div
+                    className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-teal-500"
+                    style={{ animationDelay: `${index * 180}ms` }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 flex items-center justify-center gap-2 text-center text-[10px] font-bold text-slate-400 sm:text-xs">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4 text-teal-600"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+              Form login hanya ditampilkan apabila sesi Coach sudah tidak aktif.
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
 
