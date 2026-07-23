@@ -894,6 +894,16 @@ export default function WellnessAdminMobilePage() {
                 {label}
               </button>
             ))}
+            {/* WELLNESS_ADMIN_MONITORING_NAKES_V115 */}
+            <a
+              href="/wellness/admin/monitoring-nakes"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-black text-emerald-800 ring-1 ring-emerald-100 transition hover:bg-emerald-100"
+            >
+              Monitoring NAKES
+              <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                New
+              </span>
+            </a>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
@@ -1638,7 +1648,7 @@ export default function WellnessAdminMobilePage() {
 
               <div className="rounded-[1.55rem] border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-500">
-                  Ranking Perusahaan
+                  Ranking Perusahaan · Total Point
                 </div>
                 <div className="mt-3 space-y-2">
                   {enrichedCompanies.slice(0, 10).map((company: any, index: number) => (
@@ -2192,6 +2202,18 @@ export default function WellnessAdminMobilePage() {
               ].map(([icon, label, nextView]) => (
                 <button key={String(label)} type="button" onClick={() => openView(nextView as View)} className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"><span className="text-xl">{icon}</span><span className="text-sm font-black text-slate-800">{label}</span></button>
               ))}
+              <a
+                href="/wellness/admin/monitoring-nakes"
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-left shadow-sm"
+              >
+                <span className="text-xl">🩺</span>
+                <span className="min-w-0 flex-1 text-sm font-black text-emerald-900">
+                  Monitoring NAKES
+                </span>
+                <span className="rounded-full bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white">
+                  New
+                </span>
+              </a>
               {["admin", "super_admin", "wellness_admin"].includes(
                 clean(admin.role).toLowerCase(),
               ) ? (
