@@ -705,14 +705,16 @@ export default function WellnessAdminMobilePage() {
         };
       })
       .sort((left: any, right: any) => {
+        // WELLNESS_RANKING_UI_POINT_FLOW_V111
+        // Ranking Perusahaan is point-first; achievement score is the tie-breaker.
+        const pointDifference =
+          Number(right.total_points || 0) - Number(left.total_points || 0);
+        if (pointDifference !== 0) return pointDifference;
+
         const scoreDifference =
           Number(right.achievement_score || 0) -
           Number(left.achievement_score || 0);
         if (scoreDifference !== 0) return scoreDifference;
-
-        const pointDifference =
-          Number(right.total_points || 0) - Number(left.total_points || 0);
-        if (pointDifference !== 0) return pointDifference;
 
         return clean(left.name).localeCompare(clean(right.name), "id");
       });
@@ -1649,15 +1651,15 @@ export default function WellnessAdminMobilePage() {
                           {company.name}
                         </div>
                         <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">
-                          {fmt(company.participant_count)} peserta · {fmt(company.total_points)} poin
+                          {fmt(company.participant_count)} peserta · {fmt(company.achievement_score)}% capaian
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
                         <div className="text-lg font-black text-teal-700">
-                          {fmt(company.achievement_score)}%
+                          {fmt(company.total_points)}
                         </div>
                         <div className="text-[9px] font-bold text-slate-400">
-                          capaian
+                          poin
                         </div>
                       </div>
                     </div>
@@ -2190,6 +2192,19 @@ export default function WellnessAdminMobilePage() {
               ].map(([icon, label, nextView]) => (
                 <button key={String(label)} type="button" onClick={() => openView(nextView as View)} className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"><span className="text-xl">{icon}</span><span className="text-sm font-black text-slate-800">{label}</span></button>
               ))}
+              {["admin", "super_admin", "wellness_admin"].includes(
+                clean(admin.role).toLowerCase(),
+              ) ? (
+                <a
+                  href="/wellness/admin/maintenance"
+                  className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-left shadow-sm"
+                >
+                  <span className="text-xl">🧹</span>
+                  <span className="text-sm font-black text-amber-900">
+                    Maintenance · Kelola Data Dummy
+                  </span>
+                </a>
+              ) : null}
               <a
                 href="/wellness/admin/users"
                 className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm"

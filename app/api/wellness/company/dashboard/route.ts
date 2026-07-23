@@ -330,13 +330,16 @@ function currentStreak(
   return streak;
 }
 
+// WELLNESS_RANKING_UI_POINT_FLOW_V111
+// Participant ranking uses the same canonical point categories as Coach/Admin.
+// Achievement percentages remain available for monitoring cards, not point rank.
 function metricValue(item: any, metric: string) {
   if (metric === "diligence") return number(item.diligence_percent);
-  if (metric === "workout") return number(item.workout_achievement_percent);
-  if (metric === "nutrition") return number(item.nutrition_achievement_percent);
+  if (metric === "workout") return number(item.workout_points);
+  if (metric === "nutrition") return number(item.nutrition_points);
   if (metric === "healthtalk") return number(item.healthtalk_points);
   if (metric === "streak") return number(item.current_streak);
-  return number(item.overall_score);
+  return number(item.total_points);
 }
 
 function rankParticipants(items: any[], metric: string, limit = 10) {

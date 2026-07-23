@@ -289,10 +289,13 @@ function parseWorkoutTarget(participant: any, notes: any[]) {
   return match ? asNumber(match[1]) : 0;
 }
 
+// WELLNESS_RANKING_UI_POINT_FLOW_V111
+// Metric tabs display actual point values. Achieved-day fields remain available
+// for progress/streak but are not used as the ranking point value.
 function metricValue(row: any, metric: Metric) {
   if (metric === "compliance") return row.compliance_percent;
-  if (metric === "workout") return row.workout_achieved_days;
-  if (metric === "nutrition") return row.nutrition_achieved_days;
+  if (metric === "workout") return row.workout_points;
+  if (metric === "nutrition") return row.nutrition_points;
   if (metric === "healthtalk") return row.healthtalk_points;
   return row.total_points;
 }
