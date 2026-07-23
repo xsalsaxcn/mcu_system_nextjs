@@ -746,6 +746,10 @@ export default function WellnessCoachPortalPage() {
     );
   }, [participants]);
 
+  const todayCompletionPercent = participants.length
+    ? Math.round((reminderSummary.complete / participants.length) * 100)
+    : 0;
+
   const filteredParticipants = useMemo(() => {
     const q = search.toLowerCase();
     return participants
@@ -886,32 +890,57 @@ export default function WellnessCoachPortalPage() {
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#fbfefe_0%,#f4f9fb_44%,#f8fafc_100%)] text-slate-900">
       {/* WELLNESS_COACH_UI_REFRESH_V107 */}
-      {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109: monitoring UI only; existing functions remain unchanged. */}
+      {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109 */}
+      {/* WELLNESS_COACH_COMMAND_CENTER_V112: dashboard UI only; existing functions remain unchanged. */}
       <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 sm:px-5 md:px-8 md:pb-12 md:pt-6">
         {/* WELLNESS_COACH_CHAT_DIRECT_HEADER_V77D */}
         {!isLoggedIn || coachView === "monitoring" ? (
           <>
-            <section className="overflow-visible rounded-[1.75rem] border border-slate-200/80 bg-white p-4 text-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.07)] sm:p-5 md:p-6">
-              <div className="flex items-start justify-between gap-3 md:items-end">
+            <section
+              className={`relative overflow-visible rounded-[1.75rem] p-4 sm:p-5 md:p-6 ${
+                isLoggedIn
+                  ? "border border-teal-900/10 bg-[linear-gradient(135deg,#062f37_0%,#075e5a_58%,#0b8f88_100%)] text-white shadow-[0_22px_55px_rgba(6,78,75,0.24)]"
+                  : "border border-slate-200/80 bg-white text-slate-900 shadow-[0_18px_45px_rgba(15,23,42,0.07)]"
+              }`}
+            >
+              {isLoggedIn ? (
+                <>
+                  <div className="pointer-events-none absolute -right-12 -top-14 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+                  <div className="pointer-events-none absolute -bottom-16 -left-12 h-36 w-36 rounded-full bg-cyan-300/10 blur-2xl" />
+                </>
+              ) : null}
+              <div className="relative flex items-start justify-between gap-3 md:items-end">
                 <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
                   {isLoggedIn ? (
                     <WellnessProfileAvatar
                       actorType="coach"
                       name={dashboard?.coach?.name || "Coach Wellness"}
                       size="lg"
-                      className="ring-4 ring-teal-50"
+                      className="ring-4 ring-white/20"
                     />
                   ) : null}
                   <div className="min-w-0">
-                    <div className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-700 sm:text-xs sm:tracking-[0.2em]">
-                      Wellness Coach Portal
+                    <div
+                      className={`text-[10px] font-black uppercase tracking-[0.16em] sm:text-xs sm:tracking-[0.2em] ${
+                        isLoggedIn ? "text-cyan-100/80" : "text-teal-700"
+                      }`}
+                    >
+                      Coach Command Center
                     </div>
-                    <h1 className="mt-1.5 break-words text-2xl font-black leading-tight text-slate-950 sm:text-3xl md:mt-2">
+                    <h1
+                      className={`mt-1.5 break-words text-2xl font-black leading-tight sm:text-3xl md:mt-2 ${
+                        isLoggedIn ? "text-white" : "text-slate-950"
+                      }`}
+                    >
                       {isLoggedIn
                         ? `Halo, ${dashboard?.coach?.name || "Coach"}`
                         : "Portal Coach"}
                     </h1>
-                    <p className="mt-1.5 max-w-3xl text-xs font-bold leading-5 text-slate-500 sm:text-sm sm:leading-6 md:mt-2">
+                    <p
+                      className={`mt-1.5 max-w-3xl text-xs font-bold leading-5 sm:text-sm sm:leading-6 md:mt-2 ${
+                        isLoggedIn ? "text-white/65" : "text-slate-500"
+                      }`}
+                    >
                       {fmtNumber(participants.length)} peserta aktif · {fmtNumber(reminderSummary.reminder)} peserta membutuhkan perhatian hari ini.
                     </p>
                   </div>
@@ -924,7 +953,7 @@ export default function WellnessCoachPortalPage() {
                       onClick={() =>
                         setCoachNotificationOpen((previous) => !previous)
                       }
-                      className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg text-slate-700 shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl"
+                      className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/15 bg-white/10 text-lg text-white shadow-sm backdrop-blur transition hover:bg-white/20 sm:h-12 sm:w-12 sm:rounded-2xl"
                       aria-label="Buka notifikasi Coach"
                     >
                       🔔
@@ -942,7 +971,7 @@ export default function WellnessCoachPortalPage() {
                     <button
                       type="button"
                       onClick={() => setCoachMenuOpen(true)}
-                      className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-950 text-xl font-black text-white shadow-sm transition hover:bg-slate-800 sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
+                      className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-white text-xl font-black text-teal-900 shadow-sm transition hover:bg-teal-50 sm:h-12 sm:w-12 sm:rounded-2xl sm:text-2xl"
                       aria-label="Buka menu coach"
                     >
                       ☰
@@ -989,6 +1018,34 @@ export default function WellnessCoachPortalPage() {
                   </div>
                 ) : null}
               </div>
+
+              {isLoggedIn ? (
+                <>
+                  <div className="relative mt-5 grid grid-cols-3 gap-2.5">
+                    <CoachHeroStat label="Peserta" value={fmtNumber(participants.length)} />
+                    <CoachHeroStat label="Lengkap" value={fmtNumber(reminderSummary.complete)} />
+                    <CoachHeroStat label="Follow-up" value={fmtNumber(reminderSummary.reminder)} />
+                  </div>
+                  <div className="relative mt-4 rounded-2xl border border-white/10 bg-black/10 p-3 backdrop-blur-sm">
+                    <div className="flex items-center justify-between gap-3 text-[10px] font-black">
+                      <span className="text-white/70">Penyelesaian input hari ini</span>
+                      <span>{todayCompletionPercent}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-200 transition-all"
+                        style={{
+                          width: `${
+                            todayCompletionPercent > 0
+                              ? Math.max(3, todayCompletionPercent)
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </section>
 
             {loading || message !== "Portal Coach aktif." ? (
@@ -1111,16 +1168,19 @@ export default function WellnessCoachPortalPage() {
         ) : (
           <section className={coachView === "chat" ? "mt-2" : "mt-6"}>
             {coachView === "monitoring" ? (
-              <div className="space-y-6">
-                {/* WELLNESS_COACH_COMPACT_DASHBOARD_V109 */}
-                <section>
-                  <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="space-y-5">
+                {/* WELLNESS_COACH_COMMAND_CENTER_V112 */}
+                <section className="rounded-[1.6rem] border border-slate-200/80 bg-white p-4 shadow-[0_14px_38px_rgba(15,23,42,0.055)] sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-black text-slate-950 sm:text-xl">
-                        Ringkasan Hari Ini
+                      <div className="text-[9px] font-black uppercase tracking-[0.18em] text-teal-600">
+                        Daily Monitoring
+                      </div>
+                      <h2 className="mt-1 text-lg font-black text-slate-950 sm:text-xl">
+                        Status Hari Ini
                       </h2>
-                      <p className="mt-0.5 text-xs font-bold text-slate-500">
-                        Status input peserta assigned group.
+                      <p className="mt-0.5 text-[11px] font-bold text-slate-500">
+                        Ringkasan kepatuhan seluruh peserta assigned group.
                       </p>
                     </div>
 
@@ -1131,23 +1191,20 @@ export default function WellnessCoachPortalPage() {
                         window.setTimeout(() => {
                           document
                             .getElementById("coach-participant-table")
-                            ?.scrollIntoView({
-                              behavior: "smooth",
-                              block: "start",
-                            });
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
                         }, 60);
                       }}
-                      className="shrink-0 text-xs font-black text-teal-700"
+                      className="shrink-0 rounded-full bg-teal-50 px-3 py-2 text-[10px] font-black text-teal-700 transition hover:bg-teal-100"
                     >
-                      Lihat semua ›
+                      Semua peserta
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div className="mt-4 grid grid-cols-2 gap-2.5 md:grid-cols-4">
                     <ReminderSummaryCard
                       label="Lengkap"
                       value={fmtNumber(reminderSummary.complete)}
-                      note="peserta"
+                      note="input selesai"
                       tone="emerald"
                       active={reminderFilter === "complete"}
                       onClick={() => setReminderFilter("complete")}
@@ -1155,7 +1212,7 @@ export default function WellnessCoachPortalPage() {
                     <ReminderSummaryCard
                       label="Belum Nutrisi"
                       value={fmtNumber(reminderSummary.nutrition)}
-                      note="peserta"
+                      note="perlu input"
                       tone="orange"
                       active={reminderFilter === "nutrition"}
                       onClick={() => setReminderFilter("nutrition")}
@@ -1163,15 +1220,15 @@ export default function WellnessCoachPortalPage() {
                     <ReminderSummaryCard
                       label="Belum Workout"
                       value={fmtNumber(reminderSummary.workout)}
-                      note="peserta"
+                      note="perlu aktivitas"
                       tone="sky"
                       active={reminderFilter === "workout"}
                       onClick={() => setReminderFilter("workout")}
                     />
                     <ReminderSummaryCard
-                      label="Perlu Follow-up"
+                      label="Follow-up"
                       value={fmtNumber(reminderSummary.reminder)}
-                      note="peserta"
+                      note="prioritas Coach"
                       tone="rose"
                       active={reminderFilter === "reminder"}
                       onClick={() => setReminderFilter("reminder")}
@@ -1179,22 +1236,19 @@ export default function WellnessCoachPortalPage() {
                   </div>
                 </section>
 
-                <section className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_12px_34px_rgba(15,23,42,0.05)]">
+                <section className="overflow-hidden rounded-[1.6rem] border border-slate-200/80 bg-white shadow-[0_14px_38px_rgba(15,23,42,0.055)]">
                   <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
-                    <div>
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <h2 className="text-lg font-black text-slate-950 sm:text-xl">
                           Prioritas Hari Ini
                         </h2>
-                        <span
-                          className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[10px] font-black text-slate-400"
-                          title="Peserta yang paling membutuhkan tindak lanjut."
-                        >
-                          i
+                        <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[9px] font-black text-rose-600">
+                          {priorityParticipants.length} teratas
                         </span>
                       </div>
-                      <p className="mt-1 text-xs font-bold text-slate-500">
-                        Peserta yang paling perlu ditindaklanjuti.
+                      <p className="mt-1 text-[11px] font-bold text-slate-500">
+                        Peserta yang membutuhkan tindak lanjut paling cepat.
                       </p>
                     </div>
 
@@ -1205,13 +1259,10 @@ export default function WellnessCoachPortalPage() {
                         window.setTimeout(() => {
                           document
                             .getElementById("coach-participant-table")
-                            ?.scrollIntoView({
-                              behavior: "smooth",
-                              block: "start",
-                            });
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
                         }, 60);
                       }}
-                      className="shrink-0 text-xs font-black text-teal-700"
+                      className="shrink-0 text-[10px] font-black text-teal-700"
                     >
                       Lihat semua ›
                     </button>
@@ -1220,7 +1271,10 @@ export default function WellnessCoachPortalPage() {
                   <div className="divide-y divide-slate-100">
                     {priorityParticipants.length === 0 ? (
                       <div className="px-5 py-10 text-center">
-                        <div className="text-sm font-black text-emerald-700">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-lg font-black text-emerald-600">
+                          ✓
+                        </div>
+                        <div className="mt-3 text-sm font-black text-slate-800">
                           Semua peserta sudah lengkap
                         </div>
                         <p className="mt-1 text-xs font-bold text-slate-400">
@@ -2109,6 +2163,20 @@ function coachCompactStatus(
 }
 
 
+function CoachHeroStat({ label, value }: any) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/10 px-3 py-3 backdrop-blur-sm">
+      <div className="text-[9px] font-black uppercase tracking-wide text-white/55">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-black leading-none text-white sm:text-2xl">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+
 function CoachPriorityParticipantRow({
   item,
   onDetail,
@@ -2116,34 +2184,19 @@ function CoachPriorityParticipantRow({
   onReminder,
 }: any) {
   const meta = reminderMeta(item);
-  const maxDelay = Math.max(
-    meta.nutritionDays || 0,
-    meta.workoutDays || 0,
-  );
-
+  const maxDelay = Math.max(meta.nutritionDays || 0, meta.workoutDays || 0);
   const priority =
     meta.neverInput || maxDelay >= 3
-      ? {
-          label: "Prioritas tinggi",
-          className: "bg-rose-50 text-rose-600",
-        }
-      : maxDelay >= 2 ||
-          (meta.nutritionMissing && meta.workoutMissing)
-        ? {
-            label: "Prioritas sedang",
-            className: "bg-orange-50 text-orange-600",
-          }
-        : {
-            label: "Prioritas rendah",
-            className: "bg-emerald-50 text-emerald-600",
-          };
+      ? { label: "Tinggi", className: "bg-rose-50 text-rose-600" }
+      : maxDelay >= 2 || (meta.nutritionMissing && meta.workoutMissing)
+        ? { label: "Sedang", className: "bg-orange-50 text-orange-600" }
+        : { label: "Rendah", className: "bg-emerald-50 text-emerald-600" };
 
   const nutritionStatus = coachCompactStatus(
     "Nutrisi",
     meta.nutritionMissing,
     item.compliance?.days_since_nutrition,
   );
-
   const workoutStatus = coachCompactStatus(
     "Workout",
     meta.workoutMissing,
@@ -2151,77 +2204,71 @@ function CoachPriorityParticipantRow({
   );
 
   return (
-    <article className="flex items-center gap-2 px-3 py-3.5 sm:gap-3 sm:px-5">
-      <button
-        type="button"
-        onClick={onDetail}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
-      >
-        <WellnessAvatar
-          name={item.name}
-          src={
-            item.profile_photo_preview_url ||
-            item.profile_photo_url
-          }
-          size="sm"
-        />
+    <article className="px-4 py-4 transition hover:bg-slate-50/70 sm:px-5">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onDetail}
+          className="flex min-w-0 flex-1 items-start gap-3 rounded-xl text-left focus:outline-none focus:ring-2 focus:ring-teal-300"
+        >
+          <WellnessAvatar
+            name={item.name}
+            src={item.profile_photo_preview_url || item.profile_photo_url}
+            size="sm"
+          />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="break-words text-sm font-black leading-5 text-slate-950">
-              {item.name}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="break-words text-sm font-black leading-5 text-slate-950">
+                {item.name}
+              </div>
+              <span className={`rounded-full px-2 py-1 text-[8px] font-black leading-none ${priority.className}`}>
+                Prioritas {priority.label.toLowerCase()}
+              </span>
             </div>
-            <span
-              className={`rounded-full px-2 py-1 text-[8px] font-black leading-none sm:text-[9px] ${priority.className}`}
-            >
-              {priority.label}
-            </span>
+            <div className="mt-0.5 text-[10px] font-bold text-slate-400">
+              {item.code} · {item.group_name}
+            </div>
+            <div className="mt-1.5 space-y-0.5 text-[10px] font-bold leading-4 text-slate-500 sm:text-[11px]">
+              <div className={meta.nutritionMissing ? "text-orange-600" : "text-emerald-600"}>
+                {meta.nutritionMissing ? "N" : "✓"} · {nutritionStatus}
+              </div>
+              <div className={meta.workoutMissing ? "text-sky-600" : "text-emerald-600"}>
+                {meta.workoutMissing ? "W" : "✓"} · {workoutStatus}
+              </div>
+            </div>
           </div>
+        </button>
+      </div>
 
-          <div className="mt-0.5 text-[10px] font-bold text-slate-400">
-            {item.code} · {item.group_name}
-          </div>
-
-          <div className="mt-1 text-[10px] font-bold leading-4 text-slate-500 sm:text-[11px]">
-            {nutritionStatus}
-            <span className="mx-1 text-slate-300">•</span>
-            {workoutStatus}
-          </div>
-        </div>
-      </button>
-
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ml-[52px] mt-3 flex gap-2">
         <button
           type="button"
           onClick={onChat}
-          className="flex h-12 w-12 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white text-[9px] font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50"
-          aria-label={`Chat dengan ${item.name}`}
+          className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-black text-slate-700 shadow-sm transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
         >
-          <span className="text-base leading-none">◯</span>
-          <span className="mt-1">Chat</span>
+          <span className="text-sm">◯</span>
+          Chat
         </button>
 
         {!meta.complete ? (
           <button
             type="button"
             onClick={onReminder}
-            className="flex h-12 w-12 flex-col items-center justify-center rounded-xl border border-slate-200 bg-white text-[9px] font-black text-slate-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-50"
-            aria-label={`Ingatkan ${item.name}`}
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-slate-950 px-3 text-[10px] font-black text-white shadow-sm transition hover:bg-slate-800"
           >
-            <span className="text-base leading-none">♧</span>
-            <span className="mt-1">Ingatkan</span>
+            <span className="text-sm">!</span>
+            Ingatkan
           </button>
         ) : (
-          <div className="flex h-12 w-12 flex-col items-center justify-center rounded-xl bg-emerald-50 text-[9px] font-black text-emerald-700">
-            <span className="text-base leading-none">✓</span>
-            <span className="mt-1">Lengkap</span>
+          <div className="inline-flex min-h-9 items-center justify-center rounded-xl bg-emerald-50 px-3 text-[10px] font-black text-emerald-700">
+            ✓ Lengkap
           </div>
         )}
       </div>
     </article>
   );
 }
-
 
 function CoachParticipantCompactRow({
   item,
@@ -2317,15 +2364,7 @@ function ReminderSummaryCard({
   active,
   onClick,
 }: any) {
-  const config: Record<
-    string,
-    {
-      icon: string;
-      iconClass: string;
-      valueClass: string;
-      ringClass: string;
-    }
-  > = {
+  const config: Record<string, any> = {
     emerald: {
       icon: "✓",
       iconClass: "bg-emerald-50 text-emerald-700",
@@ -2333,25 +2372,24 @@ function ReminderSummaryCard({
       ringClass: "ring-emerald-200",
     },
     orange: {
-      icon: "♜",
+      icon: "N",
       iconClass: "bg-orange-50 text-orange-600",
       valueClass: "text-orange-600",
       ringClass: "ring-orange-200",
     },
     sky: {
-      icon: "H",
-      iconClass: "bg-sky-50 text-sky-600",
+      icon: "W",
+      iconClass: "bg-sky-50 text-sky-700",
       valueClass: "text-sky-700",
       ringClass: "ring-sky-200",
     },
     rose: {
-      icon: "♧",
+      icon: "!",
       iconClass: "bg-rose-50 text-rose-600",
       valueClass: "text-rose-600",
       ringClass: "ring-rose-200",
     },
   };
-
   const selected = config[tone] || config.emerald;
 
   return (
@@ -2359,39 +2397,27 @@ function ReminderSummaryCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`group min-h-[94px] rounded-[1.25rem] border border-slate-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition sm:p-3.5 ${
+      className={`group rounded-[1.15rem] border border-slate-200/80 bg-slate-50/60 p-3 text-left transition ${
         active
-          ? `ring-4 ${selected.ringClass}`
-          : "hover:-translate-y-0.5 hover:border-teal-200"
+          ? `bg-white ring-4 ${selected.ringClass}`
+          : "hover:-translate-y-0.5 hover:border-teal-200 hover:bg-white hover:shadow-sm"
       }`}
     >
-      <div className="flex items-center gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base font-black sm:h-11 sm:w-11 ${selected.iconClass}`}
-          aria-hidden="true"
-        >
+      <div className="flex items-center gap-2.5">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-black ${selected.iconClass}`}>
           {selected.icon}
         </div>
-
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-black text-slate-700 sm:text-xs">
+          <div className="text-[9px] font-black leading-3 text-slate-600 sm:text-[10px]">
             {label}
           </div>
-
-          <div
-            className={`mt-0.5 text-2xl font-black leading-none ${selected.valueClass}`}
-          >
+          <div className={`mt-0.5 text-xl font-black leading-none ${selected.valueClass}`}>
             {value}
           </div>
-
-          <div className="mt-1 text-[10px] font-bold text-slate-500">
+          <div className="mt-1 truncate text-[8px] font-bold text-slate-400 sm:text-[9px]">
             {note}
           </div>
         </div>
-
-        <span className="text-xl font-black text-slate-300">
-          ›
-        </span>
       </div>
     </button>
   );
