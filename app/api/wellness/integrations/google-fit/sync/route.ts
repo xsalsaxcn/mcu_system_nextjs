@@ -1,7 +1,4 @@
-// WELLNESS_GOOGLE_FIT_ACTIVE_CALORIE_GUARD_V70
-// WELLNESS_GOOGLE_FIT_EXACT_LAST_SYNC_V79K
-// WELLNESS_GOOGLE_FIT_REST_STABLE_V80A
-// WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B
+// WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -20,7 +17,7 @@ import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 
 export const runtime = "nodejs";
 
-const MARKER = "WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B";
+const MARKER = "WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414";
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 function clean(value: any) {
@@ -107,82 +104,29 @@ function estimateDistanceFromSteps(steps: number) {
   return Math.round(steps * 0.0007 * 100) / 100;
 }
 
-function validateDailyDistanceFromSteps(steps: number, googleDistanceKm: number) {
-  const safeSteps = Math.max(0, Number(steps || 0));
-  const rawDistanceKm = Math.max(0, Number(googleDistanceKm || 0));
-  const estimatedDistanceKm = estimateDistanceFromSteps(safeSteps);
-
-  if (safeSteps <= 0) {
-    return {
-      distanceKm: rawDistanceKm,
-      usedEstimate: false,
-      reason: rawDistanceKm > 0 ? "NO_STEPS_DISTANCE_PRESERVED" : "NO_DISTANCE",
-      rawDistanceKm,
-      estimatedDistanceKm,
-    };
-  }
-
-  // Plausible stride range 0.25-1.50 meter per step.
-  // Outside this range the aggregate is likely cumulative, duplicated, or unit-mismatched.
-  const minPlausibleKm = Math.max(0.05, safeSteps * 0.00025);
-  const maxPlausibleKm = Math.max(0.3, safeSteps * 0.0015);
-  const plausible =
-    rawDistanceKm > 0 &&
-    rawDistanceKm >= minPlausibleKm &&
-    rawDistanceKm <= maxPlausibleKm;
-
-  return {
-    distanceKm: plausible ? rawDistanceKm : estimatedDistanceKm,
-    usedEstimate: !plausible,
-    reason: plausible
-      ? "GOOGLE_DISTANCE_PLAUSIBLE"
-      : rawDistanceKm > 0
-        ? "GOOGLE_DISTANCE_REJECTED_AS_IMPLAUSIBLE"
-        : "GOOGLE_DISTANCE_MISSING",
-    rawDistanceKm,
-    estimatedDistanceKm,
-    minPlausibleKm,
-    maxPlausibleKm,
-  };
-}
-
 function estimateActiveMinutesFromSteps(steps: number) {
   if (!steps || steps <= 0) return 0;
 
-  // Approximate 100 steps/minute for ordinary walking.
-  return Math.min(1440, Math.round((steps / 100) * 10) / 10);
+  return Math.round((steps / 100) * 10) / 10;
 }
 
 function estimateActiveCalories(params: {
   steps: number;
   distanceKm: number;
   weightKg: number;
-  activeMinutes?: number;
 }) {
-  const steps = Math.max(0, Number(params.steps || 0));
-  const weightKg = Math.min(250, Math.max(35, Number(params.weightKg || 70)));
+  const steps = Number(params.steps || 0);
+  const weightKg = Number(params.weightKg || 70);
   const distanceKm =
     Number(params.distanceKm || 0) > 0
       ? Number(params.distanceKm)
       : estimateDistanceFromSteps(steps);
-  const activeMinutes = Math.max(0, Number(params.activeMinutes || 0));
 
-  if (steps > 0) {
-    // Active walking/running estimate. Hard cap prevents total-energy/BMR values
-    // from becoming workout calories (for example 8,878 kkal for ~1,000 steps).
-    const distanceEstimate = distanceKm * weightKg * 0.53;
-    const stepCap = steps * 0.1;
-    const calories = Math.min(distanceEstimate, stepCap);
+  if (!steps || steps <= 0) return 0;
 
-    return Math.max(1, Math.round(calories));
-  }
+  const calories = distanceKm * weightKg * 0.53;
 
-  if (activeMinutes > 0) {
-    const perMinute = Math.max(3, weightKg * 0.06);
-    return Math.min(1200, Math.max(1, Math.round(activeMinutes * perMinute)));
-  }
-
-  return 0;
+  return Math.max(1, Math.round(calories));
 }
 
 function getWeightKg(participant: any) {
@@ -283,10 +227,8 @@ async function googlePost(accessToken: string, url: string, body: any) {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      "Cache-Control": "no-cache, no-store, must-revalidate",
     },
     body: JSON.stringify(body),
-    cache: "no-store",
   });
 
   const json: any = await response.json().catch(() => ({}));
@@ -300,8 +242,7 @@ async function googlePost(accessToken: string, url: string, body: any) {
 
 async function readAggregateByDataType(params: {
   accessToken: string;
-  dataTypeName?: string;
-  dataSourceId?: string;
+  dataTypeName: string;
   start: Date;
   end: Date;
 }) {
@@ -310,17 +251,12 @@ async function readAggregateByDataType(params: {
 
   const body = {
     aggregateBy: [
-      params.dataSourceId
-        ? { dataSourceId: params.dataSourceId }
-        : { dataTypeName: params.dataTypeName },
+      {
+        dataTypeName: params.dataTypeName,
+      },
     ],
     bucketByTime: {
-      // Use Jakarta calendar days, not fixed UTC-aligned 24-hour buckets.
-      period: {
-        type: "day",
-        value: 1,
-        timeZoneId: JAKARTA_TIME_ZONE,
-      },
+      durationMillis: 24 * 60 * 60 * 1000,
     },
     startTimeMillis,
     endTimeMillis,
@@ -362,32 +298,26 @@ async function readAggregateByDataType(params: {
 
 async function safeReadAggregate(params: {
   accessToken: string;
-  dataTypeName?: string;
-  dataSourceId?: string;
+  dataTypeName: string;
   start: Date;
   end: Date;
 }) {
   try {
     return {
       ok: true,
-      dataTypeName: params.dataTypeName || params.dataSourceId || "",
-      dataSourceId: params.dataSourceId || "",
+      dataTypeName: params.dataTypeName,
       rows: await readAggregateByDataType(params),
       message: "",
     };
   } catch (error: any) {
     return {
       ok: false,
-      dataTypeName: params.dataTypeName || params.dataSourceId || "",
-      dataSourceId: params.dataSourceId || "",
+      dataTypeName: params.dataTypeName,
       rows: new Map<string, number>(),
       message: error?.message || String(error),
     };
   }
 }
-
-
-
 
 async function upsertDailyRow(params: {
   supabase: any;
@@ -398,85 +328,58 @@ async function upsertDailyRow(params: {
   const nowJakarta = jakartaNowLabel();
   const externalId = `google_fit_daily_${params.participant.id}_${params.row.date}`;
 
-  const existing = await params.supabase
-    .from("wellness_activity_logs")
-    .select("id,steps,distance_km,duration_minutes,calories,raw_payload,updated_at")
-    .eq("participant_id", params.participant.id)
-    .eq("source", "google_fit")
-    .eq("external_activity_id", externalId)
-    .maybeSingle();
-
-  if (existing.error) throw existing.error;
-
-  const resolvedRow = { ...params.row };
-
   const payload: any = {
     participant_id: Number(params.participant.id),
     source: "google_fit",
     external_activity_id: externalId,
     provider_activity_id: externalId,
     activity_type: "Google Fit Daily",
-    activity_name: `Google Fit Daily - ${resolvedRow.steps} steps`,
-    log_date: resolvedRow.date,
+    activity_name: `Google Fit Daily - ${params.row.steps} steps`,
+    log_date: params.row.date,
+
+    // Important:
+    // This is intentionally latest sync time, not day bucket start.
+    // Portal will no longer display 07.00 as if it were activity time.
     started_at: nowIso,
-    duration_minutes: resolvedRow.duration_minutes,
-    calories: 0,
-    distance_km: resolvedRow.distance_km,
-    steps: resolvedRow.steps,
-    updated_at: nowIso,
+
+    duration_minutes: params.row.duration_minutes,
+    calories: params.row.calories,
+    distance_km: params.row.distance_km,
+    steps: params.row.steps,
     raw_payload: {
       marker: MARKER,
-      log_date: resolvedRow.date,
+      log_date: params.row.date,
       provider: "google_fit",
-      sync_mode: "aggregate_daily_rest_jakarta_calendar",
+      sync_mode: "aggregate_daily",
       display_time_note:
         "started_at is latest sync time. log_date is the Google Fit daily date in Asia/Jakarta.",
       last_sync_at: nowIso,
       last_sync_at_jakarta: nowJakarta,
-      google_fit_steps: resolvedRow.steps,
-      google_fit_step_data_source_id: resolvedRow.step_data_source_id,
-      google_fit_distance_km: resolvedRow.distance_km,
-      google_fit_distance_km_original:
-        resolvedRow.google_fit_distance_km_original,
-      google_fit_calories_expended:
-        resolvedRow.google_fit_total_calories,
-      google_fit_total_calories:
-        resolvedRow.google_fit_total_calories,
-      google_fit_calories_include_bmr: true,
-      google_fit_active_calories: null,
-      active_calories_available: false,
-      google_fit_active_minutes:
-        resolvedRow.google_fit_active_minutes,
-      estimated_distance_used: resolvedRow.estimated_distance_used,
-      distance_validation_reason:
-        resolvedRow.distance_validation_reason,
-      distance_min_plausible_km:
-        resolvedRow.distance_min_plausible_km,
-      distance_max_plausible_km:
-        resolvedRow.distance_max_plausible_km,
-      estimated_active_minutes_used:
-        resolvedRow.estimated_active_minutes_used,
-      estimated_calories_used: false,
-      sanitized_active_calories: 0,
-      calories_source: "google_fit_total_exact_no_active_guess",
-      distance_source: resolvedRow.distance_source,
-      duration_source: resolvedRow.duration_source,
-      rest_sync: resolvedRow.rest_sync,
-      exact_snapshot: {
-        synced_at: nowIso,
-        date: resolvedRow.date,
-        steps: resolvedRow.steps,
-        total_calories: resolvedRow.google_fit_total_calories,
-        distance_km: resolvedRow.distance_km,
-        active_minutes: resolvedRow.google_fit_active_minutes,
-        step_data_source_id: resolvedRow.step_data_source_id,
-        calories_data_type: "com.google.calories.expended",
-      },
+      google_fit_steps: params.row.steps,
+      google_fit_distance_km: params.row.distance_km,
+      google_fit_calories_expended: params.row.google_fit_calories_expended,
+      google_fit_active_minutes: params.row.google_fit_active_minutes,
+      estimated_distance_used: params.row.estimated_distance_used,
+      estimated_active_minutes_used: params.row.estimated_active_minutes_used,
+      estimated_calories_used: params.row.estimated_calories_used,
+      calories_source: params.row.calories_source,
+      distance_source: params.row.distance_source,
+      duration_source: params.row.duration_source,
       calculation_note:
-        "Steps use the canonical estimated_steps aggregate through the stored Google Fit OAuth connection. Total calories are com.google.calories.expended including BMR. No active-calorie estimate is fabricated.",
+        "Values are read from Google Fit aggregate API where available. Calories are Google Fit calories.expended when available; otherwise estimated.",
       synced_at: nowIso,
     },
   };
+
+  const existing = await params.supabase
+    .from("wellness_activity_logs")
+    .select("id")
+    .eq("participant_id", params.participant.id)
+    .eq("source", "google_fit")
+    .eq("external_activity_id", externalId)
+    .maybeSingle();
+
+  if (existing.error) throw existing.error;
 
   if (existing.data?.id) {
     const updated = await params.supabase
@@ -487,7 +390,7 @@ async function upsertDailyRow(params: {
       .single();
 
     if (updated.error) throw updated.error;
-    return { action: "updated", row: updated.data, resolvedRow };
+    return { action: "updated", row: updated.data };
   }
 
   const inserted = await params.supabase
@@ -497,7 +400,7 @@ async function upsertDailyRow(params: {
     .single();
 
   if (inserted.error) throw inserted.error;
-  return { action: "inserted", row: inserted.data, resolvedRow };
+  return { action: "inserted", row: inserted.data };
 }
 
 export async function POST(req: NextRequest) {
@@ -535,41 +438,38 @@ export async function POST(req: NextRequest) {
     }
 
     const accessToken = await refreshAccessTokenIfNeeded(supabase, integration);
+    const weightKg = await readLatestWeight(supabase, participant);
+
     const today = jakartaTodayKey();
     const startKey = addDays(today, -(days - 1));
     const start = jakartaDayStartUtc(startKey);
+    const end = jakartaDayStartUtc(addDays(today, 1));
 
-    // Stable REST flow: one aggregate request per data type. The stored OAuth
-    // refresh token is reused, so pressing Sync does not trigger Android account
-    // selection and does not wait for multiple delayed cloud reads.
-    const readEnd = new Date();
     const [stepsResult, distanceResult, caloriesResult, activeMinutesResult] =
       await Promise.all([
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.step_count.delta",
-          dataSourceId:
-            "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
           start,
-          end: readEnd,
+          end,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.distance.delta",
           start,
-          end: readEnd,
+          end,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.calories.expended",
           start,
-          end: readEnd,
+          end,
         }),
         safeReadAggregate({
           accessToken,
           dataTypeName: "com.google.active_minutes",
           start,
-          end: readEnd,
+          end,
         }),
       ]);
 
@@ -592,11 +492,9 @@ export async function POST(req: NextRequest) {
         const distanceKmFromGoogle =
           Math.round((Number(distanceResult.rows.get(date) || 0) / 1000) * 100) / 100;
 
-        const distanceValidation = validateDailyDistanceFromSteps(
-          steps,
-          distanceKmFromGoogle
-        );
-        const distanceKm = distanceValidation.distanceKm;
+        const estimatedDistanceKm = estimateDistanceFromSteps(steps);
+        const distanceKm =
+          distanceKmFromGoogle > 0 ? distanceKmFromGoogle : estimatedDistanceKm;
 
         const activeMinutesFromGoogle =
           Math.round(Number(activeMinutesResult.rows.get(date) || 0) * 10) / 10;
@@ -608,40 +506,35 @@ export async function POST(req: NextRequest) {
         const googleCalories =
           Math.round(Number(caloriesResult.rows.get(date) || 0) * 10) / 10;
 
+        const estimatedCalories = estimateActiveCalories({
+          steps,
+          distanceKm,
+          weightKg,
+        });
+
+        const calories = googleCalories > 0 ? googleCalories : estimatedCalories;
+
         return {
           date,
           steps,
           distance_km: distanceKm,
           duration_minutes: durationMinutes,
-          // No active-calorie guess. Google Fit REST returns total calories here.
-          calories: 0,
-          google_fit_total_calories: googleCalories,
-          step_data_source_id:
-            "derived:com.google.step_count.delta:com.google.android.gms:estimated_steps",
-          google_fit_distance_km_original: distanceKmFromGoogle,
+          calories,
+          google_fit_calories_expended: googleCalories,
           google_fit_active_minutes: activeMinutesFromGoogle,
-          estimated_distance_used: distanceValidation.usedEstimate,
-          distance_validation_reason: distanceValidation.reason,
-          distance_min_plausible_km: distanceValidation.minPlausibleKm || null,
-          distance_max_plausible_km: distanceValidation.maxPlausibleKm || null,
+          estimated_distance_used: distanceKmFromGoogle <= 0 && steps > 0,
           estimated_active_minutes_used: activeMinutesFromGoogle <= 0 && steps > 0,
-          estimated_calories_used: false,
-          calories_source: "google_fit_total_exact_no_active_guess",
-          distance_source: distanceValidation.usedEstimate
-            ? "estimated_from_steps"
-            : "google_fit_distance_delta_validated",
+          estimated_calories_used: googleCalories <= 0 && steps > 0,
+          calories_source:
+            googleCalories > 0
+              ? "google_fit_calories_expended"
+              : "estimated_from_steps_distance_weight",
+          distance_source:
+            distanceKmFromGoogle > 0 ? "google_fit_distance_delta" : "estimated_from_steps",
           duration_source:
             activeMinutesFromGoogle > 0
               ? "google_fit_active_minutes"
               : "estimated_from_steps",
-          rest_sync: {
-            marker: MARKER,
-            read_ended_at: readEnd.toISOString(),
-            steps: Number(stepsResult.rows.get(date) || 0),
-            total_calories: Number(caloriesResult.rows.get(date) || 0),
-            distance_m: Number(distanceResult.rows.get(date) || 0),
-            active_minutes: Number(activeMinutesResult.rows.get(date) || 0),
-          },
         };
       })
       .filter((row) => {
@@ -649,19 +542,17 @@ export async function POST(req: NextRequest) {
           row.steps > 0 ||
           row.distance_km > 0 ||
           row.duration_minutes > 0 ||
-          row.google_fit_total_calories > 0
+          row.calories > 0
         );
       });
 
     let inserted = 0;
     let updated = 0;
-    const persistedRows: any[] = [];
 
     for (const row of dailyRows) {
       const saved = await upsertDailyRow({ supabase, participant, row });
       if (saved.action === "inserted") inserted += 1;
       if (saved.action === "updated") updated += 1;
-      persistedRows.push(saved.resolvedRow);
     }
 
     const nowIso = new Date().toISOString();
@@ -681,33 +572,14 @@ export async function POST(req: NextRequest) {
       activeMinutesResult.ok ? "" : `Active minutes: ${activeMinutesResult.message}`,
     ].filter(Boolean);
 
-    const todaySnapshot =
-      persistedRows.find((row) => row.date === today) ||
-      dailyRows.find((row) => row.date === today) ||
-      null;
-
     return NextResponse.json({
       ok: true,
       marker: MARKER,
-      message: todaySnapshot
-        ? `Google Fit sync selesai. ${todaySnapshot.steps} steps dan ${Math.round(Number(todaySnapshot.google_fit_total_calories || 0) * 10) / 10} kkal total pada Last Sync.`
-        : `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
-      sync_mode: "aggregate_daily_jakarta_calendar",
+      message: `Google Fit sync selesai. ${inserted} baru, ${updated} update.`,
+      sync_mode: "aggregate_daily",
       timezone: JAKARTA_TIME_ZONE,
       last_sync_at: nowIso,
       last_sync_at_jakarta: jakartaNowLabel(),
-      last_sync_snapshot: todaySnapshot
-        ? {
-            date: todaySnapshot.date,
-            steps: todaySnapshot.steps,
-            total_calories: todaySnapshot.google_fit_total_calories,
-            distance_km: todaySnapshot.distance_km,
-            active_minutes: todaySnapshot.google_fit_active_minutes,
-            step_data_source_id: todaySnapshot.step_data_source_id,
-            calories_data_type: "com.google.calories.expended",
-            active_calories_available: false,
-          }
-        : null,
       date_range: {
         start: startKey,
         end: today,
@@ -719,18 +591,6 @@ export async function POST(req: NextRequest) {
         calories: caloriesResult.ok,
         active_minutes: activeMinutesResult.ok,
       },
-      rest_sync: {
-        marker: MARKER,
-        read_ended_at: readEnd.toISOString(),
-        persisted_today: todaySnapshot
-          ? {
-              steps: todaySnapshot.steps,
-              total_calories: todaySnapshot.google_fit_total_calories,
-              distance_km: todaySnapshot.distance_km,
-              active_minutes: todaySnapshot.google_fit_active_minutes,
-            }
-          : null,
-      },
       warnings: warningMessages,
       fetched_daily: dailyRows.length,
       inserted,
@@ -738,7 +598,7 @@ export async function POST(req: NextRequest) {
       daily: dailyRows,
     });
   } catch (error: any) {
-    console.error("WELLNESS_GOOGLE_FIT_JAKARTA_CALENDAR_BUCKET_V80B_ERROR", error);
+    console.error("WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414_ERROR", error);
 
     return NextResponse.json(
       {
