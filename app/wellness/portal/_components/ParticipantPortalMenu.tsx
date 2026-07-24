@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
 // HARMONY_PARTICIPANT_DEVICE_SYNC_HAMBURGER_V116
+// WELLNESS_PARTICIPANT_HEALTH_CONNECT_SEPARATE_MENU_V119
 // Mobile app style:
 // - Bottom navigation seperti aplikasi.
 // - Floating quick action untuk input nutrisi/workout.
@@ -79,11 +80,11 @@ const menuItems: MenuItem[] = [
     description: "Riwayat nutrisi, workout, dan health talk",
     emoji: "📊",
   },
-  {
+    {
     key: "devices",
-    label: "Perangkat & Sinkronisasi",
+    label: "Device Sync",
     shortLabel: "Device",
-    description: "Health Connect, Google Fit, permission, dan diagnostic",
+    description: "Google Fit / Health Connect",
     emoji: "⌚",
   },
   {
@@ -114,6 +115,7 @@ const bottomItems: PortalTab[] = [
   "nutrition",
   "workout",
   "history",
+  "devices",
 ];
 
 function clean(value: any) {
@@ -140,6 +142,8 @@ export default function ParticipantPortalMenu({
   const [coachUnread, setCoachUnread] = useState(0);
   const [adminUnread, setAdminUnread] = useState(0);
   const [assignedCoachName, setAssignedCoachName] = useState("");
+  const [nativeHealthConnectSyncAvailable, setNativeHealthConnectSyncAvailable] =
+    useState(false);
 
   const participantName =
     clean(participant?.name) ||
@@ -159,6 +163,17 @@ export default function ParticipantPortalMenu({
     () => menuItems.find((item) => item.key === activeTab) || menuItems[0],
     [activeTab],
   );
+
+  useEffect(() => {
+    const bridge =
+      typeof window !== "undefined"
+        ? (window as any).HarmonyNativeFitness
+        : null;
+
+    setNativeHealthConnectSyncAvailable(
+      Boolean(bridge && typeof bridge.openDeviceSync === "function"),
+    );
+  }, []);
 
   async function loadUnreadNotifications() {
     if (!participantId) {
@@ -254,23 +269,26 @@ export default function ParticipantPortalMenu({
     if (tab === "support") setAdminUnread(0);
   }
 
-  function openDeviceSync() {
-    const bridge = (window as any).HarmonyNativeFitness;
+  function openNativeHealthConnectSyncV119() {
+    const bridge =
+      typeof window !== "undefined"
+        ? (window as any).HarmonyNativeFitness
+        : null;
 
-    if (bridge && typeof bridge.openDeviceSync === "function") {
-      try {
-        bridge.openDeviceSync();
-        setOpen(false);
-        setQuickOpen(false);
-        setNotificationOpen(false);
-        return;
-      } catch {
-        // Browser/WebView fallback tetap membuka tab Devices existing.
-      }
+    if (!bridge || typeof bridge.openDeviceSync !== "function") {
+      return;
     }
 
-    chooseTab("devices");
+    try {
+      bridge.openDeviceSync();
+      setOpen(false);
+      setQuickOpen(false);
+      setNotificationOpen(false);
+    } catch {
+      // Existing Device Sync remains untouched when native Android panel fails.
+    }
   }
+
 
   function NotificationBell() {
     // WELLNESS_NOTIFICATION_BELL_ALL_SCREENS_V75
@@ -477,7 +495,7 @@ export default function ParticipantPortalMenu({
       ) : null}
 
       <nav className="fixed bottom-0 left-0 right-0 z-[9996] border-t border-orange-100 bg-white/95 px-2 pb-3 pt-2 shadow-2xl shadow-slate-300 backdrop-blur md:hidden">
-        <div className="grid grid-cols-4 gap-1">
+        <div className="grid grid-cols-5 gap-1">
           {bottomItems.map((key) => {
             const item = menuItems.find((menu) => menu.key === key)!;
             const active = activeTab === key;
@@ -657,11 +675,7 @@ export default function ParticipantPortalMenu({
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() =>
-                        item.key === "devices"
-                          ? openDeviceSync()
-                          : chooseTab(item.key)
-                      }
+                      onClick={() => chooseTab(item.key)}
                       className={`w-full rounded-3xl border p-4 text-left transition ${
                         active
                           ? "border-orange-200 bg-white shadow-lg shadow-orange-100"
@@ -694,6 +708,32 @@ export default function ParticipantPortalMenu({
                     </button>
                   );
                 })}
+
+                {nativeHealthConnectSyncAvailable ? (
+                  <button
+                    type="button"
+                    onClick={openNativeHealthConnectSyncV119}
+                    className="w-full rounded-3xl border border-teal-200 bg-gradient-to-br from-teal-50 to-cyan-50 p-4 text-left transition hover:border-teal-300 hover:bg-teal-50"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-600 text-xl text-white">
+                        🔄
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="text-sm font-black text-teal-950">
+                          Health Connect Sync
+                        </div>
+                        <div className="mt-1 text-xs font-bold leading-5 text-teal-700/80">
+                          Participant ID, izin, sumber wearable, diagnostic, dan sync Android
+                        </div>
+                        <div className="mt-2 inline-flex rounded-full bg-white px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-teal-700 shadow-sm">
+                          Menu baru · tidak mengganti Device Sync
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ) : null}
               </div>
             </div>
 
