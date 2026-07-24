@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 // WELLNESS_PARTICIPANT_CHAT_GROUP_MENU_V76B
 
 // WELLNESS_PARTICIPANT_PORTAL_BOTTOM_NAV_V431
+// HARMONY_PARTICIPANT_DEVICE_SYNC_HAMBURGER_V116
 // Mobile app style:
 // - Bottom navigation seperti aplikasi.
 // - Floating quick action untuk input nutrisi/workout.
@@ -80,9 +81,9 @@ const menuItems: MenuItem[] = [
   },
   {
     key: "devices",
-    label: "Device Sync",
+    label: "Perangkat & Sinkronisasi",
     shortLabel: "Device",
-    description: "Google Fit / Health Connect",
+    description: "Health Connect, Google Fit, permission, dan diagnostic",
     emoji: "⌚",
   },
   {
@@ -113,7 +114,6 @@ const bottomItems: PortalTab[] = [
   "nutrition",
   "workout",
   "history",
-  "devices",
 ];
 
 function clean(value: any) {
@@ -252,6 +252,24 @@ export default function ParticipantPortalMenu({
     setNotificationOpen(false);
     if (tab === "chat") setCoachUnread(0);
     if (tab === "support") setAdminUnread(0);
+  }
+
+  function openDeviceSync() {
+    const bridge = (window as any).HarmonyNativeFitness;
+
+    if (bridge && typeof bridge.openDeviceSync === "function") {
+      try {
+        bridge.openDeviceSync();
+        setOpen(false);
+        setQuickOpen(false);
+        setNotificationOpen(false);
+        return;
+      } catch {
+        // Browser/WebView fallback tetap membuka tab Devices existing.
+      }
+    }
+
+    chooseTab("devices");
   }
 
   function NotificationBell() {
@@ -459,7 +477,7 @@ export default function ParticipantPortalMenu({
       ) : null}
 
       <nav className="fixed bottom-0 left-0 right-0 z-[9996] border-t border-orange-100 bg-white/95 px-2 pb-3 pt-2 shadow-2xl shadow-slate-300 backdrop-blur md:hidden">
-        <div className="grid grid-cols-5 gap-1">
+        <div className="grid grid-cols-4 gap-1">
           {bottomItems.map((key) => {
             const item = menuItems.find((menu) => menu.key === key)!;
             const active = activeTab === key;
@@ -639,7 +657,11 @@ export default function ParticipantPortalMenu({
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() => chooseTab(item.key)}
+                      onClick={() =>
+                        item.key === "devices"
+                          ? openDeviceSync()
+                          : chooseTab(item.key)
+                      }
                       className={`w-full rounded-3xl border p-4 text-left transition ${
                         active
                           ? "border-orange-200 bg-white shadow-lg shadow-orange-100"
