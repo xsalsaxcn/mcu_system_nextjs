@@ -9,6 +9,7 @@
 // WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_BUTTON_V86B
 // WELLNESS_GOOGLE_FIT_OLD_CARD_REST_LKG_V123
 // WELLNESS_GOOGLE_FIT_CARD_TOTAL_DISPLAY_V124
+// WELLNESS_FITNESS_NATIVE_ALIGNMENT_V125_FIX
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -59,6 +60,23 @@ type PortalTab =
 
 function clean(value: any) {
   return String(value ?? "").trim();
+}
+
+function nativeGoogleFitBridgeV125Fix() {
+  if (typeof window === "undefined") return null;
+
+  const bridge = (window as any)?.HarmonyNativeFitness;
+  if (!bridge || typeof bridge.syncGoogleFit !== "function") return null;
+
+  try {
+    if (typeof bridge.available === "function" && bridge.available() !== true) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return bridge;
 }
 
 function asNumber(value: any) {
@@ -695,6 +713,7 @@ export default function WellnessParticipantPortalPage() {
     healthtalk_count: 0,
   });
   const [syncing, setSyncing] = useState("");
+  const googleFitNativeSilentV125Fix = useRef(false);
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
     meal_type: "",
@@ -802,6 +821,43 @@ export default function WellnessParticipantPortalPage() {
       setActivities(nextActivities);
       setActivitySummary(result.activity_summary || []);
 
+      // V125 FIX: status Health Connect lama dapat tidak memiliki last_sync_at
+      // walaupun daily row sudah tersimpan. Ambil waktu row terbaru sebagai fallback.
+      const latestHealthConnectDailyV125Fix = nextActivities
+        .filter((item: any) => isHealthConnectDailyRow(item))
+        .sort((left: any, right: any) =>
+          clean(
+            right?.updated_at ||
+              right?.raw_payload?.health_connect_last_sync_at ||
+              right?.raw_payload?.last_sync_at ||
+              right?.started_at,
+          ).localeCompare(
+            clean(
+              left?.updated_at ||
+                left?.raw_payload?.health_connect_last_sync_at ||
+                left?.raw_payload?.last_sync_at ||
+                left?.started_at,
+            ),
+          ),
+        )[0];
+      const latestHealthConnectRawV125Fix = activityRawPayloadV72(
+        latestHealthConnectDailyV125Fix,
+      );
+      const latestHealthConnectSyncAtV125Fix = clean(
+        latestHealthConnectRawV125Fix?.health_connect_last_sync_at ||
+          latestHealthConnectRawV125Fix?.last_sync_at ||
+          latestHealthConnectDailyV125Fix?.updated_at ||
+          latestHealthConnectDailyV125Fix?.started_at ||
+          latestHealthConnectDailyV125Fix?.created_at,
+      );
+
+      if (latestHealthConnectSyncAtV125Fix) {
+        setFitnessLastSyncAt((current) => ({
+          ...current,
+          health_connect: latestHealthConnectSyncAtV125Fix,
+        }));
+      }
+
       const latestGoogleFitDaily = nextActivities
         .filter((item: any) => isGoogleFitDailyRow(item))
         .sort((left: any, right: any) =>
@@ -899,6 +955,72 @@ export default function WellnessParticipantPortalPage() {
     } else {
       loadMe();
     }
+  }, []);
+
+  useEffect(() => {
+    function handleNativeGoogleFitV125Fix(event: Event) {
+      const detail = (event as CustomEvent<any>)?.detail || {};
+      const silent = googleFitNativeSilentV125Fix.current;
+
+      if (detail?.progress) {
+        setSyncing("google-fit");
+        if (!silent) {
+          setMessage(
+            clean(detail?.message) ||
+              "Membaca steps dan kalori langsung dari Google Fit HP...",
+          );
+        }
+        return;
+      }
+
+      setSyncing("");
+      googleFitNativeSilentV125Fix.current = false;
+
+      if (!detail?.ok) {
+        if (!silent) {
+          setMessage(
+            clean(detail?.message) ||
+              "Google Fit dari HP gagal disinkronkan.",
+          );
+        }
+        return;
+      }
+
+      const completedAt =
+        clean(detail?.last_sync_at) || new Date().toISOString();
+
+      setFitnessLastSyncAt((current) => ({
+        ...current,
+        google_fit: completedAt,
+      }));
+
+      if (detail?.last_sync_snapshot) {
+        setFitnessLastSyncSnapshot((current) => ({
+          ...current,
+          google_fit: detail.last_sync_snapshot,
+        }));
+      }
+
+      if (!silent) {
+        setMessage(
+          clean(detail?.message) ||
+            "Google Fit berhasil disinkronkan langsung dari HP.",
+        );
+      }
+
+      void loadMe({ keepMessage: true });
+    }
+
+    window.addEventListener(
+      "harmony-native-google-fit-sync",
+      handleNativeGoogleFitV125Fix as EventListener,
+    );
+
+    return () =>
+      window.removeEventListener(
+        "harmony-native-google-fit-sync",
+        handleNativeGoogleFitV125Fix as EventListener,
+      );
   }, []);
 
   function setValue(key: string, value: string) {
@@ -1009,6 +1131,41 @@ export default function WellnessParticipantPortalPage() {
     provider: "strava" | "google-fit",
     options?: { silent?: boolean; days?: number },
   ) {
+    // V125 FIX: tombol Google Fit lama tetap dipakai. Pada aplikasi Android,
+    // fungsi ini membaca snapshot native HP. Browser biasa tetap memakai REST.
+    if (provider === "google-fit") {
+      const participantId = Number(
+        participant?.id ||
+          participant?.participant_id ||
+          participant?.wellness_participant_id ||
+          0,
+      );
+      const bridge = nativeGoogleFitBridgeV125Fix();
+
+      if (bridge && participantId > 0) {
+        googleFitNativeSilentV125Fix.current = options?.silent === true;
+        setSyncing(provider);
+
+        if (!options?.silent) {
+          setMessage("Membaca steps dan kalori langsung dari Google Fit HP...");
+        }
+
+        try {
+          bridge.syncGoogleFit(participantId);
+          return;
+        } catch (error: any) {
+          googleFitNativeSilentV125Fix.current = false;
+          setSyncing("");
+          if (!options?.silent) {
+            setMessage(
+              error?.message || "Google Fit native tidak dapat dijalankan.",
+            );
+          }
+          return;
+        }
+      }
+    }
+
     setSyncing(provider);
 
     if (!options?.silent) {
@@ -1254,9 +1411,13 @@ export default function WellnessParticipantPortalPage() {
     if (step !== "portal") return;
     if (!fitnessEnabled || activeFitnessSource !== "google_fit") return;
     if (!googleFitConnected) return;
+
+    // Sync segera ketika portal dibuka, lalu ulang setiap 10 menit selama terbuka.
+    void syncProvider("google-fit", { silent: true, days: 2 });
+
     const intervalId = window.setInterval(
       () => {
-        syncProvider("google-fit", { silent: true, days: 2 });
+        void syncProvider("google-fit", { silent: true, days: 2 });
       },
       10 * 60 * 1000,
     );

@@ -348,6 +348,7 @@ async function saveActivityLog(supabase: any, payload: any) {
   return { inserted: true };
 }
 
+// WELLNESS_HEALTH_CONNECT_LAST_SYNC_STATUS_V125_FIX
 async function upsertIntegration(supabase: any, participantId: number, body: any) {
   const nowIso = new Date().toISOString();
 
@@ -400,6 +401,7 @@ async function upsertIntegration(supabase: any, participantId: number, body: any
     provider_user_id: providerUserId,
     scope: "steps,exercise,distance,calories",
     is_active: 1,
+    last_sync_at: nowIso,
     updated_at: nowIso,
     raw_payload: rawPayload,
   };
