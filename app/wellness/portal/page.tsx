@@ -8,6 +8,7 @@
 // WELLNESS_GOOGLE_FIT_STABLE_SYNC_AND_TOTAL_DISPLAY_V79O
 // WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_BUTTON_V86B
 // WELLNESS_GOOGLE_FIT_OLD_CARD_REST_LKG_V123
+// WELLNESS_GOOGLE_FIT_CARD_TOTAL_DISPLAY_V124
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -813,14 +814,56 @@ export default function WellnessParticipantPortalPage() {
           latestGoogleFitDaily,
         );
 
-      const preferredGoogleSnapshotV123 =
+      // V124: REST V414 menyimpan nilai harian yang benar di activity row,
+      // tetapi tidak selalu menyediakan exact_snapshot. Bentuk snapshot tampilan
+      // dari row terbaru agar card lama tetap menampilkan steps dan kalori total.
+      const latestGoogleActiveCaloriesV124 = asNumber(
+        latestGoogleRaw?.google_fit_active_calories_exact ??
+          latestGoogleRaw?.google_fit_active_calories,
+      );
+      const latestGoogleMeasuredAtV124 = clean(
+        latestGoogleRaw?.last_sync_at ||
+          latestGoogleFitDaily?.updated_at ||
+          latestGoogleFitDaily?.started_at ||
+          latestGoogleFitDaily?.created_at,
+      );
+      const derivedGoogleSnapshotV124 = latestGoogleFitDaily
+        ? {
+            date: activityDateKey(latestGoogleFitDaily),
+            measured_at: latestGoogleMeasuredAtV124,
+            synced_at: latestGoogleMeasuredAtV124,
+            steps: activityStepsValue(latestGoogleFitDaily),
+            total_calories: googleFitTotalCaloriesValueV73(latestGoogleFitDaily),
+            distance_km: activityDistanceValue(latestGoogleFitDaily),
+            active_calories:
+              latestGoogleActiveCaloriesV124 > 0
+                ? latestGoogleActiveCaloriesV124
+                : null,
+            active_calories_available: latestGoogleActiveCaloriesV124 > 0,
+            source: clean(
+              latestGoogleRaw?.selected_step_source ||
+                latestGoogleRaw?.step_data_source_id ||
+                latestGoogleRaw?.provider ||
+                "google_fit_rest_aggregate",
+            ),
+            step_data_source_id: clean(
+              latestGoogleRaw?.selected_step_source ||
+                latestGoogleRaw?.step_data_source_id ||
+                latestGoogleRaw?.google_fit_step_source ||
+                "google_fit_rest_aggregate",
+            ),
+          }
+        : null;
+
+      const preferredGoogleSnapshotV124 =
         latestGoogleRaw?.exact_snapshot ||
+        derivedGoogleSnapshotV124 ||
         null;
 
-      if (preferredGoogleSnapshotV123) {
+      if (preferredGoogleSnapshotV124) {
         setFitnessLastSyncSnapshot((current) => ({
           ...current,
-          google_fit: preferredGoogleSnapshotV123,
+          google_fit: preferredGoogleSnapshotV124,
         }));
       }
       setClinicalHistory(result.clinical_history || []);
@@ -2701,8 +2744,20 @@ function HomeTab({
       if (!isGoogleFitDailyRow(item) || activityDateKey(item) !== todayKeyV73) {
         return false;
       }
+
       const raw = activityRawPayloadV72(item);
-      return raw?.active_calories_available === false;
+      const exactActiveCalories = asNumber(
+        raw?.google_fit_active_calories_exact ??
+          raw?.google_fit_active_calories,
+      );
+      const exactTotalCalories = googleFitTotalCaloriesValueV73(item);
+
+      // REST V414 tidak selalu menulis active_calories_available=false.
+      // Total provider tetap ditampilkan sebagai informasi bila active exact tidak ada.
+      return (
+        raw?.active_calories_available === false ||
+        (!(exactActiveCalories > 0) && exactTotalCalories > 0)
+      );
     });
 
   // WELLNESS_GOOGLE_FIT_EXACT_TOTAL_DISPLAY_V79O
