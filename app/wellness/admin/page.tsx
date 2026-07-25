@@ -405,13 +405,87 @@ export default function WellnessAdminMobilePage() {
         }));
       });
 
+      // WELLNESS_ADMIN_PARTICIPANT_STABILITY_V126H
+      // Dashboard perusahaan tetap menjadi sumber utama.
+      // Master peserta dari Admin API melengkapi perusahaan yang gagal dimuat.
+      const masterRows = (structureResult.participants || []).map(
+        (participant: any) => ({
+          ...participant,
+          id: Number(
+            participant.id ||
+              participant.participant_id ||
+              0,
+          ),
+          participant_id: Number(
+            participant.participant_id ||
+              participant.id ||
+              0,
+          ),
+          ranking_source:
+            participant.ranking_source ||
+            "admin_master_fallback",
+          wellness_control:
+            participantControlById.get(
+              Number(
+                participant.participant_id ||
+                  participant.id ||
+                  0,
+              ),
+            ) ||
+            participant.wellness_control ||
+            null,
+        }),
+      );
+
+      const participantRowsById =
+        new Map<number, any>();
+
+      for (const participant of masterRows) {
+        const participantId = Number(
+          participant.participant_id ||
+            participant.id ||
+            0,
+        );
+
+        if (!participantId) continue;
+
+        participantRowsById.set(
+          participantId,
+          participant,
+        );
+      }
+
+      // Hasil Dashboard Perusahaan menimpa fallback karena berisi
+      // poin, compliance, ranking, workout, nutrisi, dan flag aktual.
+      for (const participant of rankingRows) {
+        const participantId = Number(
+          participant.participant_id ||
+            participant.id ||
+            0,
+        );
+
+        if (!participantId) continue;
+
+        participantRowsById.set(
+          participantId,
+          participant,
+        );
+      }
+
+      const mergedRows = [
+        ...participantRowsById.values(),
+      ];
+
       setData(structureResult);
       setWellnessData({
-        ok: successfulDashboards.length > 0 || companyList.length === 0,
+        ok:
+          successfulDashboards.length > 0 ||
+          masterRows.length > 0 ||
+          companyList.length === 0,
         source: "company_dashboard",
         source_label: "Backend Portal Perusahaan",
         period_days: 30,
-        rows: rankingRows,
+        rows: mergedRows,
         company_dashboards: successfulDashboards,
         failed_company_dashboards: failedDashboards,
         summary: {
@@ -430,7 +504,7 @@ export default function WellnessAdminMobilePage() {
 
       if (failedDashboards.length > 0) {
         setMessage(
-          `${successfulDashboards.length} perusahaan berhasil dimuat, ${failedDashboards.length} gagal. Ranking hanya menampilkan data backend yang valid.`,
+          `${successfulDashboards.length} perusahaan berhasil dimuat, ${failedDashboards.length} gagal. Daftar peserta tetap ditampilkan dari master Admin; metrik perusahaan yang gagal akan diperbarui saat backend kembali tersedia.`,
         );
       } else {
         setMessage(

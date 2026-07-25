@@ -242,6 +242,86 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // WELLNESS_ADMIN_PARTICIPANT_STABILITY_V126H
+    // Master peserta dikirim sebagai fallback agar halaman Admin tidak kosong
+    // ketika salah satu Dashboard Perusahaan gagal dimuat.
+    const participantCards = participants.map((participant: any) => {
+      const participantId = numberValue(participant.id);
+      const companyId = numberValue(participant.wellness_company_id);
+      const company = companyById.get(companyId) || {};
+
+      const groupUnit =
+        groupById.get(numberValue(participant.wellness_group_unit_id)) || {};
+
+      const kelompok =
+        groupById.get(numberValue(participant.wellness_kelompok_id)) ||
+        (groupUnit?.parent_id
+          ? groupById.get(numberValue(groupUnit.parent_id))
+          : null) ||
+        (clean(groupUnit?.unit_type).toLowerCase() === "kelompok"
+          ? groupUnit
+          : null) ||
+        {};
+
+      return {
+        id: participantId,
+        participant_id: participantId,
+        code: clean(
+          participant.code ||
+            participant.employee_code ||
+            participant.no_karyawan,
+        ),
+        name:
+          clean(
+            participant.name ||
+              participant.full_name ||
+              participant.employee_name,
+          ) || `Peserta ${participantId}`,
+        company_id: companyId,
+        company_name:
+          clean(company.name) ||
+          `Perusahaan ${companyId || "-"}`,
+        kelompok_id: numberValue(kelompok?.id),
+        kelompok_name:
+          clean(kelompok?.name) ||
+          clean(participant.group_name) ||
+          "Tanpa Kelompok",
+        group_id: numberValue(groupUnit?.id),
+        group_name:
+          clean(groupUnit?.name) ||
+          clean(kelompok?.name) ||
+          clean(participant.group_name) ||
+          "-",
+        bmi: numberValue(
+          participant.baseline_bmi ||
+            participant.bmi ||
+            participant.initial_bmi,
+        ),
+        total_points: 0,
+        nutrition_points: 0,
+        workout_points: 0,
+        healthtalk_points: 0,
+        other_points: 0,
+        diligence_percent: 0,
+        nutrition_achievement_percent: 0,
+        workout_achievement_percent: 0,
+        current_streak: 0,
+        active_days: 0,
+        last_nutrition_date: null,
+        last_workout_date: null,
+        days_since_nutrition: 99,
+        days_since_workout: 99,
+        overall_score: 0,
+        flag: "yellow",
+        flag_label: "Menunggu data program",
+        compliance_status: "Menunggu data program",
+        need_followup: false,
+        ranking_source: "admin_master_fallback",
+        wellness_control:
+          participantControlMap.get(participantId) || null,
+      };
+    });
+
     return ok({
       admin: {
         id: user.id,
@@ -261,6 +341,7 @@ export async function GET(request: NextRequest) {
       companies: companyCards,
       groups: groupCards,
       coaches: coachCards,
+      participants: participantCards,
       participant_controls: participants.map((participant: any) => {
         const participantId = numberValue(participant.id);
         return (
