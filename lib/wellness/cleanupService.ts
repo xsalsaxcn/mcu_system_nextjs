@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
 // WELLNESS_DUMMY_DATA_MAINTENANCE_V109
+// WELLNESS_MAINTENANCE_CONTROLS_PK_FIX_V112
 // WELLNESS_MAINTENANCE_COMPANY_SCHEMA_FIX_V110
 // Server-only whitelist for preview, backup, and cleanup of explicitly selected
 // Wellness dummy participants. No Google Sheet, Drive, master data, point rules,
@@ -20,6 +21,7 @@ type TableSpec = {
   label: string;
   optional?: boolean;
   alsoEmployeeCode?: boolean;
+  orderColumn?: string;
 };
 
 export type CleanupTableResult = {
@@ -126,6 +128,7 @@ const FULL_EXTRA_TABLES: TableSpec[] = [
     table: "wellness_participant_controls",
     label: "Pengaturan akses peserta",
     optional: true,
+    orderColumn: "participant_id",
   },
 ];
 
@@ -239,6 +242,7 @@ async function selectRowsByColumn(
   table: string,
   column: string,
   values: Array<number | string>,
+  orderColumn = "id",
 ) {
   const allRows: any[] = [];
   if (!values.length) return allRows;
@@ -250,7 +254,7 @@ async function selectRowsByColumn(
         .from(table)
         .select("*")
         .in(column, valueChunk)
-        .order("id", { ascending: true })
+        .order(orderColumn, { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
       if (result?.error) throw result.error;
@@ -276,6 +280,7 @@ async function selectRowsForSpec(
       spec.table,
       "participant_id",
       participantIds,
+      spec.orderColumn || "id",
     );
 
     if (spec.alsoEmployeeCode && employeeCodes.length) {
@@ -285,6 +290,7 @@ async function selectRowsForSpec(
           spec.table,
           "employee_code",
           employeeCodes,
+          spec.orderColumn || "id",
         )),
       );
     }
