@@ -384,7 +384,9 @@ export async function GET(request: NextRequest) {
     const today = jakartaDate();
     const fromDate = jakartaDate(-(days - 1));
 
-    const [participants, groupUnits, assignments, coachUsers] = await Promise.all([
+    // WELLNESS_COMPANY_PARTICIPANT_STABILITY_V126G
+    // Peserta master tidak boleh hilang hanya karena satu query scope gagal.
+    let [participants, groupUnits, assignments, coachUsers] = await Promise.all([
       safeRows(
         supabase
           .from("wellness_participants")
@@ -414,6 +416,115 @@ export async function GET(request: NextRequest) {
           .limit(1000),
       ),
     ]);
+
+    // WELLNESS_COMPANY_PARTICIPANT_STABILITY_V126G
+    // Primary relation: wellness_company_id.
+    // Fallback relation: unit/kelompok yang dimiliki perusahaan.
+    // Data digabung dan dideduplikasi berdasarkan participant.id.
+    if (!participants.length && groupUnits.length > 0) {
+      const companyUnitIds = [
+        ...new Set(
+          groupUnits
+            .map((item: any) => number(item.id))
+            .filter(Boolean),
+        ),
+      ];
+
+      const kelompokIds = [
+        ...new Set(
+          groupUnits
+            .filter(
+              (item: any) =>
+                clean(item.unit_type).toLowerCase() ===
+                "kelompok",
+            )
+            .map((item: any) => number(item.id))
+            .filter(Boolean),
+        ),
+      ];
+
+      const fallbackResults: any[][] = [];
+
+      if (companyUnitIds.length > 0) {
+        const byGroupUnit = await supabase
+          .from("wellness_participants")
+          .select("*")
+          .in(
+            "wellness_group_unit_id",
+            companyUnitIds,
+          )
+          .limit(5000);
+
+        if (byGroupUnit.error) {
+          console.error(
+            "WELLNESS_COMPANY_PARTICIPANT_GROUP_FALLBACK_ERROR_V126G",
+            byGroupUnit.error,
+          );
+        } else {
+          fallbackResults.push(
+            byGroupUnit.data || [],
+          );
+        }
+      }
+
+      if (kelompokIds.length > 0) {
+        const byKelompok = await supabase
+          .from("wellness_participants")
+          .select("*")
+          .in(
+            "wellness_kelompok_id",
+            kelompokIds,
+          )
+          .limit(5000);
+
+        if (byKelompok.error) {
+          console.error(
+            "WELLNESS_COMPANY_PARTICIPANT_KELOMPOK_FALLBACK_ERROR_V126G",
+            byKelompok.error,
+          );
+        } else {
+          fallbackResults.push(
+            byKelompok.data || [],
+          );
+        }
+      }
+
+      const participantMap =
+        new Map<number, any>();
+
+      for (
+        const row of fallbackResults.flat()
+      ) {
+        const participantId =
+          number(row?.id);
+
+        if (!participantId) continue;
+
+        participantMap.set(
+          participantId,
+          row,
+        );
+      }
+
+      participants = [
+        ...participantMap.values(),
+      ];
+    }
+
+    if (!participants.length) {
+      console.error(
+        "WELLNESS_COMPANY_PARTICIPANT_EMPTY_V126G",
+        {
+          company_id: companyId,
+          group_units:
+            groupUnits.length,
+          group_unit_ids:
+            groupUnits.map(
+              (item: any) => item.id,
+            ),
+        },
+      );
+    }
 
     const participantIds = participants.map((item: any) => number(item.id)).filter(Boolean);
     const participantCodes = participants.map((item: any) => clean(item.code)).filter(Boolean);
