@@ -86,8 +86,12 @@ function getParticipantId(row: any) {
   );
 }
 
+// WELLNESS_COACH_KELOMPOK_ACCESS_V122
+// Coach pada Kelompok induk dapat melihat peserta
+// di Kelompok maupun seluruh Group anaknya.
 function participantGroupIds(row: any) {
   return [
+    row?.wellness_kelompok_id,
     row?.wellness_group_unit_id,
     row?.group_unit_id,
     row?.group_id,
@@ -99,6 +103,7 @@ function participantGroupIds(row: any) {
 
 function participantGroupNames(row: any) {
   return [
+    row?.kelompok_name,
     row?.group_name,
     row?.group_unit_name,
     row?.risk_group,
