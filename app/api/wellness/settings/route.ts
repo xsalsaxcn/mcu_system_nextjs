@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { canManageWellness } from "@/lib/wellness/auth";
 
 // WELLNESS_SETTINGS_PARAMETER_V350_API
+// WELLNESS_SETTINGS_COACH_DROPDOWN_V121
 
 const MAIN_PARAMETERS = [
   { parameter_key: "nutrition", label: "Nutrisi", frequency: "Harian", filled_by: "Peserta", sort_order: 10 },
@@ -36,6 +37,203 @@ function toNumber(value: any) {
 
 function isEnabled(value: any) {
   return value === true || value === 1 || value === "1" || value === "true";
+}
+
+function activeValue(value: any) {
+  return [
+    true,
+    1,
+    "1",
+    "true",
+    "aktif",
+    "active",
+  ].includes(
+    typeof value === "string"
+      ? value.toLowerCase()
+      : value,
+  );
+}
+
+async function getActiveCoach(
+  supabase: any,
+  coachUserId: number,
+) {
+  const { data, error } = await supabase
+    .from("wellness_coach_users")
+    .select("id,name,email,username,is_active")
+    .eq("id", coachUserId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!data) {
+    throw new Error(
+      "Coach yang dipilih tidak ditemukan.",
+    );
+  }
+
+  if (!activeValue(data.is_active)) {
+    throw new Error(
+      "Coach yang dipilih sedang nonaktif.",
+    );
+  }
+
+  if (
+    !clean(data.name) ||
+    !clean(data.email) ||
+    !clean(data.username)
+  ) {
+    throw new Error(
+      "Akun Coach belum lengkap. Nama, email, dan username wajib tersedia.",
+    );
+  }
+
+  return data;
+}
+
+async function syncPrimaryCoachAssignment(
+  supabase: any,
+  groupUnit: any,
+  coach: any,
+) {
+  const groupUnitId = Number(
+    groupUnit?.id || 0,
+  );
+
+  const coachUserId = Number(
+    coach?.id || 0,
+  );
+
+  const groupName = clean(
+    groupUnit?.name,
+  );
+
+  if (!groupUnitId || !coachUserId) {
+    throw new Error(
+      "Kelompok atau Coach belum valid.",
+    );
+  }
+
+  const {
+    data: previousActive,
+    error: previousActiveError,
+  } = await supabase
+    .from("wellness_coach_group_assignments")
+    .select("id")
+    .eq(
+      "wellness_group_unit_id",
+      groupUnitId,
+    )
+    .eq("is_active", true);
+
+  if (previousActiveError) {
+    throw previousActiveError;
+  }
+
+  const previousActiveIds = (
+    previousActive || []
+  )
+    .map((item: any) => Number(item.id))
+    .filter(Boolean);
+
+  const {
+    data: existing,
+    error: existingError,
+  } = await supabase
+    .from("wellness_coach_group_assignments")
+    .select("id")
+    .eq(
+      "wellness_group_unit_id",
+      groupUnitId,
+    )
+    .eq(
+      "coach_user_id",
+      coachUserId,
+    )
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) {
+    throw existingError;
+  }
+
+  const {
+    error: deactivateError,
+  } = await supabase
+    .from("wellness_coach_group_assignments")
+    .update({
+      is_active: false,
+    })
+    .eq(
+      "wellness_group_unit_id",
+      groupUnitId,
+    )
+    .eq("is_active", true);
+
+  if (deactivateError) {
+    throw deactivateError;
+  }
+
+  try {
+    if (existing?.id) {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from(
+          "wellness_coach_group_assignments",
+        )
+        .update({
+          group_name: groupName,
+          is_active: true,
+        })
+        .eq("id", existing.id)
+        .select("*")
+        .single();
+
+      if (error) throw error;
+
+      return data;
+    }
+
+    const {
+      data,
+      error,
+    } = await supabase
+      .from(
+        "wellness_coach_group_assignments",
+      )
+      .insert({
+        coach_user_id: coachUserId,
+        wellness_group_unit_id:
+          groupUnitId,
+        group_name: groupName,
+        is_active: true,
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    return data;
+  } catch (error) {
+    /*
+     * Bila assignment baru gagal,
+     * kembalikan assignment aktif sebelumnya.
+     */
+    if (previousActiveIds.length) {
+      await supabase
+        .from(
+          "wellness_coach_group_assignments",
+        )
+        .update({
+          is_active: true,
+        })
+        .in("id", previousActiveIds);
+    }
+
+    throw error;
+  }
 }
 
 async function getOrCreateCompany(supabase: any, name: string) {
@@ -149,23 +347,65 @@ export async function GET(req: NextRequest) {
 
   try {
     const supabase = getSupabaseAdmin();
-    const [companiesRes, groupsRes, parametersRes, miniMcuRes] = await Promise.all([
-      supabase.from("wellness_companies").select("*").order("name", { ascending: true }),
-      supabase.from("wellness_group_units").select("*").order("unit_type", { ascending: true }).order("name", { ascending: true }),
-      supabase.from("wellness_program_parameters").select("*").order("sort_order", { ascending: true }),
-      supabase.from("wellness_mini_mcu_parameters").select("*").order("sort_order", { ascending: true }),
+    const [
+      companiesRes,
+      groupsRes,
+      parametersRes,
+      miniMcuRes,
+      coachesRes,
+    ] = await Promise.all([
+      supabase
+        .from("wellness_companies")
+        .select("*")
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("wellness_group_units")
+        .select("*")
+        .order("unit_type", { ascending: true })
+        .order("name", { ascending: true }),
+
+      supabase
+        .from("wellness_program_parameters")
+        .select("*")
+        .order("sort_order", { ascending: true }),
+
+      supabase
+        .from("wellness_mini_mcu_parameters")
+        .select("*")
+        .order("sort_order", { ascending: true }),
+
+      supabase
+        .from("wellness_coach_users")
+        .select(
+          "id,name,email,username,is_active",
+        )
+        .order("name", { ascending: true }),
     ]);
 
     if (companiesRes.error) throw companiesRes.error;
     if (groupsRes.error) throw groupsRes.error;
     if (parametersRes.error) throw parametersRes.error;
     if (miniMcuRes.error) throw miniMcuRes.error;
+    if (coachesRes.error) throw coachesRes.error;
+
+    const activeCoaches = (
+      coachesRes.data || []
+    ).filter((coach: any) => {
+      return (
+        activeValue(coach?.is_active) &&
+        clean(coach?.name) &&
+        clean(coach?.email) &&
+        clean(coach?.username)
+      );
+    });
 
     return ok({
       companies: companiesRes.data || [],
       groupUnits: groupsRes.data || [],
       programParameters: parametersRes.data || [],
       miniMcuParameters: miniMcuRes.data || [],
+      coaches: activeCoaches,
       defaults: {
         mainParameters: MAIN_PARAMETERS,
         miniMcuParameters: MINI_MCU_PARAMETERS,
@@ -193,8 +433,46 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "add_kelompok") {
-      const groupUnit = await getOrCreateGroupUnit(supabase, { ...body, unitType: "kelompok", parentId: null });
-      return ok({ groupUnit });
+      const coachUserId = toNumber(
+        body.coachUserId ||
+          body.coach_user_id,
+      );
+
+      if (!coachUserId) {
+        return fail(
+          "Pilih Coach penanggung jawab.",
+          400,
+        );
+      }
+
+      const coach = await getActiveCoach(
+        supabase,
+        coachUserId,
+      );
+
+      const groupUnit =
+        await getOrCreateGroupUnit(
+          supabase,
+          {
+            ...body,
+            unitType: "kelompok",
+            parentId: null,
+            coachName: coach.name,
+          },
+        );
+
+      const assignment =
+        await syncPrimaryCoachAssignment(
+          supabase,
+          groupUnit,
+          coach,
+        );
+
+      return ok({
+        groupUnit,
+        coach,
+        assignment,
+      });
     }
 
     if (action === "add_group") {

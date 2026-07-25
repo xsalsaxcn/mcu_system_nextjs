@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 // WELLNESS_SETTINGS_PARAMETER_V350_PAGE
+// WELLNESS_SETTINGS_COACH_DROPDOWN_V121
 
 type ParameterDraft = {
   parameter_key: string;
@@ -45,6 +46,7 @@ export default function WellnessSettingsPage() {
 function WellnessSettings() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [groupUnits, setGroupUnits] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
   const [programParameters, setProgramParameters] = useState<any[]>([]);
   const [miniMcuParameters, setMiniMcuParameters] = useState<any[]>([]);
   const [defaultMain, setDefaultMain] = useState<ParameterDraft[]>(FALLBACK_MAIN_PARAMETERS);
@@ -52,7 +54,7 @@ function WellnessSettings() {
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [kelompokName, setKelompokName] = useState("");
-  const [coachName, setCoachName] = useState("");
+  const [selectedCoachId, setSelectedCoachId] = useState("");
   const [groupName, setGroupName] = useState("");
   const [parentKelompokId, setParentKelompokId] = useState("");
   const [message, setMessage] = useState("Setting Wellness hanya menyimpan tabel wellness_* dan tidak menyentuh MCU/CAPASKA/Vaksinasi.");
@@ -68,6 +70,7 @@ function WellnessSettings() {
       }
       setCompanies(json.companies || []);
       setGroupUnits(json.groupUnits || []);
+      setCoaches(json.coaches || []);
       setProgramParameters(json.programParameters || []);
       setMiniMcuParameters(json.miniMcuParameters || []);
       setDefaultMain(json.defaults?.mainParameters || FALLBACK_MAIN_PARAMETERS);
@@ -85,6 +88,17 @@ function WellnessSettings() {
   useEffect(() => { load(); }, []);
 
   const selectedCompany = useMemo(() => companies.find((item) => String(item.id) === String(selectedCompanyId)), [companies, selectedCompanyId]);
+
+  const selectedCoach = useMemo(
+    () =>
+      coaches.find(
+        (item) =>
+          String(item.id) ===
+          String(selectedCoachId),
+      ),
+    [coaches, selectedCoachId],
+  );
+
   const kelompokList = useMemo(() => groupUnits.filter((item) => String(item.company_id) === String(selectedCompanyId) && item.unit_type === "kelompok"), [groupUnits, selectedCompanyId]);
   const childGroupList = useMemo(() => groupUnits.filter((item) => String(item.company_id) === String(selectedCompanyId) && item.unit_type === "group"), [groupUnits, selectedCompanyId]);
 
@@ -129,9 +143,34 @@ function WellnessSettings() {
 
   async function addKelompok(event: React.FormEvent) {
     event.preventDefault();
-    const json = await post({ action: "add_kelompok", companyId: selectedCompanyId, name: kelompokName, coachName }, "Kelompok dan coach berhasil disimpan.");
-    if (json?.groupUnit?.id) setParentKelompokId(String(json.groupUnit.id));
-    if (json?.groupUnit?.id) { setKelompokName(""); setCoachName(""); }
+
+    if (!selectedCoachId) {
+      setMessage(
+        "Pilih Coach penanggung jawab terlebih dahulu.",
+      );
+      return;
+    }
+
+    const json = await post(
+      {
+        action: "add_kelompok",
+        companyId: selectedCompanyId,
+        name: kelompokName,
+        coachUserId: selectedCoachId,
+        coachName:
+          selectedCoach?.name || "",
+      },
+      "Kelompok dan Coach penanggung jawab berhasil disimpan.",
+    );
+
+    if (json?.groupUnit?.id) {
+      setParentKelompokId(
+        String(json.groupUnit.id),
+      );
+
+      setKelompokName("");
+      setSelectedCoachId("");
+    }
   }
 
   async function addGroup(event: React.FormEvent) {
@@ -199,8 +238,52 @@ function WellnessSettings() {
           <form onSubmit={addKelompok} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
             <div className="text-xl font-black text-slate-900">2. Add Kelompok</div>
             <input className="mt-4 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" placeholder="Nama kelompok" value={kelompokName} onChange={(e) => setKelompokName(e.target.value)} />
-            <input className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold" placeholder="Nama coach kelompok" value={coachName} onChange={(e) => setCoachName(e.target.value)} />
-            <button disabled={loading || !selectedCompanyId || !kelompokName.trim()} className="mt-3 w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white disabled:opacity-60">Tambah Kelompok</button>
+            <select
+              className="mt-3 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold"
+              value={selectedCoachId}
+              onChange={(event) =>
+                setSelectedCoachId(
+                  event.target.value,
+                )
+              }
+            >
+              <option value="">
+                Pilih Coach penanggung jawab
+              </option>
+
+              {coaches.map((coach) => (
+                <option
+                  key={coach.id}
+                  value={coach.id}
+                >
+                  {coach.name}
+                  {" — "}
+                  {coach.email}
+                  {coach.username
+                    ? ` (@${coach.username})`
+                    : ""}
+                </option>
+              ))}
+            </select>
+
+            {!coaches.length ? (
+              <div className="mt-2 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-800">
+                Belum ada Coach aktif dengan email
+                dan username lengkap. Tambahkan
+                melalui Admin → User → Coach.
+              </div>
+            ) : null}
+            <button
+              disabled={
+                loading ||
+                !selectedCompanyId ||
+                !kelompokName.trim() ||
+                !selectedCoachId
+              }
+              className="mt-3 w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+            >
+              Tambah Kelompok
+            </button>
           </form>
 
           <form onSubmit={addGroup} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
