@@ -64,23 +64,13 @@ function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+// WELLNESS_GOOGLE_FIT_REST_LKG_V116
+// Last Known Good:
+// Sync Google Fit dijalankan melalui REST server dan OAuth tersimpan.
+// Android native bridge tetap ada di APK tetapi tidak dipanggil portal.
 function nativeGoogleFitBridgeV125Fix() {
-  if (typeof window === "undefined") return null;
-
-  const bridge = (window as any)?.HarmonyNativeFitness;
-  if (!bridge || typeof bridge.syncGoogleFit !== "function") return null;
-
-  try {
-    if (typeof bridge.available === "function" && bridge.available() !== true) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return bridge;
+  return null;
 }
-
 function asNumber(value: any) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
