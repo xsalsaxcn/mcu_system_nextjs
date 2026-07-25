@@ -5,6 +5,7 @@
 // WELLNESS_COACH_ADMIN_SUPPORT_V61
 // WELLNESS_PROGRESS_CHAT_SMOOTH_V65
 // WELLNESS_COACH_RANKING_PROFILE_V76
+// WELLNESS_COACH_USERNAME_ACCOUNTS_V117A
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
@@ -197,7 +198,12 @@ const fieldClass =
 export default function WellnessCoachPortalPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Masuk menggunakan akun coach.");
-  const [login, setLogin] = useState({ email: "", access_code: "" });
+  const [login, setLogin] = useState({
+    email: "",
+    username: "",
+    access_code: "",
+    use_legacy: false,
+  });
   const [dashboard, setDashboard] = useState<CoachDashboard | null>(null);
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [flagFilter, setFlagFilter] = useState<"all" | FlagLevel>("all");
@@ -277,16 +283,42 @@ export default function WellnessCoachPortalPage() {
   }
 
   async function submitLogin() {
-    if (!clean(login.email) || !clean(login.access_code)) {
-      setMessage("Email dan access code wajib diisi.");
+    const legacy = login.use_legacy === true;
+
+    if (!clean(login.email)) {
+      setMessage("Email Coach wajib diisi.");
       return;
     }
+
+    if (legacy && !clean(login.access_code)) {
+      setMessage("Access code lama wajib diisi.");
+      return;
+    }
+
+    if (!legacy && !clean(login.username)) {
+      setMessage("Username Coach wajib diisi.");
+      return;
+    }
+
     setLoading(true);
-    setMessage("Login coach...");
+    setMessage("Login Coach...");
+
+    const payload = legacy
+      ? {
+          email: login.email,
+          access_code: login.access_code,
+        }
+      : {
+          email: login.email,
+          username: login.username,
+        };
+
     const result = await fetch("/api/wellness/coach/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(login),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
     })
       .then((response) => response.json())
       .catch((error) => ({
@@ -294,12 +326,14 @@ export default function WellnessCoachPortalPage() {
         message: error?.message || "Network error",
       }));
 
-    if (result.ok) await loadDashboard();
-    else {
+    if (result.ok) {
+      await loadDashboard();
+    } else {
       setMessage(result.message || "Login gagal.");
       setLoading(false);
     }
   }
+
 
   async function logout() {
     await fetch("/api/wellness/coach/me", { method: "DELETE" }).catch(
@@ -1567,11 +1601,23 @@ export default function WellnessCoachPortalPage() {
             ) : coachView === "ranking" ? (
               <WellnessLeaderboard groups={groups} />
             ) : coachView === "profile" ? (
-              <WellnessProfilePanel
-                actorType="coach"
-                actor={dashboard?.coach}
-                title={dashboard?.coach?.name || "Profil Coach"}
-              />
+              <div className="space-y-5">
+                <WellnessProfilePanel
+                  actorType="coach"
+                  actor={dashboard?.coach}
+                  title={dashboard?.coach?.name || "Profil Coach"}
+                />
+
+                <CoachProfileUsernamePanel
+                  coach={dashboard?.coach}
+                  onSaved={() =>
+                    loadDashboard({
+                      keepSelection: true,
+                      silent: true,
+                    })
+                  }
+                />
+              </div>
             ) : (
               <SupportChatPanel
                 actorType="coach"
@@ -2384,13 +2430,19 @@ function CoachOpeningLoadingScreen() {
 
 
 function LoginSection({ login, setLogin, submitLogin, loading }: any) {
+  const legacy = login.use_legacy === true;
+
   return (
     <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_380px]">
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-xl font-black">Login Coach</h2>
+
         <p className="mt-1 text-sm font-bold leading-6 text-slate-500">
-          Gunakan email coach dan access code yang dibuat oleh admin.
+          {legacy
+            ? "Gunakan email dan access code lama."
+            : "Gunakan email dan username Coach."}
         </p>
+
         <div className="mt-5 grid gap-4">
           <label className="grid gap-2 text-sm font-bold text-slate-700">
             Email Coach
@@ -2398,29 +2450,49 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
               type="email"
               className={fieldClass}
               value={login.email}
-              onChange={(e) =>
+              onChange={(event) =>
                 setLogin((previous: any) => ({
                   ...previous,
-                  email: e.target.value,
+                  email: event.target.value,
                 }))
               }
               placeholder="coach@inharmony.co.id"
             />
           </label>
-          <label className="grid gap-2 text-sm font-bold text-slate-700">
-            Access Code
-            <input
-              className={fieldClass}
-              value={login.access_code}
-              onChange={(e) =>
-                setLogin((previous: any) => ({
-                  ...previous,
-                  access_code: e.target.value,
-                }))
-              }
-              placeholder="Contoh: INA2026"
-            />
-          </label>
+
+          {legacy ? (
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Access Code Lama
+              <input
+                className={fieldClass}
+                value={login.access_code}
+                onChange={(event) =>
+                  setLogin((previous: any) => ({
+                    ...previous,
+                    access_code: event.target.value,
+                  }))
+                }
+                placeholder="Access code akun lama"
+              />
+            </label>
+          ) : (
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Username
+              <input
+                className={fieldClass}
+                value={login.username}
+                onChange={(event) =>
+                  setLogin((previous: any) => ({
+                    ...previous,
+                    username: event.target.value.toLowerCase(),
+                  }))
+                }
+                placeholder="username.coach"
+                autoCapitalize="none"
+              />
+            </label>
+          )}
+
           <button
             type="button"
             onClick={submitLogin}
@@ -2429,19 +2501,138 @@ function LoginSection({ login, setLogin, submitLogin, loading }: any) {
           >
             Masuk Portal Coach
           </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setLogin((previous: any) => ({
+                ...previous,
+                username: "",
+                access_code: "",
+                use_legacy: !legacy,
+              }))
+            }
+            className="rounded-2xl bg-slate-100 px-4 py-3 text-xs font-black text-slate-600"
+          >
+            {legacy
+              ? "Kembali ke login Username"
+              : "Gunakan Access Code Lama"}
+          </button>
         </div>
       </div>
+
       <aside className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-black">Akses Coach</h3>
+
         <div className="mt-4 space-y-3 text-sm font-bold leading-6 text-slate-500">
-          <p>Coach hanya melihat peserta sesuai group assignment.</p>
-          <p>Green, Yellow, dan Red Flag dihitung dari kepatuhan 7 hari.</p>
+          <p>
+            Coach hanya melihat peserta sesuai group assignment.
+          </p>
+          <p>
+            Username dapat diubah sendiri melalui menu Profil Coach.
+          </p>
           <p className="rounded-2xl bg-teal-50 p-4 text-teal-900">
-            Instruksi kelompok akan diterima oleh seluruh anggota kelompok
-            terpilih.
+            Login Access Code dipertahankan sementara hanya untuk akun lama
+            yang belum mempunyai username.
           </p>
         </div>
       </aside>
+    </section>
+  );
+}
+
+
+function CoachProfileUsernamePanel({ coach, onSaved }: any) {
+  const [username, setUsername] = useState(
+    clean(coach?.username),
+  );
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [usernameMessage, setUsernameMessage] = useState("");
+
+  useEffect(() => {
+    setUsername(clean(coach?.username));
+  }, [coach?.username]);
+
+  async function saveUsername() {
+    const normalized = clean(username).toLowerCase();
+
+    if (!normalized) {
+      setUsernameMessage("Username wajib diisi.");
+      return;
+    }
+
+    setSavingUsername(true);
+    setUsernameMessage("Menyimpan username...");
+
+    const result = await fetch("/api/wellness/coach/me", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: normalized,
+      }),
+    })
+      .then((response) => response.json())
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
+
+    setSavingUsername(false);
+
+    if (!result.ok) {
+      setUsernameMessage(
+        result.message || "Gagal memperbarui username.",
+      );
+      return;
+    }
+
+    setUsername(result.coach?.username || normalized);
+    setUsernameMessage(
+      result.message || "Username berhasil diperbarui.",
+    );
+
+    if (onSaved) await onSaved();
+  }
+
+  return (
+    <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-lg font-black text-slate-950">
+        Username Login Coach
+      </div>
+
+      <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+        Coach hanya dapat mengubah username miliknya sendiri. Nama, email,
+        status, dan assignment tetap dikelola Admin.
+      </p>
+
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        <input
+          value={username}
+          onChange={(event) =>
+            setUsername(event.target.value.toLowerCase())
+          }
+          className={`${fieldClass} min-w-0 flex-1`}
+          placeholder="username.coach"
+          autoCapitalize="none"
+        />
+
+        <button
+          type="button"
+          onClick={saveUsername}
+          disabled={savingUsername}
+          className="rounded-2xl bg-teal-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
+        >
+          {savingUsername ? "Menyimpan..." : "Simpan Username"}
+        </button>
+      </div>
+
+      {usernameMessage ? (
+        <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-xs font-bold text-slate-700">
+          {usernameMessage}
+        </div>
+      ) : null}
     </section>
   );
 }

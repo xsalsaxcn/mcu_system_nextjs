@@ -760,7 +760,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      coach: { id: coach.id, name: coach.name, email: coach.email },
+      coach: {
+        id: coach.id,
+        name: coach.name,
+        email: coach.email,
+        username: coach.username,
+      },
       groups,
       summary: {
         total_participants: participantCards.length,
