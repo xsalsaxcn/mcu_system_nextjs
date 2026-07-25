@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
 // WELLNESS_DUMMY_DATA_MAINTENANCE_V109
+// WELLNESS_MAINTENANCE_COMPANY_SCHEMA_FIX_V110
 // Server-only whitelist for preview, backup, and cleanup of explicitly selected
 // Wellness dummy participants. No Google Sheet, Drive, master data, point rules,
 // migrations, Google Fit, or Health Connect source is modified by this module.
@@ -332,7 +333,7 @@ export async function loadWellnessCleanupBootstrap(supabase: any) {
   const [companyResult, participantResult, groupResult] = await Promise.all([
     supabase
       .from("wellness_companies")
-      .select("id,name,code,is_active")
+      .select("id,name,is_active")
       .order("name", { ascending: true }),
     supabase
       .from("wellness_participants")
