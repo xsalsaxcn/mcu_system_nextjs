@@ -10,6 +10,7 @@
 // WELLNESS_GOOGLE_FIT_OLD_CARD_REST_LKG_V123
 // WELLNESS_GOOGLE_FIT_CARD_TOTAL_DISPLAY_V124
 // WELLNESS_FITNESS_NATIVE_ALIGNMENT_V125_FIX
+// WELLNESS_GOOGLE_FIT_FIRST_CONNECT_SYNC_UNLOCK_V111
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -714,6 +715,8 @@ export default function WellnessParticipantPortalPage() {
   });
   const [syncing, setSyncing] = useState("");
   const googleFitNativeSilentV125Fix = useRef(false);
+  const googleFitNativeInFlightV111 = useRef(false);
+  const googleFitNativeTimeoutV111 = useRef<number | null>(null);
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
     meal_type: "",
@@ -958,13 +961,21 @@ export default function WellnessParticipantPortalPage() {
   }, []);
 
   useEffect(() => {
+    function clearGoogleFitNativeTimeoutV111() {
+      if (googleFitNativeTimeoutV111.current !== null) {
+        window.clearTimeout(googleFitNativeTimeoutV111.current);
+        googleFitNativeTimeoutV111.current = null;
+      }
+    }
+
     function handleNativeGoogleFitV125Fix(event: Event) {
       const detail = (event as CustomEvent<any>)?.detail || {};
       const silent = googleFitNativeSilentV125Fix.current;
 
       if (detail?.progress) {
-        setSyncing("google-fit");
+        googleFitNativeInFlightV111.current = true;
         if (!silent) {
+          setSyncing("google-fit");
           setMessage(
             clean(detail?.message) ||
               "Membaca steps dan kalori langsung dari Google Fit HP...",
@@ -973,6 +984,8 @@ export default function WellnessParticipantPortalPage() {
         return;
       }
 
+      clearGoogleFitNativeTimeoutV111();
+      googleFitNativeInFlightV111.current = false;
       setSyncing("");
       googleFitNativeSilentV125Fix.current = false;
 
@@ -1016,11 +1029,15 @@ export default function WellnessParticipantPortalPage() {
       handleNativeGoogleFitV125Fix as EventListener,
     );
 
-    return () =>
+    return () => {
       window.removeEventListener(
         "harmony-native-google-fit-sync",
         handleNativeGoogleFitV125Fix as EventListener,
       );
+      clearGoogleFitNativeTimeoutV111();
+      googleFitNativeInFlightV111.current = false;
+      googleFitNativeSilentV125Fix.current = false;
+    };
   }, []);
 
   function setValue(key: string, value: string) {
@@ -1131,9 +1148,24 @@ export default function WellnessParticipantPortalPage() {
     provider: "strava" | "google-fit",
     options?: { silent?: boolean; days?: number },
   ) {
-    // V125 FIX: tombol Google Fit lama tetap dipakai. Pada aplikasi Android,
-    // fungsi ini membaca snapshot native HP. Browser biasa tetap memakai REST.
-    if (provider === "google-fit") {
+    const isGoogleFit = provider === "google-fit";
+    const silent = options?.silent === true;
+
+    // V111: auto-sync pertama tidak boleh mengunci tombol manual.
+    // Bila user menekan tombol saat native sync masih berjalan, ubah proses
+    // tersebut menjadi sync terlihat agar klik tetap memberi respons.
+    if (isGoogleFit && googleFitNativeInFlightV111.current) {
+      if (!silent) {
+        googleFitNativeSilentV125Fix.current = false;
+        setSyncing("google-fit");
+        setMessage("Sinkronisasi Google Fit sedang berjalan. Menunggu hasil dari perangkat...");
+      }
+      return;
+    }
+
+    // V125 FIX: pada aplikasi Android gunakan snapshot native HP.
+    // Browser biasa tetap memakai REST. Silent sync tidak men-disable tombol.
+    if (isGoogleFit) {
       const participantId = Number(
         participant?.id ||
           participant?.participant_id ||
@@ -1143,20 +1175,44 @@ export default function WellnessParticipantPortalPage() {
       const bridge = nativeGoogleFitBridgeV125Fix();
 
       if (bridge && participantId > 0) {
-        googleFitNativeSilentV125Fix.current = options?.silent === true;
-        setSyncing(provider);
+        googleFitNativeSilentV125Fix.current = silent;
+        googleFitNativeInFlightV111.current = true;
 
-        if (!options?.silent) {
+        if (!silent) {
+          setSyncing(provider);
           setMessage("Membaca steps dan kalori langsung dari Google Fit HP...");
         }
+
+        if (googleFitNativeTimeoutV111.current !== null) {
+          window.clearTimeout(googleFitNativeTimeoutV111.current);
+        }
+
+        googleFitNativeTimeoutV111.current = window.setTimeout(() => {
+          const wasSilent = googleFitNativeSilentV125Fix.current;
+          googleFitNativeTimeoutV111.current = null;
+          googleFitNativeInFlightV111.current = false;
+          googleFitNativeSilentV125Fix.current = false;
+          setSyncing("");
+
+          if (!wasSilent) {
+            setMessage(
+              "Google Fit belum merespons. Tombol sudah dibuka kembali; silakan tekan Sync Google Fit sekali lagi.",
+            );
+          }
+        }, 60_000);
 
         try {
           bridge.syncGoogleFit(participantId);
           return;
         } catch (error: any) {
+          if (googleFitNativeTimeoutV111.current !== null) {
+            window.clearTimeout(googleFitNativeTimeoutV111.current);
+            googleFitNativeTimeoutV111.current = null;
+          }
+          googleFitNativeInFlightV111.current = false;
           googleFitNativeSilentV125Fix.current = false;
           setSyncing("");
-          if (!options?.silent) {
+          if (!silent) {
             setMessage(
               error?.message || "Google Fit native tidak dapat dijalankan.",
             );
@@ -1166,57 +1222,60 @@ export default function WellnessParticipantPortalPage() {
       }
     }
 
-    setSyncing(provider);
-
-    if (!options?.silent) {
+    if (!silent) {
+      setSyncing(provider);
       setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
     }
 
-    const result = await fetch(`/api/wellness/integrations/${provider}/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        days: options?.days || (provider === "google-fit" ? 2 : 30),
-      }),
-    })
-      .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Network error",
-      }));
-
-    if (result.ok) {
-      const providerKey = provider === "google-fit" ? "google_fit" : provider;
-      const completedAt = clean(result.last_sync_at) || new Date().toISOString();
-      setFitnessLastSyncAt((current) => ({
-        ...current,
-        [providerKey]: completedAt,
-      }));
-      if (result.last_sync_snapshot) {
-        setFitnessLastSyncSnapshot((current) => ({
-          ...current,
-          [providerKey]: result.last_sync_snapshot,
+    try {
+      const result = await fetch(`/api/wellness/integrations/${provider}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          days: options?.days || (isGoogleFit ? 2 : 30),
+        }),
+      })
+        .then((response) => response.json())
+        .catch((error) => ({
+          ok: false,
+          message: error?.message || "Network error",
         }));
+
+      if (result.ok) {
+        const providerKey = isGoogleFit ? "google_fit" : provider;
+        const completedAt = clean(result.last_sync_at) || new Date().toISOString();
+        setFitnessLastSyncAt((current) => ({
+          ...current,
+          [providerKey]: completedAt,
+        }));
+        if (result.last_sync_snapshot) {
+          setFitnessLastSyncSnapshot((current) => ({
+            ...current,
+            [providerKey]: result.last_sync_snapshot,
+          }));
+        }
+
+        if (!silent) {
+          const fetched = Number(result.fetched || result.fetched_daily || 0);
+          const inserted = Number(result.inserted || result.synced || 0);
+          const updated = Number(result.updated || 0);
+          const skipped = Number(result.skipped || 0);
+
+          setMessage(
+            result.message ||
+              `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`,
+          );
+        }
+
+        await loadMe({ keepMessage: true });
+      } else if (!silent) {
+        setMessage(result.message || "Gagal sync activity.");
       }
-
-      if (!options?.silent) {
-        const fetched = Number(result.fetched || result.fetched_daily || 0);
-        const inserted = Number(result.inserted || result.synced || 0);
-        const updated = Number(result.updated || 0);
-        const skipped = Number(result.skipped || 0);
-
-        setMessage(
-          result.message ||
-            `Sync selesai. Fetched ${fetched}, masuk baru ${inserted}, update ${updated}, skip ${skipped}.`,
-        );
+    } finally {
+      if (!silent) {
+        setSyncing("");
       }
-
-      await loadMe({ keepMessage: true });
-    } else if (!options?.silent) {
-      setMessage(result.message || "Gagal sync activity.");
     }
-
-    setSyncing("");
   }
 
   async function saveNutrition(): Promise<{ ok: boolean; message: string }> {
