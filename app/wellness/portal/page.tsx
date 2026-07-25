@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 "use client";
 
 // WELLNESS_DEVICE_HISTORY_PRIMARY_SOURCE_V72
@@ -16,6 +17,7 @@
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
+// WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -678,13 +680,71 @@ export default function WellnessParticipantPortalPage() {
   const [message, setMessage] = useState(
     "Gunakan Kode Karyawan dan email terdaftar untuk menerima OTP dan masuk ke portal peserta.",
   );
+  const [
+    participantCompaniesV126C,
+    setParticipantCompaniesV126C,
+  ] = useState<any[]>([]);
+
+  const [
+    companiesLoadingV126C,
+    setCompaniesLoadingV126C,
+  ] = useState(true);
+
   const [form, setForm] = useState({
+    company_id: "",
     code: "",
     username: "",
     email: "",
     phone: "",
     otp: "",
   });
+
+  useEffect(() => {
+    let active = true;
+
+    setCompaniesLoadingV126C(true);
+
+    fetch(
+      "/api/wellness/participant/companies",
+      {
+        cache: "no-store",
+      },
+    )
+      .then((response) =>
+        response.json(),
+      )
+      .then((result) => {
+        if (!active) return;
+
+        setParticipantCompaniesV126C(
+          result?.ok &&
+            Array.isArray(
+              result?.companies,
+            )
+            ? result.companies
+            : [],
+        );
+      })
+      .catch(() => {
+        if (active) {
+          setParticipantCompaniesV126C(
+            [],
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setCompaniesLoadingV126C(
+            false,
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const [participant, setParticipant] = useState<any>(null);
   const [fitnessSettings, setFitnessSettings] = useState<any>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
@@ -1048,6 +1108,13 @@ export default function WellnessParticipantPortalPage() {
   }
 
   async function requestOtp() {
+    if (!clean(form.company_id)) {
+      setMessage(
+        "Perusahaan wajib dipilih.",
+      );
+      return;
+    }
+
     if (!clean(form.code)) {
       setMessage("Kode Karyawan wajib diisi.");
       return;
@@ -1682,6 +1749,45 @@ export default function WellnessParticipantPortalPage() {
                   />
 
                   <div className="mt-6 grid gap-5">
+                    <label className="grid gap-2 text-sm font-bold text-slate-700">
+                      Perusahaan
+                      <select
+                        className={fieldClass}
+                        value={form.company_id}
+                        onChange={(event) =>
+                          setValue(
+                            "company_id",
+                            event.target.value,
+                          )
+                        }
+                        disabled={
+                          companiesLoadingV126C ||
+                          step === "verify"
+                        }
+                      >
+                        <option value="">
+                          {
+                            companiesLoadingV126C
+                              ? "Memuat perusahaan..."
+                              : "Pilih perusahaan"
+                          }
+                        </option>
+                    
+                        {participantCompaniesV126C.map(
+                          (company: any) => (
+                            <option
+                              key={company.id}
+                              value={String(
+                                company.id,
+                              )}
+                            >
+                              {company.name}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+
                     <label className="grid gap-2 text-sm font-black text-slate-700">
                       Kode Karyawan
                       <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 shadow-sm transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100">
@@ -6064,6 +6170,39 @@ function ProfileTab({
           <ProfileRow label="Participant ID" value={participantId} />
           <ProfileRow label="Nama" value={participant?.name} />
           <ProfileRow label="Kode Karyawan" value={participant?.code} />
+
+          <ProfileRow
+            label="Asal Perusahaan"
+            value={
+              participant?.company_name ||
+              participant?.company ||
+              participant?.nama_perusahaan ||
+              "-"
+            }
+          />
+
+          <ProfileRow
+            label="Login Terakhir"
+            value={
+              participant?.last_login_at
+                ? new Date(
+                    participant.last_login_at,
+                  ).toLocaleString(
+                    "id-ID",
+                    {
+                      timeZone:
+                        "Asia/Jakarta",
+                      day: "2-digit",
+                      month: "long",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    },
+                  )
+                : "Belum tersedia"
+            }
+          />
+
           <ProfileRow label="Gender" value={participant?.gender} />
           <ProfileRow
             label="Email"

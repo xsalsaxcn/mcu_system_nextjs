@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -10,6 +11,12 @@ import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { resolveCompanyPortalContext } from "@/lib/wellness/companyAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 import {
   healthtalkPointsFromRow,
   nutritionDailyBonusPoints,
@@ -506,8 +513,7 @@ export async function GET(request: NextRequest) {
       sheetResult.rows || [],
     ).filter(
       (row: any) =>
-        participantIds.includes(number(row.participant_id)) ||
-        participantCodes.includes(clean(row.participant_code)),
+        participantIds.includes(number(row.participant_id)),
     );
 
     const nutritionHistory = await loadCanonicalNutritionHistories({
@@ -570,8 +576,23 @@ export async function GET(request: NextRequest) {
     const participantCards = participants.map((participant: any) => {
       const id = number(participant.id);
       const code = clean(participant.code || participant.employee_code);
-      const participantPointRows = points.get(id) || [];
-      const participantPointHistory = pointHistory.get(id) || [];
+      const participantPointRows =
+        filterOperationalRowsForProgram(
+          participant,
+          points.get(id) || [],
+          fromDate,
+          today,
+          ["log_date", "created_at"],
+        );
+
+      const participantPointHistory =
+        filterOperationalRowsForProgram(
+          participant,
+          pointHistory.get(id) || [],
+          fromDate,
+          today,
+          ["log_date", "created_at"],
+        );
       const nutritionPointInputs = [
         ...new Map(
           participantPointHistory
@@ -581,21 +602,46 @@ export async function GET(request: NextRequest) {
       ];
       const canonicalHistory = nutritionHistory.byParticipantId.get(id);
       const allFoods = canonicalHistory?.logs || [];
-      const foods = allFoods.filter((item: any) => {
-        const date = dateOnly(item.log_date || item.created_at);
-        return date >= fromDate && date <= today;
-      });
-      const activities = dbActivity.get(id) || [];
-      const sheetTalks = dedupeRows([
-        ...(sheetHealthtalk.byId.get(id) || []),
-        ...(sheetHealthtalk.byCode.get(code) || []),
-      ]);
-      const talks = (sheetTalks.length ? sheetTalks : dbHealthtalk.get(id) || []).filter(
-        (item: any) => {
-          const date = dateOnly(item.event_date || item.log_date || item.created_at);
-          return !date || (date >= fromDate && date <= today);
-        },
+      const foods =
+        filterOperationalRowsForProgram(
+          participant,
+          allFoods,
+          fromDate,
+          today,
+          ["log_date", "created_at"],
+        );
+
+      const activities =
+        filterOperationalRowsForProgram(
+          participant,
+          dbActivity.get(id) || [],
+          fromDate,
+          today,
+          [
+            "log_date",
+            "started_at",
+            "created_at",
+          ],
+        );
+      // WELLNESS_COMPANY_HEALTHTALK_ID_ONLY_V126C
+      // Health Talk hanya dipasangkan melalui participant_id.
+      const sheetTalks = dedupeRows(
+        sheetHealthtalk.byId.get(id) || [],
       );
+      const talks =
+        filterOperationalRowsForProgram(
+          participant,
+          sheetTalks.length
+            ? sheetTalks
+            : dbHealthtalk.get(id) || [],
+          fromDate,
+          today,
+          [
+            "event_date",
+            "log_date",
+            "created_at",
+          ],
+        );
       const participantNotes = notes.get(id) || [];
       const targetNote = latestTarget(participantNotes);
       const parsedTargets = parseTargets(targetNote);
@@ -608,16 +654,13 @@ export async function GET(request: NextRequest) {
         parsedTargets.workout ||
         300;
 
-      const effectiveDays = clamp(
-        participant.program_start_date
-          ? daysBetween(
-              dateOnly(participant.program_start_date),
-              today,
-            ) + 1
-          : days,
-        1,
-        days,
-      );
+      const effectiveDays =
+        programWindowDayCount(
+          participant,
+          fromDate,
+          today,
+          days,
+        );
 
       const nutritionByDate = new Map<string, Set<string>>();
       const nutritionCaloriesByDate = new Map<string, number>();
@@ -705,7 +748,7 @@ export async function GET(request: NextRequest) {
       ]);
       const nutritionHistoryDates = [
         ...new Set([
-          ...allFoods
+          ...foods
             .map((item: any) => dateOnly(item.log_date || item.created_at))
             .filter(Boolean),
           ...nutritionPointInputs.map(pointLogDate).filter(Boolean),
@@ -741,7 +784,32 @@ export async function GET(request: NextRequest) {
         workoutTargetDates,
       );
 
-      const historyParticipant = history.get(id) || [];
+      const historyParticipant =
+        filterClinicalRowsForProgram(
+          participant,
+          history.get(id) || [],
+          fromDate,
+          today,
+        );
+
+      const participantWeightRows =
+        filterOperationalRowsForProgram(
+          participant,
+          weights.get(id) || [],
+          fromDate,
+          today,
+          ["log_date", "created_at"],
+        );
+
+      const participantMiniRows =
+        filterOperationalRowsForProgram(
+          participant,
+          mini.get(id) || [],
+          fromDate,
+          today,
+          ["exam_date", "created_at"],
+        );
+
       const baseline = {
         weight: baselineValue(participant, historyParticipant, "weight"),
         bmi: baselineValue(participant, historyParticipant, "bmi"),
@@ -751,8 +819,8 @@ export async function GET(request: NextRequest) {
       };
       const current = currentValues(
         participant,
-        weights.get(id) || [],
-        mini.get(id) || [],
+        participantWeightRows,
+        participantMiniRows,
         historyParticipant,
       );
       const healthImprovementPercent = improvementScore(

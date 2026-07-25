@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -5,6 +6,12 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
@@ -88,6 +95,7 @@ function participantCode(row: any) {
 function participantGroupIds(row: any) {
   return [
     row?.wellness_group_unit_id,
+    row?.wellness_kelompok_id,
     row?.group_unit_id,
     row?.group_id,
     row?.wellness_group_id,
@@ -96,45 +104,48 @@ function participantGroupIds(row: any) {
     .filter(Boolean);
 }
 
-function participantGroupNames(row: any) {
-  return [
-    row?.group_name,
-    row?.group_unit_name,
-    row?.risk_group,
-    row?.risk_category,
-    row?.category,
-    row?.group,
-  ]
-    .map((value) => clean(value).toLowerCase())
-    .filter(Boolean);
-}
+function canAccessParticipant(
+  row: any,
+  assignments: any[],
+) {
+  if (!(assignments || []).length) {
+    return false;
+  }
 
-function canAccessParticipant(row: any, assignments: any[]) {
   const allowedIds = new Set(
     (assignments || [])
-      .map((item) => clean(item.wellness_group_unit_id))
+      .map((item) =>
+        clean(
+          item.wellness_group_unit_id,
+        ),
+      )
       .filter(Boolean),
   );
-  const allowedNames = new Set(
-    (assignments || [])
-      .map((item) => clean(item.group_name).toLowerCase())
-      .filter(Boolean),
-  );
-  return (
-    participantGroupIds(row).some((id) => allowedIds.has(id)) ||
-    participantGroupNames(row).some((name) => allowedNames.has(name))
+
+  return participantGroupIds(row).some(
+    (id) => allowedIds.has(id),
   );
 }
 
-function assignedGroup(row: any, assignments: any[]) {
+function assignedGroup(
+  row: any,
+  assignments: any[],
+) {
   const ids = participantGroupIds(row);
-  const names = participantGroupNames(row);
+
   return (
-    (assignments || []).find((item) => {
-      const id = clean(item.wellness_group_unit_id);
-      const name = clean(item.group_name).toLowerCase();
-      return (id && ids.includes(id)) || (name && names.includes(name));
-    }) || null
+    (assignments || []).find(
+      (item) => {
+        const id = clean(
+          item.wellness_group_unit_id,
+        );
+
+        return Boolean(
+          id &&
+          ids.includes(id),
+        );
+      },
+    ) || null
   );
 }
 
@@ -439,8 +450,7 @@ export async function GET(request: NextRequest) {
       sheet.rows || [],
     ).filter(
       (row: any) =>
-        ids.includes(asNumber(row.participant_id)) ||
-        Boolean(clean(row.participant_code)),
+        ids.includes(asNumber(row.participant_id)),
     );
 
     const profilesResult = await postSupportWebhook("wellnessProfileList", {
@@ -459,20 +469,37 @@ export async function GET(request: NextRequest) {
       const code = participantCode(participant);
       const assignment = assignedGroup(participant, assignments || []);
       const canonicalHistory = nutritionHistory.byParticipantId.get(id);
-      const participantFood = (canonicalHistory?.logs || []).filter((row: any) => {
-        const date = dateKey(row?.log_date || row?.created_at);
-        return date >= fromDate && date <= toDate;
-      });
-      const participantActivities = activityRows.filter(
-        (row: any) => asNumber(row.participant_id) === id,
-      );
+      const participantFood =
+        filterOperationalRowsForProgram(
+          participant,
+          canonicalHistory?.logs || [],
+          fromDate,
+          toDate,
+          ["log_date", "created_at"],
+        );
+      const participantActivities =
+        filterOperationalRowsForProgram(
+          participant,
+          activityRows.filter(
+            (row: any) =>
+              asNumber(
+                row.participant_id,
+              ) === id,
+          ),
+          fromDate,
+          toDate,
+          [
+            "log_date",
+            "started_at",
+            "created_at",
+          ],
+        );
       const dbHealthtalk = healthtalkRows.filter(
         (row: any) => asNumber(row.participant_id) === id,
       );
       const participantSheetHealthtalk = sheetHealthtalk.filter(
         (row: any) =>
-          asNumber(row.participant_id) === id ||
-          (code && clean(row.participant_code) === code),
+          asNumber(row.participant_id) === id,
       );
       const participantHealthtalk = (
         participantSheetHealthtalk.length
@@ -482,9 +509,19 @@ export async function GET(request: NextRequest) {
         const date = dateKey(row?.event_date || row?.log_date || row?.created_at);
         return !date || (date >= fromDate && date <= toDate);
       });
-      const participantPointHistory = pointRows.filter(
-        (row: any) => asNumber(row.participant_id) === id,
-      );
+      const participantPointHistory =
+        filterOperationalRowsForProgram(
+          participant,
+          pointRows.filter(
+            (row: any) =>
+              asNumber(
+                row.participant_id,
+              ) === id,
+          ),
+          fromDate,
+          toDate,
+          ["log_date", "created_at"],
+        );
       const nutritionPointInputs = [
         ...new Map(
           participantPointHistory
@@ -577,9 +614,19 @@ export async function GET(request: NextRequest) {
         (sum: number, row: any) => sum + healthtalkPoint(row),
         0,
       );
-      const participantPointRows = pointRowsInPeriod.filter(
-        (row: any) => asNumber(row.participant_id) === id,
-      );
+      const participantPointRows =
+        filterOperationalRowsForProgram(
+          participant,
+          pointRowsInPeriod.filter(
+            (row: any) =>
+              asNumber(
+                row.participant_id,
+              ) === id,
+          ),
+          fromDate,
+          toDate,
+          ["log_date", "created_at"],
+        );
       const pointLedger = resolveWellnessPointBreakdown({
         ledgerRows: participantPointRows,
         calculated: {
@@ -602,7 +649,21 @@ export async function GET(request: NextRequest) {
         ...foodByDate.keys(),
         ...workoutByDate.keys(),
       ]);
-      const compliancePercent = Math.round((activeDates.size / days) * 100);
+      const effectiveDays =
+        programWindowDayCount(
+          participant,
+          fromDate,
+          toDate,
+          days,
+        );
+
+      const compliancePercent =
+        Math.round(
+          (
+            activeDates.size /
+            effectiveDays
+          ) * 100,
+        );
       const successDates = new Set<string>();
       for (const date of new Set([
         ...foodByDate.keys(),
@@ -614,7 +675,7 @@ export async function GET(request: NextRequest) {
         if (nutritionOk && workoutOk) successDates.add(date);
       }
       let currentStreak = 0;
-      for (let offset = 0; offset > -days; offset -= 1) {
+      for (let offset = 0; offset > -effectiveDays; offset -= 1) {
         const date = jakartaDate(offset);
         if (!successDates.has(date)) {
           if (offset === 0) continue;
@@ -629,9 +690,18 @@ export async function GET(request: NextRequest) {
         participant_id: id,
         name: participantName(participant),
         code,
+        // WELLNESS_COACH_RANKING_DISPLAY_NO_NAME_HELPER_V126C
         group_name:
           clean(assignment?.group_name) ||
-          participantGroupNames(participant)[0] ||
+          clean(
+            participant?.kelompok_name ||
+              participant?.group_name ||
+              participant?.group_unit_name ||
+              participant?.risk_group ||
+              participant?.risk_category ||
+              participant?.category ||
+              participant?.group,
+          ) ||
           "-",
         photo_url: profile.photo_url || "",
         photo_preview_url: profile.photo_preview_url || "",

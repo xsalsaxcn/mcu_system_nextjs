@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_CANONICAL_NUTRITION_HISTORY_V105
 // One read path for Participant, Coach, Company, and Admin.
 // Sources: existing wellness_food_logs + the existing Google Sheet CSV export.
@@ -524,79 +525,162 @@ function participantCode(row: any) {
   );
 }
 
-function standaloneCodeMatch(text: string, code: string) {
-  if (!text || !code) return false;
-  const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text);
+function participantCompanyIdV126C(
+  row: any,
+) {
+  return parseNumber(
+    row?.wellness_company_id ||
+      row?.company_id ||
+      0,
+  );
 }
 
-function buildParticipantIndexes(participants: any[]) {
-  const byId = new Map<number, any>();
-  const byCode = new Map<string, any>();
-  const byNameAll = new Map<string, any[]>();
+function scopedCompanyCodeKeyV126C(
+  companyId: number,
+  code: string,
+) {
+  const normalizedCode =
+    canonicalNutritionNormalizeText(
+      code,
+    );
 
-  for (const participant of participants || []) {
-    const id = participantId(participant);
-    const code = canonicalNutritionNormalizeText(participantCode(participant));
-    const name = canonicalNutritionNormalizeText(participantName(participant));
-    if (id > 0) byId.set(id, participant);
-    if (code) byCode.set(code, participant);
-    if (name) byNameAll.set(name, [...(byNameAll.get(name) || []), participant]);
+  if (
+    !(companyId > 0) ||
+    !normalizedCode
+  ) {
+    return "";
   }
 
-  const byUniqueName = new Map<string, any>();
-  for (const [name, matches] of byNameAll.entries()) {
-    if (matches.length === 1) byUniqueName.set(name, matches[0]);
+  return `${companyId}|${normalizedCode}`;
+}
+
+function buildParticipantIndexes(
+  participants: any[],
+) {
+  const byId = new Map<
+    number,
+    any
+  >();
+
+  const byCompanyCodeV126C =
+    new Map<string, any>();
+
+  for (
+    const participant
+    of participants || []
+  ) {
+    const id =
+      participantId(participant);
+
+    const code =
+      participantCode(participant);
+
+    const companyId =
+      participantCompanyIdV126C(
+        participant,
+      );
+
+    if (id > 0) {
+      byId.set(
+        id,
+        participant,
+      );
+    }
+
+    const scopedKey =
+      scopedCompanyCodeKeyV126C(
+        companyId,
+        code,
+      );
+
+    if (scopedKey) {
+      byCompanyCodeV126C.set(
+        scopedKey,
+        participant,
+      );
+    }
   }
 
-  return { byId, byCode, byUniqueName };
+  return {
+    byId,
+    byCompanyCodeV126C,
+  };
 }
 
 function matchSheetParticipant(
   row: Record<string, string>,
-  participants: any[],
-  indexes: ReturnType<typeof buildParticipantIndexes>,
+  _participants: any[],
+  indexes:
+    ReturnType<
+      typeof buildParticipantIndexes
+    >,
 ) {
+  /*
+   * Identitas Google Sheet:
+   *
+   * 1. Participant ID; atau
+   * 2. Company ID + Kode Karyawan.
+   *
+   * Nama perusahaan, nama peserta,
+   * atau kode global tidak boleh
+   * digunakan sebagai fallback.
+   */
   const explicitId = parseNumber(
-    findColumn(row, ["participant id", "participant_id"]),
+    findColumn(
+      row,
+      [
+        "participant id",
+        "participant_id",
+      ],
+    ),
   );
-  if (explicitId > 0 && indexes.byId.has(explicitId)) {
-    return indexes.byId.get(explicitId) || null;
+
+  if (explicitId > 0) {
+    return (
+      indexes.byId.get(
+        explicitId,
+      ) || null
+    );
   }
 
-  const explicitCode = canonicalNutritionNormalizeText(
-    findColumn(row, [
-      "kode karyawan",
-      "employee code",
-      "participant code",
-      "kode peserta",
-      "kode",
-    ]),
-  );
-  if (explicitCode && indexes.byCode.has(explicitCode)) {
-    return indexes.byCode.get(explicitCode) || null;
-  }
+  const explicitCompanyId =
+    parseNumber(
+      findColumn(
+        row,
+        [
+          "company id",
+          "company_id",
+          "wellness company id",
+          "wellness_company_id",
+        ],
+      ),
+    );
 
-  const selected = firstText(
-    findColumn(row, ["pilih nama anda", "pilih nama", "nama anda"]),
-    findColumn(row, ["nama peserta", "participant name", "peserta"]),
-  );
-  const normalizedSelected = canonicalNutritionNormalizeText(selected);
+  const explicitCode =
+    findColumn(
+      row,
+      [
+        "kode karyawan",
+        "employee code",
+        "participant code",
+        "kode peserta",
+        "kode",
+      ],
+    );
 
-  for (const participant of participants || []) {
-    const code = canonicalNutritionNormalizeText(participantCode(participant));
-    if (code && standaloneCodeMatch(normalizedSelected, code)) return participant;
-  }
+  const scopedKey =
+    scopedCompanyCodeKeyV126C(
+      explicitCompanyId,
+      explicitCode,
+    );
 
-  if (normalizedSelected && indexes.byUniqueName.has(normalizedSelected)) {
-    return indexes.byUniqueName.get(normalizedSelected) || null;
-  }
-
-  const strippedName = canonicalNutritionNormalizeText(
-    selected.replace(/^\s*[a-z0-9._/-]+\s*[-–—|:]\s*/i, ""),
-  );
-  if (strippedName && indexes.byUniqueName.has(strippedName)) {
-    return indexes.byUniqueName.get(strippedName) || null;
+  if (scopedKey) {
+    return (
+      indexes
+        .byCompanyCodeV126C
+        .get(scopedKey) ||
+      null
+    );
   }
 
   return null;

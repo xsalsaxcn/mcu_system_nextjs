@@ -1,8 +1,15 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { calculateBmi, interpretBmi, weightDelta } from "@/lib/wellness/bmi";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 import {
   fetchWellnessGoogleSheetRows,
   googleSheetRowsToFoodLogs,
@@ -1153,13 +1160,7 @@ export async function GET(req: NextRequest) {
           .in("participant_id", participantIds)
           .order("checkup_date", { ascending: true })
       ),
-      participantCodes.length
-        ? safeSelect(supabase, "wellness_checkup_history", (query) =>
-            query
-              .in("employee_code", participantCodes)
-              .order("checkup_date", { ascending: true })
-          )
-        : [],
+      [],
       safeSelect(supabase, "wellness_companies", (query) =>
         query.order("name", { ascending: true })
       ),
@@ -1201,7 +1202,7 @@ export async function GET(req: NextRequest) {
       const id = Number(row.participant_id);
       const code = String(row.participant_code || "").trim();
 
-      return participantIds.includes(id) || participantCodes.includes(code);
+      return participantIds.includes(id);
     });
 
     const googleSheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(
@@ -1210,7 +1211,7 @@ export async function GET(req: NextRequest) {
       const id = Number(row.participant_id);
       const code = String(row.participant_code || "").trim();
 
-      return participantIds.includes(id) || participantCodes.includes(code);
+      return participantIds.includes(id);
     });
 
     const googleSheetFoodGrouped =
@@ -1233,13 +1234,9 @@ export async function GET(req: NextRequest) {
     const activitiesByParticipant = groupByParticipant(selectedActivityRows);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
 
-    const combinedHistoryRows = mergeUniqueRows(
-      historyRows || [],
-      historyRowsByCode || []
-    );
+    const combinedHistoryRows = mergeUniqueRows(historyRows || []);
 
     const historyByParticipant = groupByParticipant(combinedHistoryRows);
-    const historyByEmployeeCode = groupByEmployeeCode(combinedHistoryRows);
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
     const pointsByParticipant = groupByParticipant(pointRows || []);
     const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
@@ -1263,45 +1260,103 @@ export async function GET(req: NextRequest) {
     );
 
     const rows = participants.map((participant: any) => {
-      const weightRows = weightsByParticipant.get(Number(participant.id)) || [];
+      const weightRows =
+        filterOperationalRowsForProgram(
+          participant,
+          weightsByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+          ["log_date", "created_at"],
+        );
 
       const dbFoodRows = foodsByParticipant.get(Number(participant.id)) || [];
 
       const sheetFoodRowsById =
         googleSheetFoodGrouped.byId.get(Number(participant.id)) || [];
 
-      const sheetFoodRowsByCode =
-        googleSheetFoodGrouped.byCode.get(String(participant.code || "").trim()) ||
-        [];
+      
 
-      const sheetFoodRows = mergeFoodRows(
-        sheetFoodRowsById,
-        sheetFoodRowsByCode
-      );
+      const sheetFoodRows = mergeFoodRows(sheetFoodRowsById);
 
       // SOURCE OF TRUTH NUTRISI:
       // Jika Google Sheet sudah punya data nutrisi peserta,
       // dashboard pakai Google Sheet saja.
       // Supabase wellness_food_logs hanya fallback data lama,
       // supaya 1 input tidak muncul dobel di tanggal berbeda.
-      const foodRows = sheetFoodRows.length ? sheetFoodRows : dbFoodRows;
+      const foodRows =
+        filterOperationalRowsForProgram(
+          participant,
+          sheetFoodRows.length
+            ? sheetFoodRows
+            : dbFoodRows,
+          "",
+          "",
+          ["log_date", "created_at"],
+        );
 
       const activityRows =
-        activitiesByParticipant.get(Number(participant.id)) || [];
+        filterOperationalRowsForProgram(
+          participant,
+          activitiesByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+          [
+            "log_date",
+            "started_at",
+            "created_at",
+          ],
+        );
 
       const miniMcuParticipantRows =
-        miniMcuByParticipant.get(Number(participant.id)) || [];
+        filterOperationalRowsForProgram(
+          participant,
+          miniMcuByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+          ["exam_date", "created_at"],
+        );
 
-      const historyParticipantRows = mergeUniqueRows(
-        historyByParticipant.get(Number(participant.id)) || [],
-        historyByEmployeeCode.get(String(participant.code || "").trim()) || []
-      );
+      const historyParticipantRows =
+        filterClinicalRowsForProgram(
+          participant,
+          historyByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+        );
 
       const evidenceParticipantRows =
-        evidenceByParticipant.get(Number(participant.id)) || [];
+        filterOperationalRowsForProgram(
+          participant,
+          evidenceByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+          [
+            "log_date",
+            "event_date",
+            "created_at",
+          ],
+        );
 
       const pointParticipantRows =
-        pointsByParticipant.get(Number(participant.id)) || [];
+        filterOperationalRowsForProgram(
+          participant,
+          pointsByParticipant.get(
+            Number(participant.id),
+          ) || [],
+          "",
+          "",
+          ["log_date", "created_at"],
+        );
 
       const dbHealthtalkRows =
         healthtalkByParticipant.get(Number(participant.id)) || [];
@@ -1309,22 +1364,27 @@ export async function GET(req: NextRequest) {
       const sheetHealthtalkRowsById =
         googleSheetHealthtalkGrouped.byId.get(Number(participant.id)) || [];
 
-      const sheetHealthtalkRowsByCode =
-        googleSheetHealthtalkGrouped.byCode.get(
-          String(participant.code || "").trim()
-        ) || [];
+      
 
-      const sheetHealthtalkRows = mergeFoodRows(
-        sheetHealthtalkRowsById,
-        sheetHealthtalkRowsByCode
-      );
+      const sheetHealthtalkRows = mergeFoodRows(sheetHealthtalkRowsById);
 
       // SOURCE OF TRUTH HEALTHTALK:
       // Health Talk terbaru pakai Google Sheet.
       // Supabase healthtalk hanya fallback data lama.
-      const healthtalkParticipantRows = sheetHealthtalkRows.length
-        ? sheetHealthtalkRows
-        : dbHealthtalkRows;
+      const healthtalkParticipantRows =
+        filterOperationalRowsForProgram(
+          participant,
+          sheetHealthtalkRows.length
+            ? sheetHealthtalkRows
+            : dbHealthtalkRows,
+          "",
+          "",
+          [
+            "event_date",
+            "log_date",
+            "created_at",
+          ],
+        );
 
       const latestWeight = latestByDate(weightRows) || null;
       const latestFood = latestByDate(foodRows) || null;

@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
 import { getSessionUser } from "@/lib/server/session";
@@ -1356,11 +1357,7 @@ export async function GET(req: NextRequest) {
       safeSelect(supabase, "wellness_checkup_history", (query) =>
         query.in("participant_id", participantIds).order("checkup_date", { ascending: true })
       ),
-      participantCodes.length
-        ? safeSelect(supabase, "wellness_checkup_history", (query) =>
-            query.in("employee_code", participantCodes).order("checkup_date", { ascending: true })
-          )
-        : [],
+      [],
       safeSelect(supabase, "wellness_companies", (query) =>
         query.order("name", { ascending: true })
       ),
@@ -1386,9 +1383,8 @@ export async function GET(req: NextRequest) {
     const foodsByParticipant = groupByParticipant(foodRes.data || []);
     const activitiesByParticipant = groupByParticipant(activityRes.data || []);
     const miniMcuByParticipant = groupByParticipant(miniMcuRows || []);
-    const combinedHistoryRows = mergeUniqueRows(historyRows || [], historyRowsByCode || []);
+    const combinedHistoryRows = mergeUniqueRows(historyRows || []);
     const historyByParticipant = groupByParticipant(combinedHistoryRows);
-    const historyByEmployeeCode = groupByEmployeeCode(combinedHistoryRows);
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
     const pointsByParticipant = groupByParticipant(pointRows || []);
     const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
@@ -1406,10 +1402,10 @@ export async function GET(req: NextRequest) {
       const activityRows = activitiesByParticipant.get(Number(participant.id)) || [];
       const miniMcuParticipantRows = miniMcuByParticipant.get(Number(participant.id)) || [];
 
-      const historyParticipantRows = mergeUniqueRows(
-        historyByParticipant.get(Number(participant.id)) || [],
-        historyByEmployeeCode.get(String(participant.code || "").trim()) || []
-      );
+      const historyParticipantRows =
+        historyByParticipant.get(
+          Number(participant.id),
+        ) || [];
 
       const evidenceParticipantRows = evidenceByParticipant.get(Number(participant.id)) || [];
       const pointParticipantRows = pointsByParticipant.get(Number(participant.id)) || [];

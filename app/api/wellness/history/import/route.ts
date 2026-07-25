@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest } from "next/server";
 import * as XLSX from "xlsx";
 import { fail, ok } from "@/lib/server/response";
@@ -189,27 +190,38 @@ async function getOrCreateGroup(supabase: any, name = "Wellness Default") {
   return data.id;
 }
 
-async function findParticipant(supabase: any, employeeCode: string, companyId: number | null, kelompokId: number | null, groupUnitId: number | null) {
-  if (!employeeCode) return null;
+async function findParticipant(
+  supabase: any,
+  employeeCode: string,
+  companyId: number | null,
+  _kelompokId: number | null,
+  _groupUnitId: number | null,
+) {
+  const code = clean(employeeCode);
 
-  const buildQuery = () => {
-    let query = supabase.from("wellness_participants").select("*").eq("code", employeeCode);
-    if (companyId) query = query.eq("wellness_company_id", companyId);
-    if (kelompokId) query = query.eq("wellness_kelompok_id", kelompokId);
-    if (groupUnitId) query = query.eq("wellness_group_unit_id", groupUnitId);
-    return query;
-  };
-
-  if (companyId || kelompokId || groupUnitId) {
-    const scoped = await buildQuery().maybeSingle();
-    if (scoped.error) throw scoped.error;
-    if (scoped.data) return scoped.data;
+  if (!code) {
     return null;
   }
 
-  const anyCompany = await supabase.from("wellness_participants").select("*").eq("code", employeeCode).maybeSingle();
-  if (anyCompany.error) throw anyCompany.error;
-  return anyCompany.data || null;
+  if (!companyId) {
+    throw new Error(
+      "Perusahaan tujuan wajib dipilih sebelum import history MCU.",
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("wellness_participants")
+    .select("*")
+    .eq("wellness_company_id", companyId)
+    .eq("code", code)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
 }
 
 async function createParticipantFromHistory(supabase: any, payload: any) {
@@ -289,6 +301,13 @@ export async function POST(req: NextRequest) {
   const defaultVisitLabel = clean(form.get("visit_label")) || historyTypeLabel(defaultHistoryType);
   const createMissingParticipants = clean(form.get("create_missing_participants")) === "1";
   const columnMapping = parseColumnMapping(form.get("column_mapping"));
+
+  if (!companyId) {
+    return fail(
+      "Perusahaan tujuan wajib dipilih sebelum import history MCU.",
+      400,
+    );
+  }
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());

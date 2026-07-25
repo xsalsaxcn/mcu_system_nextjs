@@ -2,6 +2,7 @@
 
 // WELLNESS_ADMIN_SUPPORT_UNREAD_NORMALIZED_V79Q
 // WELLNESS_ADMIN_PARTICIPANT_DETAIL_UI_V89
+// WELLNESS_ADMIN_PARTICIPANT_FILTER_PAGINATION_SORT_V126E
 
 import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
@@ -199,6 +200,30 @@ export default function WellnessAdminMobilePage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [query, setQuery] = useState("");
+
+  // WELLNESS_ADMIN_PARTICIPANT_FILTER_PAGINATION_SORT_V126E
+  // UI/UX-only:
+  // - Filter perusahaan
+  // - Sorting peserta
+  // - Pagination 20 peserta per halaman
+  // Tidak mengubah Google Fit, Health Connect, OTP, API, atau database.
+  const [
+    participantCompanyFilter,
+    setParticipantCompanyFilter,
+  ] = useState("all");
+
+  const [
+    participantSort,
+    setParticipantSort,
+  ] = useState("name_asc");
+
+  const [
+    participantPage,
+    setParticipantPage,
+  ] = useState(1);
+
+  const participantPageSize = 20;
+
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [supportUnread, setSupportUnread] = useState(0);
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null);
@@ -733,18 +758,306 @@ export default function WellnessAdminMobilePage() {
     [rows],
   );
 
-  const filteredParticipants = useMemo(() => {
-    const keyword = clean(query).toLowerCase();
-    if (!keyword) return rows.slice(0, 120);
-    return rows
-      .filter((item: any) =>
-        [item.name, item.code, item.company_name, item.group_name]
-          .map((value) => clean(value).toLowerCase())
-          .join(" ")
-          .includes(keyword),
-      )
-      .slice(0, 120);
-  }, [rows, query]);
+  const participantCompanyOptions =
+    useMemo(
+      () =>
+        [...companies]
+          .map((company: any) => ({
+            id: String(
+              company.id || "",
+            ),
+            name:
+              clean(company.name) ||
+              `Perusahaan ${company.id}`,
+          }))
+          .filter(
+            (company: any) =>
+              Boolean(company.id),
+          )
+          .sort(
+            (
+              left: any,
+              right: any,
+            ) =>
+              left.name.localeCompare(
+                right.name,
+                "id",
+              ),
+          ),
+      [companies],
+    );
+
+  const filteredParticipants =
+    useMemo(() => {
+      const keyword =
+        clean(query).toLowerCase();
+
+      const filtered = rows.filter(
+        (item: any) => {
+          const matchesCompany =
+            participantCompanyFilter ===
+              "all" ||
+            String(
+              item.company_id || "",
+            ) ===
+              participantCompanyFilter;
+
+          if (!matchesCompany) {
+            return false;
+          }
+
+          if (!keyword) {
+            return true;
+          }
+
+          const searchableText = [
+            item.name,
+            item.code,
+            item.company_name,
+            item.group_name,
+          ]
+            .map((value) =>
+              clean(value).toLowerCase(),
+            )
+            .join(" ");
+
+          return searchableText.includes(
+            keyword,
+          );
+        },
+      );
+
+      return [...filtered].sort(
+        (
+          left: any,
+          right: any,
+        ) => {
+          const leftName =
+            clean(left.name);
+
+          const rightName =
+            clean(right.name);
+
+          const leftCompany =
+            clean(left.company_name);
+
+          const rightCompany =
+            clean(right.company_name);
+
+          const leftPoints =
+            Number(
+              left.total_points || 0,
+            );
+
+          const rightPoints =
+            Number(
+              right.total_points || 0,
+            );
+
+          const leftBmi =
+            Number(left.bmi || 0);
+
+          const rightBmi =
+            Number(right.bmi || 0);
+
+          if (
+            participantSort ===
+            "name_desc"
+          ) {
+            return rightName.localeCompare(
+              leftName,
+              "id",
+            );
+          }
+
+          if (
+            participantSort ===
+            "company_asc"
+          ) {
+            return (
+              leftCompany.localeCompare(
+                rightCompany,
+                "id",
+              ) ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          if (
+            participantSort ===
+            "points_desc"
+          ) {
+            return (
+              rightPoints -
+                leftPoints ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          if (
+            participantSort ===
+            "points_asc"
+          ) {
+            return (
+              leftPoints -
+                rightPoints ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          if (
+            participantSort ===
+            "bmi_desc"
+          ) {
+            return (
+              rightBmi -
+                leftBmi ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          if (
+            participantSort ===
+            "bmi_asc"
+          ) {
+            return (
+              leftBmi -
+                rightBmi ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          if (
+            participantSort ===
+            "status_priority"
+          ) {
+            const statusOrder:
+              Record<string, number> = {
+                red: 0,
+                yellow: 1,
+                green: 2,
+              };
+
+            const leftStatus =
+              statusOrder[
+                flagOf(left)
+              ] ?? 9;
+
+            const rightStatus =
+              statusOrder[
+                flagOf(right)
+              ] ?? 9;
+
+            return (
+              leftStatus -
+                rightStatus ||
+              leftName.localeCompare(
+                rightName,
+                "id",
+              )
+            );
+          }
+
+          return leftName.localeCompare(
+            rightName,
+            "id",
+          );
+        },
+      );
+    }, [
+      rows,
+      query,
+      participantCompanyFilter,
+      participantSort,
+    ]);
+
+  const participantTotalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        filteredParticipants.length /
+          participantPageSize,
+      ),
+    );
+
+  const safeParticipantPage =
+    Math.min(
+      participantPage,
+      participantTotalPages,
+    );
+
+  const paginatedParticipants =
+    useMemo(() => {
+      const startIndex =
+        (
+          safeParticipantPage -
+          1
+        ) *
+        participantPageSize;
+
+      return filteredParticipants.slice(
+        startIndex,
+        startIndex +
+          participantPageSize,
+      );
+    }, [
+      filteredParticipants,
+      safeParticipantPage,
+    ]);
+
+  useEffect(() => {
+    setParticipantPage(1);
+  }, [
+    query,
+    participantCompanyFilter,
+    participantSort,
+  ]);
+
+  useEffect(() => {
+    if (
+      participantPage >
+      participantTotalPages
+    ) {
+      setParticipantPage(
+        participantTotalPages,
+      );
+    }
+  }, [
+    participantPage,
+    participantTotalPages,
+  ]);
+
+  const participantStartNumber =
+    filteredParticipants.length > 0
+      ? (
+          safeParticipantPage -
+          1
+        ) *
+          participantPageSize +
+        1
+      : 0;
+
+  const participantEndNumber =
+    Math.min(
+      safeParticipantPage *
+        participantPageSize,
+      filteredParticipants.length,
+    );
 
   const unreadPriority = supportUnread;
 
@@ -1331,16 +1644,145 @@ export default function WellnessAdminMobilePage() {
 
           {view === "participants" ? (
             <section className="space-y-3">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Cari nama, kode, perusahaan, atau kelompok"
-                  className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
-                />
-                <div className="flex items-center rounded-2xl border border-slate-200 bg-white px-4 text-xs font-black text-slate-600">
-                  {fmt(filteredParticipants.length)} peserta tampil
+              <div className="rounded-[1.4rem] border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="grid gap-3 xl:grid-cols-[minmax(16rem,1fr)_minmax(13rem,0.65fr)_minmax(13rem,0.65fr)_auto]">
+                  <div className="relative">
+                    <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
+                      🔎
+                    </span>
+
+                    <input
+                      value={query}
+                      onChange={(event) =>
+                        setQuery(
+                          event.target.value,
+                        )
+                      }
+                      placeholder="Cari nama, kode, perusahaan, atau kelompok"
+                      aria-label="Cari peserta"
+                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-semibold outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+                    />
+                  </div>
+
+                  <select
+                    value={
+                      participantCompanyFilter
+                    }
+                    onChange={(event) =>
+                      setParticipantCompanyFilter(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Filter peserta berdasarkan perusahaan"
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+                  >
+                    <option value="all">
+                      Semua perusahaan
+                    </option>
+
+                    {participantCompanyOptions.map(
+                      (company: any) => (
+                        <option
+                          key={company.id}
+                          value={company.id}
+                        >
+                          {company.name}
+                        </option>
+                      ),
+                    )}
+                  </select>
+
+                  <select
+                    value={participantSort}
+                    onChange={(event) =>
+                      setParticipantSort(
+                        event.target.value,
+                      )
+                    }
+                    aria-label="Urutkan peserta"
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+                  >
+                    <option value="name_asc">
+                      Nama A–Z
+                    </option>
+
+                    <option value="name_desc">
+                      Nama Z–A
+                    </option>
+
+                    <option value="company_asc">
+                      Perusahaan A–Z
+                    </option>
+
+                    <option value="points_desc">
+                      Poin tertinggi
+                    </option>
+
+                    <option value="points_asc">
+                      Poin terendah
+                    </option>
+
+                    <option value="bmi_desc">
+                      BMI tertinggi
+                    </option>
+
+                    <option value="bmi_asc">
+                      BMI terendah
+                    </option>
+
+                    <option value="status_priority">
+                      Status prioritas
+                    </option>
+                  </select>
+
+                  <div className="flex h-12 min-w-[9rem] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-4 text-center">
+                    <div>
+                      <div className="text-sm font-black text-slate-900">
+                        {fmt(
+                          filteredParticipants.length,
+                        )}
+                      </div>
+
+                      <div className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                        Peserta tampil
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                {participantCompanyFilter !==
+                  "all" ||
+                query ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                    <div className="text-[10px] font-bold text-slate-500">
+                      Filter aktif
+                      {participantCompanyFilter !==
+                      "all"
+                        ? " · Perusahaan dipilih"
+                        : ""}
+                      {query
+                        ? ` · Pencarian: "${query}"`
+                        : ""}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuery("");
+                        setParticipantCompanyFilter(
+                          "all",
+                        );
+                        setParticipantSort(
+                          "name_asc",
+                        );
+                        setParticipantPage(1);
+                      }}
+                      className="rounded-xl bg-slate-100 px-3 py-2 text-[10px] font-black text-slate-700 transition hover:bg-slate-200"
+                    >
+                      Reset filter
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               {controlNotice ? (
@@ -1356,7 +1798,7 @@ export default function WellnessAdminMobilePage() {
               ) : null}
 
               <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                {filteredParticipants.map((item: any, index: number) => {
+                {paginatedParticipants.map((item: any, index: number) => {
                   const flag = flagOf(item);
                   const control = item.wellness_control || {
                     session_enabled: true,
@@ -1547,13 +1989,112 @@ export default function WellnessAdminMobilePage() {
                 })}
               </div>
 
-              {filteredParticipants.length === 0 ? (
+              {filteredParticipants.length > 0 ? (
+                <div className="flex flex-col gap-4 rounded-[1.4rem] border border-slate-200 bg-white px-4 py-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">
+                      Menampilkan{" "}
+                      {participantStartNumber}
+                      {"–"}
+                      {participantEndNumber}
+                      {" dari "}
+                      {fmt(
+                        filteredParticipants.length,
+                      )}
+                      {" peserta"}
+                    </div>
+
+                    <div className="mt-1 text-[10px] font-bold text-slate-400">
+                      Maksimal 20 peserta per halaman
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParticipantPage(1)
+                      }
+                      disabled={
+                        safeParticipantPage <= 1
+                      }
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      « Awal
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParticipantPage(
+                          (currentPage) =>
+                            Math.max(
+                              1,
+                              currentPage -
+                                1,
+                            ),
+                        )
+                      }
+                      disabled={
+                        safeParticipantPage <= 1
+                      }
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ‹ Sebelumnya
+                    </button>
+
+                    <div className="flex h-10 min-w-[8.5rem] items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-black text-white">
+                      Halaman{" "}
+                      {safeParticipantPage}
+                      {" / "}
+                      {participantTotalPages}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParticipantPage(
+                          (currentPage) =>
+                            Math.min(
+                              participantTotalPages,
+                              currentPage +
+                                1,
+                            ),
+                        )
+                      }
+                      disabled={
+                        safeParticipantPage >=
+                        participantTotalPages
+                      }
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Berikutnya ›
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParticipantPage(
+                          participantTotalPages,
+                        )
+                      }
+                      disabled={
+                        safeParticipantPage >=
+                        participantTotalPages
+                      }
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Akhir »
+                    </button>
+                  </div>
+                </div>
+              ) : (
                 <EmptyState
                   icon="👥"
                   title="Peserta tidak ditemukan"
-                  text="Ubah kata pencarian atau periksa data peserta."
+                  text="Ubah kata pencarian atau filter perusahaan."
                 />
-              ) : null}
+              )}
             </section>
           ) : null}
 

@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
@@ -7,6 +8,7 @@ import {
 } from "@/lib/wellness/participantControls";
 
 // WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71
+// WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 // WELLNESS_HEALTH_CONNECT_SINGLE_SOURCE_GUARD_V79F
 // WELLNESS_PARTICIPANT_FITNESS_SELECTION_SYNC_V79H
 // WELLNESS_FITNESS_PROVIDER_ORIGIN_SEPARATION_V79I
@@ -266,42 +268,87 @@ function isEmptyDailyPayload({
   return s <= 0 && m <= 0 && d <= 0 && c <= 5;
 }
 
-async function findParticipant(supabase: any, req: NextRequest, body: any) {
-  const sessionParticipant = await getParticipantFromPortalSession(
-    supabase,
-    req
-  ).catch(() => null);
+async function findParticipant(
+  supabase: any,
+  req: NextRequest,
+  body: any,
+) {
+  const sessionParticipant =
+    await getParticipantFromPortalSession(
+      supabase,
+      req,
+    ).catch(() => null);
 
-  if (sessionParticipant?.id) return sessionParticipant;
+  if (sessionParticipant?.id) {
+    return sessionParticipant;
+  }
 
-  const expectedSecret = clean(process.env.HEALTH_CONNECT_PUSH_SECRET);
-  const suppliedSecret = clean(req.headers.get("x-health-connect-secret"));
+  const expectedSecret = clean(
+    process.env.HEALTH_CONNECT_PUSH_SECRET,
+  );
 
-  if (!expectedSecret || suppliedSecret !== expectedSecret) {
+  const suppliedSecret = clean(
+    req.headers.get(
+      "x-health-connect-secret",
+    ),
+  );
+
+  if (
+    !expectedSecret ||
+    suppliedSecret !== expectedSecret
+  ) {
     return null;
   }
 
-  const participantId = num(body?.participant_id);
-  const code = clean(body?.participant_code || body?.code || body?.employee_code);
+  const participantId = num(
+    body?.participant_id,
+  );
 
   if (participantId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("wellness_participants")
       .select("*")
       .eq("id", participantId)
       .maybeSingle();
 
-    if (data?.id) return data;
+    if (error) {
+      throw error;
+    }
+
+    if (data?.id) {
+      return data;
+    }
   }
 
-  if (code) {
-    const { data } = await supabase
+  const companyId = num(
+    body?.wellness_company_id ||
+      body?.company_id,
+  );
+
+  const code = clean(
+    body?.participant_code ||
+      body?.code ||
+      body?.employee_code,
+  );
+
+  if (companyId && code) {
+    const { data, error } = await supabase
       .from("wellness_participants")
       .select("*")
+      .eq(
+        "wellness_company_id",
+        companyId,
+      )
       .eq("code", code)
       .maybeSingle();
 
-    if (data?.id) return data;
+    if (error) {
+      throw error;
+    }
+
+    if (data?.id) {
+      return data;
+    }
   }
 
   return null;
@@ -619,7 +666,42 @@ async function handlePush(req: NextRequest) {
     );
   }
 
-  const date = normalizeDate(body?.date || body?.log_date);
+  const date = normalizeDate(
+    body?.date ||
+      body?.log_date,
+  );
+
+  const programStartDate =
+    clean(
+      participant?.program_start_date,
+    ).slice(0, 10);
+
+  if (
+    programStartDate &&
+    date < programStartDate
+  ) {
+    return NextResponse.json(
+      {
+        ok: true,
+        marker:
+          "WELLNESS_HEALTH_CONNECT_PROGRAM_CUTOFF_V126F",
+        participant_id:
+          participantId,
+        action:
+          "before_program_start_skipped",
+        date,
+        program_start_date:
+          programStartDate,
+        inserted: 0,
+        updated: 0,
+        skipped: 1,
+        message:
+          `Data ${date} tidak disimpan karena program dimulai ${programStartDate}.`,
+      },
+      { status: 200 },
+    );
+  }
+
   const nowIso = new Date().toISOString();
 
   let inserted = 0;
@@ -740,6 +822,15 @@ async function handlePush(req: NextRequest) {
         workout?.start_time ||
         workout?.started_at
     );
+
+    if (
+      programStartDate &&
+      workoutDate <
+        programStartDate
+    ) {
+      skipped += 1;
+      continue;
+    }
 
     const externalId =
       clean(workout?.id || workout?.uid || workout?.external_id) ||

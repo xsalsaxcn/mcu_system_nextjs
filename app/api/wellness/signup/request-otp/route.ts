@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 import { NextRequest } from "next/server";
@@ -133,6 +134,20 @@ export async function POST(
     await req.json()
       .catch(() => ({}));
 
+  const companyId = Number(
+    body?.company_id ||
+      body?.wellness_company_id ||
+      0,
+  );
+
+  if (!(companyId > 0)) {
+    return fail(
+      "Perusahaan wajib dipilih.",
+      400,
+    );
+  }
+
+
 
   const employeeNo =
     clean(
@@ -185,6 +200,7 @@ export async function POST(
           "code",
           employeeNo
         )
+        .eq("wellness_company_id", companyId)
         .maybeSingle();
 
 

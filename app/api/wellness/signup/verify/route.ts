@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -25,12 +26,32 @@ function randomPassword() {
   return crypto.randomBytes(18).toString("base64url");
 }
 
-function safeUsername(employeeNo: string) {
-  return `wellness_${employeeNo}`.toLowerCase().replace(/[^a-z0-9_\-.]/g, "_").slice(0, 80);
+function safeUsername(
+  companyId: number,
+  employeeNo: string,
+) {
+  return `wellness_${companyId}_${employeeNo}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-.]/g, "_")
+    .slice(0, 80);
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
+
+  const companyId = Number(
+    body?.company_id ||
+      body?.wellness_company_id ||
+      0,
+  );
+
+  if (!(companyId > 0)) {
+    return fail(
+      "Perusahaan wajib dipilih.",
+      400,
+    );
+  }
+
   const employeeNo = clean(body.employee_no || body.code);
   const email = clean(body.email).toLowerCase();
   const phone = normalizePhone(body.phone);
@@ -44,6 +65,7 @@ export async function POST(req: NextRequest) {
       .from("wellness_participants")
       .select("id,code,name,email,phone,user_id,is_active")
       .eq("code", employeeNo)
+      .eq("wellness_company_id", companyId)
       .maybeSingle();
     if (participantError) throw participantError;
     if (!participant) return fail("No karyawan tidak ditemukan.", 404);
@@ -76,7 +98,7 @@ export async function POST(req: NextRequest) {
     await supabase.from("wellness_signup_otps").update({ used_at: new Date().toISOString() }).eq("id", otpRow.id);
 
     let userId = participant.user_id;
-    let username = safeUsername(employeeNo);
+    let username = safeUsername(companyId, employeeNo);
     if (!userId) {
       const { data: existingUser } = await supabase.from("users").select("id,username").eq("username", username).maybeSingle();
       if (existingUser?.id) {

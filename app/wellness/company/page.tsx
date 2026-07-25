@@ -95,6 +95,38 @@ export default function WellnessCompanyPortalPage() {
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
 
+    // WELLNESS_COMPANY_PAGE_URL_CONTEXT_V126C
+    // Admin membuka portal perusahaan dari company_id pada URL.
+    // Context disimpan dahulu agar seluruh endpoint Portal Perusahaan
+    // memakai perusahaan yang sama.
+    const requestedCompanyId =
+      typeof window !== "undefined"
+        ? Number(
+            new URLSearchParams(
+              window.location.search,
+            ).get("company_id") || 0,
+          )
+        : 0;
+
+    if (requestedCompanyId > 0) {
+      await fetch(
+        "/api/wellness/company/session",
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            company_id:
+              requestedCompanyId,
+          }),
+        },
+      ).catch(() => null);
+    }
+
     const result = await fetch("/api/wellness/company/dashboard?days=30", {
       cache: "no-store",
       credentials: "include",

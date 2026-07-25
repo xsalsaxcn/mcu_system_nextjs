@@ -2,6 +2,7 @@
 // Exact Android HistoryClient.readDailyTotal snapshot. No calorie estimation.
 // WELLNESS_GOOGLE_FIT_STABLE_NATIVE_V79R3
 // WELLNESS_GOOGLE_FIT_NATIVE_SNAPSHOT_ONLY_V86B
+// WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -148,6 +149,32 @@ export async function POST(req: NextRequest) {
     }
 
     const date = normalizeDate(body?.date);
+
+    const programStartDate =
+      clean(
+        participant?.program_start_date,
+      ).slice(0, 10);
+
+    if (
+      programStartDate &&
+      date < programStartDate
+    ) {
+      return NextResponse.json(
+        {
+          ok: true,
+          marker: MARKER,
+          action:
+            "before_program_start_skipped",
+          message:
+            `Data ${date} tidak disimpan karena program dimulai ${programStartDate}.`,
+          program_start_date:
+            programStartDate,
+          skipped_date: date,
+        },
+        { status: 200 },
+      );
+    }
+
     const measuredAtText = clean(body?.measured_at) || new Date().toISOString();
     const measuredAtMs = new Date(measuredAtText).getTime();
     if (!Number.isFinite(measuredAtMs)) {

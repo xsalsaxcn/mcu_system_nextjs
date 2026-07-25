@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
@@ -64,6 +65,7 @@ function chatSender(note: any) {
 function participantGroupIds(row: any) {
   return [
     row?.wellness_group_unit_id,
+    row?.wellness_kelompok_id,
     row?.group_unit_id,
     row?.group_id,
     row?.wellness_group_id,
@@ -72,28 +74,26 @@ function participantGroupIds(row: any) {
     .filter(Boolean);
 }
 
-function participantGroupNames(row: any) {
-  return [
-    row?.group_name,
-    row?.group_unit_name,
-    row?.risk_group,
-    row?.risk_category,
-    row?.category,
-    row?.group,
-  ]
-    .map((value) => clean(value).toLowerCase())
-    .filter(Boolean);
-}
+function matchingAssignment(
+  participant: any,
+  assignments: any[],
+) {
+  const ids =
+    participantGroupIds(participant);
 
-function matchingAssignment(participant: any, assignments: any[]) {
-  const ids = participantGroupIds(participant);
-  const names = participantGroupNames(participant);
   return (
-    assignments.find((item: any) => {
-      const id = clean(item?.wellness_group_unit_id);
-      const name = clean(item?.group_name).toLowerCase();
-      return (id && ids.includes(id)) || (name && names.includes(name));
-    }) || null
+    (assignments || []).find(
+      (item: any) => {
+        const id = clean(
+          item?.wellness_group_unit_id,
+        );
+
+        return Boolean(
+          id &&
+          ids.includes(id),
+        );
+      },
+    ) || null
   );
 }
 

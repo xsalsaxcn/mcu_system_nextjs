@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -50,6 +51,7 @@ function chatSender(note: any) {
 function participantGroupIds(row: any) {
   return [
     row?.wellness_group_unit_id,
+    row?.wellness_kelompok_id,
     row?.group_unit_id,
     row?.group_id,
     row?.wellness_group_id,
@@ -58,43 +60,48 @@ function participantGroupIds(row: any) {
     .filter(Boolean);
 }
 
-function participantGroupNames(row: any) {
-  return [
-    row?.group_name,
-    row?.group_unit_name,
-    row?.risk_group,
-    row?.risk_category,
-    row?.category,
-    row?.group,
-  ]
-    .map((value) => clean(value).toLowerCase())
-    .filter(Boolean);
-}
+function canAccessParticipant(
+  row: any,
+  assignments: any[],
+) {
+  if (!(assignments || []).length) {
+    return false;
+  }
 
-function canAccessParticipant(row: any, assignments: any[]) {
   const allowedIds = new Set(
-    assignments.map((item) => clean(item.wellness_group_unit_id)).filter(Boolean)
-  );
-  const allowedNames = new Set(
-    assignments.map((item) => clean(item.group_name).toLowerCase()).filter(Boolean)
+    (assignments || [])
+      .map((item) =>
+        clean(
+          item.wellness_group_unit_id,
+        ),
+      )
+      .filter(Boolean),
   );
 
-  return (
-    participantGroupIds(row).some((id) => allowedIds.has(id)) ||
-    participantGroupNames(row).some((name) => allowedNames.has(name))
+  return participantGroupIds(row).some(
+    (id) => allowedIds.has(id),
   );
 }
 
-function assignedGroupFor(row: any, assignments: any[]) {
+function assignedGroupFor(
+  row: any,
+  assignments: any[],
+) {
   const ids = participantGroupIds(row);
-  const names = participantGroupNames(row);
 
   return (
-    assignments.find((item) => {
-      const id = clean(item.wellness_group_unit_id);
-      const name = clean(item.group_name).toLowerCase();
-      return (id && ids.includes(id)) || (name && names.includes(name));
-    }) || null
+    (assignments || []).find(
+      (item) => {
+        const id = clean(
+          item.wellness_group_unit_id,
+        );
+
+        return Boolean(
+          id &&
+          ids.includes(id),
+        );
+      },
+    ) || null
   );
 }
 
@@ -139,16 +146,19 @@ async function assignedScope(supabase: any, coachId: number) {
 function findGroupParticipants(
   participants: any[],
   groupId: any,
-  groupName: any
+  _groupName: any,
 ) {
   const id = clean(groupId);
-  const name = clean(groupName).toLowerCase();
 
-  return participants.filter((row) => {
-    if (id && participantGroupIds(row).includes(id)) return true;
-    if (name && participantGroupNames(row).includes(name)) return true;
-    return false;
-  });
+  if (!id) {
+    return [];
+  }
+
+  return (participants || []).filter(
+    (row) =>
+      participantGroupIds(row)
+        .includes(id),
+  );
 }
 
 function participantGroupName(row: any) {

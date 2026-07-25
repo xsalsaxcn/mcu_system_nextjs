@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_PARTICIPANT_REAL_EMAIL_OTP_V394_MICROSOFT365
 // WELLNESS_PARTICIPANT_SESSION_ADMIN_GUARD_V79F
 
@@ -163,6 +164,20 @@ async function sendOtpEmail(params: {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
 
+  const companyId = Number(
+    body?.company_id ||
+      body?.wellness_company_id ||
+      0,
+  );
+
+  if (!(companyId > 0)) {
+    return fail(
+      "Perusahaan wajib dipilih.",
+      400,
+    );
+  }
+
+
   const code = clean(body.code || body.employee_no || body.no_karyawan);
   const email = clean(body.email).toLowerCase();
   const phone = normalizePhone(body.phone || body.no_hp);
@@ -176,6 +191,7 @@ export async function POST(req: NextRequest) {
       .from("wellness_participants")
       .select("id,code,name,email,phone,is_active")
       .eq("code", code)
+      .eq("wellness_company_id", companyId)
       .maybeSingle();
 
     if (error) throw error;

@@ -1,4 +1,5 @@
 // WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414
+// WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 // Google Fit daily sync using Google Fit aggregate API.
 // Goals:
 // - Read daily aggregate numbers closer to Google Fit App.
@@ -484,8 +485,18 @@ export async function POST(req: NextRequest) {
     for (const key of caloriesResult.rows.keys()) dateKeys.add(key);
     for (const key of activeMinutesResult.rows.keys()) dateKeys.add(key);
 
+    const programStartDate =
+      clean(
+        participant?.program_start_date,
+      ).slice(0, 10);
+
     const dailyRows = [...dateKeys]
       .sort((a, b) => a.localeCompare(b))
+      .filter(
+        (date) =>
+          !programStartDate ||
+          date >= programStartDate,
+      )
       .map((date) => {
         const steps = Math.round(Number(stepsResult.rows.get(date) || 0));
 

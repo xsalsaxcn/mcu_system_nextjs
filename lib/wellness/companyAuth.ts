@@ -150,10 +150,14 @@ export async function resolveCompanyPortalContext(
     request.cookies.get("wellness_company_context")?.value,
   );
 
-  let selectedCompanyId = directCompanyId;
-  if (!selectedCompanyId && isManager) {
-    selectedCompanyId = queryCompanyId || cookieCompanyId;
-  }
+  // WELLNESS_MANAGER_COMPANY_CONTEXT_PRIORITY_V126C
+  // Manager/Admin boleh memilih perusahaan melalui query atau context cookie.
+  // User perusahaan biasa tetap terkunci ke perusahaan dari akunnya.
+  const selectedCompanyId = isManager
+    ? queryCompanyId ||
+      cookieCompanyId ||
+      directCompanyId
+    : directCompanyId;
 
   let company = selectedCompanyId
     ? companies.find((item: any) => numeric(item.id) === selectedCompanyId) || null

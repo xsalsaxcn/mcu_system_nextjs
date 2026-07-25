@@ -1,0 +1,10 @@
+PASS nutrition input: 5
+PASS nutrition bonus under: 10
+PASS nutrition bonus over: 0
+PASS nutrition no input: 0
+PASS workout reached: 10
+PASS workout below: 5
+PASS workout none: 0
+PASS healthtalk offline photo: 20
+PASS healthtalk offline no photo: 10
+PASS healthtalk online photo: 10

@@ -1,8 +1,15 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -91,27 +98,13 @@ function getParticipantId(row: any) {
 // di Kelompok maupun seluruh Group anaknya.
 function participantGroupIds(row: any) {
   return [
-    row?.wellness_kelompok_id,
     row?.wellness_group_unit_id,
+    row?.wellness_kelompok_id,
     row?.group_unit_id,
     row?.group_id,
     row?.wellness_group_id,
   ]
-    .map((x) => clean(x))
-    .filter(Boolean);
-}
-
-function participantGroupNames(row: any) {
-  return [
-    row?.kelompok_name,
-    row?.group_name,
-    row?.group_unit_name,
-    row?.risk_group,
-    row?.risk_category,
-    row?.category,
-    row?.group,
-  ]
-    .map((x) => clean(x).toLowerCase())
+    .map(clean)
     .filter(Boolean);
 }
 
@@ -137,36 +130,48 @@ function participantRisk(row: any) {
   );
 }
 
-function canAccessParticipant(row: any, assignments: any[]) {
-  if (!assignments.length) return false;
+function canAccessParticipant(
+  row: any,
+  assignments: any[],
+) {
+  if (!(assignments || []).length) {
+    return false;
+  }
 
   const allowedIds = new Set(
-    assignments
-      .map((item) => clean(item.wellness_group_unit_id))
-      .filter(Boolean),
-  );
-  const allowedNames = new Set(
-    assignments
-      .map((item) => clean(item.group_name).toLowerCase())
+    (assignments || [])
+      .map((item) =>
+        clean(
+          item.wellness_group_unit_id,
+        ),
+      )
       .filter(Boolean),
   );
 
-  return (
-    participantGroupIds(row).some((id) => allowedIds.has(id)) ||
-    participantGroupNames(row).some((name) => allowedNames.has(name))
+  return participantGroupIds(row).some(
+    (id) => allowedIds.has(id),
   );
 }
 
-function assignedGroupFor(row: any, assignments: any[]) {
+function assignedGroupFor(
+  row: any,
+  assignments: any[],
+) {
   const ids = participantGroupIds(row);
-  const names = participantGroupNames(row);
 
   return (
-    assignments.find((item) => {
-      const id = clean(item.wellness_group_unit_id);
-      const name = clean(item.group_name).toLowerCase();
-      return (id && ids.includes(id)) || (name && names.includes(name));
-    }) || null
+    (assignments || []).find(
+      (item) => {
+        const id = clean(
+          item.wellness_group_unit_id,
+        );
+
+        return Boolean(
+          id &&
+          ids.includes(id),
+        );
+      },
+    ) || null
   );
 }
 
@@ -592,22 +597,50 @@ export async function GET(request: NextRequest) {
 
     const participantCards = participants.map((row: any) => {
       const id = getParticipantId(row);
-      const acts = activityRows.filter(
-        (item) => asNumber(item.participant_id) === id,
-      );
+      const acts =
+        filterOperationalRowsForProgram(
+          row,
+          activityRows.filter(
+            (item) =>
+              asNumber(
+                item.participant_id,
+              ) === id,
+          ),
+          fromDate,
+          today,
+          [
+            "log_date",
+            "started_at",
+            "created_at",
+          ],
+        );
       const canonicalHistory = nutritionHistory.byParticipantId.get(id);
       const allFoods = canonicalHistory?.logs || [];
-      const foods = allFoods.filter((item: any) => {
-        const date = foodDate(item);
-        return date >= fromDate && date <= today;
-      });
+      const foods =
+        filterOperationalRowsForProgram(
+          row,
+          allFoods,
+          fromDate,
+          today,
+          ["log_date", "created_at"],
+        );
       const nutritionPointInputs = [
         ...new Map(
           pointRows
             .filter(
               (item) =>
                 asNumber(item.participant_id) === id &&
-                isNutritionInputPoint(item),
+                isNutritionInputPoint(item) &&
+                isOperationalRowInProgramWindow(
+                  row,
+                  item,
+                  fromDate,
+                  today,
+                  [
+                    "log_date",
+                    "created_at",
+                  ],
+                ),
             )
             .map((item) => [nutritionPointIdentity(item), item]),
         ).values(),
@@ -619,7 +652,7 @@ export async function GET(request: NextRequest) {
         (date) => date >= fromDate && date <= today,
       );
       const foodDates = foods.map(foodDate).filter(Boolean);
-      const allFoodDates = allFoods.map(foodDate).filter(Boolean);
+      const allFoodDates = foods.map(foodDate).filter(Boolean);
       const nutritionDates = [
         ...new Set([...foodDates, ...recentNutritionDates]),
       ];
@@ -745,10 +778,8 @@ export async function GET(request: NextRequest) {
       const name = clean(item.group_name) || `Group ${id}`;
       const members = participantCards.filter((participant) => {
         const row = participant.raw || {};
-        return (
-          participantGroupIds(row).includes(id) ||
-          participantGroupNames(row).includes(name.toLowerCase())
-        );
+        // WELLNESS_COACH_DASHBOARD_MEMBER_ID_ONLY_V126C
+        return participantGroupIds(row).includes(id);
       });
 
       return {

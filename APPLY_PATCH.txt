@@ -1,0 +1,3 @@
+Copy the files in this patch folder into the repository root while preserving their paths, then deploy the Next.js application.
+
+No SQL migration is required by this patch. The existing wellness_point_logs table is used when available. Source-derived front-end calculation remains available if a ledger write fails.

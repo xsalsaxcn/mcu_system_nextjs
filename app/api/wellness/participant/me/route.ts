@@ -1,5 +1,7 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V377_PORTAL_ME
 // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_V79F
+// WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 
 import { NextRequest, NextResponse } from "next/server";
 import { fail, ok } from "@/lib/server/response";
@@ -7,6 +9,12 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { clearPortalCookie, getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 
 export const runtime = "nodejs";
 
@@ -143,20 +151,30 @@ export async function GET(req: NextRequest) {
       .order("checkup_date", { ascending: false })
       .limit(50);
 
-    let historyByCode: any[] = [];
-    const code = clean(participant.code || participant.employee_code || participant.no_karyawan);
-    if (code) {
-      const { data } = await supabase
-        .from("wellness_checkup_history")
-        .select("*")
-        .eq("employee_code", code)
-        .order("checkup_date", { ascending: false })
-        .limit(50);
-      historyByCode = data || [];
-    }
 
-    const clinical_history = mergeUniqueRows(historyById || [], historyByCode || [])
-      .sort((a, b) => String(b.checkup_date || b.created_at || "").localeCompare(String(a.checkup_date || a.created_at || "")));
+    // WELLNESS_PARTICIPANT_ID_ONLY_HISTORY_V126C
+    // History hanya mengikuti participant_id.
+    const clinical_history =
+      filterClinicalRowsForProgram(
+        participant,
+        mergeUniqueRows(
+          historyById || [],
+        ),
+        "",
+        "",
+      ).sort((a, b) =>
+        String(
+          b.checkup_date ||
+            b.created_at ||
+            "",
+        ).localeCompare(
+          String(
+            a.checkup_date ||
+              a.created_at ||
+              "",
+          ),
+        ),
+      );
 
     const controlMap = await loadParticipantControlMap(supabase, [participant.id]);
     const fitnessSettings = controlMap.get(Number(participant.id)) ||
@@ -170,12 +188,80 @@ export async function GET(req: NextRequest) {
         has_multiple_active_providers: false,
         source_connected: false,
       };
-    const selectedActivities = filterActivityRowsByFitnessSource(
-      activities || [],
-      controlMap,
-    );
+    const selectedActivities =
+      filterOperationalRowsForProgram(
+        participant,
+        filterActivityRowsByFitnessSource(
+          activities || [],
+          controlMap,
+        ),
+        "",
+        "",
+        [
+          "log_date",
+          "started_at",
+          "created_at",
+        ],
+      );
     const activity_summary = buildActivitySummary(selectedActivities, participant);
 
+
+    // WELLNESS_PROFILE_COMPANY_LAST_LOGIN_V126F
+    // Informasi profil tambahan tanpa mengubah autentikasi peserta.
+    const companyId = Number(
+      participant?.wellness_company_id ||
+        participant?.company_id ||
+        0,
+    );
+
+    let participantCompanyName =
+      clean(
+        participant?.company_name ||
+          participant?.company ||
+          participant?.nama_perusahaan,
+      );
+
+    if (
+      !participantCompanyName &&
+      companyId > 0
+    ) {
+      const companyResult =
+        await supabase
+          .from("wellness_companies")
+          .select("id,name")
+          .eq("id", companyId)
+          .maybeSingle();
+
+      if (!companyResult.error) {
+        participantCompanyName =
+          clean(companyResult.data?.name);
+      }
+    }
+
+    const latestSessionResult =
+      await supabase
+        .from(
+          "wellness_participant_sessions",
+        )
+        .select(
+          "created_at,expires_at",
+        )
+        .eq(
+          "participant_id",
+          participant.id,
+        )
+        .order(
+          "created_at",
+          { ascending: false },
+        )
+        .limit(1)
+        .maybeSingle();
+
+    const lastLoginAt =
+      latestSessionResult.error
+        ? null
+        : latestSessionResult
+            .data?.created_at || null;
 
     // PROFILE PHOTO ONLY PATCH
     // Tidak mengubah data participant lain.
@@ -198,6 +284,10 @@ export async function GET(req: NextRequest) {
     return ok({
       participant: {
         ...participant,
+        company_name:
+          participantCompanyName || "-",
+        last_login_at:
+          lastLoginAt,
         photo_url:
           profilePhoto.photo_url || "",
         photo_preview_url:

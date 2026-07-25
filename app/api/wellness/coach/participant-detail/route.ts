@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -7,6 +8,12 @@ import {
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
+import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
 import {
   healthtalkPointsFromRow,
   nutritionDailyBonusPoints,
@@ -79,6 +86,7 @@ function dateLabel(value: any) {
 function participantIds(row: any) {
   return [
     row?.wellness_group_unit_id,
+    row?.wellness_kelompok_id,
     row?.group_unit_id,
     row?.group_id,
     row?.wellness_group_id,
@@ -87,30 +95,26 @@ function participantIds(row: any) {
     .filter(Boolean);
 }
 
-function participantNames(row: any) {
-  return [
-    row?.group_name,
-    row?.group_unit_name,
-    row?.risk_group,
-    row?.risk_category,
-    row?.category,
-    row?.group,
-  ]
-    .map((value) => clean(value).toLowerCase())
-    .filter(Boolean);
-}
+function canAccessParticipant(
+  row: any,
+  assignments: any[],
+) {
+  if (!(assignments || []).length) {
+    return false;
+  }
 
-function canAccessParticipant(row: any, assignments: any[]) {
   const allowedIds = new Set(
-    (assignments || []).map((item) => clean(item.wellness_group_unit_id)).filter(Boolean)
-  );
-  const allowedNames = new Set(
-    (assignments || []).map((item) => clean(item.group_name).toLowerCase()).filter(Boolean)
+    (assignments || [])
+      .map((item) =>
+        clean(
+          item.wellness_group_unit_id,
+        ),
+      )
+      .filter(Boolean),
   );
 
-  return (
-    participantIds(row).some((id) => allowedIds.has(id)) ||
-    participantNames(row).some((name) => allowedNames.has(name))
+  return participantIds(row).some(
+    (id) => allowedIds.has(id),
   );
 }
 
@@ -482,9 +486,7 @@ export async function GET(request: NextRequest) {
       safeSelect(supabase, "wellness_weight_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(1000)),
       safeSelect(supabase, "wellness_clinical_history", (q) => q.eq("participant_id", participantId).limit(1000)),
       safeSelect(supabase, "wellness_checkup_history", (q) => q.eq("participant_id", participantId).order("checkup_date", { ascending: true }).limit(1000)),
-      code
-        ? safeSelect(supabase, "wellness_checkup_history", (q) => q.eq("employee_code", code).order("checkup_date", { ascending: true }).limit(1000))
-        : Promise.resolve([]),
+      [],
       safeSelect(supabase, "wellness_mini_mcu_logs", (q) => q.eq("participant_id", participantId).order("exam_date", { ascending: true }).limit(1000)),
       safeSelect(supabase, "wellness_point_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(3000)),
       safeSelect(supabase, "wellness_healthtalk_logs", (q) => q.eq("participant_id", participantId).order("event_date", { ascending: true }).limit(1000)),
@@ -495,16 +497,63 @@ export async function GET(request: NextRequest) {
       supabase,
       [participantId],
     );
-    const activityRows = filterActivityRowsByFitnessSource(
-      activityRowsRaw,
-      participantControlMap,
-    );
+    const activityRows =
+      filterOperationalRowsForProgram(
+        participant,
+        filterActivityRowsByFitnessSource(
+          activityRowsRaw,
+          participantControlMap,
+        ),
+        "",
+        "",
+        [
+          "log_date",
+          "started_at",
+          "created_at",
+        ],
+      );
+
+    const scopedFoodRows =
+      filterOperationalRowsForProgram(
+        participant,
+        foodRows,
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
+
+    const scopedWeightRows =
+      filterOperationalRowsForProgram(
+        participant,
+        weightRows,
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
+
+    const scopedMiniMcuRows =
+      filterOperationalRowsForProgram(
+        participant,
+        miniMcuRows,
+        "",
+        "",
+        ["exam_date", "created_at"],
+      );
+
+    const scopedPointRows =
+      filterOperationalRowsForProgram(
+        participant,
+        pointRows,
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
 
     const [nutritionHistory, sheetResult] = await Promise.all([
       loadCanonicalNutritionHistory({
         supabase,
         participant,
-        dbRows: foodRows,
+        dbRows: scopedFoodRows,
       }),
       fetchWellnessGoogleSheetRows({
         participantId,
@@ -514,12 +563,46 @@ export async function GET(request: NextRequest) {
     ]);
 
     const sheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(sheetResult.rows || []).filter((row: any) => {
-      return asNumber(row.participant_id) === participantId || (code && clean(row.participant_code) === code);
+      return asNumber(row.participant_id) === participantId;
     });
 
-    const mergedFoodRows = nutritionHistory.logs || [];
-    const mergedHealthtalkRows = mergeRows(healthtalkRows, sheetHealthtalkRows);
-    const clinicalAll = mergeRows(clinicalRows, historyById, historyByCode, miniMcuRows);
+    const mergedFoodRows =
+      filterOperationalRowsForProgram(
+        participant,
+        nutritionHistory.logs || [],
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
+
+    const mergedHealthtalkRows =
+      filterOperationalRowsForProgram(
+        participant,
+        mergeRows(
+          healthtalkRows,
+          sheetHealthtalkRows,
+        ),
+        "",
+        "",
+        [
+          "event_date",
+          "log_date",
+          "created_at",
+        ],
+      );
+
+    const clinicalAll =
+      filterClinicalRowsForProgram(
+        participant,
+        mergeRows(
+          clinicalRows,
+          historyById,
+          historyByCode,
+          scopedMiniMcuRows,
+        ),
+        "",
+        "",
+      );
 
     const nutritionTargetCalories = nutritionTargetForParticipant(participant, targetNotes);
     const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes) || 300;
@@ -576,7 +659,7 @@ export async function GET(request: NextRequest) {
     }
 
     let otherPoints = 0;
-    for (const row of pointRows) {
+    for (const row of scopedPointRows) {
       if (pointCategory(row) !== "other") continue;
       const points = asNumber(row?.points);
       otherPoints += points;
@@ -588,7 +671,7 @@ export async function GET(request: NextRequest) {
     }
 
     const resolvedPointLedger = resolveWellnessPointBreakdown({
-      ledgerRows: pointRows,
+      ledgerRows: scopedPointRows,
       calculated: {
         nutrition: nutritionPoints,
         workout: activityPoints,
@@ -626,15 +709,15 @@ export async function GET(request: NextRequest) {
       workout_calories: workoutChart,
       steps: stepChart,
       weight_kg: compactClinicalPoints(
-        mergeRows(weightRows, clinicalAll),
+        mergeRows(scopedWeightRows, clinicalAll),
         (row) => nullableNumber(row?.weight_kg, row?.weight, row?.body_weight)
       ),
       bmi: compactClinicalPoints(
-        mergeRows(weightRows, clinicalAll),
+        mergeRows(scopedWeightRows, clinicalAll),
         (row) => nullableNumber(row?.bmi)
       ),
       waist_cm: compactClinicalPoints(
-        mergeRows(weightRows, clinicalAll),
+        mergeRows(scopedWeightRows, clinicalAll),
         (row) => nullableNumber(row?.waist_cm, row?.waist_circumference)
       ),
       hba1c: compactClinicalPoints(

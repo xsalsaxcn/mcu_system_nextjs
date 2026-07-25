@@ -1,3 +1,4 @@
+// WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_HELPER
 // Server helper for the existing Google Apps Script webhook v370.
 // It supports:
@@ -180,6 +181,7 @@ export function buildBaseFormRow(params: {
     "Bukti Healthtalk": "",
     "Preview Bukti Healthtalk": "",
     "Total Point": "",
+    "Company ID": participant.wellness_company_id || participant.company_id || "",
     "Company": company,
     "Kelompok": participant.group_name || participant.kelompok || "",
     "Group Upload": "Portal Peserta",

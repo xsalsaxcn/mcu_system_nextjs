@@ -5,6 +5,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import {
+  filterClinicalRowsForProgram,
+  filterOperationalRowsForProgram,
+  isOperationalRowInProgramWindow,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
+import {
   fetchWellnessGoogleSheetRows,
   googleSheetRowsToFoodLogs,
   googleSheetRowsToHealthtalkLogs,
@@ -200,18 +206,46 @@ export async function GET(req: NextRequest) {
         resolveParticipantPointTargets(supabase, participant),
       ]);
 
-    const matchesParticipant = (row: any) =>
-      Number(row?.participant_id) === participantId ||
-      (participantCode && clean(row?.participant_code) === participantCode);
+    // V126D: identitas Sheet wajib participant_id.
+    const matchesParticipant =
+      (row: any) =>
+        Number(
+          row?.participant_id,
+        ) === participantId;
 
-    const foodRows = uniqueRows(
-      googleSheetRowsToFoodLogs(sheetResult.rows || []).filter(matchesParticipant),
-    );
-    const healthtalkRows = uniqueRows(
-      googleSheetRowsToHealthtalkLogs(sheetResult.rows || []).filter(
-        matchesParticipant,
-      ),
-    );
+    const foodRows =
+      filterOperationalRowsForProgram(
+        participant,
+        uniqueRows(
+          googleSheetRowsToFoodLogs(
+            sheetResult.rows || [],
+          ).filter(
+            matchesParticipant,
+          ),
+        ),
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
+
+    const healthtalkRows =
+      filterOperationalRowsForProgram(
+        participant,
+        uniqueRows(
+          googleSheetRowsToHealthtalkLogs(
+            sheetResult.rows || [],
+          ).filter(
+            matchesParticipant,
+          ),
+        ),
+        "",
+        "",
+        [
+          "event_date",
+          "log_date",
+          "created_at",
+        ],
+      );
 
     const nutritionByDate = new Map<string, { count: number; calories: number }>();
     for (const row of foodRows) {
@@ -233,9 +267,23 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const selectedActivities = normalizeActivities(
-      filterActivityRowsByFitnessSource(activityResult.data || [], controlMap),
-    );
+    const selectedActivities =
+      filterOperationalRowsForProgram(
+        participant,
+        normalizeActivities(
+          filterActivityRowsByFitnessSource(
+            activityResult.data || [],
+            controlMap,
+          ),
+        ),
+        "",
+        "",
+        [
+          "log_date",
+          "started_at",
+          "created_at",
+        ],
+      );
     const workoutByDate = new Map<
       string,
       { calories: number; hasActivity: boolean }
@@ -266,7 +314,16 @@ export async function GET(req: NextRequest) {
       (sum: number, row: any) => sum + healthtalkPointsFromRow(row),
       0,
     );
-    const ledgerRows = ledgerResult.error ? [] : ledgerResult.data || [];
+    const ledgerRows =
+      filterOperationalRowsForProgram(
+        participant,
+        ledgerResult.error
+          ? []
+          : ledgerResult.data || [],
+        "",
+        "",
+        ["log_date", "created_at"],
+      );
     const otherPoints = ledgerRows
       .filter((row: any) => wellnessPointCategory(row) === "other")
       .reduce((sum: number, row: any) => sum + numberValue(row?.points), 0);
