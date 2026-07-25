@@ -11,6 +11,7 @@
 // WELLNESS_GOOGLE_FIT_CARD_TOTAL_DISPLAY_V124
 // WELLNESS_FITNESS_NATIVE_ALIGNMENT_V125_FIX
 // WELLNESS_GOOGLE_FIT_FIRST_CONNECT_SYNC_UNLOCK_V111
+// WELLNESS_GOOGLE_FIT_MANUAL_FORCE_RESTART_V113
   // WELLNESS_GOOGLE_FIT_CONNECTION_STATUS_V79G
 // WELLNESS_TODAY_NUTRITION_GOOGLE_FIT_LABEL_V73
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
@@ -1155,12 +1156,21 @@ export default function WellnessParticipantPortalPage() {
     // Bila user menekan tombol saat native sync masih berjalan, ubah proses
     // tersebut menjadi sync terlihat agar klik tetap memberi respons.
     if (isGoogleFit && googleFitNativeInFlightV111.current) {
-      if (!silent) {
-        googleFitNativeSilentV125Fix.current = false;
-        setSyncing("google-fit");
-        setMessage("Sinkronisasi Google Fit sedang berjalan. Menunggu hasil dari perangkat...");
+      if (silent) {
+        return;
       }
-      return;
+
+      // V113: klik manual tidak boleh hanya menunggu callback lama.
+      // Bersihkan status native yang mungkin stale, lalu mulai request baru.
+      if (googleFitNativeTimeoutV111.current !== null) {
+        window.clearTimeout(googleFitNativeTimeoutV111.current);
+        googleFitNativeTimeoutV111.current = null;
+      }
+
+      googleFitNativeInFlightV111.current = false;
+      googleFitNativeSilentV125Fix.current = false;
+      setSyncing("");
+      setMessage("Memulai ulang sinkronisasi Google Fit...");
     }
 
     // V125 FIX: pada aplikasi Android gunakan snapshot native HP.
