@@ -10,6 +10,7 @@ import { classifyWellnessRisk } from "@/lib/wellness/riskRules";
 export const runtime = "nodejs";
 
 // WELLNESS_SETTINGS_PARAMETER_V350_IMPORT_API
+// WELLNESS_COMPANY_SCOPED_IMPORT_V126A
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -190,60 +191,107 @@ async function maybeGetOrCreateCompany(supabase: any, companyId: any, companyNam
   }
 }
 
-async function findExistingParticipantScoped(supabase: any, employeeNo: string, companyId: any, kelompokId: any, groupUnitId: any) {
-  // WELLNESS_INPUT_PRO_SELECTOR_V359_IMPORT_GUARD: code is unique in wellness_participants.
-  // First try selected scope, then fallback to global KODE to prevent duplicate-key errors.
+async function findExistingParticipantScoped(
+  supabase: any,
+  employeeNo: string,
+  companyId: any,
+  _kelompokId: any,
+  _groupUnitId: any,
+) {
+  /*
+   * WELLNESS_COMPANY_SCOPED_IMPORT_V126A
+   *
+   * Identitas peserta:
+   * wellness_company_id + normalized employee code.
+   *
+   * Kelompok dan Group bukan bagian dari identitas.
+   * Peserta dapat dipindahkan antar-Group dalam perusahaan
+   * yang sama tanpa membuat participant baru.
+   *
+   * Tidak boleh melakukan fallback berdasarkan kode global.
+   */
   const code = clean(employeeNo);
   const companyIdNum = toNumber(companyId);
-  const kelompokIdNum = toNumber(kelompokId);
-  const groupUnitIdNum = toNumber(groupUnitId);
 
-  try {
-    let query = supabase.from("wellness_participants").select("id,name,code").eq("code", code);
-    if (companyIdNum) query = query.eq("wellness_company_id", companyIdNum);
-    if (kelompokIdNum) query = query.eq("wellness_kelompok_id", kelompokIdNum);
-    if (groupUnitIdNum) query = query.eq("wellness_group_unit_id", groupUnitIdNum);
-    const { data, error } = await query.limit(1).maybeSingle();
-    if (error) throw error;
-    if (data?.id) return data;
-
-    const { data: globalData, error: globalError } = await supabase
-      .from("wellness_participants")
-      .select("id,name,code")
-      .eq("code", code)
-      .limit(1)
-      .maybeSingle();
-    if (globalError) throw globalError;
-    return globalData;
-  } catch (error: any) {
-    if (!isMissingWellnessColumn(error)) throw error;
-    const { data, error: fallbackError } = await supabase
-      .from("wellness_participants")
-      .select("id,name,code")
-      .eq("code", code)
-      .limit(1)
-      .maybeSingle();
-    if (fallbackError) throw fallbackError;
-    return data;
+  if (!companyIdNum) {
+    throw new Error(
+      "Perusahaan tujuan wajib dipilih sebelum import peserta.",
+    );
   }
+
+  if (!code) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("wellness_participants")
+    .select(
+      "id,name,code,wellness_company_id",
+    )
+    .eq(
+      "wellness_company_id",
+      companyIdNum,
+    )
+    .eq("code", code)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
 }
 
-async function saveParticipant(supabase: any, existingId: any, basePayload: any, extendedPayload: any) {
-  if (existingId) {
-    const { error } = await supabase.from("wellness_participants").update(extendedPayload).eq("id", existingId);
-    if (!error) return { fallback: false };
-    if (!isMissingWellnessColumn(error)) throw error;
-    const { error: fallbackError } = await supabase.from("wellness_participants").update(basePayload).eq("id", existingId);
-    if (fallbackError) throw fallbackError;
-    return { fallback: true };
+async function saveParticipant(
+  supabase: any,
+  existingId: any,
+  _basePayload: any,
+  extendedPayload: any,
+) {
+  /*
+   * Jangan menyimpan participant tanpa company ID.
+   * Fallback basePayload lama sengaja dihapus.
+   */
+  const companyId = toNumber(
+    extendedPayload?.wellness_company_id,
+  );
+
+  if (!companyId) {
+    throw new Error(
+      "wellness_company_id wajib tersedia saat menyimpan peserta.",
+    );
   }
 
-  const { error } = await supabase.from("wellness_participants").insert({ ...extendedPayload, created_at: new Date().toISOString() });
-  if (!error) return { fallback: false };
-  if (!isMissingWellnessColumn(error)) throw error;
-  const { error: fallbackError } = await supabase.from("wellness_participants").insert({ ...basePayload, created_at: new Date().toISOString() });
-  if (fallbackError) throw fallbackError;
-  return { fallback: true };
+  if (existingId) {
+    const { error } = await supabase
+      .from("wellness_participants")
+      .update(extendedPayload)
+      .eq("id", existingId);
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      fallback: false,
+    };
+  }
+
+  const { error } = await supabase
+    .from("wellness_participants")
+    .insert({
+      ...extendedPayload,
+      created_at: new Date().toISOString(),
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    fallback: false,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -274,8 +322,23 @@ export async function POST(req: NextRequest) {
     const headers = rows[headerRowIndex] || [];
     const dataRows = rows.slice(headerRowIndex + 1);
     const supabase = getSupabaseAdmin();
-    const companyId = await maybeGetOrCreateCompany(supabase, requestedCompanyId, companyName);
-    const defaultGroupId = await getOrCreateGroup(supabase, defaultGroupName);
+    const companyId = await maybeGetOrCreateCompany(
+      supabase,
+      requestedCompanyId,
+      companyName,
+    );
+
+    if (!companyId) {
+      return fail(
+        "Perusahaan tujuan wajib dipilih sebelum import peserta.",
+        400,
+      );
+    }
+
+    const defaultGroupId = await getOrCreateGroup(
+      supabase,
+      defaultGroupName,
+    );
 
     let inserted = 0;
     let updated = 0;
