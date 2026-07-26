@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AuthGate from "@/components/AuthGate";
 
@@ -78,9 +78,16 @@ function parseImportedFood(row: any, rowNumber: number) {
 }
 
 function WellnessMaster() {
+  // WELLNESS_MASTER_SERVER_PAGINATION_V126J
   const [foods, setFoods] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [foodSearch, setFoodSearch] = useState("");
+  const [foodPage, setFoodPage] = useState(1);
+  const [foodTotal, setFoodTotal] = useState(0);
+  const [foodTotalPages, setFoodTotalPages] = useState(1);
+  const [foodFrom, setFoodFrom] = useState(0);
+  const [foodTo, setFoodTo] = useState(0);
+  const [foodLoading, setFoodLoading] = useState(false);
   const [message, setMessage] = useState(
     "Master Wellness memakai database internal, bukan Google Sheet.",
   );
@@ -92,24 +99,76 @@ function WellnessMaster() {
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
+  async function loadFoods(page = foodPage, search = foodSearch) {
+    setFoodLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: "100",
+      });
+
+      if (clean(search)) params.set("q", clean(search));
+
+      const response = await fetch(
+        `/api/wellness/reference/foods?${params.toString()}`,
+        { cache: "no-store" },
+      );
+
+      const json = await response.json().catch(() => ({}));
+
+      if (!response.ok || !json.ok) {
+        throw new Error(
+          json.message || "Master makanan gagal dimuat.",
+        );
+      }
+
+      const pagination = json.pagination || {};
+
+      setFoods(json.foods || []);
+      setFoodTotal(Number(pagination.total || 0));
+      setFoodTotalPages(Number(pagination.total_pages || 1));
+      setFoodFrom(Number(pagination.from || 0));
+      setFoodTo(Number(pagination.to || 0));
+    } catch (error: any) {
+      setFoods([]);
+      setMessage(
+        error?.message || "Master makanan gagal dimuat.",
+      );
+    } finally {
+      setFoodLoading(false);
+    }
+  }
+
+  async function loadActivities() {
+    const json = await fetch(
+      "/api/wellness/reference/activities",
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch(() => ({}));
+
+    setActivities(json.activities || []);
+  }
+
   async function load() {
-    const [foodJson, activityJson] = await Promise.all([
-      fetch("/api/wellness/reference/foods?limit=2000", {
-        cache: "no-store",
-      })
-        .then((r) => r.json())
-        .catch(() => ({})),
-      fetch("/api/wellness/reference/activities", { cache: "no-store" })
-        .then((r) => r.json())
-        .catch(() => ({})),
+    await Promise.all([
+      loadFoods(1, foodSearch),
+      loadActivities(),
     ]);
-    setFoods(foodJson.foods || []);
-    setActivities(activityJson.activities || []);
   }
 
   useEffect(() => {
-    void load();
+    void loadActivities();
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadFoods(foodPage, foodSearch);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [foodPage, foodSearch]);
 
   async function setupDefaults() {
     setMessage("Mengisi master KaloriData dan KaloriOlahraga...");
@@ -121,7 +180,8 @@ function WellnessMaster() {
       return;
     }
     setMessage(`Setup berhasil: ${json.foods} makanan, ${json.activities} aktivitas.`);
-    void load();
+    setFoodPage(1);
+      void loadFoods(1, foodSearch);
   }
 
   async function saveFood(event: React.FormEvent) {
@@ -136,7 +196,8 @@ function WellnessMaster() {
     );
     if (json.ok) {
       setFoodForm({});
-      void load();
+      setFoodPage(1);
+      void loadFoods(1, foodSearch);
     }
   }
 
@@ -152,7 +213,8 @@ function WellnessMaster() {
     );
     if (json.ok) {
       setActivityForm({ unit: "menit" });
-      void load();
+      setFoodPage(1);
+      void loadFoods(1, foodSearch);
     }
   }
 
@@ -214,7 +276,8 @@ function WellnessMaster() {
       setImportRows([]);
       setImportFileName("");
       setImportOpen(false);
-      await load();
+      setFoodPage(1);
+      await loadFoods(1, foodSearch);
     } catch (error: any) {
       setMessage(error?.message || "Import Master Data Nutrisi gagal.");
     } finally {
@@ -237,19 +300,6 @@ function WellnessMaster() {
     URL.revokeObjectURL(url);
   }
 
-  const filteredFoods = useMemo(() => {
-    const keyword = foodSearch.trim().toLowerCase();
-    return keyword
-      ? foods.filter((food) =>
-          [food.food_name, food.category, food.aliases]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-            .includes(keyword),
-        )
-      : foods;
-  }, [foods, foodSearch]);
-
   const validImportRows = importRows.filter((item) => item.valid);
 
   return (
@@ -269,7 +319,7 @@ function WellnessMaster() {
           <div className="text-xs font-black uppercase tracking-wide text-slate-400">
             Makanan
           </div>
-          <div className="mt-2 text-3xl font-black text-slate-900">{foods.length}</div>
+          <div className="mt-2 text-3xl font-black text-slate-900">{foodTotal.toLocaleString("id-ID")}</div>
         </div>
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-xs font-black uppercase tracking-wide text-slate-400">
@@ -511,14 +561,19 @@ function WellnessMaster() {
             <div>
               <div className="text-xl font-black text-slate-900">KaloriData</div>
               <div className="text-sm font-semibold text-slate-500">
-                {filteredFoods.length} dari {foods.length} makanan
+                {foodLoading
+                  ? "Memuat data..."
+                  : `${foodFrom.toLocaleString("id-ID")}–${foodTo.toLocaleString("id-ID")} dari ${foodTotal.toLocaleString("id-ID")} makanan`}
               </div>
             </div>
             <input
               className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold"
               placeholder="Cari makanan"
               value={foodSearch}
-              onChange={(e) => setFoodSearch(e.target.value)}
+              onChange={(e) => {
+                setFoodSearch(e.target.value);
+                setFoodPage(1);
+              }}
             />
           </div>
         </div>
@@ -533,7 +588,7 @@ function WellnessMaster() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredFoods.map((food) => (
+              {foods.map((food) => (
                 <tr key={food.id || food.food_name}>
                   <td className="px-4 py-3 font-bold text-slate-900">
                     {food.food_name}
@@ -549,6 +604,41 @@ function WellnessMaster() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-bold text-slate-600">
+            Halaman {foodPage.toLocaleString("id-ID")} dari{" "}
+            {foodTotalPages.toLocaleString("id-ID")}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={foodLoading || foodPage <= 1}
+              onClick={() =>
+                setFoodPage((current) => Math.max(current - 1, 1))
+              }
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-black disabled:opacity-40"
+            >
+              Sebelumnya
+            </button>
+
+            <button
+              type="button"
+              disabled={
+                foodLoading || foodPage >= foodTotalPages
+              }
+              onClick={() =>
+                setFoodPage((current) =>
+                  Math.min(current + 1, foodTotalPages),
+                )
+              }
+              className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-black text-white disabled:opacity-40"
+            >
+              Berikutnya
+            </button>
+          </div>
         </div>
       </section>
     </div>

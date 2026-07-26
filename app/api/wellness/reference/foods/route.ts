@@ -73,37 +73,79 @@ function normalizeFoodInput(item: any) {
   };
 }
 
+// WELLNESS_MASTER_SERVER_PAGINATION_V126J
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
 
   try {
     const supabase = getSupabaseAdmin();
+
     if (!user) {
-      const participant = await getParticipantFromPortalSession(supabase, req).catch(
-        () => null,
-      );
+      const participant = await getParticipantFromPortalSession(
+        supabase,
+        req,
+      ).catch(() => null);
+
       if (!participant) return fail("Unauthorized", 401);
     }
 
     const q = clean(req.nextUrl.searchParams.get("q"));
-    const limit = Math.min(
-      Math.max(Number(req.nextUrl.searchParams.get("limit") || 500), 1),
-      2000,
+
+    const page = Math.max(
+      Number(req.nextUrl.searchParams.get("page") || 1),
+      1,
     );
+
+    const pageSize = Math.min(
+      Math.max(
+        Number(req.nextUrl.searchParams.get("page_size") || 100),
+        10,
+      ),
+      200,
+    );
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
 
     let query = supabase
       .from("wellness_food_calories")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("is_active", 1)
       .order("food_name", { ascending: true })
-      .limit(limit);
-    if (q) query = query.ilike("food_name", `%${q}%`);
+      .range(from, to);
 
-    const { data, error } = await query;
+    if (q) {
+      const safeQ = q.replace(/[,%()]/g, " ").trim();
+
+      if (safeQ) {
+        query = query.or(
+          `food_name.ilike.%${safeQ}%,category.ilike.%${safeQ}%,aliases.ilike.%${safeQ}%`,
+        );
+      }
+    }
+
+    const { data, error, count } = await query;
+
     if (error) throw error;
-    return ok({ foods: data || [] });
+
+    const total = Number(count || 0);
+
+    return ok({
+      foods: data || [],
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: Math.max(Math.ceil(total / pageSize), 1),
+        from: total > 0 ? from + 1 : 0,
+        to: total > 0 ? Math.min(to + 1, total) : 0,
+      },
+    });
   } catch (error: any) {
-    return fail(error?.message || "Gagal memuat referensi makanan.", 500);
+    return fail(
+      error?.message || "Gagal memuat referensi makanan.",
+      500,
+    );
   }
 }
 
