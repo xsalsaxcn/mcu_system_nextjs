@@ -1245,6 +1245,9 @@ export default function WellnessAdminMobilePage() {
 
   const canonicalAdminUrl = "/wellness/admin";
   const exportExcelUrl = "/api/wellness/admin/export-excel?days=30";
+  // WELLNESS_ADMIN_LOGIN_MONITORING_EXPORT_V126N
+  const loginMonitoringExcelUrl =
+    "/api/wellness/admin/export-login-monitoring";
   const lastLoadedLabel = lastLoadedAt
     ? lastLoadedAt.toLocaleTimeString("id-ID", {
         hour: "2-digit",
@@ -2395,6 +2398,26 @@ export default function WellnessAdminMobilePage() {
               <a href="/wellness/dashboard" className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4 text-sky-950 shadow-sm"><div className="text-2xl">📊</div><div className="mt-2 text-base font-black">Dashboard Wellness Lengkap</div><div className="mt-1 text-xs font-bold leading-5 text-sky-700">Buka laporan operasional dan detail parameter.</div></a>
               <a href="/wellness/history-import" className="rounded-[1.5rem] border border-teal-100 bg-teal-50 p-4 text-teal-950 shadow-sm"><div className="text-2xl">📈</div><div className="mt-2 text-base font-black">History MCU</div><div className="mt-1 text-xs font-bold leading-5 text-teal-700">Kelola baseline dan pemeriksaan berkala.</div></a>
               <a href="/wellness/support-admin" className="rounded-[1.5rem] border border-violet-100 bg-violet-50 p-4 text-violet-950 shadow-sm"><div className="text-2xl">📄</div><div className="mt-2 text-base font-black">Laporan Follow-up</div><div className="mt-1 text-xs font-bold leading-5 text-violet-700">Tinjau tiket dan tindak lanjut layanan.</div></a>
+              <a
+                href={loginMonitoringExcelUrl}
+                className="rounded-[1.5rem] border border-amber-100 bg-amber-50 p-4 text-amber-950 shadow-sm active:scale-[0.99]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-2xl">👤</div>
+                    <div className="mt-2 text-base font-black">
+                      Monitoring Login Peserta
+                    </div>
+                    <div className="mt-1 text-xs font-bold leading-5 text-amber-700">
+                      Unduh daftar peserta yang belum pernah login, dikelompokkan berdasarkan perusahaan, kelompok, dan Coach.
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-amber-600 px-3 py-2 text-[10px] font-black text-white">
+                    XLSX
+                  </span>
+                </div>
+              </a>
+
               <a
                 href={exportExcelUrl}
                 className="rounded-[1.5rem] border border-emerald-100 bg-emerald-50 p-4 text-emerald-950 shadow-sm active:scale-[0.99]"
