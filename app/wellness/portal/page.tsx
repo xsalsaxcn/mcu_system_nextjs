@@ -3885,59 +3885,127 @@ function NutritionTab({
     { value: "Snack", label: "Snack" },
   ];
 
+   // WELLNESS_FULL_FOOD_MASTER_PAGINATION_V126K
   async function loadFoodMaster() {
     setFoodMasterLoading(true);
     setFoodMasterMessage("");
 
+    const cacheKey = "wellness-food-master-cache-v126k";
+
     if (typeof window !== "undefined") {
       try {
-        const cached = window.sessionStorage.getItem(
+        window.sessionStorage.removeItem(
           "wellness-food-master-cache-v82",
         );
-        const rows = cached ? JSON.parse(cached) : [];
-        if (Array.isArray(rows) && rows.length > 0) setFoodMaster(rows);
+
+        const cached =
+          window.sessionStorage.getItem(cacheKey);
+
+        const cachedRows = cached
+          ? JSON.parse(cached)
+          : [];
+
+        if (
+          Array.isArray(cachedRows) &&
+          cachedRows.length > 0
+        ) {
+          setFoodMaster(cachedRows);
+        }
       } catch {
-        // Cache is optional; continue with the server request.
+        // Cache opsional.
       }
     }
 
-    const result = await fetch("/api/wellness/reference/foods?limit=2000", {
-      cache: "no-store",
-    })
-      .then((response) => response.json())
-      .catch((error) => ({
-        ok: false,
-        message: error?.message || "Master KaloriData gagal dimuat.",
-      }));
+    try {
+      const firstResponse = await fetch(
+        "/api/wellness/reference/foods?page=1&page_size=200",
+        { cache: "no-store" },
+      );
 
-    const rows = Array.isArray(result)
-      ? result
-      : Array.isArray(result?.data)
-        ? result.data
-        : Array.isArray(result?.foods)
-          ? result.foods
-          : Array.isArray(result?.items)
-            ? result.items
+      const firstResult = await firstResponse
+        .json()
+        .catch(() => ({}));
+
+      if (!firstResponse.ok || firstResult?.ok === false) {
+        throw new Error(
+          firstResult?.message ||
+            "Master KaloriData gagal dimuat.",
+        );
+      }
+
+      const firstRows = Array.isArray(firstResult?.foods)
+        ? firstResult.foods
+        : [];
+
+      const totalPages = Math.max(
+        Number(
+          firstResult?.pagination?.total_pages || 1,
+        ),
+        1,
+      );
+
+      const remainingPages = Array.from(
+        {
+          length: Math.max(totalPages - 1, 0),
+        },
+        (_, index) => index + 2,
+      );
+
+      const pageResults = await Promise.all(
+        remainingPages.map(async (page) => {
+          const response = await fetch(
+            `/api/wellness/reference/foods?page=${page}&page_size=200`,
+            { cache: "no-store" },
+          );
+
+          const result = await response
+            .json()
+            .catch(() => ({}));
+
+          if (!response.ok || result?.ok === false) {
+            throw new Error(
+              result?.message ||
+                `KaloriData halaman ${page} gagal dimuat.`,
+            );
+          }
+
+          return Array.isArray(result?.foods)
+            ? result.foods
             : [];
+        }),
+      );
 
-    if (rows.length > 0) {
+      const rows = [
+        firstRows,
+        ...pageResults,
+      ].flat();
+
+      if (rows.length === 0) {
+        throw new Error(
+          "Master KaloriData belum memiliki data aktif.",
+        );
+      }
+
       setFoodMaster(rows);
+
       if (typeof window !== "undefined") {
         try {
           window.sessionStorage.setItem(
-            "wellness-food-master-cache-v82",
+            cacheKey,
             JSON.stringify(rows),
           );
         } catch {
-          // Cache is optional.
+          // Cache opsional.
         }
       }
-    } else {
+    } catch (error: any) {
       setFoodMasterMessage(
-        result?.message || "Master KaloriData belum dapat dimuat.",
+        error?.message ||
+          "Master KaloriData belum dapat dimuat.",
       );
+    } finally {
+      setFoodMasterLoading(false);
     }
-    setFoodMasterLoading(false);
   }
 
   async function loadDirectNutrition() {

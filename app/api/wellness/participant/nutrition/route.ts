@@ -414,16 +414,62 @@ async function uploadNutritionPhoto(params: {
   });
 }
 
-async function loadFoodMaster(supabase: any) {
-  const { data, error } = await supabase
-    .from("wellness_food_calories")
-    .select("id,food_name,calories,category,aliases")
-    .eq("is_active", 1)
-    .limit(2000);
+// WELLNESS_NUTRITION_FULL_MASTER_PAGINATION_V126K
+async function loadFoodMaster(
+  supabase: any,
+) {
+  const pageSize = 1000;
+  const rows: any[] = [];
 
-  if (error) throw error;
+  for (
+    let from = 0;
+    ;
+    from += pageSize
+  ) {
+    const to =
+      from + pageSize - 1;
 
-  return Array.isArray(data) ? data : [];
+    const {
+      data,
+      error,
+    } = await supabase
+      .from(
+        "wellness_food_calories",
+      )
+      .select(
+        "id,food_name,calories,category,aliases",
+      )
+      .eq("is_active", 1)
+      .order(
+        "id",
+        {
+          ascending: true,
+        },
+      )
+      .range(
+        from,
+        to,
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    const batch =
+      Array.isArray(data)
+        ? data
+        : [];
+
+    rows.push(...batch);
+
+    if (
+      batch.length < pageSize
+    ) {
+      break;
+    }
+  }
+
+  return rows;
 }
 
 function matchOneFoodFromMaster(foods: any[], foodName: string) {
