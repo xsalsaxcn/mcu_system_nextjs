@@ -1,4 +1,5 @@
 // WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
+// WELLNESS_NUTRITION_IDEMPOTENCY_V126L
 // WELLNESS_NUTRITION_STATUS_MIRROR_V98
 // Google Sheet + Google Drive remain the primary submission store.
 // A compact mirror is also saved to the existing wellness_food_logs table
@@ -637,6 +638,10 @@ function buildSheetRow(params: {
     params.foodName;
 
   return {
+    "Submission ID": clean(
+      params.body?.submission_id ||
+        params.body?.submissionId,
+    ),
     "Submission Date": new Date().toISOString(),
     "Pilih Nama Anda": participant.name || "",
     "Nama Peserta": participant.name || "",
@@ -874,7 +879,30 @@ export async function POST(req: NextRequest) {
 
     const { body, photo } = await parseRequestBody(req);
 
-    const foodName = clean(body?.food_name || body?.foodName || body?.makanan);
+    const foodName = clean(
+      body?.food_name ||
+        body?.foodName ||
+        body?.makanan,
+    );
+
+    const submissionId = clean(
+      body?.submission_id ||
+        body?.submissionId ||
+        req.headers.get("x-submission-id"),
+    );
+
+    if (!submissionId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Submission ID nutrisi tidak tersedia. Silakan refresh aplikasi.",
+        },
+        { status: 400 },
+      );
+    }
+
+    body.submission_id = submissionId;
 
     if (!foodName) {
       return NextResponse.json(
@@ -956,7 +984,10 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
     const sheetResult = await postToWebhook({
       sheet: getSheetName(),
       row: sheetRow,
-      marker: "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
+      submissionId,
+      submission_id: submissionId,
+      marker:
+        "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
     });
 
     const returnedLog = {
@@ -1011,7 +1042,7 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
       supabase,
       participant,
       logDate,
-      pointKey: `nutrition_input_sheet_${sheetRowNumber || Date.now()}`,
+      pointKey: `nutrition_input_${submissionId}`,
       sourceType: "nutrition_google_sheet",
       sourceId: sheetRowNumber || null,
       points: inputPointValue,

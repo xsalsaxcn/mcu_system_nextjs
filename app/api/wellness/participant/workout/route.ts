@@ -1,4 +1,5 @@
 // WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT
+// WELLNESS_WORKOUT_IDEMPOTENCY_V126L
 // Manual workout route using the existing Apps Script v370:
 // - optional workout evidence -> Google Drive by action=uploadEvidence
 // - workout submission row -> Google Sheet Form Responses
@@ -229,6 +230,11 @@ function buildWorkoutRow(params: {
     marker: MARKER,
   });
 
+  row["Submission ID"] = clean(
+    params.body?.submission_id ||
+      params.body?.submissionId,
+  );
+
   const driveUrl = getDriveUrl(params.evidenceResult);
   const previewUrl = getPreviewUrl(params.evidenceResult);
   const achievements = [
@@ -297,8 +303,36 @@ export async function POST(req: NextRequest) {
   try {
     const { body, evidence } = await parseRequestBody(req);
 
-    const activityType = clean(body?.activity_type || body?.activityType) || "Workout";
-    const durationMinutes = toNumberOrNull(body?.duration_minutes || body?.durationMinutes);
+    const submissionId = clean(
+      body?.submission_id ||
+        body?.submissionId ||
+        req.headers.get("x-submission-id"),
+    );
+
+    if (!submissionId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Submission ID workout tidak tersedia. Silakan refresh aplikasi.",
+        },
+        { status: 400 },
+      );
+    }
+
+    body.submission_id = submissionId;
+
+    const activityType =
+      clean(
+        body?.activity_type ||
+          body?.activityType,
+      ) || "Workout";
+
+    const durationMinutes =
+      toNumberOrNull(
+        body?.duration_minutes ||
+          body?.durationMinutes,
+      );
 
     if (!durationMinutes || durationMinutes <= 0) {
       return NextResponse.json(
@@ -313,9 +347,47 @@ export async function POST(req: NextRequest) {
     const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);
     const notes = clean(body?.notes || body?.catatan) || null;
-    const companyName = getCompanyName(participant, body);
+    const companyName =
+      getCompanyName(participant, body);
 
-    const weightKg = await getLatestWeightKg(supabase, participant);
+    const externalId =
+      `manual_${participant.id}_${submissionId}`;
+
+    const existingResult = await supabase
+      .from("wellness_activity_logs")
+      .select("*")
+      .eq(
+        "participant_id",
+        Number(participant.id),
+      )
+      .eq("source", "manual")
+      .eq(
+        "external_activity_id",
+        externalId,
+      )
+      .limit(1)
+      .maybeSingle();
+
+    if (existingResult.error) {
+      throw existingResult.error;
+    }
+
+    if (existingResult.data?.id) {
+      return NextResponse.json({
+        ok: true,
+        deduplicated: true,
+        message:
+          "Workout ini sudah tersimpan sebelumnya.",
+        log: existingResult.data,
+        points_total_delta: 0,
+      });
+    }
+
+    const weightKg =
+      await getLatestWeightKg(
+        supabase,
+        participant,
+      );
     const activityRef = await findActivityReference(supabase, activityType, activityName);
     const calculated = calculateCalories({
       activityType,
@@ -350,13 +422,14 @@ export async function POST(req: NextRequest) {
       evidenceResult,
     });
 
-    const sheetResult = await postToWellnessWebhook({
-      sheet: getWellnessSheetName(),
-      row: sheetRow,
-      marker: MARKER,
-    });
-
-    const externalId = `manual_${participant.id}_${Date.now()}`;
+    const sheetResult =
+      await postToWellnessWebhook({
+        sheet: getWellnessSheetName(),
+        row: sheetRow,
+        submissionId,
+        submission_id: submissionId,
+        marker: MARKER,
+      });
 
     const payload: any = {
       participant_id: Number(participant.id),

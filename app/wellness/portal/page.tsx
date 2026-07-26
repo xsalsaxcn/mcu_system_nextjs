@@ -768,6 +768,22 @@ export default function WellnessParticipantPortalPage() {
   const googleFitNativeSilentV125Fix = useRef(false);
   const googleFitNativeInFlightV111 = useRef(false);
   const googleFitNativeTimeoutV111 = useRef<number | null>(null);
+
+  // WELLNESS_SUBMISSION_LOCK_V126L
+  const nutritionSubmitInFlightV126L = useRef(false);
+  const workoutSubmitInFlightV126L = useRef(false);
+
+  function createSubmissionIdV126L(type: string) {
+    const randomId =
+      typeof crypto !== "undefined" &&
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 12)}`;
+
+    return `${type}-${randomId}`;
+  }
   const [nutritionForm, setNutritionForm] = useState({
     log_date: todayDate(),
     meal_type: "",
@@ -1346,6 +1362,16 @@ export default function WellnessParticipantPortalPage() {
   }
 
   async function saveNutrition(): Promise<{ ok: boolean; message: string }> {
+    if (nutritionSubmitInFlightV126L.current) {
+      const duplicateMessage =
+        "Submission nutrisi sedang diproses. Mohon tunggu.";
+      setMessage(duplicateMessage);
+      return {
+        ok: false,
+        message: duplicateMessage,
+      };
+    }
+
     const missing: string[] = [];
     if (!clean(nutritionForm.log_date)) missing.push("Tanggal");
     if (!clean(nutritionForm.meal_type)) missing.push("Waktu Makan");
@@ -1357,9 +1383,19 @@ export default function WellnessParticipantPortalPage() {
       return { ok: false, message: validationMessage };
     }
 
+    nutritionSubmitInFlightV126L.current = true;
+
+    window.setTimeout(() => {
+      nutritionSubmitInFlightV126L.current = false;
+    }, 30000);
+
     setMessage("Menyimpan nutrisi ke Google Sheet...");
 
+    const submissionId =
+      createSubmissionIdV126L("nutrition");
+
     const body = new FormData();
+    body.append("submission_id", submissionId);
     body.append("log_date", nutritionForm.log_date);
     body.append("meal_type", nutritionForm.meal_type);
     body.append("food_name", nutritionForm.food_name);
@@ -1419,16 +1455,33 @@ export default function WellnessParticipantPortalPage() {
 
       setNutritionPhoto(null);
       await loadPoints();
-      return { ok: true, message: successMessage };
+
+      nutritionSubmitInFlightV126L.current = false;
+
+      return {
+        ok: true,
+        message: successMessage,
+      };
     }
 
     const errorMessage =
       result.message || result.detail || "Gagal menyimpan nutrisi.";
     setMessage(errorMessage);
-    return { ok: false, message: errorMessage };
+    nutritionSubmitInFlightV126L.current = false;
+
+    return {
+      ok: false,
+      message: errorMessage,
+    };
   }
 
   async function saveWorkout() {
+    if (workoutSubmitInFlightV126L.current) {
+      setMessage(
+        "Submission workout sedang diproses. Mohon tunggu.",
+      );
+      return;
+    }
     if (!clean(workoutForm.activity_type)) {
       setMessage("Jenis workout wajib diisi.");
       return;
@@ -1439,11 +1492,21 @@ export default function WellnessParticipantPortalPage() {
       return;
     }
 
+    workoutSubmitInFlightV126L.current = true;
+
+    window.setTimeout(() => {
+      workoutSubmitInFlightV126L.current = false;
+    }, 30000);
+
     setMessage(
       "Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...",
     );
 
+    const submissionId =
+      createSubmissionIdV126L("workout");
+
     const body = new FormData();
+    body.append("submission_id", submissionId);
     body.append("log_date", workoutForm.log_date);
     body.append("started_at", workoutForm.started_at);
     body.append("activity_type", workoutForm.activity_type);
@@ -1479,8 +1542,14 @@ export default function WellnessParticipantPortalPage() {
       await loadMe({ keepMessage: true });
       setActiveTab("history");
     } else {
-      setMessage(result.detail || result.message || "Gagal menyimpan workout.");
+      setMessage(
+        result.detail ||
+          result.message ||
+          "Gagal menyimpan workout.",
+      );
     }
+
+    workoutSubmitInFlightV126L.current = false;
   }
 
   async function saveHealthtalk() {
