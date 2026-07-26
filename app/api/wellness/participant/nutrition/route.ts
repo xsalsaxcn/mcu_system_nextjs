@@ -1,5 +1,6 @@
 // WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
 // WELLNESS_NUTRITION_IDEMPOTENCY_V126L
+// WELLNESS_NUTRITION_DELETE_V126M
 // WELLNESS_NUTRITION_STATUS_MIRROR_V98
 // Google Sheet + Google Drive remain the primary submission store.
 // A compact mirror is also saved to the existing wellness_food_logs table
@@ -1195,4 +1196,272 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
   }
 }
 
+export async function DELETE(req: NextRequest) {
+  const { supabase, participant } = await getParticipant(req);
+
+  if (!participant?.id) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "OTP/session peserta belum aktif.",
+      },
+      { status: 401 },
+    );
+  }
+
+  try {
+    assertWebhookConfigured();
+
+    const body = await req.json().catch(() => ({}));
+
+    const submissionId = clean(
+      body?.submission_id ||
+        body?.submissionId,
+    );
+
+    const sheetRowNumber = pointNumber(
+      body?.google_sheet_row_number ||
+        body?.sheet_row_number ||
+        body?.row_number,
+    );
+
+    const mirrorId = pointNumber(body?.id);
+    const logDate = safeIsoDate(
+      body?.log_date ||
+        body?.date ||
+        todayDate(),
+    );
+
+    if (
+      !submissionId &&
+      !(sheetRowNumber > 0) &&
+      !(mirrorId > 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Identitas riwayat nutrisi tidak ditemukan.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const sheetDeleteResult = await postToWebhook({
+      action: "deleteSubmission",
+      sheet: getSheetName(),
+      submissionId,
+      submission_id: submissionId,
+      rowNumber: sheetRowNumber || null,
+      row_number: sheetRowNumber || null,
+      participantId: Number(participant.id),
+      participant_id: Number(participant.id),
+      logType: "nutrition",
+      log_type: "nutrition",
+      marker: "WELLNESS_NUTRITION_DELETE_V126M",
+    });
+
+    const mirrorsResult = await supabase
+      .from("wellness_food_logs")
+      .select(
+        "id,participant_id,log_date,google_sheet_row_number,raw_payload",
+      )
+      .eq(
+        "participant_id",
+        Number(participant.id),
+      )
+      .limit(1000);
+
+    if (mirrorsResult.error) {
+      throw mirrorsResult.error;
+    }
+
+    const mirrorIds = (mirrorsResult.data || [])
+      .filter((row: any) => {
+        const raw =
+          row?.raw_payload &&
+          typeof row.raw_payload === "object"
+            ? row.raw_payload
+            : {};
+
+        const rawSubmissionId = clean(
+          raw?.submission_id ||
+            raw?.submissionId ||
+            raw?.google_sheet?.submission_id ||
+            raw?.google_sheet?.submissionId,
+        );
+
+        const rawSheetRow = pointNumber(
+          row?.google_sheet_row_number ||
+            raw?.google_sheet?.rowNumber ||
+            raw?.google_sheet?.row_number,
+        );
+
+        return (
+          (mirrorId > 0 &&
+            Number(row?.id) === mirrorId) ||
+          (submissionId &&
+            rawSubmissionId === submissionId) ||
+          (sheetRowNumber > 0 &&
+            rawSheetRow === sheetRowNumber)
+        );
+      })
+      .map((row: any) => Number(row?.id))
+      .filter((id: number) => id > 0);
+
+    if (mirrorIds.length > 0) {
+      const deletedMirrors = await supabase
+        .from("wellness_food_logs")
+        .delete()
+        .in("id", mirrorIds);
+
+      if (deletedMirrors.error) {
+        throw deletedMirrors.error;
+      }
+    }
+
+    if (submissionId) {
+      const deletedInputPoint = await supabase
+        .from("wellness_point_logs")
+        .delete()
+        .eq(
+          "participant_id",
+          Number(participant.id),
+        )
+        .eq(
+          "point_key",
+          `nutrition_input_${submissionId}`,
+        );
+
+      if (deletedInputPoint.error) {
+        throw deletedInputPoint.error;
+      }
+    } else if (sheetRowNumber > 0) {
+      const deletedInputPoint = await supabase
+        .from("wellness_point_logs")
+        .delete()
+        .eq(
+          "participant_id",
+          Number(participant.id),
+        )
+        .eq(
+          "source_type",
+          "nutrition_google_sheet",
+        )
+        .eq("source_id", sheetRowNumber);
+
+      if (deletedInputPoint.error) {
+        throw deletedInputPoint.error;
+      }
+    }
+
+    let bonusResult: any = null;
+
+    try {
+      const targets =
+        await resolveParticipantPointTargets(
+          supabase,
+          participant,
+        );
+
+      const sheetRead =
+        await fetchWellnessGoogleSheetRows({
+          participantId: participant.id,
+          code: participant.code,
+          logType: "nutrition",
+          limit: 500,
+        });
+
+      const remainingFoods =
+        googleSheetRowsToFoodLogs(
+          sheetRead.rows || [],
+        ).filter(
+          (row: any) =>
+            Number(row?.participant_id) ===
+              Number(participant.id) &&
+            safeIsoDate(
+              row?.log_date ||
+                row?.created_at,
+            ) === logDate,
+        );
+
+      const totalCalories =
+        remainingFoods.reduce(
+          (sum: number, row: any) =>
+            sum +
+            pointNumber(
+              row?.total_calories ??
+                row?.calories ??
+                row?.estimated_calories ??
+                row?.raw_payload?.[
+                  "Kalori Makanan"
+                ],
+            ),
+          0,
+        );
+
+      const bonusPoints =
+        nutritionDailyBonusPoints({
+          totalCalories,
+          calorieLimit: targets.nutrition,
+          hasNutritionInput:
+            remainingFoods.length > 0,
+        });
+
+      bonusResult = await setDailyPoint({
+        supabase,
+        participant,
+        logDate,
+        pointKey: "nutrition_daily_bonus",
+        sourceType: "nutrition_daily_bonus",
+        sourceId: null,
+        points: bonusPoints,
+        description:
+          remainingFoods.length > 0
+            ? `Rekalkulasi bonus nutrisi (${Math.round(
+                totalCalories,
+              )}/${Math.round(
+                targets.nutrition,
+              )} kkal)`
+            : "Bonus nutrisi dihapus karena tidak ada input nutrisi.",
+      });
+    } catch (bonusError: any) {
+      bonusResult = {
+        ok: false,
+        warning:
+          bonusError?.message ||
+          "Poin bonus nutrisi belum berhasil dihitung ulang.",
+      };
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message:
+        "Riwayat nutrisi berhasil dihapus.",
+      submission_id: submissionId || null,
+      google_sheet_row_number:
+        sheetRowNumber || null,
+      deleted_mirror_rows:
+        mirrorIds.length,
+      google_sheet: sheetDeleteResult,
+      nutrition_daily_bonus:
+        bonusResult,
+    });
+  } catch (error: any) {
+    console.error(
+      "WELLNESS_NUTRITION_DELETE_V126M_ERROR",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          error?.message ||
+          "Gagal menghapus riwayat nutrisi.",
+      },
+      { status: 500 },
+    );
+  }
+}
 

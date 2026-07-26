@@ -1,5 +1,6 @@
 // WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT
 // WELLNESS_WORKOUT_IDEMPOTENCY_V126L
+// WELLNESS_WORKOUT_DELETE_V126M
 // Manual workout route using the existing Apps Script v370:
 // - optional workout evidence -> Google Drive by action=uploadEvidence
 // - workout submission row -> Google Sheet Form Responses
@@ -499,3 +500,215 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  const { supabase, participant } =
+    await getParticipant(req);
+
+  if (!participant?.id) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "OTP/session peserta belum aktif.",
+      },
+      { status: 401 },
+    );
+  }
+
+  try {
+    const body = await req.json().catch(
+      () => ({}),
+    );
+
+    const requestedId = Number(
+      body?.id || 0,
+    );
+
+    const requestedSubmissionId = clean(
+      body?.submission_id ||
+        body?.submissionId,
+    );
+
+    const requestedSheetRow = Number(
+      body?.google_sheet_row_number ||
+        body?.sheet_row_number ||
+        body?.row_number ||
+        0,
+    );
+
+    let query = supabase
+      .from("wellness_activity_logs")
+      .select("*")
+      .eq(
+        "participant_id",
+        Number(participant.id),
+      )
+      .eq("source", "manual")
+      .limit(1000);
+
+    if (requestedId > 0) {
+      query = query.eq("id", requestedId);
+    }
+
+    const lookup = await query;
+
+    if (lookup.error) {
+      throw lookup.error;
+    }
+
+    const log = (lookup.data || []).find(
+      (row: any) => {
+        const raw =
+          row?.raw_payload &&
+          typeof row.raw_payload === "object"
+            ? row.raw_payload
+            : {};
+
+        const submissionId = clean(
+          raw?.submission_id ||
+            raw?.submissionId,
+        );
+
+        const sheetRow = Number(
+          raw?.google_sheet?.rowNumber ||
+            raw?.google_sheet?.row_number ||
+            0,
+        );
+
+        return (
+          (requestedId > 0 &&
+            Number(row?.id) ===
+              requestedId) ||
+          (requestedSubmissionId &&
+            submissionId ===
+              requestedSubmissionId) ||
+          (requestedSheetRow > 0 &&
+            sheetRow ===
+              requestedSheetRow)
+        );
+      },
+    );
+
+    if (!log?.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Workout manual tidak ditemukan atau bukan milik peserta.",
+        },
+        { status: 404 },
+      );
+    }
+
+    if (
+      isNaN(Number(log.id)) ||
+      clean(log.source).toLowerCase() !==
+        "manual"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message:
+            "Hanya workout manual yang dapat dihapus.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const raw =
+      log?.raw_payload &&
+      typeof log.raw_payload === "object"
+        ? log.raw_payload
+        : {};
+
+    const submissionId = clean(
+      requestedSubmissionId ||
+        raw?.submission_id ||
+        raw?.submissionId,
+    );
+
+    const sheetRowNumber = Number(
+      requestedSheetRow ||
+        raw?.google_sheet?.rowNumber ||
+        raw?.google_sheet?.row_number ||
+        0,
+    );
+
+    const sheetDeleteResult =
+      await postToWellnessWebhook({
+        action: "deleteSubmission",
+        sheet: getWellnessSheetName(),
+        submissionId,
+        submission_id: submissionId,
+        rowNumber:
+          sheetRowNumber || null,
+        row_number:
+          sheetRowNumber || null,
+        participantId:
+          Number(participant.id),
+        participant_id:
+          Number(participant.id),
+        logType: "workout",
+        log_type: "workout",
+        marker:
+          "WELLNESS_WORKOUT_DELETE_V126M",
+      });
+
+    const deleted = await supabase
+      .from("wellness_activity_logs")
+      .delete()
+      .eq("id", Number(log.id))
+      .eq(
+        "participant_id",
+        Number(participant.id),
+      )
+      .eq("source", "manual");
+
+    if (deleted.error) {
+      throw deleted.error;
+    }
+
+    const workoutPoint =
+      await reconcileWorkoutDailyPoint({
+        supabase,
+        participant,
+        logDate:
+          clean(log.log_date).slice(0, 10) ||
+          safeLogDate(body?.log_date) ||
+          todayDate(),
+        sourceId: null,
+      });
+
+    return NextResponse.json({
+      ok: true,
+      message:
+        "Riwayat workout berhasil dihapus.",
+      deleted_id: Number(log.id),
+      submission_id:
+        submissionId || null,
+      google_sheet_row_number:
+        sheetRowNumber || null,
+      google_sheet:
+        sheetDeleteResult,
+      workout_point:
+        workoutPoint,
+    });
+  } catch (error: any) {
+    console.error(
+      "WELLNESS_WORKOUT_DELETE_V126M_ERROR",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          error?.message ||
+          "Gagal menghapus riwayat workout.",
+      },
+      { status: 500 },
+    );
+  }
+}
+

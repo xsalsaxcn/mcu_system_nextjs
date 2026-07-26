@@ -18,6 +18,7 @@
 // WELLNESS_NUTRITION_FILLING_GUIDE_V74
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
 // WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
+// WELLNESS_PARTICIPANT_HISTORY_DELETE_V126M
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -5432,6 +5433,172 @@ function HistoryTab({
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [loadingKey, setLoadingKey] = useState("");
+  const [deletingKeyV126M, setDeletingKeyV126M] = useState("");
+
+  function historyDeleteRawPayloadV126M(item: any) {
+    const raw = item?.raw_payload;
+
+    if (!raw) return {};
+
+    if (typeof raw === "string") {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return {};
+      }
+    }
+
+    return typeof raw === "object" ? raw : {};
+  }
+
+  function historySubmissionIdV126M(item: any) {
+    const raw = historyDeleteRawPayloadV126M(item);
+
+    return clean(
+      item?.submission_id ||
+        item?.submissionId ||
+        raw?.submission_id ||
+        raw?.submissionId ||
+        raw?.google_sheet?.submission_id ||
+        raw?.google_sheet?.submissionId,
+    );
+  }
+
+  function historySheetRowV126M(item: any) {
+    const raw = historyDeleteRawPayloadV126M(item);
+
+    const value = Number(
+      item?.google_sheet_row_number ||
+        item?.sheet_row_number ||
+        item?.row_number ||
+        item?._rowNumber ||
+        raw?.google_sheet?.rowNumber ||
+        raw?.google_sheet?.row_number ||
+        0,
+    );
+
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  function historyDeleteKeyV126M(type: "nutrition" | "workout", item: any) {
+    return [
+      type,
+      historySubmissionIdV126M(item),
+      historySheetRowV126M(item),
+      clean(item?.id),
+      clean(item?.log_date || item?.created_at),
+    ].join(":");
+  }
+
+  function isManualWorkoutDeleteV126M(item: any) {
+    if (!item || isDeviceDailyRow(item)) return false;
+
+    const raw = historyDeleteRawPayloadV126M(item);
+    const source = clean(
+      item?.source ||
+        item?.input_source ||
+        raw?.source,
+    ).toLowerCase();
+
+    const externalId = clean(
+      item?.external_activity_id ||
+        item?.provider_activity_id,
+    ).toLowerCase();
+
+    return (
+      source === "manual" ||
+      externalId.startsWith("manual_") ||
+      clean(raw?.submission_id).startsWith("workout-")
+    );
+  }
+
+  async function deleteHistoryItemV126M(
+    type: "nutrition" | "workout",
+    item: any,
+  ) {
+    const label =
+      type === "nutrition"
+        ? item?.food_name || item?.meal_text || "makanan ini"
+        : item?.activity_name || item?.activity_type || "workout ini";
+
+    const confirmed = window.confirm(
+      `Hapus ${label}? Data akan dihapus dari history dan Google Sheet.`,
+    );
+
+    if (!confirmed) return;
+
+    const deleteKey = historyDeleteKeyV126M(type, item);
+
+    if (deletingKeyV126M === deleteKey) return;
+
+    setDeletingKeyV126M(deleteKey);
+
+    try {
+      const response = await fetch(
+        `/api/wellness/participant/${type}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            id: item?.id || null,
+            submission_id: historySubmissionIdV126M(item) || null,
+            google_sheet_row_number: historySheetRowV126M(item) || null,
+            log_date:
+              clean(item?.log_date || item?.date || item?.created_at)
+                .slice(0, 10) || null,
+            source: item?.source || null,
+            title:
+              item?.food_name ||
+              item?.meal_text ||
+              item?.activity_name ||
+              item?.activity_type ||
+              null,
+          }),
+        },
+      );
+
+      const text = await response.text();
+      let result: any = {};
+
+      try {
+        result = text ? JSON.parse(text) : {};
+      } catch {
+        result = {
+          ok: false,
+          message: text || "Respons hapus tidak valid.",
+        };
+      }
+
+      if (!response.ok || result?.ok === false) {
+        throw new Error(
+          result?.message ||
+            result?.detail ||
+            "Data belum berhasil dihapus.",
+        );
+      }
+
+      if (type === "nutrition") {
+        await loadNutritionHistory();
+      } else if (refresh) {
+        await Promise.resolve(refresh());
+      }
+
+           window.alert(
+        type === "nutrition"
+          ? "Riwayat nutrisi berhasil dihapus."
+          : "Riwayat workout berhasil dihapus.",
+      );
+    } catch (error: any) {
+      window.alert(
+        error?.message ||
+          "Data belum berhasil dihapus.",
+      );
+    } finally {
+      setDeletingKeyV126M("");
+    }
+  }
 
   const [nutritionLoaded, setNutritionLoaded] = useState(false);
   const [directNutrition, setDirectNutrition] = useState<any>({
@@ -5676,6 +5843,13 @@ function HistoryTab({
               <HistoryMealItemV37
                 key={`${item.id || index}-${index}`}
                 item={item}
+                deleting={
+                  deletingKeyV126M ===
+                  historyDeleteKeyV126M("nutrition", item)
+                }
+                onDelete={() =>
+                  deleteHistoryItemV126M("nutrition", item)
+                }
               />
             ))}
           </div>
@@ -5724,6 +5898,19 @@ function HistoryTab({
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
+                  deleting={
+                    deletingKeyV126M ===
+                    historyDeleteKeyV126M("workout", item)
+                  }
+                  onDelete={
+                    isManualWorkoutDeleteV126M(item)
+                      ? () =>
+                          deleteHistoryItemV126M(
+                            "workout",
+                            item,
+                          )
+                      : undefined
+                  }
                 />
               );
             })}
@@ -5842,12 +6029,16 @@ function HistoryGenericItemV37({
   note,
   status = "",
   statusTone = "primary",
+  onDelete,
+  deleting = false,
 }: {
   title: string;
   subtitle: string;
   note: string;
   status?: string;
   statusTone?: "primary" | "secondary";
+  onDelete?: () => void;
+  deleting?: boolean;
 }) {
   return (
     <div className="rounded-[1.7rem] bg-slate-50 p-4">
@@ -5859,17 +6050,49 @@ function HistoryGenericItemV37({
           </div>
         </div>
 
-        {status ? (
-          <span
-            className={`rounded-full px-3 py-1 text-[10px] font-black ${
-              statusTone === "primary"
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-slate-200 text-slate-600"
-            }`}
-          >
-            {status}
-          </span>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {status ? (
+            <span
+              className={`rounded-full px-3 py-1 text-[10px] font-black ${
+                statusTone === "primary"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-slate-200 text-slate-600"
+              }`}
+            >
+              {status}
+            </span>
+          ) : null}
+
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              title="Hapus workout"
+              aria-label="Hapus workout"
+              className="grid h-10 w-10 place-items-center rounded-full border border-rose-200 bg-white text-rose-600 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50"
+            >
+              {deleting ? (
+                <span className="text-[10px] font-black">...</span>
+              ) : (
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6"
+                  />
+                </svg>
+              )}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-3 text-sm font-bold leading-6 text-slate-600">
@@ -5896,7 +6119,15 @@ function normalizeImageUrlV37(value: any) {
   return raw;
 }
 
-function HistoryMealItemV37({ item }: { item: any }) {
+function HistoryMealItemV37({
+  item,
+  onDelete,
+  deleting = false,
+}: {
+  item: any;
+  onDelete?: () => void;
+  deleting?: boolean;
+}) {
   const photo = normalizeImageUrlV37(item.photo_url);
   const sourceLabel =
     item.source === "google_sheet"
@@ -5943,6 +6174,36 @@ function HistoryMealItemV37({ item }: { item: any }) {
             </span>
           </div>
         </div>
+
+        {onDelete ? (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            title="Hapus makanan"
+            aria-label="Hapus makanan"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-rose-200 bg-white text-rose-600 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50"
+          >
+            {deleting ? (
+              <span className="text-[10px] font-black">...</span>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6"
+                />
+              </svg>
+            )}
+          </button>
+        ) : null}
       </div>
     </div>
   );
