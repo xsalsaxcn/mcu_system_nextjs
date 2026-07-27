@@ -26,6 +26,317 @@ export const runtime = "nodejs";
 
 const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT";
 
+// WELLNESS_WORKOUT_CANONICAL_SHEET_HISTORY_V126M9
+// Google Sheet is the durable source for participant manual workout submissions.
+// Supabase remains a mirror. GET merges both so device refresh cannot hide a
+// workout row that exists in Google Sheet but is absent from the mirror.
+function sheetWorkoutNumberV126M9(value: any) {
+  const normalized = clean(value)
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const numberValue = Number(normalized);
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function sheetWorkoutDateV126M9(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const direct = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (direct) return `${direct[1]}-${direct[2]}-${direct[3]}`;
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return text.slice(0, 10);
+}
+
+function sheetWorkoutStepsV126M9(row: any) {
+  const achievement = clean(
+    row?.[
+      "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+    ],
+  );
+
+  const match = achievement.match(
+    /([\d.,]+)\s*(?:langkah|steps?)/i,
+  );
+
+  return match
+    ? sheetWorkoutNumberV126M9(match[1])
+    : null;
+}
+
+function sheetWorkoutDistanceV126M9(row: any) {
+  const achievement = clean(
+    row?.[
+      "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+    ],
+  );
+
+  const match = achievement.match(
+    /([\d.,]+)\s*km\b/i,
+  );
+
+  return match
+    ? sheetWorkoutNumberV126M9(match[1])
+    : null;
+}
+
+function isWorkoutSheetRowV126M9(row: any) {
+  const logType = clean(
+    row?.["Log Type"] ||
+      row?.log_type,
+  ).toLowerCase();
+
+  if (logType === "workout" || logType === "activity") {
+    return true;
+  }
+
+  if (
+    logType === "nutrition" ||
+    logType === "healthtalk"
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    clean(row?.["Jenis Workout/Aktifitas"]) ||
+      clean(row?.["Kalori Aktivitas"]) ||
+      clean(
+        row?.[
+          "Melakukan Workout/Aktifitas Ringan?"
+        ],
+      ),
+  );
+}
+
+function workoutSheetMatchesParticipantV126M9(
+  row: any,
+  participant: any,
+) {
+  const rowParticipantId = Number(
+    row?.["Participant ID"] ||
+      row?.participant_id ||
+      0,
+  );
+  const participantId = Number(
+    participant?.id ||
+      0,
+  );
+
+  const rowCode = clean(
+    row?.KODE ||
+      row?.code ||
+      row?.participant_code,
+  );
+  const participantCode = clean(
+    participant?.code ||
+      participant?.employee_code ||
+      participant?.no_karyawan,
+  );
+
+  return (
+    (rowParticipantId > 0 &&
+      participantId > 0 &&
+      rowParticipantId === participantId) ||
+    (Boolean(rowCode) &&
+      Boolean(participantCode) &&
+      rowCode === participantCode)
+  );
+}
+
+function sheetRowToWorkoutV126M9(
+  row: any,
+  participant: any,
+) {
+  const submissionId = clean(
+    row?.["Submission ID"] ||
+      row?.submission_id,
+  );
+  const sheetRowNumber = Number(
+    row?._rowNumber ||
+      row?.row_number ||
+      0,
+  );
+  const submissionDate = clean(
+    row?.["Submission Date"] ||
+      row?.created_at,
+  );
+  const logDate = sheetWorkoutDateV126M9(
+    row?.["Log Date"] ||
+      row?.log_date ||
+      submissionDate,
+  );
+  const activityName =
+    clean(row?.["Jenis Workout/Aktifitas"]) ||
+    "Workout";
+  const achievement = clean(
+    row?.[
+      "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+    ],
+  );
+  const calories = sheetWorkoutNumberV126M9(
+    row?.["Kalori Aktivitas"],
+  );
+  const durationMinutes = sheetWorkoutNumberV126M9(
+    row?.["Berapa Menit anda melakukan nya ?"],
+  );
+  const steps = sheetWorkoutStepsV126M9(row);
+  const distanceKm = sheetWorkoutDistanceV126M9(row);
+
+  return {
+    id:
+      submissionId
+        ? `sheet-workout-${submissionId}`
+        : `sheet-workout-${sheetRowNumber || `${participant?.id}-${submissionDate}`}`,
+    _canonical_source:
+      "google_sheet",
+    _google_sheet_row_number:
+      sheetRowNumber || null,
+    participant_id:
+      Number(participant?.id),
+    source:
+      "manual",
+    provider:
+      "manual",
+    input_source:
+      "manual",
+    external_activity_id:
+      submissionId
+        ? `manual_sheet_${submissionId}`
+        : `manual_sheet_row_${sheetRowNumber}`,
+    provider_activity_id:
+      submissionId
+        ? `manual_sheet_${submissionId}`
+        : `manual_sheet_row_${sheetRowNumber}`,
+    activity_type:
+      activityName,
+    activity_name:
+      activityName,
+    log_date:
+      logDate,
+    started_at:
+      submissionDate || `${logDate}T00:00:00.000Z`,
+    created_at:
+      submissionDate || logDate,
+    updated_at:
+      submissionDate || logDate,
+    duration_minutes:
+      durationMinutes,
+    calories,
+    distance_km:
+      distanceKm,
+    steps,
+    notes:
+      achievement || null,
+    raw_payload: {
+      ...row,
+      submission_id:
+        submissionId || null,
+      google_sheet: {
+        rowNumber:
+          sheetRowNumber || null,
+        row_number:
+          sheetRowNumber || null,
+      },
+      notes:
+        achievement || null,
+      marker:
+        "WELLNESS_WORKOUT_CANONICAL_SHEET_HISTORY_V126M9",
+    },
+  };
+}
+
+function workoutCanonicalKeyV126M9(
+  item: any,
+  index: number,
+) {
+  const raw =
+    item?.raw_payload &&
+    typeof item.raw_payload === "object"
+      ? item.raw_payload
+      : {};
+
+  const submissionId = clean(
+    item?.submission_id ||
+      item?.submissionId ||
+      raw?.submission_id ||
+      raw?.submissionId ||
+      raw?.["Submission ID"],
+  );
+  if (submissionId) {
+    return `submission:${submissionId}`;
+  }
+
+  const sheetRowNumber = Number(
+    item?._google_sheet_row_number ||
+      raw?.google_sheet?.rowNumber ||
+      raw?.google_sheet?.row_number ||
+      raw?._rowNumber ||
+      0,
+  );
+  if (sheetRowNumber > 0) {
+    return `sheet-row:${sheetRowNumber}`;
+  }
+
+  const databaseId = Number(
+    item?._supabase_id ||
+      (item?._canonical_source !== "google_sheet"
+        ? item?.id
+        : 0) ||
+      0,
+  );
+  if (databaseId > 0) {
+    return `db:${databaseId}`;
+  }
+
+  return [
+    "fallback",
+    clean(item?.source),
+    clean(item?.log_date),
+    clean(item?.activity_name || item?.activity_type),
+    clean(item?.started_at || item?.created_at),
+    String(index),
+  ].join(":");
+}
+
+function mergeWorkoutHistoryV126M9(
+  supabaseRows: any[] = [],
+  sheetRows: any[] = [],
+) {
+  const result: any[] = [];
+  const seen = new Set<string>();
+
+  [...(supabaseRows || []), ...(sheetRows || [])].forEach(
+    (item: any, index: number) => {
+      const key = workoutCanonicalKeyV126M9(
+        item,
+        index,
+      );
+      if (seen.has(key)) return;
+      seen.add(key);
+      result.push(item);
+    },
+  );
+
+  return result.sort((left: any, right: any) =>
+    clean(
+      right?.started_at ||
+        right?.created_at ||
+        right?.log_date,
+    ).localeCompare(
+      clean(
+        left?.started_at ||
+          left?.created_at ||
+          left?.log_date,
+      ),
+    ),
+  );
+}
+
 function clean(value: any) {
   return String(value ?? "").trim();
 }
@@ -340,48 +651,127 @@ function googleSheetWorkoutLogsV126M6(rows: any[] = [], participant: any) {
 }
 
 export async function GET(req: NextRequest) {
-  const { participant } = await getParticipant(req);
+  const { supabase, participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
-      { ok: false, message: "OTP/session peserta belum aktif." },
+      {
+        ok: false,
+        message:
+          "OTP/session peserta belum aktif.",
+      },
       { status: 401 },
     );
   }
 
-  try {
-    const sheet = await fetchWellnessGoogleSheetRows({
-      participantId: participant.id,
-      code: clean(participant?.code),
-      logType: "workout",
-      limit: 3000,
-    });
+  const participantCode = clean(
+    participant?.code ||
+      participant?.employee_code ||
+      participant?.no_karyawan,
+  );
 
-    if (!sheet?.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: sheet?.message || "Gagal membaca workout dari Google Sheet.",
-        },
-        { status: 502 },
+  const [mirrorResult, sheetResult] =
+    await Promise.all([
+      supabase
+        .from("wellness_activity_logs")
+        .select("*")
+        .eq(
+          "participant_id",
+          Number(participant.id),
+        )
+        .eq("source", "manual")
+        .order(
+          "log_date",
+          { ascending: false },
+        )
+        .order(
+          "created_at",
+          { ascending: false },
+        )
+        .limit(500),
+      fetchWellnessGoogleSheetRows({
+        participantId:
+          Number(participant.id),
+        code:
+          participantCode || undefined,
+        logType:
+          "workout",
+        limit:
+          1000,
+      }).catch((error: any) => ({
+        ok: false,
+        rows: [],
+        message:
+          error?.message ||
+          "Gagal membaca Google Sheet.",
+      })),
+    ]);
+
+  const mirrorRows =
+    mirrorResult.error
+      ? []
+      : mirrorResult.data || [];
+
+  const sheetRows =
+    (sheetResult?.rows || [])
+      .filter(isWorkoutSheetRowV126M9)
+      .filter((row: any) =>
+        workoutSheetMatchesParticipantV126M9(
+          row,
+          participant,
+        ),
+      )
+      .map((row: any) =>
+        sheetRowToWorkoutV126M9(
+          row,
+          participant,
+        ),
       );
-    }
 
-    return NextResponse.json({
-      ok: true,
-      participant_id: Number(participant.id),
-      source: "google_sheet",
-      logs: googleSheetWorkoutLogsV126M6(sheet.rows || [], participant),
-    });
-  } catch (error: any) {
+  if (
+    mirrorResult.error &&
+    sheetResult?.ok === false
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        message: error?.message || "Gagal membaca workout dari Google Sheet.",
+        message:
+          "Gagal membaca workout manual dari Supabase dan Google Sheet.",
+        detail:
+          mirrorResult.error.message,
+        google_sheet_message:
+          sheetResult?.message || "",
       },
       { status: 500 },
     );
   }
+
+  const logs =
+    mergeWorkoutHistoryV126M9(
+      mirrorRows,
+      sheetRows,
+    );
+
+  return NextResponse.json({
+    ok: true,
+    marker:
+      "WELLNESS_WORKOUT_CANONICAL_SHEET_HISTORY_V126M9",
+    participant_id:
+      Number(participant.id),
+    logs,
+    sources: {
+      supabase:
+        mirrorRows.length,
+      google_sheet:
+        sheetRows.length,
+      merged:
+        logs.length,
+      google_sheet_ok:
+        sheetResult?.ok !== false,
+      supabase_ok:
+        !mirrorResult.error,
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
