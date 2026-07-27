@@ -19,6 +19,7 @@
 // WELLNESS_PARTICIPANT_PROFILE_ASSIGNED_COACH_V76
 // WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 // WELLNESS_PARTICIPANT_HISTORY_DELETE_V126M
+// WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -5403,6 +5404,447 @@ function historyStepsValueV41(item: any) {
 function historyCaloriesValueV41(item: any) {
   return activityCaloriesValue(item);
 }
+
+// WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
+function nutritionCanonicalRawV126M1(
+  item: any,
+) {
+  const raw =
+    item?.raw_payload;
+
+  if (
+    raw &&
+    typeof raw === "object"
+  ) {
+    return raw;
+  }
+
+  if (
+    typeof raw === "string"
+  ) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function nutritionCanonicalSubmissionV126M1(
+  item: any,
+) {
+  const raw =
+    nutritionCanonicalRawV126M1(
+      item,
+    );
+
+  return clean(
+    item?._submission_id ||
+      item?.submission_id ||
+      item?.submissionId ||
+      raw?.submission_id ||
+      raw?.submissionId ||
+      raw?.google_sheet
+        ?.submission_id ||
+      raw?.google_sheet
+        ?.submissionId,
+  );
+}
+
+function nutritionCanonicalRowV126M1(
+  item: any,
+) {
+  const raw =
+    nutritionCanonicalRawV126M1(
+      item,
+    );
+
+  const value =
+    Number(
+      item?._google_sheet_row_number ||
+        item?.google_sheet_row_number ||
+        item?.sheet_row_number ||
+        item?.row_number ||
+        item?._rowNumber ||
+        raw?._rowNumber ||
+        raw?.google_sheet
+          ?.rowNumber ||
+        raw?.google_sheet
+          ?.row_number ||
+        0,
+    );
+
+  return Number.isFinite(value) &&
+    value > 0
+    ? value
+    : 0;
+}
+
+function nutritionCanonicalTextV126M1(
+  value: any,
+) {
+  return clean(value)
+    .toLowerCase()
+    .replace(
+      /[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+/gi,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function nutritionCanonicalMealV126M1(
+  item: any,
+) {
+  const text =
+    nutritionCanonicalTextV126M1(
+      item?.meal_type ||
+        item?.meal_time ||
+        item?.category,
+    );
+
+  if (
+    text.includes("breakfast") ||
+    text.includes("sarapan") ||
+    text === "pagi"
+  ) {
+    return "breakfast";
+  }
+
+  if (
+    text.includes("lunch") ||
+    text.includes("siang")
+  ) {
+    return "lunch";
+  }
+
+  if (
+    text.includes("dinner") ||
+    text.includes("malam")
+  ) {
+    return "dinner";
+  }
+
+  if (
+    text.includes("snack") ||
+    text.includes("camilan")
+  ) {
+    return "snack";
+  }
+
+  return text;
+}
+
+function nutritionCanonicalTitleV126M1(
+  item: any,
+) {
+  return nutritionCanonicalTextV126M1(
+    item?.food_name ||
+      item?.meal_text ||
+      item?.detected_foods ||
+      nutritionCanonicalRawV126M1(
+        item,
+      )?.["Add Options"],
+  );
+}
+
+function nutritionCanonicalDateV126M1(
+  item: any,
+) {
+  return nutritionLogDateV73(
+    item,
+  );
+}
+
+function nutritionCanonicalCaloriesV126M1(
+  item: any,
+) {
+  return asNumber(
+    item?.calories ??
+      item?.total_calories ??
+      item?.estimated_calories,
+  );
+}
+
+function nutritionCanonicalTitlesMatchV126M1(
+  left: string,
+  right: string,
+) {
+  if (!left || !right) {
+    return true;
+  }
+
+  return (
+    left === right ||
+    left.includes(right) ||
+    right.includes(left)
+  );
+}
+
+function nutritionCanonicalRowsMatchV126M1(
+  left: any,
+  right: any,
+) {
+  const leftSubmission =
+    nutritionCanonicalSubmissionV126M1(
+      left,
+    );
+
+  const rightSubmission =
+    nutritionCanonicalSubmissionV126M1(
+      right,
+    );
+
+  if (
+    leftSubmission &&
+    rightSubmission
+  ) {
+    return (
+      leftSubmission ===
+      rightSubmission
+    );
+  }
+
+  if (
+    nutritionCanonicalDateV126M1(
+      left,
+    ) !==
+    nutritionCanonicalDateV126M1(
+      right,
+    )
+  ) {
+    return false;
+  }
+
+  const leftMeal =
+    nutritionCanonicalMealV126M1(
+      left,
+    );
+
+  const rightMeal =
+    nutritionCanonicalMealV126M1(
+      right,
+    );
+
+  if (
+    leftMeal &&
+    rightMeal &&
+    leftMeal !== rightMeal
+  ) {
+    return false;
+  }
+
+  const leftCalories =
+    nutritionCanonicalCaloriesV126M1(
+      left,
+    );
+
+  const rightCalories =
+    nutritionCanonicalCaloriesV126M1(
+      right,
+    );
+
+  if (
+    leftCalories > 0 &&
+    rightCalories > 0 &&
+    Math.abs(
+      leftCalories -
+        rightCalories,
+    ) > 1
+  ) {
+    return false;
+  }
+
+  return nutritionCanonicalTitlesMatchV126M1(
+    nutritionCanonicalTitleV126M1(
+      left,
+    ),
+    nutritionCanonicalTitleV126M1(
+      right,
+    ),
+  );
+}
+
+function canonicalNutritionHistoryV126M1(
+  rows: any[] = [],
+) {
+  const sheetRows =
+    (rows || []).filter(
+      (item: any) =>
+        clean(
+          item?.source,
+        ).toLowerCase() ===
+        "google_sheet",
+    );
+
+  const supabaseRows =
+    (rows || []).filter(
+      (item: any) =>
+        clean(
+          item?.source,
+        ).toLowerCase() ===
+        "supabase",
+    );
+
+  const otherRows =
+    (rows || []).filter(
+      (item: any) =>
+        ![
+          "google_sheet",
+          "supabase",
+        ].includes(
+          clean(
+            item?.source,
+          ).toLowerCase(),
+        ),
+    );
+
+  const usedSupabase =
+    new Set<number>();
+
+  const merged =
+    sheetRows.map(
+      (
+        sheet: any,
+        sheetIndex: number,
+      ) => {
+        const supabaseIndex =
+          supabaseRows.findIndex(
+            (
+              mirror: any,
+              index: number,
+            ) =>
+              !usedSupabase.has(
+                index,
+              ) &&
+              nutritionCanonicalRowsMatchV126M1(
+                sheet,
+                mirror,
+              ),
+          );
+
+        if (
+          supabaseIndex < 0
+        ) {
+          return {
+            ...sheet,
+            _canonical_source:
+              "google_sheet",
+            _google_sheet_row_number:
+              nutritionCanonicalRowV126M1(
+                sheet,
+              ),
+            _submission_id:
+              nutritionCanonicalSubmissionV126M1(
+                sheet,
+              ),
+          };
+        }
+
+        usedSupabase.add(
+          supabaseIndex,
+        );
+
+        const mirror =
+          supabaseRows[
+            supabaseIndex
+          ];
+
+        return {
+          ...mirror,
+          ...sheet,
+          id:
+            mirror?.id ||
+            sheet?.id ||
+            `nutrition-${sheetIndex}`,
+          source:
+            "google_sheet_supabase",
+          _canonical_source:
+            "google_sheet_supabase",
+          _supabase_id:
+            Number(
+              mirror?.id,
+            ) || null,
+          _google_sheet_row_number:
+            nutritionCanonicalRowV126M1(
+              sheet,
+            ) ||
+            nutritionCanonicalRowV126M1(
+              mirror,
+            ) ||
+            null,
+          _submission_id:
+            nutritionCanonicalSubmissionV126M1(
+              sheet,
+            ) ||
+            nutritionCanonicalSubmissionV126M1(
+              mirror,
+            ) ||
+            null,
+          photo_url:
+            sheet?.photo_url ||
+            mirror?.photo_url ||
+            null,
+        };
+      },
+    );
+
+  supabaseRows.forEach(
+    (
+      row: any,
+      index: number,
+    ) => {
+      if (
+        usedSupabase.has(index)
+      ) {
+        return;
+      }
+
+      merged.push({
+        ...row,
+        _canonical_source:
+          "supabase",
+        _supabase_id:
+          Number(row?.id) ||
+          null,
+        _google_sheet_row_number:
+          nutritionCanonicalRowV126M1(
+            row,
+          ) ||
+          null,
+        _submission_id:
+          nutritionCanonicalSubmissionV126M1(
+            row,
+          ) ||
+          null,
+      });
+    },
+  );
+
+  return [
+    ...merged,
+    ...otherRows,
+  ].sort(
+    (
+      left: any,
+      right: any,
+    ) =>
+      clean(
+        right?.created_at ||
+          right?.updated_at ||
+          right?.log_date,
+      ).localeCompare(
+        clean(
+          left?.created_at ||
+            left?.updated_at ||
+            left?.log_date,
+        ),
+      ),
+  );
+}
+
 function HistoryTab({
   participant,
   nutritionLogs,
@@ -5455,7 +5897,8 @@ function HistoryTab({
     const raw = historyDeleteRawPayloadV126M(item);
 
     return clean(
-      item?.submission_id ||
+      item?._submission_id ||
+        item?.submission_id ||
         item?.submissionId ||
         raw?.submission_id ||
         raw?.submissionId ||
@@ -5468,7 +5911,8 @@ function HistoryTab({
     const raw = historyDeleteRawPayloadV126M(item);
 
     const value = Number(
-      item?.google_sheet_row_number ||
+      item?._google_sheet_row_number ||
+        item?.google_sheet_row_number ||
         item?.sheet_row_number ||
         item?.row_number ||
         item?._rowNumber ||
@@ -5522,7 +5966,7 @@ function HistoryTab({
         : item?.activity_name || item?.activity_type || "workout ini";
 
     const confirmed = window.confirm(
-      `Hapus ${label}? Data akan dihapus dari history dan Google Sheet.`,
+      `Hapus ${label}? Data pasangan Google Sheet dan Supabase akan ikut dihapus.`,
     );
 
     if (!confirmed) return;
@@ -5542,13 +5986,39 @@ function HistoryTab({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            id: item?.id || null,
-            submission_id: historySubmissionIdV126M(item) || null,
-            google_sheet_row_number: historySheetRowV126M(item) || null,
+            id:
+              item?._supabase_id ||
+              item?.id ||
+              null,
+            mirror_id:
+              item?._supabase_id ||
+              null,
+            submission_id:
+              historySubmissionIdV126M(item) ||
+              null,
+            google_sheet_row_number:
+              historySheetRowV126M(item) ||
+              null,
             log_date:
-              clean(item?.log_date || item?.date || item?.created_at)
-                .slice(0, 10) || null,
-            source: item?.source || null,
+              clean(
+                item?.log_date ||
+                  item?.date ||
+                  item?.created_at,
+              ).slice(0, 10) ||
+              null,
+            meal_type:
+              item?.meal_type ||
+              item?.meal_time ||
+              null,
+            calories:
+              item?.calories ??
+              item?.total_calories ??
+              item?.estimated_calories ??
+              null,
+            source:
+              item?._canonical_source ||
+              item?.source ||
+              null,
             title:
               item?.food_name ||
               item?.meal_text ||
@@ -5671,9 +6141,12 @@ function HistoryTab({
   }
 
   const rawNutrition =
-    nutritionLoaded && directNutrition?.logs?.length > 0
-      ? directNutrition.logs
-      : nutritionLogs || [];
+    canonicalNutritionHistoryV126M1(
+      nutritionLoaded &&
+        directNutrition?.logs?.length > 0
+        ? directNutrition.logs
+        : nutritionLogs || [],
+    );
 
   const workoutSourceRows = workoutLogs || workoutItems || [];
   const rawWorkout = normalizeWorkoutItemsForHistoryV72(workoutSourceRows);
@@ -5824,8 +6297,7 @@ function HistoryTab({
       >
         {directNutrition?.sources ? (
           <div className="mb-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            Source: Supabase {directNutrition.sources.supabase_rows || 0} row |
-            Google Sheet {directNutrition.sources.google_sheet_rows || 0} row
+            {rawNutrition.length} submission nutrisi · data Google Sheet dan Supabase sudah digabung
           </div>
         ) : null}
 
@@ -6130,11 +6602,17 @@ function HistoryMealItemV37({
 }) {
   const photo = normalizeImageUrlV37(item.photo_url);
   const sourceLabel =
-    item.source === "google_sheet"
-      ? "Google Sheet"
-      : item.source === "supabase"
-        ? "Supabase"
-        : item.source || "Food log";
+    item.source ===
+      "google_sheet_supabase"
+      ? "Google Sheet + Supabase"
+      : item.source ===
+          "google_sheet"
+        ? "Google Sheet"
+        : item.source ===
+            "supabase"
+          ? "Supabase"
+          : item.source ||
+            "Food log";
 
   return (
     <div className="rounded-[1.7rem] bg-slate-50 p-3">

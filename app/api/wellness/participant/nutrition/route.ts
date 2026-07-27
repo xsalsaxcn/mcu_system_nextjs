@@ -1,6 +1,7 @@
 // WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD
 // WELLNESS_NUTRITION_IDEMPOTENCY_V126L
 // WELLNESS_NUTRITION_DELETE_V126M
+// WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
 // WELLNESS_NUTRITION_STATUS_MIRROR_V98
 // Google Sheet + Google Drive remain the primary submission store.
 // A compact mirror is also saved to the existing wellness_food_logs table
@@ -1197,165 +1198,626 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
 }
 
 export async function DELETE(req: NextRequest) {
-  const { supabase, participant } = await getParticipant(req);
+  const { supabase, participant } =
+    await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
       {
         ok: false,
-        message: "OTP/session peserta belum aktif.",
+        message:
+          "OTP/session peserta belum aktif.",
       },
       { status: 401 },
     );
   }
 
   try {
-    assertWebhookConfigured();
+    const body =
+      await req.json().catch(
+        () => ({}),
+      );
 
-    const body = await req.json().catch(() => ({}));
+    const requestedSource =
+      clean(body?.source)
+        .toLowerCase();
 
-    const submissionId = clean(
-      body?.submission_id ||
-        body?.submissionId,
-    );
+    const requestedMirrorId =
+      pointNumber(
+        body?.mirror_id ||
+          body?.supabase_id ||
+          body?.id,
+      );
 
-    const sheetRowNumber = pointNumber(
-      body?.google_sheet_row_number ||
-        body?.sheet_row_number ||
-        body?.row_number,
-    );
+    const requestedSubmissionId =
+      clean(
+        body?.submission_id ||
+          body?.submissionId,
+      );
 
-    const mirrorId = pointNumber(body?.id);
-    const logDate = safeIsoDate(
-      body?.log_date ||
-        body?.date ||
-        todayDate(),
-    );
+    const requestedSheetRow =
+      pointNumber(
+        body?.google_sheet_row_number ||
+          body?.sheet_row_number ||
+          body?.row_number,
+      );
 
-    if (
-      !submissionId &&
-      !(sheetRowNumber > 0) &&
-      !(mirrorId > 0)
+    const requestedDate =
+      safeIsoDate(
+        body?.log_date ||
+          body?.date ||
+          todayDate(),
+      );
+
+    const requestedMeal =
+      clean(
+        body?.meal_type ||
+          body?.meal_time,
+      ).toLowerCase();
+
+    const requestedTitle =
+      clean(
+        body?.title ||
+          body?.food_name ||
+          body?.meal_text,
+      );
+
+    const requestedCalories =
+      pointNumber(
+        body?.calories ||
+          body?.total_calories,
+      );
+
+    function normalizedDeleteText(
+      value: any,
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message:
-            "Identitas riwayat nutrisi tidak ditemukan.",
-        },
-        { status: 400 },
+      return clean(value)
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+/gi,
+          " ",
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function normalizedMeal(
+      value: any,
+    ) {
+      const text =
+        normalizedDeleteText(value);
+
+      if (
+        text.includes("breakfast") ||
+        text.includes("sarapan") ||
+        text === "pagi"
+      ) {
+        return "breakfast";
+      }
+
+      if (
+        text.includes("lunch") ||
+        text.includes("siang")
+      ) {
+        return "lunch";
+      }
+
+      if (
+        text.includes("dinner") ||
+        text.includes("malam")
+      ) {
+        return "dinner";
+      }
+
+      if (
+        text.includes("snack") ||
+        text.includes("camilan")
+      ) {
+        return "snack";
+      }
+
+      return text;
+    }
+
+    function rowRaw(
+      row: any,
+    ) {
+      if (
+        row?.raw_payload &&
+        typeof row.raw_payload ===
+          "object"
+      ) {
+        return row.raw_payload;
+      }
+
+      return {};
+    }
+
+    function rowSubmissionId(
+      row: any,
+    ) {
+      const raw =
+        rowRaw(row);
+
+      return clean(
+        row?.submission_id ||
+          row?.submissionId ||
+          raw?.submission_id ||
+          raw?.submissionId ||
+          raw?.google_sheet
+            ?.submission_id ||
+          raw?.google_sheet
+            ?.submissionId,
       );
     }
 
-    const sheetDeleteResult = await postToWebhook({
-      action: "deleteSubmission",
-      sheet: getSheetName(),
-      submissionId,
-      submission_id: submissionId,
-      rowNumber: sheetRowNumber || null,
-      row_number: sheetRowNumber || null,
-      participantId: Number(participant.id),
-      participant_id: Number(participant.id),
-      logType: "nutrition",
-      log_type: "nutrition",
-      marker: "WELLNESS_NUTRITION_DELETE_V126M",
-    });
+    function rowSheetNumber(
+      row: any,
+    ) {
+      const raw =
+        rowRaw(row);
 
-    const mirrorsResult = await supabase
-      .from("wellness_food_logs")
-      .select(
-        "id,participant_id,log_date,google_sheet_row_number,raw_payload",
-      )
-      .eq(
-        "participant_id",
-        Number(participant.id),
-      )
-      .limit(1000);
+      return pointNumber(
+        row?.google_sheet_row_number ||
+          row?.sheet_row_number ||
+          row?.row_number ||
+          row?._rowNumber ||
+          raw?._rowNumber ||
+          raw?.google_sheet
+            ?.rowNumber ||
+          raw?.google_sheet
+            ?.row_number,
+      );
+    }
+
+    function rowDate(
+      row: any,
+    ) {
+      return safeIsoDate(
+        row?.log_date ||
+          row?.date ||
+          row?.created_at ||
+          row?.updated_at,
+      );
+    }
+
+    function rowMeal(
+      row: any,
+    ) {
+      return normalizedMeal(
+        row?.meal_type ||
+          row?.meal_time ||
+          row?.category,
+      );
+    }
+
+    function rowTitle(
+      row: any,
+    ) {
+      return normalizedDeleteText(
+        row?.food_name ||
+          row?.meal_text ||
+          row?.detected_foods ||
+          row?.raw_payload?.[
+            "Add Options"
+          ],
+      );
+    }
+
+    function rowCalories(
+      row: any,
+    ) {
+      return pointNumber(
+        row?.calories ??
+          row?.total_calories ??
+          row?.estimated_calories ??
+          row?.raw_payload?.[
+            "Kalori Makanan"
+          ],
+      );
+    }
+
+    function sameFoodTitle(
+      left: string,
+      right: string,
+    ) {
+      if (!left || !right) {
+        return true;
+      }
+
+      return (
+        left === right ||
+        left.includes(right) ||
+        right.includes(left)
+      );
+    }
+
+    function strictMatch(
+      row: any,
+    ) {
+      if (
+        rowDate(row) !== requestedDate
+      ) {
+        return false;
+      }
+
+      const candidateMeal =
+        rowMeal(row);
+
+      const wantedMeal =
+        normalizedMeal(
+          requestedMeal,
+        );
+
+      if (
+        wantedMeal &&
+        candidateMeal &&
+        wantedMeal !== candidateMeal
+      ) {
+        return false;
+      }
+
+      const candidateCalories =
+        rowCalories(row);
+
+      if (
+        requestedCalories > 0 &&
+        candidateCalories > 0 &&
+        Math.abs(
+          requestedCalories -
+            candidateCalories,
+        ) > 1
+      ) {
+        return false;
+      }
+
+      return sameFoodTitle(
+        normalizedDeleteText(
+          requestedTitle,
+        ),
+        rowTitle(row),
+      );
+    }
+
+    /*
+     * Ambil mirror Supabase milik peserta.
+     * Data ini dipakai untuk menemukan pasangan
+     * Submission ID dan row Sheet yang benar.
+     */
+    const mirrorsResult =
+      await supabase
+        .from(
+          "wellness_food_logs",
+        )
+        .select("*")
+        .eq(
+          "participant_id",
+          Number(participant.id),
+        )
+        .limit(2000);
 
     if (mirrorsResult.error) {
       throw mirrorsResult.error;
     }
 
-    const mirrorIds = (mirrorsResult.data || [])
-      .filter((row: any) => {
-        const raw =
-          row?.raw_payload &&
-          typeof row.raw_payload === "object"
-            ? row.raw_payload
-            : {};
+    const mirrors =
+      mirrorsResult.data || [];
 
-        const rawSubmissionId = clean(
-          raw?.submission_id ||
-            raw?.submissionId ||
-            raw?.google_sheet?.submission_id ||
-            raw?.google_sheet?.submissionId,
+    const requestedMirror =
+      mirrors.find(
+        (row: any) =>
+          requestedMirrorId > 0 &&
+          Number(row?.id) ===
+            requestedMirrorId,
+      ) || null;
+
+    const mirrorSubmissionId =
+      requestedMirror
+        ? rowSubmissionId(
+            requestedMirror,
+          )
+        : "";
+
+    const mirrorSheetRow =
+      requestedMirror
+        ? rowSheetNumber(
+            requestedMirror,
+          )
+        : 0;
+
+    /*
+     * Baca ulang Google Sheet.
+     * Jangan mengandalkan nomor row lama karena
+     * nomor row bergeser setelah row lain dihapus.
+     */
+    const sheetRead =
+      await fetchWellnessGoogleSheetRows({
+        participantId:
+          participant.id,
+        code: participant.code,
+        logType: "nutrition",
+        limit: 10000,
+      });
+
+    const sheetFoods =
+      googleSheetRowsToFoodLogs(
+        sheetRead?.rows || [],
+      ).filter(
+        (row: any) => {
+          const sameId =
+            pointNumber(
+              row?.participant_id,
+            ) ===
+            pointNumber(
+              participant.id,
+            );
+
+          const sameCode =
+            clean(participant.code) &&
+            clean(
+              row?.participant_code,
+            ) ===
+              clean(
+                participant.code,
+              );
+
+          return (
+            sameId ||
+            Boolean(sameCode)
+          );
+        },
+      );
+
+    const wantedSubmissionId =
+      requestedSubmissionId ||
+      mirrorSubmissionId;
+
+    let matchedSheetRow: any =
+      null;
+
+    if (wantedSubmissionId) {
+      matchedSheetRow =
+        sheetFoods.find(
+          (row: any) =>
+            rowSubmissionId(row) ===
+            wantedSubmissionId,
+        ) || null;
+    }
+
+    /*
+     * Nomor row hanya digunakan bila row itu
+     * masih benar-benar milik peserta ini.
+     */
+    if (
+      !matchedSheetRow &&
+      requestedSheetRow > 0
+    ) {
+      matchedSheetRow =
+        sheetFoods.find(
+          (row: any) =>
+            rowSheetNumber(row) ===
+            requestedSheetRow,
+        ) || null;
+    }
+
+    if (
+      !matchedSheetRow &&
+      mirrorSheetRow > 0
+    ) {
+      matchedSheetRow =
+        sheetFoods.find(
+          (row: any) =>
+            rowSheetNumber(row) ===
+            mirrorSheetRow,
+        ) || null;
+    }
+
+    /*
+     * Fallback aman untuk row lama tanpa
+     * Submission ID: tanggal + meal +
+     * kalori + nama makanan.
+     */
+    if (!matchedSheetRow) {
+      const candidates =
+        sheetFoods.filter(
+          strictMatch,
         );
 
-        const rawSheetRow = pointNumber(
-          row?.google_sheet_row_number ||
-            raw?.google_sheet?.rowNumber ||
-            raw?.google_sheet?.row_number,
-        );
+      if (
+        candidates.length === 1
+      ) {
+        matchedSheetRow =
+          candidates[0];
+      }
+    }
 
-        return (
-          (mirrorId > 0 &&
-            Number(row?.id) === mirrorId) ||
-          (submissionId &&
-            rawSubmissionId === submissionId) ||
-          (sheetRowNumber > 0 &&
-            rawSheetRow === sheetRowNumber)
+    const resolvedSubmissionId =
+      wantedSubmissionId ||
+      rowSubmissionId(
+        matchedSheetRow,
+      );
+
+    const resolvedSheetRow =
+      rowSheetNumber(
+        matchedSheetRow,
+      );
+
+    let sheetDeleteResult: any = {
+      ok: true,
+      deleted: false,
+      skipped: true,
+      message:
+        "Tidak ada pasangan Google Sheet yang aman untuk dihapus.",
+    };
+
+    if (
+      resolvedSubmissionId ||
+      resolvedSheetRow > 0
+    ) {
+      sheetDeleteResult =
+        await postToWebhook({
+          action:
+            "deleteSubmission",
+          sheet:
+            getSheetName(),
+          submissionId:
+            resolvedSubmissionId,
+          submission_id:
+            resolvedSubmissionId,
+          rowNumber:
+            resolvedSheetRow ||
+            null,
+          row_number:
+            resolvedSheetRow ||
+            null,
+          participantId:
+            Number(
+              participant.id,
+            ),
+          participant_id:
+            Number(
+              participant.id,
+            ),
+          logType:
+            "nutrition",
+          log_type:
+            "nutrition",
+          marker:
+            "WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1",
+        });
+    }
+
+    /*
+     * Hapus semua mirror yang merupakan pasangan
+     * submission yang sama. Tidak memakai row
+     * number saja tanpa verifikasi lain.
+     */
+    const mirrorIds =
+      mirrors
+        .filter(
+          (row: any) => {
+            if (
+              requestedMirrorId > 0 &&
+              Number(row?.id) ===
+                requestedMirrorId
+            ) {
+              return true;
+            }
+
+            if (
+              resolvedSubmissionId &&
+              rowSubmissionId(row) ===
+                resolvedSubmissionId
+            ) {
+              return true;
+            }
+
+            if (
+              resolvedSheetRow > 0 &&
+              rowSheetNumber(row) ===
+                resolvedSheetRow &&
+              strictMatch(row)
+            ) {
+              return true;
+            }
+
+            return (
+              !resolvedSubmissionId &&
+              strictMatch(row)
+            );
+          },
+        )
+        .map(
+          (row: any) =>
+            Number(row?.id),
+        )
+        .filter(
+          (id: number) =>
+            id > 0,
         );
-      })
-      .map((row: any) => Number(row?.id))
-      .filter((id: number) => id > 0);
 
     if (mirrorIds.length > 0) {
-      const deletedMirrors = await supabase
-        .from("wellness_food_logs")
-        .delete()
-        .in("id", mirrorIds);
+      const deletedMirrors =
+        await supabase
+          .from(
+            "wellness_food_logs",
+          )
+          .delete()
+          .in(
+            "id",
+            Array.from(
+              new Set(
+                mirrorIds,
+              ),
+            ),
+          );
 
-      if (deletedMirrors.error) {
+      if (
+        deletedMirrors.error
+      ) {
         throw deletedMirrors.error;
       }
     }
 
-    if (submissionId) {
-      const deletedInputPoint = await supabase
-        .from("wellness_point_logs")
-        .delete()
-        .eq(
-          "participant_id",
-          Number(participant.id),
-        )
-        .eq(
-          "point_key",
-          `nutrition_input_${submissionId}`,
-        );
+    /*
+     * Hapus point input pasangan yang sama.
+     */
+    if (resolvedSubmissionId) {
+      const deletedInputPoint =
+        await supabase
+          .from(
+            "wellness_point_logs",
+          )
+          .delete()
+          .eq(
+            "participant_id",
+            Number(
+              participant.id,
+            ),
+          )
+          .eq(
+            "point_key",
+            `nutrition_input_${resolvedSubmissionId}`,
+          );
 
-      if (deletedInputPoint.error) {
-        throw deletedInputPoint.error;
-      }
-    } else if (sheetRowNumber > 0) {
-      const deletedInputPoint = await supabase
-        .from("wellness_point_logs")
-        .delete()
-        .eq(
-          "participant_id",
-          Number(participant.id),
-        )
-        .eq(
-          "source_type",
-          "nutrition_google_sheet",
-        )
-        .eq("source_id", sheetRowNumber);
-
-      if (deletedInputPoint.error) {
+      if (
+        deletedInputPoint.error
+      ) {
         throw deletedInputPoint.error;
       }
     }
 
-    let bonusResult: any = null;
+    if (resolvedSheetRow > 0) {
+      const deletedRowPoint =
+        await supabase
+          .from(
+            "wellness_point_logs",
+          )
+          .delete()
+          .eq(
+            "participant_id",
+            Number(
+              participant.id,
+            ),
+          )
+          .eq(
+            "source_type",
+            "nutrition_google_sheet",
+          )
+          .eq(
+            "source_id",
+            resolvedSheetRow,
+          );
+
+      if (
+        deletedRowPoint.error
+      ) {
+        throw deletedRowPoint.error;
+      }
+    }
+
+    let bonusResult: any =
+      null;
 
     try {
       const targets =
@@ -1364,30 +1826,63 @@ export async function DELETE(req: NextRequest) {
           participant,
         );
 
-      const sheetRead =
+      const refreshedSheet =
         await fetchWellnessGoogleSheetRows({
-          participantId: participant.id,
-          code: participant.code,
-          logType: "nutrition",
-          limit: 500,
+          participantId:
+            participant.id,
+          code:
+            participant.code,
+          logType:
+            "nutrition",
+          limit:
+            10000,
         });
 
       const remainingFoods =
         googleSheetRowsToFoodLogs(
-          sheetRead.rows || [],
+          refreshedSheet?.rows ||
+            [],
         ).filter(
-          (row: any) =>
-            Number(row?.participant_id) ===
-              Number(participant.id) &&
-            safeIsoDate(
-              row?.log_date ||
-                row?.created_at,
-            ) === logDate,
+          (row: any) => {
+            const sameId =
+              pointNumber(
+                row?.participant_id,
+              ) ===
+              pointNumber(
+                participant.id,
+              );
+
+            const sameCode =
+              clean(
+                participant.code,
+              ) &&
+              clean(
+                row?.participant_code,
+              ) ===
+                clean(
+                  participant.code,
+                );
+
+            return (
+              (sameId ||
+                Boolean(
+                  sameCode,
+                )) &&
+              safeIsoDate(
+                row?.log_date ||
+                  row?.created_at,
+              ) ===
+                requestedDate
+            );
+          },
         );
 
       const totalCalories =
         remainingFoods.reduce(
-          (sum: number, row: any) =>
+          (
+            sum: number,
+            row: any,
+          ) =>
             sum +
             pointNumber(
               row?.total_calories ??
@@ -1403,29 +1898,40 @@ export async function DELETE(req: NextRequest) {
       const bonusPoints =
         nutritionDailyBonusPoints({
           totalCalories,
-          calorieLimit: targets.nutrition,
+          calorieLimit:
+            targets.nutrition,
           hasNutritionInput:
-            remainingFoods.length > 0,
+            remainingFoods.length >
+            0,
         });
 
-      bonusResult = await setDailyPoint({
-        supabase,
-        participant,
-        logDate,
-        pointKey: "nutrition_daily_bonus",
-        sourceType: "nutrition_daily_bonus",
-        sourceId: null,
-        points: bonusPoints,
-        description:
-          remainingFoods.length > 0
-            ? `Rekalkulasi bonus nutrisi (${Math.round(
-                totalCalories,
-              )}/${Math.round(
-                targets.nutrition,
-              )} kkal)`
-            : "Bonus nutrisi dihapus karena tidak ada input nutrisi.",
-      });
-    } catch (bonusError: any) {
+      bonusResult =
+        await setDailyPoint({
+          supabase,
+          participant,
+          logDate:
+            requestedDate,
+          pointKey:
+            "nutrition_daily_bonus",
+          sourceType:
+            "nutrition_daily_bonus",
+          sourceId:
+            null,
+          points:
+            bonusPoints,
+          description:
+            remainingFoods.length >
+            0
+              ? `Rekalkulasi bonus nutrisi (${Math.round(
+                  totalCalories,
+                )}/${Math.round(
+                  targets.nutrition,
+                )} kkal)`
+              : "Bonus nutrisi dihapus karena tidak ada input nutrisi.",
+        });
+    } catch (
+      bonusError: any
+    ) {
       bonusResult = {
         ok: false,
         warning:
@@ -1436,20 +1942,33 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      marker:
+        "WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1",
       message:
-        "Riwayat nutrisi berhasil dihapus.",
-      submission_id: submissionId || null,
+        "Riwayat nutrisi berhasil dihapus dari Google Sheet dan Supabase.",
+      requested_source:
+        requestedSource ||
+        null,
+      submission_id:
+        resolvedSubmissionId ||
+        null,
       google_sheet_row_number:
-        sheetRowNumber || null,
+        resolvedSheetRow ||
+        null,
       deleted_mirror_rows:
-        mirrorIds.length,
-      google_sheet: sheetDeleteResult,
+        Array.from(
+          new Set(
+            mirrorIds,
+          ),
+        ).length,
+      google_sheet:
+        sheetDeleteResult,
       nutrition_daily_bonus:
         bonusResult,
     });
   } catch (error: any) {
     console.error(
-      "WELLNESS_NUTRITION_DELETE_V126M_ERROR",
+      "WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1_ERROR",
       error,
     );
 
