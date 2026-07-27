@@ -1599,86 +1599,254 @@ export async function DELETE(req: NextRequest) {
 
 
 // WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
+// WELLNESS_NUTRITION_EDIT_MATCH_INPUT_FORM_V126M7
 export async function PATCH(req: NextRequest) {
-  const { participant } = await getParticipant(req);
+  const { supabase, participant } =
+    await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
-      { ok: false, message: "OTP/session peserta belum aktif." },
+      {
+        ok: false,
+        message:
+          "OTP/session peserta belum aktif.",
+      },
       { status: 401 },
     );
   }
 
   try {
     assertWebhookConfigured();
-    const body = await req.json().catch(() => ({}));
-    const submissionId = clean(body?.submission_id || body?.submissionId);
-    const rowNumber = Number(body?.google_sheet_row_number || body?.row_number || 0);
-    const logDate = safeIsoDate(body?.log_date || body?.logDate);
-    const mealType = clean(body?.meal_type || body?.mealType);
-    const foodName = clean(body?.food_name || body?.foodName || body?.title);
-    const calories = toNumberOrNull(body?.calories);
-    const notes = clean(body?.notes || body?.catatan);
-    const expectedLogDate = safeIsoDate(body?.expected_log_date || body?.expectedLogDate);
-    const expectedMealType = clean(body?.expected_meal_type || body?.expectedMealType);
-    const expectedFoodName = clean(body?.expected_food_name || body?.expectedFoodName);
-    const expectedCalories = toNumberOrNull(body?.expected_calories ?? body?.expectedCalories);
 
-    if (!submissionId && (!Number.isFinite(rowNumber) || rowNumber < 2)) {
+    const { body, photo } =
+      await parseRequestBody(req);
+    const submissionId = clean(
+      body?.submission_id ||
+        body?.submissionId,
+    );
+    const rowNumber = Number(
+      body?.google_sheet_row_number ||
+        body?.row_number ||
+        0,
+    );
+    const requestedLogDate = clean(
+      body?.log_date ||
+        body?.logDate,
+    );
+    const logDate = requestedLogDate
+      ? safeIsoDate(requestedLogDate)
+      : "";
+    const mealType = clean(
+      body?.meal_type ||
+        body?.mealType,
+    );
+    const foodName = clean(
+      body?.food_name ||
+        body?.foodName ||
+        body?.title,
+    );
+    const portion = clean(
+      body?.portion ||
+        body?.porsi,
+    );
+    const notes = clean(
+      body?.notes ||
+        body?.catatan,
+    );
+    const expectedLogDateText = clean(
+      body?.expected_log_date ||
+        body?.expectedLogDate,
+    );
+    const expectedLogDate =
+      expectedLogDateText
+        ? safeIsoDate(
+            expectedLogDateText,
+          )
+        : "";
+    const expectedMealType = clean(
+      body?.expected_meal_type ||
+        body?.expectedMealType,
+    );
+    const expectedFoodName = clean(
+      body?.expected_food_name ||
+        body?.expectedFoodName,
+    );
+    const expectedCalories =
+      toNumberOrNull(
+        body?.expected_calories ??
+          body?.expectedCalories,
+      );
+
+    if (
+      !submissionId &&
+      (
+        !Number.isFinite(rowNumber) ||
+        rowNumber < 2
+      )
+    ) {
       return NextResponse.json(
-        { ok: false, message: "Submission ID atau nomor row Google Sheet wajib tersedia." },
+        {
+          ok: false,
+          message:
+            "Submission ID atau nomor row Google Sheet wajib tersedia.",
+        },
         { status: 400 },
       );
     }
 
-    if (!logDate || !mealType || !foodName) {
+    if (
+      !logDate ||
+      !mealType ||
+      !foodName
+    ) {
       return NextResponse.json(
-        { ok: false, message: "Tanggal, waktu makan, dan nama makanan wajib diisi." },
+        {
+          ok: false,
+          message:
+            "Tanggal, waktu makan, dan nama makanan wajib diisi.",
+        },
         { status: 400 },
       );
     }
 
-    const result = await postToWebhook({
-      action: "updateSubmissionV126M6",
-      sheet: getSheetName(),
-      submissionId,
-      submission_id: submissionId,
-      rowNumber,
-      row_number: rowNumber,
-      participantId: Number(participant.id),
-      participant_id: Number(participant.id),
-      participantCode: clean(participant?.code),
-      participant_code: clean(participant?.code),
-      logType: "nutrition",
-      log_type: "nutrition",
-      updates: {
-        "Submission Date": logDate,
-        "Log Date": logDate,
-        "Waktu Makan": mealType,
-        "Add Options": foodName,
-        "Catatan Nutrisi": notes,
-        "Kalori Makanan": calories ?? 0,
-      },
-      allowedHeaders: [
-        "Submission Date",
-        "Log Date",
-        "Waktu Makan",
-        "Add Options",
-        "Catatan Nutrisi",
-        "Kalori Makanan",
-      ],
-      expected: {
-        logDate: expectedLogDate,
-        mealType: expectedMealType,
-        title: expectedFoodName,
-        calories: expectedCalories,
-      },
-      marker: "WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6",
-    });
+    let calorieResult =
+      await calculateMultiFoodCalories(
+        supabase,
+        foodName,
+      );
+
+    calorieResult =
+      applySubmittedEstimateToCalorieResultV45(
+        calorieResult,
+        body,
+      );
+
+    const calories =
+      toNumberOrNull(
+        calorieResult?.total_calories,
+      ) ?? 0;
+    const detectedFoods = clean(
+      calorieResult?.detected_foods_text ||
+        calorieResult?.original_food_name ||
+        foodName,
+    );
+
+    const companyName =
+      clean(
+        participant?.company ||
+          participant?.company_name ||
+          body?.company ||
+          body?.company_name,
+      ) || "Tanpa Perusahaan";
+
+    const photoResult = photo
+      ? await uploadNutritionPhoto({
+          photo,
+          participant,
+          companyName,
+          logDate,
+        })
+      : null;
+
+    const previewUrl = clean(
+      photoResult?.previewUrl ||
+        photoResult?.thumbnailUrl ||
+        photoResult?.publicUrl ||
+        photoResult?.driveUrl,
+    );
+    const driveUrl = clean(
+      photoResult?.driveUrl ||
+        photoResult?.publicUrl,
+    );
+
+    const updates: Record<string, any> = {
+      "Log Date": logDate,
+      "Waktu Makan":
+        mealLabel(mealType),
+      "Add Options":
+        [foodName, portion]
+          .filter(Boolean)
+          .join(" - "),
+      "Catatan Nutrisi": notes,
+      "Kalori Makanan": calories,
+      "Detected Foods":
+        detectedFoods,
+    };
+
+    const allowedHeaders = [
+      "Log Date",
+      "Waktu Makan",
+      "Add Options",
+      "Catatan Nutrisi",
+      "Kalori Makanan",
+      "Detected Foods",
+    ];
+
+    if (photoResult) {
+      updates[
+        "Upload Foto Makanan"
+      ] = driveUrl;
+      updates[
+        "Preview Foto Makanan"
+      ] = previewUrl;
+      updates["Evidence Count"] =
+        driveUrl || previewUrl
+          ? 1
+          : 0;
+
+      allowedHeaders.push(
+        "Upload Foto Makanan",
+        "Preview Foto Makanan",
+        "Evidence Count",
+      );
+    }
+
+    const result =
+      await postToWebhook({
+        action:
+          "updateSubmissionV126M6",
+        sheet: getSheetName(),
+        submissionId,
+        submission_id:
+          submissionId,
+        rowNumber,
+        row_number: rowNumber,
+        participantId:
+          Number(participant.id),
+        participant_id:
+          Number(participant.id),
+        participantCode:
+          clean(participant?.code),
+        participant_code:
+          clean(participant?.code),
+        logType: "nutrition",
+        log_type: "nutrition",
+        updates,
+        allowedHeaders,
+        expected: {
+          logDate:
+            expectedLogDate,
+          mealType:
+            expectedMealType,
+          title:
+            expectedFoodName,
+          calories:
+            expectedCalories,
+        },
+        marker:
+          "WELLNESS_NUTRITION_EDIT_MATCH_INPUT_FORM_V126M7",
+      });
 
     if (result?.updated !== true) {
       return NextResponse.json(
-        { ok: false, message: result?.message || "Data nutrisi belum berhasil diperbarui.", google_sheet: result },
+        {
+          ok: false,
+          message:
+            result?.message ||
+            "Data nutrisi belum berhasil diperbarui.",
+          google_sheet:
+            result,
+        },
         { status: 409 },
       );
     }
@@ -1686,12 +1854,22 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       updated: true,
-      message: "Data nutrisi berhasil diperbarui di Google Sheet.",
+      calories,
+      photo_updated:
+        Boolean(photoResult),
+      message:
+        "Data nutrisi berhasil diperbarui di Google Sheet.",
       google_sheet: result,
     });
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, message: error?.message || "Gagal memperbarui nutrisi." },
+      {
+        ok: false,
+        message:
+          publicNutritionErrorV126M2(
+            error,
+          ),
+      },
       { status: 500 },
     );
   }

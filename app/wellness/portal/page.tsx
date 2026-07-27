@@ -6041,6 +6041,626 @@ function canonicalNutritionHistoryV126M1(
   );
 }
 
+
+// WELLNESS_NUTRITION_EDIT_MATCH_INPUT_FORM_V126M7
+function nutritionMealValueV126M7(value: any) {
+  const text = clean(value).toLowerCase();
+
+  if (text.includes("breakfast") || text.includes("sarapan")) {
+    return "Breakfast / Sarapan";
+  }
+  if (text.includes("lunch") || text.includes("siang")) {
+    return "Lunch / Makan Siang";
+  }
+  if (text.includes("dinner") || text.includes("malam")) {
+    return "Dinner / Makan Malam";
+  }
+  if (text.includes("snack") || text.includes("camilan")) {
+    return "Snack";
+  }
+
+  return clean(value);
+}
+
+function nutritionEditSeedV126M7(item: any, raw: any) {
+  const addOptions = clean(
+    raw?.["Add Options"] ||
+      item?.food_name ||
+      item?.meal_text ||
+      item?.title,
+  );
+
+  let foodName = clean(
+    item?.original_food_name ||
+      raw?.original_food_name ||
+      raw?.food_name,
+  );
+  let portionText = clean(
+    item?.portion ||
+      item?.portion_breakdown ||
+      raw?.portion ||
+      raw?.portion_breakdown,
+  );
+
+  if (!foodName) {
+    const separatorIndex = addOptions.lastIndexOf(" - ");
+    const tail =
+      separatorIndex >= 0
+        ? clean(addOptions.slice(separatorIndex + 3))
+        : "";
+
+    if (
+      separatorIndex > 0 &&
+      /(?:^|[\s,;])(1\/4|1\/3|1\/2|1)(?:\s*porsi)?(?:$|[\s,;])/i.test(
+        ` ${tail} `,
+      )
+    ) {
+      foodName = clean(addOptions.slice(0, separatorIndex));
+      portionText = portionText || tail;
+    } else {
+      foodName = addOptions;
+    }
+  }
+
+  const portionMap: Record<string, string> = {};
+  const portions = clean(portionText)
+    .split(/,|;/)
+    .map((value) => clean(value))
+    .filter(Boolean);
+
+  for (const portion of portions) {
+    const match = portion.match(
+      /^(.*?)(?:\s+)(1\/4|1\/3|1\/2|1)(?:\s*porsi)?$/i,
+    );
+    if (!match) continue;
+
+    const key = normalizeFoodTextV29(match[1]);
+    if (key) portionMap[key] = match[2];
+  }
+
+  const singleFraction = clean(
+    item?.portion_fraction ||
+      raw?.portion_fraction,
+  );
+  const singleFoodKey = normalizeFoodTextV29(foodName);
+  if (
+    singleFoodKey &&
+    Object.keys(portionMap).length === 0 &&
+    /^(1\/4|1\/3|1\/2|1)$/.test(singleFraction)
+  ) {
+    portionMap[singleFoodKey] = singleFraction;
+  }
+
+  return {
+    food_name: foodName,
+    portion: portionText,
+    portionMap,
+    meal_type: nutritionMealValueV126M7(
+      item?.meal_type ||
+        item?.meal_time ||
+        raw?.["Waktu Makan"],
+    ),
+    existing_photo_url: clean(
+      item?.photo_preview_url ||
+        item?.photo_url ||
+        raw?.["Preview Foto Makanan"] ||
+        raw?.["Upload Foto Makanan"],
+    ),
+  };
+}
+
+function NutritionEditFormV126M7({
+  form,
+  setForm,
+  photo,
+  setPhoto,
+  initialPortionMap,
+  seedKey,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  form: any;
+  setForm: (updater: any) => void;
+  photo: File | null;
+  setPhoto: (file: File | null) => void;
+  initialPortionMap: Record<string, string>;
+  seedKey: string;
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const [foodMaster, setFoodMaster] = useState<any[]>([]);
+  const [portionMap, setPortionMap] = useState<Record<string, string>>({});
+  const [foodMasterLoading, setFoodMasterLoading] = useState(true);
+  const [foodMasterMessage, setFoodMasterMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const mealChips = [
+    { value: "Breakfast / Sarapan", label: "Sarapan" },
+    { value: "Lunch / Makan Siang", label: "Makan Siang" },
+    { value: "Dinner / Makan Malam", label: "Malam" },
+    { value: "Snack", label: "Snack" },
+  ];
+
+  const foodText = clean(form?.food_name);
+  const existingPhotoUrl = normalizeImageUrlV37(
+    clean(form?.existing_photo_url),
+  );
+
+  useEffect(() => {
+    setPortionMap(initialPortionMap || {});
+    setPhoto(null);
+    setFieldErrors({});
+  }, [seedKey]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadFoodMasterV126M7() {
+      setFoodMasterLoading(true);
+      setFoodMasterMessage("");
+
+      const cacheKey = "wellness-food-master-cache-v126k";
+
+      if (typeof window !== "undefined") {
+        try {
+          const cached =
+            window.sessionStorage.getItem(cacheKey);
+          const cachedRows = cached
+            ? JSON.parse(cached)
+            : [];
+
+          if (
+            active &&
+            Array.isArray(cachedRows) &&
+            cachedRows.length > 0
+          ) {
+            setFoodMaster(cachedRows);
+          }
+        } catch {
+          // Cache opsional.
+        }
+      }
+
+      try {
+        const firstResponse = await fetch(
+          "/api/wellness/reference/foods?page=1&page_size=200",
+          { cache: "no-store" },
+        );
+        const firstResult = await firstResponse
+          .json()
+          .catch(() => ({}));
+
+        if (!firstResponse.ok || firstResult?.ok === false) {
+          throw new Error(
+            firstResult?.message ||
+              "Master KaloriData gagal dimuat.",
+          );
+        }
+
+        const firstRows = Array.isArray(firstResult?.foods)
+          ? firstResult.foods
+          : [];
+        const totalPages = Math.max(
+          Number(firstResult?.pagination?.total_pages || 1),
+          1,
+        );
+        const remainingPages = Array.from(
+          { length: Math.max(totalPages - 1, 0) },
+          (_, index) => index + 2,
+        );
+        const pageResults = await Promise.all(
+          remainingPages.map(async (page) => {
+            const response = await fetch(
+              `/api/wellness/reference/foods?page=${page}&page_size=200`,
+              { cache: "no-store" },
+            );
+            const result = await response
+              .json()
+              .catch(() => ({}));
+
+            if (!response.ok || result?.ok === false) {
+              throw new Error(
+                result?.message ||
+                  `KaloriData halaman ${page} gagal dimuat.`,
+              );
+            }
+
+            return Array.isArray(result?.foods)
+              ? result.foods
+              : [];
+          }),
+        );
+
+        const rows = [firstRows, ...pageResults].flat();
+        if (rows.length === 0) {
+          throw new Error(
+            "Master KaloriData belum memiliki data aktif.",
+          );
+        }
+
+        if (!active) return;
+        setFoodMaster(rows);
+
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(
+              cacheKey,
+              JSON.stringify(rows),
+            );
+          } catch {
+            // Cache opsional.
+          }
+        }
+      } catch (error: any) {
+        if (active) {
+          setFoodMasterMessage(
+            error?.message ||
+              "Master KaloriData belum dapat dimuat.",
+          );
+        }
+      } finally {
+        if (active) setFoodMasterLoading(false);
+      }
+    }
+
+    loadFoodMasterV126M7();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const parsedFoods = useMemo(() => {
+    return buildAutoFoodBreakdownV29(
+      foodText,
+      foodMaster,
+      portionMap,
+    );
+  }, [foodText, foodMaster, portionMap]);
+
+  const totalEstimatedCalories = parsedFoods.reduce(
+    (sum, item) =>
+      sum + Number(item.subtotal_calories || 0),
+    0,
+  );
+
+  const breakdownPayload = useMemo(() => {
+    return parsedFoods.map((item) => ({
+      input_name: item.input_name,
+      matched_name: item.matched_name,
+      category: item.category,
+      portion_fraction: item.portion_fraction,
+      portion_multiplier: item.portion_multiplier,
+      base_calories: item.base_calories,
+      subtotal_calories: item.subtotal_calories,
+      match_status: item.match_status,
+    }));
+  }, [parsedFoods]);
+
+  useEffect(() => {
+    const payloadText = JSON.stringify(breakdownPayload);
+    const portionText = parsedFoods
+      .map(
+        (item) =>
+          `${item.input_name} ${item.portion_fraction}`,
+      )
+      .join(", ");
+
+    setForm((previous: any) => {
+      const next = {
+        ...previous,
+        food_breakdown: payloadText,
+        portion_breakdown: payloadText,
+        estimated_calories: String(totalEstimatedCalories),
+        calories: String(totalEstimatedCalories),
+        portion: portionText,
+        portion_group: "auto_breakdown",
+        portion_fraction: "multi_food",
+      };
+
+      const unchanged =
+        clean(previous?.food_breakdown) ===
+          clean(next.food_breakdown) &&
+        clean(previous?.portion_breakdown) ===
+          clean(next.portion_breakdown) &&
+        clean(previous?.estimated_calories) ===
+          clean(next.estimated_calories) &&
+        clean(previous?.calories) ===
+          clean(next.calories) &&
+        clean(previous?.portion) ===
+          clean(next.portion) &&
+        clean(previous?.portion_group) ===
+          clean(next.portion_group) &&
+        clean(previous?.portion_fraction) ===
+          clean(next.portion_fraction);
+
+      return unchanged ? previous : next;
+    });
+  }, [JSON.stringify(breakdownPayload), totalEstimatedCalories]);
+
+  function changePortion(key: string, value: string) {
+    setPortionMap((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  }
+
+  function submitEditV126M7() {
+    const errors: Record<string, string> = {};
+
+    if (!clean(form?.log_date)) {
+      errors.log_date = "Tanggal belum diisi.";
+    }
+    if (!clean(form?.meal_type)) {
+      errors.meal_type = "Waktu makan belum dipilih.";
+    }
+    if (!foodText) {
+      errors.food_name = "Nama makanan belum diisi.";
+    }
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    onSave();
+  }
+
+  return (
+    <div className="mt-5">
+      <div className="rounded-[1.8rem] border border-white bg-white p-4 shadow-lg shadow-slate-200/50">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-black uppercase tracking-[0.18em] text-teal-700/70">
+              Food Diary
+            </div>
+            <h4 className="mt-2 text-2xl font-black leading-tight text-slate-950">
+              Edit Nutrisi
+            </h4>
+            <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+              Ketik makanan dengan koma. Sistem otomatis membuat breakdown dan
+              estimasi kalori.
+            </p>
+          </div>
+
+          <div className="shrink-0 rounded-[1.3rem] bg-teal-50 px-4 py-3 text-right">
+            <div className="text-[10px] font-black uppercase tracking-wide text-teal-700/70">
+              Estimasi
+            </div>
+            <div className="text-xl font-black text-teal-900">
+              {fmtNumber(totalEstimatedCalories, 0)}
+            </div>
+            <div className="text-[10px] font-bold text-teal-700/70">
+              kkal
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <label className="grid gap-2 text-xs font-black text-slate-700">
+            <span className="flex items-center gap-2">
+              Tanggal
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </span>
+            <input
+              type="date"
+              value={form.log_date}
+              onChange={(event) => {
+                setForm((previous: any) => ({
+                  ...previous,
+                  log_date: event.target.value,
+                }));
+                setFieldErrors((previous) => ({
+                  ...previous,
+                  log_date: "",
+                }));
+              }}
+              className={`${fieldClass} w-full text-sm ${
+                fieldErrors.log_date
+                  ? "border-rose-400 ring-4 ring-rose-50"
+                  : ""
+              }`}
+            />
+            {fieldErrors.log_date ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.log_date}
+              </span>
+            ) : null}
+          </label>
+
+          <div
+            className={`grid gap-2 rounded-2xl ${
+              fieldErrors.meal_type
+                ? "border border-rose-300 bg-rose-50/40 p-3"
+                : ""
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs font-black text-slate-700">
+              Waktu Makan
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2">
+              {mealChips.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => {
+                    setForm((previous: any) => ({
+                      ...previous,
+                      meal_type: item.value,
+                    }));
+                    setFieldErrors((previous) => ({
+                      ...previous,
+                      meal_type: "",
+                    }));
+                  }}
+                  className={`rounded-2xl px-2 py-3 text-[11px] font-black transition ${
+                    form.meal_type === item.value
+                      ? "bg-teal-600 text-white shadow-md shadow-teal-100"
+                      : "bg-slate-50 text-slate-600"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            {fieldErrors.meal_type ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.meal_type}
+              </span>
+            ) : null}
+          </div>
+
+          <label className="grid gap-2 text-xs font-black text-slate-700">
+            <span className="flex items-center gap-2">
+              Nama Makanan
+              <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
+                Required
+              </span>
+            </span>
+            <span className="rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold leading-5 text-teal-800">
+              Cara pengisian: Nasi Putih, Sayur Sop, Es Campur
+            </span>
+            <textarea
+              value={form.food_name}
+              onChange={(event) => {
+                setForm((previous: any) => ({
+                  ...previous,
+                  food_name: event.target.value,
+                }));
+                setFieldErrors((previous) => ({
+                  ...previous,
+                  food_name: "",
+                }));
+              }}
+              className={`${fieldClass} min-h-[92px] w-full resize-none text-sm ${
+                fieldErrors.food_name
+                  ? "border-rose-400 ring-4 ring-rose-50"
+                  : ""
+              }`}
+              placeholder="Nasi Putih, Sayur Sop, Es Campur"
+            />
+            {fieldErrors.food_name ? (
+              <span className="text-[10px] font-bold text-rose-600">
+                {fieldErrors.food_name}
+              </span>
+            ) : null}
+          </label>
+
+          {foodMasterLoading ? (
+            <div className="rounded-2xl bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700">
+              Memuat Master KaloriData agar estimasi porsi akurat...
+            </div>
+          ) : foodMasterMessage ? (
+            <div className="rounded-2xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+              {foodMasterMessage}
+            </div>
+          ) : null}
+
+          <CompactAutoFoodBreakdownV43
+            foods={parsedFoods}
+            onChangePortion={changePortion}
+          />
+
+          {existingPhotoUrl ? (
+            <div className="grid gap-2 text-xs font-black text-slate-700">
+              Foto Saat Ini
+              <a
+                href={existingPhotoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="overflow-hidden rounded-[1.4rem] border border-slate-200 bg-slate-50"
+              >
+                <img
+                  src={existingPhotoUrl}
+                  alt="Foto nutrisi saat ini"
+                  className="h-40 w-full object-cover"
+                />
+              </a>
+            </div>
+          ) : null}
+
+          <label className="grid gap-2 text-xs font-black text-slate-700">
+            Upload Foto
+            <div className="flex items-center gap-3 rounded-[1.4rem] border border-dashed border-teal-200 bg-[#f4fbfa] p-3">
+              <label className="shrink-0 cursor-pointer rounded-2xl bg-white px-4 py-3 text-xs font-black text-teal-700 shadow-sm">
+                {existingPhotoUrl ? "Ganti Foto" : "Pilih Foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    setPhoto(
+                      event.target.files?.[0] || null,
+                    )
+                  }
+                  className="hidden"
+                />
+              </label>
+
+              <div className="min-w-0 flex-1 truncate text-xs font-bold text-slate-500">
+                {photo
+                  ? photo.name
+                  : existingPhotoUrl
+                    ? "Foto lama tetap digunakan"
+                    : "Belum ada foto dipilih"}
+              </div>
+            </div>
+          </label>
+
+          <label className="grid gap-2 text-xs font-black text-slate-700">
+            Catatan
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                setForm((previous: any) => ({
+                  ...previous,
+                  notes: event.target.value,
+                }))
+              }
+              className={`${fieldClass} min-h-[78px] w-full resize-none text-sm`}
+              placeholder="Contoh: makan di luar, minuman manis, porsi besar, dll."
+            />
+          </label>
+
+          <div className="rounded-[1.4rem] bg-teal-50 p-3 text-[11px] font-bold leading-5 text-teal-900">
+            Peserta tidak perlu mengisi kalori manual. Sistem mencocokkan
+            makanan dengan Master KaloriData.
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="rounded-[1.4rem] bg-slate-100 px-4 py-4 text-sm font-black text-slate-700 disabled:opacity-50"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              onClick={submitEditV126M7}
+              disabled={saving || foodMasterLoading}
+              className="rounded-[1.4rem] bg-teal-600 px-4 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
+            >
+              {saving
+                ? "Menyimpan..."
+                : foodMasterLoading
+                  ? "Menyiapkan KaloriData..."
+                  : "Simpan Perubahan"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HistoryTab({
   participant,
   nutritionLogs,
@@ -6075,11 +6695,24 @@ function HistoryTab({
   const [editingItemV126M6, setEditingItemV126M6] = useState<any>(null);
   const [editingTypeV126M6, setEditingTypeV126M6] = useState<"nutrition" | "workout" | "">("");
   const [savingEditV126M6, setSavingEditV126M6] = useState(false);
+  const [editingNutritionPhotoV126M7, setEditingNutritionPhotoV126M7] =
+    useState<File | null>(null);
+  const [
+    editingNutritionPortionMapV126M7,
+    setEditingNutritionPortionMapV126M7,
+  ] = useState<Record<string, string>>({});
   const [editFormV126M6, setEditFormV126M6] = useState({
     log_date: "",
     meal_type: "",
     food_name: "",
     calories: "",
+    portion: "",
+    food_breakdown: "",
+    portion_breakdown: "",
+    estimated_calories: "",
+    portion_group: "",
+    portion_fraction: "",
+    existing_photo_url: "",
     activity_type: "",
     duration_minutes: "",
     notes: "",
@@ -6183,12 +6816,29 @@ function HistoryTab({
     if (!canEditHistoryV126M6(type, item)) return;
 
     const raw = historyDeleteRawPayloadV126M(item);
+    const nutritionSeed =
+      type === "nutrition"
+        ? nutritionEditSeedV126M7(item, raw)
+        : null;
+
     setEditingTypeV126M6(type);
     setEditingItemV126M6(item);
+    setEditingNutritionPhotoV126M7(null);
+    setEditingNutritionPortionMapV126M7(
+      nutritionSeed?.portionMap || {},
+    );
     setEditFormV126M6({
-      log_date: clean(item?.log_date || item?.date || item?.created_at).slice(0, 10),
-      meal_type: clean(item?.meal_type || item?.meal_time),
-      food_name: clean(item?.food_name || item?.meal_text),
+      log_date: clean(
+        item?.log_date ||
+          item?.date ||
+          item?.created_at,
+      ).slice(0, 10),
+      meal_type:
+        nutritionSeed?.meal_type ||
+        clean(item?.meal_type || item?.meal_time),
+      food_name:
+        nutritionSeed?.food_name ||
+        clean(item?.food_name || item?.meal_text),
       calories: clean(
         item?.calories ??
           item?.total_calories ??
@@ -6196,6 +6846,19 @@ function HistoryTab({
           raw?.["Kalori Makanan"] ??
           raw?.["Kalori Aktivitas"],
       ),
+      portion: nutritionSeed?.portion || "",
+      food_breakdown: "",
+      portion_breakdown: "",
+      estimated_calories: clean(
+        item?.calories ??
+          item?.total_calories ??
+          item?.estimated_calories ??
+          raw?.["Kalori Makanan"],
+      ),
+      portion_group: "auto_breakdown",
+      portion_fraction: "multi_food",
+      existing_photo_url:
+        nutritionSeed?.existing_photo_url || "",
       activity_type: clean(
         item?.activity_name ||
           item?.activity_type ||
@@ -6223,101 +6886,258 @@ function HistoryTab({
     if (savingEditV126M6) return;
     setEditingItemV126M6(null);
     setEditingTypeV126M6("");
+    setEditingNutritionPhotoV126M7(null);
+    setEditingNutritionPortionMapV126M7({});
   }
 
   async function saveEditHistoryV126M6() {
     if (!editingItemV126M6 || !editingTypeV126M6) return;
 
     setSavingEditV126M6(true);
+
     try {
-      const editRawV126M6 = historyDeleteRawPayloadV126M(editingItemV126M6);
-      const payload: any = {
-        id:
-          editingItemV126M6?._supabase_id ||
-          editingItemV126M6?.id ||
-          null,
-        mirror_id:
-          editingItemV126M6?._supabase_id ||
-          null,
-        submission_id: historySubmissionIdV126M(editingItemV126M6) || null,
-        google_sheet_row_number: historySheetRowV126M(editingItemV126M6) || null,
-        source:
-          editingItemV126M6?._canonical_source ||
-          editingItemV126M6?.source ||
-          editRawV126M6?.source ||
-          null,
-        title:
-          editingItemV126M6?.food_name ||
-          editingItemV126M6?.meal_text ||
-          editingItemV126M6?.activity_name ||
-          editingItemV126M6?.activity_type ||
-          null,
-        log_date: editFormV126M6.log_date,
-        calories: editFormV126M6.calories,
-        notes: editFormV126M6.notes,
-        expected_log_date: clean(
-          editingItemV126M6?.log_date ||
-            editingItemV126M6?.date ||
-            editingItemV126M6?.created_at,
-        ).slice(0, 10),
-        expected_calories:
-          editingItemV126M6?.calories ??
-          editingItemV126M6?.total_calories ??
-          editingItemV126M6?.estimated_calories ??
-          null,
-      };
+      const editRawV126M6 =
+        historyDeleteRawPayloadV126M(
+          editingItemV126M6,
+        );
+      const submissionId =
+        historySubmissionIdV126M(
+          editingItemV126M6,
+        );
+      const rowNumber =
+        historySheetRowV126M(
+          editingItemV126M6,
+        );
+      const expectedLogDate = clean(
+        editingItemV126M6?.log_date ||
+          editingItemV126M6?.date ||
+          editingItemV126M6?.created_at,
+      ).slice(0, 10);
+      const expectedCalories =
+        editingItemV126M6?.calories ??
+        editingItemV126M6?.total_calories ??
+        editingItemV126M6?.estimated_calories ??
+        editRawV126M6?.["Kalori Makanan"] ??
+        editRawV126M6?.["Kalori Aktivitas"] ??
+        null;
+
+      let response: Response;
 
       if (editingTypeV126M6 === "nutrition") {
-        payload.meal_type = editFormV126M6.meal_type;
-        payload.food_name = editFormV126M6.food_name;
-        payload.expected_meal_type =
+        const body = new FormData();
+
+        function appendField(
+          key: string,
+          value: any,
+        ) {
+          if (
+            value === null ||
+            value === undefined
+          ) {
+            return;
+          }
+          body.append(key, String(value));
+        }
+
+        appendField(
+          "submission_id",
+          submissionId,
+        );
+        appendField(
+          "google_sheet_row_number",
+          rowNumber || "",
+        );
+        appendField(
+          "log_date",
+          editFormV126M6.log_date,
+        );
+        appendField(
+          "meal_type",
+          editFormV126M6.meal_type,
+        );
+        appendField(
+          "food_name",
+          editFormV126M6.food_name,
+        );
+        appendField(
+          "portion",
+          editFormV126M6.portion,
+        );
+        appendField(
+          "food_breakdown",
+          editFormV126M6.food_breakdown,
+        );
+        appendField(
+          "portion_breakdown",
+          editFormV126M6.portion_breakdown,
+        );
+        appendField(
+          "estimated_calories",
+          editFormV126M6.estimated_calories ||
+            editFormV126M6.calories,
+        );
+        appendField(
+          "calories",
+          editFormV126M6.calories,
+        );
+        appendField(
+          "portion_group",
+          editFormV126M6.portion_group,
+        );
+        appendField(
+          "portion_fraction",
+          editFormV126M6.portion_fraction,
+        );
+        appendField(
+          "notes",
+          editFormV126M6.notes,
+        );
+        appendField(
+          "expected_log_date",
+          expectedLogDate,
+        );
+        appendField(
+          "expected_meal_type",
           editingItemV126M6?.meal_type ||
-          editingItemV126M6?.meal_time ||
-          null;
-        payload.expected_food_name =
+            editingItemV126M6?.meal_time ||
+            editRawV126M6?.["Waktu Makan"] ||
+            "",
+        );
+        appendField(
+          "expected_food_name",
           editingItemV126M6?.food_name ||
-          editingItemV126M6?.meal_text ||
-          editRawV126M6?.["Add Options"] ||
-          null;
+            editingItemV126M6?.meal_text ||
+            editRawV126M6?.["Add Options"] ||
+            "",
+        );
+        appendField(
+          "expected_calories",
+          expectedCalories,
+        );
+
+        if (editingNutritionPhotoV126M7) {
+          const compressedPhoto =
+            await compressNutritionPhotoV126M2(
+              editingNutritionPhotoV126M7,
+            );
+          body.append(
+            "photo",
+            compressedPhoto,
+          );
+        }
+
+        response = await fetch(
+          "/api/wellness/participant/nutrition",
+          {
+            method: "PATCH",
+            body,
+          },
+        );
       } else {
-        payload.activity_type = editFormV126M6.activity_type;
-        payload.activity_name = editFormV126M6.activity_type;
-        payload.duration_minutes = editFormV126M6.duration_minutes;
-        payload.expected_activity_type =
-          editingItemV126M6?.activity_type ||
-          editingItemV126M6?.activity_name ||
-          null;
-        payload.expected_duration_minutes =
-          editingItemV126M6?.duration_minutes ??
-          editRawV126M6?.duration_minutes ??
-          editRawV126M6?.["Berapa Menit anda melakukan nya ?"] ??
-          null;
+        const payload: any = {
+          id:
+            editingItemV126M6?._supabase_id ||
+            editingItemV126M6?.id ||
+            null,
+          mirror_id:
+            editingItemV126M6?._supabase_id ||
+            null,
+          submission_id:
+            submissionId || null,
+          google_sheet_row_number:
+            rowNumber || null,
+          source:
+            editingItemV126M6?._canonical_source ||
+            editingItemV126M6?.source ||
+            editRawV126M6?.source ||
+            null,
+          title:
+            editingItemV126M6?.activity_name ||
+            editingItemV126M6?.activity_type ||
+            null,
+          log_date:
+            editFormV126M6.log_date,
+          calories:
+            editFormV126M6.calories,
+          notes:
+            editFormV126M6.notes,
+          activity_type:
+            editFormV126M6.activity_type,
+          activity_name:
+            editFormV126M6.activity_type,
+          duration_minutes:
+            editFormV126M6.duration_minutes,
+          expected_log_date:
+            expectedLogDate,
+          expected_calories:
+            expectedCalories,
+          expected_activity_type:
+            editingItemV126M6?.activity_type ||
+            editingItemV126M6?.activity_name ||
+            null,
+          expected_duration_minutes:
+            editingItemV126M6?.duration_minutes ??
+            editRawV126M6?.duration_minutes ??
+            editRawV126M6?.[
+              "Berapa Menit anda melakukan nya ?"
+            ] ??
+            null,
+        };
+
+        response = await fetch(
+          "/api/wellness/participant/workout",
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        );
       }
 
-      const response = await fetch(
-        `/api/wellness/participant/${editingTypeV126M6}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      );
-      const result = await readApiResponseV126M2(response);
-      if (!response.ok || result?.ok === false) {
-        throw new Error(result?.message || result?.detail || "Data belum berhasil diperbarui.");
+      const result =
+        await readApiResponseV126M2(
+          response,
+        );
+
+      if (
+        !response.ok ||
+        result?.ok === false
+      ) {
+        throw new Error(
+          result?.message ||
+            result?.detail ||
+            "Data belum berhasil diperbarui.",
+        );
       }
 
-      if (editingTypeV126M6 === "nutrition") {
+      if (
+        editingTypeV126M6 ===
+        "nutrition"
+      ) {
         await loadNutritionHistory();
       } else {
         await loadWorkoutHistoryV126M6();
       }
-      if (refresh) await Promise.resolve(refresh());
+
+      if (refresh) {
+        await Promise.resolve(refresh());
+      }
+
       setEditingItemV126M6(null);
       setEditingTypeV126M6("");
-      window.alert(result?.message || "Data berhasil diperbarui.");
+      setEditingNutritionPhotoV126M7(null);
+      setEditingNutritionPortionMapV126M7({});
+      window.alert(
+        result?.message ||
+          "Data berhasil diperbarui.",
+      );
     } catch (error: any) {
-      window.alert(error?.message || "Data belum berhasil diperbarui.");
+      window.alert(
+        error?.message ||
+          "Data belum berhasil diperbarui.",
+      );
     } finally {
       setSavingEditV126M6(false);
     }
@@ -6837,70 +7657,163 @@ function HistoryTab({
 
       {editingItemV126M6 ? (
         <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-3 backdrop-blur-sm md:items-center">
-          <div className="w-full max-w-lg rounded-[2rem] bg-white p-5 shadow-2xl">
+          <div className="max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-[2rem] bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
                   Edit Google Sheet
                 </div>
                 <h3 className="mt-1 text-xl font-black text-slate-950">
-                  {editingTypeV126M6 === "nutrition" ? "Edit Data Nutrisi" : "Edit Data Workout"}
+                  {editingTypeV126M6 === "nutrition"
+                    ? "Edit Data Nutrisi"
+                    : "Edit Data Workout"}
                 </h3>
               </div>
-              <button type="button" onClick={closeEditHistoryV126M6} className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-lg font-black text-slate-700">×</button>
+              <button
+                type="button"
+                onClick={closeEditHistoryV126M6}
+                className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-lg font-black text-slate-700"
+              >
+                ×
+              </button>
             </div>
 
-            <div className="mt-5 space-y-3">
-              <label className="block text-xs font-black text-slate-600">
-                Tanggal
-                <input type="date" value={editFormV126M6.log_date} onChange={(e) => setEditFormV126M6((v) => ({ ...v, log_date: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
-              </label>
+            {editingTypeV126M6 === "nutrition" ? (
+              <NutritionEditFormV126M7
+                form={editFormV126M6}
+                setForm={setEditFormV126M6}
+                photo={editingNutritionPhotoV126M7}
+                setPhoto={setEditingNutritionPhotoV126M7}
+                initialPortionMap={
+                  editingNutritionPortionMapV126M7
+                }
+                seedKey={historyDeleteKeyV126M(
+                  "nutrition",
+                  editingItemV126M6,
+                )}
+                saving={savingEditV126M6}
+                onCancel={closeEditHistoryV126M6}
+                onSave={saveEditHistoryV126M6}
+              />
+            ) : (
+              <>
+                <div className="mt-5 space-y-3">
+                  <label className="block text-xs font-black text-slate-600">
+                    Tanggal
+                    <input
+                      type="date"
+                      value={editFormV126M6.log_date}
+                      onChange={(event) =>
+                        setEditFormV126M6(
+                          (previous) => ({
+                            ...previous,
+                            log_date:
+                              event.target.value,
+                          }),
+                        )
+                      }
+                      className={`${fieldClass} mt-2 w-full`}
+                    />
+                  </label>
 
-              {editingTypeV126M6 === "nutrition" ? (
-                <>
-                  <label className="block text-xs font-black text-slate-600">
-                    Waktu makan
-                    <select value={editFormV126M6.meal_type} onChange={(e) => setEditFormV126M6((v) => ({ ...v, meal_type: e.target.value }))} className={`${fieldClass} mt-2 w-full`}>
-                      <option value="">Pilih waktu makan</option>
-                      <option value="Breakfast / Sarapan">Breakfast / Sarapan</option>
-                      <option value="Lunch / Makan Siang">Lunch / Makan Siang</option>
-                      <option value="Dinner / Makan Malam">Dinner / Makan Malam</option>
-                      <option value="Snack / Camilan">Snack / Camilan</option>
-                    </select>
-                  </label>
-                  <label className="block text-xs font-black text-slate-600">
-                    Nama makanan
-                    <textarea value={editFormV126M6.food_name} onChange={(e) => setEditFormV126M6((v) => ({ ...v, food_name: e.target.value }))} rows={3} className={`${fieldClass} mt-2 w-full`} />
-                  </label>
-                </>
-              ) : (
-                <>
                   <label className="block text-xs font-black text-slate-600">
                     Jenis workout
-                    <input value={editFormV126M6.activity_type} onChange={(e) => setEditFormV126M6((v) => ({ ...v, activity_type: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+                    <input
+                      value={editFormV126M6.activity_type}
+                      onChange={(event) =>
+                        setEditFormV126M6(
+                          (previous) => ({
+                            ...previous,
+                            activity_type:
+                              event.target.value,
+                          }),
+                        )
+                      }
+                      className={`${fieldClass} mt-2 w-full`}
+                    />
                   </label>
+
                   <label className="block text-xs font-black text-slate-600">
                     Durasi (menit)
-                    <input type="number" min="1" value={editFormV126M6.duration_minutes} onChange={(e) => setEditFormV126M6((v) => ({ ...v, duration_minutes: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+                    <input
+                      type="number"
+                      min="1"
+                      value={
+                        editFormV126M6.duration_minutes
+                      }
+                      onChange={(event) =>
+                        setEditFormV126M6(
+                          (previous) => ({
+                            ...previous,
+                            duration_minutes:
+                              event.target.value,
+                          }),
+                        )
+                      }
+                      className={`${fieldClass} mt-2 w-full`}
+                    />
                   </label>
-                </>
-              )}
 
-              <label className="block text-xs font-black text-slate-600">
-                Kalori
-                <input type="number" min="0" value={editFormV126M6.calories} onChange={(e) => setEditFormV126M6((v) => ({ ...v, calories: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
-              </label>
+                  <label className="block text-xs font-black text-slate-600">
+                    Kalori
+                    <input
+                      type="number"
+                      min="0"
+                      value={editFormV126M6.calories}
+                      onChange={(event) =>
+                        setEditFormV126M6(
+                          (previous) => ({
+                            ...previous,
+                            calories:
+                              event.target.value,
+                          }),
+                        )
+                      }
+                      className={`${fieldClass} mt-2 w-full`}
+                    />
+                  </label>
 
-              <label className="block text-xs font-black text-slate-600">
-                Catatan
-                <textarea value={editFormV126M6.notes} onChange={(e) => setEditFormV126M6((v) => ({ ...v, notes: e.target.value }))} rows={2} className={`${fieldClass} mt-2 w-full`} />
-              </label>
-            </div>
+                  <label className="block text-xs font-black text-slate-600">
+                    Catatan
+                    <textarea
+                      value={editFormV126M6.notes}
+                      onChange={(event) =>
+                        setEditFormV126M6(
+                          (previous) => ({
+                            ...previous,
+                            notes:
+                              event.target.value,
+                          }),
+                        )
+                      }
+                      rows={2}
+                      className={`${fieldClass} mt-2 w-full`}
+                    />
+                  </label>
+                </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <button type="button" onClick={closeEditHistoryV126M6} disabled={savingEditV126M6} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700">Batal</button>
-              <button type="button" onClick={saveEditHistoryV126M6} disabled={savingEditV126M6} className="rounded-2xl bg-teal-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{savingEditV126M6 ? "Menyimpan..." : "Simpan Perubahan"}</button>
-            </div>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={closeEditHistoryV126M6}
+                    disabled={savingEditV126M6}
+                    className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditHistoryV126M6}
+                    disabled={savingEditV126M6}
+                    className="rounded-2xl bg-teal-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+                  >
+                    {savingEditV126M6
+                      ? "Menyimpan..."
+                      : "Simpan Perubahan"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
