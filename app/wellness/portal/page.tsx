@@ -6072,6 +6072,18 @@ function HistoryTab({
   const [endDate, setEndDate] = useState("");
   const [loadingKey, setLoadingKey] = useState("");
   const [deletingKeyV126M, setDeletingKeyV126M] = useState("");
+  const [editingItemV126M6, setEditingItemV126M6] = useState<any>(null);
+  const [editingTypeV126M6, setEditingTypeV126M6] = useState<"nutrition" | "workout" | "">("");
+  const [savingEditV126M6, setSavingEditV126M6] = useState(false);
+  const [editFormV126M6, setEditFormV126M6] = useState({
+    log_date: "",
+    meal_type: "",
+    food_name: "",
+    calories: "",
+    activity_type: "",
+    duration_minutes: "",
+    notes: "",
+  });
 
   function historyDeleteRawPayloadV126M(item: any) {
     const raw = item?.raw_payload;
@@ -6098,6 +6110,7 @@ function HistoryTab({
         item?.submissionId ||
         raw?.submission_id ||
         raw?.submissionId ||
+        raw?.["Submission ID"] ||
         raw?.google_sheet?.submission_id ||
         raw?.google_sheet?.submissionId,
     );
@@ -6112,6 +6125,8 @@ function HistoryTab({
         item?.sheet_row_number ||
         item?.row_number ||
         item?._rowNumber ||
+        raw?._rowNumber ||
+        raw?.__row_index ||
         raw?.google_sheet?.rowNumber ||
         raw?.google_sheet?.row_number ||
         0,
@@ -6150,6 +6165,162 @@ function HistoryTab({
       externalId.startsWith("manual_") ||
       clean(raw?.submission_id).startsWith("workout-")
     );
+  }
+
+
+  // WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
+  function canEditHistoryV126M6(
+    type: "nutrition" | "workout",
+    item: any,
+  ) {
+    return type === "nutrition" || isManualWorkoutDeleteV126M(item);
+  }
+
+  function openEditHistoryV126M6(
+    type: "nutrition" | "workout",
+    item: any,
+  ) {
+    if (!canEditHistoryV126M6(type, item)) return;
+
+    const raw = historyDeleteRawPayloadV126M(item);
+    setEditingTypeV126M6(type);
+    setEditingItemV126M6(item);
+    setEditFormV126M6({
+      log_date: clean(item?.log_date || item?.date || item?.created_at).slice(0, 10),
+      meal_type: clean(item?.meal_type || item?.meal_time),
+      food_name: clean(item?.food_name || item?.meal_text),
+      calories: clean(
+        item?.calories ??
+          item?.total_calories ??
+          item?.estimated_calories ??
+          raw?.["Kalori Makanan"] ??
+          raw?.["Kalori Aktivitas"],
+      ),
+      activity_type: clean(
+        item?.activity_name ||
+          item?.activity_type ||
+          raw?.["Jenis Workout/Aktifitas"],
+      ),
+      duration_minutes: clean(
+        item?.duration_minutes ??
+          raw?.duration_minutes ??
+          raw?.["Berapa Menit anda melakukan nya ?"],
+      ),
+      notes: clean(
+        item?.notes ||
+          item?.description ||
+          raw?.notes ||
+          raw?.catatan ||
+          raw?.["Catatan Nutrisi"] ||
+          raw?.[
+            "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+          ],
+      ),
+    });
+  }
+
+  function closeEditHistoryV126M6() {
+    if (savingEditV126M6) return;
+    setEditingItemV126M6(null);
+    setEditingTypeV126M6("");
+  }
+
+  async function saveEditHistoryV126M6() {
+    if (!editingItemV126M6 || !editingTypeV126M6) return;
+
+    setSavingEditV126M6(true);
+    try {
+      const editRawV126M6 = historyDeleteRawPayloadV126M(editingItemV126M6);
+      const payload: any = {
+        id:
+          editingItemV126M6?._supabase_id ||
+          editingItemV126M6?.id ||
+          null,
+        mirror_id:
+          editingItemV126M6?._supabase_id ||
+          null,
+        submission_id: historySubmissionIdV126M(editingItemV126M6) || null,
+        google_sheet_row_number: historySheetRowV126M(editingItemV126M6) || null,
+        source:
+          editingItemV126M6?._canonical_source ||
+          editingItemV126M6?.source ||
+          editRawV126M6?.source ||
+          null,
+        title:
+          editingItemV126M6?.food_name ||
+          editingItemV126M6?.meal_text ||
+          editingItemV126M6?.activity_name ||
+          editingItemV126M6?.activity_type ||
+          null,
+        log_date: editFormV126M6.log_date,
+        calories: editFormV126M6.calories,
+        notes: editFormV126M6.notes,
+        expected_log_date: clean(
+          editingItemV126M6?.log_date ||
+            editingItemV126M6?.date ||
+            editingItemV126M6?.created_at,
+        ).slice(0, 10),
+        expected_calories:
+          editingItemV126M6?.calories ??
+          editingItemV126M6?.total_calories ??
+          editingItemV126M6?.estimated_calories ??
+          null,
+      };
+
+      if (editingTypeV126M6 === "nutrition") {
+        payload.meal_type = editFormV126M6.meal_type;
+        payload.food_name = editFormV126M6.food_name;
+        payload.expected_meal_type =
+          editingItemV126M6?.meal_type ||
+          editingItemV126M6?.meal_time ||
+          null;
+        payload.expected_food_name =
+          editingItemV126M6?.food_name ||
+          editingItemV126M6?.meal_text ||
+          editRawV126M6?.["Add Options"] ||
+          null;
+      } else {
+        payload.activity_type = editFormV126M6.activity_type;
+        payload.activity_name = editFormV126M6.activity_type;
+        payload.duration_minutes = editFormV126M6.duration_minutes;
+        payload.expected_activity_type =
+          editingItemV126M6?.activity_type ||
+          editingItemV126M6?.activity_name ||
+          null;
+        payload.expected_duration_minutes =
+          editingItemV126M6?.duration_minutes ??
+          editRawV126M6?.duration_minutes ??
+          editRawV126M6?.["Berapa Menit anda melakukan nya ?"] ??
+          null;
+      }
+
+      const response = await fetch(
+        `/api/wellness/participant/${editingTypeV126M6}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const result = await readApiResponseV126M2(response);
+      if (!response.ok || result?.ok === false) {
+        throw new Error(result?.message || result?.detail || "Data belum berhasil diperbarui.");
+      }
+
+      if (editingTypeV126M6 === "nutrition") {
+        await loadNutritionHistory();
+      } else {
+        await loadWorkoutHistoryV126M6();
+      }
+      if (refresh) await Promise.resolve(refresh());
+      setEditingItemV126M6(null);
+      setEditingTypeV126M6("");
+      window.alert(result?.message || "Data berhasil diperbarui.");
+    } catch (error: any) {
+      window.alert(error?.message || "Data belum berhasil diperbarui.");
+    } finally {
+      setSavingEditV126M6(false);
+    }
   }
 
   async function deleteHistoryItemV126M(
@@ -6251,8 +6422,11 @@ function HistoryTab({
         if (refresh) {
           await Promise.resolve(refresh());
         }
-      } else if (refresh) {
-        await Promise.resolve(refresh());
+      } else {
+        await loadWorkoutHistoryV126M6();
+        if (refresh) {
+          await Promise.resolve(refresh());
+        }
       }
 
       window.alert(
@@ -6270,6 +6444,12 @@ function HistoryTab({
       setDeletingKeyV126M("");
     }
   }
+
+  const [workoutHistoryLoadedV126M6, setWorkoutHistoryLoadedV126M6] = useState(false);
+  const [directWorkoutV126M6, setDirectWorkoutV126M6] = useState<any>({
+    ok: false,
+    logs: [],
+  });
 
   const [nutritionLoaded, setNutritionLoaded] = useState(false);
   const [directNutrition, setDirectNutrition] = useState<any>({
@@ -6303,6 +6483,26 @@ function HistoryTab({
     setLoadingKey("");
   }
 
+  async function loadWorkoutHistoryV126M6() {
+    if (!participantId) return;
+
+    setLoadingKey("workout");
+
+    const result = await fetch(
+      `/api/wellness/participant/workout?t=${Date.now()}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (result?.ok) {
+      setDirectWorkoutV126M6(result);
+      setWorkoutHistoryLoadedV126M6(true);
+    }
+
+    setLoadingKey("");
+  }
+
   async function openDropdown(key: "nutrition" | "workout" | "healthtalk") {
     if (openSection === key) {
       setOpenSection("");
@@ -6316,7 +6516,12 @@ function HistoryTab({
       return;
     }
 
-    if ((key === "workout" || key === "healthtalk") && refresh) {
+    if (key === "workout" && !workoutHistoryLoadedV126M6) {
+      await loadWorkoutHistoryV126M6();
+      return;
+    }
+
+    if (key === "healthtalk" && refresh) {
       setLoadingKey(key);
       await Promise.resolve(refresh());
       setLoadingKey("");
@@ -6348,7 +6553,16 @@ function HistoryTab({
         : nutritionLogs || [],
     );
 
-  const workoutSourceRows = workoutLogs || workoutItems || [];
+  const deviceWorkoutSourceRows = workoutLogs || workoutItems || [];
+  const sheetWorkoutSourceRows = workoutHistoryLoadedV126M6
+    ? directWorkoutV126M6?.logs || []
+    : [];
+  const workoutSourceRows = workoutHistoryLoadedV126M6
+    ? [
+        ...deviceWorkoutSourceRows.filter((item: any) => isDeviceDailyRow(item)),
+        ...sheetWorkoutSourceRows,
+      ]
+    : deviceWorkoutSourceRows;
   const rawWorkout = normalizeWorkoutItemsForHistoryV72(workoutSourceRows);
   const rawWorkoutMetrics = normalizeWorkoutItemsForMetrics(workoutSourceRows);
   const rawHealthTalk = healthTalkLogs || healthtalkLogs || [];
@@ -6519,6 +6733,7 @@ function HistoryTab({
                   deletingKeyV126M ===
                   historyDeleteKeyV126M("nutrition", item)
                 }
+                onEdit={() => openEditHistoryV126M6("nutrition", item)}
                 onDelete={() =>
                   deleteHistoryItemV126M("nutrition", item)
                 }
@@ -6574,6 +6789,11 @@ function HistoryTab({
                     deletingKeyV126M ===
                     historyDeleteKeyV126M("workout", item)
                   }
+                  onEdit={
+                    isManualWorkoutDeleteV126M(item)
+                      ? () => openEditHistoryV126M6("workout", item)
+                      : undefined
+                  }
                   onDelete={
                     isManualWorkoutDeleteV126M(item)
                       ? () =>
@@ -6614,6 +6834,76 @@ function HistoryTab({
           </div>
         )}
       </HistoryAccordionCardV37>
+
+      {editingItemV126M6 ? (
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-3 backdrop-blur-sm md:items-center">
+          <div className="w-full max-w-lg rounded-[2rem] bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
+                  Edit Google Sheet
+                </div>
+                <h3 className="mt-1 text-xl font-black text-slate-950">
+                  {editingTypeV126M6 === "nutrition" ? "Edit Data Nutrisi" : "Edit Data Workout"}
+                </h3>
+              </div>
+              <button type="button" onClick={closeEditHistoryV126M6} className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-lg font-black text-slate-700">×</button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <label className="block text-xs font-black text-slate-600">
+                Tanggal
+                <input type="date" value={editFormV126M6.log_date} onChange={(e) => setEditFormV126M6((v) => ({ ...v, log_date: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+              </label>
+
+              {editingTypeV126M6 === "nutrition" ? (
+                <>
+                  <label className="block text-xs font-black text-slate-600">
+                    Waktu makan
+                    <select value={editFormV126M6.meal_type} onChange={(e) => setEditFormV126M6((v) => ({ ...v, meal_type: e.target.value }))} className={`${fieldClass} mt-2 w-full`}>
+                      <option value="">Pilih waktu makan</option>
+                      <option value="Breakfast / Sarapan">Breakfast / Sarapan</option>
+                      <option value="Lunch / Makan Siang">Lunch / Makan Siang</option>
+                      <option value="Dinner / Makan Malam">Dinner / Makan Malam</option>
+                      <option value="Snack / Camilan">Snack / Camilan</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs font-black text-slate-600">
+                    Nama makanan
+                    <textarea value={editFormV126M6.food_name} onChange={(e) => setEditFormV126M6((v) => ({ ...v, food_name: e.target.value }))} rows={3} className={`${fieldClass} mt-2 w-full`} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="block text-xs font-black text-slate-600">
+                    Jenis workout
+                    <input value={editFormV126M6.activity_type} onChange={(e) => setEditFormV126M6((v) => ({ ...v, activity_type: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+                  </label>
+                  <label className="block text-xs font-black text-slate-600">
+                    Durasi (menit)
+                    <input type="number" min="1" value={editFormV126M6.duration_minutes} onChange={(e) => setEditFormV126M6((v) => ({ ...v, duration_minutes: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+                  </label>
+                </>
+              )}
+
+              <label className="block text-xs font-black text-slate-600">
+                Kalori
+                <input type="number" min="0" value={editFormV126M6.calories} onChange={(e) => setEditFormV126M6((v) => ({ ...v, calories: e.target.value }))} className={`${fieldClass} mt-2 w-full`} />
+              </label>
+
+              <label className="block text-xs font-black text-slate-600">
+                Catatan
+                <textarea value={editFormV126M6.notes} onChange={(e) => setEditFormV126M6((v) => ({ ...v, notes: e.target.value }))} rows={2} className={`${fieldClass} mt-2 w-full`} />
+              </label>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button type="button" onClick={closeEditHistoryV126M6} disabled={savingEditV126M6} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700">Batal</button>
+              <button type="button" onClick={saveEditHistoryV126M6} disabled={savingEditV126M6} className="rounded-2xl bg-teal-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{savingEditV126M6 ? "Menyimpan..." : "Simpan Perubahan"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {clinical.length > 0 ? (
         <HistoryAccordionCardV37
@@ -6701,6 +6991,7 @@ function HistoryGenericItemV37({
   note,
   status = "",
   statusTone = "primary",
+  onEdit,
   onDelete,
   deleting = false,
 }: {
@@ -6709,6 +7000,7 @@ function HistoryGenericItemV37({
   note: string;
   status?: string;
   statusTone?: "primary" | "secondary";
+  onEdit?: () => void;
   onDelete?: () => void;
   deleting?: boolean;
 }) {
@@ -6733,6 +7025,20 @@ function HistoryGenericItemV37({
             >
               {status}
             </span>
+          ) : null}
+
+          {onEdit ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              title="Edit data"
+              aria-label="Edit data"
+              className="grid h-10 w-10 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z" />
+              </svg>
+            </button>
           ) : null}
 
           {onDelete ? (
@@ -6793,10 +7099,12 @@ function normalizeImageUrlV37(value: any) {
 
 function HistoryMealItemV37({
   item,
+  onEdit,
   onDelete,
   deleting = false,
 }: {
   item: any;
+  onEdit?: () => void;
   onDelete?: () => void;
   deleting?: boolean;
 }) {
@@ -6853,7 +7161,22 @@ function HistoryMealItemV37({
           </div>
         </div>
 
-        {onDelete ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {onEdit ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              title="Edit makanan"
+              aria-label="Edit makanan"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z" />
+              </svg>
+            </button>
+          ) : null}
+
+          {onDelete ? (
           <button
             type="button"
             onClick={onDelete}
@@ -6881,7 +7204,8 @@ function HistoryMealItemV37({
               </svg>
             )}
           </button>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </div>
   );

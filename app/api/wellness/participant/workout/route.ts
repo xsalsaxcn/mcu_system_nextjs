@@ -20,6 +20,7 @@ import {
   uploadEvidenceToDrive,
 } from "@/lib/wellness/googleSheetWebhook";
 import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
+import { fetchWellnessGoogleSheetRows } from "@/lib/wellness/googleSheetResponses";
 
 export const runtime = "nodejs";
 
@@ -258,37 +259,129 @@ function buildWorkoutRow(params: {
   return row;
 }
 
+
+// WELLNESS_WORKOUT_HISTORY_GOOGLE_SHEET_V126M6
+function sheetWorkoutDateV126M6(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const iso = text.match(/\d{4}-\d{2}-\d{2}/);
+  if (iso?.[0]) return iso[0];
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : safeLogDate(parsed.toISOString());
+}
+
+function sheetWorkoutNumberV126M6(value: any) {
+  const text = clean(value).replace(/[^0-9,.-]/g, "");
+  if (!text) return 0;
+  const normalized = text.includes(",") && !text.includes(".")
+    ? text.replace(",", ".")
+    : text;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function googleSheetWorkoutLogsV126M6(rows: any[] = [], participant: any) {
+  return (rows || [])
+    .filter((row: any) => {
+      const logType = clean(row?.["Log Type"] || row?.log_type).toLowerCase();
+      if (logType) return logType === "workout" || logType === "activity";
+      return Boolean(
+        clean(row?.["Jenis Workout/Aktifitas"]) ||
+          clean(row?.["Kalori Aktivitas"]) ||
+          clean(row?.["Berapa Menit anda melakukan nya ?"]),
+      );
+    })
+    .map((row: any) => {
+      const submissionDate = clean(row?.["Submission Date"]);
+      const logDate = sheetWorkoutDateV126M6(
+        row?.["Log Date"] || submissionDate,
+      );
+      const rowNumber = Number(row?._rowNumber || row?.__row_index || 0);
+      const submissionId = clean(row?.["Submission ID"]);
+      const activityName = clean(row?.["Jenis Workout/Aktifitas"]) || "Workout";
+      const achievement = clean(
+        row?.["Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"],
+      );
+
+      return {
+        id: `sheet-workout-${rowNumber || submissionId || logDate}`,
+        participant_id: Number(participant?.id || row?.["Participant ID"] || 0),
+        participant_code: clean(participant?.code || row?.["KODE"]),
+        source: "manual",
+        input_source: "google_sheet",
+        activity_type: activityName,
+        activity_name: activityName,
+        log_date: logDate,
+        started_at: submissionDate || logDate,
+        created_at: submissionDate || logDate,
+        updated_at: submissionDate || logDate,
+        duration_minutes: sheetWorkoutNumberV126M6(
+          row?.["Berapa Menit anda melakukan nya ?"],
+        ),
+        calories: sheetWorkoutNumberV126M6(row?.["Kalori Aktivitas"]),
+        notes: achievement,
+        description: achievement,
+        evidence_url: clean(row?.["Bukti Aktivitas"]),
+        evidence_preview_url: clean(row?.["Preview Bukti Aktivitas"]),
+        _submission_id: submissionId,
+        submission_id: submissionId,
+        _google_sheet_row_number: rowNumber,
+        google_sheet_row_number: rowNumber,
+        raw_payload: row,
+      };
+    })
+    .sort((left: any, right: any) =>
+      clean(right?.created_at || right?.log_date).localeCompare(
+        clean(left?.created_at || left?.log_date),
+      ),
+    );
+}
+
 export async function GET(req: NextRequest) {
-  const { supabase, participant } = await getParticipant(req);
+  const { participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
       { ok: false, message: "OTP/session peserta belum aktif." },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
-  const { data, error } = await supabase
-    .from("wellness_activity_logs")
-    .select("*")
-    .eq("participant_id", participant.id)
-    .eq("source", "manual")
-    .order("log_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(100);
+  try {
+    const sheet = await fetchWellnessGoogleSheetRows({
+      participantId: participant.id,
+      code: clean(participant?.code),
+      logType: "workout",
+      limit: 3000,
+    });
 
-  if (error) {
+    if (!sheet?.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: sheet?.message || "Gagal membaca workout dari Google Sheet.",
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      participant_id: Number(participant.id),
+      source: "google_sheet",
+      logs: googleSheetWorkoutLogsV126M6(sheet.rows || [], participant),
+    });
+  } catch (error: any) {
     return NextResponse.json(
-      { ok: false, message: "Gagal membaca workout manual.", detail: error.message },
-      { status: 500 }
+      {
+        ok: false,
+        message: error?.message || "Gagal membaca workout dari Google Sheet.",
+      },
+      { status: 500 },
     );
   }
-
-  return NextResponse.json({
-    ok: true,
-    participant_id: participant.id,
-    logs: data || [],
-  });
 }
 
 export async function POST(req: NextRequest) {
@@ -712,3 +805,110 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
+
+
+// WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
+export async function PATCH(req: NextRequest) {
+  const { participant } = await getParticipant(req);
+
+  if (!participant?.id) {
+    return NextResponse.json(
+      { ok: false, message: "OTP/session peserta belum aktif." },
+      { status: 401 },
+    );
+  }
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const submissionId = clean(body?.submission_id || body?.submissionId);
+    const rowNumber = Number(body?.google_sheet_row_number || body?.row_number || 0);
+    const logDate = safeLogDate(body?.log_date || body?.logDate);
+    const activityType = clean(body?.activity_type || body?.activityType || body?.title);
+    const activityName = clean(body?.activity_name || body?.activityName) || activityType;
+    const durationMinutes = toNumberOrNull(body?.duration_minutes || body?.durationMinutes);
+    const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
+    const steps = toNumberOrNull(body?.steps);
+    const notes = clean(body?.notes || body?.catatan);
+    const calories = toNumberOrNull(body?.calories);
+    const expectedLogDate = safeLogDate(body?.expected_log_date || body?.expectedLogDate);
+    const expectedActivityType = clean(body?.expected_activity_type || body?.expectedActivityType);
+    const expectedDurationMinutes = toNumberOrNull(
+      body?.expected_duration_minutes ?? body?.expectedDurationMinutes,
+    );
+    const expectedCalories = toNumberOrNull(body?.expected_calories ?? body?.expectedCalories);
+
+    if (!submissionId && (!Number.isFinite(rowNumber) || rowNumber < 2)) {
+      return NextResponse.json(
+        { ok: false, message: "Submission ID atau nomor row Google Sheet wajib tersedia." },
+        { status: 400 },
+      );
+    }
+
+    if (!logDate || !activityType || !durationMinutes || durationMinutes <= 0) {
+      return NextResponse.json(
+        { ok: false, message: "Tanggal, jenis workout, dan durasi wajib diisi." },
+        { status: 400 },
+      );
+    }
+
+    const result = await postToWellnessWebhook({
+      action: "updateSubmissionV126M6",
+      sheet: getWellnessSheetName(),
+      submissionId,
+      submission_id: submissionId,
+      rowNumber,
+      row_number: rowNumber,
+      participantId: Number(participant.id),
+      participant_id: Number(participant.id),
+      participantCode: clean(participant?.code),
+      participant_code: clean(participant?.code),
+      logType: "workout",
+      log_type: "workout",
+      updates: {
+        "Submission Date": logDate,
+        "Log Date": logDate,
+        "Melakukan Workout/Aktifitas Ringan?": "Ya",
+        "Jenis Workout/Aktifitas": activityType,
+        "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)":
+          notes || [activityName, distanceKm ? `${distanceKm} km` : "", steps ? `${steps} steps` : ""].filter(Boolean).join(" · "),
+        "Berapa Menit anda melakukan nya ?": durationMinutes,
+        "Kalori Aktivitas": calories ?? 0,
+      },
+      allowedHeaders: [
+        "Submission Date",
+        "Log Date",
+        "Melakukan Workout/Aktifitas Ringan?",
+        "Jenis Workout/Aktifitas",
+        "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)",
+        "Berapa Menit anda melakukan nya ?",
+        "Kalori Aktivitas",
+      ],
+      expected: {
+        logDate: expectedLogDate,
+        activityType: expectedActivityType,
+        durationMinutes: expectedDurationMinutes,
+        calories: expectedCalories,
+      },
+      marker: "WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6",
+    });
+
+    if (result?.updated !== true) {
+      return NextResponse.json(
+        { ok: false, message: result?.message || "Data workout belum berhasil diperbarui.", google_sheet: result },
+        { status: 409 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      updated: true,
+      message: "Data workout berhasil diperbarui di Google Sheet.",
+      google_sheet: result,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, message: error?.message || "Gagal memperbarui workout." },
+      { status: 500 },
+    );
+  }
+}

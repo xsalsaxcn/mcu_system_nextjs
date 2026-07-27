@@ -1596,3 +1596,103 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
+
+
+// WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
+export async function PATCH(req: NextRequest) {
+  const { participant } = await getParticipant(req);
+
+  if (!participant?.id) {
+    return NextResponse.json(
+      { ok: false, message: "OTP/session peserta belum aktif." },
+      { status: 401 },
+    );
+  }
+
+  try {
+    assertWebhookConfigured();
+    const body = await req.json().catch(() => ({}));
+    const submissionId = clean(body?.submission_id || body?.submissionId);
+    const rowNumber = Number(body?.google_sheet_row_number || body?.row_number || 0);
+    const logDate = safeIsoDate(body?.log_date || body?.logDate);
+    const mealType = clean(body?.meal_type || body?.mealType);
+    const foodName = clean(body?.food_name || body?.foodName || body?.title);
+    const calories = toNumberOrNull(body?.calories);
+    const notes = clean(body?.notes || body?.catatan);
+    const expectedLogDate = safeIsoDate(body?.expected_log_date || body?.expectedLogDate);
+    const expectedMealType = clean(body?.expected_meal_type || body?.expectedMealType);
+    const expectedFoodName = clean(body?.expected_food_name || body?.expectedFoodName);
+    const expectedCalories = toNumberOrNull(body?.expected_calories ?? body?.expectedCalories);
+
+    if (!submissionId && (!Number.isFinite(rowNumber) || rowNumber < 2)) {
+      return NextResponse.json(
+        { ok: false, message: "Submission ID atau nomor row Google Sheet wajib tersedia." },
+        { status: 400 },
+      );
+    }
+
+    if (!logDate || !mealType || !foodName) {
+      return NextResponse.json(
+        { ok: false, message: "Tanggal, waktu makan, dan nama makanan wajib diisi." },
+        { status: 400 },
+      );
+    }
+
+    const result = await postToWebhook({
+      action: "updateSubmissionV126M6",
+      sheet: getSheetName(),
+      submissionId,
+      submission_id: submissionId,
+      rowNumber,
+      row_number: rowNumber,
+      participantId: Number(participant.id),
+      participant_id: Number(participant.id),
+      participantCode: clean(participant?.code),
+      participant_code: clean(participant?.code),
+      logType: "nutrition",
+      log_type: "nutrition",
+      updates: {
+        "Submission Date": logDate,
+        "Log Date": logDate,
+        "Waktu Makan": mealType,
+        "Add Options": foodName,
+        "Catatan Nutrisi": notes,
+        "Kalori Makanan": calories ?? 0,
+      },
+      allowedHeaders: [
+        "Submission Date",
+        "Log Date",
+        "Waktu Makan",
+        "Add Options",
+        "Catatan Nutrisi",
+        "Kalori Makanan",
+      ],
+      expected: {
+        logDate: expectedLogDate,
+        mealType: expectedMealType,
+        title: expectedFoodName,
+        calories: expectedCalories,
+      },
+      marker: "WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6",
+    });
+
+    if (result?.updated !== true) {
+      return NextResponse.json(
+        { ok: false, message: result?.message || "Data nutrisi belum berhasil diperbarui.", google_sheet: result },
+        { status: 409 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      updated: true,
+      message: "Data nutrisi berhasil diperbarui di Google Sheet.",
+      google_sheet: result,
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, message: error?.message || "Gagal memperbarui nutrisi." },
+      { status: 500 },
+    );
+  }
+}
