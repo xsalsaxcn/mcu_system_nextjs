@@ -20,6 +20,7 @@
 // WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
 // WELLNESS_PARTICIPANT_HISTORY_DELETE_V126M
 // WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
+// WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -662,6 +663,160 @@ const activityOptions = [
 
 const fieldClass =
   "rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100";
+
+// WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
+const NUTRITION_UPLOAD_TARGET_BYTES_V126M2 = 1_200_000;
+
+async function readApiResponseV126M2(response: Response) {
+  const text = await response.text();
+  let data: any = {};
+
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const compact = text
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const requestTooLarge =
+      response.status === 413 ||
+      /request entity too large|payload too large|body exceeded/i.test(compact);
+
+    data = {
+      ok: false,
+      message: requestTooLarge
+        ? "Ukuran foto masih terlalu besar untuk dikirim. Pilih foto lain atau screenshot foto tersebut."
+        : compact.slice(0, 400) ||
+          `Server mengembalikan respons yang tidak valid (HTTP ${response.status}).`,
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      ...data,
+      ok: false,
+      message:
+        data?.detail ||
+        data?.message ||
+        `Permintaan gagal (HTTP ${response.status}).`,
+    };
+  }
+
+  return data;
+}
+
+function canvasBlobV126M2(
+  canvas: HTMLCanvasElement,
+  quality: number,
+) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(
+          new Error(
+            "Foto tidak dapat dikompres oleh browser ini.",
+          ),
+        );
+      },
+      "image/jpeg",
+      quality,
+    );
+  });
+}
+
+async function compressNutritionPhotoV126M2(
+  file: File,
+): Promise<File> {
+  if (file.size <= NUTRITION_UPLOAD_TARGET_BYTES_V126M2) {
+    return file;
+  }
+
+  if (!clean(file.type).toLowerCase().startsWith("image/")) {
+    throw new Error("File yang dipilih bukan gambar.");
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>(
+      (resolve, reject) => {
+        const element = new Image();
+        element.decoding = "async";
+        element.onload = () => resolve(element);
+        element.onerror = () =>
+          reject(
+            new Error(
+              "Format foto tidak dapat dibaca. Gunakan JPG, PNG, WEBP, atau screenshot foto tersebut.",
+            ),
+          );
+        element.src = objectUrl;
+      },
+    );
+
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+
+    if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
+      throw new Error("Dimensi foto tidak dapat dibaca.");
+    }
+
+    const largestSide = Math.max(sourceWidth, sourceHeight);
+    const initialScale = Math.min(1, 1600 / largestSide);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Browser tidak dapat menyiapkan kompresi foto.");
+    }
+
+    let latestBlob: Blob | null = null;
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const dimensionScale = initialScale * Math.pow(0.84, attempt);
+      canvas.width = Math.max(1, Math.round(sourceWidth * dimensionScale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * dimensionScale));
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const quality = Math.max(0.58, 0.84 - attempt * 0.05);
+      latestBlob = await canvasBlobV126M2(canvas, quality);
+
+      if (latestBlob.size <= NUTRITION_UPLOAD_TARGET_BYTES_V126M2) {
+        break;
+      }
+    }
+
+    if (
+      !latestBlob ||
+      latestBlob.size > NUTRITION_UPLOAD_TARGET_BYTES_V126M2
+    ) {
+      throw new Error(
+        "Foto masih terlalu besar setelah dikompres. Gunakan screenshot atau foto dengan resolusi lebih kecil.",
+      );
+    }
+
+    const baseName =
+      clean(file.name).replace(/\.[^.]+$/, "") ||
+      `nutrition-${Date.now()}`;
+
+    return new File(
+      [latestBlob],
+      `${baseName}.jpg`,
+      {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      },
+    );
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
@@ -1391,10 +1546,30 @@ export default function WellnessParticipantPortalPage() {
       nutritionSubmitInFlightV126L.current = false;
     }, 30000);
 
-    setMessage("Menyimpan nutrisi ke Google Sheet...");
+    const submissionId = createSubmissionIdV126L("nutrition");
+    let photoForUpload = nutritionPhoto;
 
-    const submissionId =
-      createSubmissionIdV126L("nutrition");
+    if (photoForUpload) {
+      setMessage("Menyiapkan dan mengompres foto nutrisi...");
+
+      try {
+        photoForUpload = await compressNutritionPhotoV126M2(
+          photoForUpload,
+        );
+      } catch (error: any) {
+        const compressionMessage =
+          error?.message ||
+          "Foto gagal dikompres. Pilih foto lain atau gunakan screenshot.";
+        setMessage(compressionMessage);
+        nutritionSubmitInFlightV126L.current = false;
+        return {
+          ok: false,
+          message: compressionMessage,
+        };
+      }
+    }
+
+    setMessage("Menyimpan nutrisi ke Google Sheet...");
 
     const body = new FormData();
     body.append("submission_id", submissionId);
@@ -1419,19 +1594,34 @@ export default function WellnessParticipantPortalPage() {
       clean((nutritionForm as any).portion_fraction),
     );
 
-    if (nutritionPhoto) {
-      body.append("photo", nutritionPhoto);
+    if (photoForUpload) {
+      body.append(
+        "photo",
+        photoForUpload,
+        photoForUpload.name,
+      );
     }
 
-    const result = await fetch("/api/wellness/participant/nutrition", {
-      method: "POST",
-      body,
-    })
-      .then((response) => response.json())
-      .catch((error) => ({
+    let result: any = {};
+
+    try {
+      const response = await fetch(
+        "/api/wellness/participant/nutrition",
+        {
+          method: "POST",
+          body,
+        },
+      );
+
+      result = await readApiResponseV126M2(response);
+    } catch (error: any) {
+      result = {
         ok: false,
-        message: error?.message || "Network error",
-      }));
+        message:
+          error?.message ||
+          "Jaringan bermasalah saat menyimpan nutrisi.",
+      };
+    }
 
     if (result.ok) {
       const successMessage = "Laporan nutrisi berhasil tersimpan.";
@@ -1467,7 +1657,9 @@ export default function WellnessParticipantPortalPage() {
     }
 
     const errorMessage =
-      result.message || result.detail || "Gagal menyimpan nutrisi.";
+      result.detail ||
+      result.message ||
+      "Gagal menyimpan nutrisi.";
     setMessage(errorMessage);
     nutritionSubmitInFlightV126L.current = false;
 
@@ -1601,8 +1793,14 @@ export default function WellnessParticipantPortalPage() {
   const googleFitConnected = providerStatus(integrations, "google_fit");
   const activeFitnessSource = clean(
     fitnessSettings?.fitness_source || "none",
-  ).toLowerCase();
-  const fitnessEnabled = fitnessSettings?.fitness_enabled === true;
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const fitnessEnabledValue = fitnessSettings?.fitness_enabled;
+  const fitnessEnabled =
+    fitnessEnabledValue === true ||
+    Number(fitnessEnabledValue) === 1 ||
+    clean(fitnessEnabledValue).toLowerCase() === "true";
 
   useEffect(() => {
     if (step !== "portal") return;
@@ -6029,36 +6227,41 @@ function HistoryTab({
         },
       );
 
-      const text = await response.text();
-      let result: any = {};
-
-      try {
-        result = text ? JSON.parse(text) : {};
-      } catch {
-        result = {
-          ok: false,
-          message: text || "Respons hapus tidak valid.",
-        };
-      }
+      const result = await readApiResponseV126M2(response);
 
       if (!response.ok || result?.ok === false) {
         throw new Error(
-          result?.message ||
-            result?.detail ||
+          result?.detail ||
+            result?.message ||
             "Data belum berhasil dihapus.",
+        );
+      }
+
+      if (
+        type === "nutrition" &&
+        result?.deleted_any !== true
+      ) {
+        throw new Error(
+          result?.message ||
+            "Data tidak ditemukan sehingga belum ada yang dihapus.",
         );
       }
 
       if (type === "nutrition") {
         await loadNutritionHistory();
+
+        if (refresh) {
+          await Promise.resolve(refresh());
+        }
       } else if (refresh) {
         await Promise.resolve(refresh());
       }
 
-           window.alert(
-        type === "nutrition"
-          ? "Riwayat nutrisi berhasil dihapus."
-          : "Riwayat workout berhasil dihapus.",
+      window.alert(
+        result?.message ||
+          (type === "nutrition"
+            ? "Riwayat nutrisi berhasil dihapus."
+            : "Riwayat workout berhasil dihapus."),
       );
     } catch (error: any) {
       window.alert(
@@ -6142,9 +6345,8 @@ function HistoryTab({
 
   const rawNutrition =
     canonicalNutritionHistoryV126M1(
-      nutritionLoaded &&
-        directNutrition?.logs?.length > 0
-        ? directNutrition.logs
+      nutritionLoaded
+        ? directNutrition?.logs || []
         : nutritionLogs || [],
     );
 
