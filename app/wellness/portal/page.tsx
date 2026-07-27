@@ -21,6 +21,7 @@
 // WELLNESS_PARTICIPANT_HISTORY_DELETE_V126M
 // WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
 // WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
+// WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -4710,11 +4711,8 @@ function NutritionTab({
 
               {directNutrition?.sources ? (
                 <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
-                  Supabase {directNutrition.sources.supabase_rows || 0} data
-                  {" • "}
-                  Google Sheet {directNutrition.sources.google_sheet_rows ||
-                    0}{" "}
-                  data
+                  Google Sheet{" "}
+                  {directNutrition.sources.google_sheet_rows || 0} data
                 </p>
               ) : null}
             </div>
@@ -6164,7 +6162,7 @@ function HistoryTab({
         : item?.activity_name || item?.activity_type || "workout ini";
 
     const confirmed = window.confirm(
-      `Hapus ${label}? Data pasangan Google Sheet dan Supabase akan ikut dihapus.`,
+      `Hapus ${label}? Data nutrisi akan dihapus dari Google Sheet.`,
     );
 
     if (!confirmed) return;
@@ -6499,7 +6497,7 @@ function HistoryTab({
       >
         {directNutrition?.sources ? (
           <div className="mb-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            {rawNutrition.length} submission nutrisi · data Google Sheet dan Supabase sudah digabung
+            {rawNutrition.length} submission nutrisi · sumber Google Sheet
           </div>
         ) : null}
 

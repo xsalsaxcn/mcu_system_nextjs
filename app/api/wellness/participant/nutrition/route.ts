@@ -3,6 +3,7 @@
 // WELLNESS_NUTRITION_DELETE_V126M
 // WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
 // WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
+// WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
 // WELLNESS_NUTRITION_STATUS_MIRROR_V98
 // Google Sheet + Google Drive remain the primary submission store.
 // A compact mirror is also saved to the existing wellness_food_logs table
@@ -772,146 +773,30 @@ export async function GET(req: NextRequest) {
   });
 }
 
-async function saveNutritionStatusMirrorV98(params: {
-  supabase: any;
-  participant: any;
-  logDate: string;
-  mealType: string;
-  foodName: string;
-  portion: string | null;
-  notes: string | null;
-  body: any;
-  calorieResult: any;
-  photoResult: any;
-  sheetResult: any;
-}) {
-  const sheetRowNumber = pointNumber(
-    params.sheetResult?.rowNumber ||
-      params.sheetResult?.row_number ||
-      params.sheetResult?._rowNumber,
-  );
 
-  let existingQuery = params.supabase
-    .from("wellness_food_logs")
-    .select("id")
-    .eq("participant_id", Number(params.participant.id));
-
-  if (sheetRowNumber > 0) {
-    existingQuery = existingQuery.eq(
-      "google_sheet_row_number",
-      sheetRowNumber,
-    );
-  } else {
-    existingQuery = existingQuery
-      .eq("log_date", params.logDate)
-      .eq("meal_type", params.mealType)
-      .eq("food_name", params.foodName);
-  }
-
-  const existingResult = await existingQuery.limit(1).maybeSingle();
-  if (existingResult.error) {
-    return {
-      ok: false,
-      inserted: false,
-      warning: `Status nutrisi belum tersinkron: ${existingResult.error.message}`,
-    };
-  }
-
-  if (existingResult.data?.id) {
-    return {
-      ok: true,
-      inserted: false,
-      id: existingResult.data.id,
-      warning: "",
-    };
-  }
-
-  const previewUrl =
-    params.photoResult?.previewUrl ||
-    params.photoResult?.thumbnailUrl ||
-    params.photoResult?.publicUrl ||
-    params.photoResult?.driveUrl ||
-    null;
-
-  const payload = {
-    participant_id: Number(params.participant.id),
-    log_date: params.logDate,
-    meal_time: params.mealType,
-    meal_type: params.mealType,
-    meal_text: params.foodName,
-    food_name: params.foodName,
-    detected_foods: clean(params.calorieResult?.detected_foods_text) || null,
-    total_calories:
-      params.calorieResult?.total_calories === null ||
-      params.calorieResult?.total_calories === undefined
-        ? null
-        : pointNumber(params.calorieResult.total_calories),
-    calories:
-      params.calorieResult?.total_calories === null ||
-      params.calorieResult?.total_calories === undefined
-        ? null
-        : pointNumber(params.calorieResult.total_calories),
-    portion: params.portion,
-    notes: params.notes,
-    source: "google_sheet_status_mirror",
-    raw_payload: {
-      ...params.body,
-      marker: "WELLNESS_NUTRITION_STATUS_MIRROR_V98",
-      status_mirror: true,
-      google_sheet: params.sheetResult || null,
-      saved_at: new Date().toISOString(),
-    },
-    photo_url: previewUrl,
-    photo_path: params.photoResult?.folderPath || null,
-    google_drive_file_id: params.photoResult?.fileId || null,
-    google_drive_url:
-      params.photoResult?.driveUrl || params.photoResult?.publicUrl || null,
-    google_drive_preview_url: previewUrl,
-    calorie_source: "wellness_food_calories",
-    calorie_match_status: params.calorieResult?.calorie_match_status || null,
-    google_sheet_synced_at: new Date().toISOString(),
-    google_sheet_row_number: sheetRowNumber > 0 ? sheetRowNumber : null,
-    sync_status: "synced",
-    sync_error: null,
-    portion_group: clean(
-      params.body?.portion_group || params.body?.portionGroup,
-    ) || null,
-    portion_fraction: clean(
-      params.body?.portion_fraction || params.body?.portionFraction,
-    ) || null,
-    portion_multiplier:
-      Number(params.body?.portion_multiplier || params.body?.portionMultiplier) ||
-      null,
-    estimated_calories:
-      params.calorieResult?.total_calories === null ||
-      params.calorieResult?.total_calories === undefined
-        ? null
-        : pointNumber(params.calorieResult.total_calories),
-    portion_source:
-      clean(params.calorieResult?.portion_estimate_source) || null,
-    updated_at: new Date().toISOString(),
-  };
-
-  const inserted = await params.supabase
-    .from("wellness_food_logs")
-    .insert(payload)
-    .select("*")
-    .single();
-
-  if (inserted.error) {
-    return {
-      ok: false,
-      inserted: false,
-      warning: `Status nutrisi belum tersinkron: ${inserted.error.message}`,
-    };
-  }
-
+async function saveNutritionStatusMirrorV98(
+  _params: any,
+) {
+  /*
+   * WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
+   *
+   * Nutrisi hanya disimpan ke Google Sheet.
+   * Supabase tetap dipakai untuk:
+   * - participant session
+   * - Master Kalori
+   * - point ledger
+   * - target nutrisi
+   *
+   * Tidak ada row baru yang dibuat ke
+   * wellness_food_logs.
+   */
   return {
     ok: true,
-    inserted: true,
-    id: inserted.data?.id,
-    row: inserted.data,
+    inserted: false,
+    disabled: true,
     warning: "",
+    message:
+      "Mirror Supabase dinonaktifkan. Google Sheet adalah penyimpanan nutrisi.",
   };
 }
 

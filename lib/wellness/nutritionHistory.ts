@@ -1,7 +1,9 @@
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_CANONICAL_NUTRITION_HISTORY_V105
+// WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
 // One read path for Participant, Coach, Company, and Admin.
-// Sources: existing wellness_food_logs + the existing Google Sheet CSV export.
+// Source aktif nutrisi: Google Sheet CSV saja.
+// wellness_food_logs tidak lagi dibaca sebagai sumber history nutrisi.
 // No database schema, migration, Google Apps Script, or point-rule changes.
 
 export type CanonicalNutritionSourceSummary = {
@@ -768,15 +770,19 @@ async function fetchSheetRows() {
   }
 }
 
-async function loadDbRows(supabase: any, participantIds: number[]) {
-  if (!participantIds.length) return [];
-  const result = await supabase
-    .from("wellness_food_logs")
-    .select("*")
-    .in("participant_id", participantIds)
-    .order("log_date", { ascending: false })
-    .limit(50000);
-  return result?.error ? [] : result?.data || [];
+
+async function loadDbRows(
+  _supabase: any,
+  _participantIds: number[],
+) {
+  /*
+   * WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
+   *
+   * Sengaja mengembalikan array kosong agar
+   * wellness_food_logs tidak ikut masuk ke
+   * canonical nutrition history.
+   */
+  return [];
 }
 
 async function loadFoodMaster(supabase: any) {
@@ -798,9 +804,10 @@ export async function loadCanonicalNutritionHistories(params: {
   );
   const participantIds = participants.map(participantId);
   const [dbRows, foodMasterRows, sheet] = await Promise.all([
-    params.dbRows
-      ? Promise.resolve(params.dbRows)
-      : loadDbRows(params.supabase, participantIds),
+    loadDbRows(
+      params.supabase,
+      participantIds,
+    ),
     params.foodMasterRows
       ? Promise.resolve(params.foodMasterRows)
       : loadFoodMaster(params.supabase),
