@@ -25,6 +25,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
@@ -819,6 +820,84 @@ async function compressNutritionPhotoV126M2(
   }
 }
 
+
+// WELLNESS_MANUAL_WORKOUT_REFRESH_AND_MODAL_V126M8_1
+// Manual workout tetap berasal dari endpoint khusus workout dan digabungkan
+// dengan device activities saat Portal/Google Fit melakukan refresh.
+function workoutRowIdentityV126M8(item: any, index: number) {
+  const raw =
+    item?.raw_payload && typeof item.raw_payload === "object"
+      ? item.raw_payload
+      : {};
+
+  const databaseId = clean(
+    item?._supabase_id ||
+      item?.id,
+  );
+  if (databaseId) return `db:${databaseId}`;
+
+  const submissionId = clean(
+    item?.submission_id ||
+      item?.submissionId ||
+      raw?.submission_id ||
+      raw?.submissionId,
+  );
+  if (submissionId) return `submission:${submissionId}`;
+
+  const externalId = clean(
+    item?.external_activity_id ||
+      item?.provider_activity_id ||
+      raw?.external_activity_id ||
+      raw?.provider_activity_id,
+  );
+  if (externalId) return `external:${externalId}`;
+
+  return [
+    "fallback",
+    clean(item?.source || item?.provider || item?.input_source),
+    clean(item?.log_date || item?.date || item?.started_at),
+    clean(item?.activity_name || item?.activity_type || item?.title),
+    clean(item?.created_at || item?.updated_at),
+    String(index),
+  ].join(":");
+}
+
+function mergeWorkoutRowsV126M8(
+  activityRows: any[] = [],
+  manualRows: any[] = [],
+) {
+  const merged: any[] = [];
+  const seen = new Set<string>();
+
+  [...(activityRows || []), ...(manualRows || [])].forEach(
+    (item: any, index: number) => {
+      if (!item) return;
+
+      const key = workoutRowIdentityV126M8(item, index);
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      merged.push(item);
+    },
+  );
+
+  return merged.sort((left: any, right: any) => {
+    const rightDate = clean(
+      right?.log_date ||
+        right?.started_at ||
+        right?.created_at ||
+        right?.updated_at,
+    );
+    const leftDate = clean(
+      left?.log_date ||
+        left?.started_at ||
+        left?.created_at ||
+        left?.updated_at,
+    );
+    return rightDate.localeCompare(leftDate);
+  });
+}
+
 export default function WellnessParticipantPortalPage() {
   const [step, setStep] = useState<Step>("request");
   const [activeTab, setActiveTab] = useState<PortalTab>("home");
@@ -914,6 +993,8 @@ export default function WellnessParticipantPortalPage() {
   >({});
   const [activities, setActivities] = useState<any[]>([]);
   const [activitySummary, setActivitySummary] = useState<any[]>([]);
+  const [manualWorkoutLogsV126M8, setManualWorkoutLogsV126M8] =
+    useState<any[]>([]);
   const [clinicalHistory, setClinicalHistory] = useState<any[]>([]);
   const [nutritionLogs, setNutritionLogs] = useState<any[]>([]);
   const [healthtalkLogs, setHealthtalkLogs] = useState<any[]>([]);
@@ -983,6 +1064,22 @@ export default function WellnessParticipantPortalPage() {
     if (result.ok) {
       setNutritionLogs(result.logs || []);
     }
+  }
+
+  async function loadWorkoutV126M8() {
+    const result = await fetch("/api/wellness/participant/workout", {
+      cache: "no-store",
+    })
+      .then((response) => response.json())
+      .catch(() => ({ ok: false, logs: [] }));
+
+    if (result.ok) {
+      setManualWorkoutLogsV126M8(
+        Array.isArray(result.logs) ? result.logs : [],
+      );
+    }
+
+    return result;
   }
 
   async function loadHealthtalk() {
@@ -1159,7 +1256,8 @@ export default function WellnessParticipantPortalPage() {
         );
       }
 
-      await Promise.all([loadNutrition(), loadHealthtalk(), loadPoints()]);
+      await Promise.all([loadNutrition(), loadWorkoutV126M8(),
+loadNutrition(), loadHealthtalk(), loadPoints()]);
     } else {
       setMessage(result.message || "Session Wellness belum aktif.");
       if (/dinonaktifkan|session|otp/i.test(clean(result.message))) {
@@ -1367,6 +1465,7 @@ export default function WellnessParticipantPortalPage() {
     setFitnessLastSyncSnapshot({});
     setActivities([]);
     setActivitySummary([]);
+    setManualWorkoutLogsV126M8([]);
     setClinicalHistory([]);
     setNutritionLogs([]);
     setHealthtalkLogs([]);
@@ -1822,12 +1921,17 @@ export default function WellnessParticipantPortalPage() {
   }, [step, googleFitConnected, fitnessEnabled, activeFitnessSource]);
 
   const workoutItems = useMemo(() => {
-    const sourceRows =
+    const activityRows =
       Array.isArray(activities) && activities.length > 0
         ? activities
         : Array.isArray(activitySummary) && activitySummary.length > 0
           ? activitySummary
           : [];
+
+    const sourceRows = mergeWorkoutRowsV126M8(
+      activityRows,
+      manualWorkoutLogsV126M8,
+    );
 
     return sourceRows.filter((item: any) => {
       const raw = activityRawPayloadV72(item);
@@ -1840,7 +1944,13 @@ export default function WellnessParticipantPortalPage() {
       if (!fitnessEnabled) return false;
       return provider === activeFitnessSource;
     });
-  }, [activities, activitySummary, fitnessEnabled, activeFitnessSource]);
+  }, [
+    activities,
+    activitySummary,
+    manualWorkoutLogsV126M8,
+    fitnessEnabled,
+    activeFitnessSource,
+  ]);
 
   const todayWorkoutItems = useMemo(() => {
     return normalizeTodayWorkoutItems(workoutItems);
@@ -7655,9 +7765,10 @@ function HistoryTab({
         )}
       </HistoryAccordionCardV37>
 
-      {editingItemV126M6 ? (
-        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-3 backdrop-blur-sm md:items-center">
-          <div className="max-h-[94vh] w-full max-w-lg overflow-y-auto rounded-[2rem] bg-white p-5 shadow-2xl">
+      {editingItemV126M6 && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[2147483000] flex h-[100dvh] w-screen items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-sm md:items-center md:p-4">
+              <div className="h-[100dvh] max-h-[100dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-none bg-white px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl md:h-auto md:max-h-[92dvh] md:max-w-2xl md:rounded-[2rem] md:p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
@@ -7814,9 +7925,11 @@ function HistoryTab({
                 </div>
               </>
             )}
-          </div>
-        </div>
-      ) : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {clinical.length > 0 ? (
         <HistoryAccordionCardV37
