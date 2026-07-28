@@ -5,6 +5,7 @@
 // WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
 // WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
 // WELLNESS_NUTRITION_STATUS_MIRROR_V98
+// WELLNESS_LOCAL_DATE_JAKARTA_V126M13_2
 // Google Sheet + Google Drive remain the primary submission store.
 // A compact mirror is also saved to the existing wellness_food_logs table
 // so Coach/Admin can read daily nutrition status. No schema or point-rule change.
@@ -233,6 +234,15 @@ function jakartaDateKeyV126M2(value: Date) {
 
 function todayDate() {
   return jakartaDateKeyV126M2(new Date());
+}
+
+function jakartaSubmissionTimestampV126M13(value = new Date()) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    value = new Date();
+  }
+
+  const shifted = new Date(value.getTime() + 7 * 60 * 60 * 1000);
+  return shifted.toISOString().replace(/Z$/, "+07:00");
 }
 
 function safeIsoDate(value: any) {
@@ -697,7 +707,7 @@ function buildSheetRow(params: {
       params.body?.submission_id ||
         params.body?.submissionId,
     ),
-    "Submission Date": new Date().toISOString(),
+    "Submission Date": jakartaSubmissionTimestampV126M13(),
     "Pilih Nama Anda": participant.name || "",
     "Nama Peserta": participant.name || "",
 

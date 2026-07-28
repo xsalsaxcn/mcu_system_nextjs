@@ -1,6 +1,7 @@
 // WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT
 // WELLNESS_WORKOUT_IDEMPOTENCY_V126L
 // WELLNESS_WORKOUT_DELETE_V126M
+// WELLNESS_LOCAL_DATE_JAKARTA_V126M13_2
 // Manual workout route using the existing Apps Script v370:
 // - optional workout evidence -> Google Drive by action=uploadEvidence
 // - workout submission row -> Google Sheet Form Responses
@@ -41,16 +42,7 @@ function sheetWorkoutNumberV126M9(value: any) {
 function sheetWorkoutDateV126M9(value: any) {
   const text = clean(value);
   if (!text) return "";
-
-  const direct = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (direct) return `${direct[1]}-${direct[2]}-${direct[3]}`;
-
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
-  }
-
-  return text.slice(0, 10);
+  return safeLogDate(text);
 }
 
 function sheetWorkoutStepsV126M9(row: any) {
@@ -350,14 +342,20 @@ function toNumberOrNull(value: any) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return safeLogDate(new Date());
 }
 
 function isoFromLocal(value: any) {
   const text = clean(value);
   if (!text) return null;
 
-  const date = new Date(text);
+  const hasExplicitZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const normalized =
+    hasExplicitZone || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)
+      ? text
+      : `${text}+07:00`;
+
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return null;
 
   return date.toISOString();
@@ -575,12 +573,7 @@ function buildWorkoutRow(params: {
 function sheetWorkoutDateV126M6(value: any) {
   const text = clean(value);
   if (!text) return "";
-
-  const iso = text.match(/\d{4}-\d{2}-\d{2}/);
-  if (iso?.[0]) return iso[0];
-
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? "" : safeLogDate(parsed.toISOString());
+  return safeLogDate(text);
 }
 
 function sheetWorkoutNumberV126M6(value: any) {
@@ -826,7 +819,7 @@ export async function POST(req: NextRequest) {
     }
 
     const logDate = safeLogDate(body?.log_date || body?.logDate) || todayDate();
-    const startedAt = isoFromLocal(body?.started_at) || `${logDate}T00:00:00.000Z`;
+    const startedAt = isoFromLocal(body?.started_at) || `${logDate}T00:00:00.000+07:00`;
     const activityName = clean(body?.activity_name || body?.activityName) || activityType;
     const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);

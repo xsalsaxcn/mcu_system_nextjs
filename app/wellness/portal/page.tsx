@@ -22,6 +22,7 @@
 // WELLNESS_NUTRITION_CANONICAL_DEDUPE_SAFE_DELETE_V126M1
 // WELLNESS_MOBILE_UPLOAD_LOCAL_DATE_SAFE_DELETE_GOOGLE_FIT_V126M2
 // WELLNESS_NUTRITION_GOOGLE_SHEET_ONLY_V126M3A
+// WELLNESS_LOCAL_DATE_JAKARTA_V126M13_2
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -3102,18 +3103,7 @@ function WellnessProgressRow({
 
 // WELLNESS_PARTICIPANT_MOMENTUM_STREAK_V66
 function localDateKeyV66(value: any) {
-  const raw = clean(value);
-  if (!raw) return "";
-  const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (direct?.[1]) return direct[1];
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Jakarta",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(parsed);
+  return jakartaDateFromAny(value);
 }
 
 function jakartaDayKeyV66(offsetDays = 0) {
@@ -7532,7 +7522,7 @@ function HistoryTab({
   function setLast7DaysFilter() {
     const now = new Date();
     const past = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-    setStartDate(past.toISOString().slice(0, 10));
+    setStartDate(jakartaDateFromAny(past));
     setEndDate(todayDate());
   }
 
@@ -8443,17 +8433,8 @@ function filterHistoryByDateV37(
 
 function extractDateFromItemV37(item: any, keys: string[]) {
   for (const key of keys) {
-    const raw = clean(item?.[key]);
-
-    if (!raw) continue;
-
-    const iso = raw.match(/\d{4}-\d{2}-\d{2}/);
-    if (iso) return iso[0];
-
-    const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString().slice(0, 10);
-    }
+    const localDate = jakartaDateFromAny(item?.[key]);
+    if (localDate) return localDate;
   }
 
   return "";
@@ -8461,18 +8442,8 @@ function extractDateFromItemV37(item: any, keys: string[]) {
 
 function formatDateTextV37(value: any) {
   const raw = clean(value);
-
   if (!raw) return "-";
-
-  const iso = raw.match(/\d{4}-\d{2}-\d{2}/);
-  if (iso) return iso[0];
-
-  const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
-  }
-
-  return raw.slice(0, 10);
+  return jakartaDateFromAny(raw) || raw.slice(0, 10);
 }
 function DevicesTab({
   healthConnectConnected,

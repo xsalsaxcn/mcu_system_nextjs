@@ -1,4 +1,5 @@
 // WELLNESS_GOOGLE_SHEET_RESPONSES_V412_JAKARTA_DATE_NORMAL_FORM
+// WELLNESS_LOCAL_DATE_JAKARTA_V126M13_2
 // Read-only helper untuk dashboard/admin/portal membaca Form Responses Google Sheet.
 // Fix utama:
 // - semua Date dari Google Sheet dipaksa Asia/Jakarta
@@ -377,9 +378,9 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
       const submissionDate = row["Submission Date"];
       const explicitLogDate = row["Log Date"] || row["Tanggal"];
 
-      // Untuk form nutrisi normal, tanggal utama adalah Submission Date.
-      // Ini mencegah row input 02 Juli terbaca sebagai 01 Juli akibat field Log Date lama / UTC.
-      const logDate = toIsoDate(submissionDate || explicitLogDate);
+      // Log Date adalah tanggal operasional yang dipilih peserta.
+      // Submission Date hanya timestamp audit dan menjadi fallback untuk row lama.
+      const logDate = toIsoDate(explicitLogDate || submissionDate);
       const logTime = toTime(submissionDate);
 
       const foodDetail =

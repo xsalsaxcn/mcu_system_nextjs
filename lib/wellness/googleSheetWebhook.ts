@@ -1,5 +1,6 @@
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_HELPER
+// WELLNESS_LOCAL_DATE_JAKARTA_V126M13_2
 // Server helper for the existing Google Apps Script webhook v370.
 // It supports:
 // - action=uploadEvidence for Google Drive upload
@@ -7,6 +8,30 @@
 
 export function cleanGsValue(value: any) {
   return String(value ?? "").trim();
+}
+
+const JAKARTA_OFFSET_MS_V126M13 = 7 * 60 * 60 * 1000;
+
+export function jakartaDateKeyV126M13(value: Date = new Date()) {
+  const safeValue =
+    value instanceof Date && !Number.isNaN(value.getTime())
+      ? value
+      : new Date();
+  const shifted = new Date(
+    safeValue.getTime() + JAKARTA_OFFSET_MS_V126M13,
+  );
+  return shifted.toISOString().slice(0, 10);
+}
+
+export function jakartaTimestampV126M13(value: Date = new Date()) {
+  const safeValue =
+    value instanceof Date && !Number.isNaN(value.getTime())
+      ? value
+      : new Date();
+  const shifted = new Date(
+    safeValue.getTime() + JAKARTA_OFFSET_MS_V126M13,
+  );
+  return shifted.toISOString().replace(/Z$/, "+07:00");
 }
 
 export function getWellnessWebhookUrl() {
@@ -73,12 +98,28 @@ export async function fileToBase64(fileLike: any) {
 }
 
 export function safeLogDate(value: any) {
-  const text = cleanGsValue(value);
-  if (!text) return new Date().toISOString().slice(0, 10);
+  if (value instanceof Date) {
+    return jakartaDateKeyV126M13(value);
+  }
 
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text.slice(0, 10) || new Date().toISOString().slice(0, 10);
-  return date.toISOString().slice(0, 10);
+  const text = cleanGsValue(value);
+  if (!text) return jakartaDateKeyV126M13();
+
+  const exactDate = text.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (exactDate?.[1]) return exactDate[1];
+
+  const localDateTime = text.match(
+    /^(\d{4}-\d{2}-\d{2})[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/,
+  );
+  if (localDateTime?.[1]) return localDateTime[1];
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return jakartaDateKeyV126M13(parsed);
+  }
+
+  const embeddedDate = text.match(/(\d{4}-\d{2}-\d{2})/);
+  return embeddedDate?.[1] || jakartaDateKeyV126M13();
 }
 
 export function getCompanyName(participant: any, body?: any) {
@@ -151,7 +192,7 @@ export function buildBaseFormRow(params: {
   const company = getCompanyName(participant, body);
 
   return {
-    "Submission Date": new Date().toISOString(),
+    "Submission Date": jakartaTimestampV126M13(),
     "Pilih Nama Anda": participant.name || "",
     "Nama Peserta": participant.name || "",
     "Waktu Makan": "",
