@@ -7765,10 +7765,10 @@ function HistoryTab({
         )}
       </HistoryAccordionCardV37>
 
-      {editingItemV126M6 && typeof document !== "undefined"
-        ? createPortal(
-            <div className="fixed inset-0 z-[2147483000] flex h-[100dvh] w-screen items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-sm md:items-center md:p-4">
-              <div className="h-[100dvh] max-h-[100dvh] w-full max-w-none overflow-y-auto overscroll-contain rounded-none bg-white px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl md:h-auto md:max-h-[92dvh] md:max-w-2xl md:rounded-[2rem] md:p-6">
+      {editingItemV126M6 ? (
+        <HistoryEditModalShellV126M8_2
+          onClose={closeEditHistoryV126M6}
+        >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.18em] text-teal-700">
@@ -7925,11 +7925,8 @@ function HistoryTab({
                 </div>
               </>
             )}
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+        </HistoryEditModalShellV126M8_2>
+      ) : null}
 
       {clinical.length > 0 ? (
         <HistoryAccordionCardV37
@@ -7960,6 +7957,128 @@ function HistoryTab({
         </HistoryAccordionCardV37>
       ) : null}
     </section>
+  );
+}
+
+
+// WELLNESS_EDIT_BUTTON_MODAL_WEBVIEW_V126M8_2
+// Stable edit overlay for Android WebView: mount only after the client is ready,
+// track the visual viewport, lock background scrolling, and keep all taps inside
+// an explicit top-level portal.
+function HistoryEditModalShellV126M8_2({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const [viewportFrame, setViewportFrame] = useState({
+    top: 0,
+    height: 0,
+  });
+
+  useEffect(() => {
+    const updateViewportFrame = () => {
+      const viewport = window.visualViewport;
+      const top = Math.max(
+        0,
+        Number(viewport?.pageTop ?? window.scrollY ?? 0),
+      );
+      const height = Math.max(
+        320,
+        Number(viewport?.height ?? window.innerHeight ?? 0),
+      );
+
+      setViewportFrame({ top, height });
+    };
+
+    updateViewportFrame();
+
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+
+    window.addEventListener("resize", updateViewportFrame);
+    window.visualViewport?.addEventListener(
+      "resize",
+      updateViewportFrame,
+    );
+    window.visualViewport?.addEventListener(
+      "scroll",
+      updateViewportFrame,
+    );
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscroll;
+      window.removeEventListener("resize", updateViewportFrame);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        updateViewportFrame,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        updateViewportFrame,
+      );
+    };
+  }, []);
+
+  if (
+    typeof document === "undefined" ||
+    viewportFrame.height <= 0
+  ) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      data-wellness-history-edit-modal="v126m8-2"
+      style={{
+        position: "absolute",
+        top: `${viewportFrame.top}px`,
+        left: 0,
+        right: 0,
+        height: `${viewportFrame.height}px`,
+        zIndex: 2147483600,
+        pointerEvents: "auto",
+        background: "rgba(15, 23, 42, 0.55)",
+      }}
+    >
+      <button
+        type="button"
+        aria-label="Tutup edit"
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 0,
+          width: "100%",
+          height: "100%",
+          border: 0,
+          padding: 0,
+          background: "transparent",
+          pointerEvents: "auto",
+          touchAction: "manipulation",
+        }}
+      />
+
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit riwayat wellness"
+        className="absolute inset-0 z-10 overflow-y-auto overscroll-contain bg-white px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-2xl md:inset-4 md:m-auto md:max-h-[92vh] md:max-w-2xl md:rounded-[2rem] md:p-6"
+        style={{
+          pointerEvents: "auto",
+          WebkitOverflowScrolling: "touch",
+          transform: "translateZ(0)",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </section>
+    </div>,
+    document.body,
   );
 }
 
@@ -8059,7 +8178,9 @@ function HistoryGenericItemV37({
               onClick={onEdit}
               title="Edit data"
               aria-label="Edit data"
-              className="grid h-10 w-10 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50"
+              data-wellness-edit-button="workout"
+              data-wellness-edit-syntax="WELLNESS_EDIT_BUTTON_SYNTAX_REPAIR_V126M8_3_1"
+              className="grid h-10 w-10 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50 active:bg-amber-100"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z" />
@@ -8194,7 +8315,8 @@ function HistoryMealItemV37({
               onClick={onEdit}
               title="Edit makanan"
               aria-label="Edit makanan"
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50"
+              data-wellness-edit-button="nutrition"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-amber-200 bg-white text-amber-600 transition hover:bg-amber-50 active:bg-amber-100"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z" />
