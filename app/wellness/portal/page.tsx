@@ -4228,6 +4228,9 @@ function NutritionTab({
 
   const [foodMaster, setFoodMaster] = useState<any[]>([]);
   const [portionMap, setPortionMap] = useState<Record<string, string>>({});
+  // WELLNESS_NUTRITION_QUANTITY_STEPPER_V126M11_1
+  // Quantity is an additional multiplier. Existing portion choices remain unchanged.
+  const [quantityMap, setQuantityMap] = useState<Record<string, number>>({});
   const [directNutrition, setDirectNutrition] = useState<any>({
     ok: false,
     logs: [],
@@ -4416,12 +4419,20 @@ function NutritionTab({
   }, [participantId]);
 
   useEffect(() => {
-    if (!foodText) setPortionMap({});
+    if (!foodText) {
+      setPortionMap({});
+      setQuantityMap({});
+    }
   }, [foodText]);
 
   const parsedFoods = useMemo(() => {
-    return buildAutoFoodBreakdownV29(foodText, foodMaster, portionMap);
-  }, [foodText, foodMaster, portionMap]);
+    return buildAutoFoodBreakdownV29(
+      foodText,
+      foodMaster,
+      portionMap,
+      quantityMap,
+    );
+  }, [foodText, foodMaster, portionMap, quantityMap]);
 
   const totalEstimatedCalories = parsedFoods.reduce((sum, item) => {
     return sum + Number(item.subtotal_calories || 0);
@@ -4434,6 +4445,7 @@ function NutritionTab({
       category: item.category,
       portion_fraction: item.portion_fraction,
       portion_multiplier: item.portion_multiplier,
+      quantity: item.quantity,
       base_calories: item.base_calories,
       subtotal_calories: item.subtotal_calories,
       match_status: item.match_status,
@@ -4443,7 +4455,10 @@ function NutritionTab({
   useEffect(() => {
     const payloadText = JSON.stringify(breakdownPayload);
     const portionText = parsedFoods
-      .map((item) => `${item.input_name} ${item.portion_fraction}`)
+      .map(
+        (item) =>
+          `${item.input_name} ${item.portion_fraction} x ${item.quantity}`,
+      )
       .join(", ");
 
     if (clean(form.food_breakdown) !== payloadText) {
@@ -4531,6 +4546,7 @@ function NutritionTab({
     if (result.ok) {
       setFieldErrors({});
       setPortionMap({});
+      setQuantityMap({});
       await loadDirectNutrition();
     }
     setSavingSmart(false);
@@ -4545,6 +4561,18 @@ function NutritionTab({
       const next = { ...previous };
       delete next.portion;
       return next;
+    });
+  }
+
+  function changeQuantity(key: string, delta: number) {
+    setQuantityMap((previous) => {
+      const current = Math.max(1, Number(previous[key] || 1));
+      const next = Math.min(99, Math.max(1, current + delta));
+
+      return {
+        ...previous,
+        [key]: next,
+      };
     });
   }
 
@@ -4688,6 +4716,7 @@ function NutritionTab({
           <CompactAutoFoodBreakdownV43
             foods={parsedFoods}
             onChangePortion={changePortion}
+            onChangeQuantity={changeQuantity}
           />
 
           <label className="grid gap-2 text-xs font-black text-slate-700">
@@ -4869,9 +4898,11 @@ function NutritionTab({
 function CompactAutoFoodBreakdownV43({
   foods,
   onChangePortion,
+  onChangeQuantity,
 }: {
   foods: any[];
   onChangePortion: (key: string, value: string) => void;
+  onChangeQuantity?: (key: string, delta: number) => void; // WELLNESS_NUTRITION_QUANTITY_OPTIONAL_V126M11_4
 }) {
   const total = foods.reduce(
     (sum, item) => sum + Number(item.subtotal_calories || 0),
@@ -4902,7 +4933,7 @@ function CompactAutoFoodBreakdownV43({
             </span>
           </div>
           <div className="text-[11px] font-bold text-slate-500">
-            {foods.length} item makanan · kalori dihitung dari 1 porsi × porsi dipilih
+            {foods.length} item makanan · kalori dihitung dari 1 porsi × porsi dipilih × jumlah
           </div>
         </div>
 
@@ -4927,19 +4958,50 @@ function CompactAutoFoodBreakdownV43({
                 : "Belum match di Master KaloriData"}
             </div>
 
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <select
                 value={item.portion_fraction}
                 onChange={(event) =>
                   onChangePortion(item.key, event.target.value)
                 }
-                className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black text-slate-700 outline-none"
+                className="min-w-[9rem] flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-black text-slate-700 outline-none"
               >
                 <option value="1/4">1/4 porsi</option>
                 <option value="1/3">1/3 porsi</option>
                 <option value="1/2">1/2 porsi</option>
                 <option value="1">1 porsi</option>
               </select>
+
+              {onChangeQuantity ? (
+                <div
+                  className="flex h-11 shrink-0 overflow-hidden rounded-2xl border border-slate-300 bg-white"
+                  aria-label={`Jumlah ${item.input_name}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onChangeQuantity(item.key, -1)}
+                    disabled={Number(item.quantity || 1) <= 1}
+                    aria-label={`Kurangi jumlah ${item.input_name}`}
+                    className="grid h-full w-10 place-items-center bg-slate-700 text-lg font-black text-white transition active:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    -
+                  </button>
+
+                  <div className="grid min-w-11 place-items-center bg-white px-3 text-sm font-black text-slate-900">
+                    {Number(item.quantity || 1)}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onChangeQuantity(item.key, 1)}
+                    disabled={Number(item.quantity || 1) >= 99}
+                    aria-label={`Tambah jumlah ${item.input_name}`}
+                    className="grid h-full w-10 place-items-center bg-slate-700 text-lg font-black text-white transition active:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    +
+                  </button>
+                </div>
+              ) : null}
 
               <div className="shrink-0 rounded-2xl bg-teal-50 px-3 py-3 text-xs font-black text-teal-700">
                 {fmtNumber(item.subtotal_calories, 0)} kkal
@@ -5142,7 +5204,8 @@ function buildAutoFoodBreakdownV29(
   foodText: string,
   foodMaster: any[],
   portionMap: Record<string, string>,
-) {
+  quantityMap: Record<string, number> = {},
+) { // WELLNESS_NUTRITION_QUANTITY_COMPAT_V126M11_2
   const tokens = splitFoodInputV29(foodText);
   const masterIndex = buildFoodMasterIndexV29(foodMaster);
 
@@ -5153,8 +5216,9 @@ function buildAutoFoodBreakdownV29(
     const defaultPortion = defaultPortionByCategoryV29(category);
     const portionFraction = portionMap[key] || defaultPortion;
     const multiplier = portionMultiplierV29(portionFraction);
+    const quantity = Math.max(1, Number(quantityMap[key] || 1));
     const baseCalories = Number(matched?.calories || 0);
-    const subtotal = Math.round(baseCalories * multiplier);
+    const subtotal = Math.round(baseCalories * multiplier * quantity);
 
     return {
       key,
@@ -5163,6 +5227,7 @@ function buildAutoFoodBreakdownV29(
       category,
       portion_fraction: portionFraction,
       portion_multiplier: multiplier,
+      quantity,
       base_calories: baseCalories,
       subtotal_calories: subtotal,
       match_status: matched ? "matched" : "unmatched",
