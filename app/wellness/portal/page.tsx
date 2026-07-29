@@ -397,12 +397,20 @@ function googleFitTotalCaloriesValueV73(item: any) {
 
   const raw = activityRawPayloadV72(item);
 
+  // WELLNESS_GOOGLE_FIT_CARD_STABLE_V126M14
+  // Read the exact Google Fit total from both raw payload and the daily row.
+  // This remains display-only; activityCaloriesValue() is intentionally unchanged.
   return asNumber(
     raw?.google_fit_calories_expended ??
       raw?.google_fit_total_calories ??
       raw?.calories_expended_total ??
+      raw?.exact_snapshot?.total_calories ??
+      raw?.native_last_snapshot?.total_calories ??
       raw?.original_payload?.calories_expended ??
-      raw?.original_payload?.calories,
+      raw?.original_payload?.calories ??
+      item?.total_calories ??
+      item?.calories ??
+      item?.calories_burned,
   );
 }
 
@@ -2294,6 +2302,7 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
                 workoutItems={workoutItems}
                 healthtalkLogs={healthtalkLogs}
                 fitnessSettings={fitnessSettings}
+                fitnessLastSyncSnapshot={fitnessLastSyncSnapshot}
                 pointSummary={pointSummary}
               />
             ) : null}
@@ -3238,6 +3247,7 @@ function HomeTab({
   workoutItems,
   healthtalkLogs,
   fitnessSettings,
+  fitnessLastSyncSnapshot,
   pointSummary,
 }: {
   participant: any;
@@ -3250,6 +3260,7 @@ function HomeTab({
   workoutItems: any[];
   healthtalkLogs: any[];
   fitnessSettings: any;
+  fitnessLastSyncSnapshot: Record<string, any>;
   pointSummary: any;
 }) {
   const participantId = Number(
@@ -3434,8 +3445,13 @@ function HomeTab({
     ],
   );
 
+  const googleFitSelectedV126M14 =
+    clean(fitnessSettings?.fitness_source)
+      .toLowerCase()
+      .replace(/-/g, "_") === "google_fit";
+
   const googleFitActiveCaloriesUnavailable =
-    clean(fitnessSettings?.fitness_source).toLowerCase() === "google_fit" &&
+    googleFitSelectedV126M14 &&
     (workoutItems || []).some((item: any) => {
       if (!isGoogleFitDailyRow(item) || activityDateKey(item) !== todayKeyV73) {
         return false;
@@ -3448,8 +3464,6 @@ function HomeTab({
       );
       const exactTotalCalories = googleFitTotalCaloriesValueV73(item);
 
-      // REST V414 tidak selalu menulis active_calories_available=false.
-      // Total provider tetap ditampilkan sebagai informasi bila active exact tidak ada.
       return (
         raw?.active_calories_available === false ||
         (!(exactActiveCalories > 0) && exactTotalCalories > 0)
@@ -3457,8 +3471,9 @@ function HomeTab({
     });
 
   // WELLNESS_GOOGLE_FIT_EXACT_TOTAL_DISPLAY_V79O
-  // When Google Fit exposes only total energy, show that exact provider value
-  // instead of a fake 0. It is explicitly not compared with the workout target.
+  // WELLNESS_GOOGLE_FIT_CARD_STABLE_V126M14
+  // The selected provider controls the card identity. Data arrival only changes
+  // the numeric value, so refresh cannot switch the card back to Kalori Workout.
   const googleFitTotalByDateV79O = useMemo(() => {
     const values = new Map<string, { value: number; updatedAt: number }>();
 
@@ -3480,30 +3495,43 @@ function HomeTab({
     return values;
   }, [JSON.stringify(workoutItems || [])]);
 
-  const todayGoogleFitTotalCaloriesV79O =
-    googleFitTotalByDateV79O.get(todayKeyV73)?.value || 0;
+  const googleFitSnapshotV126M14 =
+    fitnessLastSyncSnapshot?.google_fit || null;
+  const googleFitSnapshotDateV126M14 =
+    clean(googleFitSnapshotV126M14?.date).slice(0, 10) ||
+    jakartaDateFromAny(
+      googleFitSnapshotV126M14?.measured_at ||
+        googleFitSnapshotV126M14?.synced_at,
+    );
+  const googleFitSnapshotTotalV126M14 =
+    googleFitSnapshotDateV126M14 === todayKeyV73
+      ? asNumber(googleFitSnapshotV126M14?.total_calories)
+      : 0;
 
-  const googleFitTotalDisplayModeV79O =
-    googleFitActiveCaloriesUnavailable &&
-    todayGoogleFitTotalCaloriesV79O > 0;
+  const todayGoogleFitTotalCaloriesV79O =
+    googleFitTotalByDateV79O.get(todayKeyV73)?.value ||
+    googleFitSnapshotTotalV126M14 ||
+    0;
 
   const participantMomentumDisplayV79O = useMemo(() => {
-    if (!googleFitTotalDisplayModeV79O) return participantMomentum;
+    if (!googleFitSelectedV126M14) return participantMomentum;
 
     return {
       ...participantMomentum,
       days: (participantMomentum.days || []).map((day: any) => ({
         ...day,
         workoutCalories:
-          googleFitTotalByDateV79O.get(day.date)?.value ||
-          day.workoutCalories ||
-          0,
+          day.date === todayKeyV73
+            ? todayGoogleFitTotalCaloriesV79O
+            : googleFitTotalByDateV79O.get(day.date)?.value || 0,
       })),
     };
   }, [
     participantMomentum,
-    googleFitTotalDisplayModeV79O,
+    googleFitSelectedV126M14,
     googleFitTotalByDateV79O,
+    todayGoogleFitTotalCaloriesV79O,
+    todayKeyV73,
   ]);
 
   return (
@@ -3558,21 +3586,21 @@ function HomeTab({
             nutritionCount={todayRowCount}
             nutritionCalories={todayCalories}
             workoutCalories={
-              googleFitTotalDisplayModeV79O
+              googleFitSelectedV126M14
                 ? todayGoogleFitTotalCaloriesV79O
                 : asNumber(totals.workoutCalories || 0)
             }
             workoutTitle={
-              googleFitTotalDisplayModeV79O
+              googleFitSelectedV126M14
                 ? "Kalori Google Fit"
                 : "Kalori Workout"
             }
             workoutSubtitle={
-              googleFitTotalDisplayModeV79O
+              googleFitSelectedV126M14
                 ? "Total energi, termasuk basal"
                 : "Target terbakar"
             }
-            workoutTargetEnabled={!googleFitTotalDisplayModeV79O}
+            workoutTargetEnabled={!googleFitSelectedV126M14}
             steps={asNumber(totals.steps || 0)}
             nutritionTarget={nutritionTarget}
             workoutTarget={workoutTarget}
