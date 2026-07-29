@@ -1782,7 +1782,13 @@ export async function PATCH(req: NextRequest) {
         photoResult?.publicUrl,
     );
 
+    // WELLNESS_NUTRITION_EDIT_SYNC_V126M16_1
+    // Editing a nutrition entry must update both visible date columns.
+    // Submission Date keeps the selected operational date and current WIB time;
+    // Log Date keeps the selected YYYY-MM-DD value.
     const updates: Record<string, any> = {
+      "Submission Date":
+        jakartaSubmissionTimestampForLogDateV126M15(logDate),
       "Log Date": logDate,
       "Waktu Makan":
         mealLabel(mealType),
@@ -1797,6 +1803,7 @@ export async function PATCH(req: NextRequest) {
     };
 
     const allowedHeaders = [
+      "Submission Date",
       "Log Date",
       "Waktu Makan",
       "Add Options",
@@ -1869,6 +1876,20 @@ export async function PATCH(req: NextRequest) {
             "Data nutrisi belum berhasil diperbarui.",
           google_sheet:
             result,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (result?.marker !== "WELLNESS_NUTRITION_EDIT_SYNC_V126M16_1") {
+      return NextResponse.json(
+        {
+          ok: false,
+          updated: false,
+          message:
+            "Google Apps Script edit belum menggunakan V126M16.1. " +
+            "Pasang fungsi update terbaru lalu deploy Web App sebagai versi baru.",
+          google_sheet: result,
         },
         { status: 409 },
       );
