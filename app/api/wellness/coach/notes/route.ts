@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // WELLNESS_COACH_INSTRUCTIONS_TARGETS_V53
+// WELLNESS_COACH_GROUP_TARGET_PERSISTENCE_V126M22
 // WELLNESS_COACH_CHAT_API_V54
 // Reuses existing wellness_coach_notes and wellness_participants fields.
 // No table creation or schema migration.
@@ -151,6 +152,83 @@ async function updateExistingTargetFields(
     synced: !fallback.error,
     mode: fallback.error ? "note_only" : "weight_field_and_note",
     warning: full.error.message || fallback.error?.message || "",
+  };
+}
+
+async function updateProvidedGroupTargetFields(
+  supabase: any,
+  participantId: number,
+  targets: {
+    nutrition_max_calories: number;
+    workout_min_calories: number;
+    target_weight_kg: number;
+  },
+) {
+  const fields: Array<[string, number]> = [];
+
+  if (targets.nutrition_max_calories > 0) {
+    fields.push(["daily_calorie_limit", targets.nutrition_max_calories]);
+  }
+  if (targets.workout_min_calories > 0) {
+    fields.push(["workout_calorie_target", targets.workout_min_calories]);
+  }
+  if (targets.target_weight_kg > 0) {
+    fields.push(["target_weight_kg", targets.target_weight_kg]);
+  }
+
+  if (fields.length === 0) {
+    return {
+      synced: true,
+      partial: false,
+      mode: "no_target_change",
+      applied_fields: [] as string[],
+      warnings: [] as string[],
+    };
+  }
+
+  const updatedAt = new Date().toISOString();
+  const fullPayload: any = { updated_at: updatedAt };
+  for (const [field, value] of fields) fullPayload[field] = value;
+
+  const full = await supabase
+    .from("wellness_participants")
+    .update(fullPayload)
+    .eq("id", participantId);
+
+  if (!full.error) {
+    return {
+      synced: true,
+      partial: false,
+      mode: "all_provided_fields",
+      applied_fields: fields.map(([field]) => field),
+      warnings: [] as string[],
+    };
+  }
+
+  const appliedFields: string[] = [];
+  const warnings: string[] = [full.error.message];
+
+  for (const [field, value] of fields) {
+    const result = await supabase
+      .from("wellness_participants")
+      .update({ [field]: value, updated_at: updatedAt })
+      .eq("id", participantId);
+
+    if (result.error) warnings.push(`${field}: ${result.error.message}`);
+    else appliedFields.push(field);
+  }
+
+  return {
+    synced: appliedFields.length === fields.length,
+    partial: appliedFields.length > 0 && appliedFields.length < fields.length,
+    mode:
+      appliedFields.length === fields.length
+        ? "individual_fields"
+        : appliedFields.length > 0
+          ? "partial_fields"
+          : "note_only",
+    applied_fields: appliedFields,
+    warnings,
   };
 }
 
@@ -500,7 +578,24 @@ export async function POST(request: NextRequest) {
     }
 
     const coachNote = clean(body.coach_note);
-    const actionPlan = clean(body.action_plan);
+    const requestedTargets = {
+      nutrition_max_calories: asNumber(body.nutrition_max_calories),
+      workout_min_calories: asNumber(body.workout_min_calories),
+      target_weight_kg: asNumber(body.target_weight_kg),
+    };
+    const requestedTargetLines = [
+      requestedTargets.nutrition_max_calories > 0
+        ? `Target Nutrisi: ${requestedTargets.nutrition_max_calories} kkal/hari`
+        : "",
+      requestedTargets.workout_min_calories > 0
+        ? `Target Workout: ${requestedTargets.workout_min_calories} kkal/hari`
+        : "",
+      requestedTargets.target_weight_kg > 0
+        ? `Target BB: ${requestedTargets.target_weight_kg} kg`
+        : "",
+    ].filter(Boolean);
+    const actionPlan = clean(body.action_plan) || requestedTargetLines.join("\n");
+    const hasRequestedTargets = requestedTargetLines.length > 0;
 
     if (!coachNote && !actionPlan) {
       return NextResponse.json(
@@ -549,14 +644,53 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const targetSyncResults: any[] = [];
+
+    if (hasRequestedTargets) {
+      for (const participant of targets) {
+        const sync = await updateProvidedGroupTargetFields(
+          supabase,
+          asNumber(participant.id),
+          requestedTargets,
+        );
+        targetSyncResults.push({
+          participant_id: asNumber(participant.id),
+          ...sync,
+        });
+      }
+    }
+
+    const fullySyncedTargets = targetSyncResults.filter(
+      (item: any) => item.synced,
+    ).length;
+    const partiallySyncedTargets = targetSyncResults.filter(
+      (item: any) => item.partial,
+    ).length;
+
     return NextResponse.json({
       ok: true,
       message:
-        scope === "group"
-          ? `Instruksi dikirim kepada ${rows.length} anggota kelompok.`
-          : "Instruksi peserta berhasil disimpan.",
+        scope === "group" && hasRequestedTargets
+          ? fullySyncedTargets === rows.length
+            ? `Instruksi dan target tersimpan untuk ${rows.length} anggota kelompok.`
+            : `Instruksi terkirim kepada ${rows.length} anggota. Target tersinkron penuh pada ${fullySyncedTargets} peserta dan sebagian pada ${partiallySyncedTargets} peserta.`
+          : scope === "group"
+            ? `Instruksi dikirim kepada ${rows.length} anggota kelompok.`
+            : hasRequestedTargets && fullySyncedTargets === 1
+              ? "Instruksi dan target peserta berhasil disimpan."
+              : "Instruksi peserta berhasil disimpan.",
       notes: data || [],
       recipient_count: rows.length,
+      target_sync: {
+        requested: hasRequestedTargets,
+        fully_synced: fullySyncedTargets,
+        partially_synced: partiallySyncedTargets,
+        failed: Math.max(
+          0,
+          targetSyncResults.length - fullySyncedTargets - partiallySyncedTargets,
+        ),
+        results: targetSyncResults,
+      },
     });
   } catch (error: any) {
     return NextResponse.json(

@@ -20,6 +20,7 @@ import WellnessProfilePanel, {
 } from "@/components/wellness/WellnessProfile";
 
 // WELLNESS_COACH_PORTAL_FLAGS_TARGETS_V53
+// WELLNESS_COACH_GROUP_TARGET_PERSISTENCE_V126M22
 // WELLNESS_COACH_COMPACT_LIST_ACTION_CHAT_V54
 // WELLNESS_COACH_TABLE_DETAIL_CHARTS_V55
 // WELLNESS_COACH_MODAL_RESPONSIVE_CHARTS_V56
@@ -495,6 +496,9 @@ export default function WellnessCoachPortalPage() {
         main_issue: instructionForm.main_issue,
         coach_note: instructionForm.coach_note,
         action_plan: actionPlan,
+        nutrition_max_calories: instructionForm.action_nutrition_calories,
+        workout_min_calories: instructionForm.action_workout_calories,
+        target_weight_kg: instructionForm.action_target_weight,
         follow_up_status: instructionForm.follow_up_status,
         next_follow_up_date: instructionForm.next_follow_up_date,
       }),
@@ -4444,8 +4448,10 @@ function InstructionModal({
                 Target / Action Plan (Opsional)
               </div>
               <p className="mt-1 text-xs font-bold leading-5 text-sky-800/70">
-                Isi hanya target yang ingin ditetapkan atau diubah. Kolom
-                lainnya boleh dikosongkan.
+                Isi hanya target yang ingin ditetapkan atau diubah. Pada
+                instruksi kelompok, nilai yang diisi akan disimpan sebagai
+                target aktual seluruh anggota kelompok; kolom kosong tidak
+                menghapus target lama.
               </p>
               <div className="mt-4 grid gap-3">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
@@ -4532,8 +4538,8 @@ function InstructionModal({
               {saving
                 ? "Mengirim..."
                 : scope === "group"
-                  ? "Kirim ke Seluruh Anggota"
-                  : "Kirim ke Peserta"}
+                  ? "Simpan Target & Kirim ke Seluruh Anggota"
+                  : "Simpan Target & Kirim ke Peserta"}
             </button>
           </div>
         </div>
