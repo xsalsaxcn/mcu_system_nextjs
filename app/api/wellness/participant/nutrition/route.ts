@@ -245,6 +245,19 @@ function jakartaSubmissionTimestampV126M13(value = new Date()) {
   return shifted.toISOString().replace(/Z$/, "+07:00");
 }
 
+// WELLNESS_NUTRITION_BACKDATE_SHEET_DATE_V126M15_1
+// Keep the real WIB submission time, but use the operational date selected
+// by the participant. This makes Google Sheet backdated entries consistently
+// show the selected date in both Submission Date and Log Date.
+function jakartaSubmissionTimestampForLogDateV126M15(
+  logDate: any,
+  value = new Date(),
+) {
+  const dateKey = safeIsoDate(logDate);
+  const currentJakartaTimestamp = jakartaSubmissionTimestampV126M13(value);
+  return `${dateKey}${currentJakartaTimestamp.slice(10)}`;
+}
+
 function safeIsoDate(value: any) {
   const text = clean(value);
   if (!text) return todayDate();
@@ -707,7 +720,7 @@ function buildSheetRow(params: {
       params.body?.submission_id ||
         params.body?.submissionId,
     ),
-    "Submission Date": jakartaSubmissionTimestampV126M13(),
+    "Submission Date": jakartaSubmissionTimestampForLogDateV126M15(params.logDate),
     "Pilih Nama Anda": participant.name || "",
     "Nama Peserta": participant.name || "",
 
