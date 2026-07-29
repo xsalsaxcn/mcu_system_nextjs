@@ -6,6 +6,7 @@
 // WELLNESS_PROGRESS_CHAT_SMOOTH_V65
 // WELLNESS_COACH_RANKING_PROFILE_V76
 // WELLNESS_COACH_USERNAME_ACCOUNTS_V117A
+// WELLNESS_COACH_CANONICAL_GROUP_ACCESS_V126M20_3
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
@@ -53,6 +54,20 @@ type CoachDashboard = {
 
 function clean(value: any) {
   return String(value || "").trim();
+}
+
+function participantMatchesSelectedCoachGroup(item: any, selectedGroup: any) {
+  const selected = clean(selectedGroup);
+  if (!selected || selected === "all") return true;
+
+  const accessIds = Array.isArray(item?.access_group_ids)
+    ? item.access_group_ids.map((value: any) => clean(value)).filter(Boolean)
+    : [];
+
+  return (
+    accessIds.includes(selected) ||
+    clean(item?.assigned_group_unit_id) === selected
+  );
 }
 
 function fmtNumber(value: any, digits = 0) {
@@ -789,11 +804,10 @@ export default function WellnessCoachPortalPage() {
     return participants
       .filter((item: any) => {
         const meta = reminderMeta(item);
-        const byGroup =
-          selectedGroup === "all" ||
-          clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
-          clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
-          clean(item.raw?.group_unit_id) === selectedGroup;
+        const byGroup = participantMatchesSelectedCoachGroup(
+          item,
+          selectedGroup,
+        );
         const byFlag = flagFilter === "all" || item.flag === flagFilter;
         const byReminder =
           reminderFilter === "all" ||
@@ -840,11 +854,10 @@ export default function WellnessCoachPortalPage() {
     return participants
       .filter((item: any) => {
         const meta = reminderMeta(item);
-        const byGroup =
-          selectedGroup === "all" ||
-          clean(item.group_name).toLowerCase() === selectedGroup.toLowerCase() ||
-          clean(item.raw?.wellness_group_unit_id) === selectedGroup ||
-          clean(item.raw?.group_unit_id) === selectedGroup;
+        const byGroup = participantMatchesSelectedCoachGroup(
+          item,
+          selectedGroup,
+        );
         const byFlag = flagFilter === "all" || item.flag === flagFilter;
         const haystack = [
           item.name,
@@ -1851,33 +1864,13 @@ function CoachChatPanel({
       String(group.wellness_group_unit_id || group.group_name) ===
       String(selectedGroup),
   );
-  const selectedGroupName = clean(
-    selectedGroupObject?.group_name || selectedGroup,
-  ).toLowerCase();
+  const groupFilteredParticipants = (participants || []).filter((item: any) =>
+    participantMatchesSelectedCoachGroup(item, selectedGroup),
+  );
 
-  const groupFilteredParticipants = (participants || []).filter((item: any) => {
-    if (selectedGroup === "all") return true;
-
-    const participantGroupName = clean(item.group_name).toLowerCase();
-    const participantGroupIds = [
-      item.raw?.wellness_group_unit_id,
-      item.raw?.group_unit_id,
-      item.raw?.wellness_group_id,
-    ].map((value) => clean(value));
-
-    return (
-      participantGroupIds.includes(clean(selectedGroup)) ||
-      participantGroupName === selectedGroupName ||
-      participantGroupName.includes(selectedGroupName) ||
-      selectedGroupName.includes(participantGroupName)
-    );
-  });
-
-  // Jangan biarkan inbox kosong hanya karena format ID/nama group berbeda.
-  const availableParticipants =
-    selectedGroup !== "all" && groupFilteredParticipants.length === 0
-      ? participants || []
-      : groupFilteredParticipants;
+  // Group filtering is fail-closed: an empty group stays empty instead of
+  // silently falling back to every assigned participant.
+  const availableParticipants = groupFilteredParticipants;
 
   const conversations = [...availableParticipants].sort(
     (left: any, right: any) => {

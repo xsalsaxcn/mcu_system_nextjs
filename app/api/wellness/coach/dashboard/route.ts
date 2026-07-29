@@ -5,6 +5,17 @@ import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import {
+  buildCoachGroupUnitMap,
+  canCoachAccessParticipant,
+  canonicalParticipantGroupName,
+  canonicalParticipantGroupUnit,
+  canonicalParticipantKelompokUnit,
+  dedupeCoachParticipants,
+  matchingCoachAssignment,
+  participantCanonicalUnitId,
+  participantScopeIds,
+} from "@/lib/wellness/coachGroupAccess";
+import {
   filterClinicalRowsForProgram,
   filterOperationalRowsForProgram,
   isOperationalRowInProgramWindow,
@@ -94,20 +105,7 @@ function getParticipantId(row: any) {
 }
 
 // WELLNESS_COACH_KELOMPOK_ACCESS_V122
-// Coach pada Kelompok induk dapat melihat peserta
-// di Kelompok maupun seluruh Group anaknya.
-function participantGroupIds(row: any) {
-  return [
-    row?.wellness_group_unit_id,
-    row?.wellness_kelompok_id,
-    row?.group_unit_id,
-    row?.group_id,
-    row?.wellness_group_id,
-  ]
-    .map(clean)
-    .filter(Boolean);
-}
-
+// Canonical hierarchy enforcement is centralized in coachGroupAccess.
 function participantName(row: any) {
   return clean(
     row?.name || row?.employee_name || row?.nama || row?.full_name || "-",
@@ -127,51 +125,6 @@ function participantRisk(row: any) {
       row?.baseline_risk_group ||
       row?.category ||
       "-",
-  );
-}
-
-function canAccessParticipant(
-  row: any,
-  assignments: any[],
-) {
-  if (!(assignments || []).length) {
-    return false;
-  }
-
-  const allowedIds = new Set(
-    (assignments || [])
-      .map((item) =>
-        clean(
-          item.wellness_group_unit_id,
-        ),
-      )
-      .filter(Boolean),
-  );
-
-  return participantGroupIds(row).some(
-    (id) => allowedIds.has(id),
-  );
-}
-
-function assignedGroupFor(
-  row: any,
-  assignments: any[],
-) {
-  const ids = participantGroupIds(row);
-
-  return (
-    (assignments || []).find(
-      (item) => {
-        const id = clean(
-          item.wellness_group_unit_id,
-        );
-
-        return Boolean(
-          id &&
-          ids.includes(id),
-        );
-      },
-    ) || null
   );
 }
 
@@ -472,6 +425,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: groupUnits, error: groupUnitError } = await supabase
+      .from("wellness_group_units")
+      .select("*")
+      .limit(5000);
+
+    if (groupUnitError) {
+      return NextResponse.json(
+        { ok: false, message: groupUnitError.message },
+        { status: 500 },
+      );
+    }
+
+    const groupUnitMap = buildCoachGroupUnitMap(groupUnits || []);
+
     const { data: allParticipants, error: participantError } = await supabase
       .from("wellness_participants")
       .select("*")
@@ -489,8 +456,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const participants = (allParticipants || []).filter((row: any) =>
-      canAccessParticipant(row, assignments || []),
+    const participants = dedupeCoachParticipants(allParticipants || []).filter(
+      (row: any) =>
+        canCoachAccessParticipant(row, assignments || [], groupUnitMap),
     );
     const participantIds = participants.map(getParticipantId).filter(Boolean);
     const participantControlMap = await loadParticipantControlMap(
@@ -690,7 +658,17 @@ export async function GET(request: NextRequest) {
         latestNote,
       });
 
-      const assignedGroup = assignedGroupFor(row, assignments || []);
+      const assignedGroup = matchingCoachAssignment(
+        row,
+        assignments || [],
+        groupUnitMap,
+      );
+      const canonicalGroup = canonicalParticipantGroupUnit(row, groupUnitMap);
+      const canonicalKelompok = canonicalParticipantKelompokUnit(
+        row,
+        groupUnitMap,
+      );
+      const accessGroupIds = participantScopeIds(row, groupUnitMap);
       const profile = profileMap.get(String(id)) || {};
 
       return {
@@ -699,15 +677,17 @@ export async function GET(request: NextRequest) {
         code: participantCode(row),
         profile_photo_url: clean(profile.photo_url),
         profile_photo_preview_url: clean(profile.photo_preview_url),
-        group_name:
-          clean(assignedGroup?.group_name) ||
-          clean(
-            row?.group_unit_name ||
-              row?.group_name ||
-              row?.risk_group ||
-              row?.category,
-          ) ||
-          "-",
+        group_name: canonicalParticipantGroupName(row, groupUnitMap),
+        kelompok_name: clean(canonicalKelompok?.name) || "-",
+        group_unit_id:
+          clean(canonicalGroup?.id) ||
+          participantCanonicalUnitId(row, groupUnitMap) ||
+          null,
+        kelompok_id: clean(canonicalKelompok?.id) || null,
+        assigned_group_name: clean(assignedGroup?.group_name) || "",
+        assigned_group_unit_id:
+          clean(assignedGroup?.wellness_group_unit_id) || null,
+        access_group_ids: accessGroupIds,
         risk: participantRisk(row),
         raw: row,
         today: {
@@ -778,8 +758,8 @@ export async function GET(request: NextRequest) {
       const name = clean(item.group_name) || `Group ${id}`;
       const members = participantCards.filter((participant) => {
         const row = participant.raw || {};
-        // WELLNESS_COACH_DASHBOARD_MEMBER_ID_ONLY_V126C
-        return participantGroupIds(row).includes(id);
+        // WELLNESS_COACH_CANONICAL_GROUP_ACCESS_V126M20_3
+        return participantScopeIds(row, groupUnitMap).includes(id);
       });
 
       return {

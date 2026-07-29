@@ -6,6 +6,13 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
+import {
+  buildCoachGroupUnitMap,
+  canCoachAccessParticipant,
+  canonicalParticipantGroupName,
+  canonicalParticipantGroupUnit,
+  canonicalParticipantKelompokUnit,
+} from "@/lib/wellness/coachGroupAccess";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 import {
@@ -81,41 +88,6 @@ function dateLabel(value: any) {
   const text = dateKey(value);
   const parts = text.split("-");
   return parts.length === 3 ? `${parts[2]}/${parts[1]}` : text || "-";
-}
-
-function participantIds(row: any) {
-  return [
-    row?.wellness_group_unit_id,
-    row?.wellness_kelompok_id,
-    row?.group_unit_id,
-    row?.group_id,
-    row?.wellness_group_id,
-  ]
-    .map(clean)
-    .filter(Boolean);
-}
-
-function canAccessParticipant(
-  row: any,
-  assignments: any[],
-) {
-  if (!(assignments || []).length) {
-    return false;
-  }
-
-  const allowedIds = new Set(
-    (assignments || [])
-      .map((item) =>
-        clean(
-          item.wellness_group_unit_id,
-        ),
-      )
-      .filter(Boolean),
-  );
-
-  return participantIds(row).some(
-    (id) => allowedIds.has(id),
-  );
 }
 
 async function getCoach(request: NextRequest, supabase: any) {
@@ -464,6 +436,14 @@ export async function GET(request: NextRequest) {
 
     if (assignmentError) throw assignmentError;
 
+    const { data: groupUnits, error: groupUnitError } = await supabase
+      .from("wellness_group_units")
+      .select("*")
+      .limit(5000);
+
+    if (groupUnitError) throw groupUnitError;
+    const groupUnitMap = buildCoachGroupUnitMap(groupUnits || []);
+
     const { data: participant, error: participantError } = await supabase
       .from("wellness_participants")
       .select("*")
@@ -474,10 +454,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, message: "Peserta tidak ditemukan." }, { status: 404 });
     }
 
-    if (!canAccessParticipant(participant, assignments || [])) {
+    if (
+      !canCoachAccessParticipant(
+        participant,
+        assignments || [],
+        groupUnitMap,
+      )
+    ) {
       return NextResponse.json({ ok: false, message: "Peserta tidak termasuk assigned group coach." }, { status: 403 });
     }
 
+    const canonicalGroup = canonicalParticipantGroupUnit(
+      participant,
+      groupUnitMap,
+    );
+    const canonicalKelompok = canonicalParticipantKelompokUnit(
+      participant,
+      groupUnitMap,
+    );
     const code = clean(participant.code || participant.employee_code || participant.no_karyawan);
 
     const [activityRowsRaw, foodRows, weightRows, clinicalRows, historyById, historyByCode, miniMcuRows, pointRows, healthtalkRows, targetNotes] = await Promise.all([
@@ -754,6 +748,10 @@ export async function GET(request: NextRequest) {
         id: participant.id,
         name: clean(participant.name || participant.employee_name || participant.full_name || "-"),
         code: clean(participant.code || participant.employee_code || participant.no_karyawan || "-"),
+        group_name: canonicalParticipantGroupName(participant, groupUnitMap),
+        group_unit_id: clean(canonicalGroup?.id) || null,
+        kelompok_name: clean(canonicalKelompok?.name) || "-",
+        kelompok_id: clean(canonicalKelompok?.id) || null,
       },
       summary: {
         total_points: Math.round(totalPoints),

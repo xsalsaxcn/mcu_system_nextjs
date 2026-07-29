@@ -1,6 +1,15 @@
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  buildCoachGroupUnitMap,
+  canCoachAccessParticipant,
+  canonicalParticipantGroupName,
+  dedupeCoachParticipants,
+  matchingCoachAssignment,
+  participantBelongsToGroupUnit,
+  participantCanonicalUnitId,
+} from "@/lib/wellness/coachGroupAccess";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -48,63 +57,6 @@ function chatSender(note: any) {
     : "coach";
 }
 
-function participantGroupIds(row: any) {
-  return [
-    row?.wellness_group_unit_id,
-    row?.wellness_kelompok_id,
-    row?.group_unit_id,
-    row?.group_id,
-    row?.wellness_group_id,
-  ]
-    .map(clean)
-    .filter(Boolean);
-}
-
-function canAccessParticipant(
-  row: any,
-  assignments: any[],
-) {
-  if (!(assignments || []).length) {
-    return false;
-  }
-
-  const allowedIds = new Set(
-    (assignments || [])
-      .map((item) =>
-        clean(
-          item.wellness_group_unit_id,
-        ),
-      )
-      .filter(Boolean),
-  );
-
-  return participantGroupIds(row).some(
-    (id) => allowedIds.has(id),
-  );
-}
-
-function assignedGroupFor(
-  row: any,
-  assignments: any[],
-) {
-  const ids = participantGroupIds(row);
-
-  return (
-    (assignments || []).find(
-      (item) => {
-        const id = clean(
-          item.wellness_group_unit_id,
-        );
-
-        return Boolean(
-          id &&
-          ids.includes(id),
-        );
-      },
-    ) || null
-  );
-}
-
 async function getCoach(request: NextRequest, supabase: any) {
   const token = request.cookies.get("wellness_coach_session")?.value || "";
   if (!token) return null;
@@ -121,13 +73,20 @@ async function getCoach(request: NextRequest, supabase: any) {
 }
 
 async function assignedScope(supabase: any, coachId: number) {
-  const { data: assignments, error: assignmentError } = await supabase
-    .from("wellness_coach_group_assignments")
-    .select("*")
-    .eq("coach_user_id", coachId)
-    .eq("is_active", true);
+  const [{ data: assignments, error: assignmentError }, groupUnitResult] =
+    await Promise.all([
+      supabase
+        .from("wellness_coach_group_assignments")
+        .select("*")
+        .eq("coach_user_id", coachId)
+        .eq("is_active", true),
+      supabase.from("wellness_group_units").select("*").limit(5000),
+    ]);
 
   if (assignmentError) throw assignmentError;
+  if (groupUnitResult.error) throw groupUnitResult.error;
+
+  const groupUnitMap = buildCoachGroupUnitMap(groupUnitResult.data || []);
 
   const { data: allParticipants, error: participantError } = await supabase
     .from("wellness_participants")
@@ -136,40 +95,22 @@ async function assignedScope(supabase: any, coachId: number) {
 
   if (participantError) throw participantError;
 
-  const participants = (allParticipants || []).filter((row: any) =>
-    canAccessParticipant(row, assignments || [])
+  const participants = dedupeCoachParticipants(allParticipants || []).filter(
+    (row: any) =>
+      canCoachAccessParticipant(row, assignments || [], groupUnitMap),
   );
 
-  return { assignments: assignments || [], participants };
+  return { assignments: assignments || [], participants, groupUnitMap };
 }
 
 function findGroupParticipants(
   participants: any[],
   groupId: any,
-  _groupName: any,
+  groupName: any,
+  groupUnitMap: ReturnType<typeof buildCoachGroupUnitMap>,
 ) {
-  const id = clean(groupId);
-
-  if (!id) {
-    return [];
-  }
-
-  return (participants || []).filter(
-    (row) =>
-      participantGroupIds(row)
-        .includes(id),
-  );
-}
-
-function participantGroupName(row: any) {
-  return (
-    clean(
-      row?.group_unit_name ||
-        row?.group_name ||
-        row?.risk_group ||
-        row?.risk_category ||
-        row?.category
-    ) || "-"
+  return (participants || []).filter((row) =>
+    participantBelongsToGroupUnit(row, groupId, groupName, groupUnitMap),
   );
 }
 
@@ -316,7 +257,7 @@ export async function POST(request: NextRequest) {
     const participantId = asNumber(body.participant_id);
     const groupId = body.wellness_group_unit_id || body.group_unit_id || null;
     const groupName = clean(body.group_name);
-    const { assignments, participants } = await assignedScope(
+    const { assignments, participants, groupUnitMap } = await assignedScope(
       supabase,
       asNumber(coach.id)
     );
@@ -341,18 +282,17 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const assignedGroup = assignedGroupFor(participant, assignments);
+      const assignedGroup = matchingCoachAssignment(participant, assignments, groupUnitMap);
       const now = new Date().toISOString();
       const payload = {
         coach_user_id: coach.id,
         participant_id: participantId,
         wellness_group_unit_id:
+          participantCanonicalUnitId(participant, groupUnitMap) ||
           assignedGroup?.wellness_group_unit_id ||
-          participant.wellness_group_unit_id ||
-          participant.group_unit_id ||
           null,
         group_name:
-          clean(assignedGroup?.group_name) || participantGroupName(participant),
+          clean(assignedGroup?.group_name) || canonicalParticipantGroupName(participant, groupUnitMap),
         session_date: now.slice(0, 10),
         topic: "Chat Coach",
         main_issue: "chat:coach",
@@ -485,17 +425,16 @@ export async function POST(request: NextRequest) {
         targets
       );
 
-      const assignedGroup = assignedGroupFor(participant, assignments);
+      const assignedGroup = matchingCoachAssignment(participant, assignments, groupUnitMap);
       const payload = {
         coach_user_id: coach.id,
         participant_id: participantId,
         wellness_group_unit_id:
+          participantCanonicalUnitId(participant, groupUnitMap) ||
           assignedGroup?.wellness_group_unit_id ||
-          participant.wellness_group_unit_id ||
-          participant.group_unit_id ||
           null,
         group_name:
-          clean(assignedGroup?.group_name) || participantGroupName(participant),
+          clean(assignedGroup?.group_name) || canonicalParticipantGroupName(participant, groupUnitMap),
         session_date: clean(body.session_date) || new Date().toISOString().slice(0, 10),
         topic: "Target Wellness",
         main_issue: clean(body.main_issue) || "Penetapan target individual peserta.",
@@ -535,7 +474,12 @@ export async function POST(request: NextRequest) {
     let targets: any[] = [];
 
     if (scope === "group") {
-      targets = findGroupParticipants(participants, groupId, groupName);
+      targets = findGroupParticipants(
+        participants,
+        groupId,
+        groupName,
+        groupUnitMap,
+      );
       if (targets.length === 0) {
         return NextResponse.json(
           { ok: false, message: "Tidak ada peserta pada group assignment tersebut." },
@@ -567,20 +511,19 @@ export async function POST(request: NextRequest) {
 
     const now = new Date().toISOString();
     const rows = targets.map((participant: any) => {
-      const assignedGroup = assignedGroupFor(participant, assignments);
+      const assignedGroup = matchingCoachAssignment(participant, assignments, groupUnitMap);
       return {
         coach_user_id: coach.id,
         participant_id: asNumber(participant.id),
         wellness_group_unit_id:
+          participantCanonicalUnitId(participant, groupUnitMap) ||
           assignedGroup?.wellness_group_unit_id ||
-          participant.wellness_group_unit_id ||
-          participant.group_unit_id ||
           groupId ||
           null,
         group_name:
           clean(groupName) ||
           clean(assignedGroup?.group_name) ||
-          participantGroupName(participant),
+          canonicalParticipantGroupName(participant, groupUnitMap),
         session_date: clean(body.session_date) || now.slice(0, 10),
         topic:
           clean(body.topic) ||
