@@ -402,37 +402,109 @@ async function fileToBase64(fileLike: any) {
   };
 }
 
-async function postToWebhook(payload: any) {
+type WellnessWebhookOptionsV126M17 = {
+  attempts?: number;
+  timeoutMs?: number;
+  requestId?: string;
+  label?: string;
+};
+
+function wellnessSleepV126M17(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function wellnessWebhookRetryableV126M17(error: any) {
+  const message = clean(error?.message || error || "").toLowerCase();
+  const status = Number(error?.status || 0);
+
+  return (
+    error?.name === "AbortError" ||
+    [408, 425, 429, 500, 502, 503, 504].includes(status) ||
+    /wellness_retryable_busy|sedang menerima banyak input|sedang sibuk|timeout|timed out|fetch failed|network|socket|econnreset/i.test(
+      message,
+    )
+  );
+}
+
+// WELLNESS_STABLE_DELIVERY_V126M17
+// Main Sheet writes are retried with the same request/submission ID. If the
+// first execution completed but its response was lost, Apps Script deduplicates
+// the retry instead of appending a second row.
+async function postToWebhook(
+  payload: any,
+  options: WellnessWebhookOptionsV126M17 = {},
+) {
   const url = assertWebhookConfigured();
+  const attempts = Math.max(1, Number(options.attempts || 1));
+  const timeoutMs = Math.max(5000, Number(options.timeoutMs || 20000));
+  const requestId = clean(
+    options.requestId ||
+      payload?.requestId ||
+      payload?.request_id ||
+      payload?.submissionId ||
+      payload?.submission_id ||
+      `wellness-${Date.now()}`,
+  );
+  let lastError: any = null;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      secret: getWebhookSecret(),
-      ...payload,
-    }),
-  });
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const text = await response.text();
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          secret: getWebhookSecret(),
+          requestId,
+          request_id: requestId,
+          ...payload,
+        }),
+        signal: controller.signal,
+      });
 
-  let json: any = {};
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    json = {
-      ok: false,
-      message: text || "Invalid webhook response",
-    };
+      const text = await response.text();
+      let json: any = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {
+          ok: false,
+          message: text || "Invalid webhook response",
+        };
+      }
+
+      if (!response.ok || json?.ok === false) {
+        const webhookError: any = new Error(
+          json?.message || `Webhook gagal: HTTP ${response.status}`,
+        );
+        webhookError.status = response.status;
+        webhookError.webhook = json;
+        throw webhookError;
+      }
+
+      return json;
+    } catch (error: any) {
+      lastError = error;
+      const retryable = wellnessWebhookRetryableV126M17(error);
+
+      if (!retryable || attempt >= attempts) {
+        throw error;
+      }
+
+      await wellnessSleepV126M17(
+        700 * attempt + Math.floor(Math.random() * 401),
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  if (!response.ok || json?.ok === false) {
-    throw new Error(json?.message || `Webhook gagal: HTTP ${response.status}`);
-  }
-
-  return json;
+  throw lastError || new Error("Webhook gagal tanpa respons.");
 }
 
 function publicNutritionErrorV126M2(error: any) {
@@ -924,12 +996,25 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
 // Route ini membaca request lewat parseRequestBody(req), jadi estimasi porsi diambil dari body.
 calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
 
-    const photoResult = await uploadNutritionPhoto({
-      photo,
-      participant,
-      companyName,
-      logDate,
-    });
+    let photoResult: any = null;
+    let photoWarning = "";
+
+    if (photo) {
+      try {
+        photoResult = await uploadNutritionPhoto({
+          photo,
+          participant,
+          companyName,
+          logDate,
+        });
+      } catch (photoError: any) {
+        // WELLNESS_STABLE_DELIVERY_V126M17
+        // A Drive/photo failure must not block the nutrition row.
+        photoWarning =
+          publicNutritionErrorV126M2(photoError) ||
+          "Foto belum berhasil diunggah, tetapi data nutrisi tetap diproses.";
+      }
+    }
 
     const sheetRow = buildSheetRow({
       participant,
@@ -943,14 +1028,22 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
       photoResult,
     });
 
-    const sheetResult = await postToWebhook({
-      sheet: getSheetName(),
-      row: sheetRow,
-      submissionId,
-      submission_id: submissionId,
-      marker:
-        "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
-    });
+    const sheetResult = await postToWebhook(
+      {
+        sheet: getSheetName(),
+        row: sheetRow,
+        submissionId,
+        submission_id: submissionId,
+        marker:
+          "WELLNESS_PARTICIPANT_NUTRITION_GOOGLE_SHEET_ONLY_V402_MULTI_FOOD",
+      },
+      {
+        attempts: 4,
+        timeoutMs: 20000,
+        requestId: submissionId,
+        label: "nutrition_append",
+      },
+    );
 
     const returnedLog = {
       id: `sheet_${sheetResult?.rowNumber || Date.now()}`,
@@ -981,6 +1074,7 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
       google_sheet_row_number: sheetResult?.rowNumber || null,
       google_drive: photoResult || null,
       google_sheet: sheetResult || null,
+      photo_warning: photoWarning || null,
     };
 
     const statusMirrorResult = await saveNutritionStatusMirrorV98({
@@ -1762,14 +1856,24 @@ export async function PATCH(req: NextRequest) {
           body?.company_name,
       ) || "Tanpa Perusahaan";
 
-    const photoResult = photo
-      ? await uploadNutritionPhoto({
+    let photoResult: any = null;
+    let photoWarning = "";
+
+    if (photo) {
+      try {
+        photoResult = await uploadNutritionPhoto({
           photo,
           participant,
           companyName,
           logDate,
-        })
-      : null;
+        });
+      } catch (photoError: any) {
+        // WELLNESS_STABLE_DELIVERY_V126M17
+        photoWarning =
+          publicNutritionErrorV126M2(photoError) ||
+          "Foto belum berhasil diunggah. Perubahan data tanpa foto tetap diproses.";
+      }
+    }
 
     const previewUrl = clean(
       photoResult?.previewUrl ||
@@ -1832,9 +1936,10 @@ export async function PATCH(req: NextRequest) {
     }
 
     const result =
-      await postToWebhook({
-        action:
-          "updateSubmissionV126M6",
+      await postToWebhook(
+        {
+          action:
+            "updateSubmissionV126M6",
         sheet: getSheetName(),
         submissionId,
         submission_id:
@@ -1863,9 +1968,18 @@ export async function PATCH(req: NextRequest) {
           calories:
             expectedCalories,
         },
-        marker:
-          "WELLNESS_NUTRITION_EDIT_MATCH_INPUT_FORM_V126M7",
-      });
+          marker:
+            "WELLNESS_NUTRITION_EDIT_MATCH_INPUT_FORM_V126M7",
+        },
+        {
+          attempts: 4,
+          timeoutMs: 20000,
+          requestId:
+            submissionId ||
+            `nutrition-edit-${participant.id}-${rowNumber}`,
+          label: "nutrition_update",
+        },
+      );
 
     if (result?.updated !== true) {
       return NextResponse.json(
@@ -1881,14 +1995,17 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    if (result?.marker !== "WELLNESS_NUTRITION_EDIT_SYNC_V126M16_1") {
+    if (
+      result?.marker !== "WELLNESS_STABLE_DELIVERY_V126M17" &&
+      result?.marker !== "WELLNESS_NUTRITION_EDIT_SYNC_V126M16_1"
+    ) {
       return NextResponse.json(
         {
           ok: false,
           updated: false,
           message:
-            "Google Apps Script edit belum menggunakan V126M16.1. " +
-            "Pasang fungsi update terbaru lalu deploy Web App sebagai versi baru.",
+            "Google Apps Script belum menggunakan versi edit yang kompatibel. " +
+            "Deploy full Apps Script V126M17 sebagai versi Web App baru.",
           google_sheet: result,
         },
         { status: 409 },
@@ -1901,8 +2018,12 @@ export async function PATCH(req: NextRequest) {
       calories,
       photo_updated:
         Boolean(photoResult),
+      photo_warning:
+        photoWarning || null,
       message:
-        "Data nutrisi berhasil diperbarui di Google Sheet.",
+        photoWarning
+          ? "Data nutrisi berhasil diperbarui. Foto belum berhasil diunggah."
+          : "Data nutrisi berhasil diperbarui di Google Sheet.",
       google_sheet: result,
     });
   } catch (error: any) {

@@ -1019,6 +1019,13 @@ export default function WellnessParticipantPortalPage() {
 
   // WELLNESS_SUBMISSION_LOCK_V126L
   const nutritionSubmitInFlightV126L = useRef(false);
+  // WELLNESS_STABLE_DELIVERY_V126M17
+  // Reuse the same Submission ID after an uncertain network failure so a
+  // manual retry is deduplicated by Google Sheet instead of creating a new row.
+  const nutritionPendingSubmissionV126M17 = useRef<{
+    id: string;
+    fingerprint: string;
+  } | null>(null);
   const workoutSubmitInFlightV126L = useRef(false);
 
   function createSubmissionIdV126L(type: string) {
@@ -1655,7 +1662,58 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       nutritionSubmitInFlightV126L.current = false;
     }, 30000);
 
-    const submissionId = createSubmissionIdV126L("nutrition");
+    const fingerprintSourceV126M17 = JSON.stringify([
+      clean(nutritionForm.log_date),
+      clean(nutritionForm.meal_type),
+      clean(nutritionForm.food_name),
+      clean(nutritionForm.portion),
+      clean(nutritionForm.notes),
+      clean((nutritionForm as any).estimated_calories),
+      nutritionPhoto?.name || "",
+      nutritionPhoto?.size || 0,
+      nutritionPhoto?.lastModified || 0,
+    ]);
+    let fingerprintHashV126M17 = 2166136261;
+    for (let index = 0; index < fingerprintSourceV126M17.length; index += 1) {
+      fingerprintHashV126M17 ^= fingerprintSourceV126M17.charCodeAt(index);
+      fingerprintHashV126M17 = Math.imul(fingerprintHashV126M17, 16777619);
+    }
+    const fingerprintV126M17 = String(fingerprintHashV126M17 >>> 0);
+    const pendingStorageKeyV126M17 = `wellness:nutrition-pending:${
+      participant?.id || "session"
+    }`;
+
+    if (!nutritionPendingSubmissionV126M17.current) {
+      try {
+        const stored = window.localStorage.getItem(pendingStorageKeyV126M17);
+        const parsed = stored ? JSON.parse(stored) : null;
+        if (parsed?.id && parsed?.fingerprint) {
+          nutritionPendingSubmissionV126M17.current = parsed;
+        }
+      } catch {
+        // Browser storage is optional; the in-memory ref still works.
+      }
+    }
+
+    const pendingV126M17 = nutritionPendingSubmissionV126M17.current;
+    const submissionId =
+      pendingV126M17?.fingerprint === fingerprintV126M17
+        ? pendingV126M17.id
+        : createSubmissionIdV126L("nutrition");
+
+    nutritionPendingSubmissionV126M17.current = {
+      id: submissionId,
+      fingerprint: fingerprintV126M17,
+    };
+    try {
+      window.localStorage.setItem(
+        pendingStorageKeyV126M17,
+        JSON.stringify(nutritionPendingSubmissionV126M17.current),
+      );
+    } catch {
+      // Browser storage is optional.
+    }
+
     let photoForUpload = nutritionPhoto;
 
     if (photoForUpload) {
@@ -1755,6 +1813,12 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       }));
 
       setNutritionPhoto(null);
+      nutritionPendingSubmissionV126M17.current = null;
+      try {
+        window.localStorage.removeItem(pendingStorageKeyV126M17);
+      } catch {
+        // Browser storage is optional.
+      }
       await loadPoints();
 
       nutritionSubmitInFlightV126L.current = false;
