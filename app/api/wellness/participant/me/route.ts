@@ -15,8 +15,10 @@ import {
   isOperationalRowInProgramWindow,
   programWindowDayCount,
 } from "@/lib/wellness/programWindow";
+import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -281,6 +283,17 @@ export async function GET(req: NextRequest) {
     const profilePhoto =
       profileResult?.profiles?.[0] || {};
 
+    // WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
+    // Streak is included in the same authenticated response that opens the portal.
+    // The dedicated endpoint remains available for later refreshes.
+    const canonicalStreakPayload = await loadParticipantCanonicalStreak({
+      supabase,
+      participant: {
+        ...participant,
+        wellness_control: fitnessSettings,
+      },
+    });
+
     return ok({
       participant: {
         ...participant,
@@ -300,6 +313,11 @@ export async function GET(req: NextRequest) {
       activities: selectedActivities,
       activity_summary,
       clinical_history,
+      streak_participant_id: canonicalStreakPayload.participant_id,
+      streak: canonicalStreakPayload.streak,
+      streak_targets: canonicalStreakPayload.targets,
+      streak_sources: canonicalStreakPayload.sources,
+      streak_status: canonicalStreakPayload.status,
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal memuat portal peserta.", 500);

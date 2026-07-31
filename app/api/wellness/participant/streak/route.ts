@@ -1,17 +1,11 @@
 // WELLNESS_PARTICIPANT_CANONICAL_STREAK_V126M23_1
-// Read-only participant endpoint using the same streak builder as Coach.
+// WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
+// Read-only refresh endpoint. Initial portal hydration comes from /participant/me.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
-import {
-  filterActivityRowsByFitnessSource,
-  loadParticipantControlMap,
-} from "@/lib/wellness/participantControls";
-import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
-import { resolveParticipantPointTargets } from "@/lib/wellness/pointWriter";
-import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
-import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
+import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,57 +23,40 @@ export async function GET(request: NextRequest) {
     }
 
     const participantId = Number(participant.id);
-    const [activityResult, controlMap, nutritionHistory, targets] =
-      await Promise.all([
-        supabase
-          .from("wellness_activity_logs")
-          .select("*")
-          .eq("participant_id", participantId)
-          .order("log_date", { ascending: true })
-          .limit(2000),
-        loadParticipantControlMap(supabase, [participantId]),
-        loadCanonicalNutritionHistory({ supabase, participant }),
-        resolveParticipantPointTargets(supabase, participant),
-      ]);
-
-    const activityRows = filterOperationalRowsForProgram(
-      participant,
-      filterActivityRowsByFitnessSource(
-        activityResult.error ? [] : activityResult.data || [],
-        controlMap,
-      ),
-      "",
-      "",
-      ["log_date", "started_at", "created_at"],
+    const requestedParticipantId = Number(
+      request.nextUrl.searchParams.get("participant_id") || 0,
     );
 
-    const nutritionRows = filterOperationalRowsForProgram(
+    if (
+      requestedParticipantId > 0 &&
+      requestedParticipantId !== participantId
+    ) {
+      return NextResponse.json(
+        { ok: false, message: "Session peserta tidak sesuai." },
+        { status: 403 },
+      );
+    }
+
+    const payload = await loadParticipantCanonicalStreak({
+      supabase,
       participant,
-      nutritionHistory.logs || [],
-      "",
-      "",
-      ["log_date", "created_at"],
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        participant_id: payload.participant_id,
+        streak: payload.streak,
+        targets: payload.targets,
+        sources: payload.sources,
+        status: payload.status,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      },
     );
-
-    const streak = buildWellnessStreakSummary({
-      nutritionRows,
-      activityRows,
-      workoutTargetCalories: targets.workout,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      participant_id: participantId,
-      streak,
-      targets: {
-        nutrition_max_calories: targets.nutrition,
-        workout_min_calories: targets.workout,
-      },
-      sources: {
-        nutrition: nutritionHistory.sources,
-        activity_ok: !activityResult.error,
-      },
-    });
   } catch (error: any) {
     return NextResponse.json(
       {

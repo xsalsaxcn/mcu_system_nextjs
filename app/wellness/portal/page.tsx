@@ -1139,7 +1139,19 @@ export default function WellnessParticipantPortalPage() {
       }));
 
     if (result.ok) {
-      setParticipant(result.participant);
+      // WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
+      // Preserve canonical streak in the participant object so Home can render
+      // immediately and can rehydrate after tab changes or device sync.
+      setParticipant({
+        ...result.participant,
+        wellness_streak: result.streak || null,
+        wellness_streak_targets: result.streak_targets || null,
+        wellness_streak_sources: result.streak_sources || null,
+        wellness_streak_status: clean(result.streak_status),
+        wellness_streak_participant_id: asNumber(
+          result.streak_participant_id || result.participant?.id,
+        ),
+      });
       setFitnessSettings(
         result.fitness_settings || result.participant?.wellness_control || null,
       );
@@ -3234,6 +3246,41 @@ function buildParticipantMomentumV66(
   };
 }
 
+function verifiedParticipantStreakV126M26(
+  payload: any,
+  expectedParticipantId: number,
+) {
+  const participantId = asNumber(
+    payload?.participant_id ||
+      payload?.streak_participant_id ||
+      payload?.wellness_streak_participant_id,
+  );
+  const streak =
+    payload?.streak ||
+    payload?.wellness_streak ||
+    (Array.isArray(payload?.days) ? payload : null);
+
+  if (
+    !(expectedParticipantId > 0) ||
+    participantId !== expectedParticipantId ||
+    !streak ||
+    !Array.isArray(streak?.days) ||
+    streak.days.length !== 7
+  ) {
+    return null;
+  }
+
+  return {
+    ...streak,
+    __participant_id: participantId,
+    __status: clean(
+      payload?.status || payload?.wellness_streak_status || "ok",
+    ),
+    __sources:
+      payload?.sources || payload?.wellness_streak_sources || null,
+  };
+}
+
 function HomeTab({
   participant,
   nutritionLogs,
@@ -3281,13 +3328,62 @@ function HomeTab({
   });
 
   const [nutritionLoading, setNutritionLoading] = useState(false);
+  const initialParticipantStreakV126M26 =
+    verifiedParticipantStreakV126M26(
+      {
+        participant_id: participant?.wellness_streak_participant_id,
+        streak: participant?.wellness_streak,
+        status: participant?.wellness_streak_status,
+        sources: participant?.wellness_streak_sources,
+      },
+      participantId,
+    );
   const [participantStreakV126M23, setParticipantStreakV126M23] =
-    useState<any>(null);
+    useState<any>(initialParticipantStreakV126M26);
   const [coachTargets, setCoachTargets] = useState({
     nutrition_max_calories: 0,
     workout_min_calories: 0,
     target_weight_kg: 0,
   });
+
+  useEffect(() => {
+    const initial = verifiedParticipantStreakV126M26(
+      {
+        participant_id: participant?.wellness_streak_participant_id,
+        streak: participant?.wellness_streak,
+        status: participant?.wellness_streak_status,
+        sources: participant?.wellness_streak_sources,
+      },
+      participantId,
+    );
+
+    setParticipantStreakV126M23((current: any) => {
+      if (initial) return initial;
+      if (
+        asNumber(current?.__participant_id) > 0 &&
+        asNumber(current?.__participant_id) !== participantId
+      ) {
+        return null;
+      }
+      return current;
+    });
+
+    const initialTargets = participant?.wellness_streak_targets || {};
+    setCoachTargets((current) => ({
+      ...current,
+      nutrition_max_calories:
+        asNumber(initialTargets?.nutrition_max_calories) ||
+        current.nutrition_max_calories,
+      workout_min_calories:
+        asNumber(initialTargets?.workout_min_calories) ||
+        current.workout_min_calories,
+    }));
+  }, [
+    participantId,
+    participant?.wellness_streak,
+    participant?.wellness_streak_targets,
+    participant?.wellness_streak_status,
+  ]);
 
   async function loadCoachTargets() {
     if (!participantId) return;
@@ -3332,22 +3428,36 @@ function HomeTab({
   async function loadParticipantStreakV126M23() {
     if (!participantId) return null;
 
-    const requestStreak = () =>
-      fetch(
-        `/api/wellness/participant/streak?participant_id=${participantId}&t=${Date.now()}`,
-        { cache: "no-store", credentials: "include" },
-      )
-        .then((response) => response.json())
-        .catch(() => null);
+    const requestStreak = async () => {
+      try {
+        const response = await fetch(
+          `/api/wellness/participant/streak?participant_id=${participantId}&t=${Date.now()}`,
+          { cache: "no-store", credentials: "include" },
+        );
+        return await response.json().catch(() => null);
+      } catch {
+        return null;
+      }
+    };
 
     let result = await requestStreak();
-    if (!result?.ok || !result?.streak) {
+    let verified = verifiedParticipantStreakV126M26(
+      result,
+      participantId,
+    );
+
+    if (!result?.ok || !verified) {
       await new Promise((resolve) => window.setTimeout(resolve, 700));
       result = await requestStreak();
+      verified = verifiedParticipantStreakV126M26(
+        result,
+        participantId,
+      );
     }
 
-    if (result?.ok && result?.streak) {
-      setParticipantStreakV126M23(result.streak);
+    // A failed refresh must never replace a valid initial streak with zero.
+    if (result?.ok && verified) {
+      setParticipantStreakV126M23(verified);
       setCoachTargets((previous) => ({
         ...previous,
         nutrition_max_calories:
