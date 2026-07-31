@@ -38,6 +38,7 @@ import WellnessProfilePanel, {
   WellnessAvatar,
   WellnessProfileAvatar,
 } from "@/components/wellness/WellnessProfile";
+import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
@@ -2357,7 +2358,7 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
             {activeTab === "home" ? (
               <HomeTab
                 participant={participant}
-                nutritionLogs={todayNutrition}
+                nutritionLogs={nutritionLogs}
                 totals={totals}
                 setActiveTab={setActiveTab}
                 healthConnectConnected={!!healthConnectConnected}
@@ -3210,93 +3211,26 @@ function buildParticipantMomentumV66(
   workoutRows: any[],
   workoutTarget: number,
 ) {
-  const map = new Map<
-    string,
-    {
-      mealKeys: Set<string>;
-      nutritionCalories: number;
-      workoutCalories: number;
-      steps: number;
-    }
-  >();
-
-  function ensure(date: string) {
-    if (!map.has(date)) {
-      map.set(date, {
-        mealKeys: new Set<string>(),
-        nutritionCalories: 0,
-        workoutCalories: 0,
-        steps: 0,
-      });
-    }
-    return map.get(date)!;
-  }
-
-  for (const row of nutritionRows || []) {
-    const date = localDateKeyV66(
-      row?.log_date || row?.created_at || row?.updated_at || row?.date,
-    );
-    if (!date) continue;
-    const bucket = ensure(date);
-    const mealKey = clean(
-      row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan,
-    ).toLowerCase();
-    bucket.mealKeys.add(mealKey || `row-${bucket.mealKeys.size + 1}`);
-    bucket.nutritionCalories += asNumber(
-      row?.calories || row?.total_calories || row?.calorie_total,
-    );
-  }
-
-  for (const row of normalizeWorkoutItemsForMetrics(workoutRows || [])) {
-    const date = localDateKeyV66(
-      row?.log_date ||
-        row?.started_at ||
-        row?.created_at ||
-        row?.updated_at ||
-        row?.date,
-    );
-    if (!date) continue;
-    const bucket = ensure(date);
-    bucket.workoutCalories += activityCaloriesValue(row);
-    bucket.steps += activityStepsValue(row);
-  }
-
-  const allDays: WellnessMomentumDay[] = [];
-  for (let offset = -41; offset <= 0; offset += 1) {
-    const date = jakartaDayKeyV66(offset);
-    const bucket = map.get(date);
-    const nutritionCount = bucket?.mealKeys.size || 0;
-    const workoutCalories = bucket?.workoutCalories || 0;
-    const success =
-      nutritionCount >= 3 &&
-      (workoutTarget > 0
-        ? workoutCalories >= workoutTarget
-        : workoutCalories > 0);
-    allDays.push({
-      date,
-      label: shortDayLabelV66(date).slice(0, 3),
-      nutritionCount,
-      nutritionCalories: Math.round(bucket?.nutritionCalories || 0),
-      workoutCalories: Math.round(workoutCalories),
-      steps: Math.round(bucket?.steps || 0),
-      success,
-    });
-  }
-
-  const todayIndex = allDays.length - 1;
-  let cursor = allDays[todayIndex]?.success ? todayIndex : todayIndex - 1;
-  let currentStreak = 0;
-  while (cursor >= 0 && allDays[cursor]?.success) {
-    currentStreak += 1;
-    cursor -= 1;
-  }
+  // WELLNESS_PARTICIPANT_STREAK_FALLBACK_V126M24_1
+  // Client fallback now uses the exact same pure builder as Coach/API.
+  const streak = buildWellnessStreakSummary({
+    nutritionRows: nutritionRows || [],
+    activityRows: workoutRows || [],
+    workoutTargetCalories: workoutTarget,
+  });
 
   return {
-    days: allDays.slice(-7),
-    successDates: allDays
-      .filter((item) => item.success)
-      .map((item) => item.date),
-    currentStreak,
+    days: streak.days.map((day) => ({
+      date: day.date,
+      label: day.label,
+      nutritionCount: day.nutrition_count,
+      nutritionCalories: day.nutrition_calories,
+      workoutCalories: day.workout_calories,
+      steps: day.steps,
+      success: day.success,
+    })),
+    successDates: streak.success_dates,
+    currentStreak: streak.current_streak,
   };
 }
 
@@ -3398,15 +3332,31 @@ function HomeTab({
   async function loadParticipantStreakV126M23() {
     if (!participantId) return null;
 
-    const result = await fetch(
-      `/api/wellness/participant/streak?t=${Date.now()}`,
-      { cache: "no-store" },
-    )
-      .then((response) => response.json())
-      .catch(() => null);
+    const requestStreak = () =>
+      fetch(
+        `/api/wellness/participant/streak?participant_id=${participantId}&t=${Date.now()}`,
+        { cache: "no-store", credentials: "include" },
+      )
+        .then((response) => response.json())
+        .catch(() => null);
+
+    let result = await requestStreak();
+    if (!result?.ok || !result?.streak) {
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+      result = await requestStreak();
+    }
 
     if (result?.ok && result?.streak) {
       setParticipantStreakV126M23(result.streak);
+      setCoachTargets((previous) => ({
+        ...previous,
+        nutrition_max_calories:
+          asNumber(result?.targets?.nutrition_max_calories) ||
+          previous.nutrition_max_calories,
+        workout_min_calories:
+          asNumber(result?.targets?.workout_min_calories) ||
+          previous.workout_min_calories,
+      }));
     }
 
     return result;
@@ -3519,15 +3469,22 @@ function HomeTab({
     weightTarget > 0
       ? weightTargetProgress(latestWeight, baselineWeight, weightTarget)
       : 0;
+  const streakNutritionRowsV126M24 =
+    Array.isArray(directNutrition?.logs) && directNutrition.logs.length > 0
+      ? directNutrition.logs
+      : Array.isArray(nutritionLogs)
+        ? nutritionLogs
+        : [];
+
   const participantMomentum = useMemo(
     () =>
       buildParticipantMomentumV66(
-        directNutrition?.logs || nutritionLogs || [],
+        streakNutritionRowsV126M24,
         workoutItems || [],
         workoutTarget,
       ),
     [
-      JSON.stringify(directNutrition?.logs || nutritionLogs || []),
+      JSON.stringify(streakNutritionRowsV126M24),
       JSON.stringify(workoutItems || []),
       workoutTarget,
     ],

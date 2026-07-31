@@ -7,6 +7,29 @@ import { useEffect, useMemo, useState } from "react";
 // Tidak menulis atau mengubah data pemeriksaan.
 
 type RiskFilter = "all" | "high" | "medium" | "low" | "unclassified";
+type ExaminationStatusFilter = "all" | "examined" | "not_examined";
+
+// WELLNESS_NAKES_EXAM_CALENDAR_V126M24_1
+function currentJakartaMonth() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "";
+  const month = parts.find((part) => part.type === "month")?.value || "";
+  return year && month ? `${year}-${month}` : "2026-07";
+}
+
+function monthLabel(value: string) {
+  const parsed = new Date(`${value}-01T12:00:00+07:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("id-ID", {
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Jakarta",
+  }).format(parsed);
+}
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -478,6 +501,12 @@ export default function AdminMonitoringNakesPage() {
     useState<RiskFilter>("all");
   const [companyFilter, setCompanyFilter] =
     useState("all");
+  const [calendarRows, setCalendarRows] = useState<any[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [examMonth, setExamMonth] = useState(currentJakartaMonth());
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [examStatusFilter, setExamStatusFilter] =
+    useState<ExaminationStatusFilter>("all");
   const [selectedId, setSelectedId] =
     useState<number | null>(null);
 
@@ -485,27 +514,44 @@ export default function AdminMonitoringNakesPage() {
     setLoading(true);
     setMessage("Memuat hasil pemeriksaan NAKES...");
 
-    const result = await fetch(
-      `/api/wellness/dashboard?t=${Date.now()}`,
-      {
+    setCalendarLoading(true);
+
+    const [result, calendarResult] = await Promise.all([
+      fetch(`/api/wellness/dashboard?t=${Date.now()}`, {
         cache: "no-store",
         credentials: "include",
-      },
-    )
-      .then(async (response) => ({
-        ...(await response.json().catch(() => ({}))),
-        http_status: response.status,
-      }))
-      .catch((error) => ({
-        ok: false,
-        http_status: 0,
-        message:
-          error?.message || "Tidak dapat terhubung ke server.",
-      }));
+      })
+        .then(async (response) => ({
+          ...(await response.json().catch(() => ({}))),
+          http_status: response.status,
+        }))
+        .catch((error) => ({
+          ok: false,
+          http_status: 0,
+          message:
+            error?.message || "Tidak dapat terhubung ke server.",
+        })),
+      fetch(`/api/wellness/admin/nakes-calendar?t=${Date.now()}`, {
+        cache: "no-store",
+        credentials: "include",
+      })
+        .then(async (response) => ({
+          ...(await response.json().catch(() => ({}))),
+          http_status: response.status,
+        }))
+        .catch((error) => ({
+          ok: false,
+          http_status: 0,
+          message:
+            error?.message || "Kalender pemeriksaan tidak dapat dimuat.",
+        })),
+    ]);
 
     if (!result?.ok) {
       setData(null);
       setRows([]);
+      setCalendarRows([]);
+      setCalendarLoading(false);
       setMessage(
         result?.message ||
           "Hasil pemeriksaan NAKES gagal dimuat.",
@@ -518,9 +564,36 @@ export default function AdminMonitoringNakesPage() {
       ? result.rows
       : [];
 
+    const nextCalendarRows = Array.isArray(calendarResult?.rows)
+      ? calendarResult.rows
+      : nextRows.map((item: any) => {
+          const latestDate = clean(
+            item?.latest_history_date || item?.latest_mini_mcu_date,
+          ).slice(0, 10);
+          return {
+            participant_id: Number(item?.participant_id || item?.id || 0),
+            code: clean(item?.code),
+            name: clean(item?.name),
+            company_name: clean(item?.company_name) || "-",
+            group_name: clean(item?.group_name) || "-",
+            kelompok_name: clean(item?.kelompok_name) || "-",
+            checkup_dates: latestDate ? [latestDate] : [],
+            examination_count: Number(item?.history_logs_count || 0),
+            latest_examination_date: latestDate || null,
+          };
+        });
+
     setData(result);
     setRows(nextRows);
-    setMessage("Monitoring NAKES aktif.");
+    setCalendarRows(nextCalendarRows);
+    setCalendarLoading(false);
+    setMessage(
+      calendarResult?.ok
+        ? "Monitoring NAKES dan kalender pemeriksaan aktif."
+        : `Monitoring NAKES aktif. Kalender: ${
+            calendarResult?.message || "menggunakan data terbatas"
+          }`,
+    );
 
     setSelectedId((current) => {
       if (
@@ -566,6 +639,18 @@ export default function AdminMonitoringNakesPage() {
         left.localeCompare(right, "id"),
       ),
     [rows],
+  );
+
+  const calendarGroups = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          calendarRows
+            .map((item) => clean(item?.group_name || item?.kelompok_name))
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right, "id")),
+    [calendarRows],
   );
 
   const filteredRows = useMemo(() => {
@@ -640,6 +725,121 @@ export default function AdminMonitoringNakesPage() {
         );
       });
   }, [rows, query, riskFilter, companyFilter]);
+
+  const calendarFilteredRows = useMemo(() => {
+    const keyword = clean(query).toLowerCase();
+
+    return calendarRows
+      .map((item: any) => {
+        const dates = Array.isArray(item?.checkup_dates)
+          ? item.checkup_dates.map((value: any) => clean(value).slice(0, 10))
+          : [];
+        const periodDates = dates.filter((date: string) =>
+          date.startsWith(`${examMonth}-`),
+        );
+
+        return {
+          ...item,
+          period_dates: periodDates,
+          period_count: periodDates.length,
+          period_latest: periodDates.at(-1) || null,
+          period_examined: periodDates.length > 0,
+        };
+      })
+      .filter((item: any) => {
+        const matchesKeyword =
+          !keyword ||
+          [item?.name, item?.code, item?.company_name, item?.group_name]
+            .map((value) => clean(value).toLowerCase())
+            .join(" ")
+            .includes(keyword);
+        const matchesCompany =
+          companyFilter === "all" ||
+          clean(item?.company_name) === companyFilter;
+        const matchesGroup =
+          groupFilter === "all" ||
+          clean(item?.group_name || item?.kelompok_name) === groupFilter;
+        const matchesStatus =
+          examStatusFilter === "all" ||
+          (examStatusFilter === "examined" && item.period_examined) ||
+          (examStatusFilter === "not_examined" && !item.period_examined);
+
+        return matchesKeyword && matchesCompany && matchesGroup && matchesStatus;
+      })
+      .sort((left: any, right: any) => {
+        if (left.period_examined !== right.period_examined) {
+          return left.period_examined ? -1 : 1;
+        }
+        return clean(left?.name).localeCompare(clean(right?.name), "id");
+      });
+  }, [calendarRows, query, companyFilter, groupFilter, examStatusFilter, examMonth]);
+
+  const calendarPeriodBaseRows = useMemo(() => {
+    const keyword = clean(query).toLowerCase();
+    return calendarRows
+      .map((item: any) => {
+        const dates = Array.isArray(item?.checkup_dates)
+          ? item.checkup_dates.map((value: any) => clean(value).slice(0, 10))
+          : [];
+        const periodDates = dates.filter((date: string) =>
+          date.startsWith(`${examMonth}-`),
+        );
+        return {
+          ...item,
+          period_dates: periodDates,
+          period_count: periodDates.length,
+          period_latest: periodDates.at(-1) || null,
+          period_examined: periodDates.length > 0,
+        };
+      })
+      .filter((item: any) => {
+        const matchesKeyword =
+          !keyword ||
+          [item?.name, item?.code, item?.company_name, item?.group_name]
+            .map((value) => clean(value).toLowerCase())
+            .join(" ")
+            .includes(keyword);
+        const matchesCompany =
+          companyFilter === "all" ||
+          clean(item?.company_name) === companyFilter;
+        const matchesGroup =
+          groupFilter === "all" ||
+          clean(item?.group_name || item?.kelompok_name) === groupFilter;
+        return matchesKeyword && matchesCompany && matchesGroup;
+      });
+  }, [calendarRows, query, companyFilter, groupFilter, examMonth]);
+
+  const calendarExaminedCount = calendarPeriodBaseRows.filter(
+    (item: any) => item.period_examined,
+  ).length;
+  const calendarNotExaminedCount = Math.max(
+    0,
+    calendarPeriodBaseRows.length - calendarExaminedCount,
+  );
+  const calendarCompletion = calendarPeriodBaseRows.length
+    ? Math.round((calendarExaminedCount / calendarPeriodBaseRows.length) * 100)
+    : 0;
+  const calendarDayCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of calendarPeriodBaseRows) {
+      for (const date of item.period_dates || []) {
+        counts.set(date, (counts.get(date) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [calendarPeriodBaseRows]);
+  const calendarCells = useMemo(() => {
+    const parsed = new Date(`${examMonth}-01T12:00:00+07:00`);
+    if (Number.isNaN(parsed.getTime())) return [] as Array<number | null>;
+    const year = parsed.getFullYear();
+    const month = parsed.getMonth();
+    const days = new Date(year, month + 1, 0).getDate();
+    const mondayOffset = (parsed.getDay() + 6) % 7;
+    return [
+      ...Array.from({ length: mondayOffset }, () => null),
+      ...Array.from({ length: days }, (_, index) => index + 1),
+    ];
+  }, [examMonth]);
 
   const selectedParticipant =
     rows.find(
@@ -1274,6 +1474,82 @@ export default function AdminMonitoringNakesPage() {
               </section>
             </div>
           )}
+        </section>
+
+        <section className="mt-4 rounded-[1.65rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700">Kalender Pemeriksaan</div>
+              <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950 sm:text-2xl">Status Pemeriksaan NAKES Peserta</h2>
+              <p className="mt-2 max-w-3xl text-xs font-bold leading-5 text-slate-500">Daftar peserta yang sudah dan belum menjalani pemeriksaan pada periode terpilih. Data bersumber dari wellness_checkup_history.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[700px]">
+              <input type="month" value={examMonth} onChange={(event) => setExamMonth(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+              <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
+                <option value="all">Semua Kelompok</option>
+                {calendarGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+              </select>
+              <select value={examStatusFilter} onChange={(event) => setExamStatusFilter(event.target.value as ExaminationStatusFilter)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
+                <option value="all">Semua Status</option>
+                <option value="examined">Sudah Pemeriksaan</option>
+                <option value="not_examined">Belum Pemeriksaan</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard label="Total Periode" value={calendarPeriodBaseRows.length} note={monthLabel(examMonth)} icon="👥" tone="border-slate-100 bg-slate-50 text-slate-950" />
+            <SummaryCard label="Sudah Pemeriksaan" value={calendarExaminedCount} note="Memiliki pemeriksaan pada periode" icon="✅" tone="border-emerald-100 bg-emerald-50 text-emerald-950" />
+            <SummaryCard label="Belum Pemeriksaan" value={calendarNotExaminedCount} note="Perlu dijadwalkan atau ditindaklanjuti" icon="⏳" tone="border-orange-100 bg-orange-50 text-orange-950" />
+            <SummaryCard label="Penyelesaian (%)" value={calendarCompletion} note="Cakupan pemeriksaan periode" icon="📅" tone="border-sky-100 bg-sky-50 text-sky-950" />
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-black text-slate-950">{monthLabel(examMonth)}</div>
+                  <div className="mt-1 text-[10px] font-bold text-slate-400">Angka menunjukkan jumlah peserta diperiksa</div>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1.5 text-[9px] font-black text-emerald-700 shadow-sm">{calendarExaminedCount} peserta</span>
+              </div>
+              <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[9px] font-black text-slate-400">
+                {["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"].map((day) => <div key={day} className="py-1">{day}</div>)}
+                {calendarCells.map((day, index) => {
+                  const date = day ? `${examMonth}-${String(day).padStart(2, "0")}` : "";
+                  const count = date ? calendarDayCounts.get(date) || 0 : 0;
+                  return (
+                    <div key={`${day || "empty"}-${index}`} className={`min-h-12 rounded-xl border p-1.5 ${day ? count > 0 ? "border-emerald-200 bg-emerald-100 text-emerald-900" : "border-slate-200 bg-white text-slate-500" : "border-transparent"}`}>
+                      {day ? <><div className="text-[10px] font-black">{day}</div><div className="mt-1 text-[9px] font-black">{count > 0 ? `${count} ✓` : "—"}</div></> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[1.4rem] border border-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
+                <div><h3 className="text-sm font-black text-slate-950">Daftar Status Pemeriksaan</h3><div className="mt-1 text-[10px] font-bold text-slate-400">{calendarFilteredRows.length} peserta sesuai filter</div></div>
+                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[9px] font-black text-slate-500">{calendarLoading ? "MEMUAT" : "READ ONLY"}</span>
+              </div>
+              <div className="max-h-[560px] overflow-auto">
+                <table className="w-full min-w-[900px] border-collapse text-left">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-[9px] font-black uppercase tracking-[0.08em] text-slate-500"><tr>
+                    <th className="border-b border-slate-200 px-4 py-3">Kode</th><th className="border-b border-slate-200 px-4 py-3">Nama Peserta</th><th className="border-b border-slate-200 px-4 py-3">Perusahaan</th><th className="border-b border-slate-200 px-4 py-3">Kelompok</th><th className="border-b border-slate-200 px-4 py-3">Status</th><th className="border-b border-slate-200 px-4 py-3">Pemeriksaan Terakhir</th><th className="border-b border-slate-200 px-4 py-3 text-center">Jumlah</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-xs font-bold text-slate-700">
+                    {calendarLoading ? <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Memuat kalender pemeriksaan...</td></tr> : calendarFilteredRows.length === 0 ? <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Tidak ada peserta yang sesuai dengan filter.</td></tr> : calendarFilteredRows.map((item: any, index: number) => (
+                      <tr key={`${item?.participant_id || item?.code}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-black text-slate-500">{item?.code || "—"}</td><td className="px-4 py-3 text-slate-950">{item?.name || "Peserta Wellness"}</td><td className="px-4 py-3">{item?.company_name || "—"}</td><td className="px-4 py-3">{item?.group_name || item?.kelompok_name || "—"}</td>
+                        <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-[9px] font-black ${item?.period_examined ? "bg-emerald-100 text-emerald-800" : "bg-orange-100 text-orange-800"}`}>{item?.period_examined ? "Sudah Pemeriksaan" : "Belum Pemeriksaan"}</span></td>
+                        <td className="px-4 py-3">{item?.period_latest ? formatDate(item.period_latest) : "—"}</td><td className="px-4 py-3 text-center font-black">{Number(item?.period_count || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </section>
 
         <footer className="mt-6 text-center text-[10px] font-bold text-slate-400">
