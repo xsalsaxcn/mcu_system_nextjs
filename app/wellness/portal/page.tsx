@@ -3347,6 +3347,8 @@ function HomeTab({
   });
 
   const [nutritionLoading, setNutritionLoading] = useState(false);
+  const [participantStreakV126M23, setParticipantStreakV126M23] =
+    useState<any>(null);
   const [coachTargets, setCoachTargets] = useState({
     nutrition_max_calories: 0,
     workout_min_calories: 0,
@@ -3393,6 +3395,23 @@ function HomeTab({
     });
   }
 
+  async function loadParticipantStreakV126M23() {
+    if (!participantId) return null;
+
+    const result = await fetch(
+      `/api/wellness/participant/streak?t=${Date.now()}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (result?.ok && result?.streak) {
+      setParticipantStreakV126M23(result.streak);
+    }
+
+    return result;
+  }
+
   async function loadDirectNutrition() {
     if (!participantId) return;
 
@@ -3409,6 +3428,7 @@ function HomeTab({
       setDirectNutrition(result);
     }
 
+    await loadParticipantStreakV126M23();
     setNutritionLoading(false);
   }
 
@@ -3416,6 +3436,10 @@ function HomeTab({
     loadDirectNutrition();
     loadCoachTargets();
   }, [participantId]);
+
+  useEffect(() => {
+    void loadParticipantStreakV126M23();
+  }, [participantId, workoutItems]);
 
   const latestClinical =
     Array.isArray(clinicalHistory) && clinicalHistory.length > 0
@@ -3509,6 +3533,31 @@ function HomeTab({
     ],
   );
 
+  const participantMomentumCanonicalV126M23 = useMemo(() => {
+    const serverDays = Array.isArray(participantStreakV126M23?.days)
+      ? participantStreakV126M23.days
+      : [];
+
+    if (serverDays.length !== 7) return participantMomentum;
+
+    return {
+      days: serverDays.map((day: any) => ({
+        date: clean(day?.date),
+        label: clean(day?.label).slice(0, 3),
+        nutritionCount: asNumber(day?.nutrition_count),
+        nutritionCalories: asNumber(day?.nutrition_calories),
+        workoutCalories: asNumber(day?.workout_calories),
+        steps: asNumber(day?.steps),
+        success: Boolean(day?.success),
+      })),
+      currentStreak: asNumber(participantStreakV126M23?.current_streak),
+      successDates: Array.isArray(participantStreakV126M23?.success_dates)
+        ? participantStreakV126M23.success_dates.map(clean).filter(Boolean)
+        : [],
+    };
+  }, [participantStreakV126M23, participantMomentum]);
+
+  // WELLNESS_PARTICIPANT_CANONICAL_STREAK_UI_V126M23_1
   const googleFitSelectedV126M14 =
     clean(fitnessSettings?.fitness_source)
       .toLowerCase()
@@ -3578,11 +3627,11 @@ function HomeTab({
     0;
 
   const participantMomentumDisplayV79O = useMemo(() => {
-    if (!googleFitSelectedV126M14) return participantMomentum;
+    if (!googleFitSelectedV126M14) return participantMomentumCanonicalV126M23;
 
     return {
-      ...participantMomentum,
-      days: (participantMomentum.days || []).map((day: any) => ({
+      ...participantMomentumCanonicalV126M23,
+      days: (participantMomentumCanonicalV126M23.days || []).map((day: any) => ({
         ...day,
         workoutCalories:
           day.date === todayKeyV73
@@ -3591,7 +3640,7 @@ function HomeTab({
       })),
     };
   }, [
-    participantMomentum,
+    participantMomentumCanonicalV126M23,
     googleFitSelectedV126M14,
     googleFitTotalByDateV79O,
     todayGoogleFitTotalCaloriesV79O,
