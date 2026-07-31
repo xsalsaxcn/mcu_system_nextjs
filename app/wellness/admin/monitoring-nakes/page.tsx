@@ -1,5 +1,7 @@
 "use client";
 
+// WELLNESS_NAKES_FULL_CLINICAL_EXPORT_V126M25_2
+
 import { useEffect, useMemo, useState } from "react";
 
 // WELLNESS_ADMIN_MONITORING_NAKES_V115
@@ -503,6 +505,7 @@ export default function AdminMonitoringNakesPage() {
     useState("all");
   const [calendarRows, setCalendarRows] = useState<any[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
+  const [clinicalExportLoading, setClinicalExportLoading] = useState(false);
   const [examMonth, setExamMonth] = useState(currentJakartaMonth());
   const [groupFilter, setGroupFilter] = useState("all");
   const [examStatusFilter, setExamStatusFilter] =
@@ -621,6 +624,56 @@ export default function AdminMonitoringNakesPage() {
     });
 
     setLoading(false);
+  }
+
+  async function exportClinicalExcel() {
+    if (clinicalExportLoading) return;
+
+    setClinicalExportLoading(true);
+    try {
+      const params = new URLSearchParams({
+        month: examMonth,
+        company: companyFilter,
+        group: groupFilter,
+        status: examStatusFilter,
+        q: query,
+      });
+      const response = await fetch(
+        `/api/wellness/admin/nakes-calendar/export?${params.toString()}`,
+        {
+          cache: "no-store",
+          credentials: "include",
+        },
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(
+          payload?.message || "Export hasil pemeriksaan NAKES gagal dibuat.",
+        );
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      const filename =
+        filenameMatch?.[1] ||
+        `monitoring_nakes_${examMonth.replace("-", "_")}.xlsx`;
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error: any) {
+      window.alert(
+        error?.message || "Export hasil pemeriksaan NAKES gagal dibuat.",
+      );
+    } finally {
+      setClinicalExportLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -1530,7 +1583,12 @@ export default function AdminMonitoringNakesPage() {
             <div className="overflow-hidden rounded-[1.4rem] border border-slate-200">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
                 <div><h3 className="text-sm font-black text-slate-950">Daftar Status Pemeriksaan</h3><div className="mt-1 text-[10px] font-bold text-slate-400">{calendarFilteredRows.length} peserta sesuai filter</div></div>
-                <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[9px] font-black text-slate-500">{calendarLoading ? "MEMUAT" : "READ ONLY"}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => void exportClinicalExcel()} disabled={calendarLoading || clinicalExportLoading} className="inline-flex h-9 items-center justify-center rounded-xl bg-emerald-700 px-3 text-[9px] font-black text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    {clinicalExportLoading ? "MEMBUAT EXCEL..." : "⬇ EXPORT HASIL LENGKAP"}
+                  </button>
+                  <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[9px] font-black text-slate-500">{calendarLoading ? "MEMUAT" : "READ ONLY"}</span>
+                </div>
               </div>
               <div className="max-h-[560px] overflow-auto">
                 <table className="w-full min-w-[900px] border-collapse text-left">
