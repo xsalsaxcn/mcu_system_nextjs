@@ -60,6 +60,108 @@ function parseRawPayload(value: any) {
   }
 }
 
+// WELLNESS_GOOGLE_FIT_NATIVE_DAILY_ROW_V126M29_1
+// Persist the exact Android daily snapshot into the same daily activity row
+// already consumed by Participant, Coach, points, and streak.
+async function upsertNativeGoogleFitDailyRow(params: {
+  supabase: any;
+  participantId: number;
+  snapshot: any;
+  syncedAt: string;
+}) {
+  const date = normalizeDate(params.snapshot?.date);
+  const externalId = `google_fit_daily_${params.participantId}_${date}`;
+
+  const existingResult = await params.supabase
+    .from("wellness_activity_logs")
+    .select("*")
+    .eq("participant_id", params.participantId)
+    .eq("source", "google_fit")
+    .eq("external_activity_id", externalId)
+    .maybeSingle();
+
+  if (existingResult.error) throw existingResult.error;
+
+  const existing = existingResult.data || null;
+  const existingRaw = parseRawPayload(existing?.raw_payload);
+  const steps = Math.max(0, Math.round(numberValue(params.snapshot?.steps)));
+  const totalCalories =
+    Math.round(Math.max(0, numberValue(params.snapshot?.total_calories)) * 100) /
+    100;
+  const distanceKm =
+    Math.round(Math.max(0, numberValue(params.snapshot?.distance_km)) * 100) /
+    100;
+  const activeCaloriesAvailable =
+    params.snapshot?.active_calories_available === true;
+  const activeCalories = activeCaloriesAvailable
+    ? Math.round(
+        Math.max(0, numberValue(params.snapshot?.active_calories)) * 100,
+      ) / 100
+    : 0;
+
+  const payload = {
+    participant_id: params.participantId,
+    source: "google_fit",
+    external_activity_id: externalId,
+    provider_activity_id: externalId,
+    activity_type: "Google Fit Daily",
+    activity_name: `Google Fit Daily - ${steps} steps`,
+    log_date: date,
+    started_at: params.syncedAt,
+    duration_minutes: numberValue(existing?.duration_minutes),
+    calories: totalCalories,
+    distance_km: distanceKm,
+    steps,
+    raw_payload: {
+      ...existingRaw,
+      marker: MARKER,
+      provider: "google_fit",
+      source: "google_fit",
+      sync_mode: "aggregate_daily",
+      log_date: date,
+      last_sync_at: params.syncedAt,
+      synced_at: params.syncedAt,
+      native_snapshot_persisted: true,
+      exact_snapshot: params.snapshot,
+      google_fit_steps: steps,
+      google_fit_distance_km: distanceKm,
+      google_fit_total_calories: totalCalories,
+      google_fit_calories_expended: totalCalories,
+      google_fit_active_calories_exact:
+        activeCaloriesAvailable ? activeCalories : null,
+      google_fit_active_calories:
+        activeCaloriesAvailable ? activeCalories : null,
+      active_calories_available: activeCaloriesAvailable,
+      calories_source: activeCaloriesAvailable
+        ? "google_fit_native_total_with_active_snapshot"
+        : "google_fit_native_total_energy",
+      calculation_note:
+        "Native Google Fit daily total persisted so Participant and Coach read the same daily row.",
+    },
+  };
+
+  if (existing?.id) {
+    const updated = await params.supabase
+      .from("wellness_activity_logs")
+      .update(payload)
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+
+    if (updated.error) throw updated.error;
+    return "updated";
+  }
+
+  const inserted = await params.supabase
+    .from("wellness_activity_logs")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (inserted.error) throw inserted.error;
+  return "inserted";
+}
+
 async function findParticipant(supabase: any, req: NextRequest, body: any) {
   const sessionParticipant = await getParticipantFromPortalSession(
     supabase,
@@ -256,12 +358,17 @@ const exactSnapshot = {
       });
     }
 
-    // Snapshot native hanya disimpan
-    // sebagai data tampilan perangkat.
-    // Total calories tidak masuk ke
-    // workout, target, ranking, atau poin.
+    // WELLNESS_GOOGLE_FIT_NATIVE_DAILY_ROW_V126M29_1
+    // Save the native snapshot to the canonical daily activity row first.
+    const dailyRowAction = await upsertNativeGoogleFitDailyRow({
+      supabase,
+      participantId,
+      snapshot: exactSnapshot,
+      syncedAt: nowIso,
+    });
+
     const action =
-      "native_snapshot_updated";
+      `native_snapshot_${dailyRowAction}`;
 
     const integrationUpdate = await supabase
       .from("wellness_integrations")
@@ -275,7 +382,8 @@ const exactSnapshot = {
           native_last_sync_at: nowIso,
           native_last_snapshot:
             exactSnapshot,
-          native_snapshot_only: true,
+          native_snapshot_only: false,
+          native_daily_row_action: dailyRowAction,
           marker: MARKER,
         },
       })
@@ -290,6 +398,7 @@ const exactSnapshot = {
       last_sync_at: nowIso,
       last_sync_snapshot: exactSnapshot,
       active_calories_available: activeCaloriesAvailable,
+      daily_row_action: dailyRowAction,
     });
   } catch (error: any) {
     console.error("WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_ERROR", error);

@@ -2,7 +2,8 @@
 // WELLNESS_STREAK_SUBMISSION_COUNT_V126M23_4_1
 // A nutrition streak counts canonical submissions, not unique meal labels.
 // Shared read-only streak calculation for Coach and Participant.
-// Google Fit total energy (including basal calories) is display-only.
+// WELLNESS_GOOGLE_FIT_STREAK_PROVIDER_CALORIES_V126M29_1
+// Google Fit streak uses the same provider calorie value displayed by Coach.
 
 export type WellnessStreakDay = {
   date: string;
@@ -214,13 +215,23 @@ export function wellnessStreakWorkoutCalories(row: any) {
   const raw = rawPayload(row);
 
   if (isGoogleFitDaily(row)) {
-    // Exact active calories only. Google Fit total energy includes basal energy
-    // and must never create workout target success.
-    return numberValue(
+    const activeCalories = numberValue(
       raw?.google_fit_active_calories_exact ??
         raw?.google_fit_active_calories ??
         raw?.selected_active_calories ??
         raw?.sanitized_active_calories,
+    );
+    if (activeCalories > 0) return activeCalories;
+
+    // When Google Fit exposes only its provider daily calorie value, use the
+    // exact same value already shown in the Coach graph and Participant card.
+    return numberValue(
+      raw?.google_fit_total_calories ??
+        raw?.google_fit_calories_expended ??
+        raw?.exact_snapshot?.total_calories ??
+        row?.total_calories ??
+        row?.calories ??
+        row?.calories_burned,
     );
   }
 
