@@ -38,7 +38,10 @@ import WellnessProfilePanel, {
   WellnessAvatar,
   WellnessProfileAvatar,
 } from "@/components/wellness/WellnessProfile";
-import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
+import {
+  buildWellnessStreakSummary,
+  wellnessStreakWorkoutCalories,
+} from "@/lib/wellness/streak";
 
 // WELLNESS_PARTICIPANT_PORTAL_HEALTH_CONNECT_V421
 // WELLNESS_PARTICIPANT_COACH_CHAT_V54
@@ -3650,69 +3653,95 @@ function HomeTab({
       );
     });
 
-  // WELLNESS_GOOGLE_FIT_EXACT_TOTAL_DISPLAY_V79O
-  // WELLNESS_GOOGLE_FIT_CARD_STABLE_V126M14
-  // The selected provider controls the card identity. Data arrival only changes
-  // the numeric value, so refresh cannot switch the card back to Kalori Workout.
-  const googleFitTotalByDateV79O = useMemo(() => {
-    const values = new Map<string, { value: number; updatedAt: number }>();
-
-    for (const item of workoutItems || []) {
-      if (!isGoogleFitDailyRow(item)) continue;
-
-      const date = activityDateKey(item);
-      const value = googleFitTotalCaloriesValueV73(item);
-      const updatedAt = activityUpdatedAtMs(item);
-
-      if (!date || !(value > 0)) continue;
-
-      const current = values.get(date);
-      if (!current || updatedAt >= current.updatedAt) {
-        values.set(date, { value, updatedAt });
-      }
-    }
-
-    return values;
-  }, [JSON.stringify(workoutItems || [])]);
-
-  const googleFitSnapshotV126M14 =
-    fitnessLastSyncSnapshot?.google_fit || null;
-  const googleFitSnapshotDateV126M14 =
-    clean(googleFitSnapshotV126M14?.date).slice(0, 10) ||
-    jakartaDateFromAny(
-      googleFitSnapshotV126M14?.measured_at ||
-        googleFitSnapshotV126M14?.synced_at,
+  // WELLNESS_TOTAL_WORKOUT_DISPLAY_V126M31_2
+  // Display totals use the merged participant workout history:
+  // device (Google Fit / Health Connect) + manual workout.
+  // Streak success and current streak remain server-canonical and unchanged.
+  const participantMomentumDisplayV126M31 = useMemo(() => {
+    const localByDate = new Map(
+      (participantMomentum.days || []).map((day: any) => [day.date, day]),
     );
-  const googleFitSnapshotTotalV126M14 =
-    googleFitSnapshotDateV126M14 === todayKeyV73
-      ? asNumber(googleFitSnapshotV126M14?.total_calories)
-      : 0;
-
-  const todayGoogleFitTotalCaloriesV79O =
-    googleFitTotalByDateV79O.get(todayKeyV73)?.value ||
-    googleFitSnapshotTotalV126M14 ||
-    0;
-
-  const participantMomentumDisplayV79O = useMemo(() => {
-    if (!googleFitSelectedV126M14) return participantMomentumCanonicalV126M23;
+    const localActivityDates = new Set(
+      (workoutItems || []).map((item: any) => activityDateKey(item)).filter(Boolean),
+    );
 
     return {
       ...participantMomentumCanonicalV126M23,
-      days: (participantMomentumCanonicalV126M23.days || []).map((day: any) => ({
-        ...day,
-        workoutCalories:
-          day.date === todayKeyV73
-            ? todayGoogleFitTotalCaloriesV79O
-            : googleFitTotalByDateV79O.get(day.date)?.value || 0,
-      })),
+      days: (participantMomentumCanonicalV126M23.days || []).map((day: any) => {
+        const localDay = localByDate.get(day.date) as any;
+        if (!localDay || !localActivityDates.has(day.date)) return day;
+
+        return {
+          ...day,
+          workoutCalories: asNumber(localDay.workoutCalories),
+          steps: asNumber(localDay.steps),
+        };
+      }),
     };
   }, [
     participantMomentumCanonicalV126M23,
-    googleFitSelectedV126M14,
-    googleFitTotalByDateV79O,
-    todayGoogleFitTotalCaloriesV79O,
-    todayKeyV73,
+    participantMomentum,
+    JSON.stringify(workoutItems || []),
   ]);
+
+  const todayWorkoutBreakdownV126M31 = useMemo(() => {
+    const result = {
+      googleFit: 0,
+      healthConnect: 0,
+      strava: 0,
+      manual: 0,
+      other: 0,
+    };
+
+    for (const item of workoutItems || []) {
+      if (activityDateKey(item) !== todayKeyV73) continue;
+
+      const raw = activityRawPayloadV72(item);
+      const provider = clean(
+        item?.source || item?.provider || item?.input_source || raw?.provider,
+      )
+        .toLowerCase()
+        .replace(/-/g, "_");
+      const calories = wellnessStreakWorkoutCalories(item);
+
+      if (provider === "google_fit") result.googleFit += calories;
+      else if (provider === "health_connect") result.healthConnect += calories;
+      else if (provider === "strava") result.strava += calories;
+      else if (!provider || provider === "manual" || provider === "google_sheet") {
+        result.manual += calories;
+      } else {
+        result.other += calories;
+      }
+    }
+
+    return result;
+  }, [JSON.stringify(workoutItems || []), todayKeyV73]);
+
+  const todayTotalWorkoutCaloriesV126M31 = asNumber(
+    (participantMomentumDisplayV126M31.days || []).find(
+      (day: any) => day.date === todayKeyV73,
+    )?.workoutCalories,
+  );
+
+  const workoutSourceSubtitleV126M31 = [
+    todayWorkoutBreakdownV126M31.googleFit > 0
+      ? `Google Fit ${fmtNumber(todayWorkoutBreakdownV126M31.googleFit, 0)}`
+      : "",
+    todayWorkoutBreakdownV126M31.healthConnect > 0
+      ? `Health Connect ${fmtNumber(todayWorkoutBreakdownV126M31.healthConnect, 0)}`
+      : "",
+    todayWorkoutBreakdownV126M31.strava > 0
+      ? `Strava ${fmtNumber(todayWorkoutBreakdownV126M31.strava, 0)}`
+      : "",
+    todayWorkoutBreakdownV126M31.manual > 0
+      ? `Manual ${fmtNumber(todayWorkoutBreakdownV126M31.manual, 0)}`
+      : "",
+    todayWorkoutBreakdownV126M31.other > 0
+      ? `Lainnya ${fmtNumber(todayWorkoutBreakdownV126M31.other, 0)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" + ") || "Google Fit/device + workout manual";
 
   return (
     <section className="w-full max-w-full space-y-5 overflow-hidden">
@@ -3751,36 +3780,24 @@ function HomeTab({
 
         {googleFitActiveCaloriesUnavailable ? (
           <div className="mt-5 rounded-[1.5rem] border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
-            Google Fit mengirim steps dan kalori total secara langsung. Karena
-            kalori total mencakup energi basal, nilainya ditampilkan sebagai
-            <strong> Kalori Google Fit</strong> dan tidak dihitung sebagai poin
-            atau target workout.
+            Google Fit mengirim kalori total yang dapat mencakup energi basal.
+            Sesuai aturan program, kartu <strong>Total Kalori Workout</strong>
+            menggabungkan Google Fit/device dan workout manual untuk dibandingkan
+            dengan target Coach.
           </div>
         ) : null}
 
         <div className="mt-5">
           <WellnessMomentumDashboard
-            days={participantMomentumDisplayV79O.days}
-            currentStreak={participantMomentumDisplayV79O.currentStreak}
-            successDates={participantMomentumDisplayV79O.successDates}
+            days={participantMomentumDisplayV126M31.days}
+            currentStreak={participantMomentumDisplayV126M31.currentStreak}
+            successDates={participantMomentumDisplayV126M31.successDates}
             nutritionCount={todayRowCount}
             nutritionCalories={todayCalories}
-            workoutCalories={
-              googleFitSelectedV126M14
-                ? todayGoogleFitTotalCaloriesV79O
-                : asNumber(totals.workoutCalories || 0)
-            }
-            workoutTitle={
-              googleFitSelectedV126M14
-                ? "Kalori Google Fit"
-                : "Kalori Workout"
-            }
-            workoutSubtitle={
-              googleFitSelectedV126M14
-                ? "Total energi, termasuk basal"
-                : "Target terbakar"
-            }
-            workoutTargetEnabled={!googleFitSelectedV126M14}
+            workoutCalories={todayTotalWorkoutCaloriesV126M31}
+            workoutTitle="Total Kalori Workout"
+            workoutSubtitle={workoutSourceSubtitleV126M31}
+            workoutTargetEnabled
             steps={asNumber(totals.steps || 0)}
             nutritionTarget={nutritionTarget}
             workoutTarget={workoutTarget}

@@ -3475,6 +3475,26 @@ function ParticipantDetail({
   const healthtalks = detail?.healthtalks || [];
   const pointRules = detail?.point_rules || {};
   const streak = detail?.streak || {};
+  const workoutSourceBreakdown = detail?.workout_source_breakdown || {};
+  const workoutSourceSubtitle = [
+    Number(workoutSourceBreakdown?.google_fit || 0) > 0
+      ? `Google Fit ${fmtNumber(workoutSourceBreakdown.google_fit)}`
+      : "",
+    Number(workoutSourceBreakdown?.health_connect || 0) > 0
+      ? `Health Connect ${fmtNumber(workoutSourceBreakdown.health_connect)}`
+      : "",
+    Number(workoutSourceBreakdown?.strava || 0) > 0
+      ? `Strava ${fmtNumber(workoutSourceBreakdown.strava)}`
+      : "",
+    Number(workoutSourceBreakdown?.manual || 0) > 0
+      ? `Manual ${fmtNumber(workoutSourceBreakdown.manual)}`
+      : "",
+    Number(workoutSourceBreakdown?.other || 0) > 0
+      ? `Lainnya ${fmtNumber(workoutSourceBreakdown.other)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" + ") || "Google Fit/device + workout manual";
   const setTarget = (key: string, value: string) =>
     setTargetForm((previous: any) => ({ ...previous, [key]: value }));
   const latestChartValue = (key: string) => {
@@ -3587,6 +3607,8 @@ function ParticipantDetail({
               workoutCalories={Number(
                 latestMomentum?.workoutCalories || workoutLatest || 0,
               )}
+              workoutTitle="Total Kalori Workout"
+              workoutSubtitle={workoutSourceSubtitle}
               steps={Number(latestMomentum?.steps || stepsLatest || 0)}
               nutritionTarget={nutritionTarget}
               workoutTarget={workoutTarget}
@@ -3667,7 +3689,7 @@ function ParticipantDetail({
                 suffix="kkal"
               />
               <CoachTrendChart
-                title="Kalori Workout"
+                title="Total Kalori Workout"
                 points={charts.workout_calories || []}
                 suffix="kkal"
               />

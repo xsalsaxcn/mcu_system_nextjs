@@ -28,7 +28,10 @@ import {
   participantWorkoutCalorieTarget,
   workoutDailyPoints,
 } from "@/lib/wellness/pointRules";
-import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
+import {
+  buildWellnessStreakSummary,
+  wellnessStreakWorkoutCalories,
+} from "@/lib/wellness/streak";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -216,6 +219,64 @@ function activitySteps(row: any) {
   return asNumber(
     row?.steps ?? row?.total_steps ?? row?.raw_payload?.health_connect_steps ?? row?.raw_payload?.google_fit_steps
   );
+}
+
+function activitySourceKeyV126M31(row: any) {
+  const raw =
+    row?.raw_payload && typeof row.raw_payload === "object"
+      ? row.raw_payload
+      : {};
+
+  return clean(
+    row?.source || row?.provider || row?.input_source || raw?.provider,
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+}
+
+function workoutSourceBreakdownV126M31(rows: any[], targetDate: string) {
+  const result = {
+    date: targetDate,
+    total: 0,
+    google_fit: 0,
+    health_connect: 0,
+    strava: 0,
+    manual: 0,
+    other: 0,
+  };
+
+  for (const row of rows || []) {
+    const rowDate = dateKey(
+      row?.log_date || row?.started_at || row?.created_at,
+    );
+    if (!targetDate || rowDate !== targetDate) continue;
+
+    const calories = wellnessStreakWorkoutCalories(row);
+    const source = activitySourceKeyV126M31(row);
+    result.total += calories;
+
+    if (source === "google_fit") result.google_fit += calories;
+    else if (source === "health_connect") result.health_connect += calories;
+    else if (source === "strava") result.strava += calories;
+    else if (!source || source === "manual" || source === "google_sheet") {
+      result.manual += calories;
+    } else {
+      result.other += calories;
+    }
+  }
+
+  for (const key of [
+    "total",
+    "google_fit",
+    "health_connect",
+    "strava",
+    "manual",
+    "other",
+  ] as const) {
+    result[key] = Math.round(result[key]);
+  }
+
+  return result;
 }
 
 function foodCalories(row: any) {
@@ -582,7 +643,7 @@ export async function GET(request: NextRequest) {
     const totalPoints = resolvedPointLedger.total;
 
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
-    const workoutChart = aggregateByDate(activityRows, activityCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
+    const workoutChart = aggregateByDate(activityRows, wellnessStreakWorkoutCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
     const stepChart = aggregateByDate(activityRows, activitySteps, (row) => row?.log_date || row?.started_at || row?.created_at);
     const pointChart = [...dailyPoints.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -629,6 +690,11 @@ export async function GET(request: NextRequest) {
       activityRows,
       workoutTargetCalories,
     });
+    const latestWorkoutDateV126M31 = clean(streak.days.at(-1)?.date);
+    const workoutSourceBreakdown = workoutSourceBreakdownV126M31(
+      activityRows,
+      latestWorkoutDateV126M31,
+    );
 
     const healthtalks = mergedHealthtalkRows
       .map((row: any) => ({
@@ -658,7 +724,7 @@ export async function GET(request: NextRequest) {
         nutrition_log_count: mergedFoodRows.length,
         workout_log_count: activityRows.length,
         total_steps: activityRows.reduce((sum, row) => sum + activitySteps(row), 0),
-        total_workout_calories: Math.round(activityRows.reduce((sum, row) => sum + activityCalories(row), 0)),
+        total_workout_calories: Math.round(activityRows.reduce((sum, row) => sum + wellnessStreakWorkoutCalories(row), 0)),
         latest_weight_kg: latestWeight,
         latest_bmi: latestBmi,
         latest_systolic: latestBp?.value ?? null,
@@ -679,6 +745,7 @@ export async function GET(request: NextRequest) {
       },
       charts,
       streak,
+      workout_source_breakdown: workoutSourceBreakdown,
       nutrition_logs: mergedFoodRows,
       nutrition_sources: nutritionHistory.sources,
       healthtalks,
