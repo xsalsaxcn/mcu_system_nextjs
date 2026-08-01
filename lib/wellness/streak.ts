@@ -1,4 +1,6 @@
 // WELLNESS_CANONICAL_STREAK_V126M23_1
+// WELLNESS_STREAK_SUBMISSION_COUNT_V126M23_4_1
+// A nutrition streak counts canonical submissions, not unique meal labels.
 // Shared read-only streak calculation for Coach and Participant.
 // Google Fit total energy (including basal calories) is display-only.
 
@@ -280,7 +282,7 @@ export function buildWellnessStreakSummary(params: {
   const map = new Map<
     string,
     {
-      mealKeys: Set<string>;
+      nutritionCount: number;
       nutritionCalories: number;
       workoutCalories: number;
       steps: number;
@@ -290,7 +292,7 @@ export function buildWellnessStreakSummary(params: {
   const ensure = (date: string) => {
     if (!map.has(date)) {
       map.set(date, {
-        mealKeys: new Set<string>(),
+        nutritionCount: 0,
         nutritionCalories: 0,
         workoutCalories: 0,
         steps: 0,
@@ -305,10 +307,9 @@ export function buildWellnessStreakSummary(params: {
     );
     if (!date) continue;
     const bucket = ensure(date);
-    const meal = clean(
-      row?.meal_time || row?.meal_type || row?.meal_period || row?.waktu_makan,
-    ).toLowerCase();
-    bucket.mealKeys.add(meal || `row-${bucket.mealKeys.size + 1}`);
+    // Each canonical row represents one submitted nutrition entry.
+    // Repeated meal labels still count as separate submissions.
+    bucket.nutritionCount += 1;
     bucket.nutritionCalories += nutritionCalories(row);
   }
 
@@ -326,7 +327,7 @@ export function buildWellnessStreakSummary(params: {
   for (let offset = -(historyDays - 1); offset <= 0; offset += 1) {
     const date = jakartaDay(offset);
     const bucket = map.get(date);
-    const nutritionCount = bucket?.mealKeys.size || 0;
+    const nutritionCount = bucket?.nutritionCount || 0;
     const workoutCalories = Math.round(bucket?.workoutCalories || 0);
     const success =
       nutritionCount >= 3 &&
