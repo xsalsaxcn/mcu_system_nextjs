@@ -3343,9 +3343,11 @@ function HomeTab({
     );
   const [participantStreakV126M23, setParticipantStreakV126M23] =
     useState<any>(initialParticipantStreakV126M26);
+  // WELLNESS_EDITABLE_STEP_TARGET_V126M34
   const [coachTargets, setCoachTargets] = useState({
     nutrition_max_calories: 0,
     workout_min_calories: 0,
+    daily_step_target: 8000,
     target_weight_kg: 0,
   });
 
@@ -3401,7 +3403,8 @@ function HomeTab({
     const targetNote = notes.find(
       (item: any) =>
         clean(item?.topic).toLowerCase().includes("target wellness") ||
-        clean(item?.action_plan).toLowerCase().includes("target nutrisi"),
+        clean(item?.action_plan).toLowerCase().includes("target nutrisi") ||
+        clean(item?.action_plan).toLowerCase().includes("target langkah"),
     );
     const actionPlan = clean(targetNote?.action_plan);
 
@@ -3422,6 +3425,13 @@ function HomeTab({
             participant?.workout_calorie_target ||
             participant?.active_calorie_target,
         ),
+      daily_step_target:
+        coachTargetFromText(
+          actionPlan,
+          /Target\s+Langkah\s*:\s*([0-9.,]+)/i,
+        ) ||
+        asNumber(participant?.daily_step_target || participant?.step_target) ||
+        8000,
       target_weight_kg:
         coachTargetFromText(actionPlan, /Target\s+BB\s*:\s*([0-9.,]+)/i) ||
         asNumber(participant?.target_weight_kg || participant?.target_weight),
@@ -3553,7 +3563,10 @@ function HomeTab({
   const workoutTarget = asNumber(coachTargets.workout_min_calories);
   const weightTarget = asNumber(coachTargets.target_weight_kg);
   const stepsTarget = asNumber(
-    participant?.daily_step_target || participant?.step_target || 8000,
+    coachTargets.daily_step_target ||
+      participant?.daily_step_target ||
+      participant?.step_target ||
+      8000,
   );
   const latestWeight = asNumber(
     latestClinical?.weight_kg || latestClinical?.weight || latestClinical?.bb,
