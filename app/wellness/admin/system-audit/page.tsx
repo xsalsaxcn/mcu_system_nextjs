@@ -1,6 +1,6 @@
 "use client";
 
-// WELLNESS_READ_ONLY_SYSTEM_AUDIT_UI_V126M36_1
+// WELLNESS_SYSTEM_AUDIT_WORKFLOW_UI_V126M37
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,6 +23,31 @@ const SEVERITIES = [
   ["medium", "Medium"],
   ["low", "Low"],
 ];
+
+const WORKFLOW_STATUSES = [
+  ["all", "Semua Status"],
+  ["open", "Belum Ditangani"],
+  ["in_progress", "Sedang Diproses"],
+  ["fixed_pending_verification", "Fixed - Menunggu Verifikasi"],
+  ["solved", "Solved"],
+  ["reopened", "Terbuka Kembali"],
+];
+
+function workflowLabel(value: string) {
+  if (value === "in_progress") return "Sedang Diproses";
+  if (value === "fixed_pending_verification") return "Fixed - Belum Terverifikasi";
+  if (value === "solved") return "Solved";
+  if (value === "reopened") return "Terbuka Kembali";
+  return "Belum Ditangani";
+}
+
+function workflowTone(value: string) {
+  if (value === "solved") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (value === "fixed_pending_verification") return "border-blue-200 bg-blue-50 text-blue-800";
+  if (value === "in_progress") return "border-violet-200 bg-violet-50 text-violet-800";
+  if (value === "reopened") return "border-rose-200 bg-rose-50 text-rose-800";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -66,7 +91,10 @@ export default function WellnessSystemAuditPage() {
   const [days, setDays] = useState("14");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
+  const [workflowFilter, setWorkflowFilter] = useState("all");
   const [query, setQuery] = useState("");
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [savingFingerprint, setSavingFingerprint] = useState("");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("Menjalankan audit read-only...");
@@ -106,6 +134,8 @@ export default function WellnessSystemAuditPage() {
     return (data?.issues || []).filter((issue: any) => {
       if (moduleFilter !== "all" && issue.module !== moduleFilter) return false;
       if (severityFilter !== "all" && issue.severity !== severityFilter) return false;
+      const workflowStatus = clean(issue?.workflow?.status || "open");
+      if (workflowFilter !== "all" && workflowStatus !== workflowFilter) return false;
       if (!text) return true;
       return [
         issue.id,
@@ -120,7 +150,62 @@ export default function WellnessSystemAuditPage() {
         .map((value) => clean(value).toLowerCase())
         .some((value) => value.includes(text));
     });
-  }, [data, moduleFilter, severityFilter, query]);
+  }, [data, moduleFilter, severityFilter, workflowFilter, query]);
+
+  async function updateWorkflow(action: string, issue: any) {
+    const fingerprint = clean(issue?.fingerprint);
+    if (!fingerprint || savingFingerprint) return;
+    setSavingFingerprint(fingerprint);
+    try {
+      const response = await fetch("/api/wellness/admin/system-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          days: Number(days),
+          issue,
+          resolution_note: clean(notes[fingerprint] ?? issue?.workflow?.resolution_note),
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.message || `Update status gagal (HTTP ${response.status}).`);
+      }
+
+      setData((current: any) => {
+        if (!current) return current;
+        const nextIssues = (current.issues || []).map((item: any) =>
+          clean(item?.fingerprint) === fingerprint
+            ? { ...item, workflow: json.workflow }
+            : item,
+        );
+        const workflowSummary: Record<string, number> = {
+          open: 0,
+          in_progress: 0,
+          fixed_pending_verification: 0,
+          solved: 0,
+          reopened: 0,
+        };
+        for (const item of nextIssues) {
+          const status = clean(item?.workflow?.status || "open");
+          workflowSummary[status] = (workflowSummary[status] || 0) + 1;
+        }
+        return {
+          ...current,
+          issues: nextIssues,
+          workflow: {
+            ...(current.workflow || {}),
+            summary: workflowSummary,
+          },
+        };
+      });
+      setMessage(json?.verification?.message || json?.message || "Status temuan diperbarui.");
+    } catch (error: any) {
+      setMessage(error?.message || "Status temuan gagal diperbarui.");
+    } finally {
+      setSavingFingerprint("");
+    }
+  }
 
   function downloadJson() {
     if (!data || typeof window === "undefined") return;
@@ -137,6 +222,7 @@ export default function WellnessSystemAuditPage() {
 
   const summary = data?.summary || {};
   const sources = data?.sources || {};
+  const workflowSummary = data?.workflow?.summary || {};
 
   return (
     <main className="min-h-screen bg-[#f4f8fb] pb-16 text-slate-950">
@@ -153,7 +239,7 @@ export default function WellnessSystemAuditPage() {
               <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-white/80">
                 Sistem memeriksa konsistensi Nutrisi, Workout, Fitness Device,
                 Target, Streak, identitas peserta, serta NAKES tanpa melakukan
-                insert, update, delete, retry, atau koreksi data production.
+                insert, update, delete, retry, atau koreksi data kesehatan production. Status tindak lanjut disimpan terpisah.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -176,7 +262,7 @@ export default function WellnessSystemAuditPage() {
         </section>
 
         <section className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[180px_180px_180px_1fr_auto]">
+          <div className="grid gap-3 lg:grid-cols-[150px_160px_160px_210px_1fr_auto]">
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">
                 Periode Audit
@@ -223,6 +309,20 @@ export default function WellnessSystemAuditPage() {
             </label>
             <label className="block">
               <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                Status Tindak Lanjut
+              </span>
+              <select
+                value={workflowFilter}
+                onChange={(event) => setWorkflowFilter(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold"
+              >
+                {WORKFLOW_STATUSES.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">
                 Cari Temuan/Peserta
               </span>
               <input
@@ -246,6 +346,11 @@ export default function WellnessSystemAuditPage() {
           }`}>
             {message}
           </div>
+          {data && data?.workflow?.available === false ? (
+            <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+              Status Solved belum aktif: {data?.workflow?.message}
+            </div>
+          ) : null}
         </section>
 
         {data ? (
@@ -280,13 +385,41 @@ export default function WellnessSystemAuditPage() {
             <section className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
+                  <h2 className="text-base font-black">Status Tindak Lanjut Temuan</h2>
+                  <p className="mt-1 text-xs font-bold text-slate-500">
+                    Status administratif terpisah dari hasil audit teknis. Tombol Fixed tidak mengubah data peserta.
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase text-slate-700">
+                  Workflow Status
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  ["Belum Ditangani", workflowSummary.open || 0, "border-slate-200 bg-slate-50 text-slate-800"],
+                  ["Diproses", workflowSummary.in_progress || 0, "border-violet-200 bg-violet-50 text-violet-800"],
+                  ["Fixed - Verifikasi", workflowSummary.fixed_pending_verification || 0, "border-blue-200 bg-blue-50 text-blue-800"],
+                  ["Solved", workflowSummary.solved || 0, "border-emerald-200 bg-emerald-50 text-emerald-800"],
+                  ["Terbuka Kembali", workflowSummary.reopened || 0, "border-rose-200 bg-rose-50 text-rose-800"],
+                ].map(([label, value, tone]) => (
+                  <div key={String(label)} className={`rounded-xl border p-3 ${tone}`}>
+                    <div className="text-[10px] font-black uppercase opacity-70">{label}</div>
+                    <div className="mt-1 text-xl font-black">{fmt(value)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
                   <h2 className="text-base font-black">Kesehatan Sumber Data</h2>
                   <div className="mt-1 text-xs font-bold text-slate-500">
                     Periode {formatDate(data?.period?.start_date)} - {formatDate(data?.period?.end_date)}
                   </div>
                 </div>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-slate-700">
-                  Mode {data.mode}
+                  Data {data.mode} · Workflow Status
                 </span>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -343,6 +476,9 @@ export default function WellnessSystemAuditPage() {
                               {issue.module}
                             </span>
                             <span className="text-[10px] font-black text-slate-400">{issue.id}</span>
+                            <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${workflowTone(clean(issue?.workflow?.status || "open"))}`}>
+                              {workflowLabel(clean(issue?.workflow?.status || "open"))}
+                            </span>
                           </div>
                           <h3 className="mt-3 text-base font-black text-slate-950 sm:text-lg">{issue.title}</h3>
                           <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{issue.finding}</p>
@@ -370,6 +506,72 @@ export default function WellnessSystemAuditPage() {
                         <div className="rounded-xl bg-violet-50 p-3">
                           <div className="text-[9px] font-black uppercase tracking-wide text-violet-700">Rekomendasi</div>
                           <div className="mt-1 text-xs font-bold leading-5 text-violet-950">{issue.recommendation}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+                          <label className="min-w-0 flex-1">
+                            <span className="text-[9px] font-black uppercase tracking-wide text-slate-500">
+                              Catatan Tindakan / Perbaikan
+                            </span>
+                            <input
+                              value={notes[issue.fingerprint] ?? clean(issue?.workflow?.resolution_note)}
+                              onChange={(event) => setNotes((current) => ({
+                                ...current,
+                                [issue.fingerprint]: event.target.value,
+                              }))}
+                              placeholder="Contoh: row Sheet diverifikasi, target dikoreksi, atau duplicate diperiksa..."
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold"
+                            />
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {["open", "reopened"].includes(clean(issue?.workflow?.status || "open")) ? (
+                              <button
+                                type="button"
+                                onClick={() => updateWorkflow("start", issue)}
+                                disabled={Boolean(savingFingerprint) || data?.workflow?.available === false}
+                                className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-black text-violet-800 disabled:opacity-50"
+                              >
+                                Mulai Tindak Lanjut
+                              </button>
+                            ) : null}
+                            {!["fixed_pending_verification", "solved"].includes(clean(issue?.workflow?.status || "open")) ? (
+                              <button
+                                type="button"
+                                onClick={() => updateWorkflow("mark_fixed", issue)}
+                                disabled={Boolean(savingFingerprint) || data?.workflow?.available === false}
+                                className="rounded-xl bg-blue-700 px-3 py-2.5 text-xs font-black text-white disabled:opacity-50"
+                              >
+                                {savingFingerprint === issue.fingerprint ? "Menyimpan..." : "Tandai Fixed"}
+                              </button>
+                            ) : null}
+                            {clean(issue?.workflow?.status) === "fixed_pending_verification" ? (
+                              <button
+                                type="button"
+                                onClick={() => updateWorkflow("verify", issue)}
+                                disabled={Boolean(savingFingerprint) || data?.workflow?.available === false}
+                                className="rounded-xl bg-emerald-700 px-3 py-2.5 text-xs font-black text-white disabled:opacity-50"
+                              >
+                                {savingFingerprint === issue.fingerprint ? "Memverifikasi..." : "Verifikasi Ulang"}
+                              </button>
+                            ) : null}
+                            {["fixed_pending_verification", "solved", "in_progress"].includes(clean(issue?.workflow?.status)) ? (
+                              <button
+                                type="button"
+                                onClick={() => updateWorkflow("reopen", issue)}
+                                disabled={Boolean(savingFingerprint) || data?.workflow?.available === false}
+                                className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs font-black text-slate-700 disabled:opacity-50"
+                              >
+                                Buka Kembali
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-bold text-slate-500">
+                          <span>Action by: {clean(issue?.workflow?.action_by) || "-"}</span>
+                          <span>Update: {formatDate(issue?.workflow?.updated_at)}</span>
+                          <span>Verifikasi: {clean(issue?.workflow?.verification_result) || "not_verified"}</span>
                         </div>
                       </div>
                     </article>

@@ -1,4 +1,5 @@
-// WELLNESS_READ_ONLY_SYSTEM_AUDIT_V126M36_1
+// WELLNESS_SYSTEM_AUDIT_WORKFLOW_V126M37
+// Base audit remains read-only for production health data; workflow status is stored separately.
 // Read-only consistency audit for Wellness production data.
 // This module never inserts, updates, deletes, retries, or corrects data.
 
@@ -31,6 +32,7 @@ export type WellnessAuditModule =
 
 export type WellnessAuditIssue = {
   id: string;
+  fingerprint: string;
   code: string;
   check_key: string;
   module: WellnessAuditModule;
@@ -407,11 +409,17 @@ export async function runWellnessSystemAudit(params: AuditParams) {
     evaluatedChecks.add(checkKey);
   }
 
-  function addIssue(input: Omit<WellnessAuditIssue, "id" | "status">) {
+  function addIssue(input: Omit<WellnessAuditIssue, "id" | "status" | "fingerprint">) {
     markCheck(input.check_key);
     failedChecks.add(input.check_key);
     const issue: WellnessAuditIssue = {
       ...input,
+      fingerprint: `WAF-${hashText([
+        input.code,
+        input.check_key,
+        input.participant_id || 0,
+        input.date,
+      ].join("|"))}`,
       id: `AUD-${hashText([
         input.code,
         input.check_key,
@@ -1138,7 +1146,7 @@ export async function runWellnessSystemAudit(params: AuditParams) {
           : "passed";
 
   return {
-    marker: "WELLNESS_READ_ONLY_SYSTEM_AUDIT_V126M36_1",
+    marker: "WELLNESS_SYSTEM_AUDIT_WORKFLOW_V126M37",
     mode: "read_only",
     generated_at: generatedAt,
     period: { days, start_date: startDate, end_date: endDate },
