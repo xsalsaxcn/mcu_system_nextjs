@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import NakesAuthGate from "@/components/wellness/NakesAuthGate";
 
 // WELLNESS_NAKES_GENERAL_CHECKUP_INPUT_V372_PAGE
+// WELLNESS_NAKES_NON_DESTRUCTIVE_SYNC_V126M32_PAGE
 // Wellness-only page for NAKES/company medical team to input any clinical checkpoint.
 // Visit labels are generalized: baseline, periodic, final evaluation, follow-up, or custom.
 // Data is stored in wellness_checkup_history and feeds dashboard before-after charts.
@@ -80,10 +81,18 @@ function participantName(participant: any) {
 function participantLabel(participant: any) {
   const code = clean(participant?.code);
   const name = participantName(participant);
+  const participantId = clean(participant?.id);
   const risk = clean(participant?.risk_cluster || participant?.baseline_risk_group);
   const scope = clean(participant?.scope_text);
 
-  return [`${code ? `${code} - ` : ""}${name}`, risk, scope].filter(Boolean).join(" | ");
+  return [
+    `${code ? `${code} - ` : ""}${name}`,
+    participantId ? `ID ${participantId}` : "",
+    risk,
+    scope,
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function matchesSearch(participant: any, query: string) {
@@ -194,6 +203,7 @@ function WellnessNakesInput({
   const [participants, setParticipants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [retryingSheet, setRetryingSheet] = useState(false);
   const [message, setMessage] = useState(
     "Input NAKES dibuat general untuk pemeriksaan awal, berkala, evaluasi akhir, follow-up, atau label custom. Data masuk ke grafik before-after Wellness."
   );
@@ -428,7 +438,8 @@ function WellnessNakesInput({
 
     if (result.ok) {
       setMessage(
-        "Input NAKES berhasil disimpan. Dashboard grafik peserta akan membaca data ini sebagai titik pemeriksaan klinis."
+        result.message ||
+          "Input NAKES berhasil disimpan. Dashboard grafik peserta akan membaca data ini sebagai titik pemeriksaan klinis."
       );
 
       setForm((previous: any) => ({
@@ -442,6 +453,47 @@ function WellnessNakesInput({
     } else {
       setMessage(result.message || "Gagal menyimpan input NAKES.");
     }
+  }
+
+  async function retryGoogleSheetSync() {
+    const historyId = Number(lastResult?.history?.id || 0);
+    const participantId = Number(
+      lastResult?.participant?.id || form.participant_id || 0,
+    );
+
+    if (!(historyId > 0) || !(participantId > 0)) {
+      setMessage("History atau peserta untuk retry Google Sheet tidak ditemukan.");
+      return;
+    }
+
+    setRetryingSheet(true);
+    setMessage("Mencoba sinkronisasi ulang ke Google Sheet...");
+
+    const response = await fetch("/api/wellness/nakes-input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "retry_google_sheet",
+        history_id: historyId,
+        participant_id: participantId,
+      }),
+    }).catch(() => null);
+
+    const result = response
+      ? await response.json().catch(() => ({
+          ok: false,
+          message: `Respons retry tidak valid (HTTP ${response.status}).`,
+        }))
+      : { ok: false, message: "Tidak dapat menghubungi server NAKES." };
+
+    setRetryingSheet(false);
+    setLastResult(result);
+    setMessage(
+      result.message ||
+        (result.ok
+          ? "Google Sheet berhasil disinkronkan."
+          : "Google Sheet belum berhasil disinkronkan."),
+    );
   }
 
   return (
@@ -953,8 +1005,10 @@ function WellnessNakesInput({
 
               <div
                 className={`mt-4 rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${
-                  lastResult?.ok
-                    ? "bg-emerald-50 text-emerald-800"
+                  lastResult?.partial_success
+                    ? "bg-amber-50 text-amber-900"
+                    : lastResult?.ok
+                      ? "bg-emerald-50 text-emerald-800"
                     : lastResult && !lastResult.ok
                       ? "bg-rose-50 text-rose-700"
                       : "bg-slate-50 text-slate-600"
@@ -965,13 +1019,41 @@ function WellnessNakesInput({
 
               {lastResult?.ok ? (
                 <div className="mt-4 grid gap-3">
-                  <InfoPill label="Visit" value={lastResult.summary?.visit_label} tone="blue" />
-                  <InfoPill label="Risk" value={lastResult.summary?.risk_cluster} tone="amber" />
                   <InfoPill
-                    label="Status"
-                    value={lastResult.summary?.program_status}
-                    tone="emerald"
+                    label="Peserta tersimpan"
+                    value={`${lastResult.participant?.code || "-"} - ${
+                      lastResult.participant?.name || "-"
+                    } · ID ${lastResult.participant?.id || "-"}`}
+                    tone="blue"
                   />
+                  <InfoPill label="Visit" value={lastResult.summary?.visit_label} tone="blue" />
+                  <InfoPill
+                    label="History ID / Revisi"
+                    value={`${lastResult.history?.id || "-"} / ${
+                      lastResult.summary?.revision || "-"
+                    }`}
+                    tone="purple"
+                  />
+                  <InfoPill
+                    label="Google Sheet"
+                    value={
+                      lastResult.google_sheet?.ok
+                        ? `Tersinkron · Row ${lastResult.google_sheet?.rowNumber || "-"}`
+                        : "Belum tersinkron"
+                    }
+                    tone={lastResult.google_sheet?.ok ? "emerald" : "amber"}
+                  />
+
+                  {lastResult.saved_to_history && lastResult.google_sheet?.ok === false ? (
+                    <button
+                      type="button"
+                      onClick={retryGoogleSheetSync}
+                      disabled={retryingSheet}
+                      className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-black text-white disabled:opacity-60"
+                    >
+                      {retryingSheet ? "Menyinkronkan..." : "Coba Sinkronkan Google Sheet"}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 

@@ -853,7 +853,9 @@ async function safeSelect(supabase: any, table: string, queryBuilder: (query: an
 
 
 // WELLNESS_NAKES_SAVE_SHEET_HISTORY_V91
+// WELLNESS_NAKES_NON_DESTRUCTIVE_SYNC_V126M32
 const NAKES_SAVE_MARKER = "WELLNESS_NAKES_SAVE_SHEET_HISTORY_V91";
+const NAKES_SYNC_MARKER = "WELLNESS_NAKES_NON_DESTRUCTIVE_SYNC_V126M32";
 
 function cleanNakesValue(value: any) {
   return String(value ?? "").trim();
@@ -902,8 +904,20 @@ function buildNakesSheetRow(params: {
   user: any;
   historyRow: any;
   sourceKey: string;
+  revision?: number;
+  operation?: "create" | "update" | "retry";
+  previousSheetRow?: number | null;
 }) {
-  const { body, participant, user, historyRow, sourceKey } = params;
+  const {
+    body,
+    participant,
+    user,
+    historyRow,
+    sourceKey,
+    revision = 1,
+    operation = "create",
+    previousSheetRow = null,
+  } = params;
   const participantName = nakesParticipantName(participant);
   const companyName = cleanNakesValue(
     participant?.company_name || body?.company_name || historyRow?.company_name,
@@ -936,6 +950,12 @@ function buildNakesSheetRow(params: {
     "Created By": `nakes:${cleanNakesValue(user?.id) || "system"}`,
     "Marker": NAKES_SAVE_MARKER,
 
+    "NAKES Sync Marker": NAKES_SYNC_MARKER,
+    "NAKES History ID": historyRow?.id || "",
+    "NAKES Submission Key": `${sourceKey}:r${revision}`,
+    "NAKES Revision": revision,
+    "NAKES Operation": operation,
+    "NAKES Previous Sheet Row": previousSheetRow || "",
     "NAKES Source Key": sourceKey,
     "Jenis Pemeriksaan NAKES": historyRow?.history_type || "",
     "Label Pemeriksaan NAKES": historyRow?.visit_label || "",
@@ -1004,7 +1024,7 @@ async function findExistingNakesHistory(
 ) {
   const { data, error } = await supabase
     .from("wellness_checkup_history")
-    .select("id,raw_payload")
+    .select("*")
     .eq("participant_id", participantId)
     .eq("checkup_date", checkupDate)
     .eq("history_type", historyType)
@@ -1018,6 +1038,153 @@ async function findExistingNakesHistory(
       (row: any) => cleanNakesValue(row?.raw_payload?.nakes_source_key) === sourceKey,
     ) || null
   );
+}
+
+const NAKES_PRESERVE_FIELDS = [
+  "company_id",
+  "company_name",
+  "employee_code",
+  "participant_name",
+  "sex",
+  "department",
+  "position",
+  "lab_no",
+  "checkup_date",
+  "history_type",
+  "visit_label",
+  "risk_cluster",
+  "risk_level",
+  "hba1c_percent",
+  "glucose_value",
+  "bp_raw",
+  "systolic",
+  "diastolic",
+  "pulse",
+  "height_cm",
+  "weight_kg",
+  "bmi",
+  "waist_cm",
+  "cholesterol_total",
+  "ldl",
+  "hdl",
+  "triglyceride",
+  "uric_acid",
+  "sgot",
+  "sgpt",
+  "criteria_count",
+  "intervention_focus",
+  "monitoring_plan",
+  "medical_validation_notes",
+  "program_status",
+  "next_followup_date",
+  "created_by",
+] as const;
+
+function nakesHistorySnapshot(row: any) {
+  if (!row || typeof row !== "object") return null;
+
+  const snapshot: Record<string, any> = {
+    id: row?.id || null,
+    archived_at: new Date().toISOString(),
+  };
+
+  for (const key of NAKES_PRESERVE_FIELDS) {
+    snapshot[key] = row?.[key] ?? null;
+  }
+
+  return snapshot;
+}
+
+function preserveExistingNakesValues(existing: any, nextPayload: any) {
+  if (!existing) return nextPayload;
+
+  const merged = { ...nextPayload };
+
+  for (const key of NAKES_PRESERVE_FIELDS) {
+    const nextValue = merged[key];
+    const previousValue = existing?.[key];
+
+    if (
+      (nextValue === null || nextValue === undefined || nextValue === "") &&
+      previousValue !== null &&
+      previousValue !== undefined &&
+      previousValue !== ""
+    ) {
+      merged[key] = previousValue;
+    }
+  }
+
+  return merged;
+}
+
+function appendNakesRevision(existingRaw: any, existingRow: any, nowIso: string) {
+  const previous = Array.isArray(existingRaw?.nakes_revision_history)
+    ? existingRaw.nakes_revision_history
+    : [];
+  const snapshot = nakesHistorySnapshot(existingRow);
+
+  if (!snapshot) return previous;
+
+  return [
+    ...previous,
+    {
+      revision: Number(existingRaw?.nakes_revision || 1),
+      archived_at: nowIso,
+      values: snapshot,
+    },
+  ];
+}
+
+async function saveNakesSheetSyncState(params: {
+  supabase: any;
+  historyRow: any;
+  rawPayload: any;
+  sheetResult?: any;
+  sheetError?: string;
+  revision: number;
+}) {
+  const {
+    supabase,
+    historyRow,
+    rawPayload,
+    sheetResult,
+    sheetError = "",
+    revision,
+  } = params;
+  const attemptedAt = new Date().toISOString();
+  const previousSyncHistory = Array.isArray(rawPayload?.google_sheet_sync_history)
+    ? rawPayload.google_sheet_sync_history
+    : [];
+  const syncEntry = {
+    attempted_at: attemptedAt,
+    revision,
+    ok: !sheetError,
+    row_number: sheetResult?.rowNumber || null,
+    sheet_name: sheetResult?.sheet || getWellnessSheetName(),
+    error: sheetError || null,
+  };
+  const nextRawPayload = {
+    ...rawPayload,
+    google_sheet_last_attempt_at: attemptedAt,
+    google_sheet_last_error: sheetError || null,
+    google_sheet_sync_history: [...previousSyncHistory, syncEntry],
+    ...(sheetError
+      ? {}
+      : {
+          google_sheet_synced_at: attemptedAt,
+          google_sheet_synced_revision: revision,
+          google_sheet_row_number: sheetResult?.rowNumber || null,
+          google_sheet_name: sheetResult?.sheet || getWellnessSheetName(),
+        }),
+  };
+
+  await supabase
+    .from("wellness_checkup_history")
+    .update({ raw_payload: nextRawPayload, updated_at: attemptedAt })
+    .eq("id", historyRow.id);
+
+  historyRow.raw_payload = nextRawPayload;
+  return nextRawPayload;
 }
 
 async function writeNakesHistory(params: {
@@ -1077,6 +1244,166 @@ export async function POST(req: NextRequest) {
       return fail("Peserta tidak ditemukan atau akses NAKES ditolak.", 404);
     }
 
+    if (cleanNakesValue(body?.action) === "retry_google_sheet") {
+      const historyId = Number(body?.history_id || 0);
+      if (!(historyId > 0)) {
+        return fail("History ID untuk retry Google Sheet wajib tersedia.", 400);
+      }
+
+      const { data: retryHistory, error: retryHistoryError } = await supabase
+        .from("wellness_checkup_history")
+        .select("*")
+        .eq("id", historyId)
+        .eq("participant_id", participantId)
+        .single();
+
+      if (retryHistoryError || !retryHistory) {
+        return fail("History NAKES tidak ditemukan atau bukan milik peserta terpilih.", 404);
+      }
+
+      const retryRaw =
+        retryHistory?.raw_payload && typeof retryHistory.raw_payload === "object"
+          ? retryHistory.raw_payload
+          : {};
+      const retryRevision = Math.max(1, Number(retryRaw?.nakes_revision || 1));
+      const retrySourceKey =
+        cleanNakesValue(retryRaw?.nakes_source_key) ||
+        nakesSourceKey({
+          participantId,
+          checkupDate: nakesDate(retryHistory?.checkup_date),
+          historyType:
+            cleanNakesValue(retryHistory?.history_type) || "periodic_checkup",
+          visitLabel:
+            cleanNakesValue(retryHistory?.visit_label) || "Pemeriksaan Berkala",
+          visitSequence: cleanNakesValue(retryRaw?.visit_sequence),
+          labNo: cleanNakesValue(retryHistory?.lab_no),
+        });
+
+      if (
+        Number(retryRaw?.google_sheet_synced_revision || 0) === retryRevision &&
+        Number(retryRaw?.google_sheet_row_number || 0) > 0
+      ) {
+        return ok({
+          message: "Revisi data NAKES ini sudah tersinkron ke Google Sheet.",
+          partial_success: false,
+          saved_to_history: true,
+          saved_to_graphs: true,
+          participant: {
+            id: participant?.id || participantId,
+            code: participant?.code || retryHistory?.employee_code || "",
+            name: nakesParticipantName(participant) || retryHistory?.participant_name || "",
+            company_name: participant?.company_name || retryHistory?.company_name || "",
+          },
+          history: retryHistory,
+          summary: {
+            history_id: retryHistory?.id,
+            visit_label: retryHistory?.visit_label || "",
+            risk_cluster: retryHistory?.risk_cluster || "",
+            program_status: retryHistory?.program_status || "",
+            checkup_date: retryHistory?.checkup_date || "",
+            revision: retryRevision,
+            created: false,
+            updated: true,
+          },
+          google_sheet: {
+            ok: true,
+            skipped: true,
+            rowNumber: retryRaw?.google_sheet_row_number,
+            sheet: retryRaw?.google_sheet_name || getWellnessSheetName(),
+          },
+        });
+      }
+
+      try {
+        const retrySheetResult = await postToWellnessWebhook({
+          sheet: getWellnessSheetName(),
+          row: buildNakesSheetRow({
+            body: retryRaw,
+            participant,
+            user,
+            historyRow: retryHistory,
+            sourceKey: retrySourceKey,
+            revision: retryRevision,
+            operation: "retry",
+            previousSheetRow:
+              Number(retryRaw?.google_sheet_row_number || 0) || null,
+          }),
+        });
+
+        await saveNakesSheetSyncState({
+          supabase,
+          historyRow: retryHistory,
+          rawPayload: retryRaw,
+          sheetResult: retrySheetResult,
+          revision: retryRevision,
+        });
+
+        return ok({
+          message:
+            "Data NAKES yang sudah tersimpan berhasil ditambahkan ke Google Sheet tanpa menghapus history lama.",
+          partial_success: false,
+          saved_to_history: true,
+          saved_to_graphs: true,
+          participant: {
+            id: participant?.id || participantId,
+            code: participant?.code || retryHistory?.employee_code || "",
+            name: nakesParticipantName(participant) || retryHistory?.participant_name || "",
+            company_name: participant?.company_name || retryHistory?.company_name || "",
+          },
+          history: retryHistory,
+          summary: {
+            history_id: retryHistory?.id,
+            visit_label: retryHistory?.visit_label || "",
+            risk_cluster: retryHistory?.risk_cluster || "",
+            program_status: retryHistory?.program_status || "",
+            checkup_date: retryHistory?.checkup_date || "",
+            revision: retryRevision,
+            created: false,
+            updated: true,
+          },
+          google_sheet: { ok: true, ...retrySheetResult },
+        });
+      } catch (error: any) {
+        const retryError =
+          error?.message || "Google Sheet masih belum berhasil disinkronkan.";
+
+        await saveNakesSheetSyncState({
+          supabase,
+          historyRow: retryHistory,
+          rawPayload: retryRaw,
+          sheetError: retryError,
+          revision: retryRevision,
+        }).catch(() => null);
+
+        return ok({
+          message:
+            `Data NAKES tetap aman di history/laporan. Google Sheet masih belum tersinkron: ${retryError}`,
+          partial_success: true,
+          saved_to_history: true,
+          saved_to_graphs: true,
+          retry_safe: true,
+          participant: {
+            id: participant?.id || participantId,
+            code: participant?.code || retryHistory?.employee_code || "",
+            name: nakesParticipantName(participant) || retryHistory?.participant_name || "",
+            company_name: participant?.company_name || retryHistory?.company_name || "",
+          },
+          history: retryHistory,
+          summary: {
+            history_id: retryHistory?.id,
+            visit_label: retryHistory?.visit_label || "",
+            risk_cluster: retryHistory?.risk_cluster || "",
+            program_status: retryHistory?.program_status || "",
+            checkup_date: retryHistory?.checkup_date || "",
+            revision: retryRevision,
+            created: false,
+            updated: true,
+          },
+          google_sheet: { ok: false, message: retryError },
+        });
+      }
+    }
+
     const checkupDate = nakesDate(body?.checkup_date);
     const historyType =
       cleanNakesValue(body?.history_type) || "periodic_checkup";
@@ -1084,21 +1411,6 @@ export async function POST(req: NextRequest) {
       cleanNakesValue(body?.visit_label) || "Pemeriksaan Berkala";
     const visitSequence = cleanNakesValue(body?.visit_sequence);
     const labNo = cleanNakesValue(body?.lab_no);
-
-    const heightCm = pickNumber(body?.height_cm, participant?.height_cm);
-    const weightKg = pickNumber(body?.weight_kg);
-    const bmi = pickNumber(body?.bmi, calculateBmi(weightKg, heightCm));
-    const systolic = pickNumber(body?.systolic);
-    const diastolic = pickNumber(body?.diastolic);
-    const hba1c = pickNumber(body?.hba1c_percent);
-    const glucose = pickNumber(body?.glucose_value);
-    const risk = classifyWellnessRisk({
-      hba1c,
-      glucose,
-      bmi,
-      sbp: systolic,
-      dbp: diastolic,
-    });
 
     const sourceKey = nakesSourceKey({
       participantId,
@@ -1117,6 +1429,31 @@ export async function POST(req: NextRequest) {
       sourceKey,
     );
 
+    // Use the existing values as a fallback when a safe retry or partial
+    // resubmission does not send every clinical field again.
+    const heightCm = pickNumber(
+      body?.height_cm,
+      existing?.height_cm,
+      participant?.height_cm,
+    );
+    const weightKg = pickNumber(body?.weight_kg, existing?.weight_kg);
+    const bmi = pickNumber(
+      body?.bmi,
+      existing?.bmi,
+      calculateBmi(weightKg, heightCm),
+    );
+    const systolic = pickNumber(body?.systolic, existing?.systolic);
+    const diastolic = pickNumber(body?.diastolic, existing?.diastolic);
+    const hba1c = pickNumber(body?.hba1c_percent, existing?.hba1c_percent);
+    const glucose = pickNumber(body?.glucose_value, existing?.glucose_value);
+    const risk = classifyWellnessRisk({
+      hba1c,
+      glucose,
+      bmi,
+      sbp: systolic,
+      dbp: diastolic,
+    });
+
     const existingRaw =
       existing?.raw_payload && typeof existing.raw_payload === "object"
         ? existing.raw_payload
@@ -1131,11 +1468,24 @@ export async function POST(req: NextRequest) {
     );
     const participantName = nakesParticipantName(participant);
 
+    const previousRevision = existing
+      ? Math.max(1, Number(existingRaw?.nakes_revision || 1))
+      : 0;
+    const revision = previousRevision + 1;
+    const revisionHistory = appendNakesRevision(existingRaw, existing, nowIso);
+    const nonBlankSubmittedRaw = Object.fromEntries(
+      Object.entries(body || {}).filter(([, value]) =>
+        value !== null && value !== undefined && value !== "",
+      ),
+    );
     const rawPayload = {
       ...existingRaw,
-      ...body,
+      ...nonBlankSubmittedRaw,
       nakes_source_key: sourceKey,
       nakes_marker: NAKES_SAVE_MARKER,
+      nakes_sync_marker: NAKES_SYNC_MARKER,
+      nakes_revision: revision,
+      nakes_revision_history: revisionHistory,
       participant_snapshot: {
         id: participant?.id,
         code: participant?.code,
@@ -1164,6 +1514,7 @@ export async function POST(req: NextRequest) {
       risk_cluster:
         cleanNakesValue(
           body?.risk_cluster ||
+            existing?.risk_cluster ||
             participant?.risk_cluster ||
             participant?.baseline_risk_group,
         ) || risk.group,
@@ -1176,18 +1527,18 @@ export async function POST(req: NextRequest) {
           : null,
       systolic,
       diastolic,
-      pulse: pickNumber(body?.pulse),
+      pulse: pickNumber(body?.pulse, existing?.pulse),
       height_cm: heightCm,
       weight_kg: weightKg,
       bmi,
-      waist_cm: pickNumber(body?.waist_cm),
-      cholesterol_total: pickNumber(body?.cholesterol_total),
-      ldl: pickNumber(body?.ldl),
-      hdl: pickNumber(body?.hdl),
-      triglyceride: pickNumber(body?.triglyceride),
-      uric_acid: pickNumber(body?.uric_acid),
-      sgot: pickNumber(body?.sgot),
-      sgpt: pickNumber(body?.sgpt),
+      waist_cm: pickNumber(body?.waist_cm, existing?.waist_cm),
+      cholesterol_total: pickNumber(body?.cholesterol_total, existing?.cholesterol_total),
+      ldl: pickNumber(body?.ldl, existing?.ldl),
+      hdl: pickNumber(body?.hdl, existing?.hdl),
+      triglyceride: pickNumber(body?.triglyceride, existing?.triglyceride),
+      uric_acid: pickNumber(body?.uric_acid, existing?.uric_acid),
+      sgot: pickNumber(body?.sgot, existing?.sgot),
+      sgpt: pickNumber(body?.sgpt, existing?.sgpt),
       criteria_count: risk.flags.length,
       intervention_focus: nullableNakesText(body?.intervention_focus),
       monitoring_plan: nullableNakesText(body?.monitoring_plan),
@@ -1196,9 +1547,10 @@ export async function POST(req: NextRequest) {
       next_followup_date: nullableNakesText(body?.follow_up_date),
       raw_payload: rawPayload,
       created_by:
-        Number.isFinite(createdByNumber) && createdByNumber > 0
+        existing?.created_by ||
+        (Number.isFinite(createdByNumber) && createdByNumber > 0
           ? createdByNumber
-          : null,
+          : null),
       updated_at: nowIso,
     };
 
@@ -1208,52 +1560,56 @@ export async function POST(req: NextRequest) {
       }
     });
 
+    const nonDestructiveHistoryPayload = preserveExistingNakesValues(
+      existing,
+      historyPayload,
+    );
+
     const historyWrite = await writeNakesHistory({
       supabase,
-      fullPayload: historyPayload,
+      fullPayload: nonDestructiveHistoryPayload,
       existingId: Number(existing?.id || 0) || null,
     });
     const historyRow = historyWrite.row;
 
     let sheetResult: any = null;
     let sheetError = "";
+    const previousSheetRow = Number(existingRaw?.google_sheet_row_number || 0) || null;
 
-    if (existingRaw?.google_sheet_synced_at) {
-      sheetResult = {
-        ok: true,
-        skipped: true,
-        message: "Google Sheet sudah tersinkron untuk input ini.",
-        rowNumber: existingRaw?.google_sheet_row_number || null,
-      };
-    } else {
-      try {
-        sheetResult = await postToWellnessWebhook({
-          sheet: getWellnessSheetName(),
-          row: buildNakesSheetRow({
-            body,
-            participant,
-            user,
-            historyRow,
-            sourceKey,
-          }),
-        });
+    try {
+      // The deployed webhook is append-only. Every revision is appended as a
+      // new auditable row so an older Google Sheet value is never overwritten.
+      sheetResult = await postToWellnessWebhook({
+        sheet: getWellnessSheetName(),
+        row: buildNakesSheetRow({
+          body,
+          participant,
+          user,
+          historyRow,
+          sourceKey,
+          revision,
+          operation: existing ? "update" : "create",
+          previousSheetRow,
+        }),
+      });
 
-        const syncedRawPayload = {
-          ...(historyRow?.raw_payload || rawPayload),
-          google_sheet_synced_at: new Date().toISOString(),
-          google_sheet_row_number: sheetResult?.rowNumber || null,
-          google_sheet_name: sheetResult?.sheet || getWellnessSheetName(),
-        };
+      await saveNakesSheetSyncState({
+        supabase,
+        historyRow,
+        rawPayload: historyRow?.raw_payload || rawPayload,
+        sheetResult,
+        revision,
+      });
+    } catch (error: any) {
+      sheetError = error?.message || "Google Sheet gagal disinkronkan.";
 
-        await supabase
-          .from("wellness_checkup_history")
-          .update({ raw_payload: syncedRawPayload, updated_at: new Date().toISOString() })
-          .eq("id", historyRow.id);
-
-        historyRow.raw_payload = syncedRawPayload;
-      } catch (error: any) {
-        sheetError = error?.message || "Google Sheet gagal disinkronkan.";
-      }
+      await saveNakesSheetSyncState({
+        supabase,
+        historyRow,
+        rawPayload: historyRow?.raw_payload || rawPayload,
+        sheetError,
+        revision,
+      }).catch(() => null);
     }
 
     const summary = {
@@ -1267,29 +1623,41 @@ export async function POST(req: NextRequest) {
     };
 
     if (sheetError) {
-      return fail(
-        `Data NAKES sudah tersimpan untuk grafik seluruh portal, tetapi Google Sheet belum tersinkron: ${sheetError}`,
-        502,
-        {
-          saved_to_history: true,
-          saved_to_graphs: true,
-          retry_safe: true,
-          history: historyRow,
-          summary,
-          google_sheet: { ok: false, message: sheetError },
-          warning: historyWrite.compatibilityWarning || "",
+      return ok({
+        message:
+          `Data NAKES aman tersimpan di history dan laporan. Google Sheet belum tersinkron dan dapat dicoba ulang tanpa menghapus data: ${sheetError}`,
+        partial_success: true,
+        saved_to_history: true,
+        saved_to_graphs: true,
+        retry_safe: true,
+        participant: {
+          id: participant?.id || participantId,
+          code: participant?.code || body?.employee_code || "",
+          name: participantName,
+          company_name: companyName,
         },
-      );
+        history: historyRow,
+        summary: { ...summary, revision },
+        google_sheet: { ok: false, message: sheetError },
+        warning: historyWrite.compatibilityWarning || "",
+      });
     }
 
     return ok({
       message:
-        "Input NAKES berhasil disimpan ke Google Sheet dan history pemeriksaan. Data dapat ditampilkan pada grafik peserta setelah portal di-refresh.",
+        "Input NAKES berhasil disimpan ke history/laporan dan ditambahkan ke Google Sheet tanpa menghapus data sebelumnya.",
+      partial_success: false,
       saved_to_history: true,
       saved_to_graphs: true,
+      participant: {
+        id: participant?.id || participantId,
+        code: participant?.code || body?.employee_code || "",
+        name: participantName,
+        company_name: companyName,
+      },
       history: historyRow,
-      summary,
-      google_sheet: sheetResult,
+      summary: { ...summary, revision },
+      google_sheet: { ok: true, ...sheetResult },
       warning: historyWrite.compatibilityWarning || "",
     });
   } catch (error: any) {
