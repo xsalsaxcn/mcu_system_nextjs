@@ -1294,6 +1294,15 @@ export default function WellnessAdminMobilePage() {
                 New
               </span>
             </a>
+            <a
+              href="/wellness/admin/system-audit"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-50 px-3 py-2.5 text-xs font-black text-violet-800 ring-1 ring-violet-100 transition hover:bg-violet-100"
+            >
+              System Audit
+              <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                Read-only
+              </span>
+            </a>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
@@ -2850,6 +2859,18 @@ export default function WellnessAdminMobilePage() {
                 </span>
                 <span className="rounded-full bg-emerald-600 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white">
                   New
+                </span>
+              </a>
+              <a
+                href="/wellness/admin/system-audit"
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-left shadow-sm"
+              >
+                <span className="text-xl">🛡️</span>
+                <span className="min-w-0 flex-1 text-sm font-black text-violet-900">
+                  System Audit
+                </span>
+                <span className="rounded-full bg-violet-600 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-white">
+                  Read-only
                 </span>
               </a>
               {["admin", "super_admin", "wellness_admin"].includes(
