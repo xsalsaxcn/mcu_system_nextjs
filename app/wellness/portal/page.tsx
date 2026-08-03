@@ -4427,6 +4427,53 @@ function formatCoachDate(value: any) {
     year: "numeric",
   });
 }
+// WELLNESS_FOOD_AUTOCOMPLETE_V126M35
+function normalizeFoodSuggestionTextV126M35(value: any) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function foodSuggestionScoreV126M35(item: any, rawQuery: string) {
+  const query = normalizeFoodSuggestionTextV126M35(rawQuery);
+  if (query.length < 2) return 0;
+
+  const name = normalizeFoodSuggestionTextV126M35(
+    item?.food_name || item?.name || item?.nama_makanan,
+  );
+  const category = normalizeFoodSuggestionTextV126M35(
+    item?.category || item?.kategori,
+  );
+  const aliases = normalizeFoodSuggestionTextV126M35(
+    item?.aliases || item?.alias || item?.sinonim,
+  );
+  const combined = [name, aliases, category].filter(Boolean).join(" ");
+
+  if (name === query) return 120;
+  if (name.startsWith(query)) return 110;
+  if (name.includes(query)) return 100;
+  if (query.startsWith(name)) return 95;
+  if (aliases.startsWith(query)) return 90;
+  if (aliases.includes(query)) return 85;
+  if (category.includes(query)) return 70;
+
+  const queryTokens = query.split(" ").filter(Boolean);
+  const candidateTokens = combined.split(" ").filter(Boolean);
+  const tokenMatch = queryTokens.every((queryToken) =>
+    candidateTokens.some(
+      (candidateToken) =>
+        candidateToken.startsWith(queryToken) ||
+        queryToken.startsWith(candidateToken),
+    ),
+  );
+
+  return tokenMatch ? 60 : 0;
+}
+
 function NutritionTab({
   participant,
   form,
@@ -4455,6 +4502,7 @@ function NutritionTab({
   );
 
   const [foodMaster, setFoodMaster] = useState<any[]>([]);
+  const [foodSuggestionOpen, setFoodSuggestionOpen] = useState(false);
   const [portionMap, setPortionMap] = useState<Record<string, string>>({});
   // WELLNESS_NUTRITION_QUANTITY_STEPPER_V126M11_1
   // Quantity is an additional multiplier. Existing portion choices remain unchanged.
@@ -4488,6 +4536,28 @@ function NutritionTab({
       form.mealText ||
       form.makanan,
   );
+
+  const activeFoodQueryV126M35 = useMemo(() => {
+    const fragments = String(form.food_name || "").split(",");
+    return clean(fragments[fragments.length - 1] || "");
+  }, [form.food_name]);
+
+  const foodSuggestionsV126M35 = useMemo(() => {
+    if (activeFoodQueryV126M35.length < 2) return [];
+
+    return (foodMaster || [])
+      .map((item: any) => ({
+        item,
+        score: foodSuggestionScoreV126M35(item, activeFoodQueryV126M35),
+      }))
+      .filter((entry: any) => entry.score > 0)
+      .sort((a: any, b: any) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return clean(a.item?.food_name).localeCompare(clean(b.item?.food_name));
+      })
+      .slice(0, 8)
+      .map((entry: any) => entry.item);
+  }, [activeFoodQueryV126M35, foodMaster]);
 
   const mealChips = [
     { value: "Breakfast / Sarapan", label: "Sarapan" },
@@ -4804,6 +4874,23 @@ function NutritionTab({
     });
   }
 
+  function chooseFoodSuggestionV126M35(item: any) {
+    const name = clean(item?.food_name || item?.name || item?.nama_makanan);
+    if (!name) return;
+
+    const completedItems = String(form.food_name || "")
+      .split(",")
+      .slice(0, -1)
+      .map(clean)
+      .filter(Boolean);
+
+    completedItems.push(name);
+    setValue("food_name", completedItems.join(", "));
+    setFieldErrors((previous) => ({ ...previous, food_name: "" }));
+    setFoodSuggestionOpen(false);
+    window.setTimeout(() => foodFieldRef.current?.focus(), 0);
+  }
+
   return (
     <section className="w-full max-w-full space-y-4 overflow-hidden">
       <div className="rounded-[1.8rem] border border-white bg-white p-4 shadow-lg shadow-slate-200/50">
@@ -4901,7 +4988,7 @@ function NutritionTab({
             ) : null}
           </div>
 
-          <label className="grid gap-2 text-xs font-black text-slate-700">
+          <div className="grid gap-2 text-xs font-black text-slate-700">
             <span className="flex items-center gap-2">
               Nama Makanan
               <span className="rounded-full bg-rose-50 px-2 py-1 text-[9px] font-black text-rose-600">
@@ -4909,27 +4996,80 @@ function NutritionTab({
               </span>
             </span>
             <span className="rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold leading-5 text-teal-800">
-              Cara pengisian: Nasi Putih, Sayur Sop, Es Campur
+              Ketik minimal 2 huruf. Pilih referensi yang muncul atau lanjutkan input manual.
             </span>
-            <textarea
-              ref={foodFieldRef}
-              value={form.food_name}
-              onChange={(e) => {
-                setValue("food_name", e.target.value);
-                setFieldErrors((previous) => ({ ...previous, food_name: "" }));
-              }}
-              aria-invalid={Boolean(fieldErrors.food_name)}
-              className={`${fieldClass} min-h-[92px] w-full resize-none text-sm ${
-                fieldErrors.food_name ? "border-rose-400 ring-4 ring-rose-50" : ""
-              }`}
-              placeholder="Nasi Putih, Sayur Sop, Es Campur"
-            />
+            <div className="relative">
+              <textarea
+                ref={foodFieldRef}
+                value={form.food_name}
+                onFocus={() => setFoodSuggestionOpen(true)}
+                onBlur={() =>
+                  window.setTimeout(() => setFoodSuggestionOpen(false), 180)
+                }
+                onChange={(e) => {
+                  setValue("food_name", e.target.value);
+                  setFoodSuggestionOpen(true);
+                  setFieldErrors((previous) => ({ ...previous, food_name: "" }));
+                }}
+                aria-invalid={Boolean(fieldErrors.food_name)}
+                aria-autocomplete="list"
+                className={`${fieldClass} min-h-[92px] w-full resize-none text-sm ${
+                  fieldErrors.food_name ? "border-rose-400 ring-4 ring-rose-50" : ""
+                }`}
+                placeholder="Contoh: Nasi goreng, Ayam bakar"
+              />
+
+              {foodSuggestionOpen &&
+              activeFoodQueryV126M35.length >= 2 &&
+              foodSuggestionsV126M35.length > 0 ? (
+                <div
+                  role="listbox"
+                  className="absolute left-0 right-0 top-full z-50 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-teal-100 bg-white p-2 shadow-2xl shadow-slate-300/50"
+                >
+                  <div className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.15em] text-teal-700">
+                    Referensi makanan
+                  </div>
+                  {foodSuggestionsV126M35.map((item: any, index: number) => {
+                    const name = clean(
+                      item?.food_name || item?.name || item?.nama_makanan,
+                    );
+                    const category = clean(item?.category || item?.kategori);
+                    const calories = Number(
+                      item?.calories || item?.calorie || item?.kalori || 0,
+                    );
+
+                    return (
+                      <button
+                        key={`${name}-${item?.id || index}`}
+                        type="button"
+                        role="option"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => chooseFoodSuggestionV126M35(item)}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-teal-50"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-black text-slate-800">
+                            {name}
+                          </span>
+                          <span className="mt-1 block truncate text-[10px] font-bold text-slate-400">
+                            {category || "Referensi master makanan"}
+                          </span>
+                        </span>
+                        <span className="shrink-0 rounded-full bg-amber-50 px-3 py-2 text-[11px] font-black text-amber-700">
+                          {fmtNumber(calories, 0)} kkal/porsi
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
             {fieldErrors.food_name ? (
               <span className="text-[10px] font-bold text-rose-600">
                 {fieldErrors.food_name}
               </span>
             ) : null}
-          </label>
+          </div>
 
           {foodMasterLoading ? (
             <div className="rounded-2xl bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700">

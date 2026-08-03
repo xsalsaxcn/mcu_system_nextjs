@@ -22,6 +22,7 @@ import {
   programWindowDayCount,
 } from "@/lib/wellness/programWindow";
 
+// WELLNESS_EDITABLE_STEP_TARGET_V126M34
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -237,6 +238,9 @@ function parseTargetsFromNote(note: any) {
     workout_min_calories: find(
       /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
     ),
+    daily_step_target: find(
+      /Target\s+Langkah\s*:\s*([0-9.,]+)/i,
+    ),
     target_weight_kg: find(
       /Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i,
     ),
@@ -261,6 +265,10 @@ function participantTargets(row: any, latestTargetNote: any) {
       ) ||
       fromNote.workout_min_calories ||
       0,
+    daily_step_target:
+      fromNote.daily_step_target ||
+      asNumber(row?.daily_step_target || row?.step_target) ||
+      8000,
     target_weight_kg:
       asNumber(row?.target_weight_kg || row?.weight_target_kg) ||
       fromNote.target_weight_kg ||

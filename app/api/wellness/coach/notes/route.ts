@@ -1,5 +1,7 @@
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
+
+// WELLNESS_EDITABLE_STEP_TARGET_V126M34
 import { createClient } from "@supabase/supabase-js";
 import {
   buildCoachGroupUnitMap,
@@ -121,6 +123,7 @@ async function updateExistingTargetFields(
   targets: {
     nutrition_max_calories: number;
     workout_min_calories: number;
+    daily_step_target: number;
     target_weight_kg: number;
   }
 ) {
@@ -152,6 +155,39 @@ async function updateExistingTargetFields(
     synced: !fallback.error,
     mode: fallback.error ? "note_only" : "weight_field_and_note",
     warning: full.error.message || fallback.error?.message || "",
+  };
+}
+
+async function updateStepTargetField(
+  supabase: any,
+  participantId: number,
+  dailyStepTarget: number,
+) {
+  if (dailyStepTarget <= 0) {
+    return { synced: true, mode: "default_8000", field: "", warning: "" };
+  }
+
+  const warnings: string[] = [];
+  for (const field of ["daily_step_target", "step_target"]) {
+    const result = await supabase
+      .from("wellness_participants")
+      .update({
+        [field]: dailyStepTarget,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", participantId);
+
+    if (!result.error) {
+      return { synced: true, mode: "participant_field", field, warning: "" };
+    }
+    warnings.push(`${field}: ${result.error.message}`);
+  }
+
+  return {
+    synced: false,
+    mode: "coach_note",
+    field: "",
+    warning: warnings.join(" | "),
   };
 }
 
@@ -469,12 +505,14 @@ export async function POST(request: NextRequest) {
       const targets = {
         nutrition_max_calories: asNumber(body.nutrition_max_calories),
         workout_min_calories: asNumber(body.workout_min_calories),
+        daily_step_target: asNumber(body.daily_step_target) || 8000,
         target_weight_kg: asNumber(body.target_weight_kg),
       };
 
       if (
         targets.nutrition_max_calories <= 0 &&
         targets.workout_min_calories <= 0 &&
+        targets.daily_step_target <= 0 &&
         targets.target_weight_kg <= 0
       ) {
         return NextResponse.json(
@@ -490,6 +528,9 @@ export async function POST(request: NextRequest) {
         targets.workout_min_calories > 0
           ? `Target Workout: ${targets.workout_min_calories} kkal/hari`
           : "",
+        targets.daily_step_target > 0
+          ? `Target Langkah: ${targets.daily_step_target} langkah/hari`
+          : "",
         targets.target_weight_kg > 0
           ? `Target BB: ${targets.target_weight_kg} kg`
           : "",
@@ -501,6 +542,11 @@ export async function POST(request: NextRequest) {
         supabase,
         participantId,
         targets
+      );
+      const stepSync = await updateStepTargetField(
+        supabase,
+        participantId,
+        targets.daily_step_target,
       );
 
       const assignedGroup = matchingCoachAssignment(participant, assignments, groupUnitMap);
@@ -545,7 +591,7 @@ export async function POST(request: NextRequest) {
             ? "Target peserta berhasil disimpan dan tersinkron ke grafik."
             : "Target peserta berhasil disimpan sebagai instruksi coach.",
         note: data,
-        target_sync: sync,
+        target_sync: { ...sync, step_target: stepSync },
       });
     }
 

@@ -256,9 +256,11 @@ export default function WellnessCoachPortalPage() {
     follow_up_status: "Open",
     next_follow_up_date: "",
   });
+  // WELLNESS_EDITABLE_STEP_TARGET_V126M34
   const [targetForm, setTargetForm] = useState({
     nutrition_max_calories: "",
     workout_min_calories: "",
+    daily_step_target: "8000",
     target_weight_kg: "",
     coach_note: "",
     next_follow_up_date: "",
@@ -400,6 +402,12 @@ export default function WellnessCoachPortalPage() {
       workout_min_calories: item?.targets?.workout_min_calories
         ? String(item.targets.workout_min_calories)
         : "",
+      daily_step_target: String(
+        item?.targets?.daily_step_target ||
+          item?.daily_step_target ||
+          item?.step_target ||
+          8000,
+      ),
       target_weight_kg: item?.targets?.target_weight_kg
         ? String(item.targets.target_weight_kg)
         : "",
@@ -530,6 +538,7 @@ export default function WellnessCoachPortalPage() {
         participant_id: selectedParticipant.id,
         nutrition_max_calories: targetForm.nutrition_max_calories,
         workout_min_calories: targetForm.workout_min_calories,
+        daily_step_target: targetForm.daily_step_target,
         target_weight_kg: targetForm.target_weight_kg,
         coach_note: targetForm.coach_note,
         next_follow_up_date: targetForm.next_follow_up_date,
@@ -3529,7 +3538,11 @@ function ParticipantDetail({
     participant?.compliance_rate || participant?.compliance_percentage || 0,
   );
   const stepTarget = Number(
-    participant?.daily_step_target || participant?.step_target || 8000,
+    targetForm?.daily_step_target ||
+      participant?.targets?.daily_step_target ||
+      participant?.daily_step_target ||
+      participant?.step_target ||
+      8000,
   );
   const momentumDays: WellnessMomentumDay[] = Array.isArray(streak?.days)
     ? streak.days.map((item: any) => ({
@@ -3860,6 +3873,22 @@ function ParticipantDetail({
                 }
                 placeholder="Contoh: 300"
               />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Target Langkah (langkah/hari)
+              <input
+                type="number"
+                min="1000"
+                max="50000"
+                step="500"
+                className={fieldClass}
+                value={targetForm.daily_step_target}
+                onChange={(e) => setTarget("daily_step_target", e.target.value)}
+                placeholder="Default: 8000"
+              />
+              <span className="text-[11px] font-bold text-slate-400">
+                Default 8.000 langkah dan dapat disesuaikan Coach per peserta.
+              </span>
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Target Berat Badan (kg)
