@@ -1,4 +1,5 @@
 // WELLNESS_NAKES_EXAM_CALENDAR_V126M24_1
+// WELLNESS_NAKES_CALENDAR_RECONCILIATION_V126M33
 // Read-only calendar source for Admin Monitoring NAKES.
 // No migration and no write operation.
 
@@ -33,11 +34,46 @@ function active(value: any) {
   );
 }
 
+function dateKey(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const local = text.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/);
+  if (!local) return "";
+
+  const first = Number(local[1]);
+  const second = Number(local[2]);
+  const year = local[3];
+
+  // Browser date controls can display MM/DD/YYYY, while imported data can use
+  // DD/MM/YYYY. Resolve impossible values first and use MM/DD as the safe
+  // fallback for the browser-rendered format used by the NAKES form.
+  const month = first > 12 ? second : first;
+  const day = first > 12 ? first : second > 12 ? second : second;
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function historyDate(row: any) {
+  return dateKey(
+    row?.checkup_date ||
+      row?.exam_date ||
+      row?.log_date ||
+      row?.raw_payload?.checkup_date ||
+      row?.raw_payload?.exam_date ||
+      row?.created_at,
+  );
+}
+
 function validHistory(row: any) {
   const status = clean(row?.status).toLowerCase();
   return (
-    numberValue(row?.participant_id) > 0 &&
-    Boolean(clean(row?.checkup_date || row?.created_at).slice(0, 10)) &&
+    Boolean(historyDate(row)) &&
     active(row?.is_active) &&
     !["cancelled", "canceled", "deleted", "void", "batal"].includes(status)
   );
@@ -53,6 +89,44 @@ async function safeRows(query: any) {
   }
 }
 
+async function loadHistoryRows(supabase: any) {
+  try {
+    const ordered = await supabase
+      .from("wellness_checkup_history")
+      .select("*")
+      .order("checkup_date", { ascending: true })
+      .limit(50000);
+
+    if (!ordered?.error) {
+      return {
+        rows: ordered?.data || [],
+        ok: true,
+        fallback_used: false,
+        message: "",
+      };
+    }
+
+    const fallback = await supabase
+      .from("wellness_checkup_history")
+      .select("*")
+      .limit(50000);
+
+    return {
+      rows: fallback?.error ? [] : fallback?.data || [],
+      ok: !fallback?.error,
+      fallback_used: true,
+      message: clean(fallback?.error?.message || ordered?.error?.message),
+    };
+  } catch (error: any) {
+    return {
+      rows: [],
+      ok: false,
+      fallback_used: true,
+      message: clean(error?.message),
+    };
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user: any = getSessionUser(request);
@@ -64,7 +138,7 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
-    const [participantRows, companyRows, groupRows, historyRows] =
+    const [participantRows, companyRows, groupRows, historyResult] =
       await Promise.all([
         safeRows(
           supabase.from("wellness_participants").select("*").limit(10000),
@@ -81,13 +155,7 @@ export async function GET(request: NextRequest) {
             .select("id,name,parent_id,company_id,unit_type,is_active")
             .limit(5000),
         ),
-        safeRows(
-          supabase
-            .from("wellness_checkup_history")
-            .select("*")
-            .order("checkup_date", { ascending: true })
-            .limit(50000),
-        ),
+        loadHistoryRows(supabase),
       ]);
 
     const participants = participantRows.filter((item: any) =>
@@ -95,6 +163,9 @@ export async function GET(request: NextRequest) {
     );
     const companies = companyRows.filter((item: any) => active(item?.is_active));
     const groups = groupRows.filter((item: any) => active(item?.is_active));
+    const historyRows = Array.isArray(historyResult?.rows)
+      ? historyResult.rows
+      : [];
 
     const companyById = new Map<number, any>(
       companies.map((item: any) => [numberValue(item.id), item]),
@@ -102,10 +173,40 @@ export async function GET(request: NextRequest) {
     const groupById = new Map<number, any>(
       groups.map((item: any) => [numberValue(item.id), item]),
     );
+    const participantByCode = new Map<string, number>();
+
+    for (const participant of participants) {
+      const code = clean(
+        participant?.code ||
+          participant?.employee_code ||
+          participant?.no_karyawan,
+      ).toLowerCase();
+      if (code) participantByCode.set(code, numberValue(participant?.id));
+    }
+
     const historyByParticipant = new Map<number, any[]>();
+    let unmatchedHistoryRows = 0;
 
     for (const row of historyRows.filter(validHistory)) {
-      const participantId = numberValue(row.participant_id);
+      let participantId = numberValue(
+        row?.participant_id || row?.raw_payload?.participant_id,
+      );
+
+      if (!participantId) {
+        const participantCode = clean(
+          row?.participant_code ||
+            row?.employee_code ||
+            row?.raw_payload?.participant_code ||
+            row?.raw_payload?.employee_code,
+        ).toLowerCase();
+        participantId = participantByCode.get(participantCode) || 0;
+      }
+
+      if (!participantId) {
+        unmatchedHistoryRows += 1;
+        continue;
+      }
+
       if (!historyByParticipant.has(participantId)) {
         historyByParticipant.set(participantId, []);
       }
@@ -118,9 +219,7 @@ export async function GET(request: NextRequest) {
       const checkupDates = [
         ...new Set(
           participantHistory
-            .map((item: any) =>
-              clean(item?.checkup_date || item?.created_at).slice(0, 10),
-            )
+            .map((item: any) => historyDate(item))
             .filter(Boolean),
         ),
       ].sort();
@@ -179,6 +278,10 @@ export async function GET(request: NextRequest) {
           (sum: number, item: any) => sum + item.examination_count,
           0,
         ),
+        history_query_ok: Boolean(historyResult?.ok),
+        history_query_fallback_used: Boolean(historyResult?.fallback_used),
+        history_query_message: clean(historyResult?.message),
+        unmatched_history_rows: unmatchedHistoryRows,
       },
     });
   } catch (error: any) {

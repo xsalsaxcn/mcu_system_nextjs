@@ -1,6 +1,7 @@
 "use client";
 
 // WELLNESS_NAKES_FULL_CLINICAL_EXPORT_V126M25_2
+// WELLNESS_NAKES_CALENDAR_RECONCILIATION_V126M33
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -35,6 +36,27 @@ function monthLabel(value: string) {
 
 function clean(value: any) {
   return String(value ?? "").trim();
+}
+
+function dateKey(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const local = text.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/);
+  if (!local) return "";
+
+  const first = Number(local[1]);
+  const second = Number(local[2]);
+  const year = local[3];
+  const month = first > 12 ? second : first;
+  const day = first > 12 ? first : second;
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "";
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function numberOrNull(value: any): number | null {
@@ -567,24 +589,81 @@ export default function AdminMonitoringNakesPage() {
       ? result.rows
       : [];
 
-    const nextCalendarRows = Array.isArray(calendarResult?.rows)
+    const dashboardByParticipant = new Map<number, any>();
+    for (const item of nextRows) {
+      const participantId = Number(item?.participant_id || item?.id || 0);
+      if (participantId > 0) dashboardByParticipant.set(participantId, item);
+    }
+
+    const calendarByParticipant = new Map<number, any>();
+    const rawCalendarRows = Array.isArray(calendarResult?.rows)
       ? calendarResult.rows
-      : nextRows.map((item: any) => {
-          const latestDate = clean(
-            item?.latest_history_date || item?.latest_mini_mcu_date,
-          ).slice(0, 10);
-          return {
-            participant_id: Number(item?.participant_id || item?.id || 0),
-            code: clean(item?.code),
-            name: clean(item?.name),
-            company_name: clean(item?.company_name) || "-",
-            group_name: clean(item?.group_name) || "-",
-            kelompok_name: clean(item?.kelompok_name) || "-",
-            checkup_dates: latestDate ? [latestDate] : [],
-            examination_count: Number(item?.history_logs_count || 0),
-            latest_examination_date: latestDate || null,
-          };
-        });
+      : [];
+    for (const item of rawCalendarRows) {
+      const participantId = Number(item?.participant_id || item?.id || 0);
+      if (participantId > 0) calendarByParticipant.set(participantId, item);
+    }
+
+    const participantIds = new Set<number>([
+      ...dashboardByParticipant.keys(),
+      ...calendarByParticipant.keys(),
+    ]);
+
+    const nextCalendarRows = [...participantIds].map((participantId) => {
+      const dashboardItem = dashboardByParticipant.get(participantId) || {};
+      const calendarItem = calendarByParticipant.get(participantId) || {};
+      const dashboardLatestDate = dateKey(
+        dashboardItem?.latest_history_date ||
+          dashboardItem?.latest_mini_mcu_date,
+      );
+      const calendarDates = Array.isArray(calendarItem?.checkup_dates)
+        ? calendarItem.checkup_dates.map(dateKey).filter(Boolean)
+        : [];
+      const checkupDates = [
+        ...new Set([
+          ...calendarDates,
+          ...(dashboardLatestDate ? [dashboardLatestDate] : []),
+        ]),
+      ].sort();
+      const dashboardHistoryCount = Number(
+        dashboardItem?.history_logs_count || 0,
+      );
+      const calendarHistoryCount = Number(
+        calendarItem?.examination_count || 0,
+      );
+
+      return {
+        participant_id: participantId,
+        code: clean(calendarItem?.code || dashboardItem?.code),
+        name: clean(calendarItem?.name || dashboardItem?.name),
+        company_name:
+          clean(calendarItem?.company_name || dashboardItem?.company_name) ||
+          "-",
+        group_name:
+          clean(calendarItem?.group_name || dashboardItem?.group_name) || "-",
+        kelompok_name:
+          clean(
+            calendarItem?.kelompok_name || dashboardItem?.kelompok_name,
+          ) || "-",
+        ...calendarItem,
+        checkup_dates: checkupDates,
+        examination_count: Math.max(
+          calendarHistoryCount,
+          dashboardHistoryCount,
+        ),
+        latest_examination_date:
+          checkupDates.at(-1) ||
+          dateKey(calendarItem?.latest_examination_date) ||
+          null,
+        calendar_reconciled:
+          dashboardHistoryCount > calendarHistoryCount ||
+          Boolean(dashboardLatestDate && !calendarDates.includes(dashboardLatestDate)),
+      };
+    });
+
+    const reconciledCount = nextCalendarRows.filter(
+      (item: any) => item?.calendar_reconciled,
+    ).length;
 
     setData(result);
     setRows(nextRows);
@@ -592,9 +671,11 @@ export default function AdminMonitoringNakesPage() {
     setCalendarLoading(false);
     setMessage(
       calendarResult?.ok
-        ? "Monitoring NAKES dan kalender pemeriksaan aktif."
+        ? reconciledCount > 0
+          ? `Monitoring NAKES aktif. ${reconciledCount} data kalender diselaraskan dengan history pemeriksaan.`
+          : "Monitoring NAKES dan kalender pemeriksaan aktif."
         : `Monitoring NAKES aktif. Kalender: ${
-            calendarResult?.message || "menggunakan data terbatas"
+            calendarResult?.message || "menggunakan data history sebagai fallback"
           }`,
     );
 
@@ -785,7 +866,7 @@ export default function AdminMonitoringNakesPage() {
     return calendarRows
       .map((item: any) => {
         const dates = Array.isArray(item?.checkup_dates)
-          ? item.checkup_dates.map((value: any) => clean(value).slice(0, 10))
+          ? item.checkup_dates.map((value: any) => dateKey(value)).filter(Boolean)
           : [];
         const periodDates = dates.filter((date: string) =>
           date.startsWith(`${examMonth}-`),
@@ -832,7 +913,7 @@ export default function AdminMonitoringNakesPage() {
     return calendarRows
       .map((item: any) => {
         const dates = Array.isArray(item?.checkup_dates)
-          ? item.checkup_dates.map((value: any) => clean(value).slice(0, 10))
+          ? item.checkup_dates.map((value: any) => dateKey(value)).filter(Boolean)
           : [];
         const periodDates = dates.filter((date: string) =>
           date.startsWith(`${examMonth}-`),
