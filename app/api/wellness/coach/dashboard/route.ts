@@ -247,6 +247,37 @@ function parseTargetsFromNote(note: any) {
   };
 }
 
+// WELLNESS_COACH_TARGET_READBACK_HOTFIX_V126M38_1
+function isTargetWellnessNote(note: any) {
+  const topic = clean(note?.topic).toLowerCase();
+  const content = [note?.action_plan, note?.coach_note, note?.main_issue]
+    .map(clean)
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    topic.includes("target wellness") ||
+    /Target\s+(?:Nutrisi|(?:Kalori\s+)?Workout|Langkah|BB|Berat(?:\s+Badan)?)\s*:/i.test(
+      content,
+    )
+  );
+}
+
+function noteSortValue(note: any) {
+  const timestamp = Date.parse(
+    clean(note?.updated_at || note?.created_at || note?.session_date),
+  );
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function newestNotes(rows: any[]) {
+  return [...(rows || [])].sort((a, b) => {
+    const timeDifference = noteSortValue(b) - noteSortValue(a);
+    if (timeDifference !== 0) return timeDifference;
+    return asNumber(b?.id) - asNumber(a?.id);
+  });
+}
+
 // WELLNESS_COACH_TARGET_READBACK_V126M38
 // The newest individual Target Wellness note is the canonical override.
 // Participant fields and defaults are fallbacks only.
@@ -638,21 +669,18 @@ export async function GET(request: NextRequest) {
       const nutritionHistoryDates = [
         ...new Set([...allFoodDates, ...nutritionPointDates]),
       ];
-      const participantNotes = noteRows.filter(
-        (note) => asNumber(note.participant_id) === id,
+      const participantNotes = newestNotes(
+        noteRows.filter((note) => asNumber(note.participant_id) === id),
       );
       const chatNotes = participantNotes.filter(isChatNote);
       const instructionNotes = participantNotes.filter(
         (note) => !isChatNote(note),
       );
       const latestNote = instructionNotes[0] || null;
-      const latestTargetNote = instructionNotes.find((note) =>
-        clean(note.topic).toLowerCase().includes("target wellness"),
-      ) || null;
-      const latestInstructionNote = instructionNotes.find(
-        (note) =>
-          !clean(note.topic).toLowerCase().includes("target wellness"),
-      ) || null;
+      const latestTargetNote =
+        instructionNotes.find(isTargetWellnessNote) || null;
+      const latestInstructionNote =
+        instructionNotes.find((note) => !isTargetWellnessNote(note)) || null;
       const todayActs = acts.filter((item) => activityDate(item) === today);
       const todayFoods = foods.filter((item) => foodDate(item) === today);
       const todayNutritionPointCount = nutritionPointInputs.filter(

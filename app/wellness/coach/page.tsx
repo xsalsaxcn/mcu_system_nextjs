@@ -560,66 +560,121 @@ export default function WellnessCoachPortalPage() {
       }));
 
     if (result.ok) {
-      const refreshed = await loadDashboard({ keepSelection: true, silent: true });
+      const serverTargets =
+        result?.read_back?.targets || result?.saved_targets || requestedTargets;
+      const canonicalTargets = {
+        nutrition_max_calories: Number(
+          serverTargets?.nutrition_max_calories ??
+            requestedTargets.nutrition_max_calories,
+        ),
+        workout_min_calories: Number(
+          serverTargets?.workout_min_calories ??
+            requestedTargets.workout_min_calories,
+        ),
+        daily_step_target: Number(
+          serverTargets?.daily_step_target ?? requestedTargets.daily_step_target,
+        ) || 8000,
+        target_weight_kg: Number(
+          serverTargets?.target_weight_kg ?? requestedTargets.target_weight_kg,
+        ),
+      };
+
+      const refreshed = await loadDashboard({
+        keepSelection: false,
+        silent: true,
+      });
       const freshParticipant = (refreshed?.participants || []).find(
         (item: any) => Number(item.id) === Number(selectedParticipant.id),
       );
-      const readBackTargets =
-        freshParticipant?.targets || result?.read_back?.targets || {};
-      const checks = {
+      const dashboardTargets = freshParticipant?.targets || {};
+      const dashboardChecks = {
         nutrition_max_calories:
           requestedTargets.nutrition_max_calories <= 0 ||
-          Number(readBackTargets.nutrition_max_calories || 0) ===
+          Number(dashboardTargets.nutrition_max_calories || 0) ===
             requestedTargets.nutrition_max_calories,
         workout_min_calories:
           requestedTargets.workout_min_calories <= 0 ||
-          Number(readBackTargets.workout_min_calories || 0) ===
+          Number(dashboardTargets.workout_min_calories || 0) ===
             requestedTargets.workout_min_calories,
         daily_step_target:
-          Number(readBackTargets.daily_step_target || 0) ===
+          Number(dashboardTargets.daily_step_target || 0) ===
           requestedTargets.daily_step_target,
         target_weight_kg:
           requestedTargets.target_weight_kg <= 0 ||
           Math.abs(
-            Number(readBackTargets.target_weight_kg || 0) -
+            Number(dashboardTargets.target_weight_kg || 0) -
               requestedTargets.target_weight_kg,
           ) < 0.01,
       };
-      const verified =
-        result.verified !== false && Object.values(checks).every(Boolean);
+      const serverChecks = result?.read_back?.verified_fields || {};
+      const serverVerified =
+        result.verified === true ||
+        ([
+          "nutrition_max_calories",
+          "workout_min_calories",
+          "daily_step_target",
+          "target_weight_kg",
+        ] as const).every((key) => serverChecks[key] !== false);
+      const dashboardVerified = Object.values(dashboardChecks).every(Boolean);
+      const verified = serverVerified && dashboardVerified;
 
-      if (freshParticipant) {
-        setSelectedParticipant(freshParticipant);
-        setTargetForm((previous) => ({
-          ...previous,
-          nutrition_max_calories: readBackTargets.nutrition_max_calories
-            ? String(readBackTargets.nutrition_max_calories)
-            : previous.nutrition_max_calories,
-          workout_min_calories: readBackTargets.workout_min_calories
-            ? String(readBackTargets.workout_min_calories)
-            : previous.workout_min_calories,
-          daily_step_target: String(readBackTargets.daily_step_target || 8000),
-          target_weight_kg: readBackTargets.target_weight_kg
-            ? String(readBackTargets.target_weight_kg)
-            : previous.target_weight_kg,
-          coach_note: "",
-        }));
-      }
+      const mergedParticipant = {
+        ...selectedParticipant,
+        ...(freshParticipant || {}),
+        targets: canonicalTargets,
+        latest_target_note:
+          result?.note ||
+          freshParticipant?.latest_target_note ||
+          selectedParticipant?.latest_target_note ||
+          null,
+      };
+
+      setSelectedParticipant(mergedParticipant);
+      setDashboard((current: any) => {
+        const base = refreshed?.ok ? refreshed : current;
+        if (!base) return base;
+        return {
+          ...base,
+          participants: (base.participants || []).map((item: any) =>
+            Number(item.id) === Number(selectedParticipant.id)
+              ? mergedParticipant
+              : item,
+          ),
+        };
+      });
+      setTargetForm((previous) => ({
+        ...previous,
+        nutrition_max_calories: canonicalTargets.nutrition_max_calories
+          ? String(canonicalTargets.nutrition_max_calories)
+          : previous.nutrition_max_calories,
+        workout_min_calories: canonicalTargets.workout_min_calories
+          ? String(canonicalTargets.workout_min_calories)
+          : previous.workout_min_calories,
+        daily_step_target: String(canonicalTargets.daily_step_target || 8000),
+        target_weight_kg: canonicalTargets.target_weight_kg
+          ? String(canonicalTargets.target_weight_kg)
+          : previous.target_weight_kg,
+        coach_note: "",
+      }));
 
       setTargetSaveReceipt({
         verified,
+        saved_verified: serverVerified,
+        dashboard_verified: dashboardVerified,
         participant: result.participant || {
           id: selectedParticipant.id,
           code: selectedParticipant.code,
           name: selectedParticipant.name,
         },
-        targets: readBackTargets,
-        checks,
+        targets: canonicalTargets,
+        checks: dashboardChecks,
       });
       setMessage(
         verified
           ? `VERIFIED - Target ${selectedParticipant.name} (kode ${selectedParticipant.code || "-"}, ID ${selectedParticipant.id}) sudah tersimpan dan terbaca kembali.`
-          : `PARTIAL SUCCESS - Target tersimpan untuk kode ${selectedParticipant.code || "-"}, tetapi tampilan belum sepenuhnya sama.`,
+          : serverVerified
+            ? `SAVED - Target ${selectedParticipant.name} sudah tersimpan. Tampilan dashboard sedang diselaraskan dengan target individual terbaru.`
+            : `PARTIAL SUCCESS - Target diterima, tetapi pembacaan server masih perlu diperiksa.`,
       );
     } else {
       setMessage(result.message || "Gagal menyimpan target peserta.");
@@ -4013,7 +4068,9 @@ function ParticipantDetail({
                 <div className="font-black">
                   {targetSaveReceipt.verified
                     ? "VERIFIED - target tersimpan dan terbaca kembali"
-                    : "PARTIAL SUCCESS - perlu pemeriksaan ulang"}
+                    : targetSaveReceipt.saved_verified
+                      ? "SAVED - dashboard sedang diselaraskan"
+                      : "PARTIAL SUCCESS - perlu pemeriksaan ulang"}
                 </div>
                 <div className="mt-1">
                   Kode {targetSaveReceipt.participant?.code || participant.code || "-"}
