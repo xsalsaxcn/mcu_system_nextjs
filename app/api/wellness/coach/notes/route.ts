@@ -45,6 +45,74 @@ function asNumber(value: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// WELLNESS_COACH_TARGET_READBACK_V126M38
+function participantCode(row: any) {
+  return clean(
+    row?.code ||
+      row?.employee_code ||
+      row?.participant_code ||
+      row?.kode_karyawan ||
+      row?.nik ||
+      row?.employee_id,
+  );
+}
+
+function participantName(row: any) {
+  return clean(
+    row?.name || row?.full_name || row?.employee_name || row?.nama,
+  ) || "Peserta";
+}
+
+function parseTargetsFromNote(note: any) {
+  const text = [note?.action_plan, note?.coach_note, note?.main_issue]
+    .map(clean)
+    .filter(Boolean)
+    .join("\n");
+  const find = (pattern: RegExp) => {
+    const match = text.match(pattern);
+    return match ? asNumber(String(match[1]).replace(",", ".")) : 0;
+  };
+  return {
+    nutrition_max_calories: find(/Target\s+Nutrisi\s*:\s*([0-9.,]+)/i),
+    workout_min_calories: find(
+      /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
+    ),
+    daily_step_target: find(/Target\s+Langkah\s*:\s*([0-9.,]+)/i),
+    target_weight_kg: find(
+      /Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i,
+    ),
+  };
+}
+
+function effectiveParticipantTargets(row: any, targetNote: any) {
+  const fromNote = parseTargetsFromNote(targetNote);
+  return {
+    nutrition_max_calories:
+      fromNote.nutrition_max_calories ||
+      asNumber(row?.daily_calorie_limit || row?.target_calories || row?.calorie_limit),
+    workout_min_calories:
+      fromNote.workout_min_calories ||
+      asNumber(
+        row?.workout_calorie_target ||
+          row?.active_calorie_target ||
+          row?.daily_activity_calorie_target,
+      ),
+    daily_step_target:
+      fromNote.daily_step_target ||
+      asNumber(row?.daily_step_target || row?.step_target) ||
+      8000,
+    target_weight_kg:
+      fromNote.target_weight_kg ||
+      asNumber(row?.target_weight_kg || row?.weight_target_kg),
+  };
+}
+
+function sameTarget(actual: any, expected: any) {
+  const a = asNumber(actual);
+  const e = asNumber(expected);
+  return e <= 0 || Math.abs(a - e) < 0.01;
+}
+
 function isChatNote(note: any) {
   const topic = clean(note?.topic).toLowerCase();
   const issue = clean(note?.main_issue).toLowerCase();
@@ -125,36 +193,70 @@ async function updateExistingTargetFields(
     workout_min_calories: number;
     daily_step_target: number;
     target_weight_kg: number;
-  }
+  },
 ) {
-  const fullPayload: any = {
-    target_weight_kg: targets.target_weight_kg || null,
-    daily_calorie_limit: targets.nutrition_max_calories || null,
-    workout_calorie_target: targets.workout_min_calories || null,
-    updated_at: new Date().toISOString(),
-  };
+  const fields: Array<[string, number]> = [];
+  if (targets.nutrition_max_calories > 0) {
+    fields.push(["daily_calorie_limit", targets.nutrition_max_calories]);
+  }
+  if (targets.workout_min_calories > 0) {
+    fields.push(["workout_calorie_target", targets.workout_min_calories]);
+  }
+  if (targets.target_weight_kg > 0) {
+    fields.push(["target_weight_kg", targets.target_weight_kg]);
+  }
+
+  if (fields.length === 0) {
+    return {
+      synced: true,
+      partial: false,
+      mode: "target_note_only",
+      applied_fields: [] as string[],
+      warnings: [] as string[],
+    };
+  }
+
+  const updatedAt = new Date().toISOString();
+  const payload: any = { updated_at: updatedAt };
+  for (const [field, value] of fields) payload[field] = value;
 
   const full = await supabase
     .from("wellness_participants")
-    .update(fullPayload)
+    .update(payload)
     .eq("id", participantId);
 
   if (!full.error) {
-    return { synced: true, mode: "all_existing_fields", warning: "" };
+    return {
+      synced: true,
+      partial: false,
+      mode: "all_provided_fields",
+      applied_fields: fields.map(([field]) => field),
+      warnings: [] as string[],
+    };
   }
 
-  const fallback = await supabase
-    .from("wellness_participants")
-    .update({
-      target_weight_kg: targets.target_weight_kg || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", participantId);
+  const appliedFields: string[] = [];
+  const warnings: string[] = [full.error.message];
+  for (const [field, value] of fields) {
+    const result = await supabase
+      .from("wellness_participants")
+      .update({ [field]: value, updated_at: updatedAt })
+      .eq("id", participantId);
+    if (result.error) warnings.push(`${field}: ${result.error.message}`);
+    else appliedFields.push(field);
+  }
 
   return {
-    synced: !fallback.error,
-    mode: fallback.error ? "note_only" : "weight_field_and_note",
-    warning: full.error.message || fallback.error?.message || "",
+    synced: appliedFields.length === fields.length,
+    partial: appliedFields.length > 0 && appliedFields.length < fields.length,
+    mode:
+      appliedFields.length === fields.length
+        ? "individual_fields"
+        : appliedFields.length > 0
+          ? "partial_fields"
+          : "target_note_only",
+    applied_fields: appliedFields,
+    warnings,
   };
 }
 
@@ -369,6 +471,7 @@ export async function POST(request: NextRequest) {
     const action = clean(body.action) || "save_instruction";
     const scope = clean(body.scope) || "participant";
     const participantId = asNumber(body.participant_id);
+    const requestedParticipantCode = clean(body.participant_code);
     const groupId = body.wellness_group_unit_id || body.group_unit_id || null;
     const groupName = clean(body.group_name);
     const { assignments, participants, groupUnitMap } = await assignedScope(
@@ -502,6 +605,21 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const actualParticipantCode = participantCode(participant);
+      if (
+        requestedParticipantCode &&
+        actualParticipantCode &&
+        requestedParticipantCode !== actualParticipantCode
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            message: `Identitas peserta berubah. Dipilih kode ${requestedParticipantCode}, tetapi Participant ID ${participantId} terhubung ke kode ${actualParticipantCode}. Refresh peserta lalu pilih ulang.`,
+          },
+          { status: 409 },
+        );
+      }
+
       const targets = {
         nutrition_max_calories: asNumber(body.nutrition_max_calories),
         workout_min_calories: asNumber(body.workout_min_calories),
@@ -584,12 +702,63 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const [participantReadBack, noteReadBack] = await Promise.all([
+        supabase
+          .from("wellness_participants")
+          .select("*")
+          .eq("id", participantId)
+          .maybeSingle(),
+        supabase
+          .from("wellness_coach_notes")
+          .select("*")
+          .eq("id", data.id)
+          .maybeSingle(),
+      ]);
+
+      const readBackParticipant = participantReadBack.data || participant;
+      const readBackNote = noteReadBack.data || data;
+      const readBackTargets = effectiveParticipantTargets(
+        readBackParticipant,
+        readBackNote,
+      );
+      const verifiedFields = {
+        nutrition_max_calories: sameTarget(
+          readBackTargets.nutrition_max_calories,
+          targets.nutrition_max_calories,
+        ),
+        workout_min_calories: sameTarget(
+          readBackTargets.workout_min_calories,
+          targets.workout_min_calories,
+        ),
+        daily_step_target: sameTarget(
+          readBackTargets.daily_step_target,
+          targets.daily_step_target,
+        ),
+        target_weight_kg: sameTarget(
+          readBackTargets.target_weight_kg,
+          targets.target_weight_kg,
+        ),
+      };
+      const verified = Object.values(verifiedFields).every(Boolean);
+
       return NextResponse.json({
         ok: true,
-        message:
-          sync.mode === "all_existing_fields"
-            ? "Target peserta berhasil disimpan dan tersinkron ke grafik."
-            : "Target peserta berhasil disimpan sebagai instruksi coach.",
+        verified,
+        message: verified
+          ? "Target peserta berhasil disimpan dan pembacaan ulang terverifikasi."
+          : "Target tersimpan, tetapi pembacaan ulang belum sepenuhnya sesuai.",
+        participant: {
+          id: participantId,
+          code: actualParticipantCode,
+          name: participantName(participant),
+        },
+        saved_targets: targets,
+        read_back: {
+          targets: readBackTargets,
+          verified_fields: verifiedFields,
+          participant_error: participantReadBack.error?.message || "",
+          note_error: noteReadBack.error?.message || "",
+        },
         note: data,
         target_sync: { ...sync, step_target: stepSync },
       });

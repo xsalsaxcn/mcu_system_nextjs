@@ -240,6 +240,8 @@ export default function WellnessCoachPortalPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [saving, setSaving] = useState(false);
+  // WELLNESS_COACH_TARGET_READBACK_V126M38
+  const [targetSaveReceipt, setTargetSaveReceipt] = useState<any>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [instructionGroup, setInstructionGroup] = useState("");
   const [instructionScope, setInstructionScope] = useState<
@@ -395,6 +397,7 @@ export default function WellnessCoachPortalPage() {
   function chooseParticipant(item: any, options?: { openDetail?: boolean }) {
     setSelectedParticipant(item);
     setParticipantDetail(null);
+    setTargetSaveReceipt(null);
     setTargetForm({
       nutrition_max_calories: item?.targets?.nutrition_max_calories
         ? String(item.targets.nutrition_max_calories)
@@ -528,7 +531,15 @@ export default function WellnessCoachPortalPage() {
   async function saveTargets() {
     if (!selectedParticipant) return;
     setSaving(true);
-    setMessage("Menyimpan target peserta...");
+    setTargetSaveReceipt(null);
+    setMessage("Menyimpan dan memverifikasi target peserta...");
+
+    const requestedTargets = {
+      nutrition_max_calories: Number(targetForm.nutrition_max_calories || 0),
+      workout_min_calories: Number(targetForm.workout_min_calories || 0),
+      daily_step_target: Number(targetForm.daily_step_target || 8000),
+      target_weight_kg: Number(targetForm.target_weight_kg || 0),
+    };
 
     const result = await fetch("/api/wellness/coach/notes", {
       method: "POST",
@@ -536,10 +547,8 @@ export default function WellnessCoachPortalPage() {
       body: JSON.stringify({
         action: "save_targets",
         participant_id: selectedParticipant.id,
-        nutrition_max_calories: targetForm.nutrition_max_calories,
-        workout_min_calories: targetForm.workout_min_calories,
-        daily_step_target: targetForm.daily_step_target,
-        target_weight_kg: targetForm.target_weight_kg,
+        participant_code: selectedParticipant.code || "",
+        ...requestedTargets,
         coach_note: targetForm.coach_note,
         next_follow_up_date: targetForm.next_follow_up_date,
       }),
@@ -551,9 +560,70 @@ export default function WellnessCoachPortalPage() {
       }));
 
     if (result.ok) {
-      setMessage(result.message || "Target peserta berhasil disimpan.");
-      await loadDashboard({ keepSelection: true });
-    } else setMessage(result.message || "Gagal menyimpan target peserta.");
+      const refreshed = await loadDashboard({ keepSelection: true, silent: true });
+      const freshParticipant = (refreshed?.participants || []).find(
+        (item: any) => Number(item.id) === Number(selectedParticipant.id),
+      );
+      const readBackTargets =
+        freshParticipant?.targets || result?.read_back?.targets || {};
+      const checks = {
+        nutrition_max_calories:
+          requestedTargets.nutrition_max_calories <= 0 ||
+          Number(readBackTargets.nutrition_max_calories || 0) ===
+            requestedTargets.nutrition_max_calories,
+        workout_min_calories:
+          requestedTargets.workout_min_calories <= 0 ||
+          Number(readBackTargets.workout_min_calories || 0) ===
+            requestedTargets.workout_min_calories,
+        daily_step_target:
+          Number(readBackTargets.daily_step_target || 0) ===
+          requestedTargets.daily_step_target,
+        target_weight_kg:
+          requestedTargets.target_weight_kg <= 0 ||
+          Math.abs(
+            Number(readBackTargets.target_weight_kg || 0) -
+              requestedTargets.target_weight_kg,
+          ) < 0.01,
+      };
+      const verified =
+        result.verified !== false && Object.values(checks).every(Boolean);
+
+      if (freshParticipant) {
+        setSelectedParticipant(freshParticipant);
+        setTargetForm((previous) => ({
+          ...previous,
+          nutrition_max_calories: readBackTargets.nutrition_max_calories
+            ? String(readBackTargets.nutrition_max_calories)
+            : previous.nutrition_max_calories,
+          workout_min_calories: readBackTargets.workout_min_calories
+            ? String(readBackTargets.workout_min_calories)
+            : previous.workout_min_calories,
+          daily_step_target: String(readBackTargets.daily_step_target || 8000),
+          target_weight_kg: readBackTargets.target_weight_kg
+            ? String(readBackTargets.target_weight_kg)
+            : previous.target_weight_kg,
+          coach_note: "",
+        }));
+      }
+
+      setTargetSaveReceipt({
+        verified,
+        participant: result.participant || {
+          id: selectedParticipant.id,
+          code: selectedParticipant.code,
+          name: selectedParticipant.name,
+        },
+        targets: readBackTargets,
+        checks,
+      });
+      setMessage(
+        verified
+          ? `VERIFIED - Target ${selectedParticipant.name} (kode ${selectedParticipant.code || "-"}, ID ${selectedParticipant.id}) sudah tersimpan dan terbaca kembali.`
+          : `PARTIAL SUCCESS - Target tersimpan untuk kode ${selectedParticipant.code || "-"}, tetapi tampilan belum sepenuhnya sama.`,
+      );
+    } else {
+      setMessage(result.message || "Gagal menyimpan target peserta.");
+    }
     setSaving(false);
   }
 
@@ -1663,6 +1733,7 @@ export default function WellnessCoachPortalPage() {
           targetForm={targetForm}
           setTargetForm={setTargetForm}
           saveTargets={saveTargets}
+          targetSaveReceipt={targetSaveReceipt}
           openInstruction={() => openInstruction("participant")}
           saving={saving}
           onClose={() => setParticipantModalOpen(false)}
@@ -3470,10 +3541,17 @@ function ParticipantDetail({
   targetForm,
   setTargetForm,
   saveTargets,
+  targetSaveReceipt,
   openInstruction,
   saving,
 }: any) {
-  const latestNote = participant.latest_note || null;
+  const latestTargetNote = participant.latest_target_note || null;
+  const latestInstructionNote =
+    participant.latest_instruction_note ||
+    (clean(participant.latest_note?.topic).toLowerCase().includes("target wellness")
+      ? null
+      : participant.latest_note) ||
+    null;
   const summary = detail?.summary || {};
   const breakdown = detail?.point_breakdown || {};
   const charts = detail?.charts || {};
@@ -3847,6 +3925,11 @@ function ParticipantDetail({
           <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
             Isi hanya target yang ingin ditetapkan atau diubah.
           </p>
+          <div className="mt-3 inline-flex flex-wrap items-center gap-2 rounded-2xl bg-sky-50 px-3 py-2 text-[11px] font-black text-sky-800">
+            <span>{participant.name || "Peserta"}</span>
+            <span>• Kode {participant.code || "-"}</span>
+            <span>• Participant ID {participant.id || "-"}</span>
+          </div>
           <div className="mt-4 grid gap-3">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Batas Konsumsi Kalori Harian (kkal/hari)
@@ -3917,14 +4000,39 @@ function ParticipantDetail({
               disabled={saving}
               className="rounded-2xl bg-teal-600 px-5 py-4 text-sm font-black text-white disabled:opacity-50"
             >
-              {saving ? "Menyimpan..." : "Simpan Target Peserta"}
+              {saving ? "Menyimpan & Verifikasi..." : "Simpan Target Peserta"}
             </button>
+            {targetSaveReceipt ? (
+              <div
+                className={`rounded-2xl border p-3 text-xs font-bold leading-5 ${
+                  targetSaveReceipt.verified
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+                }`}
+              >
+                <div className="font-black">
+                  {targetSaveReceipt.verified
+                    ? "VERIFIED - target tersimpan dan terbaca kembali"
+                    : "PARTIAL SUCCESS - perlu pemeriksaan ulang"}
+                </div>
+                <div className="mt-1">
+                  Kode {targetSaveReceipt.participant?.code || participant.code || "-"}
+                  {" • "}Participant ID {targetSaveReceipt.participant?.id || participant.id}
+                </div>
+                <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                  <span>Nutrisi: {fmtNumber(targetSaveReceipt.targets?.nutrition_max_calories || 0)} kkal</span>
+                  <span>Workout: {fmtNumber(targetSaveReceipt.targets?.workout_min_calories || 0)} kkal</span>
+                  <span>Langkah: {fmtNumber(targetSaveReceipt.targets?.daily_step_target || 8000)}</span>
+                  <span>Target BB: {fmtNumber(targetSaveReceipt.targets?.target_weight_kg || 0, 1)} kg</span>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-base font-black">Instruksi Terakhir</h3>
+            <h3 className="text-base font-black">Target & Instruksi Terakhir</h3>
             <button
               type="button"
               onClick={openInstruction}
@@ -3933,30 +4041,56 @@ function ParticipantDetail({
               + Tambah Instruksi
             </button>
           </div>
-          {latestNote ? (
-            <div className="mt-4">
-              <div className="text-sm font-black text-slate-900">
-                {latestNote.topic || "Catatan Coaching"}
-              </div>
-              <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">
-                {latestNote.coach_note || latestNote.action_plan || "-"}
-              </div>
-              {latestNote.action_plan ? (
-                <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">
-                  {latestNote.action_plan}
+
+          <div className="mt-4 rounded-2xl border border-teal-100 bg-teal-50 p-3">
+            <div className="text-[10px] font-black uppercase tracking-wide text-teal-700">
+              Target Individual Terakhir
+            </div>
+            {latestTargetNote ? (
+              <>
+                <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-700">
+                  {latestTargetNote.action_plan || latestTargetNote.coach_note || "-"}
                 </div>
-              ) : null}
-              <div
-                className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${latestNote.is_read ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
-              >
-                {formatReadAt(latestNote.read_at)}
+                <div className="mt-2 text-[10px] font-bold text-teal-800">
+                  Kode {participant.code || "-"} • Participant ID {participant.id || "-"}
+                </div>
+              </>
+            ) : (
+              <div className="mt-2 text-xs font-bold text-slate-400">
+                Belum ada target individual.
               </div>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Instruksi Kelompok / Individual Terakhir
             </div>
-          ) : (
-            <div className="mt-4 text-sm font-bold text-slate-400">
-              Belum ada instruksi.
-            </div>
-          )}
+            {latestInstructionNote ? (
+              <div className="mt-2">
+                <div className="text-sm font-black text-slate-900">
+                  {latestInstructionNote.topic || "Catatan Coaching"}
+                </div>
+                <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-600">
+                  {latestInstructionNote.coach_note || latestInstructionNote.action_plan || "-"}
+                </div>
+                {latestInstructionNote.action_plan ? (
+                  <div className="mt-3 whitespace-pre-line rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-700">
+                    {latestInstructionNote.action_plan}
+                  </div>
+                ) : null}
+                <div
+                  className={`mt-3 inline-flex rounded-full px-3 py-2 text-xs font-black ${latestInstructionNote.is_read ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
+                >
+                  {formatReadAt(latestInstructionNote.read_at)}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 text-sm font-bold text-slate-400">
+                Belum ada instruksi selain target individual.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

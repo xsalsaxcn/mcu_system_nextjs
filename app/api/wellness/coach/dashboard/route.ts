@@ -247,31 +247,34 @@ function parseTargetsFromNote(note: any) {
   };
 }
 
+// WELLNESS_COACH_TARGET_READBACK_V126M38
+// The newest individual Target Wellness note is the canonical override.
+// Participant fields and defaults are fallbacks only.
 function participantTargets(row: any, latestTargetNote: any) {
   const fromNote = parseTargetsFromNote(latestTargetNote);
 
   return {
     nutrition_max_calories:
+      fromNote.nutrition_max_calories ||
       asNumber(
         row?.daily_calorie_limit || row?.target_calories || row?.calorie_limit,
       ) ||
-      fromNote.nutrition_max_calories ||
       0,
     workout_min_calories:
+      fromNote.workout_min_calories ||
       asNumber(
         row?.workout_calorie_target ||
           row?.active_calorie_target ||
           row?.daily_activity_calorie_target,
       ) ||
-      fromNote.workout_min_calories ||
       0,
     daily_step_target:
       fromNote.daily_step_target ||
       asNumber(row?.daily_step_target || row?.step_target) ||
       8000,
     target_weight_kg:
-      asNumber(row?.target_weight_kg || row?.weight_target_kg) ||
       fromNote.target_weight_kg ||
+      asNumber(row?.target_weight_kg || row?.weight_target_kg) ||
       0,
   };
 }
@@ -645,7 +648,11 @@ export async function GET(request: NextRequest) {
       const latestNote = instructionNotes[0] || null;
       const latestTargetNote = instructionNotes.find((note) =>
         clean(note.topic).toLowerCase().includes("target wellness"),
-      );
+      ) || null;
+      const latestInstructionNote = instructionNotes.find(
+        (note) =>
+          !clean(note.topic).toLowerCase().includes("target wellness"),
+      ) || null;
       const todayActs = acts.filter((item) => activityDate(item) === today);
       const todayFoods = foods.filter((item) => foodDate(item) === today);
       const todayNutritionPointCount = nutritionPointInputs.filter(
@@ -653,6 +660,12 @@ export async function GET(request: NextRequest) {
       ).length;
       const latestNoteReadAt = latestNote
         ? readMap.get(`${asNumber(latestNote.id)}:${id}`) || null
+        : null;
+      const latestTargetReadAt = latestTargetNote
+        ? readMap.get(`${asNumber(latestTargetNote.id)}:${id}`) || null
+        : null;
+      const latestInstructionReadAt = latestInstructionNote
+        ? readMap.get(`${asNumber(latestInstructionNote.id)}:${id}`) || null
         : null;
       const flag = makeFlag({
         today,
@@ -726,6 +739,20 @@ export async function GET(request: NextRequest) {
               ...latestNote,
               is_read: Boolean(latestNoteReadAt),
               read_at: latestNoteReadAt,
+            }
+          : null,
+        latest_target_note: latestTargetNote
+          ? {
+              ...latestTargetNote,
+              is_read: Boolean(latestTargetReadAt),
+              read_at: latestTargetReadAt,
+            }
+          : null,
+        latest_instruction_note: latestInstructionNote
+          ? {
+              ...latestInstructionNote,
+              is_read: Boolean(latestInstructionReadAt),
+              read_at: latestInstructionReadAt,
             }
           : null,
         unread_note_count: instructionNotes.filter(
