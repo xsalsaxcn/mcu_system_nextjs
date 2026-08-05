@@ -40,6 +40,7 @@ export type CoachNutritionTargetSummary = {
 export type CoachNutritionProfileInput = {
   gender?: unknown;
   birth_date?: unknown;
+  age_years?: unknown;
   height_cm?: unknown;
   weight_kg?: unknown;
   bmi?: unknown;
@@ -574,7 +575,11 @@ export function buildCoachNutritionTargetRecommendation(
     weight > 0 && height > 0 ? weight / ((height / 100) ** 2) : 0;
   const bmi = rounded(suppliedBmi > 0 ? suppliedBmi : calculatedBmi, 1);
   const gender = normalizeGender(profile.gender);
-  const age = ageOnDate(profile.birth_date, activity.end_date);
+  const suppliedAge = Math.round(numberValue(profile.age_years));
+  const age =
+    suppliedAge > 0 && suppliedAge < 120
+      ? suppliedAge
+      : ageOnDate(profile.birth_date, activity.end_date);
   const healthyMin = height > 0 ? rounded(18.5 * ((height / 100) ** 2), 1) : 0;
   const healthyMax = height > 0 ? rounded(24.9 * ((height / 100) ** 2), 1) : 0;
   const activityFactor = activityFactorForNutrition(activity);
@@ -606,6 +611,29 @@ export function buildCoachNutritionTargetRecommendation(
   let maintenance = 0;
   let nutritionTarget = 0;
   let targetWeight = 0;
+
+  // Weight goal depends on the latest height, weight, and BMI. It must remain
+  // available even when date of birth is missing, because age is only required
+  // for the Mifflin-St Jeor calorie calculation.
+  if (height > 0 && weight > 0 && bmi > 0) {
+    if (bmi < 18.5) {
+      goal = "medical_review";
+      targetWeight = healthyMin;
+      warnings.push(
+        "BMI di bawah 18,5. Target berat badan perlu dikonfirmasi NAKES/dokter sebelum diterapkan.",
+      );
+    } else if (bmi < 25) {
+      goal = "maintain";
+      targetWeight = rounded(weight, 1);
+    } else if (bmi < 30) {
+      goal = "reduce";
+      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+    } else {
+      goal = "reduce";
+      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+    }
+  }
+
   const completeAdultProfile =
     height > 0 && weight > 0 && bmi > 0 && age >= 18 && gender !== "unknown";
 
@@ -614,24 +642,12 @@ export function buildCoachNutritionTargetRecommendation(
     bmr = nearest(bmr, 10);
     maintenance = nearest(bmr * activityFactor, 50);
 
-    if (bmi < 18.5) {
-      goal = "medical_review";
-      targetWeight = healthyMin;
-      warnings.push(
-        "BMI di bawah 18,5. Target nutrisi dan berat badan perlu dikonfirmasi NAKES/dokter sebelum diterapkan.",
-      );
-    } else if (bmi < 25) {
-      goal = "maintain";
+    if (bmi >= 18.5 && bmi < 25) {
       nutritionTarget = maintenance;
-      targetWeight = rounded(weight, 1);
-    } else if (bmi < 30) {
-      goal = "reduce";
+    } else if (bmi >= 25 && bmi < 30) {
       nutritionTarget = nearest(maintenance * 0.9, 50);
-      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
-    } else {
-      goal = "reduce";
+    } else if (bmi >= 30) {
       nutritionTarget = nearest(maintenance * 0.85, 50);
-      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
     }
 
     if (nutritionTarget > 0 && nutritionTarget < 1200) {

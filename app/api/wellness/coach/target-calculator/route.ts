@@ -67,6 +67,80 @@ function rowDate(row: any) {
   return clean(row?.checkup_date || row?.exam_date || row?.log_date || row?.created_at);
 }
 
+function rowPayload(row: any) {
+  if (!row?.raw_payload) return {};
+  if (typeof row.raw_payload === "object") return row.raw_payload;
+  try {
+    const parsed = JSON.parse(String(row.raw_payload));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function firstText(...values: any[]) {
+  for (const value of values) {
+    const text = clean(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function profileAge(row: any, participant: any) {
+  const raw = rowPayload(row);
+  return positiveNumber(
+    row?.age_years,
+    row?.age,
+    row?.usia,
+    raw?.age_years,
+    raw?.age,
+    raw?.usia,
+    raw?.["Usia"],
+    participant?.age_years,
+    participant?.age,
+    participant?.usia,
+  );
+}
+
+function profileBirthDate(row: any, participant: any) {
+  const raw = rowPayload(row);
+  return firstText(
+    row?.birth_date,
+    row?.date_of_birth,
+    row?.birthdate,
+    row?.dob,
+    row?.tanggal_lahir,
+    raw?.birth_date,
+    raw?.date_of_birth,
+    raw?.birthdate,
+    raw?.dob,
+    raw?.tanggal_lahir,
+    raw?.["Tanggal Lahir"],
+    raw?.participant_snapshot?.birth_date,
+    participant?.birth_date,
+    participant?.date_of_birth,
+    participant?.birthdate,
+    participant?.dob,
+    participant?.tanggal_lahir,
+  );
+}
+
+function profileGender(row: any, participant: any) {
+  const raw = rowPayload(row);
+  return firstText(
+    row?.gender,
+    row?.sex,
+    row?.jenis_kelamin,
+    raw?.gender,
+    raw?.sex,
+    raw?.jenis_kelamin,
+    raw?.["Jenis Kelamin"],
+    participant?.gender,
+    participant?.sex,
+    participant?.jenis_kelamin,
+  );
+}
+
 async function safeClinicalRows(
   supabase: any,
   table: string,
@@ -94,8 +168,9 @@ function latestClinicalProfile(participant: any, sources: Array<{ label: string;
       const bmi = positiveNumber(row?.bmi, row?.body_mass_index);
       if (weight > 0 && height > 0) {
         return {
-          gender: participant?.gender || participant?.sex,
-          birth_date: participant?.birth_date || participant?.date_of_birth,
+          gender: profileGender(row, participant),
+          birth_date: profileBirthDate(row, participant),
+          age_years: profileAge(row, participant),
           height_cm: height,
           weight_kg: weight,
           bmi,
@@ -107,8 +182,9 @@ function latestClinicalProfile(participant: any, sources: Array<{ label: string;
   }
 
   return {
-    gender: participant?.gender || participant?.sex,
-    birth_date: participant?.birth_date || participant?.date_of_birth,
+    gender: profileGender(null, participant),
+    birth_date: profileBirthDate(null, participant),
+    age_years: profileAge(null, participant),
     height_cm: positiveNumber(participant?.height_cm),
     weight_kg: positiveNumber(
       participant?.current_weight_kg,
@@ -147,6 +223,12 @@ export async function GET(request: NextRequest) {
 
     const participantId = asNumber(request.nextUrl.searchParams.get("participant_id"));
     const requestedCode = clean(request.nextUrl.searchParams.get("participant_code"));
+    const ageOverride = Math.round(
+      positiveNumber(request.nextUrl.searchParams.get("age_years")),
+    );
+    const genderOverride = clean(
+      request.nextUrl.searchParams.get("gender"),
+    ).toLowerCase();
     const periodDays = Math.min(
       30,
       Math.max(7, asNumber(request.nextUrl.searchParams.get("days")) || 14),
@@ -243,12 +325,20 @@ export async function GET(request: NextRequest) {
     const calculation = buildCoachActivityTargetRecommendation(activityRows, {
       periodDays,
     });
+    const clinicalProfile = latestClinicalProfile(participant, [
+      { label: "Pemeriksaan NAKES", rows: checkupRows },
+      { label: "Mini MCU", rows: miniMcuRows },
+      { label: "Log berat badan", rows: weightRows },
+    ]);
+    if (ageOverride >= 18 && ageOverride < 120) {
+      clinicalProfile.age_years = ageOverride;
+    }
+    if (["male", "female", "laki-laki", "perempuan", "pria", "wanita"].includes(genderOverride)) {
+      clinicalProfile.gender = genderOverride;
+    }
+
     const nutritionResult = buildCoachNutritionTargetRecommendation(
-      latestClinicalProfile(participant, [
-        { label: "Pemeriksaan NAKES", rows: checkupRows },
-        { label: "Mini MCU", rows: miniMcuRows },
-        { label: "Log berat badan", rows: weightRows },
-      ]),
+      clinicalProfile,
       calculation,
     );
     calculation.clinical = nutritionResult.clinical;
