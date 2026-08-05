@@ -3,6 +3,7 @@
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 // WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
 // WELLNESS_COACH_INVALID_GOAL_SAFE_CLAMP_V126M40_6
+// WELLNESS_COACH_ADAPTIVE_NUTRITION_DEFICIT_V126M40_7
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -568,6 +569,12 @@ function activityFactorForNutrition(activity: CoachActivityTargetResult) {
   return 1.2;
 }
 
+function adaptiveReductionPercent(bmi: number) {
+  if (bmi >= 30) return -20;
+  if (bmi >= 25) return -15;
+  return -10;
+}
+
 /**
  * Builds an editable Coach recommendation. BMI determines the operational goal,
  * while Mifflin-St Jeor uses weight, height, age, and sex for energy estimation.
@@ -668,7 +675,7 @@ export function buildCoachNutritionTargetRecommendation(
         goal = "reduce";
         phaseTargetWeight = rounded(Math.max(targetWeight, weight * 0.95), 1);
         const safeLossPercent = ((weight - targetWeight) / weight) * 100;
-        calorieAdjustmentPercent = safeLossPercent > 5 ? -15 : -10;
+        calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
         warnings.push(
           `Arah program tetap penurunan BB. Fase awal sistem: ${phaseTargetWeight} kg sebelum menuju batas aman ${targetWeight} kg.`,
         );
@@ -685,7 +692,7 @@ export function buildCoachNutritionTargetRecommendation(
       goal = "reduce";
       phaseTargetWeight = rounded(Math.max(requestedTargetWeight, weight * 0.95), 1);
       const lossPercent = ((weight - requestedTargetWeight) / weight) * 100;
-      calorieAdjustmentPercent = lossPercent > 5 ? -15 : -10;
+      calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
       if (lossPercent > 10) {
         warnings.push(
           `Goal BB ${targetWeight} kg adalah target jangka panjang (${rounded(lossPercent, 1)}% dari BB saat ini). Fase awal sistem: ${phaseTargetWeight} kg.`,
@@ -723,7 +730,7 @@ export function buildCoachNutritionTargetRecommendation(
       goal = "reduce";
       targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
       phaseTargetWeight = targetWeight;
-      calorieAdjustmentPercent = bmi >= 30 ? -15 : -10;
+      calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
     }
   }
 
@@ -738,7 +745,7 @@ export function buildCoachNutritionTargetRecommendation(
     if (goal === "maintain") {
       nutritionTarget = maintenance;
     } else if (goal === "reduce") {
-      const factor = calorieAdjustmentPercent <= -15 ? 0.85 : 0.9;
+      const factor = Math.max(0.8, 1 + calorieAdjustmentPercent / 100);
       nutritionTarget = nearest(maintenance * factor, 50);
     } else if (goal === "gain") {
       nutritionTarget = nearest(maintenance * 1.1, 50);
