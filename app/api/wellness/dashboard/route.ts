@@ -145,6 +145,65 @@ function sortedByDate(rows: any[] = [], field = "log_date") {
   );
 }
 
+// WELLNESS_NAKES_LATEST_REVISION_SELECTION_V126M42_2
+function clinicalRawPayload(row: any) {
+  if (!row?.raw_payload) return {};
+  if (typeof row.raw_payload === "object") return row.raw_payload;
+  try {
+    const parsed = JSON.parse(String(row.raw_payload));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function clinicalSortableNumber(value: any) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return String(Math.trunc(numeric)).padStart(20, "0");
+  }
+  return String(value || "");
+}
+
+function clinicalRecencyKey(row: any, dateField = "checkup_date") {
+  const raw = clinicalRawPayload(row);
+  return [
+    String(row?.[dateField] || ""),
+    String(row?.updated_at || raw?.saved_at || row?.created_at || ""),
+    clinicalSortableNumber(raw?.nakes_revision || row?.revision || 0),
+    clinicalSortableNumber(row?.id || 0),
+  ].join("|");
+}
+
+function latestClinicalHistory(rows: any[] = []) {
+  return [...(rows || [])].sort((a: any, b: any) =>
+    clinicalRecencyKey(b).localeCompare(clinicalRecencyKey(a)),
+  )[0] || null;
+}
+
+function latestClinicalRowsForCharts(rows: any[] = []) {
+  const latest = new Map<string, any>();
+
+  for (const row of rows || []) {
+    const key = [
+      String(row?.checkup_date || ""),
+      String(row?.history_type || "clinical_history"),
+    ].join("|");
+    const current = latest.get(key);
+    if (!current || clinicalRecencyKey(row) > clinicalRecencyKey(current)) {
+      latest.set(key, row);
+    }
+  }
+
+  return [...latest.values()].sort((a: any, b: any) => {
+    const dateCompare = String(a?.checkup_date || "").localeCompare(
+      String(b?.checkup_date || ""),
+    );
+    if (dateCompare) return dateCompare;
+    return clinicalRecencyKey(a).localeCompare(clinicalRecencyKey(b));
+  });
+}
+
 function historySource(row: any) {
   return (
     row?.visit_label ||
@@ -301,7 +360,7 @@ function mergeUniqueRows(...lists: any[][]) {
 }
 
 function firstClinicalHistory(rows: any[] = []) {
-  const sorted = sortedByDate(rows, "checkup_date");
+  const sorted = latestClinicalRowsForCharts(rows);
 
   return (
     sorted.find((row) => String(row?.history_type || "") === "baseline_mcu") ||
@@ -931,7 +990,7 @@ function buildParticipantCharts(args: {
     value: baselineGlucose,
   });
 
-  for (const row of sortedByDate(historyRows, "checkup_date")) {
+  for (const row of latestClinicalRowsForCharts(historyRows)) {
     const label = row.visit_label || dateLabel(row.checkup_date);
     const source = historySource(row);
 
@@ -1391,8 +1450,7 @@ export async function GET(req: NextRequest) {
       const latestActivity = latestByDate(activityRows) || null;
       const latestMiniMcu =
         latestByDate(miniMcuParticipantRows, "exam_date") || null;
-      const latestHistory =
-        latestByDate(historyParticipantRows, "checkup_date") || null;
+      const latestHistory = latestClinicalHistory(historyParticipantRows);
       const baselineHistory = firstClinicalHistory(historyParticipantRows);
 
       const baselineWeight = pickNumber(
@@ -1412,12 +1470,17 @@ export async function GET(req: NextRequest) {
         latestWeight?.weight_kg,
         baselineWeight
       );
+      const currentHeight = pickNumber(
+        latestHistory?.height_cm,
+        latestMiniMcu?.height_cm,
+        participant.height_cm
+      );
 
       const bmi = pickNumber(
         latestHistory?.bmi,
         latestMiniMcu?.bmi,
         latestWeight?.bmi,
-        calculateBmi(currentWeight, participant.height_cm),
+        calculateBmi(currentWeight, currentHeight),
         baselineBmi
       );
 
@@ -1709,7 +1772,7 @@ export async function GET(req: NextRequest) {
           groupName.get(Number(participant.group_id)) ||
           "-",
         old_group_name: groupName.get(Number(participant.group_id)) || "-",
-        height_cm: participant.height_cm,
+        height_cm: currentHeight,
         initial_weight_kg: participant.initial_weight_kg,
         target_weight_kg: participant.target_weight_kg,
         baseline_weight_kg: baselineWeight ?? null,

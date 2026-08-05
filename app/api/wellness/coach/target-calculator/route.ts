@@ -82,6 +82,33 @@ function rowPayload(row: any) {
   }
 }
 
+// WELLNESS_NAKES_LATEST_REVISION_SELECTION_V126M42_2
+function sortableClinicalNumber(value: any) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return String(Math.trunc(numeric)).padStart(20, "0");
+  }
+  return String(value || "");
+}
+
+function clinicalRecencyKey(row: any, dateColumn = "checkup_date") {
+  const raw = rowPayload(row);
+  return [
+    clean(row?.[dateColumn] || rowDate(row)),
+    clean(row?.updated_at || raw?.saved_at || row?.created_at),
+    sortableClinicalNumber(raw?.nakes_revision || row?.revision || 0),
+    sortableClinicalNumber(row?.id || 0),
+  ].join("|");
+}
+
+function sortClinicalRows(rows: any[], dateColumn: string) {
+  return [...(rows || [])].sort((a: any, b: any) =>
+    clinicalRecencyKey(b, dateColumn).localeCompare(
+      clinicalRecencyKey(a, dateColumn),
+    ),
+  );
+}
+
 function firstText(...values: any[]) {
   for (const value of values) {
     const text = clean(value);
@@ -158,7 +185,7 @@ async function safeClinicalRows(
       .eq("participant_id", participantId)
       .order(dateColumn, { ascending: false })
       .limit(20);
-    return result.error ? [] : result.data || [];
+    return result.error ? [] : sortClinicalRows(result.data || [], dateColumn);
   } catch {
     return [];
   }
@@ -166,15 +193,36 @@ async function safeClinicalRows(
 
 function latestClinicalProfile(participant: any, sources: Array<{ label: string; rows: any[] }>) {
   for (const source of sources) {
-    for (const row of source.rows || []) {
+    const dateColumn =
+      source.label === "Pemeriksaan NAKES"
+        ? "checkup_date"
+        : source.label === "Mini MCU"
+          ? "exam_date"
+          : "log_date";
+    const orderedRows = sortClinicalRows(source.rows || [], dateColumn);
+    const demographicRow = orderedRows.find((candidate: any) =>
+      Boolean(
+        profileAge(candidate, participant) ||
+          profileBirthDate(candidate, participant) ||
+          profileGender(candidate, participant),
+      ),
+    );
+
+    for (const row of orderedRows) {
       const weight = positiveNumber(row?.weight_kg, row?.weight, row?.body_weight);
       const height = positiveNumber(row?.height_cm, row?.height, participant?.height_cm);
       const bmi = positiveNumber(row?.bmi, row?.body_mass_index);
       if (weight > 0 && height > 0) {
         return {
-          gender: profileGender(row, participant),
-          birth_date: profileBirthDate(row, participant),
-          age_years: profileAge(row, participant),
+          gender:
+            profileGender(row, participant) ||
+            profileGender(demographicRow, participant),
+          birth_date:
+            profileBirthDate(row, participant) ||
+            profileBirthDate(demographicRow, participant),
+          age_years:
+            profileAge(row, participant) ||
+            profileAge(demographicRow, participant),
           height_cm: height,
           weight_kg: weight,
           bmi,
