@@ -78,6 +78,9 @@ function parseTargetsFromNote(note: any) {
       /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
     ),
     daily_step_target: find(/Target\s+Langkah\s*:\s*([0-9.,]+)/i),
+    workout_duration_target_minutes: find(
+      /Target\s+(?:Durasi\s+)?Latihan\s*:\s*([0-9.,]+)/i,
+    ),
     target_weight_kg: find(
       /Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i,
     ),
@@ -101,6 +104,8 @@ function effectiveParticipantTargets(row: any, targetNote: any) {
       fromNote.daily_step_target ||
       asNumber(row?.daily_step_target || row?.step_target) ||
       8000,
+    workout_duration_target_minutes:
+      fromNote.workout_duration_target_minutes || 0,
     target_weight_kg:
       fromNote.target_weight_kg ||
       asNumber(row?.target_weight_kg || row?.weight_target_kg),
@@ -624,6 +629,9 @@ export async function POST(request: NextRequest) {
         nutrition_max_calories: asNumber(body.nutrition_max_calories),
         workout_min_calories: asNumber(body.workout_min_calories),
         daily_step_target: asNumber(body.daily_step_target) || 8000,
+        workout_duration_target_minutes: asNumber(
+          body.workout_duration_target_minutes,
+        ),
         target_weight_kg: asNumber(body.target_weight_kg),
       };
 
@@ -631,6 +639,7 @@ export async function POST(request: NextRequest) {
         targets.nutrition_max_calories <= 0 &&
         targets.workout_min_calories <= 0 &&
         targets.daily_step_target <= 0 &&
+        targets.workout_duration_target_minutes <= 0 &&
         targets.target_weight_kg <= 0
       ) {
         return NextResponse.json(
@@ -648,6 +657,9 @@ export async function POST(request: NextRequest) {
           : "",
         targets.daily_step_target > 0
           ? `Target Langkah: ${targets.daily_step_target} langkah/hari`
+          : "",
+        targets.workout_duration_target_minutes > 0
+          ? `Target Latihan: ${targets.workout_duration_target_minutes} menit/hari aktif`
           : "",
         targets.target_weight_kg > 0
           ? `Target BB: ${targets.target_weight_kg} kg`
@@ -733,6 +745,10 @@ export async function POST(request: NextRequest) {
         daily_step_target: sameTarget(
           readBackTargets.daily_step_target,
           targets.daily_step_target,
+        ),
+        workout_duration_target_minutes: sameTarget(
+          readBackTargets.workout_duration_target_minutes,
+          targets.workout_duration_target_minutes,
         ),
         target_weight_kg: sameTarget(
           readBackTargets.target_weight_kg,

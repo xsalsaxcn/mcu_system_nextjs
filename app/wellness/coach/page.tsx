@@ -242,6 +242,9 @@ export default function WellnessCoachPortalPage() {
   const [saving, setSaving] = useState(false);
   // WELLNESS_COACH_TARGET_READBACK_V126M38
   const [targetSaveReceipt, setTargetSaveReceipt] = useState<any>(null);
+  // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
+  const [targetCalculatorLoading, setTargetCalculatorLoading] = useState(false);
+  const [targetRecommendation, setTargetRecommendation] = useState<any>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [instructionGroup, setInstructionGroup] = useState("");
   const [instructionScope, setInstructionScope] = useState<
@@ -263,6 +266,7 @@ export default function WellnessCoachPortalPage() {
     nutrition_max_calories: "",
     workout_min_calories: "",
     daily_step_target: "8000",
+    workout_duration_target_minutes: "",
     target_weight_kg: "",
     coach_note: "",
     next_follow_up_date: "",
@@ -398,6 +402,7 @@ export default function WellnessCoachPortalPage() {
     setSelectedParticipant(item);
     setParticipantDetail(null);
     setTargetSaveReceipt(null);
+    setTargetRecommendation(null);
     setTargetForm({
       nutrition_max_calories: item?.targets?.nutrition_max_calories
         ? String(item.targets.nutrition_max_calories)
@@ -411,6 +416,9 @@ export default function WellnessCoachPortalPage() {
           item?.step_target ||
           8000,
       ),
+      workout_duration_target_minutes: item?.targets?.workout_duration_target_minutes
+        ? String(item.targets.workout_duration_target_minutes)
+        : "",
       target_weight_kg: item?.targets?.target_weight_kg
         ? String(item.targets.target_weight_kg)
         : "",
@@ -528,6 +536,64 @@ export default function WellnessCoachPortalPage() {
     setSaving(false);
   }
 
+  // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
+  async function calculateTargetRecommendation() {
+    if (!selectedParticipant?.id) return;
+    setTargetCalculatorLoading(true);
+    setTargetRecommendation(null);
+    setMessage("Menghitung baseline aktivitas 14 hari...");
+
+    const params = new URLSearchParams({
+      participant_id: String(selectedParticipant.id),
+      participant_code: clean(selectedParticipant.code),
+      days: "14",
+    });
+    const result = await fetch(
+      `/api/wellness/coach/target-calculator?${params.toString()}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch((error) => ({
+        ok: false,
+        message: error?.message || "Network error",
+      }));
+
+    if (result.ok) {
+      setTargetRecommendation(result);
+      setMessage(
+        result?.calculation?.recommendation?.ready_to_apply
+          ? "Rekomendasi 14 hari selesai. Tinjau lalu terapkan ke form."
+          : "Baseline terbaca, tetapi data belum cukup untuk rekomendasi lengkap.",
+      );
+    } else {
+      setMessage(result.message || "Gagal menghitung rekomendasi target.");
+    }
+    setTargetCalculatorLoading(false);
+  }
+
+  function applyTargetRecommendation() {
+    const recommendation = targetRecommendation?.calculation?.recommendation;
+    if (!recommendation) return;
+    setTargetForm((previous: any) => ({
+      ...previous,
+      workout_min_calories: recommendation.active_calorie_target
+        ? String(recommendation.active_calorie_target)
+        : previous.workout_min_calories,
+      daily_step_target: recommendation.step_target
+        ? String(recommendation.step_target)
+        : previous.daily_step_target,
+      workout_duration_target_minutes: recommendation.exercise_minutes_target
+        ? String(recommendation.exercise_minutes_target)
+        : previous.workout_duration_target_minutes,
+      coach_note:
+        previous.coach_note ||
+        `Rekomendasi sistem dari baseline aktivitas ${targetRecommendation?.calculation?.period_days || 14} hari.`,
+    }));
+    setMessage(
+      "Rekomendasi sudah dimasukkan ke form. Periksa kembali lalu tekan Simpan Target Peserta.",
+    );
+  }
+
   async function saveTargets() {
     if (!selectedParticipant) return;
     setSaving(true);
@@ -538,6 +604,9 @@ export default function WellnessCoachPortalPage() {
       nutrition_max_calories: Number(targetForm.nutrition_max_calories || 0),
       workout_min_calories: Number(targetForm.workout_min_calories || 0),
       daily_step_target: Number(targetForm.daily_step_target || 8000),
+      workout_duration_target_minutes: Number(
+        targetForm.workout_duration_target_minutes || 0,
+      ),
       target_weight_kg: Number(targetForm.target_weight_kg || 0),
     };
 
@@ -574,6 +643,10 @@ export default function WellnessCoachPortalPage() {
         daily_step_target: Number(
           serverTargets?.daily_step_target ?? requestedTargets.daily_step_target,
         ) || 8000,
+        workout_duration_target_minutes: Number(
+          serverTargets?.workout_duration_target_minutes ??
+            requestedTargets.workout_duration_target_minutes,
+        ),
         target_weight_kg: Number(
           serverTargets?.target_weight_kg ?? requestedTargets.target_weight_kg,
         ),
@@ -599,6 +672,10 @@ export default function WellnessCoachPortalPage() {
         daily_step_target:
           Number(dashboardTargets.daily_step_target || 0) ===
           requestedTargets.daily_step_target,
+        workout_duration_target_minutes:
+          requestedTargets.workout_duration_target_minutes <= 0 ||
+          Number(dashboardTargets.workout_duration_target_minutes || 0) ===
+            requestedTargets.workout_duration_target_minutes,
         target_weight_kg:
           requestedTargets.target_weight_kg <= 0 ||
           Math.abs(
@@ -613,6 +690,7 @@ export default function WellnessCoachPortalPage() {
           "nutrition_max_calories",
           "workout_min_calories",
           "daily_step_target",
+          "workout_duration_target_minutes",
           "target_weight_kg",
         ] as const).every((key) => serverChecks[key] !== false);
       const dashboardVerified = Object.values(dashboardChecks).every(Boolean);
@@ -651,6 +729,10 @@ export default function WellnessCoachPortalPage() {
           ? String(canonicalTargets.workout_min_calories)
           : previous.workout_min_calories,
         daily_step_target: String(canonicalTargets.daily_step_target || 8000),
+        workout_duration_target_minutes:
+          canonicalTargets.workout_duration_target_minutes
+            ? String(canonicalTargets.workout_duration_target_minutes)
+            : previous.workout_duration_target_minutes,
         target_weight_kg: canonicalTargets.target_weight_kg
           ? String(canonicalTargets.target_weight_kg)
           : previous.target_weight_kg,
@@ -1789,6 +1871,10 @@ export default function WellnessCoachPortalPage() {
           setTargetForm={setTargetForm}
           saveTargets={saveTargets}
           targetSaveReceipt={targetSaveReceipt}
+          targetRecommendation={targetRecommendation}
+          targetCalculatorLoading={targetCalculatorLoading}
+          calculateTargetRecommendation={calculateTargetRecommendation}
+          applyTargetRecommendation={applyTargetRecommendation}
           openInstruction={() => openInstruction("participant")}
           saving={saving}
           onClose={() => setParticipantModalOpen(false)}
@@ -3597,6 +3683,10 @@ function ParticipantDetail({
   setTargetForm,
   saveTargets,
   targetSaveReceipt,
+  targetRecommendation,
+  targetCalculatorLoading,
+  calculateTargetRecommendation,
+  applyTargetRecommendation,
   openInstruction,
   saving,
 }: any) {
@@ -3985,6 +4075,85 @@ function ParticipantDetail({
             <span>• Kode {participant.code || "-"}</span>
             <span>• Participant ID {participant.id || "-"}</span>
           </div>
+          <div className="mt-4 rounded-3xl border border-cyan-100 bg-cyan-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-black text-slate-900">
+                  Kalkulator Target Aktivitas 14 Hari
+                </div>
+                <div className="mt-1 text-xs font-bold leading-5 text-slate-600">
+                  Menggunakan kalori aktif, langkah, dan durasi latihan. Energi total Google Fit tidak dihitung sebagai kalori workout.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={calculateTargetRecommendation}
+                disabled={targetCalculatorLoading}
+                className="rounded-2xl bg-cyan-700 px-4 py-3 text-xs font-black text-white disabled:opacity-50"
+              >
+                {targetCalculatorLoading ? "Menghitung..." : "Hitung Rekomendasi"}
+              </button>
+            </div>
+
+            {targetRecommendation?.calculation ? (
+              <div className="mt-4 space-y-3">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-400">Baseline kalori aktif</div>
+                    <div className="mt-1 text-lg font-black text-slate-900">
+                      {fmtNumber(targetRecommendation.calculation.baseline?.active_calories_per_active_day || 0)} kkal
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-500">per hari aktif</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-400">Baseline langkah</div>
+                    <div className="mt-1 text-lg font-black text-slate-900">
+                      {fmtNumber(targetRecommendation.calculation.baseline?.steps_per_recorded_day || 0)}
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-500">per hari tercatat</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-400">Baseline latihan</div>
+                    <div className="mt-1 text-lg font-black text-slate-900">
+                      {fmtNumber(targetRecommendation.calculation.baseline?.exercise_minutes_per_active_day || 0)} menit
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-500">per hari aktif</div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
+                  <div className="text-[10px] font-black uppercase text-emerald-700">Rekomendasi sistem</div>
+                  <div className="mt-2 grid gap-2 text-xs font-black text-slate-800 sm:grid-cols-3">
+                    <span>Kalori aktif: {fmtNumber(targetRecommendation.calculation.recommendation?.active_calorie_target || 0)} kkal/hari aktif</span>
+                    <span>Langkah: {fmtNumber(targetRecommendation.calculation.recommendation?.step_target || 0)} langkah/hari</span>
+                    <span>Latihan: {fmtNumber(targetRecommendation.calculation.recommendation?.exercise_minutes_target || 0)} menit/hari aktif</span>
+                  </div>
+                  <div className="mt-2 text-[10px] font-bold text-emerald-800">
+                    Confidence: {clean(targetRecommendation.calculation.recommendation?.confidence || "low").toUpperCase()} • Periode {targetRecommendation.calculation.start_date} s.d. {targetRecommendation.calculation.end_date}
+                  </div>
+                </div>
+
+                {Array.isArray(targetRecommendation.calculation.quality?.warnings) &&
+                targetRecommendation.calculation.quality.warnings.length > 0 ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+                    {targetRecommendation.calculation.quality.warnings.map((warning: string) => (
+                      <div key={warning}>• {warning}</div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={applyTargetRecommendation}
+                  disabled={!targetRecommendation.calculation.recommendation?.ready_to_apply}
+                  className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white disabled:opacity-40"
+                >
+                  Terapkan Rekomendasi ke Form
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           <div className="mt-4 grid gap-3">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Batas Konsumsi Kalori Harian (kkal/hari)
@@ -4026,6 +4195,24 @@ function ParticipantDetail({
               />
               <span className="text-[11px] font-bold text-slate-400">
                 Default 8.000 langkah dan dapat disesuaikan Coach per peserta.
+              </span>
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-slate-700">
+              Target Durasi Latihan (menit/hari aktif)
+              <input
+                type="number"
+                min="0"
+                max="180"
+                step="5"
+                className={fieldClass}
+                value={targetForm.workout_duration_target_minutes}
+                onChange={(e) =>
+                  setTarget("workout_duration_target_minutes", e.target.value)
+                }
+                placeholder="Contoh: 30"
+              />
+              <span className="text-[11px] font-bold text-slate-400">
+                Disimpan pada catatan target Coach dan tidak mengubah kalkulasi streak saat ini.
               </span>
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
@@ -4080,6 +4267,7 @@ function ParticipantDetail({
                   <span>Nutrisi: {fmtNumber(targetSaveReceipt.targets?.nutrition_max_calories || 0)} kkal</span>
                   <span>Workout: {fmtNumber(targetSaveReceipt.targets?.workout_min_calories || 0)} kkal</span>
                   <span>Langkah: {fmtNumber(targetSaveReceipt.targets?.daily_step_target || 8000)}</span>
+                  <span>Durasi: {fmtNumber(targetSaveReceipt.targets?.workout_duration_target_minutes || 0)} menit</span>
                   <span>Target BB: {fmtNumber(targetSaveReceipt.targets?.target_weight_kg || 0, 1)} kg</span>
                 </div>
               </div>

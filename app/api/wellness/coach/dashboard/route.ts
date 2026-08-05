@@ -241,6 +241,9 @@ function parseTargetsFromNote(note: any) {
     daily_step_target: find(
       /Target\s+Langkah\s*:\s*([0-9.,]+)/i,
     ),
+    workout_duration_target_minutes: find(
+      /Target\s+(?:Durasi\s+)?Latihan\s*:\s*([0-9.,]+)/i,
+    ),
     target_weight_kg: find(
       /Target\s+(?:BB|Berat(?:\s+Badan)?)\s*:\s*([0-9.,]+)/i,
     ),
@@ -257,7 +260,7 @@ function isTargetWellnessNote(note: any) {
 
   return (
     topic.includes("target wellness") ||
-    /Target\s+(?:Nutrisi|(?:Kalori\s+)?Workout|Langkah|BB|Berat(?:\s+Badan)?)\s*:/i.test(
+    /Target\s+(?:Nutrisi|(?:Kalori\s+)?Workout|Langkah|(?:Durasi\s+)?Latihan|BB|Berat(?:\s+Badan)?)\s*:/i.test(
       content,
     )
   );
@@ -303,6 +306,8 @@ function participantTargets(row: any, latestTargetNote: any) {
       fromNote.daily_step_target ||
       asNumber(row?.daily_step_target || row?.step_target) ||
       8000,
+    workout_duration_target_minutes:
+      fromNote.workout_duration_target_minutes || 0,
     target_weight_kg:
       fromNote.target_weight_kg ||
       asNumber(row?.target_weight_kg || row?.weight_target_kg) ||
