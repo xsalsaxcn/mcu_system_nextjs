@@ -245,6 +245,9 @@ export default function WellnessCoachPortalPage() {
   // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
   const [targetCalculatorLoading, setTargetCalculatorLoading] = useState(false);
   const [targetRecommendation, setTargetRecommendation] = useState<any>(null);
+  // V126M40.1: session-only fallback when participant master has no DOB/gender.
+  const [targetCalculatorProfileOverride, setTargetCalculatorProfileOverride] =
+    useState({ age_years: "", gender: "" });
   const [composerOpen, setComposerOpen] = useState(false);
   const [instructionGroup, setInstructionGroup] = useState("");
   const [instructionScope, setInstructionScope] = useState<
@@ -403,6 +406,7 @@ export default function WellnessCoachPortalPage() {
     setParticipantDetail(null);
     setTargetSaveReceipt(null);
     setTargetRecommendation(null);
+    setTargetCalculatorProfileOverride({ age_years: "", gender: "" });
     setTargetForm({
       nutrition_max_calories: item?.targets?.nutrition_max_calories
         ? String(item.targets.nutrition_max_calories)
@@ -548,6 +552,13 @@ export default function WellnessCoachPortalPage() {
       participant_code: clean(selectedParticipant.code),
       days: "14",
     });
+    const ageOverride = Number(targetCalculatorProfileOverride.age_years || 0);
+    if (ageOverride >= 18 && ageOverride < 120) {
+      params.set("age_years", String(Math.round(ageOverride)));
+    }
+    if (targetCalculatorProfileOverride.gender) {
+      params.set("gender", targetCalculatorProfileOverride.gender);
+    }
     const result = await fetch(
       `/api/wellness/coach/target-calculator?${params.toString()}`,
       { cache: "no-store" },
@@ -1879,6 +1890,8 @@ export default function WellnessCoachPortalPage() {
           targetSaveReceipt={targetSaveReceipt}
           targetRecommendation={targetRecommendation}
           targetCalculatorLoading={targetCalculatorLoading}
+          targetCalculatorProfileOverride={targetCalculatorProfileOverride}
+          setTargetCalculatorProfileOverride={setTargetCalculatorProfileOverride}
           calculateTargetRecommendation={calculateTargetRecommendation}
           applyTargetRecommendation={applyTargetRecommendation}
           openInstruction={() => openInstruction("participant")}
@@ -3691,6 +3704,8 @@ function ParticipantDetail({
   targetSaveReceipt,
   targetRecommendation,
   targetCalculatorLoading,
+  targetCalculatorProfileOverride,
+  setTargetCalculatorProfileOverride,
   calculateTargetRecommendation,
   applyTargetRecommendation,
   openInstruction,
@@ -4142,13 +4157,74 @@ function ParticipantDetail({
                     <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
                       <span>BB: {fmtNumber(targetRecommendation.calculation.clinical.weight_kg || 0, 1)} kg</span>
                       <span>TB: {fmtNumber(targetRecommendation.calculation.clinical.height_cm || 0, 1)} cm</span>
-                      <span>Usia: {fmtNumber(targetRecommendation.calculation.clinical.age_years || 0)} tahun</span>
+                      <span>Usia: {targetRecommendation.calculation.clinical.age_years ? `${fmtNumber(targetRecommendation.calculation.clinical.age_years)} tahun` : "Belum tersedia"}</span>
                       <span>Sumber: {targetRecommendation.calculation.clinical.source || "-"}</span>
                     </div>
                     <div className="mt-1 text-[10px] text-sky-800">
                       Rentang BB sehat berbasis BMI: {fmtNumber(targetRecommendation.calculation.clinical.healthy_weight_min_kg || 0, 1)}-{fmtNumber(targetRecommendation.calculation.clinical.healthy_weight_max_kg || 0, 1)} kg
                       {targetRecommendation.calculation.clinical.measured_at ? ` • Pengukuran ${targetRecommendation.calculation.clinical.measured_at}` : ""}
                     </div>
+                  </div>
+                ) : null}
+
+                {targetRecommendation.calculation.clinical &&
+                (!targetRecommendation.calculation.clinical.age_years ||
+                  targetRecommendation.calculation.clinical.gender === "unknown") ? (
+                  <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3">
+                    <div className="text-xs font-black text-violet-900">
+                      Lengkapi profil untuk kalkulator nutrisi
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold text-violet-700">
+                      Nilai ini hanya dipakai untuk hitung ulang dan tidak mengubah data master peserta.
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {!targetRecommendation.calculation.clinical.age_years ? (
+                        <label className="grid gap-1 text-[10px] font-black text-violet-900">
+                          Usia peserta (tahun)
+                          <input
+                            type="number"
+                            min="18"
+                            max="119"
+                            value={targetCalculatorProfileOverride.age_years}
+                            onChange={(event) =>
+                              setTargetCalculatorProfileOverride((current) => ({
+                                ...current,
+                                age_years: event.target.value,
+                              }))
+                            }
+                            placeholder="Contoh: 36"
+                            className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 outline-none"
+                          />
+                        </label>
+                      ) : null}
+                      {targetRecommendation.calculation.clinical.gender === "unknown" ? (
+                        <label className="grid gap-1 text-[10px] font-black text-violet-900">
+                          Jenis kelamin
+                          <select
+                            value={targetCalculatorProfileOverride.gender}
+                            onChange={(event) =>
+                              setTargetCalculatorProfileOverride((current) => ({
+                                ...current,
+                                gender: event.target.value,
+                              }))
+                            }
+                            className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 outline-none"
+                          >
+                            <option value="">Pilih</option>
+                            <option value="female">Perempuan</option>
+                            <option value="male">Laki-laki</option>
+                          </select>
+                        </label>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={calculateTargetRecommendation}
+                      disabled={targetCalculatorLoading}
+                      className="mt-3 rounded-xl bg-violet-900 px-4 py-2 text-[10px] font-black text-white disabled:opacity-50"
+                    >
+                      {targetCalculatorLoading ? "Menghitung..." : "Hitung Ulang Nutrisi"}
+                    </button>
                   </div>
                 ) : null}
 
