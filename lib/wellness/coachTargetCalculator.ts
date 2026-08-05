@@ -4,6 +4,7 @@
 // WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
 // WELLNESS_COACH_INVALID_GOAL_SAFE_CLAMP_V126M40_6
 // WELLNESS_COACH_ADAPTIVE_NUTRITION_DEFICIT_V126M40_7
+// WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -38,6 +39,12 @@ export type CoachNutritionTargetSummary = {
   nutrition_target_calories: number;
   target_weight_kg: number;
   phase_target_weight_kg: number;
+  phase_duration_days: number;
+  phase_duration_months: number;
+  phase_mode: "standard";
+  phase_weekly_change_percent: number;
+  phase_total_change_kg: number;
+  phase_monthly_milestones_kg: number[];
   requested_target_weight_kg: number;
   goal_source: "coach" | "bmi" | "bmi_safety_fallback";
   target_bmi: number;
@@ -81,6 +88,12 @@ export type CoachActivityTargetResult = {
     nutrition_calorie_target?: number;
     target_weight_kg?: number;
     phase_target_weight_kg?: number;
+    phase_duration_days?: number;
+    phase_duration_months?: number;
+    phase_mode?: "standard";
+    phase_weekly_change_percent?: number;
+    phase_total_change_kg?: number;
+    phase_monthly_milestones_kg?: number[];
     ready_to_apply: boolean;
     confidence: "low" | "medium" | "high";
   };
@@ -575,6 +588,54 @@ function adaptiveReductionPercent(bmi: number) {
   return -10;
 }
 
+const FOUR_MONTH_PHASE_DAYS = 120;
+const STANDARD_LOSS_PERCENT_PER_WEEK = 0.75;
+const STANDARD_GAIN_PERCENT_PER_WEEK = 0.25;
+
+function buildFourMonthWeightPhase(
+  currentWeight: number,
+  operationalTargetWeight: number,
+  goal: CoachNutritionTargetSummary["goal"],
+) {
+  const weeks = FOUR_MONTH_PHASE_DAYS / 7;
+  let plannedWeeklyPercent = 0;
+  let phaseTargetWeight = rounded(currentWeight, 1);
+
+  if (goal === "reduce" && operationalTargetWeight > 0) {
+    plannedWeeklyPercent = -STANDARD_LOSS_PERCENT_PER_WEEK;
+    const plannedLoss =
+      currentWeight * (STANDARD_LOSS_PERCENT_PER_WEEK / 100) * weeks;
+    phaseTargetWeight = rounded(
+      Math.max(operationalTargetWeight, currentWeight - plannedLoss),
+      1,
+    );
+  } else if (goal === "gain" && operationalTargetWeight > 0) {
+    plannedWeeklyPercent = STANDARD_GAIN_PERCENT_PER_WEEK;
+    const plannedGain =
+      currentWeight * (STANDARD_GAIN_PERCENT_PER_WEEK / 100) * weeks;
+    phaseTargetWeight = rounded(
+      Math.min(operationalTargetWeight, currentWeight + plannedGain),
+      1,
+    );
+  }
+
+  const totalChange = rounded(Math.abs(phaseTargetWeight - currentWeight), 1);
+  const direction = phaseTargetWeight >= currentWeight ? 1 : -1;
+  const milestones = [1, 2, 3, 4].map((month) =>
+    rounded(currentWeight + direction * totalChange * (month / 4), 1),
+  );
+
+  return {
+    targetWeight: phaseTargetWeight,
+    durationDays: FOUR_MONTH_PHASE_DAYS,
+    durationMonths: 4,
+    mode: "standard" as const,
+    plannedWeeklyPercent,
+    totalChange,
+    monthlyMilestones: milestones,
+  };
+}
+
 /**
  * Builds an editable Coach recommendation. BMI determines the operational goal,
  * while Mifflin-St Jeor uses weight, height, age, and sex for energy estimation.
@@ -643,10 +704,16 @@ export function buildCoachNutritionTargetRecommendation(
   let nutritionTarget = 0;
   let targetWeight = 0;
   let phaseTargetWeight = 0;
+  let phaseDurationDays = FOUR_MONTH_PHASE_DAYS;
+  let phaseDurationMonths = 4;
+  let phaseMode: "standard" = "standard";
+  let phaseWeeklyChangePercent = 0;
+  let phaseTotalChangeKg = 0;
+  let phaseMonthlyMilestonesKg: number[] = [];
   let calorieAdjustmentPercent = 0;
 
   // A Coach-entered goal weight takes priority over BMI-only maintenance logic.
-  // BMI remains a safety boundary. Large changes are split into a first 5% phase.
+  // BMI remains a safety boundary. Large changes use a specific 120-day phase.
   if (height > 0 && weight > 0 && bmi > 0 && hasCoachGoalWeight) {
     targetWeight = rounded(requestedTargetWeight, 1);
     if (requestedTargetBmi < 18.5 || requestedTargetBmi > 35) {
@@ -677,7 +744,7 @@ export function buildCoachNutritionTargetRecommendation(
         const safeLossPercent = ((weight - targetWeight) / weight) * 100;
         calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
         warnings.push(
-          `Arah program tetap penurunan BB. Fase awal sistem: ${phaseTargetWeight} kg sebelum menuju batas aman ${targetWeight} kg.`,
+          `Arah program tetap penurunan BB menuju batas aman ${targetWeight} kg.`,
         );
       } else if (targetWeight > weight + 0.5) {
         goal = "gain";
@@ -695,7 +762,7 @@ export function buildCoachNutritionTargetRecommendation(
       calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
       if (lossPercent > 10) {
         warnings.push(
-          `Goal BB ${targetWeight} kg adalah target jangka panjang (${rounded(lossPercent, 1)}% dari BB saat ini). Fase awal sistem: ${phaseTargetWeight} kg.`,
+          `Goal BB ${targetWeight} kg adalah target jangka panjang (${rounded(lossPercent, 1)}% dari BB saat ini).`,
         );
         if (confidence === "high") confidence = "medium";
       }
@@ -728,9 +795,26 @@ export function buildCoachNutritionTargetRecommendation(
       phaseTargetWeight = rounded(weight, 1);
     } else {
       goal = "reduce";
-      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+      targetWeight = healthyMax;
       phaseTargetWeight = targetWeight;
       calorieAdjustmentPercent = adaptiveReductionPercent(bmi);
+    }
+  }
+
+  if (height > 0 && weight > 0 && targetWeight > 0) {
+    const phase = buildFourMonthWeightPhase(weight, targetWeight, goal);
+    phaseTargetWeight = phase.targetWeight;
+    phaseDurationDays = phase.durationDays;
+    phaseDurationMonths = phase.durationMonths;
+    phaseMode = phase.mode;
+    phaseWeeklyChangePercent = phase.plannedWeeklyPercent;
+    phaseTotalChangeKg = phase.totalChange;
+    phaseMonthlyMilestonesKg = phase.monthlyMilestones;
+
+    if ((goal === "reduce" || goal === "gain") && phaseTotalChangeKg > 0) {
+      warnings.push(
+        `Target 4 bulan mode standar: ${phaseTargetWeight} kg (${Math.abs(phaseWeeklyChangePercent)}% BB/minggu, total ${phaseTotalChangeKg} kg selama ${phaseDurationDays} hari).`,
+      );
     }
   }
 
@@ -783,6 +867,12 @@ export function buildCoachNutritionTargetRecommendation(
       nutrition_target_calories: nutritionTarget,
       target_weight_kg: targetWeight,
       phase_target_weight_kg: phaseTargetWeight,
+      phase_duration_days: phaseDurationDays,
+      phase_duration_months: phaseDurationMonths,
+      phase_mode: phaseMode,
+      phase_weekly_change_percent: phaseWeeklyChangePercent,
+      phase_total_change_kg: phaseTotalChangeKg,
+      phase_monthly_milestones_kg: phaseMonthlyMilestonesKg,
       requested_target_weight_kg: rounded(requestedTargetWeight, 1),
       goal_source: goalSource,
       target_bmi: requestedTargetBmi,

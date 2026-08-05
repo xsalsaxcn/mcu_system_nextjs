@@ -544,6 +544,7 @@ export default function WellnessCoachPortalPage() {
   // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
   // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
   // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
+  // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
   async function calculateTargetRecommendation() {
     if (!selectedParticipant?.id) return;
     setTargetCalculatorLoading(true);
@@ -4255,10 +4256,20 @@ function ParticipantDetail({
                           ? "Goal BB aman (BMI)"
                           : "Goal BB sistem (BMI)"}: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg
                     </span>
-                    <span>Goal fase awal: {fmtNumber(targetRecommendation.calculation.recommendation?.phase_target_weight_kg || targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
+                    <span>Target 4 bulan: {fmtNumber(targetRecommendation.calculation.recommendation?.phase_target_weight_kg || targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
                   </div>
+                  {Array.isArray(targetRecommendation.calculation.recommendation?.phase_monthly_milestones_kg) &&
+                  targetRecommendation.calculation.recommendation.phase_monthly_milestones_kg.length === 4 ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-black text-emerald-900 sm:grid-cols-4">
+                      {targetRecommendation.calculation.recommendation.phase_monthly_milestones_kg.map((weight: number, index: number) => (
+                        <div key={`${index}-${weight}`} className="rounded-xl border border-emerald-200 bg-white/70 px-3 py-2">
+                          Bulan {index + 1}: {fmtNumber(weight, 1)} kg
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="mt-2 text-[10px] font-bold text-emerald-800">
-                    Confidence: {clean(targetRecommendation.calculation.recommendation?.confidence || "low").toUpperCase()} • Periode {targetRecommendation.calculation.start_date} s.d. {targetRecommendation.calculation.end_date}
+                    Confidence: {clean(targetRecommendation.calculation.recommendation?.confidence || "low").toUpperCase()} • Periode data {targetRecommendation.calculation.start_date} s.d. {targetRecommendation.calculation.end_date} • Fase {fmtNumber(targetRecommendation.calculation.recommendation?.phase_duration_days || 120)} hari • Mode {clean(targetRecommendation.calculation.recommendation?.phase_mode || "standard").toUpperCase()} • Laju {fmtNumber(Math.abs(targetRecommendation.calculation.recommendation?.phase_weekly_change_percent || 0), 2)}% BB/minggu
                   </div>
                   {targetRecommendation.calculation.nutrition ? (
                     <div className="mt-1 text-[10px] font-bold text-emerald-800">
