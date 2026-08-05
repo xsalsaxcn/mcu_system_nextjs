@@ -10,7 +10,10 @@ import {
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
-import { buildCoachActivityTargetRecommendation } from "@/lib/wellness/coachTargetCalculator";
+import {
+  buildCoachActivityTargetRecommendation,
+  buildCoachNutritionTargetRecommendation,
+} from "@/lib/wellness/coachTargetCalculator";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -49,6 +52,73 @@ function participantCode(row: any) {
 
 function participantName(row: any) {
   return clean(row?.name || row?.full_name || row?.employee_name || row?.nama) || "Peserta";
+}
+
+
+function positiveNumber(...values: any[]) {
+  for (const value of values) {
+    const parsed = asNumber(value);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function rowDate(row: any) {
+  return clean(row?.checkup_date || row?.exam_date || row?.log_date || row?.created_at);
+}
+
+async function safeClinicalRows(
+  supabase: any,
+  table: string,
+  participantId: number,
+  dateColumn: string,
+) {
+  try {
+    const result = await supabase
+      .from(table)
+      .select("*")
+      .eq("participant_id", participantId)
+      .order(dateColumn, { ascending: false })
+      .limit(20);
+    return result.error ? [] : result.data || [];
+  } catch {
+    return [];
+  }
+}
+
+function latestClinicalProfile(participant: any, sources: Array<{ label: string; rows: any[] }>) {
+  for (const source of sources) {
+    for (const row of source.rows || []) {
+      const weight = positiveNumber(row?.weight_kg, row?.weight, row?.body_weight);
+      const height = positiveNumber(row?.height_cm, row?.height, participant?.height_cm);
+      const bmi = positiveNumber(row?.bmi, row?.body_mass_index);
+      if (weight > 0 && height > 0) {
+        return {
+          gender: participant?.gender || participant?.sex,
+          birth_date: participant?.birth_date || participant?.date_of_birth,
+          height_cm: height,
+          weight_kg: weight,
+          bmi,
+          measurement_source: source.label,
+          measurement_date: rowDate(row),
+        };
+      }
+    }
+  }
+
+  return {
+    gender: participant?.gender || participant?.sex,
+    birth_date: participant?.birth_date || participant?.date_of_birth,
+    height_cm: positiveNumber(participant?.height_cm),
+    weight_kg: positiveNumber(
+      participant?.current_weight_kg,
+      participant?.initial_weight_kg,
+      participant?.baseline_weight_kg,
+    ),
+    bmi: positiveNumber(participant?.bmi, participant?.baseline_bmi),
+    measurement_source: "Baseline peserta",
+    measurement_date: participant?.updated_at || participant?.created_at,
+  };
 }
 
 async function getCoach(request: NextRequest, supabase: any) {
@@ -133,12 +203,32 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const activityResult = await supabase
-      .from("wellness_activity_logs")
-      .select("*")
-      .eq("participant_id", participantId)
-      .order("log_date", { ascending: true })
-      .limit(3000);
+    const [activityResult, checkupRows, miniMcuRows, weightRows] = await Promise.all([
+      supabase
+        .from("wellness_activity_logs")
+        .select("*")
+        .eq("participant_id", participantId)
+        .order("log_date", { ascending: true })
+        .limit(3000),
+      safeClinicalRows(
+        supabase,
+        "wellness_checkup_history",
+        participantId,
+        "checkup_date",
+      ),
+      safeClinicalRows(
+        supabase,
+        "wellness_mini_mcu_logs",
+        participantId,
+        "exam_date",
+      ),
+      safeClinicalRows(
+        supabase,
+        "wellness_weight_logs",
+        participantId,
+        "log_date",
+      ),
+    ]);
     if (activityResult.error) throw activityResult.error;
 
     const controlMap = await loadParticipantControlMap(supabase, [participantId]);
@@ -153,6 +243,24 @@ export async function GET(request: NextRequest) {
     const calculation = buildCoachActivityTargetRecommendation(activityRows, {
       periodDays,
     });
+    const nutritionResult = buildCoachNutritionTargetRecommendation(
+      latestClinicalProfile(participant, [
+        { label: "Pemeriksaan NAKES", rows: checkupRows },
+        { label: "Mini MCU", rows: miniMcuRows },
+        { label: "Log berat badan", rows: weightRows },
+      ]),
+      calculation,
+    );
+    calculation.clinical = nutritionResult.clinical;
+    calculation.nutrition = nutritionResult.nutrition;
+    calculation.recommendation.nutrition_calorie_target =
+      nutritionResult.nutrition.nutrition_target_calories;
+    calculation.recommendation.target_weight_kg =
+      nutritionResult.nutrition.target_weight_kg;
+    calculation.recommendation.ready_to_apply =
+      calculation.recommendation.ready_to_apply ||
+      nutritionResult.nutrition.ready_to_apply;
+    calculation.quality.warnings.push(...nutritionResult.nutrition.warnings);
 
     return NextResponse.json({
       ok: true,
@@ -164,7 +272,7 @@ export async function GET(request: NextRequest) {
       },
       calculation,
       note:
-        "Rekomendasi belum mengubah target. Kalori total Google Fit tidak digunakan; Coach tetap harus menekan Terapkan ke Form dan Simpan Target Peserta.",
+        "Rekomendasi belum mengubah target. Nutrisi memakai BMI terbaru serta Mifflin-St Jeor bila usia, jenis kelamin, tinggi, dan berat lengkap. Coach tetap harus menekan Terapkan ke Form dan Simpan Target Peserta.",
     });
   } catch (error: any) {
     return NextResponse.json(

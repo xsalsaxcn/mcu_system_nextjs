@@ -11,6 +11,42 @@ export type CoachActivityBaselineDay = {
   row_count: number;
 };
 
+export type CoachNutritionClinicalSummary = {
+  source: string;
+  measured_at: string;
+  weight_kg: number;
+  height_cm: number;
+  bmi: number;
+  bmi_category: string;
+  age_years: number;
+  gender: "male" | "female" | "unknown";
+  healthy_weight_min_kg: number;
+  healthy_weight_max_kg: number;
+};
+
+export type CoachNutritionTargetSummary = {
+  formula: "Mifflin-St Jeor";
+  goal: "maintain" | "reduce" | "gain" | "medical_review";
+  bmr_calories: number;
+  activity_factor: number;
+  maintenance_calories: number;
+  nutrition_target_calories: number;
+  target_weight_kg: number;
+  ready_to_apply: boolean;
+  confidence: "low" | "medium" | "high";
+  warnings: string[];
+};
+
+export type CoachNutritionProfileInput = {
+  gender?: unknown;
+  birth_date?: unknown;
+  height_cm?: unknown;
+  weight_kg?: unknown;
+  bmi?: unknown;
+  measurement_source?: unknown;
+  measurement_date?: unknown;
+};
+
 export type CoachActivityTargetResult = {
   period_days: number;
   start_date: string;
@@ -29,9 +65,13 @@ export type CoachActivityTargetResult = {
     active_calorie_target: number;
     step_target: number;
     exercise_minutes_target: number;
+    nutrition_calorie_target?: number;
+    target_weight_kg?: number;
     ready_to_apply: boolean;
     confidence: "low" | "medium" | "high";
   };
+  clinical?: CoachNutritionClinicalSummary;
+  nutrition?: CoachNutritionTargetSummary;
   quality: {
     exact_active_calorie_rows: number;
     estimated_active_calorie_rows: number;
@@ -468,3 +508,167 @@ export function buildCoachActivityTargetRecommendation(
     days,
   };
 }
+
+function normalizeGender(value: unknown): "male" | "female" | "unknown" {
+  const text = clean(value).toLowerCase();
+  if (["male", "m", "l", "laki-laki", "laki laki", "pria"].includes(text)) {
+    return "male";
+  }
+  if (["female", "f", "p", "perempuan", "wanita"].includes(text)) {
+    return "female";
+  }
+  return "unknown";
+}
+
+function ageOnDate(value: unknown, referenceDate: string) {
+  const birthText = clean(value);
+  const birth = new Date(birthText);
+  const reference = new Date(`${referenceDate}T12:00:00+07:00`);
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(reference.getTime())) return 0;
+  let age = reference.getFullYear() - birth.getFullYear();
+  const monthDelta = reference.getMonth() - birth.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && reference.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+  return age > 0 && age < 120 ? age : 0;
+}
+
+function bmiCategory(value: number) {
+  if (!(value > 0)) return "Belum tersedia";
+  if (value < 18.5) return "Berat Badan Kurang";
+  if (value < 25) return "Normal";
+  if (value < 30) return "Berat Badan Berlebih";
+  return "Obesitas";
+}
+
+function nearest(value: number, increment: number) {
+  if (!(value > 0) || !(increment > 0)) return 0;
+  return Math.round(value / increment) * increment;
+}
+
+function activityFactorForNutrition(activity: CoachActivityTargetResult) {
+  const steps = activity.baseline.steps_per_recorded_day || 0;
+  const minutes = activity.baseline.exercise_minutes_per_active_day || 0;
+  if (steps >= 10000 || minutes >= 45) return 1.55;
+  if (steps >= 7500 || minutes >= 30) return 1.45;
+  if (steps >= 5000 || minutes >= 15) return 1.35;
+  return 1.2;
+}
+
+/**
+ * Builds an editable Coach recommendation. BMI determines the operational goal,
+ * while Mifflin-St Jeor uses weight, height, age, and sex for energy estimation.
+ * The result never writes data automatically.
+ */
+export function buildCoachNutritionTargetRecommendation(
+  profile: CoachNutritionProfileInput,
+  activity: CoachActivityTargetResult,
+): {
+  clinical: CoachNutritionClinicalSummary;
+  nutrition: CoachNutritionTargetSummary;
+} {
+  const height = numberValue(profile.height_cm);
+  const weight = numberValue(profile.weight_kg);
+  const suppliedBmi = numberValue(profile.bmi);
+  const calculatedBmi =
+    weight > 0 && height > 0 ? weight / ((height / 100) ** 2) : 0;
+  const bmi = rounded(suppliedBmi > 0 ? suppliedBmi : calculatedBmi, 1);
+  const gender = normalizeGender(profile.gender);
+  const age = ageOnDate(profile.birth_date, activity.end_date);
+  const healthyMin = height > 0 ? rounded(18.5 * ((height / 100) ** 2), 1) : 0;
+  const healthyMax = height > 0 ? rounded(24.9 * ((height / 100) ** 2), 1) : 0;
+  const activityFactor = activityFactorForNutrition(activity);
+  const warnings: string[] = [];
+
+  let confidence: "low" | "medium" | "high" = "high";
+  if (!(height > 0) || !(weight > 0) || !(bmi > 0)) {
+    warnings.push("Tinggi, berat badan, atau BMI terbaru belum lengkap.");
+    confidence = "low";
+  }
+  if (!age) {
+    warnings.push("Tanggal lahir belum tersedia; kebutuhan kalori belum dapat dihitung otomatis.");
+    confidence = "low";
+  } else if (age < 18) {
+    warnings.push("Peserta di bawah 18 tahun memerlukan perhitungan klinis khusus.");
+    confidence = "low";
+  }
+  if (gender === "unknown") {
+    warnings.push("Jenis kelamin belum tersedia; rumus Mifflin-St Jeor belum dapat diterapkan.");
+    confidence = "low";
+  }
+  if (clean(profile.measurement_source).toLowerCase().includes("baseline")) {
+    warnings.push("Pengukuran NAKES terbaru belum tersedia; sistem memakai baseline peserta.");
+    if (confidence === "high") confidence = "medium";
+  }
+
+  let goal: CoachNutritionTargetSummary["goal"] = "medical_review";
+  let bmr = 0;
+  let maintenance = 0;
+  let nutritionTarget = 0;
+  let targetWeight = 0;
+  const completeAdultProfile =
+    height > 0 && weight > 0 && bmi > 0 && age >= 18 && gender !== "unknown";
+
+  if (completeAdultProfile) {
+    bmr = 10 * weight + 6.25 * height - 5 * age + (gender === "male" ? 5 : -161);
+    bmr = nearest(bmr, 10);
+    maintenance = nearest(bmr * activityFactor, 50);
+
+    if (bmi < 18.5) {
+      goal = "medical_review";
+      targetWeight = healthyMin;
+      warnings.push(
+        "BMI di bawah 18,5. Target nutrisi dan berat badan perlu dikonfirmasi NAKES/dokter sebelum diterapkan.",
+      );
+    } else if (bmi < 25) {
+      goal = "maintain";
+      nutritionTarget = maintenance;
+      targetWeight = rounded(weight, 1);
+    } else if (bmi < 30) {
+      goal = "reduce";
+      nutritionTarget = nearest(maintenance * 0.9, 50);
+      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+    } else {
+      goal = "reduce";
+      nutritionTarget = nearest(maintenance * 0.85, 50);
+      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+    }
+
+    if (nutritionTarget > 0 && nutritionTarget < 1200) {
+      warnings.push(
+        "Hasil di bawah 1.200 kkal/hari tidak diterapkan otomatis dan perlu review klinis.",
+      );
+      nutritionTarget = 0;
+      goal = "medical_review";
+      confidence = "low";
+    }
+  }
+
+  return {
+    clinical: {
+      source: clean(profile.measurement_source) || "Data peserta",
+      measured_at: dateKey(profile.measurement_date) || "",
+      weight_kg: rounded(weight, 1),
+      height_cm: rounded(height, 1),
+      bmi,
+      bmi_category: bmiCategory(bmi),
+      age_years: age,
+      gender,
+      healthy_weight_min_kg: healthyMin,
+      healthy_weight_max_kg: healthyMax,
+    },
+    nutrition: {
+      formula: "Mifflin-St Jeor",
+      goal,
+      bmr_calories: bmr,
+      activity_factor: activityFactor,
+      maintenance_calories: maintenance,
+      nutrition_target_calories: nutritionTarget,
+      target_weight_kg: targetWeight,
+      ready_to_apply: nutritionTarget > 0 && targetWeight > 0 && goal !== "medical_review",
+      confidence,
+      warnings,
+    },
+  };
+}
+

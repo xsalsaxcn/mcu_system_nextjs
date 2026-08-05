@@ -576,6 +576,9 @@ export default function WellnessCoachPortalPage() {
     if (!recommendation) return;
     setTargetForm((previous: any) => ({
       ...previous,
+      nutrition_max_calories: recommendation.nutrition_calorie_target
+        ? String(recommendation.nutrition_calorie_target)
+        : previous.nutrition_max_calories,
       workout_min_calories: recommendation.active_calorie_target
         ? String(recommendation.active_calorie_target)
         : previous.workout_min_calories,
@@ -585,6 +588,9 @@ export default function WellnessCoachPortalPage() {
       workout_duration_target_minutes: recommendation.exercise_minutes_target
         ? String(recommendation.exercise_minutes_target)
         : previous.workout_duration_target_minutes,
+      target_weight_kg: recommendation.target_weight_kg
+        ? String(recommendation.target_weight_kg)
+        : previous.target_weight_kg,
       coach_note:
         previous.coach_note ||
         `Rekomendasi sistem dari baseline aktivitas ${targetRecommendation?.calculation?.period_days || 14} hari.`,
@@ -4079,10 +4085,10 @@ function ParticipantDetail({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-black text-slate-900">
-                  Kalkulator Target Aktivitas 14 Hari
+                  Kalkulator Target Aktivitas & Nutrisi
                 </div>
                 <div className="mt-1 text-xs font-bold leading-5 text-slate-600">
-                  Menggunakan kalori aktif, langkah, dan durasi latihan. Energi total Google Fit tidak dihitung sebagai kalori workout.
+                  Aktivitas memakai baseline 14 hari. Nutrisi memakai BMI/pengukuran terbaru NAKES dan Mifflin-St Jeor bila profil peserta lengkap.
                 </div>
               </div>
               <button
@@ -4097,7 +4103,7 @@ function ParticipantDetail({
 
             {targetRecommendation?.calculation ? (
               <div className="mt-4 space-y-3">
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-2xl bg-white p-3">
                     <div className="text-[10px] font-black uppercase text-slate-400">Baseline kalori aktif</div>
                     <div className="mt-1 text-lg font-black text-slate-900">
@@ -4119,18 +4125,50 @@ function ParticipantDetail({
                     </div>
                     <div className="text-[10px] font-bold text-slate-500">per hari aktif</div>
                   </div>
+                  <div className="rounded-2xl bg-white p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-400">BMI terbaru</div>
+                    <div className="mt-1 text-lg font-black text-slate-900">
+                      {fmtNumber(targetRecommendation.calculation.clinical?.bmi || 0, 1)}
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-500">
+                      {targetRecommendation.calculation.clinical?.bmi_category || "Belum tersedia"}
+                    </div>
+                  </div>
                 </div>
+
+                {targetRecommendation.calculation.clinical ? (
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 text-xs font-bold leading-5 text-slate-700">
+                    <div className="font-black text-sky-800">Dasar klinis</div>
+                    <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
+                      <span>BB: {fmtNumber(targetRecommendation.calculation.clinical.weight_kg || 0, 1)} kg</span>
+                      <span>TB: {fmtNumber(targetRecommendation.calculation.clinical.height_cm || 0, 1)} cm</span>
+                      <span>Usia: {fmtNumber(targetRecommendation.calculation.clinical.age_years || 0)} tahun</span>
+                      <span>Sumber: {targetRecommendation.calculation.clinical.source || "-"}</span>
+                    </div>
+                    <div className="mt-1 text-[10px] text-sky-800">
+                      Rentang BB sehat berbasis BMI: {fmtNumber(targetRecommendation.calculation.clinical.healthy_weight_min_kg || 0, 1)}-{fmtNumber(targetRecommendation.calculation.clinical.healthy_weight_max_kg || 0, 1)} kg
+                      {targetRecommendation.calculation.clinical.measured_at ? ` • Pengukuran ${targetRecommendation.calculation.clinical.measured_at}` : ""}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
                   <div className="text-[10px] font-black uppercase text-emerald-700">Rekomendasi sistem</div>
-                  <div className="mt-2 grid gap-2 text-xs font-black text-slate-800 sm:grid-cols-3">
+                  <div className="mt-2 grid gap-2 text-xs font-black text-slate-800 sm:grid-cols-2 lg:grid-cols-5">
+                    <span>Nutrisi: {fmtNumber(targetRecommendation.calculation.recommendation?.nutrition_calorie_target || 0)} kkal/hari</span>
                     <span>Kalori aktif: {fmtNumber(targetRecommendation.calculation.recommendation?.active_calorie_target || 0)} kkal/hari aktif</span>
                     <span>Langkah: {fmtNumber(targetRecommendation.calculation.recommendation?.step_target || 0)} langkah/hari</span>
                     <span>Latihan: {fmtNumber(targetRecommendation.calculation.recommendation?.exercise_minutes_target || 0)} menit/hari aktif</span>
+                    <span>Goal BB fase awal: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
                   </div>
                   <div className="mt-2 text-[10px] font-bold text-emerald-800">
                     Confidence: {clean(targetRecommendation.calculation.recommendation?.confidence || "low").toUpperCase()} • Periode {targetRecommendation.calculation.start_date} s.d. {targetRecommendation.calculation.end_date}
                   </div>
+                  {targetRecommendation.calculation.nutrition ? (
+                    <div className="mt-1 text-[10px] font-bold text-emerald-800">
+                      Nutrisi: {targetRecommendation.calculation.nutrition.formula} • BMR {fmtNumber(targetRecommendation.calculation.nutrition.bmr_calories || 0)} kkal • Estimasi kebutuhan {fmtNumber(targetRecommendation.calculation.nutrition.maintenance_calories || 0)} kkal • Goal {clean(targetRecommendation.calculation.nutrition.goal || "review").toUpperCase()}
+                    </div>
+                  ) : null}
                 </div>
 
                 {Array.isArray(targetRecommendation.calculation.quality?.warnings) &&
