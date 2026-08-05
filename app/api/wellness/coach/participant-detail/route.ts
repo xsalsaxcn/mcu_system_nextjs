@@ -1,3 +1,4 @@
+// WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -6,6 +7,10 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
+import {
+  canonicalNakesSheetRows,
+  resolveCanonicalClinicalHistory,
+} from "@/lib/wellness/canonicalClinicalHistory";
 import {
   buildCoachGroupUnitMap,
   canCoachAccessParticipant,
@@ -694,11 +699,10 @@ export async function GET(request: NextRequest) {
     });
     const sheetNakesClinicalRows = filterClinicalRowsForProgram(
       participant,
-      googleSheetRowsToNakesClinicalRows(
-        sheetResult.rows || [],
-        participantId,
-        code,
-      ),
+      canonicalNakesSheetRows({
+        participant,
+        sheetRows: sheetResult.rows || [],
+      }),
       "",
       "",
     );
@@ -728,21 +732,22 @@ export async function GET(request: NextRequest) {
         ],
       );
 
-    const clinicalAll = mergeRows(
-      filterClinicalRowsForProgram(
+    // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
+    // Grafik Coach memakai resolver yang sama dengan Portal Peserta dan kalkulator.
+    const clinicalAll = filterClinicalRowsForProgram(
+      participant,
+      resolveCanonicalClinicalHistory({
         participant,
-        mergeRows(
+        databaseRows: mergeRows(
           clinicalRows,
           historyById,
           historyByCode,
           scopedMiniMcuRows,
         ),
-        "",
-        "",
-      ),
-      // Sheet NAKES berada paling akhir agar revisi sinkron terbaru
-      // menggantikan nilai Supabase lama pada tanggal pemeriksaan yang sama.
-      sheetNakesClinicalRows,
+        sheetRows: sheetResult.rows || [],
+      }),
+      "",
+      "",
     );
 
     const nutritionTargetCalories = nutritionTargetForParticipant(participant, targetNotes);

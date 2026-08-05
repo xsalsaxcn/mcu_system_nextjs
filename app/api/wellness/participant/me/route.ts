@@ -1,3 +1,4 @@
+// WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 // WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V377_PORTAL_ME
 // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_V79F
@@ -9,6 +10,8 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { clearPortalCookie, getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
+import { fetchWellnessGoogleSheetRows } from "@/lib/wellness/googleSheetResponses";
+import { resolveCanonicalClinicalHistory } from "@/lib/wellness/canonicalClinicalHistory";
 import {
   filterClinicalRowsForProgram,
   filterOperationalRowsForProgram,
@@ -146,37 +149,36 @@ export async function GET(req: NextRequest) {
       .order("log_date", { ascending: false })
       .limit(100);
 
-    const { data: historyById } = await supabase
-      .from("wellness_checkup_history")
-      .select("*")
-      .eq("participant_id", participant.id)
-      .order("checkup_date", { ascending: false })
-      .limit(50);
+    const [{ data: historyById }, sheetClinicalResult] = await Promise.all([
+      supabase
+        .from("wellness_checkup_history")
+        .select("*")
+        .eq("participant_id", participant.id)
+        .order("checkup_date", { ascending: false })
+        .limit(100),
+      fetchWellnessGoogleSheetRows({
+        participantId: Number(participant.id),
+        code: clean(participant.code || participant.employee_code || participant.no_karyawan),
+        limit: 1000,
+      }).catch(() => ({ ok: false, rows: [] as any[] })),
+    ]);
 
-
-    // WELLNESS_PARTICIPANT_ID_ONLY_HISTORY_V126C
-    // History hanya mengikuti participant_id.
-    const clinical_history =
-      filterClinicalRowsForProgram(
+    // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
+    // Portal peserta dan Coach menggunakan resolver klinis yang sama.
+    const clinical_history = filterClinicalRowsForProgram(
+      participant,
+      resolveCanonicalClinicalHistory({
         participant,
-        mergeUniqueRows(
-          historyById || [],
-        ),
-        "",
-        "",
-      ).sort((a, b) =>
-        String(
-          b.checkup_date ||
-            b.created_at ||
-            "",
-        ).localeCompare(
-          String(
-            a.checkup_date ||
-              a.created_at ||
-              "",
-          ),
-        ),
-      );
+        databaseRows: mergeUniqueRows(historyById || []),
+        sheetRows: sheetClinicalResult.rows || [],
+      }),
+      "",
+      "",
+    ).sort((a, b) =>
+      String(b.checkup_date || b.created_at || "").localeCompare(
+        String(a.checkup_date || a.created_at || ""),
+      ),
+    );
 
     const controlMap = await loadParticipantControlMap(supabase, [participant.id]);
     const fitnessSettings = controlMap.get(Number(participant.id)) ||

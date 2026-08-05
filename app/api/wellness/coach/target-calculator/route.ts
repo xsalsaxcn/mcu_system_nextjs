@@ -1,3 +1,4 @@
+// WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
 // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
 // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
@@ -16,6 +17,7 @@ import {
 } from "@/lib/wellness/participantControls";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
 import { fetchWellnessGoogleSheetRows } from "@/lib/wellness/googleSheetResponses";
+import { resolveCanonicalClinicalHistory } from "@/lib/wellness/canonicalClinicalHistory";
 import {
   buildCoachActivityTargetRecommendation,
   buildCoachNutritionTargetRecommendation,
@@ -551,8 +553,15 @@ export async function GET(request: NextRequest) {
     const calculation = buildCoachActivityTargetRecommendation(activityRows, {
       periodDays,
     });
+    // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
+    // Kalkulator dan grafik Coach membaca history klinis canonical yang sama.
+    const canonicalCheckupRows = resolveCanonicalClinicalHistory({
+      participant,
+      databaseRows: checkupRows,
+      sheetRows: sheetNakesResult?.rows || [],
+    });
     const databaseClinicalProfile = latestClinicalProfile(participant, [
-      { label: "Pemeriksaan NAKES", rows: checkupRows },
+      { label: "Pemeriksaan NAKES", rows: canonicalCheckupRows },
       { label: "Mini MCU", rows: miniMcuRows },
       { label: "Log berat badan", rows: weightRows },
     ]);
@@ -562,10 +571,7 @@ export async function GET(request: NextRequest) {
       participantId,
       actualCode,
     );
-    const clinicalProfile = reconcileClinicalProfile(
-      databaseClinicalProfile,
-      sheetClinicalProfile,
-    );
+    const clinicalProfile = databaseClinicalProfile;
     if (ageOverride >= 18 && ageOverride < 120) {
       clinicalProfile.age_years = ageOverride;
     }
