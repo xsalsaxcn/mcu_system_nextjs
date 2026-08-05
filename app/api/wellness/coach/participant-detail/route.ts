@@ -489,29 +489,39 @@ function parseTargetsFromNote(note: any) {
   };
 }
 
-function nutritionTargetForParticipant(participant: any, notes: any[]) {
-  const direct = participantNutritionCalorieLimit(participant);
-  if (direct > 0) return direct;
-
-  for (const note of notes || []) {
-    const parsed = parseTargetsFromNote(note);
-    if (parsed.nutrition_max_calories > 0) {
-      return parsed.nutrition_max_calories;
-    }
-  }
-
-  return 0;
+// WELLNESS_COACH_TARGET_PERSISTENCE_V126M43
+// Individual target notes are canonical. Participant columns are only fallbacks
+// because they can still contain group/default values on older schemas.
+function sortedTargetNotes(notes: any[]) {
+  return [...(notes || [])].sort((a, b) => {
+    const aTime = Date.parse(
+      clean(a?.updated_at || a?.created_at || a?.session_date),
+    );
+    const bTime = Date.parse(
+      clean(b?.updated_at || b?.created_at || b?.session_date),
+    );
+    const timeDifference =
+      (Number.isFinite(bTime) ? bTime : 0) -
+      (Number.isFinite(aTime) ? aTime : 0);
+    if (timeDifference !== 0) return timeDifference;
+    return asNumber(b?.id) - asNumber(a?.id);
+  });
 }
 
-function workoutTargetForParticipant(participant: any, notes: any[]) {
-  const direct = participantWorkoutCalorieTarget(participant);
-  if (direct > 0) return direct;
-
-  for (const note of notes || []) {
-    const parsed = parseTargetsFromNote(note);
-    if (parsed.workout_min_calories > 0) return parsed.workout_min_calories;
-  }
-  return 0;
+function canonicalTargetValues(participant: any, notes: any[]) {
+  const latestNote = sortedTargetNotes(notes)[0] || null;
+  const fromNote = parseTargetsFromNote(latestNote);
+  return {
+    nutrition_max_calories:
+      fromNote.nutrition_max_calories ||
+      participantNutritionCalorieLimit(participant) ||
+      0,
+    workout_min_calories:
+      fromNote.workout_min_calories ||
+      participantWorkoutCalorieTarget(participant) ||
+      0,
+    latest_note: latestNote,
+  };
 }
 
 function rowsByDate(rows: any[], dateGetter: (row: any) => string) {
@@ -622,7 +632,13 @@ export async function GET(request: NextRequest) {
       safeSelect(supabase, "wellness_mini_mcu_logs", (q) => q.eq("participant_id", participantId).order("exam_date", { ascending: true }).limit(1000)),
       safeSelect(supabase, "wellness_point_logs", (q) => q.eq("participant_id", participantId).order("log_date", { ascending: true }).limit(3000)),
       safeSelect(supabase, "wellness_healthtalk_logs", (q) => q.eq("participant_id", participantId).order("event_date", { ascending: true }).limit(1000)),
-      safeSelect(supabase, "wellness_coach_notes", (q) => q.eq("participant_id", participantId).order("created_at", { ascending: false }).limit(100)),
+      safeSelect(supabase, "wellness_coach_notes", (q) =>
+        q
+          .eq("participant_id", participantId)
+          .eq("topic", "Target Wellness")
+          .order("id", { ascending: false })
+          .limit(500),
+      ),
     ]);
 
     const participantControlMap = await loadParticipantControlMap(
@@ -750,8 +766,9 @@ export async function GET(request: NextRequest) {
       "",
     );
 
-    const nutritionTargetCalories = nutritionTargetForParticipant(participant, targetNotes);
-    const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes) || 300;
+    const canonicalTargets = canonicalTargetValues(participant, targetNotes);
+    const nutritionTargetCalories = canonicalTargets.nutrition_max_calories;
+    const workoutTargetCalories = canonicalTargets.workout_min_calories || 300;
     const dailyPoints = new Map<string, number>();
 
     const nutritionRowsByDate = rowsByDate(
@@ -934,6 +951,14 @@ export async function GET(request: NextRequest) {
         nutrition_daily_bonus_points: 10,
         nutrition_target_calories: nutritionTargetCalories,
         workout_target_calories: workoutTargetCalories,
+        target_source: canonicalTargets.latest_note
+          ? "individual_target_note"
+          : "participant_or_default",
+        target_note_id: canonicalTargets.latest_note?.id || null,
+        target_note_updated_at:
+          canonicalTargets.latest_note?.updated_at ||
+          canonicalTargets.latest_note?.created_at ||
+          null,
         workout_target_points: 10,
         workout_partial_points: 5,
         healthtalk_offline_with_evidence_points: 20,

@@ -281,6 +281,27 @@ function newestNotes(rows: any[]) {
   });
 }
 
+// WELLNESS_COACH_TARGET_PERSISTENCE_V126M43
+// Target notes are also loaded through a dedicated query so they cannot be
+// omitted by the general note limit. ID is the final immutable tie-breaker.
+function mergeCoachNoteRows(...groups: any[][]) {
+  const unique = new Map<string, any>();
+  for (const row of groups.flat()) {
+    const id = clean(row?.id);
+    const key = id || [
+      clean(row?.participant_id),
+      clean(row?.topic),
+      clean(row?.updated_at || row?.created_at),
+      clean(row?.action_plan),
+    ].join("|");
+    const current = unique.get(key);
+    if (!current || noteSortValue(row) >= noteSortValue(current)) {
+      unique.set(key, row);
+    }
+  }
+  return [...unique.values()];
+}
+
 // WELLNESS_COACH_TARGET_READBACK_V126M38
 // The newest individual Target Wellness note is the canonical override.
 // Participant fields and defaults are fallbacks only.
@@ -528,6 +549,7 @@ export async function GET(request: NextRequest) {
         foodResult,
         clinicalResult,
         noteResult,
+        targetNoteResult,
         pointResult,
       ] = await Promise.all([
           supabase
@@ -551,8 +573,16 @@ export async function GET(request: NextRequest) {
             .from("wellness_coach_notes")
             .select("*")
             .in("participant_id", participantIds)
-            .order("created_at", { ascending: false })
-            .limit(3000),
+            .order("updated_at", { ascending: false, nullsFirst: false })
+            .order("id", { ascending: false })
+            .limit(10000),
+          supabase
+            .from("wellness_coach_notes")
+            .select("*")
+            .in("participant_id", participantIds)
+            .eq("topic", "Target Wellness")
+            .order("id", { ascending: false })
+            .limit(5000),
           supabase
             .from("wellness_point_logs")
             .select(
@@ -569,7 +599,10 @@ export async function GET(request: NextRequest) {
       );
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
-      noteRows = noteResult.data || [];
+      noteRows = mergeCoachNoteRows(
+        noteResult.error ? [] : noteResult.data || [],
+        targetNoteResult.error ? [] : targetNoteResult.data || [],
+      );
       pointRows = pointResult.error ? [] : pointResult.data || [];
 
       const noteIds = noteRows
@@ -683,7 +716,7 @@ export async function GET(request: NextRequest) {
       );
       const latestNote = instructionNotes[0] || null;
       const latestTargetNote =
-        instructionNotes.find(isTargetWellnessNote) || null;
+        newestNotes(participantNotes.filter(isTargetWellnessNote))[0] || null;
       const latestInstructionNote =
         instructionNotes.find((note) => !isTargetWellnessNote(note)) || null;
       const todayActs = acts.filter((item) => activityDate(item) === today);
@@ -767,6 +800,12 @@ export async function GET(request: NextRequest) {
         nutrition_history_sources: canonicalHistory?.sources || null,
         clinical: latestClinicalFor(id, clinicalRows),
         targets: participantTargets(row, latestTargetNote),
+        target_persistence: {
+          source: latestTargetNote ? "individual_target_note" : "participant_or_default",
+          note_id: latestTargetNote?.id || null,
+          note_updated_at:
+            latestTargetNote?.updated_at || latestTargetNote?.created_at || null,
+        },
         latest_note: latestNote
           ? {
               ...latestNote,
