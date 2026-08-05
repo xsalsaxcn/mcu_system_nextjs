@@ -8,6 +8,7 @@ import NakesAuthGate from "@/components/wellness/NakesAuthGate";
 
 // WELLNESS_NAKES_GENERAL_CHECKUP_INPUT_V372_PAGE
 // WELLNESS_NAKES_NON_DESTRUCTIVE_SYNC_V126M32_PAGE
+// WELLNESS_NAKES_AGE_CAPTURE_V126M42_PAGE
 // Wellness-only page for NAKES/company medical team to input any clinical checkpoint.
 // Visit labels are generalized: baseline, periodic, final evaluation, follow-up, or custom.
 // Data is stored in wellness_checkup_history and feeds dashboard before-after charts.
@@ -132,6 +133,36 @@ function setNumberish(value: any) {
   const text = clean(value);
   if (!text) return "";
   return text.replace(",", ".");
+}
+
+function participantAge(participant: any) {
+  const direct = Number(
+    participant?.age_years || participant?.age || participant?.usia || 0
+  );
+  if (Number.isFinite(direct) && direct >= 18 && direct <= 119) {
+    return String(Math.round(direct));
+  }
+
+  const birthDate = clean(
+    participant?.birth_date ||
+      participant?.date_of_birth ||
+      participant?.birthdate ||
+      participant?.dob ||
+      participant?.tanggal_lahir
+  );
+  if (!birthDate) return "";
+
+  const parsed = new Date(birthDate);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const now = new Date();
+  let age = now.getFullYear() - parsed.getFullYear();
+  const monthDelta = now.getMonth() - parsed.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < parsed.getDate())) {
+    age -= 1;
+  }
+
+  return age >= 18 && age <= 119 ? String(age) : "";
 }
 
 function InfoPill({
@@ -335,6 +366,14 @@ function WellnessNakesInput({
   );
 
   useEffect(() => {
+    const resolvedAge = participantAge(selectedParticipant);
+    setForm((previous: any) => ({
+      ...previous,
+      age_years: resolvedAge,
+    }));
+  }, [selectedParticipant?.id]);
+
+  useEffect(() => {
     if (!filteredParticipants.length) return;
 
     const stillAvailable = filteredParticipants.some(
@@ -382,6 +421,12 @@ function WellnessNakesInput({
 
     if (!form.participant_id) {
       setMessage("Pilih peserta terlebih dahulu.");
+      return;
+    }
+
+    const ageYears = Number(form.age_years || 0);
+    if (!Number.isFinite(ageYears) || ageYears < 18 || ageYears > 119) {
+      setMessage("Usia peserta wajib diisi antara 18 sampai 119 tahun.");
       return;
     }
 
@@ -448,6 +493,7 @@ function WellnessNakesInput({
         history_type: previous.history_type || "periodic_checkup",
         visit_label: previous.visit_label || "Pemeriksaan Berkala",
         visit_sequence: previous.visit_sequence || "",
+        age_years: previous.age_years,
         height_cm: previous.height_cm,
       }));
     } else {
@@ -773,7 +819,24 @@ function WellnessNakesInput({
             <section className="grid gap-4 rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
               <h2 className="text-lg font-black text-slate-900">3. Pemeriksaan Fisik & Vital Sign</h2>
 
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-4">
+                <Field
+                  label="Usia saat pemeriksaan (tahun)"
+                  helper="Disimpan pada history NAKES dan otomatis dipakai kalkulator target Coach."
+                >
+                  <input
+                    type="number"
+                    min="18"
+                    max="119"
+                    step="1"
+                    required
+                    className={inputClass()}
+                    value={form.age_years || ""}
+                    onChange={(event) => setValue("age_years", event.target.value)}
+                    placeholder="Contoh: 33"
+                  />
+                </Field>
+
                 <Field label="BB saat ini (kg)">
                   <input
                     className={inputClass()}

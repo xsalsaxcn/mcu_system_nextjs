@@ -13,6 +13,7 @@ import { getWellnessSheetName, postToWellnessWebhook } from "@/lib/wellness/goog
 // WELLNESS_HISTORY_IMPORT_V352_DASHBOARD
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
 // WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V379_API
+// WELLNESS_NAKES_AGE_CAPTURE_V126M42_API
 // WELLNESS_WORKOUT_CALORIES_ALIGN_V381_API
 // Wellness-only dashboard API.
 // Chart workout calories sekarang memakai kalkulasi yang sama dengan Log Activities,
@@ -961,6 +962,8 @@ function buildNakesSheetRow(params: {
     "Label Pemeriksaan NAKES": historyRow?.visit_label || "",
     "Urutan Pemeriksaan NAKES": cleanNakesValue(body?.visit_sequence),
     "Nomor Lab NAKES": historyRow?.lab_no || "",
+    "Usia NAKES (tahun)":
+      historyRow?.raw_payload?.age_years ?? body?.age_years ?? "",
     "Tinggi Badan NAKES (cm)": historyRow?.height_cm ?? "",
     "Berat Badan NAKES (kg)": historyRow?.weight_kg ?? "",
     "Lingkar Perut NAKES (cm)": historyRow?.waist_cm ?? "",
@@ -1459,6 +1462,29 @@ export async function POST(req: NextRequest) {
         ? existing.raw_payload
         : {};
 
+    const submittedAgeYears = pickNumber(body?.age_years, body?.usia);
+    if (
+      submittedAgeYears !== null &&
+      (submittedAgeYears < 18 || submittedAgeYears > 119)
+    ) {
+      return fail("Usia peserta wajib diisi antara 18 sampai 119 tahun.", 400);
+    }
+    const ageYearsRaw = pickNumber(
+      submittedAgeYears,
+      existingRaw?.age_years,
+      existingRaw?.usia,
+      participant?.age_years,
+      participant?.age,
+      participant?.usia,
+    );
+    const ageYears =
+      ageYearsRaw !== null && ageYearsRaw >= 18 && ageYearsRaw <= 119
+        ? Math.round(ageYearsRaw)
+        : null;
+    if (ageYears === null) {
+      return fail("Usia peserta wajib tersedia untuk menyimpan pemeriksaan NAKES.", 400);
+    }
+
     const createdByNumber = Number(user?.id);
     const nowIso = new Date().toISOString();
     const companyId =
@@ -1481,6 +1507,9 @@ export async function POST(req: NextRequest) {
     const rawPayload = {
       ...existingRaw,
       ...nonBlankSubmittedRaw,
+      age_years: ageYears,
+      usia: ageYears,
+      age_recorded_at: checkupDate,
       nakes_source_key: sourceKey,
       nakes_marker: NAKES_SAVE_MARKER,
       nakes_sync_marker: NAKES_SYNC_MARKER,
@@ -1490,6 +1519,7 @@ export async function POST(req: NextRequest) {
         id: participant?.id,
         code: participant?.code,
         name: participantName,
+        age_years: ageYears,
         company_name: companyName,
         kelompok_name: participant?.kelompok_name || "",
         group_unit_name: participant?.group_unit_name || "",
