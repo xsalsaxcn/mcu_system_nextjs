@@ -1,6 +1,7 @@
 // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
 // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
+// WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -36,7 +37,7 @@ export type CoachNutritionTargetSummary = {
   target_weight_kg: number;
   phase_target_weight_kg: number;
   requested_target_weight_kg: number;
-  goal_source: "coach" | "bmi";
+  goal_source: "coach" | "bmi" | "bmi_safety_fallback";
   target_bmi: number;
   calorie_adjustment_percent: number;
   ready_to_apply: boolean;
@@ -626,6 +627,9 @@ export function buildCoachNutritionTargetRecommendation(
   }
 
   let goal: CoachNutritionTargetSummary["goal"] = "medical_review";
+  let goalSource: CoachNutritionTargetSummary["goal_source"] = hasCoachGoalWeight
+    ? "coach"
+    : "bmi";
   let bmr = 0;
   let maintenance = 0;
   let nutritionTarget = 0;
@@ -638,12 +642,34 @@ export function buildCoachNutritionTargetRecommendation(
   if (height > 0 && weight > 0 && bmi > 0 && hasCoachGoalWeight) {
     targetWeight = rounded(requestedTargetWeight, 1);
     if (requestedTargetBmi < 18.5 || requestedTargetBmi > 35) {
-      goal = "medical_review";
-      phaseTargetWeight = rounded(weight, 1);
+      goalSource = "bmi_safety_fallback";
       warnings.push(
-        `Goal BB ${targetWeight} kg menghasilkan BMI ${requestedTargetBmi}. Review klinis diperlukan sebelum rekomendasi nutrisi diterapkan.`,
+        `Goal BB ${targetWeight} kg menghasilkan BMI ${requestedTargetBmi} dan memerlukan review klinis.`,
       );
-      confidence = "low";
+      warnings.push(
+        "Target BB Coach tidak dipakai untuk kalkulasi nutrisi. Sistem memakai logic BMI saat ini sebagai fallback aman tanpa mengubah nilai Target BB pada form.",
+      );
+      confidence = "medium";
+
+      if (bmi < 18.5) {
+        goal = "medical_review";
+        targetWeight = healthyMin;
+        phaseTargetWeight = healthyMin;
+        warnings.push(
+          "BMI saat ini di bawah 18,5. Target nutrisi tetap memerlukan review NAKES/dokter.",
+        );
+        confidence = "low";
+      } else if (bmi < 25) {
+        goal = "maintain";
+        targetWeight = rounded(weight, 1);
+        phaseTargetWeight = rounded(weight, 1);
+        calorieAdjustmentPercent = 0;
+      } else {
+        goal = "reduce";
+        targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+        phaseTargetWeight = targetWeight;
+        calorieAdjustmentPercent = bmi >= 30 ? -15 : -10;
+      }
     } else if (requestedTargetWeight < weight - 0.5) {
       goal = "reduce";
       phaseTargetWeight = rounded(Math.max(requestedTargetWeight, weight * 0.95), 1);
@@ -740,7 +766,7 @@ export function buildCoachNutritionTargetRecommendation(
       target_weight_kg: targetWeight,
       phase_target_weight_kg: phaseTargetWeight,
       requested_target_weight_kg: rounded(requestedTargetWeight, 1),
-      goal_source: hasCoachGoalWeight ? "coach" : "bmi",
+      goal_source: goalSource,
       target_bmi: requestedTargetBmi,
       calorie_adjustment_percent: calorieAdjustmentPercent,
       ready_to_apply: nutritionTarget > 0 && targetWeight > 0 && goal !== "medical_review",

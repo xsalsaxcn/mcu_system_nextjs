@@ -1,3 +1,4 @@
+// WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
 "use client";
 
 // WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
@@ -608,9 +609,12 @@ export default function WellnessCoachPortalPage() {
       workout_duration_target_minutes: recommendation.exercise_minutes_target
         ? String(recommendation.exercise_minutes_target)
         : previous.workout_duration_target_minutes,
-      target_weight_kg: recommendation.target_weight_kg
-        ? String(recommendation.target_weight_kg)
-        : previous.target_weight_kg,
+      target_weight_kg:
+        targetRecommendation?.calculation?.nutrition?.goal_source === "bmi_safety_fallback"
+          ? previous.target_weight_kg
+          : recommendation.target_weight_kg
+            ? String(recommendation.target_weight_kg)
+            : previous.target_weight_kg,
       coach_note:
         previous.coach_note ||
         `Rekomendasi sistem dari baseline aktivitas ${targetRecommendation?.calculation?.period_days || 14} hari.`,
@@ -4247,7 +4251,9 @@ function ParticipantDetail({
                     <span>
                       {targetRecommendation.calculation.nutrition?.goal_source === "coach"
                         ? "Goal BB Coach"
-                        : "Goal BB sistem (BMI)"}: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg
+                        : targetRecommendation.calculation.nutrition?.goal_source === "bmi_safety_fallback"
+                          ? "Goal BB aman (BMI)"
+                          : "Goal BB sistem (BMI)"}: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg
                     </span>
                     <span>Goal fase awal: {fmtNumber(targetRecommendation.calculation.recommendation?.phase_target_weight_kg || targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
                   </div>
@@ -4256,7 +4262,11 @@ function ParticipantDetail({
                   </div>
                   {targetRecommendation.calculation.nutrition ? (
                     <div className="mt-1 text-[10px] font-bold text-emerald-800">
-                      Dasar: {targetRecommendation.calculation.nutrition.goal_source === "coach" ? "TARGET BB COACH" : "LOGIC BMI OTOMATIS"} • Nutrisi: {targetRecommendation.calculation.nutrition.formula} • BMR {fmtNumber(targetRecommendation.calculation.nutrition.bmr_calories || 0)} kkal • Estimasi kebutuhan {fmtNumber(targetRecommendation.calculation.nutrition.maintenance_calories || 0)} kkal • Penyesuaian {fmtNumber(targetRecommendation.calculation.nutrition.calorie_adjustment_percent || 0)}% • Goal {clean(targetRecommendation.calculation.nutrition.goal || "review").toUpperCase()}
+                      Dasar: {targetRecommendation.calculation.nutrition.goal_source === "coach"
+                        ? "TARGET BB COACH"
+                        : targetRecommendation.calculation.nutrition.goal_source === "bmi_safety_fallback"
+                          ? "FALLBACK BMI - TARGET COACH PERLU REVIEW"
+                          : "LOGIC BMI OTOMATIS"} • Nutrisi: {targetRecommendation.calculation.nutrition.formula} • BMR {fmtNumber(targetRecommendation.calculation.nutrition.bmr_calories || 0)} kkal • Estimasi kebutuhan {fmtNumber(targetRecommendation.calculation.nutrition.maintenance_calories || 0)} kkal • Penyesuaian {fmtNumber(targetRecommendation.calculation.nutrition.calorie_adjustment_percent || 0)}% • Goal {clean(targetRecommendation.calculation.nutrition.goal || "review").toUpperCase()}
                     </div>
                   ) : null}
                 </div>
