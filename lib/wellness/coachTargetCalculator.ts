@@ -2,6 +2,7 @@
 // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 // WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
+// WELLNESS_COACH_INVALID_GOAL_SAFE_CLAMP_V126M40_6
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -643,32 +644,42 @@ export function buildCoachNutritionTargetRecommendation(
     targetWeight = rounded(requestedTargetWeight, 1);
     if (requestedTargetBmi < 18.5 || requestedTargetBmi > 35) {
       goalSource = "bmi_safety_fallback";
+      const safeBoundaryWeight =
+        requestedTargetBmi < 18.5
+          ? healthyMin
+          : rounded(35 * ((height / 100) ** 2), 1);
+      targetWeight = safeBoundaryWeight;
       warnings.push(
-        `Goal BB ${targetWeight} kg menghasilkan BMI ${requestedTargetBmi} dan memerlukan review klinis.`,
+        `Goal BB Coach ${rounded(requestedTargetWeight, 1)} kg menghasilkan BMI ${requestedTargetBmi} dan memerlukan review klinis.`,
       );
       warnings.push(
-        "Target BB Coach tidak dipakai untuk kalkulasi nutrisi. Sistem memakai logic BMI saat ini sebagai fallback aman tanpa mengubah nilai Target BB pada form.",
+        `Untuk kalkulasi nutrisi, sistem memakai batas aman ${safeBoundaryWeight} kg. Nilai Target BB Coach pada form tetap dipertahankan untuk review.`,
       );
       confidence = "medium";
 
       if (bmi < 18.5) {
         goal = "medical_review";
-        targetWeight = healthyMin;
         phaseTargetWeight = healthyMin;
         warnings.push(
           "BMI saat ini di bawah 18,5. Target nutrisi tetap memerlukan review NAKES/dokter.",
         );
         confidence = "low";
-      } else if (bmi < 25) {
+      } else if (targetWeight < weight - 0.5) {
+        goal = "reduce";
+        phaseTargetWeight = rounded(Math.max(targetWeight, weight * 0.95), 1);
+        const safeLossPercent = ((weight - targetWeight) / weight) * 100;
+        calorieAdjustmentPercent = safeLossPercent > 5 ? -15 : -10;
+        warnings.push(
+          `Arah program tetap penurunan BB. Fase awal sistem: ${phaseTargetWeight} kg sebelum menuju batas aman ${targetWeight} kg.`,
+        );
+      } else if (targetWeight > weight + 0.5) {
+        goal = "gain";
+        phaseTargetWeight = rounded(Math.min(targetWeight, weight * 1.05), 1);
+        calorieAdjustmentPercent = 10;
+      } else {
         goal = "maintain";
-        targetWeight = rounded(weight, 1);
         phaseTargetWeight = rounded(weight, 1);
         calorieAdjustmentPercent = 0;
-      } else {
-        goal = "reduce";
-        targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
-        phaseTargetWeight = targetWeight;
-        calorieAdjustmentPercent = bmi >= 30 ? -15 : -10;
       }
     } else if (requestedTargetWeight < weight - 0.5) {
       goal = "reduce";
