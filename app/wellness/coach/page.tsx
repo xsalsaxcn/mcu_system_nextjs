@@ -545,6 +545,7 @@ export default function WellnessCoachPortalPage() {
   // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
   // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
   // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
+// WELLNESS_COACH_MONTHLY_NUTRITION_BUTTONS_V126M41_1
   async function calculateTargetRecommendation() {
     if (!selectedParticipant?.id) return;
     setTargetCalculatorLoading(true);
@@ -3725,6 +3726,7 @@ function ParticipantDetail({
   openInstruction,
   saving,
 }: any) {
+  const [selectedPhaseMonth, setSelectedPhaseMonth] = useState<number | null>(null);
   const latestTargetNote = participant.latest_target_note || null;
   const latestInstructionNote =
     participant.latest_instruction_note ||
@@ -3815,6 +3817,18 @@ function ParticipantDetail({
     : [];
   const latestMomentum =
     momentumDays.length > 0 ? momentumDays[momentumDays.length - 1] : null;
+
+  function applyMonthlyNutritionTarget(
+    monthIndex: number,
+    nutritionCalories: number,
+  ) {
+    if (!(nutritionCalories > 0)) return;
+    setSelectedPhaseMonth(monthIndex);
+    setTargetForm((previous: any) => ({
+      ...previous,
+      nutrition_max_calories: String(nutritionCalories),
+    }));
+  }
 
   return (
     <div className="space-y-5">
@@ -4260,12 +4274,45 @@ function ParticipantDetail({
                   </div>
                   {Array.isArray(targetRecommendation.calculation.recommendation?.phase_monthly_milestones_kg) &&
                   targetRecommendation.calculation.recommendation.phase_monthly_milestones_kg.length === 4 ? (
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-black text-emerald-900 sm:grid-cols-4">
-                      {targetRecommendation.calculation.recommendation.phase_monthly_milestones_kg.map((weight: number, index: number) => (
-                        <div key={`${index}-${weight}`} className="rounded-xl border border-emerald-200 bg-white/70 px-3 py-2">
-                          Bulan {index + 1}: {fmtNumber(weight, 1)} kg
+                    <div className="mt-3">
+                      <div className="mb-2 text-[10px] font-bold text-emerald-800">
+                        Klik bulan untuk mengisi Batas Konsumsi Kalori Harian. Goal BB jangka panjang tidak berubah.
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-black text-emerald-900 sm:grid-cols-4">
+                        {targetRecommendation.calculation.recommendation.phase_monthly_milestones_kg.map((weight: number, index: number) => {
+                          const monthlyCalories = Number(
+                            targetRecommendation.calculation.recommendation?.phase_monthly_nutrition_targets?.[index] || 0,
+                          );
+                          const isSelected = selectedPhaseMonth === index;
+                          return (
+                            <button
+                              type="button"
+                              key={`${index}-${weight}`}
+                              disabled={!monthlyCalories}
+                              onClick={() =>
+                                applyMonthlyNutritionTarget(index, monthlyCalories)
+                              }
+                              className={`rounded-xl border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                                isSelected
+                                  ? "border-emerald-700 bg-emerald-700 text-white shadow-md"
+                                  : "border-emerald-200 bg-white/80 hover:border-emerald-500 hover:bg-white"
+                              }`}
+                            >
+                              <span className="block">Bulan {index + 1}: {fmtNumber(weight, 1)} kg</span>
+                              <span className={`mt-1 block text-[9px] ${isSelected ? "text-emerald-50" : "text-emerald-700"}`}>
+                                {monthlyCalories
+                                  ? `Nutrisi maks. ${fmtNumber(monthlyCalories)} kkal/hari`
+                                  : "Nutrisi perlu review"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedPhaseMonth !== null ? (
+                        <div className="mt-2 rounded-xl bg-emerald-100 px-3 py-2 text-[10px] font-black text-emerald-900">
+                          Bulan {selectedPhaseMonth + 1} dipilih. Nilai nutrisi maksimal sudah dimasukkan ke form di bawah.
                         </div>
-                      ))}
+                      ) : null}
                     </div>
                   ) : null}
                   <div className="mt-2 text-[10px] font-bold text-emerald-800">

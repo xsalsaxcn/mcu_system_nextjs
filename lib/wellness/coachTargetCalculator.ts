@@ -5,6 +5,7 @@
 // WELLNESS_COACH_INVALID_GOAL_SAFE_CLAMP_V126M40_6
 // WELLNESS_COACH_ADAPTIVE_NUTRITION_DEFICIT_V126M40_7
 // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
+// WELLNESS_COACH_MONTHLY_NUTRITION_BUTTONS_V126M41_1
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -45,6 +46,7 @@ export type CoachNutritionTargetSummary = {
   phase_weekly_change_percent: number;
   phase_total_change_kg: number;
   phase_monthly_milestones_kg: number[];
+  phase_monthly_nutrition_targets: number[];
   requested_target_weight_kg: number;
   goal_source: "coach" | "bmi" | "bmi_safety_fallback";
   target_bmi: number;
@@ -94,6 +96,7 @@ export type CoachActivityTargetResult = {
     phase_weekly_change_percent?: number;
     phase_total_change_kg?: number;
     phase_monthly_milestones_kg?: number[];
+    phase_monthly_nutrition_targets?: number[];
     ready_to_apply: boolean;
     confidence: "low" | "medium" | "high";
   };
@@ -710,6 +713,7 @@ export function buildCoachNutritionTargetRecommendation(
   let phaseWeeklyChangePercent = 0;
   let phaseTotalChangeKg = 0;
   let phaseMonthlyMilestonesKg: number[] = [];
+  let phaseMonthlyNutritionTargets: number[] = [];
   let calorieAdjustmentPercent = 0;
 
   // A Coach-entered goal weight takes priority over BMI-only maintenance logic.
@@ -843,6 +847,29 @@ export function buildCoachNutritionTargetRecommendation(
       goal = "medical_review";
       confidence = "low";
     }
+
+    // Monthly calorie ceilings use the same Mifflin-St Jeor profile,
+    // activity factor, and goal adjustment at each milestone weight.
+    // They are recommendations only and never write data automatically.
+    phaseMonthlyNutritionTargets = phaseMonthlyMilestonesKg.map((milestoneWeight) => {
+      if (!(milestoneWeight > 0) || goal === "medical_review") return 0;
+      const milestoneBmr = nearest(
+        10 * milestoneWeight +
+          6.25 * height -
+          5 * age +
+          (gender === "male" ? 5 : -161),
+        10,
+      );
+      const milestoneMaintenance = nearest(milestoneBmr * activityFactor, 50);
+      let milestoneTarget = milestoneMaintenance;
+      if (goal === "reduce") {
+        const factor = Math.max(0.8, 1 + calorieAdjustmentPercent / 100);
+        milestoneTarget = nearest(milestoneMaintenance * factor, 50);
+      } else if (goal === "gain") {
+        milestoneTarget = nearest(milestoneMaintenance * 1.1, 50);
+      }
+      return milestoneTarget >= 1200 ? milestoneTarget : 0;
+    });
   }
 
   return {
@@ -873,6 +900,7 @@ export function buildCoachNutritionTargetRecommendation(
       phase_weekly_change_percent: phaseWeeklyChangePercent,
       phase_total_change_kg: phaseTotalChangeKg,
       phase_monthly_milestones_kg: phaseMonthlyMilestonesKg,
+      phase_monthly_nutrition_targets: phaseMonthlyNutritionTargets,
       requested_target_weight_kg: rounded(requestedTargetWeight, 1),
       goal_source: goalSource,
       target_bmi: requestedTargetBmi,

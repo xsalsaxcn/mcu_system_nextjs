@@ -2,6 +2,7 @@
 // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
+// WELLNESS_COACH_MONTHLY_NUTRITION_BUTTONS_V126M41_1
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -376,6 +377,8 @@ export async function GET(request: NextRequest) {
       nutritionResult.nutrition.phase_total_change_kg;
     calculation.recommendation.phase_monthly_milestones_kg =
       nutritionResult.nutrition.phase_monthly_milestones_kg;
+    calculation.recommendation.phase_monthly_nutrition_targets =
+      nutritionResult.nutrition.phase_monthly_nutrition_targets;
     calculation.recommendation.ready_to_apply =
       calculation.recommendation.ready_to_apply ||
       nutritionResult.nutrition.ready_to_apply;
