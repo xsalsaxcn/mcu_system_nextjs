@@ -95,6 +95,183 @@ function dateLabel(value: any) {
   return parts.length === 3 ? `${parts[2]}/${parts[1]}` : text || "-";
 }
 
+// WELLNESS_COACH_GRAPH_NAKES_SHEET_RECONCILIATION_V126M42_5
+function sheetField(row: any, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== null && value !== undefined && clean(value) !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizedClinicalDateKey(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  }
+
+  const local = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+  if (local) {
+    return `${local[3]}-${String(local[2]).padStart(2, "0")}-${String(local[1]).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function sortableClinicalNumber(value: any) {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) {
+    return String(Math.max(0, Math.trunc(parsed))).padStart(20, "0");
+  }
+  return clean(value);
+}
+
+function sheetClinicalTimestampKey(row: any) {
+  const value = sheetField(row, "Submission Date", "Updated At", "Created At");
+  const parsed = value ? new Date(String(value)) : null;
+  return parsed && !Number.isNaN(parsed.getTime())
+    ? String(parsed.getTime()).padStart(16, "0")
+    : clean(value);
+}
+
+function isNakesSheetRow(row: any) {
+  const logType = clean(sheetField(row, "Log Type", "log_type")).toLowerCase();
+  const marker = clean(sheetField(row, "NAKES Sync Marker", "Marker")).toLowerCase();
+  return (
+    logType === "nakes_checkup" ||
+    marker.includes("nakes") ||
+    Boolean(
+      sheetField(
+        row,
+        "Tinggi Badan NAKES (cm)",
+        "Berat Badan NAKES (kg)",
+        "Usia NAKES (tahun)",
+        "NAKES History ID",
+      ),
+    )
+  );
+}
+
+function googleSheetRowsToNakesClinicalRows(
+  rows: any[],
+  participantId: number,
+  participantCode: string,
+) {
+  const normalizedCode = clean(participantCode).toLowerCase();
+
+  return (rows || [])
+    .filter((row: any) => {
+      if (!isNakesSheetRow(row)) return false;
+      const rowParticipantId = asNumber(
+        sheetField(row, "Participant ID", "participant_id"),
+      );
+      const rowCode = clean(
+        sheetField(row, "KODE", "Kode", "participant_code"),
+      ).toLowerCase();
+      return (
+        rowParticipantId === participantId ||
+        Boolean(normalizedCode && rowCode === normalizedCode)
+      );
+    })
+    .map((row: any) => {
+      const checkupDate = normalizedClinicalDateKey(
+        sheetField(
+          row,
+          "Log Date",
+          "Tanggal Pemeriksaan NAKES",
+          "Submission Date",
+        ),
+      );
+      const updatedAt = clean(
+        sheetField(row, "Submission Date", "Updated At", "Created At"),
+      );
+      const revision = asNumber(
+        sheetField(row, "NAKES Revision", "Revision"),
+      );
+      const rowNumber = asNumber(row?._rowNumber);
+      const historyId = clean(
+        sheetField(row, "NAKES History ID", "History ID"),
+      );
+      const weight = nullableNumber(
+        sheetField(
+          row,
+          "Berat Badan NAKES (kg)",
+          "BB Monitoring terbaru",
+          "BB anda per hari ini (diisi sekali saja perminggu)",
+        ),
+      );
+      const height = nullableNumber(
+        sheetField(row, "Tinggi Badan NAKES (cm)"),
+      );
+      const suppliedBmi = nullableNumber(sheetField(row, "BMI"));
+      const calculatedBmi =
+        weight !== null && height !== null && height > 0
+          ? Math.round((weight / Math.pow(height / 100, 2)) * 10) / 10
+          : null;
+      const recencyKey = [
+        checkupDate,
+        sheetClinicalTimestampKey(row),
+        sortableClinicalNumber(revision),
+        sortableClinicalNumber(rowNumber),
+      ].join("|");
+
+      return {
+        id: `sheet-nakes:${historyId || rowNumber || recencyKey}`,
+        participant_id: participantId,
+        participant_code: participantCode,
+        checkup_date: checkupDate,
+        created_at: updatedAt || checkupDate,
+        updated_at: updatedAt || checkupDate,
+        height_cm: height,
+        weight_kg: weight,
+        bmi: suppliedBmi ?? calculatedBmi,
+        waist_cm: nullableNumber(
+          sheetField(row, "Lingkar Perut NAKES (cm)", "Lingkar Perut (cm)"),
+        ),
+        systolic: nullableNumber(sheetField(row, "Sistolik NAKES")),
+        diastolic: nullableNumber(sheetField(row, "Diastolik NAKES")),
+        pulse: nullableNumber(sheetField(row, "Nadi NAKES")),
+        hba1c_percent: nullableNumber(sheetField(row, "HbA1c NAKES (%)")),
+        glucose_value: nullableNumber(sheetField(row, "Gula Darah NAKES")),
+        raw_payload: {
+          source: "google_sheet_nakes",
+          age_years: nullableNumber(
+            sheetField(row, "Usia NAKES (tahun)", "Usia"),
+          ),
+          nakes_revision: revision,
+          sheet_row_number: rowNumber,
+          sheet_recency_key: recencyKey,
+        },
+        _wellness_sheet_recency_key: recencyKey,
+      };
+    })
+    .filter((row: any) =>
+      Boolean(
+        row.checkup_date &&
+          (row.weight_kg !== null ||
+            row.height_cm !== null ||
+            row.bmi !== null ||
+            row.waist_cm !== null ||
+            row.systolic !== null ||
+            row.diastolic !== null ||
+            row.hba1c_percent !== null ||
+            row.glucose_value !== null),
+      ),
+    )
+    .sort((a: any, b: any) =>
+      clean(a?._wellness_sheet_recency_key).localeCompare(
+        clean(b?._wellness_sheet_recency_key),
+      ),
+    );
+}
+
 async function getCoach(request: NextRequest, supabase: any) {
   const token = request.cookies.get("wellness_coach_session")?.value || "";
   if (!token) return null;
@@ -515,6 +692,16 @@ export async function GET(request: NextRequest) {
     const sheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(sheetResult.rows || []).filter((row: any) => {
       return asNumber(row.participant_id) === participantId;
     });
+    const sheetNakesClinicalRows = filterClinicalRowsForProgram(
+      participant,
+      googleSheetRowsToNakesClinicalRows(
+        sheetResult.rows || [],
+        participantId,
+        code,
+      ),
+      "",
+      "",
+    );
 
     const mergedFoodRows =
       filterOperationalRowsForProgram(
@@ -541,7 +728,7 @@ export async function GET(request: NextRequest) {
         ],
       );
 
-    const clinicalAll =
+    const clinicalAll = mergeRows(
       filterClinicalRowsForProgram(
         participant,
         mergeRows(
@@ -552,7 +739,11 @@ export async function GET(request: NextRequest) {
         ),
         "",
         "",
-      );
+      ),
+      // Sheet NAKES berada paling akhir agar revisi sinkron terbaru
+      // menggantikan nilai Supabase lama pada tanggal pemeriksaan yang sama.
+      sheetNakesClinicalRows,
+    );
 
     const nutritionTargetCalories = nutritionTargetForParticipant(participant, targetNotes);
     const workoutTargetCalories = workoutTargetForParticipant(participant, targetNotes) || 300;
@@ -753,6 +944,7 @@ export async function GET(request: NextRequest) {
         ok: Boolean(nutritionHistory.sources.google_sheet_ok),
         nutrition_count: nutritionHistory.sources.google_sheet_rows,
         healthtalk_count: sheetHealthtalkRows.length,
+        nakes_clinical_count: sheetNakesClinicalRows.length,
       },
     });
   } catch (error: any) {
