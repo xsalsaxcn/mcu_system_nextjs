@@ -45,6 +45,15 @@ function asNumber(value: any) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function jakartaDate(value: Date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
 // WELLNESS_COACH_TARGET_READBACK_V126M38
 function participantCode(row: any) {
   return clean(
@@ -648,7 +657,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const effectiveFrom = clean(body.session_date) || jakartaDate();
       const actionPlan = [
+        `Berlaku Mulai: ${effectiveFrom}`,
+        "Target Version: EFFECTIVE_DATED_V126M44",
         targets.nutrition_max_calories > 0
           ? `Target Nutrisi: ${targets.nutrition_max_calories} kkal/hari`
           : "",
@@ -689,7 +701,7 @@ export async function POST(request: NextRequest) {
           null,
         group_name:
           clean(assignedGroup?.group_name) || canonicalParticipantGroupName(participant, groupUnitMap),
-        session_date: clean(body.session_date) || new Date().toISOString().slice(0, 10),
+        session_date: effectiveFrom,
         topic: "Target Wellness",
         main_issue: clean(body.main_issue) || "Penetapan target individual peserta.",
         coach_note:
@@ -769,6 +781,8 @@ export async function POST(request: NextRequest) {
           name: participantName(participant),
         },
         saved_targets: targets,
+        effective_from: effectiveFrom,
+        target_history_mode: "effective_dated",
         read_back: {
           targets: readBackTargets,
           verified_fields: verifiedFields,
@@ -825,7 +839,15 @@ export async function POST(request: NextRequest) {
         ? `Target BB: ${requestedTargets.target_weight_kg} kg`
         : "",
     ].filter(Boolean);
-    const actionPlan = clean(body.action_plan) || requestedTargetLines.join("\n");
+    const effectiveFrom = clean(body.session_date) || jakartaDate();
+    const actionPlanBase = clean(body.action_plan) || requestedTargetLines.join("\n");
+    const actionPlan = requestedTargetLines.length > 0
+      ? [
+          `Berlaku Mulai: ${effectiveFrom}`,
+          "Target Version: EFFECTIVE_DATED_V126M44",
+          actionPlanBase,
+        ].filter(Boolean).join("\n")
+      : actionPlanBase;
     const hasRequestedTargets = requestedTargetLines.length > 0;
 
     if (!coachNote && !actionPlan) {
@@ -850,7 +872,7 @@ export async function POST(request: NextRequest) {
           clean(groupName) ||
           clean(assignedGroup?.group_name) ||
           canonicalParticipantGroupName(participant, groupUnitMap),
-        session_date: clean(body.session_date) || now.slice(0, 10),
+        session_date: effectiveFrom,
         topic:
           clean(body.topic) ||
           (scope === "group" ? "Instruksi Kelompok" : "Instruksi Individual"),

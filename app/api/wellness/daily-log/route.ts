@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
       if ("row" in nutritionPoint && nutritionPoint.row) pointLogs.push(nutritionPoint.row);
       if (nutritionPoint.inserted) pointsTotal += nutritionPoints;
 
-      const targets = await resolveParticipantPointTargets(supabase, participant);
+      const targets = await resolveParticipantPointTargets(supabase, participant, logDate);
       const { data: dailyFoods, error: dailyFoodError } = await supabase
         .from("wellness_food_logs")
         .select("total_calories,calories,estimated_calories")

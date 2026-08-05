@@ -11,6 +11,11 @@ import {
   filterActivityRowsByFitnessSource,
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
+import {
+  effectiveTargetsForDate,
+  loadEffectiveTargetTimeline,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 export type WellnessPointWriteResult = {
   ok: boolean;
@@ -40,64 +45,24 @@ export function participantCompanyId(participant: any) {
   );
 }
 
-function parseTargetNote(note: any) {
-  const text = [note?.action_plan, note?.coach_note, note?.main_issue]
-    .map(clean)
-    .filter(Boolean)
-    .join("\n");
-
-  const nutrition = text.match(/Target\s+Nutrisi\s*:\s*([0-9.,]+)/i);
-  const workout = text.match(
-    /Target\s+(?:Kalori\s+)?Workout\s*:\s*([0-9.,]+)/i,
-  );
-
-  return {
-    nutrition: nutrition ? pointNumber(nutrition[1]) : 0,
-    workout: workout ? pointNumber(workout[1]) : 0,
-  };
-}
-
-async function latestTargetFromNotes(supabase: any, participantId: number) {
-  try {
-    const { data, error } = await supabase
-      .from("wellness_coach_notes")
-      .select("*")
-      .eq("participant_id", participantId)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) return { nutrition: 0, workout: 0 };
-
-    for (const note of data || []) {
-      const parsed = parseTargetNote(note);
-      if (parsed.nutrition > 0 || parsed.workout > 0) return parsed;
-    }
-  } catch {
-    // Participant target columns remain the primary source.
-  }
-
-  return { nutrition: 0, workout: 0 };
-}
-
 export async function resolveParticipantPointTargets(
   supabase: any,
   participant: any,
+  logDate = "",
 ) {
-  const directNutrition = participantNutritionCalorieLimit(participant);
-  const directWorkout = participantWorkoutCalorieTarget(participant);
-
-  if (directNutrition > 0 && directWorkout > 0) {
-    return { nutrition: directNutrition, workout: directWorkout };
-  }
-
-  const noteTargets = await latestTargetFromNotes(
-    supabase,
-    pointNumber(participant?.id),
-  );
+  const timeline = await loadEffectiveTargetTimeline({ supabase, participant });
+  const values = logDate
+    ? effectiveTargetsForDate(timeline, logDate)
+    : timeline.current;
 
   return {
-    nutrition: directNutrition || noteTargets.nutrition || 0,
-    workout: directWorkout || noteTargets.workout || 300,
+    nutrition: pointNumber(values.nutrition),
+    workout: pointNumber(values.workout) || 300,
+    steps: pointNumber(values.steps) || 8000,
+    duration_minutes: pointNumber(values.duration_minutes),
+    weight_kg: pointNumber(values.weight_kg),
+    effective_date: logDate || timeline.current_revision?.effective_from || "",
+    timeline: targetTimelineSummary(timeline),
   };
 }
 
@@ -358,6 +323,7 @@ export async function reconcileWorkoutDailyPoint(params: {
   const targets = await resolveParticipantPointTargets(
     params.supabase,
     params.participant,
+    params.logDate,
   );
   const points = workoutDailyPoints({
     calories,

@@ -7,11 +7,10 @@ import {
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
-import { resolveParticipantPointTargets } from "@/lib/wellness/pointWriter";
 import {
-  participantNutritionCalorieLimit,
-  participantWorkoutCalorieTarget,
-} from "@/lib/wellness/pointRules";
+  loadEffectiveTargetTimeline,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
 import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
 
@@ -75,15 +74,16 @@ export async function loadParticipantCanonicalStreak(params: {
     };
   });
 
-  const targetPromise = resolveParticipantPointTargets(
-    params.supabase,
-    params.participant,
-  ).catch((error: any) => {
+  const targetPromise = loadEffectiveTargetTimeline({
+    supabase: params.supabase,
+    participant: params.participant,
+  }).catch((error: any) => {
     warnings.push(`targets:${clean(error?.message || "unavailable")}`);
-    return {
-      nutrition: participantNutritionCalorieLimit(params.participant) || 0,
-      workout: participantWorkoutCalorieTarget(params.participant) || 300,
-    };
+    return loadEffectiveTargetTimeline({
+      supabase: params.supabase,
+      participant: params.participant,
+      notes: [],
+    });
   });
 
   const [activityResult, controlMap, nutritionHistory, targets] =
@@ -119,12 +119,13 @@ export async function loadParticipantCanonicalStreak(params: {
     ["log_date", "created_at"],
   );
 
-  const nutritionTarget = numberValue(targets?.nutrition);
-  const workoutTarget = numberValue(targets?.workout) || 300;
+  const nutritionTarget = numberValue(targets?.current?.nutrition);
+  const workoutTarget = numberValue(targets?.current?.workout) || 300;
   const streak = buildWellnessStreakSummary({
     nutritionRows,
     activityRows,
     workoutTargetCalories: workoutTarget,
+    targetTimeline: targets,
   });
 
   const control =
@@ -138,6 +139,7 @@ export async function loadParticipantCanonicalStreak(params: {
     targets: {
       nutrition_max_calories: nutritionTarget,
       workout_min_calories: workoutTarget,
+      target_history: targetTimelineSummary(targets),
     },
     sources: {
       nutrition: nutritionHistory?.sources || null,

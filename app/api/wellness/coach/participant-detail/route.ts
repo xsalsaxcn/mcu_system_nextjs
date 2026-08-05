@@ -37,6 +37,11 @@ import {
   buildWellnessStreakSummary,
   wellnessStreakWorkoutCalories,
 } from "@/lib/wellness/streak";
+import {
+  buildEffectiveTargetTimeline,
+  effectiveTargetsForDate,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -635,9 +640,9 @@ export async function GET(request: NextRequest) {
       safeSelect(supabase, "wellness_coach_notes", (q) =>
         q
           .eq("participant_id", participantId)
-          .eq("topic", "Target Wellness")
-          .order("id", { ascending: false })
-          .limit(500),
+          .order("session_date", { ascending: true })
+          .order("created_at", { ascending: true })
+          .limit(2000),
       ),
     ]);
 
@@ -766,9 +771,12 @@ export async function GET(request: NextRequest) {
       "",
     );
 
-    const canonicalTargets = canonicalTargetValues(participant, targetNotes);
-    const nutritionTargetCalories = canonicalTargets.nutrition_max_calories;
-    const workoutTargetCalories = canonicalTargets.workout_min_calories || 300;
+    const targetTimeline = buildEffectiveTargetTimeline({
+      participant,
+      notes: targetNotes,
+    });
+    const nutritionTargetCalories = targetTimeline.current.nutrition;
+    const workoutTargetCalories = targetTimeline.current.workout || 300;
     const dailyPoints = new Map<string, number>();
 
     const nutritionRowsByDate = rowsByDate(
@@ -782,9 +790,10 @@ export async function GET(request: NextRequest) {
         (sum, row) => sum + foodCalories(row),
         0,
       );
+      const datedTargets = effectiveTargetsForDate(targetTimeline, date);
       const bonusPoints = nutritionDailyBonusPoints({
         totalCalories,
-        calorieLimit: nutritionTargetCalories,
+        calorieLimit: datedTargets.nutrition,
         hasNutritionInput: rows.length > 0,
       });
       const points = inputPoints + bonusPoints;
@@ -799,9 +808,10 @@ export async function GET(request: NextRequest) {
     let activityPoints = 0;
     for (const [date, rows] of workoutRowsByDate.entries()) {
       const calories = rows.reduce((sum, row) => sum + activityCalories(row), 0);
+      const datedTargets = effectiveTargetsForDate(targetTimeline, date);
       const points = workoutDailyPoints({
         calories,
-        calorieTarget: workoutTargetCalories,
+        calorieTarget: datedTargets.workout,
         hasActivity: rows.some(
           (row) =>
             activityCalories(row) > 0 ||
@@ -902,6 +912,7 @@ export async function GET(request: NextRequest) {
       nutritionRows: mergedFoodRows,
       activityRows,
       workoutTargetCalories,
+      targetTimeline,
     });
     const latestWorkoutDateV126M31 = clean(streak.days.at(-1)?.date);
     const workoutSourceBreakdown = workoutSourceBreakdownV126M31(
@@ -951,14 +962,13 @@ export async function GET(request: NextRequest) {
         nutrition_daily_bonus_points: 10,
         nutrition_target_calories: nutritionTargetCalories,
         workout_target_calories: workoutTargetCalories,
-        target_source: canonicalTargets.latest_note
-          ? "individual_target_note"
+        target_source: targetTimeline.current_revision
+          ? "effective_dated_target_history"
           : "participant_or_default",
-        target_note_id: canonicalTargets.latest_note?.id || null,
+        target_note_id: targetTimeline.current_revision?.note_id || null,
         target_note_updated_at:
-          canonicalTargets.latest_note?.updated_at ||
-          canonicalTargets.latest_note?.created_at ||
-          null,
+          targetTimeline.current_revision?.effective_at || null,
+        target_history: targetTimelineSummary(targetTimeline),
         workout_target_points: 10,
         workout_partial_points: 5,
         healthtalk_offline_with_evidence_points: 20,

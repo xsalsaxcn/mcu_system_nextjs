@@ -30,6 +30,11 @@ import {
   pointNumber,
   workoutDailyPoints,
 } from "@/lib/wellness/pointRules";
+import {
+  buildEffectiveTargetTimeline,
+  effectiveTargetsForDate,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 // WELLNESS_COACH_GROUP_RANKING_API_V76
 // WELLNESS_COACH_RANKING_SINGLE_FITNESS_SOURCE_V79F
@@ -498,8 +503,12 @@ export async function GET(request: NextRequest) {
       const participantNotes = targetNotes.filter(
         (row: any) => asNumber(row.participant_id) === id,
       );
-      const nutritionTarget = parseNutritionTarget(participant, participantNotes);
-      const workoutTarget = parseWorkoutTarget(participant, participantNotes);
+      const targetTimeline = buildEffectiveTargetTimeline({
+        participant,
+        notes: participantNotes,
+      });
+      const nutritionTarget = targetTimeline.current.nutrition;
+      const workoutTarget = targetTimeline.current.workout || 300;
 
       const foodByDate = new Map<string, Set<string>>();
       const foodCaloriesByDate = new Map<string, number>();
@@ -556,9 +565,10 @@ export async function GET(request: NextRequest) {
       let nutritionAchievedDays = 0;
       for (const [date, meals] of foodByDate.entries()) {
         const count = meals.size;
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
         nutritionPoints += nutritionDailyBonusPoints({
           totalCalories: foodCaloriesByDate.get(date) || 0,
-          calorieLimit: nutritionTarget,
+          calorieLimit: datedTargets.nutrition,
           hasNutritionInput: count > 0,
         });
         if (count >= 3) nutritionAchievedDays += 1;
@@ -566,11 +576,12 @@ export async function GET(request: NextRequest) {
 
       let workoutPoints = 0;
       let workoutAchievedDays = 0;
-      for (const value of workoutByDate.values()) {
-        const achieved = value.calories >= workoutTarget;
+      for (const [date, value] of workoutByDate.entries()) {
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
+        const achieved = value.calories >= datedTargets.workout;
         workoutPoints += workoutDailyPoints({
           calories: value.calories,
-          calorieTarget: workoutTarget,
+          calorieTarget: datedTargets.workout,
           hasActivity: value.calories > 0 || value.steps > 0,
         });
         if (achieved) workoutAchievedDays += 1;
@@ -637,7 +648,8 @@ export async function GET(request: NextRequest) {
       ])) {
         const nutritionOk = (foodByDate.get(date)?.size || 0) >= 3;
         const workoutCalories = workoutByDate.get(date)?.calories || 0;
-        const workoutOk = workoutCalories >= workoutTarget;
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
+        const workoutOk = workoutCalories >= datedTargets.workout;
         if (nutritionOk && workoutOk) successDates.add(date);
       }
       let currentStreak = 0;
@@ -666,6 +678,8 @@ export async function GET(request: NextRequest) {
         total_points: Math.round(totalPoints),
         compliance_percent: compliancePercent,
         nutrition_target_calories: nutritionTarget,
+        workout_target_calories: workoutTarget,
+        target_history: targetTimelineSummary(targetTimeline),
         workout_points: workoutPoints,
         workout_achieved_days: workoutAchievedDays,
         nutrition_points: nutritionPoints,

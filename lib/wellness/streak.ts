@@ -5,6 +5,11 @@
 // WELLNESS_GOOGLE_FIT_STREAK_PROVIDER_CALORIES_V126M29_1
 // Google Fit streak uses the same provider calorie value displayed by Coach.
 
+import {
+  effectiveTargetsForDate,
+  type WellnessTargetTimeline,
+} from "@/lib/wellness/effectiveDatedTargets";
+
 export type WellnessStreakDay = {
   date: string;
   label: string;
@@ -12,6 +17,8 @@ export type WellnessStreakDay = {
   nutrition_calories: number;
   workout_calories: number;
   steps: number;
+  workout_target_calories: number;
+  target_effective_from: string | null;
   success: boolean;
 };
 
@@ -288,6 +295,7 @@ export function buildWellnessStreakSummary(params: {
   nutritionRows: any[];
   activityRows: any[];
   workoutTargetCalories: number;
+  targetTimeline?: WellnessTargetTimeline | null;
   historyDays?: number;
 }): WellnessStreakSummary {
   const map = new Map<
@@ -340,10 +348,19 @@ export function buildWellnessStreakSummary(params: {
     const bucket = map.get(date);
     const nutritionCount = bucket?.nutritionCount || 0;
     const workoutCalories = Math.round(bucket?.workoutCalories || 0);
+    const datedTargets = params.targetTimeline
+      ? effectiveTargetsForDate(params.targetTimeline, date)
+      : null;
+    const workoutTargetCalories = Math.round(
+      datedTargets?.workout || params.workoutTargetCalories || 0,
+    );
+    const revision = params.targetTimeline?.revisions
+      ?.filter((item) => item.effective_from <= date)
+      .at(-1);
     const success =
       nutritionCount >= 3 &&
-      (params.workoutTargetCalories > 0
-        ? workoutCalories >= params.workoutTargetCalories
+      (workoutTargetCalories > 0
+        ? workoutCalories >= workoutTargetCalories
         : workoutCalories > 0);
 
     allDays.push({
@@ -353,6 +370,8 @@ export function buildWellnessStreakSummary(params: {
       nutrition_calories: Math.round(bucket?.nutritionCalories || 0),
       workout_calories: workoutCalories,
       steps: Math.round(bucket?.steps || 0),
+      workout_target_calories: workoutTargetCalories,
+      target_effective_from: revision?.effective_from || null,
       success,
     });
   }

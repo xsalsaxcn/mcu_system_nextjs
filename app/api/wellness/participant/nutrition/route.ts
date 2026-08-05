@@ -1116,7 +1116,7 @@ calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
     };
 
     try {
-      const targets = await resolveParticipantPointTargets(supabase, participant);
+      const targets = await resolveParticipantPointTargets(supabase, participant, logDate);
       const sheetRead = await fetchWellnessGoogleSheetRows({
         participantId: participant.id,
         code: participant.code,
@@ -1596,6 +1596,7 @@ export async function DELETE(req: NextRequest) {
       const targets = await resolveParticipantPointTargets(
         supabase,
         participant,
+        requestedDate,
       );
       const refreshedSheet = await fetchWellnessGoogleSheetRows({
         participantId: participant.id,

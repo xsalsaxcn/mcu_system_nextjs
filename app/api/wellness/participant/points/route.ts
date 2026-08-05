@@ -31,8 +31,12 @@ import {
 import {
   pointActivityCalories,
   pointActivityHasValue,
-  resolveParticipantPointTargets,
 } from "@/lib/wellness/pointWriter";
+import {
+  effectiveTargetsForDate,
+  loadEffectiveTargetTimeline,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -203,7 +207,7 @@ export async function GET(req: NextRequest) {
           .order("log_date", { ascending: true })
           .limit(10000),
         loadParticipantControlMap(supabase, [participantId]),
-        resolveParticipantPointTargets(supabase, participant),
+        loadEffectiveTargetTimeline({ supabase, participant }),
       ]);
 
     // V126D: identitas Sheet wajib participant_id.
@@ -258,11 +262,12 @@ export async function GET(req: NextRequest) {
     }
 
     let nutritionPoints = 0;
-    for (const bucket of nutritionByDate.values()) {
+    for (const [date, bucket] of nutritionByDate.entries()) {
+      const datedTargets = effectiveTargetsForDate(targets, date);
       nutritionPoints += bucket.count * 5;
       nutritionPoints += nutritionDailyBonusPoints({
         totalCalories: bucket.calories,
-        calorieLimit: targets.nutrition,
+        calorieLimit: datedTargets.nutrition,
         hasNutritionInput: bucket.count > 0,
       });
     }
@@ -302,10 +307,11 @@ export async function GET(req: NextRequest) {
     }
 
     let workoutPoints = 0;
-    for (const bucket of workoutByDate.values()) {
+    for (const [date, bucket] of workoutByDate.entries()) {
+      const datedTargets = effectiveTargetsForDate(targets, date);
       workoutPoints += workoutDailyPoints({
         calories: bucket.calories,
-        calorieTarget: targets.workout,
+        calorieTarget: datedTargets.workout,
         hasActivity: bucket.hasActivity,
       });
     }
@@ -353,8 +359,9 @@ export async function GET(req: NextRequest) {
       nutrition_days: nutritionByDate.size,
       workout_days: workoutByDate.size,
       targets: {
-        nutrition_max_calories: targets.nutrition,
-        workout_min_calories: targets.workout,
+        nutrition_max_calories: targets.current.nutrition,
+        workout_min_calories: targets.current.workout,
+        target_history: targetTimelineSummary(targets),
       },
       source_status: {
         google_sheet: sheetResult.ok !== false,

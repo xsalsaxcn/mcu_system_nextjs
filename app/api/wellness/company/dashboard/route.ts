@@ -25,6 +25,11 @@ import {
   pointNumber,
   workoutDailyPoints,
 } from "@/lib/wellness/pointRules";
+import {
+  buildEffectiveTargetTimeline,
+  effectiveTargetsForDate,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -754,16 +759,12 @@ export async function GET(request: NextRequest) {
           ],
         );
       const participantNotes = notes.get(id) || [];
-      const targetNote = latestTarget(participantNotes);
-      const parsedTargets = parseTargets(targetNote);
-      const nutritionTarget =
-        participantNutritionCalorieLimit(participant) ||
-        parsedTargets.nutrition ||
-        0;
-      const workoutTarget =
-        participantWorkoutCalorieTarget(participant) ||
-        parsedTargets.workout ||
-        300;
+      const targetTimeline = buildEffectiveTargetTimeline({
+        participant,
+        notes: participantNotes,
+      });
+      const nutritionTarget = targetTimeline.current.nutrition;
+      const workoutTarget = targetTimeline.current.workout || 300;
 
       const effectiveDays =
         programWindowDayCount(
@@ -829,9 +830,10 @@ export async function GET(request: NextRequest) {
       for (const [date, slots] of nutritionByDate.entries()) {
         if (slots.size >= 3) nutritionTargetDates.add(date);
 
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
         nutritionPoints += nutritionDailyBonusPoints({
           totalCalories: nutritionCaloriesByDate.get(date) || 0,
-          calorieLimit: nutritionTarget,
+          calorieLimit: datedTargets.nutrition,
           hasNutritionInput: slots.size > 0,
         });
       }
@@ -839,11 +841,12 @@ export async function GET(request: NextRequest) {
       const workoutTargetDates = new Set<string>();
       let workoutPoints = 0;
       for (const [date, value] of workoutByDate.entries()) {
-        const achieved = value.calories >= workoutTarget;
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
+        const achieved = value.calories >= datedTargets.workout;
         if (achieved) workoutTargetDates.add(date);
         workoutPoints += workoutDailyPoints({
           calories: value.calories,
-          calorieTarget: workoutTarget,
+          calorieTarget: datedTargets.workout,
           hasActivity: value.calories > 0 || value.steps > 0,
         });
       }
@@ -1025,6 +1028,7 @@ export async function GET(request: NextRequest) {
         workout_target_days: workoutTargetDates.size,
         nutrition_target_calories: nutritionTarget,
         workout_target_calories: workoutTarget,
+        target_history: targetTimelineSummary(targetTimeline),
         overall_score: clamp(overallScore, 0, 100),
         flag,
         flag_label:

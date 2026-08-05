@@ -35,6 +35,11 @@ import {
   filterActivityRowsByFitnessSource,
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
+import {
+  buildEffectiveTargetTimeline,
+  effectiveTargetsForDate,
+  targetTimelineSummary,
+} from "@/lib/wellness/effectiveDatedTargets";
 
 // WELLNESS_DASHBOARD_GOOGLE_SHEET_NUTRITION_HEALTHTALK_V413
 // Dashboard admin reads Nutrition + Health Talk from existing Google Sheet Form Responses.
@@ -1197,6 +1202,7 @@ export async function GET(req: NextRequest) {
       evidenceRows,
       pointRows,
       healthtalkRows,
+      targetNotes,
     ] = await Promise.all([
       supabase
         .from("wellness_weight_logs")
@@ -1240,6 +1246,13 @@ export async function GET(req: NextRequest) {
         query
           .in("participant_id", participantIds)
           .order("event_date", { ascending: false })
+      ),
+      safeSelect(supabase, "wellness_coach_notes", (query) =>
+        query
+          .in("participant_id", participantIds)
+          .order("session_date", { ascending: true })
+          .order("created_at", { ascending: true })
+          .limit(10000)
       ),
     ]);
 
@@ -1299,6 +1312,7 @@ export async function GET(req: NextRequest) {
     const evidenceByParticipant = groupByParticipant(evidenceRows || []);
     const pointsByParticipant = groupByParticipant(pointRows || []);
     const healthtalkByParticipant = groupByParticipant(healthtalkRows || []);
+    const targetNotesByParticipant = groupByParticipant(targetNotes || []);
 
     const groupName = new Map(
       (groupRes.data || []).map((g: any) => [Number(g.id), g.name || "-"])
@@ -1599,8 +1613,12 @@ export async function GET(req: NextRequest) {
         weight_kg: currentWeight,
       };
 
-      const nutritionTarget = participantNutritionCalorieLimit(participant);
-      const workoutTarget = participantWorkoutCalorieTarget(participant) || 300;
+      const targetTimeline = buildEffectiveTargetTimeline({
+        participant,
+        notes: targetNotesByParticipant.get(Number(participant.id)) || [],
+      });
+      const nutritionTarget = targetTimeline.current.nutrition;
+      const workoutTarget = targetTimeline.current.workout || 300;
 
       const nutritionByDate = new Map<
         string,
@@ -1619,9 +1637,10 @@ export async function GET(req: NextRequest) {
       const nutritionPointRows: any[] = [];
       for (const [date, bucket] of nutritionByDate.entries()) {
         const inputPoints = bucket.count * 5;
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
         const bonusPoints = nutritionDailyBonusPoints({
           totalCalories: bucket.calories,
-          calorieLimit: nutritionTarget,
+          calorieLimit: datedTargets.nutrition,
           hasNutritionInput: bucket.count > 0,
         });
         nutritionPoints += inputPoints + bonusPoints;
@@ -1655,9 +1674,10 @@ export async function GET(req: NextRequest) {
       let workoutPoints = 0;
       const workoutPointRows: any[] = [];
       for (const [date, bucket] of workoutByDate.entries()) {
+        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
         const points = workoutDailyPoints({
           calories: bucket.calories,
-          calorieTarget: workoutTarget,
+          calorieTarget: datedTargets.workout,
           hasActivity: bucket.hasActivity,
         });
         workoutPoints += points;
@@ -1835,6 +1855,7 @@ export async function GET(req: NextRequest) {
         point_ledger_rows: pointLedger.ledger_row_count,
         nutrition_target_calories: nutritionTarget,
         workout_target_calories: workoutTarget,
+        target_history: targetTimelineSummary(targetTimeline),
         evidence_count: evidenceGallery.length,
         pending_evidence_count: pendingEvidence,
         latest_evidence_date:
