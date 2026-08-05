@@ -1,4 +1,6 @@
 // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
+// WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
+// WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -32,6 +34,11 @@ export type CoachNutritionTargetSummary = {
   maintenance_calories: number;
   nutrition_target_calories: number;
   target_weight_kg: number;
+  phase_target_weight_kg: number;
+  requested_target_weight_kg: number;
+  goal_source: "coach" | "bmi";
+  target_bmi: number;
+  calorie_adjustment_percent: number;
   ready_to_apply: boolean;
   confidence: "low" | "medium" | "high";
   warnings: string[];
@@ -43,6 +50,8 @@ export type CoachNutritionProfileInput = {
   age_years?: unknown;
   height_cm?: unknown;
   weight_kg?: unknown;
+  goal_weight_kg?: unknown;
+  goal_weight_mode?: unknown;
   bmi?: unknown;
   measurement_source?: unknown;
   measurement_date?: unknown;
@@ -68,6 +77,7 @@ export type CoachActivityTargetResult = {
     exercise_minutes_target: number;
     nutrition_calorie_target?: number;
     target_weight_kg?: number;
+    phase_target_weight_kg?: number;
     ready_to_apply: boolean;
     confidence: "low" | "medium" | "high";
   };
@@ -571,6 +581,11 @@ export function buildCoachNutritionTargetRecommendation(
   const height = numberValue(profile.height_cm);
   const weight = numberValue(profile.weight_kg);
   const suppliedBmi = numberValue(profile.bmi);
+  const goalWeightMode =
+    clean(profile.goal_weight_mode).toLowerCase() === "coach" ? "coach" : "bmi";
+  const requestedTargetWeight =
+    goalWeightMode === "coach" ? numberValue(profile.goal_weight_kg) : 0;
+  const hasCoachGoalWeight = goalWeightMode === "coach" && requestedTargetWeight > 0;
   const calculatedBmi =
     weight > 0 && height > 0 ? weight / ((height / 100) ** 2) : 0;
   const bmi = rounded(suppliedBmi > 0 ? suppliedBmi : calculatedBmi, 1);
@@ -582,6 +597,10 @@ export function buildCoachNutritionTargetRecommendation(
       : ageOnDate(profile.birth_date, activity.end_date);
   const healthyMin = height > 0 ? rounded(18.5 * ((height / 100) ** 2), 1) : 0;
   const healthyMax = height > 0 ? rounded(24.9 * ((height / 100) ** 2), 1) : 0;
+  const requestedTargetBmi =
+    height > 0 && requestedTargetWeight > 0
+      ? rounded(requestedTargetWeight / ((height / 100) ** 2), 1)
+      : 0;
   const activityFactor = activityFactorForNutrition(activity);
   const warnings: string[] = [];
 
@@ -611,26 +630,63 @@ export function buildCoachNutritionTargetRecommendation(
   let maintenance = 0;
   let nutritionTarget = 0;
   let targetWeight = 0;
+  let phaseTargetWeight = 0;
+  let calorieAdjustmentPercent = 0;
 
-  // Weight goal depends on the latest height, weight, and BMI. It must remain
-  // available even when date of birth is missing, because age is only required
-  // for the Mifflin-St Jeor calorie calculation.
-  if (height > 0 && weight > 0 && bmi > 0) {
+  // A Coach-entered goal weight takes priority over BMI-only maintenance logic.
+  // BMI remains a safety boundary. Large changes are split into a first 5% phase.
+  if (height > 0 && weight > 0 && bmi > 0 && hasCoachGoalWeight) {
+    targetWeight = rounded(requestedTargetWeight, 1);
+    if (requestedTargetBmi < 18.5 || requestedTargetBmi > 35) {
+      goal = "medical_review";
+      phaseTargetWeight = rounded(weight, 1);
+      warnings.push(
+        `Goal BB ${targetWeight} kg menghasilkan BMI ${requestedTargetBmi}. Review klinis diperlukan sebelum rekomendasi nutrisi diterapkan.`,
+      );
+      confidence = "low";
+    } else if (requestedTargetWeight < weight - 0.5) {
+      goal = "reduce";
+      phaseTargetWeight = rounded(Math.max(requestedTargetWeight, weight * 0.95), 1);
+      const lossPercent = ((weight - requestedTargetWeight) / weight) * 100;
+      calorieAdjustmentPercent = lossPercent > 5 ? -15 : -10;
+      if (lossPercent > 10) {
+        warnings.push(
+          `Goal BB ${targetWeight} kg adalah target jangka panjang (${rounded(lossPercent, 1)}% dari BB saat ini). Fase awal sistem: ${phaseTargetWeight} kg.`,
+        );
+        if (confidence === "high") confidence = "medium";
+      }
+      if (requestedTargetBmi < 20) {
+        warnings.push(
+          `BMI pada goal BB sekitar ${requestedTargetBmi}; Coach/NAKES perlu memantau progres dan kondisi klinis.`,
+        );
+        if (confidence === "high") confidence = "medium";
+      }
+    } else if (requestedTargetWeight > weight + 0.5) {
+      goal = "gain";
+      phaseTargetWeight = rounded(Math.min(requestedTargetWeight, weight * 1.05), 1);
+      calorieAdjustmentPercent = 10;
+    } else {
+      goal = "maintain";
+      phaseTargetWeight = rounded(weight, 1);
+    }
+  } else if (height > 0 && weight > 0 && bmi > 0) {
+    // Fallback when Coach has not entered a goal weight.
     if (bmi < 18.5) {
       goal = "medical_review";
       targetWeight = healthyMin;
+      phaseTargetWeight = healthyMin;
       warnings.push(
         "BMI di bawah 18,5. Target berat badan perlu dikonfirmasi NAKES/dokter sebelum diterapkan.",
       );
     } else if (bmi < 25) {
       goal = "maintain";
       targetWeight = rounded(weight, 1);
-    } else if (bmi < 30) {
-      goal = "reduce";
-      targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+      phaseTargetWeight = rounded(weight, 1);
     } else {
       goal = "reduce";
       targetWeight = rounded(Math.max(healthyMax, weight * 0.95), 1);
+      phaseTargetWeight = targetWeight;
+      calorieAdjustmentPercent = bmi >= 30 ? -15 : -10;
     }
   }
 
@@ -642,12 +698,13 @@ export function buildCoachNutritionTargetRecommendation(
     bmr = nearest(bmr, 10);
     maintenance = nearest(bmr * activityFactor, 50);
 
-    if (bmi >= 18.5 && bmi < 25) {
+    if (goal === "maintain") {
       nutritionTarget = maintenance;
-    } else if (bmi >= 25 && bmi < 30) {
-      nutritionTarget = nearest(maintenance * 0.9, 50);
-    } else if (bmi >= 30) {
-      nutritionTarget = nearest(maintenance * 0.85, 50);
+    } else if (goal === "reduce") {
+      const factor = calorieAdjustmentPercent <= -15 ? 0.85 : 0.9;
+      nutritionTarget = nearest(maintenance * factor, 50);
+    } else if (goal === "gain") {
+      nutritionTarget = nearest(maintenance * 1.1, 50);
     }
 
     if (nutritionTarget > 0 && nutritionTarget < 1200) {
@@ -681,6 +738,11 @@ export function buildCoachNutritionTargetRecommendation(
       maintenance_calories: maintenance,
       nutrition_target_calories: nutritionTarget,
       target_weight_kg: targetWeight,
+      phase_target_weight_kg: phaseTargetWeight,
+      requested_target_weight_kg: rounded(requestedTargetWeight, 1),
+      goal_source: hasCoachGoalWeight ? "coach" : "bmi",
+      target_bmi: requestedTargetBmi,
+      calorie_adjustment_percent: calorieAdjustmentPercent,
       ready_to_apply: nutritionTarget > 0 && targetWeight > 0 && goal !== "medical_review",
       confidence,
       warnings,

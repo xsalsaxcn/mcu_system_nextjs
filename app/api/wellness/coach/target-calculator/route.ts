@@ -1,4 +1,6 @@
 // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
+// WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
+// WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -229,6 +231,14 @@ export async function GET(request: NextRequest) {
     const genderOverride = clean(
       request.nextUrl.searchParams.get("gender"),
     ).toLowerCase();
+    const goalWeightMode =
+      clean(request.nextUrl.searchParams.get("goal_weight_mode")).toLowerCase() === "coach"
+        ? "coach"
+        : "bmi";
+    const goalWeightOverride =
+      goalWeightMode === "coach"
+        ? positiveNumber(request.nextUrl.searchParams.get("goal_weight_kg"))
+        : 0;
     const periodDays = Math.min(
       30,
       Math.max(7, asNumber(request.nextUrl.searchParams.get("days")) || 14),
@@ -338,7 +348,11 @@ export async function GET(request: NextRequest) {
     }
 
     const nutritionResult = buildCoachNutritionTargetRecommendation(
-      clinicalProfile,
+      {
+        ...clinicalProfile,
+        goal_weight_kg: goalWeightOverride,
+        goal_weight_mode: goalWeightMode,
+      },
       calculation,
     );
     calculation.clinical = nutritionResult.clinical;
@@ -347,6 +361,8 @@ export async function GET(request: NextRequest) {
       nutritionResult.nutrition.nutrition_target_calories;
     calculation.recommendation.target_weight_kg =
       nutritionResult.nutrition.target_weight_kg;
+    calculation.recommendation.phase_target_weight_kg =
+      nutritionResult.nutrition.phase_target_weight_kg;
     calculation.recommendation.ready_to_apply =
       calculation.recommendation.ready_to_apply ||
       nutritionResult.nutrition.ready_to_apply;
@@ -362,7 +378,9 @@ export async function GET(request: NextRequest) {
       },
       calculation,
       note:
-        "Rekomendasi belum mengubah target. Nutrisi memakai BMI terbaru serta Mifflin-St Jeor bila usia, jenis kelamin, tinggi, dan berat lengkap. Coach tetap harus menekan Terapkan ke Form dan Simpan Target Peserta.",
+        goalWeightMode === "coach"
+          ? "Rekomendasi memakai Target BB Coach yang sedang terisi. Target belum berubah sampai Coach menekan Terapkan ke Form dan Simpan Target Peserta."
+          : "Kolom Target BB Coach kosong, sehingga rekomendasi memakai logic BMI otomatis. Target belum berubah sampai Coach menekan Terapkan ke Form dan Simpan Target Peserta.",
     });
   } catch (error: any) {
     return NextResponse.json(

@@ -541,6 +541,8 @@ export default function WellnessCoachPortalPage() {
   }
 
   // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
+  // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
+  // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
   async function calculateTargetRecommendation() {
     if (!selectedParticipant?.id) return;
     setTargetCalculatorLoading(true);
@@ -558,6 +560,13 @@ export default function WellnessCoachPortalPage() {
     }
     if (targetCalculatorProfileOverride.gender) {
       params.set("gender", targetCalculatorProfileOverride.gender);
+    }
+    const goalWeightText = clean(targetForm.target_weight_kg);
+    const goalWeightOverride = Number(goalWeightText || 0);
+    const hasCoachGoalWeight = goalWeightText !== "" && goalWeightOverride > 0;
+    params.set("goal_weight_mode", hasCoachGoalWeight ? "coach" : "bmi");
+    if (hasCoachGoalWeight) {
+      params.set("goal_weight_kg", String(goalWeightOverride));
     }
     const result = await fetch(
       `/api/wellness/coach/target-calculator?${params.toString()}`,
@@ -4103,7 +4112,7 @@ function ParticipantDetail({
                   Kalkulator Target Aktivitas & Nutrisi
                 </div>
                 <div className="mt-1 text-xs font-bold leading-5 text-slate-600">
-                  Aktivitas memakai baseline 14 hari. Nutrisi memakai BMI/pengukuran terbaru NAKES dan Mifflin-St Jeor bila profil peserta lengkap.
+                  Aktivitas memakai baseline 14 hari. Nutrisi memakai BMI/pengukuran terbaru NAKES, Mifflin-St Jeor, dan Goal BB yang sudah diisi Coach pada form.
                 </div>
               </div>
               <button
@@ -4230,19 +4239,24 @@ function ParticipantDetail({
 
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
                   <div className="text-[10px] font-black uppercase text-emerald-700">Rekomendasi sistem</div>
-                  <div className="mt-2 grid gap-2 text-xs font-black text-slate-800 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="mt-2 grid gap-2 text-xs font-black text-slate-800 sm:grid-cols-2 lg:grid-cols-6">
                     <span>Nutrisi: {fmtNumber(targetRecommendation.calculation.recommendation?.nutrition_calorie_target || 0)} kkal/hari</span>
                     <span>Kalori aktif: {fmtNumber(targetRecommendation.calculation.recommendation?.active_calorie_target || 0)} kkal/hari aktif</span>
                     <span>Langkah: {fmtNumber(targetRecommendation.calculation.recommendation?.step_target || 0)} langkah/hari</span>
                     <span>Latihan: {fmtNumber(targetRecommendation.calculation.recommendation?.exercise_minutes_target || 0)} menit/hari aktif</span>
-                    <span>Goal BB fase awal: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
+                    <span>
+                      {targetRecommendation.calculation.nutrition?.goal_source === "coach"
+                        ? "Goal BB Coach"
+                        : "Goal BB sistem (BMI)"}: {fmtNumber(targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg
+                    </span>
+                    <span>Goal fase awal: {fmtNumber(targetRecommendation.calculation.recommendation?.phase_target_weight_kg || targetRecommendation.calculation.recommendation?.target_weight_kg || 0, 1)} kg</span>
                   </div>
                   <div className="mt-2 text-[10px] font-bold text-emerald-800">
                     Confidence: {clean(targetRecommendation.calculation.recommendation?.confidence || "low").toUpperCase()} • Periode {targetRecommendation.calculation.start_date} s.d. {targetRecommendation.calculation.end_date}
                   </div>
                   {targetRecommendation.calculation.nutrition ? (
                     <div className="mt-1 text-[10px] font-bold text-emerald-800">
-                      Nutrisi: {targetRecommendation.calculation.nutrition.formula} • BMR {fmtNumber(targetRecommendation.calculation.nutrition.bmr_calories || 0)} kkal • Estimasi kebutuhan {fmtNumber(targetRecommendation.calculation.nutrition.maintenance_calories || 0)} kkal • Goal {clean(targetRecommendation.calculation.nutrition.goal || "review").toUpperCase()}
+                      Dasar: {targetRecommendation.calculation.nutrition.goal_source === "coach" ? "TARGET BB COACH" : "LOGIC BMI OTOMATIS"} • Nutrisi: {targetRecommendation.calculation.nutrition.formula} • BMR {fmtNumber(targetRecommendation.calculation.nutrition.bmr_calories || 0)} kkal • Estimasi kebutuhan {fmtNumber(targetRecommendation.calculation.nutrition.maintenance_calories || 0)} kkal • Penyesuaian {fmtNumber(targetRecommendation.calculation.nutrition.calorie_adjustment_percent || 0)}% • Goal {clean(targetRecommendation.calculation.nutrition.goal || "review").toUpperCase()}
                     </div>
                   ) : null}
                 </div>
@@ -4338,8 +4352,11 @@ function ParticipantDetail({
                 className={fieldClass}
                 value={targetForm.target_weight_kg}
                 onChange={(e) => setTarget("target_weight_kg", e.target.value)}
-                placeholder="Contoh: 72"
+                placeholder="Kosongkan untuk rekomendasi otomatis berdasarkan BMI"
               />
+              <span className="text-[11px] font-bold text-slate-400">
+                Terisi: kalkulator mengikuti Target BB Coach. Kosong: kalkulator memakai logic BMI otomatis.
+              </span>
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               Catatan Target
