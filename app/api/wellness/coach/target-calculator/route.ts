@@ -3,6 +3,7 @@
 // WELLNESS_COACH_FLEXIBLE_GOAL_WEIGHT_V126M40_4
 // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
 // WELLNESS_COACH_MONTHLY_NUTRITION_BUTTONS_V126M41_1
+// WELLNESS_NAKES_SHEET_COACH_RECONCILIATION_V126M42_3
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -14,6 +15,7 @@ import {
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
+import { fetchWellnessGoogleSheetRows } from "@/lib/wellness/googleSheetResponses";
 import {
   buildCoachActivityTargetRecommendation,
   buildCoachNutritionTargetRecommendation,
@@ -82,11 +84,10 @@ function rowPayload(row: any) {
   }
 }
 
-// WELLNESS_NAKES_LATEST_REVISION_SELECTION_V126M42_2
 function sortableClinicalNumber(value: any) {
-  const numeric = Number(value);
-  if (Number.isFinite(numeric)) {
-    return String(Math.trunc(numeric)).padStart(20, "0");
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) {
+    return String(Math.max(0, Math.trunc(parsed))).padStart(20, "0");
   }
   return String(value || "");
 }
@@ -189,6 +190,156 @@ async function safeClinicalRows(
   } catch {
     return [];
   }
+}
+
+function sheetField(row: any, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== null && value !== undefined && clean(value) !== "") return value;
+  }
+  return null;
+}
+
+function normalizedDateKey(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  }
+
+  const local = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+  if (local) {
+    return `${local[3]}-${String(local[2]).padStart(2, "0")}-${String(local[1]).padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function sheetTimestampKey(row: any) {
+  const value = sheetField(row, "Submission Date", "Updated At", "Created At");
+  const parsed = value ? new Date(String(value)) : null;
+  return parsed && !Number.isNaN(parsed.getTime())
+    ? String(parsed.getTime()).padStart(16, "0")
+    : clean(value);
+}
+
+function isNakesSheetRow(row: any) {
+  const logType = clean(sheetField(row, "Log Type", "log_type")).toLowerCase();
+  const marker = clean(sheetField(row, "NAKES Sync Marker", "Marker")).toLowerCase();
+  return (
+    logType === "nakes_checkup" ||
+    marker.includes("nakes") ||
+    Boolean(
+      sheetField(
+        row,
+        "Tinggi Badan NAKES (cm)",
+        "Berat Badan NAKES (kg)",
+        "Usia NAKES (tahun)",
+        "NAKES History ID",
+      ),
+    )
+  );
+}
+
+function latestNakesSheetProfile(
+  rows: any[],
+  participant: any,
+  participantId: number,
+  code: string,
+) {
+  const normalizedCode = clean(code).toLowerCase();
+  const candidates = (rows || [])
+    .filter((row: any) => {
+      if (!isNakesSheetRow(row)) return false;
+      const rowParticipantId = asNumber(sheetField(row, "Participant ID", "participant_id"));
+      const rowCode = clean(sheetField(row, "KODE", "Kode", "participant_code")).toLowerCase();
+      return rowParticipantId === participantId || Boolean(normalizedCode && rowCode === normalizedCode);
+    })
+    .sort((a: any, b: any) => {
+      const keyA = [
+        normalizedDateKey(sheetField(a, "Log Date", "Tanggal Pemeriksaan NAKES", "Submission Date")),
+        sheetTimestampKey(a),
+        sortableClinicalNumber(sheetField(a, "NAKES Revision", "Revision") || 0),
+        sortableClinicalNumber(a?._rowNumber || 0),
+      ].join("|");
+      const keyB = [
+        normalizedDateKey(sheetField(b, "Log Date", "Tanggal Pemeriksaan NAKES", "Submission Date")),
+        sheetTimestampKey(b),
+        sortableClinicalNumber(sheetField(b, "NAKES Revision", "Revision") || 0),
+        sortableClinicalNumber(b?._rowNumber || 0),
+      ].join("|");
+      return keyB.localeCompare(keyA);
+    });
+
+  for (const row of candidates) {
+    const weight = positiveNumber(
+      sheetField(row, "Berat Badan NAKES (kg)", "BB Monitoring terbaru", "BB anda per hari ini (diisi sekali saja perminggu)"),
+    );
+    const height = positiveNumber(sheetField(row, "Tinggi Badan NAKES (cm)"));
+    const age = positiveNumber(sheetField(row, "Usia NAKES (tahun)", "Usia"));
+    const bmi = positiveNumber(sheetField(row, "BMI"));
+    if (!(weight > 0 || height > 0 || age > 0)) continue;
+
+    return {
+      gender: firstText(
+        sheetField(row, "Jenis Kelamin", "Gender", "Sex"),
+        profileGender(null, participant),
+      ),
+      birth_date: profileBirthDate(null, participant),
+      age_years: age || profileAge(null, participant),
+      height_cm: height,
+      weight_kg: weight,
+      bmi,
+      measurement_source: "Google Sheet NAKES",
+      measurement_date: normalizedDateKey(
+        sheetField(row, "Log Date", "Tanggal Pemeriksaan NAKES", "Submission Date"),
+      ),
+      measurement_updated_at: clean(sheetField(row, "Submission Date", "Updated At")),
+      measurement_revision: positiveNumber(sheetField(row, "NAKES Revision", "Revision")),
+      measurement_row_number: asNumber(row?._rowNumber),
+    };
+  }
+
+  return null;
+}
+
+function reconcileClinicalProfile(databaseProfile: any, sheetProfile: any) {
+  if (!sheetProfile) return databaseProfile;
+
+  const databaseDate = normalizedDateKey(databaseProfile?.measurement_date);
+  const sheetDate = normalizedDateKey(sheetProfile?.measurement_date);
+  const sheetIsSameOrNewer = !databaseDate || Boolean(sheetDate && sheetDate >= databaseDate);
+
+  if (!sheetIsSameOrNewer) {
+    return {
+      ...databaseProfile,
+      age_years: databaseProfile?.age_years || sheetProfile?.age_years || 0,
+      gender: databaseProfile?.gender || sheetProfile?.gender || "",
+      birth_date: databaseProfile?.birth_date || sheetProfile?.birth_date || "",
+    };
+  }
+
+  const weight = sheetProfile?.weight_kg || databaseProfile?.weight_kg || 0;
+  const height = sheetProfile?.height_cm || databaseProfile?.height_cm || 0;
+  const calculatedBmi = weight > 0 && height > 0
+    ? Number((weight / Math.pow(height / 100, 2)).toFixed(1))
+    : 0;
+
+  return {
+    ...databaseProfile,
+    ...sheetProfile,
+    gender: sheetProfile?.gender || databaseProfile?.gender || "",
+    birth_date: sheetProfile?.birth_date || databaseProfile?.birth_date || "",
+    age_years: sheetProfile?.age_years || databaseProfile?.age_years || 0,
+    height_cm: height,
+    weight_kg: weight,
+    bmi: sheetProfile?.bmi || calculatedBmi || databaseProfile?.bmi || 0,
+    measurement_source: "Google Sheet NAKES (sinkron terbaru)",
+  };
 }
 
 function latestClinicalProfile(participant: any, sources: Array<{ label: string; rows: any[] }>) {
@@ -345,7 +496,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [activityResult, checkupRows, miniMcuRows, weightRows] = await Promise.all([
+    const [
+      activityResult,
+      checkupRows,
+      miniMcuRows,
+      weightRows,
+      sheetNakesResult,
+    ] = await Promise.all([
       supabase
         .from("wellness_activity_logs")
         .select("*")
@@ -370,6 +527,15 @@ export async function GET(request: NextRequest) {
         participantId,
         "log_date",
       ),
+      fetchWellnessGoogleSheetRows({
+        code: actualCode,
+        participantId,
+        limit: 500,
+      }).catch((error: any) => ({
+        ok: false,
+        rows: [],
+        message: error?.message || "Gagal membaca Google Sheet NAKES.",
+      })),
     ]);
     if (activityResult.error) throw activityResult.error;
 
@@ -385,11 +551,21 @@ export async function GET(request: NextRequest) {
     const calculation = buildCoachActivityTargetRecommendation(activityRows, {
       periodDays,
     });
-    const clinicalProfile = latestClinicalProfile(participant, [
+    const databaseClinicalProfile = latestClinicalProfile(participant, [
       { label: "Pemeriksaan NAKES", rows: checkupRows },
       { label: "Mini MCU", rows: miniMcuRows },
       { label: "Log berat badan", rows: weightRows },
     ]);
+    const sheetClinicalProfile = latestNakesSheetProfile(
+      sheetNakesResult?.rows || [],
+      participant,
+      participantId,
+      actualCode,
+    );
+    const clinicalProfile = reconcileClinicalProfile(
+      databaseClinicalProfile,
+      sheetClinicalProfile,
+    );
     if (ageOverride >= 18 && ageOverride < 120) {
       clinicalProfile.age_years = ageOverride;
     }
@@ -441,6 +617,33 @@ export async function GET(request: NextRequest) {
         name: participantName(participant),
       },
       calculation,
+      source_reconciliation: {
+        database: {
+          source: databaseClinicalProfile?.measurement_source || "",
+          date: databaseClinicalProfile?.measurement_date || "",
+          weight_kg: databaseClinicalProfile?.weight_kg || 0,
+          height_cm: databaseClinicalProfile?.height_cm || 0,
+          age_years: databaseClinicalProfile?.age_years || 0,
+        },
+        google_sheet: {
+          ok: sheetNakesResult?.ok === true,
+          message: sheetNakesResult?.message || "",
+          source: sheetClinicalProfile?.measurement_source || "",
+          date: sheetClinicalProfile?.measurement_date || "",
+          row_number: sheetClinicalProfile?.measurement_row_number || 0,
+          revision: sheetClinicalProfile?.measurement_revision || 0,
+          weight_kg: sheetClinicalProfile?.weight_kg || 0,
+          height_cm: sheetClinicalProfile?.height_cm || 0,
+          age_years: sheetClinicalProfile?.age_years || 0,
+        },
+        selected: {
+          source: clinicalProfile?.measurement_source || "",
+          date: clinicalProfile?.measurement_date || "",
+          weight_kg: clinicalProfile?.weight_kg || 0,
+          height_cm: clinicalProfile?.height_cm || 0,
+          age_years: clinicalProfile?.age_years || 0,
+        },
+      },
       note:
         goalWeightMode === "coach"
           ? "Rekomendasi memakai Target BB Coach yang sedang terisi. Target belum berubah sampai Coach menekan Terapkan ke Form dan Simpan Target Peserta."
