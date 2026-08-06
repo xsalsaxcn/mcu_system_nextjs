@@ -104,6 +104,134 @@ function fmtNumber(value: any, digits = 0) {
   }).format(n);
 }
 
+// WELLNESS_SAVING_OVERLAY_V126M46
+// Satu overlay bersama untuk submit Nutrisi, Workout, dan Health Talk.
+// Overlay hanya mengatur UX; endpoint, payload, dan data persistence tidak diubah.
+type SavingOverlayModuleV126M46 = "nutrition" | "workout" | "healthtalk";
+type SavingOverlayStatusV126M46 = "idle" | "saving" | "success" | "error";
+
+type SavingOverlayStateV126M46 = {
+  open: boolean;
+  module: SavingOverlayModuleV126M46;
+  status: SavingOverlayStatusV126M46;
+  detail: string;
+  message: string;
+};
+
+const emptySavingOverlayV126M46: SavingOverlayStateV126M46 = {
+  open: false,
+  module: "nutrition",
+  status: "idle",
+  detail: "",
+  message: "",
+};
+
+function savingModuleLabelV126M46(module: SavingOverlayModuleV126M46) {
+  if (module === "workout") return "Workout";
+  if (module === "healthtalk") return "Health Talk";
+  return "Nutrisi";
+}
+
+function WellnessSavingOverlayV126M46({
+  state,
+  onClose,
+}: {
+  state: SavingOverlayStateV126M46;
+  onClose: () => void;
+}) {
+  if (!state.open || typeof document === "undefined") return null;
+
+  const isSaving = state.status === "saving";
+  const isSuccess = state.status === "success";
+  const moduleLabel = savingModuleLabelV126M46(state.module);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/55 px-4 py-8 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wellness-saving-overlay-title"
+      aria-describedby="wellness-saving-overlay-description"
+    >
+      <div className="w-full max-w-lg overflow-hidden rounded-[2.25rem] border border-white/80 bg-white shadow-2xl shadow-slate-950/30">
+        <div className="relative overflow-hidden bg-gradient-to-br from-cyan-50 via-teal-50 to-emerald-50 px-6 pb-7 pt-8 text-center md:px-9">
+          <div className="pointer-events-none absolute -right-12 -top-14 h-40 w-40 rounded-full bg-cyan-200/35 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-16 -left-12 h-40 w-40 rounded-full bg-emerald-200/35 blur-2xl" />
+
+          <div
+            className={`relative mx-auto flex h-20 w-20 items-center justify-center rounded-[1.7rem] shadow-lg ${
+              isSaving
+                ? "bg-teal-600 text-white shadow-teal-200"
+                : isSuccess
+                  ? "bg-emerald-600 text-white shadow-emerald-200"
+                  : "bg-rose-600 text-white shadow-rose-200"
+            }`}
+          >
+            {isSaving ? (
+              <span className="h-10 w-10 animate-spin rounded-full border-4 border-white/35 border-t-white" />
+            ) : isSuccess ? (
+              <svg viewBox="0 0 24 24" className="h-11 w-11" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m5 12 4 4L19 6" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-11 w-11" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 3.8 2.6 17.1A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.9L13.7 3.8a2 2 0 0 0-3.4 0Z" />
+              </svg>
+            )}
+          </div>
+
+          <div className="relative mt-5 text-[11px] font-black uppercase tracking-[0.22em] text-teal-700">
+            {moduleLabel}
+          </div>
+          <h2 id="wellness-saving-overlay-title" className="relative mt-2 text-2xl font-black tracking-tight text-slate-950 md:text-3xl">
+            {isSaving
+              ? "Data Anda Sedang Disimpan"
+              : isSuccess
+                ? "Data Berhasil Disimpan"
+                : "Data Belum Berhasil Disimpan"}
+          </h2>
+          <p id="wellness-saving-overlay-description" className="relative mx-auto mt-3 max-w-md text-sm font-bold leading-6 text-slate-600">
+            {isSaving
+              ? "Jangan tutup, kembali, atau memuat ulang halaman sampai proses penyimpanan selesai."
+              : state.message}
+          </p>
+        </div>
+
+        <div className="space-y-4 px-6 py-6 md:px-9">
+          {isSaving ? (
+            <>
+              <div className="rounded-[1.4rem] border border-teal-100 bg-teal-50 px-4 py-4 text-sm font-black leading-6 text-teal-900" role="status" aria-live="polite">
+                {state.detail || "Memvalidasi dan menyimpan data..."}
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-black text-slate-500">
+                <div className="rounded-2xl bg-slate-50 px-2 py-3">Validasi</div>
+                <div className="rounded-2xl bg-slate-50 px-2 py-3">Simpan</div>
+                <div className="rounded-2xl bg-slate-50 px-2 py-3">Sinkronisasi</div>
+              </div>
+              <div className="text-center text-[11px] font-bold leading-5 text-slate-400">
+                Waktu proses dapat berbeda tergantung ukuran foto dan koneksi internet.
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              className={`w-full rounded-[1.35rem] px-5 py-4 text-sm font-black text-white shadow-lg ${
+                isSuccess
+                  ? "bg-emerald-600 shadow-emerald-100"
+                  : "bg-slate-900 shadow-slate-200"
+              }`}
+            >
+              {isSuccess ? "Selesai" : "Kembali ke Form"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function todayDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
@@ -930,6 +1058,92 @@ export default function WellnessParticipantPortalPage() {
   const [message, setMessage] = useState(
     "Gunakan Kode Karyawan dan email terdaftar untuk menerima OTP dan masuk ke portal peserta.",
   );
+  const [savingOverlayV126M46, setSavingOverlayV126M46] =
+    useState<SavingOverlayStateV126M46>(emptySavingOverlayV126M46);
+  const savingOverlayTimerV126M46 = useRef<number | null>(null);
+
+  function clearSavingOverlayTimerV126M46() {
+    if (savingOverlayTimerV126M46.current !== null) {
+      window.clearTimeout(savingOverlayTimerV126M46.current);
+      savingOverlayTimerV126M46.current = null;
+    }
+  }
+
+  function openSavingOverlayV126M46(
+    module: SavingOverlayModuleV126M46,
+    detail: string,
+  ) {
+    clearSavingOverlayTimerV126M46();
+    setSavingOverlayV126M46({
+      open: true,
+      module,
+      status: "saving",
+      detail,
+      message: "",
+    });
+  }
+
+  function updateSavingOverlayV126M46(detail: string) {
+    setSavingOverlayV126M46((current) =>
+      current.open && current.status === "saving"
+        ? { ...current, detail }
+        : current,
+    );
+  }
+
+  function completeSavingOverlayV126M46(message: string) {
+    setSavingOverlayV126M46((current) => ({
+      ...current,
+      open: true,
+      status: "success",
+      detail: "",
+      message,
+    }));
+    clearSavingOverlayTimerV126M46();
+    savingOverlayTimerV126M46.current = window.setTimeout(() => {
+      setSavingOverlayV126M46(emptySavingOverlayV126M46);
+      savingOverlayTimerV126M46.current = null;
+    }, 1600);
+  }
+
+  function failSavingOverlayV126M46(message: string) {
+    clearSavingOverlayTimerV126M46();
+    setSavingOverlayV126M46((current) => ({
+      ...current,
+      open: true,
+      status: "error",
+      detail: "",
+      message,
+    }));
+  }
+
+  function closeSavingOverlayV126M46() {
+    if (savingOverlayV126M46.status === "saving") return;
+    clearSavingOverlayTimerV126M46();
+    setSavingOverlayV126M46(emptySavingOverlayV126M46);
+  }
+
+  useEffect(() => {
+    const activelySaving =
+      savingOverlayV126M46.open && savingOverlayV126M46.status === "saving";
+    if (!activelySaving || typeof window === "undefined") return;
+
+    const preventClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", preventClose);
+    return () => window.removeEventListener("beforeunload", preventClose);
+  }, [savingOverlayV126M46.open, savingOverlayV126M46.status]);
+
+  useEffect(() => {
+    return () => {
+      if (savingOverlayTimerV126M46.current !== null) {
+        window.clearTimeout(savingOverlayTimerV126M46.current);
+      }
+    };
+  }, []);
   const [
     participantCompaniesV126C,
     setParticipantCompaniesV126C,
@@ -1673,6 +1887,12 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
     }
 
     nutritionSubmitInFlightV126L.current = true;
+    openSavingOverlayV126M46(
+      "nutrition",
+      nutritionPhoto
+        ? "Menyiapkan foto dan memvalidasi laporan nutrisi..."
+        : "Memvalidasi laporan nutrisi...",
+    );
 
     window.setTimeout(() => {
       nutritionSubmitInFlightV126L.current = false;
@@ -1734,6 +1954,7 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
 
     if (photoForUpload) {
       setMessage("Menyiapkan dan mengompres foto nutrisi...");
+      updateSavingOverlayV126M46("Menyiapkan dan mengompres foto nutrisi...");
 
       try {
         photoForUpload = await compressNutritionPhotoV126M2(
@@ -1744,6 +1965,7 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
           error?.message ||
           "Foto gagal dikompres. Pilih foto lain atau gunakan screenshot.";
         setMessage(compressionMessage);
+        failSavingOverlayV126M46(compressionMessage);
         nutritionSubmitInFlightV126L.current = false;
         return {
           ok: false,
@@ -1753,6 +1975,9 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
     }
 
     setMessage("Menyimpan nutrisi ke Google Sheet...");
+    updateSavingOverlayV126M46(
+      "Menyimpan data nutrisi dan menyinkronkan riwayat...",
+    );
 
     const body = new FormData();
     body.append("submission_id", submissionId);
@@ -1835,7 +2060,9 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       } catch {
         // Browser storage is optional.
       }
+      updateSavingOverlayV126M46("Data tersimpan. Memperbarui poin dan riwayat...");
       await loadPoints();
+      completeSavingOverlayV126M46(successMessage);
 
       nutritionSubmitInFlightV126L.current = false;
 
@@ -1850,6 +2077,7 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       result.message ||
       "Gagal menyimpan nutrisi.";
     setMessage(errorMessage);
+    failSavingOverlayV126M46(errorMessage);
     nutritionSubmitInFlightV126L.current = false;
 
     return {
@@ -1876,6 +2104,12 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
     }
 
     workoutSubmitInFlightV126L.current = true;
+    openSavingOverlayV126M46(
+      "workout",
+      workoutEvidence
+        ? "Menyiapkan bukti aktivitas dan memvalidasi workout..."
+        : "Memvalidasi data workout...",
+    );
 
     window.setTimeout(() => {
       workoutSubmitInFlightV126L.current = false;
@@ -1883,6 +2117,9 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
 
     setMessage(
       "Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...",
+    );
+    updateSavingOverlayV126M46(
+      "Menyimpan workout dan menghitung kalori aktivitas...",
     );
 
     const submissionId =
@@ -1922,14 +2159,17 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
         notes: "",
       }));
       setWorkoutEvidence(null);
+      updateSavingOverlayV126M46("Data tersimpan. Memperbarui riwayat workout...");
       await loadMe({ keepMessage: true });
       setActiveTab("history");
-    } else {
-      setMessage(
-        result.detail ||
-          result.message ||
-          "Gagal menyimpan workout.",
+      completeSavingOverlayV126M46(
+        result.message || "Workout manual berhasil disimpan.",
       );
+    } else {
+      const workoutErrorMessage =
+        result.detail || result.message || "Gagal menyimpan workout.";
+      setMessage(workoutErrorMessage);
+      failSavingOverlayV126M46(workoutErrorMessage);
     }
 
     workoutSubmitInFlightV126L.current = false;
@@ -1941,7 +2181,16 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       return;
     }
 
+    openSavingOverlayV126M46(
+      "healthtalk",
+      healthtalkEvidence
+        ? "Menyiapkan bukti dan memvalidasi data Health Talk..."
+        : "Memvalidasi data Health Talk...",
+    );
     setMessage("Menyimpan Health Talk ke Google Sheet...");
+    updateSavingOverlayV126M46(
+      "Menyimpan Health Talk dan menyinkronkan riwayat...",
+    );
 
     const body = new FormData();
     body.append("log_date", healthtalkForm.log_date);
@@ -1969,12 +2218,17 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
         notes: "",
       }));
       setHealthtalkEvidence(null);
+      updateSavingOverlayV126M46("Data tersimpan. Memperbarui riwayat dan poin...");
       await Promise.all([loadHealthtalk(), loadPoints()]);
       setActiveTab("history");
-    } else {
-      setMessage(
-        result.detail || result.message || "Gagal menyimpan Health Talk.",
+      completeSavingOverlayV126M46(
+        result.message || "Health Talk berhasil disimpan.",
       );
+    } else {
+      const healthtalkErrorMessage =
+        result.detail || result.message || "Gagal menyimpan Health Talk.";
+      setMessage(healthtalkErrorMessage);
+      failSavingOverlayV126M46(healthtalkErrorMessage);
     }
   }
 
@@ -2106,6 +2360,11 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4fbfa] pb-28 pt-16 text-slate-900 md:bg-[#f6fbff] md:pb-0 md:pt-0">
+      <WellnessSavingOverlayV126M46
+        state={savingOverlayV126M46}
+        onClose={closeSavingOverlayV126M46}
+      />
+
       {step === "portal" ? (
         <ParticipantPortalMenu
           activeTab={activeTab}
