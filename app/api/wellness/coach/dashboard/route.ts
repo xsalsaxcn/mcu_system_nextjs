@@ -21,6 +21,10 @@ import {
   isOperationalRowInProgramWindow,
   programWindowDayCount,
 } from "@/lib/wellness/programWindow";
+import {
+  wellnessStreakSteps,
+  wellnessStreakWorkoutCalories,
+} from "@/lib/wellness/streak";
 
 // WELLNESS_EDITABLE_STEP_TARGET_V126M34
 export const dynamic = "force-dynamic";
@@ -131,7 +135,11 @@ function participantRisk(row: any) {
 
 function activityDate(row: any) {
   return clean(
-    row?.log_date || row?.date || row?.started_at || row?.created_at,
+    row?.log_date ||
+      row?.date ||
+      row?.raw_payload?.log_date ||
+      row?.started_at ||
+      row?.created_at,
   ).slice(0, 10);
 }
 
@@ -159,23 +167,15 @@ function nutritionPointIdentity(row: any) {
   return clean(row?.source_id) || clean(row?.point_key) || clean(row?.id);
 }
 
+// WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1
+// Dashboard compliance and cards use the same device metric resolver as the
+// Portal, participant detail, point calculation, and streak calculation.
 function activitySteps(row: any) {
-  return asNumber(
-    row?.steps ||
-      row?.total_steps ||
-      row?.raw_payload?.health_connect_steps ||
-      row?.raw_payload?.google_fit_steps,
-  );
+  return wellnessStreakSteps(row);
 }
 
 function activityCalories(row: any) {
-  return asNumber(
-    row?.calories ||
-      row?.total_calories ||
-      row?.calories_burned ||
-      row?.raw_payload?.health_connect_calories ||
-      row?.raw_payload?.google_fit_calories_expended,
-  );
+  return wellnessStreakWorkoutCalories(row);
 }
 
 function foodCalories(row: any) {

@@ -40,6 +40,7 @@ import WellnessProfilePanel, {
 } from "@/components/wellness/WellnessProfile";
 import {
   buildWellnessStreakSummary,
+  wellnessStreakSteps,
   wellnessStreakWorkoutCalories,
 } from "@/lib/wellness/streak";
 
@@ -489,39 +490,16 @@ function estimatedDeviceDailyCalories(item: any) {
   return 0;
 }
 
+// WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1
+// Use the same canonical calorie resolver as streak and Coach. When Google Fit
+// only supplies its exact daily total, the Portal must not silently turn it
+// into zero while the sync card and Coach can already read the same row.
 function activityCaloriesValue(item: any) {
-  const raw = activityRawPayloadV72(item);
-  const stored = rawActivityCaloriesValue(item);
-
-  if (!isDeviceDailyRow(item)) return stored;
-
-  if (isHealthConnectDailyRow(item)) {
-    const selected = asNumber(raw?.selected_active_calories);
-    if (selected > 0) return selected;
-
-    const reported = asNumber(
-      raw?.health_connect_calories_original ??
-        raw?.health_connect_calories ??
-        raw?.original_payload?.calories ??
-        raw?.original_payload?.active_calories,
-    );
-
-    if (raw?.health_connect_calories_used === true && reported > 0) {
-      return reported;
-    }
-
-    // V71 stores the selected Health Connect active calories in the row itself.
-    if (stored > 0 && stored <= 2500) return stored;
-
-    return estimatedDeviceDailyCalories(item);
+  if (isDeviceDailyRow(item)) {
+    return wellnessStreakWorkoutCalories(item);
   }
 
-  // Google Fit REST provides total calories including BMR. It does not provide
-  // a separate exact active-calorie total in this sync. Never estimate it here.
-  const exactActive = asNumber(
-    raw?.google_fit_active_calories_exact ?? raw?.google_fit_active_calories,
-  );
-  return exactActive > 0 ? exactActive : 0;
+  return rawActivityCaloriesValue(item);
 }
 
 function googleFitTotalCaloriesValueV73(item: any) {
@@ -697,16 +675,7 @@ function activityMinutesValue(item: any) {
 }
 
 function activityStepsValue(item: any) {
-  const raw = activityRawPayloadV72(item);
-
-  return asNumber(
-    item?.steps ??
-      item?.total_steps ??
-      raw?.health_connect_steps ??
-      raw?.google_fit_steps ??
-      raw?.steps ??
-      raw?.total_steps,
-  );
+  return wellnessStreakSteps(item);
 }
 
 function providerStatus(integrations: any[], provider: string) {
@@ -1037,6 +1006,64 @@ function mergeWorkoutRowsV126M8(
     );
     return rightDate.localeCompare(leftDate);
   });
+}
+
+// WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1
+// Convert the successful REST sync response into the same activity-row shape
+// returned by /participant/me. This makes the Portal update immediately while
+// the subsequent server reload remains the long-term source of truth.
+function googleFitSyncDailyRowsV126M47(
+  dailyRows: any[],
+  participantId: number,
+  syncedAt: string,
+) {
+  return (Array.isArray(dailyRows) ? dailyRows : [])
+    .map((row: any) => {
+      const date = clean(row?.date).slice(0, 10);
+      if (!date) return null;
+      const steps = Math.max(0, Math.round(asNumber(row?.steps)));
+      const totalCalories = Math.max(
+        0,
+        asNumber(row?.google_fit_calories_expended ?? row?.calories),
+      );
+      const externalId = `google_fit_daily_${participantId}_${date}`;
+
+      return {
+        participant_id: participantId,
+        source: "google_fit",
+        external_activity_id: externalId,
+        provider_activity_id: externalId,
+        activity_type: "Google Fit Daily",
+        activity_name: `Google Fit Daily - ${steps} steps`,
+        log_date: date,
+        started_at: syncedAt,
+        updated_at: syncedAt,
+        duration_minutes: asNumber(row?.duration_minutes),
+        calories: totalCalories,
+        distance_km: asNumber(row?.distance_km),
+        steps,
+        raw_payload: {
+          marker: "WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1",
+          provider: "google_fit",
+          source: "google_fit",
+          sync_mode: "aggregate_daily",
+          log_date: date,
+          last_sync_at: syncedAt,
+          synced_at: syncedAt,
+          google_fit_steps: steps,
+          google_fit_distance_km: asNumber(row?.distance_km),
+          google_fit_total_calories: totalCalories,
+          google_fit_calories_expended: totalCalories,
+          google_fit_active_minutes: asNumber(row?.duration_minutes),
+          calories_source:
+            clean(row?.calories_source) || "google_fit_calories_expended",
+          selected_step_source: "google_fit_rest_aggregate",
+          step_data_source_id: "google_fit_rest_aggregate",
+          active_calories_available: false,
+        },
+      };
+    })
+    .filter(Boolean);
 }
 
 export default function WellnessParticipantPortalPage() {
@@ -1854,6 +1881,49 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
         }
 
         await loadMe({ keepMessage: true });
+
+        // The sync response already contains the authoritative daily aggregate.
+        // Merge it after reload so the current screen cannot remain at zero when
+        // the database row is momentarily not reflected by the reload response.
+        if (isGoogleFit && Array.isArray(result.daily)) {
+          const participantId = asNumber(
+            participant?.id ||
+              participant?.participant_id ||
+              participant?.wellness_participant_id,
+          );
+          const syncedRows = googleFitSyncDailyRowsV126M47(
+            result.daily,
+            participantId,
+            completedAt,
+          );
+
+          if (syncedRows.length > 0) {
+            setActivities((current) =>
+              mergeWorkoutRowsV126M8(syncedRows, current || []),
+            );
+
+            const todayRow = syncedRows.find(
+              (item: any) => activityDateKey(item) === todayDate(),
+            );
+            if (todayRow) {
+              setFitnessLastSyncSnapshot((current) => ({
+                ...current,
+                google_fit: {
+                  date: activityDateKey(todayRow),
+                  measured_at: completedAt,
+                  synced_at: completedAt,
+                  steps: activityStepsValue(todayRow),
+                  total_calories: googleFitTotalCaloriesValueV73(todayRow),
+                  distance_km: activityDistanceValue(todayRow),
+                  active_calories: null,
+                  active_calories_available: false,
+                  source: "google_fit_rest_aggregate",
+                  step_data_source_id: "google_fit_rest_aggregate",
+                },
+              }));
+            }
+          }
+        }
       } else if (!silent) {
         setMessage(result.message || "Gagal sync activity.");
       }

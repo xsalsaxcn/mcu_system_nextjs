@@ -36,6 +36,7 @@ import {
 } from "@/lib/wellness/pointRules";
 import {
   buildWellnessStreakSummary,
+  wellnessStreakSteps,
   wellnessStreakWorkoutCalories,
 } from "@/lib/wellness/streak";
 import {
@@ -391,22 +392,13 @@ function compactBloodPressure(rows: any[]) {
   return [...map.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-20);
 }
 
+// WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1
 function activityCalories(row: any) {
-  return asNumber(
-    row?.calories ??
-      row?.total_calories ??
-      row?.calories_burned ??
-      row?.activity_calories ??
-      row?.raw_payload?.health_connect_calories ??
-      row?.raw_payload?.google_fit_calories_expended ??
-      row?.raw_payload?.calories
-  );
+  return wellnessStreakWorkoutCalories(row);
 }
 
 function activitySteps(row: any) {
-  return asNumber(
-    row?.steps ?? row?.total_steps ?? row?.raw_payload?.health_connect_steps ?? row?.raw_payload?.google_fit_steps
-  );
+  return wellnessStreakSteps(row);
 }
 
 function activitySourceKeyV126M31(row: any) {

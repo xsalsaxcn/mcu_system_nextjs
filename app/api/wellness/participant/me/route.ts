@@ -19,6 +19,10 @@ import {
   programWindowDayCount,
 } from "@/lib/wellness/programWindow";
 import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
+import {
+  wellnessStreakSteps,
+  wellnessStreakWorkoutCalories,
+} from "@/lib/wellness/streak";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,13 +98,15 @@ function buildActivitySummary(rows: any[] = [], participant: any = {}) {
       duration_minutes: 0,
       calories: 0,
       distance_km: 0,
+      steps: 0,
       sources: new Set<string>(),
     };
     current.count += 1;
     current.jumlah = current.count;
     current.duration_minutes += getActivityDuration(row) || 0;
-    current.calories += estimateCalories(row, participant) || 0;
+    current.calories += wellnessStreakWorkoutCalories(row) || 0;
     current.distance_km += getActivityDistance(row) || 0;
+    current.steps += wellnessStreakSteps(row) || 0;
     current.sources.add(String(row?.source || row?.raw_payload?.source || "manual"));
     map.set(key, current);
   }
@@ -116,6 +122,7 @@ function buildActivitySummary(rows: any[] = [], participant: any = {}) {
       duration_minutes: Math.round(item.duration_minutes * 10) / 10,
       calories: Math.round(item.calories * 10) / 10,
       distance_km: Math.round(item.distance_km * 100) / 100,
+      steps: Math.round(item.steps),
       source: [...item.sources].join(", "),
     }));
 }
@@ -147,6 +154,7 @@ export async function GET(req: NextRequest) {
       .select("*")
       .eq("participant_id", participant.id)
       .order("log_date", { ascending: false })
+      .order("updated_at", { ascending: false, nullsFirst: false })
       .limit(100);
 
     const [{ data: historyById }, sheetClinicalResult] = await Promise.all([
