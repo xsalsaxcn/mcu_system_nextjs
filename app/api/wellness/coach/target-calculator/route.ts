@@ -1,3 +1,4 @@
+// WELLNESS_COACH_SPARSE_BASELINE_FALLBACK_V126M48
 // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
 // WELLNESS_COACH_ACTIVITY_TARGET_CALCULATOR_V126M39
 // WELLNESS_COACH_GOAL_WEIGHT_NUTRITION_V126M40_3
@@ -344,6 +345,21 @@ function reconcileClinicalProfile(databaseProfile: any, sheetProfile: any) {
   };
 }
 
+function validClinicalWeight(value: any) {
+  const parsed = positiveNumber(value);
+  return parsed >= 25 && parsed <= 350 ? parsed : 0;
+}
+
+function validClinicalHeight(value: any) {
+  const parsed = positiveNumber(value);
+  return parsed >= 120 && parsed <= 230 ? parsed : 0;
+}
+
+function validClinicalBmi(value: any) {
+  const parsed = positiveNumber(value);
+  return parsed >= 10 && parsed <= 80 ? parsed : 0;
+}
+
 function latestClinicalProfile(participant: any, sources: Array<{ label: string; rows: any[] }>) {
   for (const source of sources) {
     const dateColumn =
@@ -361,28 +377,52 @@ function latestClinicalProfile(participant: any, sources: Array<{ label: string;
       ),
     );
 
-    for (const row of orderedRows) {
-      const weight = positiveNumber(row?.weight_kg, row?.weight, row?.body_weight);
-      const height = positiveNumber(row?.height_cm, row?.height, participant?.height_cm);
-      const bmi = positiveNumber(row?.bmi, row?.body_mass_index);
-      if (weight > 0 && height > 0) {
-        return {
-          gender:
-            profileGender(row, participant) ||
-            profileGender(demographicRow, participant),
-          birth_date:
-            profileBirthDate(row, participant) ||
-            profileBirthDate(demographicRow, participant),
-          age_years:
-            profileAge(row, participant) ||
-            profileAge(demographicRow, participant),
-          height_cm: height,
-          weight_kg: weight,
-          bmi,
-          measurement_source: source.label,
-          measurement_date: rowDate(row),
-        };
-      }
+    const weightRow = orderedRows.find((candidate: any) =>
+      Boolean(
+        validClinicalWeight(
+          candidate?.weight_kg || candidate?.weight || candidate?.body_weight,
+        ),
+      ),
+    );
+    const heightRow = orderedRows.find((candidate: any) =>
+      Boolean(validClinicalHeight(candidate?.height_cm || candidate?.height)),
+    );
+    const participantHeight = validClinicalHeight(participant?.height_cm);
+    const weight = validClinicalWeight(
+      weightRow?.weight_kg || weightRow?.weight || weightRow?.body_weight,
+    );
+    const height =
+      validClinicalHeight(weightRow?.height_cm || weightRow?.height) ||
+      validClinicalHeight(heightRow?.height_cm || heightRow?.height) ||
+      participantHeight;
+
+    if (weight > 0 && height > 0) {
+      const sourceRow = weightRow || heightRow || demographicRow;
+      const storedBmi = validClinicalBmi(
+        weightRow?.bmi || weightRow?.body_mass_index,
+      );
+      const calculatedBmi = Number(
+        (weight / Math.pow(height / 100, 2)).toFixed(1),
+      );
+      return {
+        gender:
+          profileGender(sourceRow, participant) ||
+          profileGender(demographicRow, participant),
+        birth_date:
+          profileBirthDate(sourceRow, participant) ||
+          profileBirthDate(demographicRow, participant),
+        age_years:
+          profileAge(sourceRow, participant) ||
+          profileAge(demographicRow, participant),
+        height_cm: height,
+        weight_kg: weight,
+        bmi: storedBmi || calculatedBmi,
+        measurement_source:
+          heightRow && heightRow !== weightRow
+            ? `${source.label} (tinggi valid dari history)`
+            : source.label,
+        measurement_date: rowDate(sourceRow),
+      };
     }
   }
 
@@ -390,13 +430,13 @@ function latestClinicalProfile(participant: any, sources: Array<{ label: string;
     gender: profileGender(null, participant),
     birth_date: profileBirthDate(null, participant),
     age_years: profileAge(null, participant),
-    height_cm: positiveNumber(participant?.height_cm),
-    weight_kg: positiveNumber(
-      participant?.current_weight_kg,
-      participant?.initial_weight_kg,
-      participant?.baseline_weight_kg,
+    height_cm: validClinicalHeight(participant?.height_cm),
+    weight_kg: validClinicalWeight(
+      participant?.current_weight_kg ||
+        participant?.initial_weight_kg ||
+        participant?.baseline_weight_kg,
     ),
-    bmi: positiveNumber(participant?.bmi, participant?.baseline_bmi),
+    bmi: validClinicalBmi(participant?.bmi || participant?.baseline_bmi),
     measurement_source: "Baseline peserta",
     measurement_date: participant?.updated_at || participant?.created_at,
   };

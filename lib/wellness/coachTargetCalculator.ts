@@ -6,6 +6,7 @@
 // WELLNESS_COACH_ADAPTIVE_NUTRITION_DEFICIT_V126M40_7
 // WELLNESS_COACH_FOUR_MONTH_WEIGHT_PHASE_PLANNER_V126M41
 // WELLNESS_COACH_MONTHLY_NUTRITION_BUTTONS_V126M41_1
+// WELLNESS_COACH_SPARSE_BASELINE_FALLBACK_V126M48
 // Read-only calculator for Coach recommendations.
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
@@ -339,22 +340,39 @@ function rounded(value: number, digits = 0) {
 }
 
 function recommendedCalories(baseline: number, days: number) {
-  if (days < 3 || baseline < 25) return 0;
+  // Satu atau dua hari tetap boleh menghasilkan rekomendasi LOW confidence.
+  // Sebelumnya baseline tampil di UI, tetapi rekomendasi dipaksa menjadi 0
+  // hanya karena jumlah hari belum mencapai tiga.
+  if (days < 1 || baseline < 25) return 0;
   if (baseline > 1000) return roundUp(baseline, 25);
   const candidate = Math.max(baseline * 1.1, baseline + 25);
   return Math.min(roundUp(candidate, 25), roundUp(baseline + 100, 25));
 }
 
 function recommendedSteps(baseline: number, days: number) {
-  if (days < 3 || baseline < 250) return 0;
+  if (days < 1 || baseline < 250) return 0;
   const candidate = Math.max(baseline * 1.1, baseline + 500);
   return Math.min(12000, roundUp(Math.min(candidate, baseline + 1500), 500));
 }
 
 function recommendedMinutes(baseline: number, days: number) {
-  if (days < 3 || baseline < 3) return 0;
+  if (days < 1 || baseline < 3) return 0;
   const candidate = Math.max(baseline * 1.15, baseline + 5);
   return Math.min(60, roundUp(Math.min(candidate, baseline + 10), 5));
+}
+
+function fallbackWorkoutCalories(
+  calorieDays: number,
+  stepBaseline: number,
+  minuteBaseline: number,
+) {
+  // Total calories Google Fit tetap tidak dipakai karena dapat mencakup basal.
+  // Bila tidak ada active-calorie yang valid tetapi ada bukti aktivitas dari
+  // langkah atau durasi, berikan target awal konservatif yang harus ditinjau
+  // Coach, agar field workout tidak kosong/0.
+  if (calorieDays > 0) return 0;
+  if (stepBaseline < 1000 && minuteBaseline < 10) return 0;
+  return 250;
 }
 
 export function buildCoachActivityTargetRecommendation(
@@ -466,10 +484,17 @@ export function buildCoachActivityTargetRecommendation(
     average(minuteDays.map((day) => day.exercise_minutes)),
   );
 
-  const activeCalorieTarget = recommendedCalories(
+  const calculatedActiveCalorieTarget = recommendedCalories(
     calorieBaseline,
     calorieDays.length,
   );
+  const fallbackActiveCalorieTarget = fallbackWorkoutCalories(
+    calorieDays.length,
+    stepBaseline,
+    minuteBaseline,
+  );
+  const activeCalorieTarget =
+    calculatedActiveCalorieTarget || fallbackActiveCalorieTarget;
   const stepTarget = recommendedSteps(stepBaseline, stepDays.length);
   const exerciseMinutesTarget = recommendedMinutes(
     minuteBaseline,
@@ -490,14 +515,30 @@ export function buildCoachActivityTargetRecommendation(
       `${ignoredTotalRows} row energi total Google Fit diabaikan karena mencakup energi istirahat.`,
     );
   }
-  if (calorieDays.length < 3) {
-    warnings.push("Data kalori aktif belum cukup untuk rekomendasi kalori workout.");
+  if (fallbackActiveCalorieTarget > 0) {
+    warnings.push(
+      "Kalori aktif valid belum tersedia. Target workout sementara 250 kkal/hari aktif digunakan sebagai fallback LOW confidence dan wajib ditinjau Coach.",
+    );
+  } else if (calorieDays.length > 0 && calorieDays.length < 3) {
+    warnings.push(
+      `Rekomendasi kalori workout memakai ${calorieDays.length} hari data dan berstatus LOW confidence.`,
+    );
+  } else if (calorieDays.length === 0) {
+    warnings.push("Belum ada data kalori aktif atau bukti aktivitas yang cukup untuk rekomendasi kalori workout.");
   }
-  if (stepDays.length < 3) {
-    warnings.push("Data langkah belum cukup untuk rekomendasi target langkah.");
+  if (stepDays.length > 0 && stepDays.length < 3) {
+    warnings.push(
+      `Rekomendasi langkah memakai ${stepDays.length} hari data dan berstatus LOW confidence.`,
+    );
+  } else if (stepDays.length === 0) {
+    warnings.push("Belum ada data langkah untuk rekomendasi target langkah.");
   }
-  if (minuteDays.length < 3) {
-    warnings.push("Data durasi latihan belum cukup untuk rekomendasi menit latihan.");
+  if (minuteDays.length > 0 && minuteDays.length < 3) {
+    warnings.push(
+      `Rekomendasi durasi latihan memakai ${minuteDays.length} hari data dan berstatus LOW confidence.`,
+    );
+  } else if (minuteDays.length === 0) {
+    warnings.push("Belum ada data durasi latihan untuk rekomendasi menit latihan.");
   }
   if (calorieBaseline > 1000) {
     warnings.push(
