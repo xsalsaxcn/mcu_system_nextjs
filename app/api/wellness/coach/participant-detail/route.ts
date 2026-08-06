@@ -1,4 +1,5 @@
 // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
+// WELLNESS_COACH_GRAPH_PARTICIPANT_PARITY_V126M45
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -720,10 +721,11 @@ export async function GET(request: NextRequest) {
     });
     const sheetNakesClinicalRows = filterClinicalRowsForProgram(
       participant,
-      canonicalNakesSheetRows({
-        participant,
-        sheetRows: sheetResult.rows || [],
-      }),
+      googleSheetRowsToNakesClinicalRows(
+        sheetResult.rows || [],
+        participantId,
+        code,
+      ),
       "",
       "",
     );
@@ -764,6 +766,7 @@ export async function GET(request: NextRequest) {
           historyById,
           historyByCode,
           scopedMiniMcuRows,
+          sheetNakesClinicalRows,
         ),
         sheetRows: sheetResult.rows || [],
       }),

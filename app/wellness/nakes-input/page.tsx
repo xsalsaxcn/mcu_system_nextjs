@@ -9,6 +9,8 @@ import NakesAuthGate from "@/components/wellness/NakesAuthGate";
 // WELLNESS_NAKES_GENERAL_CHECKUP_INPUT_V372_PAGE
 // WELLNESS_NAKES_NON_DESTRUCTIVE_SYNC_V126M32_PAGE
 // WELLNESS_NAKES_AGE_CAPTURE_V126M42_PAGE
+// WELLNESS_NAKES_GUIDED_WORKFLOW_V126M45_PAGE
+// WELLNESS_NAKES_POPOUT_EXAM_WORKFLOW_V126M45_2_PAGE
 // Wellness-only page for NAKES/company medical team to input any clinical checkpoint.
 // Visit labels are generalized: baseline, periodic, final evaluation, follow-up, or custom.
 // Data is stored in wellness_checkup_history and feeds dashboard before-after charts.
@@ -19,6 +21,37 @@ type VisitType =
   | "final_evaluation"
   | "clinical_follow_up"
   | "custom_checkup";
+
+type ExamMode = "" | "routine" | "mini_mcu" | "notes";
+type ParticipantSort = "name_asc" | "code_asc" | "risk_asc";
+
+const PARTICIPANTS_PER_PAGE = 8;
+
+const EXAM_MODE_OPTIONS: Array<{
+  value: Exclude<ExamMode, "">;
+  label: string;
+  helper: string;
+  icon: string;
+}> = [
+  {
+    value: "routine",
+    label: "Pemeriksaan Rutin",
+    helper: "Usia, BB, TB, lingkar perut, tekanan darah, dan nadi.",
+    icon: "🩺",
+  },
+  {
+    value: "mini_mcu",
+    label: "Mini MCU",
+    helper: "HbA1c, gula darah, kolesterol, lipid, asam urat, SGOT, dan SGPT.",
+    icon: "🧪",
+  },
+  {
+    value: "notes",
+    label: "Tambah Catatan",
+    helper: "Kesimpulan risiko, intervensi, monitoring, follow-up, dan alert klinis.",
+    icon: "📝",
+  },
+];
 
 const VISIT_OPTIONS: Array<{
   value: VisitType;
@@ -127,6 +160,33 @@ function uniqueOptions(items: any[], key: string) {
   }
 
   return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function participantRisk(participant: any) {
+  return clean(participant?.risk_cluster || participant?.baseline_risk_group || "Belum diklasifikasikan");
+}
+
+function participantGroupLabel(participant: any) {
+  const kelompok = clean(participant?.kelompok_name) || "Tanpa Kelompok";
+  const group = clean(participant?.group_unit_name) || "Tanpa Group";
+  return `${kelompok} • ${group}`;
+}
+
+function compareParticipants(a: any, b: any, sort: ParticipantSort) {
+  if (sort === "code_asc") {
+    const aCode = clean(a?.code);
+    const bCode = clean(b?.code);
+    const numericDifference = Number(aCode || 0) - Number(bCode || 0);
+    if (Number.isFinite(numericDifference) && numericDifference !== 0) return numericDifference;
+    return aCode.localeCompare(bCode, "id", { numeric: true });
+  }
+
+  if (sort === "risk_asc") {
+    const riskDifference = participantRisk(a).localeCompare(participantRisk(b), "id");
+    if (riskDifference !== 0) return riskDifference;
+  }
+
+  return participantName(a).localeCompare(participantName(b), "id");
 }
 
 function setNumberish(value: any) {
@@ -246,6 +306,10 @@ function WellnessNakesInput({
   const [companyScopeName, setCompanyScopeName] = useState("");
   const [kelompokFilter, setKelompokFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  const [participantSort, setParticipantSort] = useState<ParticipantSort>("name_asc");
+  const [participantPage, setParticipantPage] = useState(1);
+  const [examMode, setExamMode] = useState<ExamMode>("");
+  const [examModalOpen, setExamModalOpen] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
   const [form, setForm] = useState<any>({
@@ -254,6 +318,7 @@ function WellnessNakesInput({
     visit_label: "Pemeriksaan Berkala",
     visit_sequence: "",
     program_status: "",
+    exam_mode: "",
   });
 
   async function load() {
@@ -346,17 +411,36 @@ function WellnessNakesInput({
     [participants, companyFilter, kelompokFilter]
   );
 
-  const filteredParticipants = useMemo(
-    () =>
-      participants.filter((participant) => {
-        if (companyFilter && clean(participant.company_name) !== companyFilter) return false;
-        if (kelompokFilter && clean(participant.kelompok_name) !== kelompokFilter) return false;
-        if (groupFilter && clean(participant.group_unit_name) !== groupFilter) return false;
+  const filteredParticipants = useMemo(() => {
+    const filtered = participants.filter((participant) => {
+      if (companyFilter && clean(participant.company_name) !== companyFilter) return false;
+      if (kelompokFilter && clean(participant.kelompok_name) !== kelompokFilter) return false;
+      if (groupFilter && clean(participant.group_unit_name) !== groupFilter) return false;
+      return matchesSearch(participant, search);
+    });
 
-        return matchesSearch(participant, search);
-      }),
-    [participants, companyFilter, kelompokFilter, groupFilter, search]
+    return [...filtered].sort((a, b) => compareParticipants(a, b, participantSort));
+  }, [participants, companyFilter, kelompokFilter, groupFilter, search, participantSort]);
+
+  const participantPageCount = Math.max(
+    1,
+    Math.ceil(filteredParticipants.length / PARTICIPANTS_PER_PAGE),
   );
+  const participantStartIndex = (participantPage - 1) * PARTICIPANTS_PER_PAGE;
+  const visibleParticipants = filteredParticipants.slice(
+    participantStartIndex,
+    participantStartIndex + PARTICIPANTS_PER_PAGE,
+  );
+  const groupedVisibleParticipants = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const participant of visibleParticipants) {
+      const label = participantGroupLabel(participant);
+      const current = groups.get(label) || [];
+      current.push(participant);
+      groups.set(label, current);
+    }
+    return [...groups.entries()];
+  }, [visibleParticipants]);
 
   const selectedParticipant = useMemo(
     () =>
@@ -388,6 +472,16 @@ function WellnessNakesInput({
     }
   }, [filteredParticipants, form.participant_id]);
 
+  useEffect(() => {
+    setParticipantPage(1);
+  }, [search, companyFilter, kelompokFilter, groupFilter, participantSort]);
+
+  useEffect(() => {
+    if (participantPage > participantPageCount) {
+      setParticipantPage(participantPageCount);
+    }
+  }, [participantPage, participantPageCount]);
+
   function setValue(key: string, value: any) {
     setForm((previous: any) => ({ ...previous, [key]: value }));
   }
@@ -416,11 +510,64 @@ function WellnessNakesInput({
     }));
   }
 
+  function selectExamMode(value: Exclude<ExamMode, "">) {
+    setExamMode(value);
+    setForm((previous: any) => ({
+      ...previous,
+      exam_mode: value,
+    }));
+  }
+
+  function openParticipantExam(participant: any) {
+    const defaultMode: Exclude<ExamMode, ""> = "routine";
+    setExamMode(defaultMode);
+    setLastResult(null);
+    setMessage(
+      `Peserta ${participantName(participant)} dipilih. Lengkapi pemeriksaan lalu simpan.`,
+    );
+    setForm((previous: any) => ({
+      ...previous,
+      participant_id: participant.id,
+      age_years: participantAge(participant) || previous.age_years || "",
+      exam_mode: defaultMode,
+    }));
+    setExamModalOpen(true);
+  }
+
+  function closeExamModal() {
+    if (saving) return;
+    setExamModalOpen(false);
+  }
+
+  useEffect(() => {
+    if (!examModalOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !saving) {
+        setExamModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [examModalOpen, saving]);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
 
     if (!form.participant_id) {
       setMessage("Pilih peserta terlebih dahulu.");
+      return;
+    }
+
+    if (!examMode) {
+      setMessage("Pilih area pemeriksaan: Rutin, Mini MCU, atau Tambah Catatan.");
       return;
     }
 
@@ -437,6 +584,7 @@ function WellnessNakesInput({
     const participant = selectedParticipant || {};
     const payload = {
       ...form,
+      exam_mode: examMode,
       company_name: clean(participant.company_name),
       employee_code: clean(participant.code),
     };
@@ -656,7 +804,7 @@ function WellnessNakesInput({
                   onChange={(event) => setSearch(event.target.value)}
                 />
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <select
                     className={inputClass()}
                     value={companyFilter}
@@ -703,24 +851,120 @@ function WellnessNakesInput({
                       </option>
                     ))}
                   </select>
+
+                  <select
+                    className={inputClass()}
+                    value={participantSort}
+                    onChange={(event) => setParticipantSort(event.target.value as ParticipantSort)}
+                  >
+                    <option value="name_asc">Urutkan: Nama A-Z</option>
+                    <option value="code_asc">Urutkan: Kode</option>
+                    <option value="risk_asc">Urutkan: Risk Cluster</option>
+                  </select>
                 </div>
 
-                <select
-                  className={inputClass()}
-                  value={form.participant_id || ""}
-                  onChange={(event) => setValue("participant_id", event.target.value)}
-                  disabled={loading || !filteredParticipants.length}
-                >
-                  {!filteredParticipants.length ? (
-                    <option value="">Tidak ada peserta sesuai filter</option>
-                  ) : null}
+                <div className="overflow-hidden rounded-3xl border border-blue-100 bg-white">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-50 bg-blue-50/70 px-4 py-3">
+                    <div>
+                      <div className="text-sm font-black text-slate-800">Daftar peserta per kelompok</div>
+                      <div className="text-xs font-bold text-slate-500">
+                        {filteredParticipants.length
+                          ? `Menampilkan ${participantStartIndex + 1}-${Math.min(
+                              participantStartIndex + visibleParticipants.length,
+                              filteredParticipants.length,
+                            )} dari ${filteredParticipants.length} peserta`
+                          : "Tidak ada peserta sesuai filter"}
+                      </div>
+                    </div>
+                    <div className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-blue-700 ring-1 ring-blue-100">
+                      Halaman {participantPage} / {participantPageCount}
+                    </div>
+                  </div>
 
-                  {filteredParticipants.map((participant) => (
-                    <option key={participant.id} value={participant.id}>
-                      {participantLabel(participant)}
-                    </option>
-                  ))}
-                </select>
+                  <div className="max-h-[34rem] space-y-4 overflow-y-auto p-3">
+                    {loading ? (
+                      <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">
+                        Memuat peserta...
+                      </div>
+                    ) : groupedVisibleParticipants.length ? (
+                      groupedVisibleParticipants.map(([groupLabel, groupParticipants]) => (
+                        <div key={groupLabel} className="space-y-2">
+                          <div className="sticky top-0 z-10 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-600">
+                            {groupLabel}
+                          </div>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {groupParticipants.map((participant: any) => {
+                              const active = String(participant.id) === String(form.participant_id);
+                              return (
+                                <button
+                                  key={participant.id}
+                                  type="button"
+                                  onClick={() => openParticipantExam(participant)}
+                                  className={`rounded-2xl border p-3 text-left transition ${
+                                    active
+                                      ? "border-blue-400 bg-blue-50 shadow-md shadow-blue-100"
+                                      : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/50"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <div className="text-sm font-black text-slate-900">
+                                        {participantName(participant)}
+                                      </div>
+                                      <div className="mt-1 text-xs font-bold text-blue-700">
+                                        Kode {clean(participant.code) || "-"} • Participant ID {participant.id || "-"}
+                                      </div>
+                                    </div>
+                                    <span className={`rounded-full px-2 py-1 text-[10px] font-black ${
+                                      active
+                                        ? "bg-blue-600 text-white"
+                                        : "bg-slate-100 text-slate-600"
+                                    }`}>
+                                      {active ? "Terpilih" : "Buka Form"}
+                                    </span>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black">
+                                    <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">
+                                      {participantRisk(participant)}
+                                    </span>
+                                    <span className="rounded-full bg-purple-50 px-2 py-1 text-purple-700">
+                                      {clean(participant.kelompok_name) || "Tanpa Kelompok"}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">
+                        Tidak ada peserta sesuai pencarian dan filter.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 border-t border-blue-50 px-4 py-3">
+                    <button
+                      type="button"
+                      disabled={participantPage <= 1}
+                      onClick={() => setParticipantPage((current) => Math.max(1, current - 1))}
+                      className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
+                    >
+                      Sebelumnya
+                    </button>
+                    <button
+                      type="button"
+                      disabled={participantPage >= participantPageCount}
+                      onClick={() =>
+                        setParticipantPage((current) => Math.min(participantPageCount, current + 1))
+                      }
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white disabled:opacity-40"
+                    >
+                      Berikutnya
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {selectedParticipant ? (
@@ -747,8 +991,51 @@ function WellnessNakesInput({
               ) : null}
             </section>
 
+            {examModalOpen ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-slate-950/60 p-3 backdrop-blur-sm md:p-6"
+                onMouseDown={closeExamModal}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Form pemeriksaan NAKES peserta"
+                  className="my-auto w-full max-w-[1500px] overflow-hidden rounded-[2rem] border border-white/60 bg-slate-50 shadow-2xl shadow-slate-950/30"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <header className="flex flex-col gap-4 border-b border-slate-200 bg-gradient-to-r from-teal-50 via-white to-blue-50 px-5 py-5 md:flex-row md:items-center md:justify-between md:px-7">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-teal-600 to-blue-600 text-xl font-black text-white shadow-lg shadow-teal-100">
+                        {participantName(selectedParticipant).slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-700">
+                          Pemeriksaan NAKES
+                        </div>
+                        <h2 className="truncate text-xl font-black text-slate-950 md:text-2xl">
+                          {participantName(selectedParticipant)}
+                        </h2>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs font-bold text-slate-500">
+                          <span>Kode {clean(selectedParticipant?.code) || "-"}</span>
+                          <span>Participant ID {selectedParticipant?.id || "-"}</span>
+                          <span>{participantGroupLabel(selectedParticipant)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeExamModal}
+                      disabled={saving}
+                      className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Tutup ×
+                    </button>
+                  </header>
+
+                  <div className="grid max-h-[calc(100vh-8rem)] gap-5 overflow-y-auto p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_330px]">
+                    <div className="space-y-5">
             <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4">
-              <h2 className="text-lg font-black text-slate-900">2. Jenis Input NAKES</h2>
+              <h2 className="text-lg font-black text-slate-900">1. Informasi Kunjungan</h2>
 
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 {VISIT_OPTIONS.map((option) => {
@@ -816,27 +1103,69 @@ function WellnessNakesInput({
               </div>
             </section>
 
+            <section className="grid gap-4 rounded-3xl border border-cyan-100 bg-cyan-50 p-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-900">2. Pilih Pemeriksaan</h2>
+                <p className="mt-1 text-xs font-bold leading-5 text-slate-600">
+                  Field pemeriksaan baru ditampilkan setelah area dipilih agar form lebih singkat dan fokus.
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {EXAM_MODE_OPTIONS.map((option) => {
+                  const active = examMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => selectExamMode(option.value)}
+                      className={`rounded-3xl border p-4 text-left transition ${
+                        active
+                          ? "border-cyan-500 bg-cyan-700 text-white shadow-lg shadow-cyan-100"
+                          : "border-cyan-100 bg-white text-slate-700 hover:border-cyan-300 hover:bg-cyan-50"
+                      }`}
+                    >
+                      <div className="text-2xl" aria-hidden="true">{option.icon}</div>
+                      <div className="mt-2 text-sm font-black">{option.label}</div>
+                      <div className={`mt-1 text-xs font-bold leading-5 ${active ? "text-cyan-50" : "text-slate-500"}`}>
+                        {option.helper}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {examMode ? (
+                <div className="rounded-2xl border border-cyan-100 bg-white p-4">
+                  <Field
+                    label="Usia saat pemeriksaan (tahun)"
+                    helper="Disimpan pada history NAKES dan otomatis dipakai kalkulator target Coach."
+                  >
+                    <input
+                      type="number"
+                      min="18"
+                      max="119"
+                      step="1"
+                      required
+                      className={inputClass()}
+                      value={form.age_years || ""}
+                      onChange={(event) => setValue("age_years", event.target.value)}
+                      placeholder="Contoh: 33"
+                    />
+                  </Field>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-cyan-200 bg-white/70 px-4 py-5 text-center text-sm font-bold text-cyan-800">
+                  Pilih satu area pemeriksaan untuk melanjutkan.
+                </div>
+              )}
+            </section>
+
+            {examMode === "routine" ? (
             <section className="grid gap-4 rounded-3xl border border-emerald-100 bg-emerald-50 p-4">
-              <h2 className="text-lg font-black text-slate-900">3. Pemeriksaan Fisik & Vital Sign</h2>
+              <h2 className="text-lg font-black text-slate-900">Form Pemeriksaan Rutin</h2>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <Field
-                  label="Usia saat pemeriksaan (tahun)"
-                  helper="Disimpan pada history NAKES dan otomatis dipakai kalkulator target Coach."
-                >
-                  <input
-                    type="number"
-                    min="18"
-                    max="119"
-                    step="1"
-                    required
-                    className={inputClass()}
-                    value={form.age_years || ""}
-                    onChange={(event) => setValue("age_years", event.target.value)}
-                    placeholder="Contoh: 33"
-                  />
-                </Field>
-
                 <Field label="BB saat ini (kg)">
                   <input
                     className={inputClass()}
@@ -892,9 +1221,11 @@ function WellnessNakesInput({
                 </Field>
               </div>
             </section>
+            ) : null}
 
+            {examMode === "mini_mcu" ? (
             <section className="grid gap-4 rounded-3xl border border-amber-100 bg-amber-50 p-4">
-              <h2 className="text-lg font-black text-slate-900">4. Parameter Lab / Mini MCU</h2>
+              <h2 className="text-lg font-black text-slate-900">Form Mini MCU</h2>
 
               <div className="grid gap-4 md:grid-cols-3">
                 <Field label="HbA1c (%)">
@@ -981,9 +1312,11 @@ function WellnessNakesInput({
                 </Field>
               </div>
             </section>
+            ) : null}
 
+            {examMode === "notes" ? (
             <section className="grid gap-4 rounded-3xl border border-purple-100 bg-purple-50 p-4">
-              <h2 className="text-lg font-black text-slate-900">5. Catatan NAKES & Follow-up</h2>
+              <h2 className="text-lg font-black text-slate-900">Form Tambah Catatan & Follow-up</h2>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Risk cluster / kesimpulan risiko">
@@ -1052,14 +1385,100 @@ function WellnessNakesInput({
                 </div>
               </div>
             </section>
+            ) : null}
 
             <button
               type="submit"
-              disabled={saving || !form.participant_id}
+              disabled={saving || !form.participant_id || !examMode}
               className="w-full rounded-2xl bg-gradient-to-r from-teal-600 to-blue-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 transition hover:from-teal-700 hover:to-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Menyimpan..." : "Simpan Input NAKES"}
+              {saving
+                ? "Menyimpan..."
+                : `Simpan ${
+                    EXAM_MODE_OPTIONS.find((option) => option.value === examMode)?.label ||
+                    "Input NAKES"
+                  }`}
             </button>
+                    </div>
+
+                    <aside className="space-y-4 xl:sticky xl:top-0 xl:self-start">
+                      <section className="rounded-3xl border border-teal-100 bg-white p-5 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-wide text-teal-700">
+                              Ringkasan Peserta
+                            </div>
+                            <div className="mt-1 text-lg font-black text-slate-950">
+                              {participantName(selectedParticipant)}
+                            </div>
+                            <div className="text-xs font-bold text-slate-500">
+                              Kode {clean(selectedParticipant?.code) || "-"} • ID {selectedParticipant?.id || "-"}
+                            </div>
+                          </div>
+                          <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-100">
+                            Terpilih ✓
+                          </span>
+                        </div>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                          <InfoPill label="Risk Cluster" value={participantRisk(selectedParticipant)} tone="amber" />
+                          <InfoPill label="Perusahaan" value={selectedParticipant?.company_name} tone="blue" />
+                          <InfoPill label="Kelompok / Group" value={participantGroupLabel(selectedParticipant)} tone="purple" />
+                          <InfoPill label="Usia Pemeriksaan" value={form.age_years ? `${form.age_years} tahun` : "Belum diisi"} tone="emerald" />
+                        </div>
+                      </section>
+
+                      <section className="rounded-3xl border border-blue-100 bg-blue-50 p-5">
+                        <div className="text-[10px] font-black uppercase tracking-wide text-blue-700">
+                          Pemeriksaan Aktif
+                        </div>
+                        <div className="mt-2 text-base font-black text-slate-950">
+                          {EXAM_MODE_OPTIONS.find((option) => option.value === examMode)?.label ||
+                            "Pilih jenis pemeriksaan"}
+                        </div>
+                        <div className="mt-1 text-xs font-bold leading-5 text-slate-600">
+                          {EXAM_MODE_OPTIONS.find((option) => option.value === examMode)?.helper ||
+                            "Pilih Rutin, Mini MCU, atau Tambah Catatan."}
+                        </div>
+                      </section>
+
+                      <section className={`rounded-3xl border p-5 ${
+                        lastResult?.partial_success
+                          ? "border-amber-200 bg-amber-50"
+                          : lastResult?.ok
+                            ? "border-emerald-200 bg-emerald-50"
+                            : lastResult && !lastResult.ok
+                              ? "border-rose-200 bg-rose-50"
+                              : "border-slate-200 bg-white"
+                      }`}>
+                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                          Status Penyimpanan
+                        </div>
+                        <div className="mt-2 text-sm font-bold leading-6 text-slate-700">
+                          {message}
+                        </div>
+                        {lastResult?.saved_to_history && lastResult.google_sheet?.ok === false ? (
+                          <button
+                            type="button"
+                            onClick={retryGoogleSheetSync}
+                            disabled={retryingSheet}
+                            className="mt-4 w-full rounded-2xl bg-amber-600 px-4 py-3 text-xs font-black text-white disabled:opacity-60"
+                          >
+                            {retryingSheet ? "Menyinkronkan..." : "Coba Sinkronkan Google Sheet"}
+                          </button>
+                        ) : null}
+                      </section>
+
+                      <section className="rounded-3xl border border-amber-100 bg-amber-50 p-5 text-xs font-bold leading-5 text-amber-900">
+                        <div className="font-black">Catatan penting</div>
+                        <div className="mt-2">
+                          Usia dan hasil pemeriksaan NAKES digunakan oleh grafik peserta dan kalkulator target Coach. Pastikan identitas dan tanggal pemeriksaan sudah benar.
+                        </div>
+                      </section>
+                    </aside>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </form>
 
           <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
