@@ -1262,6 +1262,12 @@ export default function WellnessParticipantPortalPage() {
   const googleFitNativeInFlightV111 = useRef(false);
   const googleFitNativeTimeoutV111 = useRef<number | null>(null);
 
+  // WELLNESS_STABLE_PORTAL_CHART_METRICS_V126M47_3
+  // Multiple portal refreshes can overlap (initial load, native callback, and
+  // automatic sync). Only the newest /participant/me response may update the
+  // activity state, otherwise an older response can make charts move backward.
+  const loadMeRequestSequenceV126M47_3 = useRef(0);
+
   // WELLNESS_SUBMISSION_LOCK_V126L
   const nutritionSubmitInFlightV126L = useRef(false);
   // WELLNESS_STABLE_DELIVERY_V126M17
@@ -1371,6 +1377,8 @@ export default function WellnessParticipantPortalPage() {
   }
 
   async function loadMe(options?: { keepMessage?: boolean }) {
+    const requestSequenceV126M47_3 =
+      ++loadMeRequestSequenceV126M47_3.current;
     setLoading(true);
 
     const result = await fetch("/api/wellness/participant/me", {
@@ -1381,6 +1389,13 @@ export default function WellnessParticipantPortalPage() {
         ok: false,
         message: error?.message || "Network error",
       }));
+
+    if (
+      requestSequenceV126M47_3 !==
+      loadMeRequestSequenceV126M47_3.current
+    ) {
+      return result;
+    }
 
     if (result.ok) {
       // WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
@@ -1415,7 +1430,9 @@ export default function WellnessParticipantPortalPage() {
         }
         return next;
       });
-      const nextActivities = result.activities || [];
+      const nextActivities = normalizeWorkoutItemsForHistoryV72(
+        result.activities || [],
+      );
       setActivities(nextActivities);
       setActivitySummary(result.activity_summary || []);
 
@@ -1540,7 +1557,12 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       }
     }
 
-    setLoading(false);
+    if (
+      requestSequenceV126M47_3 ===
+      loadMeRequestSequenceV126M47_3.current
+    ) {
+      setLoading(false);
+    }
     return result;
   }
 
@@ -1899,7 +1921,9 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
 
           if (syncedRows.length > 0) {
             setActivities((current) =>
-              mergeWorkoutRowsV126M8(syncedRows, current || []),
+              normalizeWorkoutItemsForHistoryV72(
+                mergeWorkoutRowsV126M8(syncedRows, current || []),
+              ),
             );
 
             const todayRow = syncedRows.find(
@@ -2346,17 +2370,21 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       manualWorkoutLogsV126M8,
     );
 
-    return sourceRows.filter((item: any) => {
+    const filteredRows = sourceRows.filter((item: any) => {
       const raw = activityRawPayloadV72(item);
       const provider = clean(
         item?.source || item?.provider || item?.input_source || raw?.provider,
       )
         .toLowerCase()
         .replace(/-/g, "_");
-      if (!['health_connect', 'google_fit'].includes(provider)) return true;
+      if (!["health_connect", "google_fit"].includes(provider)) return true;
       if (!fitnessEnabled) return false;
       return provider === activeFitnessSource;
     });
+
+    // One provider + one date must contribute only one device snapshot.
+    // Manual workout rows remain separate and are still added to the device row.
+    return normalizeWorkoutItemsForMetrics(filteredRows);
   }, [
     activities,
     activitySummary,
