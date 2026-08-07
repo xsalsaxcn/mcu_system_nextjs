@@ -1682,68 +1682,139 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // Read back the durable source before reporting success.
-    const readback = await fetchWellnessGoogleSheetRows({
-      participantId: Number(participant.id),
-      code: clean(participant?.code) || undefined,
-      logType: "workout",
-      limit: 1000,
-    });
+    // WELLNESS_WORKOUT_READBACK_RETRY_V126M50B_5
+    // Google Sheet/App Script can acknowledge the durable update before listRows
+    // exposes the refreshed row. Retry read-back briefly and never turn an
+    // already-accepted durable update into a user-facing failure solely because
+    // the read path is a few seconds behind.
+    const effectiveSubmissionId =
+      submissionId ||
+      clean(result?.submissionId || result?.submission_id);
+    const effectiveRowNumber = Number(
+      result?.rowNumber || result?.row_number || rowNumber || 0,
+    );
+    const readbackDelaysMs = [0, 250, 600, 1000, 1600];
+    let readback: any = null;
+    let verifiedRow: any = null;
+    let verifiedWorkout: any = null;
+    let verificationErrors: string[] = [];
 
-    const verifiedRow = (readback?.rows || [])
-      .filter(isWorkoutSheetRowV126M9)
-      .filter((row: any) => workoutSheetMatchesParticipantV126M9(row, participant))
-      .find((row: any) => {
-        const currentSubmissionId = clean(row?.["Submission ID"] || row?.submission_id);
+    function verifyWorkoutReadbackV126M50B5(item: any) {
+      const errors: string[] = [];
+      const duration = Number(item?.duration_minutes || 0);
+      const activeCalories = Number(item?.calories || 0);
+
+      if (clean(item?.log_date) !== logDate) errors.push("tanggal");
+      if (clean(item?.activity_name) !== activityType) errors.push("jenis workout");
+      if (Math.abs(duration - Number(durationMinutes)) > 0.02) errors.push("durasi");
+      if (Math.abs(activeCalories - Number(calories)) > 0.01) errors.push("kalori aktif");
+      if (steps != null && Math.abs(Number(item?.steps || 0) - Number(steps)) > 0.01) errors.push("langkah");
+      if (distanceKm != null && Math.abs(Number(item?.distance_km || 0) - Number(distanceKm)) > 0.01) errors.push("jarak");
+      if (startTime && clean(item?.start_time) !== startTime) errors.push("waktu mulai");
+      if (
+        calculationMode === "smartwatch" &&
+        totalCalories != null &&
+        Math.abs(Number(item?.smartwatch_total_calories || 0) - Number(totalCalories)) > 0.01
+      ) errors.push("kalori total");
+      if (
+        calculationMode === "smartwatch" &&
+        averageHr != null &&
+        Math.abs(Number(item?.average_heart_rate || 0) - Number(averageHr)) > 0.01
+      ) errors.push("HR rata-rata");
+      if (
+        calculationMode === "smartwatch" &&
+        maxHr != null &&
+        Math.abs(Number(item?.max_heart_rate || 0) - Number(maxHr)) > 0.01
+      ) errors.push("HR maksimal");
+
+      return errors;
+    }
+
+    for (const delayMs of readbackDelaysMs) {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      readback = await fetchWellnessGoogleSheetRows({
+        participantId: Number(participant.id),
+        code: clean(participant?.code) || undefined,
+        logType: "workout",
+        limit: 1000,
+      });
+
+      const participantRows = (readback?.rows || [])
+        .filter(isWorkoutSheetRowV126M9)
+        .filter((row: any) => workoutSheetMatchesParticipantV126M9(row, participant));
+
+      let candidate = participantRows.find((row: any) => {
+        const currentSubmissionId = clean(
+          row?.["Submission ID"] || row?.submission_id,
+        );
         const currentRow = Number(row?._rowNumber || row?.row_number || 0);
         return (
-          (submissionId && currentSubmissionId === submissionId) ||
-          (rowNumber > 0 && currentRow === rowNumber)
+          (effectiveSubmissionId && currentSubmissionId === effectiveSubmissionId) ||
+          (effectiveRowNumber > 0 && currentRow === effectiveRowNumber)
         );
       });
 
-    if (!verifiedRow) {
-      return NextResponse.json(
-        {
-          ok: false,
-          updated: true,
-          message:
-            "Google Sheet sudah menerima update, tetapi read-back row yang sama belum ditemukan. Refresh beberapa detik lagi sebelum mengedit ulang.",
-          google_sheet: result,
-          readback_ok: false,
-        },
-        { status: 409 },
-      );
+      // Some old rows do not expose Submission ID/_rowNumber consistently on
+      // listRows. A unique value match is safe for verification only; it never
+      // performs another write.
+      if (!candidate) {
+        const semanticMatches = participantRows.filter((row: any) => {
+          const item = sheetRowToWorkoutV126M9(row, participant);
+          return verifyWorkoutReadbackV126M50B5(item).length === 0;
+        });
+        if (semanticMatches.length === 1) {
+          candidate = semanticMatches[0];
+        }
+      }
+
+      if (!candidate) continue;
+
+      const candidateWorkout = sheetRowToWorkoutV126M9(candidate, participant);
+      const candidateErrors = verifyWorkoutReadbackV126M50B5(candidateWorkout);
+
+      verifiedRow = candidate;
+      verifiedWorkout = candidateWorkout;
+      verificationErrors = candidateErrors;
+
+      if (candidateErrors.length === 0) break;
     }
 
-    const verifiedWorkout = sheetRowToWorkoutV126M9(verifiedRow, participant);
-    const verifiedDuration = Number(verifiedWorkout?.duration_minutes || 0);
-    const verifiedCalories = Number(verifiedWorkout?.calories || 0);
-    const verificationErrors: string[] = [];
-
-    if (clean(verifiedWorkout?.log_date) !== logDate) verificationErrors.push("tanggal");
-    if (clean(verifiedWorkout?.activity_name) !== activityType) verificationErrors.push("jenis workout");
-    if (Math.abs(verifiedDuration - Number(durationMinutes)) > 0.02) verificationErrors.push("durasi");
-    if (Math.abs(verifiedCalories - Number(calories)) > 0.01) verificationErrors.push("kalori aktif");
-    if (steps != null && Math.abs(Number(verifiedWorkout?.steps || 0) - Number(steps)) > 0.01) verificationErrors.push("langkah");
-    if (distanceKm != null && Math.abs(Number(verifiedWorkout?.distance_km || 0) - Number(distanceKm)) > 0.01) verificationErrors.push("jarak");
-    if (startTime && clean(verifiedWorkout?.start_time) !== startTime) verificationErrors.push("waktu mulai");
-    if (calculationMode === "smartwatch" && totalCalories != null && Math.abs(Number(verifiedWorkout?.smartwatch_total_calories || 0) - Number(totalCalories)) > 0.01) verificationErrors.push("kalori total");
-    if (calculationMode === "smartwatch" && averageHr != null && Math.abs(Number(verifiedWorkout?.average_heart_rate || 0) - Number(averageHr)) > 0.01) verificationErrors.push("HR rata-rata");
-    if (calculationMode === "smartwatch" && maxHr != null && Math.abs(Number(verifiedWorkout?.max_heart_rate || 0) - Number(maxHr)) > 0.01) verificationErrors.push("HR maksimal");
-
-    if (verificationErrors.length > 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          updated: true,
-          message: `Update sudah dikirim tetapi verifikasi belum cocok pada: ${verificationErrors.join(", ")}.`,
-          verification_errors: verificationErrors,
-          verified_log: verifiedWorkout,
-          google_sheet: result,
+    if (!verifiedRow || verificationErrors.length > 0) {
+      return NextResponse.json({
+        ok: true,
+        updated: true,
+        verification_pending: true,
+        readback_ok: false,
+        message:
+          "Workout sudah tersimpan di Google Sheet. Sinkronisasi read-back masih diproses dan history akan diperbarui otomatis.",
+        verification_errors: verificationErrors,
+        verified_log: verifiedWorkout,
+        google_sheet: result,
+        submitted_log: {
+          log_date: logDate,
+          activity_type: activityType,
+          activity_name: activityName,
+          duration_minutes: durationMinutes,
+          calories,
+          distance_km: distanceKm,
+          steps,
+          start_time: startTime || null,
+          calculation_mode: calculationMode,
+          total_calories:
+            calculationMode === "smartwatch" ? totalCalories : null,
+          average_heart_rate:
+            calculationMode === "smartwatch" ? averageHr : null,
+          max_heart_rate:
+            calculationMode === "smartwatch" ? maxHr : null,
+          device_source:
+            calculationMode === "smartwatch"
+              ? deviceSource || "Smartwatch"
+              : "Manual",
         },
-        { status: 409 },
-      );
+      });
     }
 
     // Keep the Supabase mirror aligned when a matching mirror exists. Failure

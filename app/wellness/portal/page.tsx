@@ -8591,13 +8591,25 @@ function HistoryTab({
         );
       }
 
+      // WELLNESS_WORKOUT_READBACK_RETRY_V126M50B_5
+      // A Sheet update can be durable while listRows is briefly behind. Give
+      // workout history a short window to catch up instead of showing a false
+      // save failure to the participant.
       if (
         editingTypeV126M6 ===
         "nutrition"
       ) {
         await loadNutritionHistory();
       } else {
+        if (result?.verification_pending) {
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
+        }
         await loadWorkoutHistoryV126M6();
+        if (result?.verification_pending) {
+          window.setTimeout(() => {
+            void loadWorkoutHistoryV126M6();
+          }, 1800);
+        }
       }
 
       if (refresh) {
