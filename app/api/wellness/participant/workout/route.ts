@@ -748,7 +748,7 @@ function buildWorkoutRow(params: {
     deviceSource:
       params.calculationMode === "smartwatch"
         ? params.deviceSource || "Smartwatch"
-        : "Manual (Master Kalori)",
+        : "Manual",
   });
 
   row["Melakukan Workout/Aktifitas Ringan?"] = "Ya";
@@ -850,6 +850,70 @@ export async function GET(req: NextRequest) {
       },
       { status: 401 },
     );
+  }
+
+  // WELLNESS_MASTER_WORKOUT_LIVE_CALCULATION_V126M50B_4
+  // Read-only preview. It uses the exact same master calorie engine as POST/PATCH,
+  // but never writes a workout row.
+  const requestUrlV126M50B4 = new URL(req.url);
+  if (requestUrlV126M50B4.searchParams.get("calculate") === "master") {
+    const activityType =
+      clean(requestUrlV126M50B4.searchParams.get("activity_type")) ||
+      "Workout";
+    const activityName = clean(
+      requestUrlV126M50B4.searchParams.get("activity_name"),
+    );
+    const durationMinutes = toNumberOrNull(
+      requestUrlV126M50B4.searchParams.get("duration_minutes"),
+    );
+    const distanceKm = toNumberOrNull(
+      requestUrlV126M50B4.searchParams.get("distance_km"),
+    );
+
+    if (!durationMinutes || durationMinutes <= 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          preview: true,
+          message: "Durasi wajib diisi untuk menghitung kalori dari Master Workout.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const weightKg = await getLatestWeightKg(supabase, participant);
+    const activityRef = await findActivityReference(
+      supabase,
+      activityType,
+      activityName,
+    );
+    const calculated = calculateCalories({
+      activityType,
+      durationMinutes,
+      distanceKm,
+      weightKg,
+      activityRef,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      preview: true,
+      source: "manual",
+      calculation_source: "master_workout",
+      active_calories: calculated.calories,
+      participant_weight_kg_used: weightKg,
+      activity_reference_id: activityRef?.id || null,
+      activity_reference_name: activityRef?.activity_name || null,
+      master_found: Boolean(activityRef?.id),
+      calorie_method: calculated.method,
+      met_used: calculated.met,
+      calories_per_km_used: calculated.calories_per_km,
+      calorie_match_status: activityRef?.match_status || "not_found",
+      warning: activityRef?.id
+        ? null
+        : "Aktivitas belum ditemukan di Master Workout. Sistem memakai fallback MET existing.",
+      marker: "WELLNESS_MASTER_WORKOUT_LIVE_CALCULATION_V126M50B_4",
+    });
   }
 
   const participantCode = clean(
@@ -1175,7 +1239,7 @@ export async function POST(req: NextRequest) {
         device_source:
           calculationMode === "smartwatch"
             ? deviceSource || "Smartwatch"
-            : "Manual (Master Kalori)",
+            : "Manual",
         participant_weight_kg_used: weightKg,
         activity_reference_id: activityRef?.id || null,
         activity_reference_name: activityRef?.activity_name || null,
@@ -1564,7 +1628,7 @@ export async function PATCH(req: NextRequest) {
       deviceSource:
         calculationMode === "smartwatch"
           ? deviceSource || "Smartwatch"
-          : "Manual (Master Kalori)",
+          : "Manual",
     });
 
     const result = await postToWellnessWebhook({
@@ -1748,7 +1812,7 @@ export async function PATCH(req: NextRequest) {
               device_source:
                 calculationMode === "smartwatch"
                   ? deviceSource || "Smartwatch"
-                  : "Manual (Master Kalori)",
+                  : "Manual",
               ...(calculationAudit || {}),
               google_sheet: {
                 ...(previousRaw?.google_sheet || {}),

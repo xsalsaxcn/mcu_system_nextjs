@@ -6203,13 +6203,87 @@ function WorkoutTab({
   saveWorkout: () => void;
 }) {
   const smartwatchModeV126M50B3 = form.calculation_mode === "smartwatch";
+  // WELLNESS_MASTER_WORKOUT_LIVE_CALCULATION_V126M50B_4
+  const [masterPreviewV126M50B4, setMasterPreviewV126M50B4] = useState<any>(null);
+  const [masterPreviewLoadingV126M50B4, setMasterPreviewLoadingV126M50B4] = useState(false);
+  const [masterPreviewErrorV126M50B4, setMasterPreviewErrorV126M50B4] = useState("");
+
+  useEffect(() => {
+    if (smartwatchModeV126M50B3) {
+      setMasterPreviewV126M50B4(null);
+      setMasterPreviewErrorV126M50B4("");
+      setMasterPreviewLoadingV126M50B4(false);
+      return;
+    }
+
+    const duration = Number(form.duration_minutes || 0);
+    const activityType = clean(form.activity_type);
+    const activityName = clean(form.activity_name);
+    if (!activityType || !Number.isFinite(duration) || duration <= 0) {
+      setMasterPreviewV126M50B4(null);
+      setMasterPreviewErrorV126M50B4("");
+      setMasterPreviewLoadingV126M50B4(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setMasterPreviewLoadingV126M50B4(true);
+        setMasterPreviewErrorV126M50B4("");
+        const params = new URLSearchParams({
+          calculate: "master",
+          activity_type: activityType,
+          activity_name: activityName,
+          duration_minutes: String(duration),
+        });
+        const distance = clean(form.distance_km);
+        if (distance) params.set("distance_km", distance);
+
+        const response = await fetch(
+          `/api/wellness/participant/workout?${params.toString()}`,
+          { cache: "no-store" },
+        );
+        const result = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || result?.ok !== true) {
+          setMasterPreviewV126M50B4(null);
+          setMasterPreviewErrorV126M50B4(
+            result?.message || "Perhitungan Master Workout belum tersedia.",
+          );
+          return;
+        }
+        setMasterPreviewV126M50B4(result);
+      } catch (error: any) {
+        if (!cancelled) {
+          setMasterPreviewV126M50B4(null);
+          setMasterPreviewErrorV126M50B4(
+            error?.message || "Gagal menghitung preview Master Workout.",
+          );
+        }
+      } finally {
+        if (!cancelled) setMasterPreviewLoadingV126M50B4(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    smartwatchModeV126M50B3,
+    form.activity_type,
+    form.activity_name,
+    form.duration_minutes,
+    form.distance_km,
+  ]);
 
   return (
     <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-black">Input Workout Manual</h2>
       <p className="mt-1 text-sm font-bold text-slate-500">
-        Pilih cara hitung. Mode Manual memakai Master Kalori Olahraga / MET;
-        mode Smartwatch memakai angka yang tertera di perangkat.
+        Sumber input tetap Manual Peserta. Pilih apakah kalori dihitung otomatis
+        oleh sistem dari Master Workout atau diisi dari ringkasan smartwatch.
       </p>
 
       {/* WELLNESS_WORKOUT_CALCULATION_MODE_V126M50B_3 */}
@@ -6224,9 +6298,9 @@ function WorkoutTab({
               className="mt-1 h-4 w-4 accent-emerald-600"
             />
             <div>
-              <div className="text-sm font-black text-slate-900">Hitung Manual</div>
+              <div className="text-sm font-black text-slate-900">Hitung otomatis dari Master Workout</div>
               <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
-                Sistem menghitung Kalori Aktif otomatis dari Master Kalori Olahraga / MET berdasarkan aktivitas, durasi, jarak, dan data peserta.
+                Sumber input tetap Manual. Kalori Aktif dihitung otomatis dari master aktivitas (kalori/km atau MET) dan data peserta.
               </div>
             </div>
           </div>
@@ -6242,7 +6316,7 @@ function WorkoutTab({
               className="mt-1 h-4 w-4 accent-sky-600"
             />
             <div>
-              <div className="text-sm font-black text-slate-900">Hitung dari Smartwatch</div>
+              <div className="text-sm font-black text-slate-900">Ambil dari Smartwatch</div>
               <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
                 Isi angka sesuai ringkasan Mi Fitness, Garmin, Samsung Health, Apple Watch, atau perangkat lain.
               </div>
@@ -6427,11 +6501,65 @@ function WorkoutTab({
         </Input>
       </div>
 
+      {!smartwatchModeV126M50B3 ? (
+        <div className="mt-5 rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-wide text-emerald-700">
+                Hasil Sistem · Read Only
+              </div>
+              <div className="mt-1 text-sm font-black text-slate-900">
+                Kalori Aktif dari Master Workout
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white px-4 py-3 text-right shadow-sm">
+              <div className="text-2xl font-black text-emerald-700">
+                {masterPreviewLoadingV126M50B4
+                  ? "..."
+                  : masterPreviewV126M50B4?.active_calories != null
+                    ? `${Number(masterPreviewV126M50B4.active_calories).toLocaleString("id-ID")} kkal`
+                    : "-"}
+              </div>
+              <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                dipakai target & grafik
+              </div>
+            </div>
+          </div>
+
+          {masterPreviewErrorV126M50B4 ? (
+            <div className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+              {masterPreviewErrorV126M50B4}
+            </div>
+          ) : masterPreviewV126M50B4 ? (
+            <div className="mt-4 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-2">
+              <div>Sumber input: <b className="text-slate-900">Manual Peserta</b></div>
+              <div>Master: <b className="text-slate-900">{masterPreviewV126M50B4.activity_reference_name || "Fallback MET existing"}</b></div>
+              <div>Metode: <b className="text-slate-900">{masterPreviewV126M50B4.calorie_method || "-"}</b></div>
+              <div>BB dipakai: <b className="text-slate-900">{masterPreviewV126M50B4.participant_weight_kg_used || "-"} kg</b></div>
+              <div>MET: <b className="text-slate-900">{masterPreviewV126M50B4.met_used ?? "-"}</b></div>
+              <div>Kalori/km: <b className="text-slate-900">{masterPreviewV126M50B4.calories_per_km_used ?? "-"}</b></div>
+              {masterPreviewV126M50B4.warning ? (
+                <div className="md:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-amber-800">
+                  {masterPreviewV126M50B4.warning}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-3 text-xs font-bold text-emerald-900">
+              Isi jenis aktivitas dan durasi untuk melihat hasil kalkulasi otomatis.
+            </div>
+          )}
+          <div className="mt-3 text-[11px] font-bold leading-5 text-emerald-900">
+            Nilai ini bukan field bebas. Saat Simpan Workout, backend menghitung ulang dari master agar hasil tersimpan tetap konsisten.
+          </div>
+        </div>
+      ) : null}
+
       <div className={`mt-5 rounded-2xl p-4 text-xs font-bold leading-5 ${smartwatchModeV126M50B3 ? "bg-sky-50 text-sky-900" : "bg-emerald-50 text-emerald-900"}`}>
         {smartwatchModeV126M50B3 ? (
-          <>Kalori Aktif yang Anda isi tetap menjadi nilai workout untuk target, poin, total workout, dan grafik. Kalori Total serta HR disimpan sebagai informasi smartwatch.</>
+          <>Kalori Aktif dari smartwatch tetap menjadi nilai canonical workout untuk target, poin, total workout, dan grafik. Kalori Total serta HR hanya informasi perangkat.</>
         ) : (
-          <>Kalori Aktif tidak perlu diisi. Sistem memakai Master Kalori Olahraga / MET yang sudah ada. Hasilnya tetap masuk ke target, poin, total workout, dan grafik seperti fungsi sebelumnya.</>
+          <>Sumber workout tetap Manual Peserta. Perhitungannya memakai Master Workout existing; Kalori Aktif hasil sistem tetap masuk ke fungsi target, poin, total workout, dan grafik yang sudah ada.</>
         )}
       </div>
 
@@ -7823,6 +7951,81 @@ function HistoryTab({
     device_source: "",
     notes: "",
   });
+  const [editMasterPreviewV126M50B4, setEditMasterPreviewV126M50B4] = useState<any>(null);
+  const [editMasterPreviewLoadingV126M50B4, setEditMasterPreviewLoadingV126M50B4] = useState(false);
+  const [editMasterPreviewErrorV126M50B4, setEditMasterPreviewErrorV126M50B4] = useState("");
+
+  useEffect(() => {
+    if (
+      editingTypeV126M6 !== "workout" ||
+      editFormV126M6.calculation_mode === "smartwatch"
+    ) {
+      setEditMasterPreviewV126M50B4(null);
+      setEditMasterPreviewErrorV126M50B4("");
+      setEditMasterPreviewLoadingV126M50B4(false);
+      return;
+    }
+
+    const duration = Number(editFormV126M6.duration_minutes || 0);
+    const activityType = clean(editFormV126M6.activity_type);
+    if (!activityType || !Number.isFinite(duration) || duration <= 0) {
+      setEditMasterPreviewV126M50B4(null);
+      setEditMasterPreviewErrorV126M50B4("");
+      setEditMasterPreviewLoadingV126M50B4(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        setEditMasterPreviewLoadingV126M50B4(true);
+        setEditMasterPreviewErrorV126M50B4("");
+        const params = new URLSearchParams({
+          calculate: "master",
+          activity_type: activityType,
+          activity_name: activityType,
+          duration_minutes: String(duration),
+        });
+        const distance = clean(editFormV126M6.distance_km);
+        if (distance) params.set("distance_km", distance);
+
+        const response = await fetch(
+          `/api/wellness/participant/workout?${params.toString()}`,
+          { cache: "no-store" },
+        );
+        const result = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || result?.ok !== true) {
+          setEditMasterPreviewV126M50B4(null);
+          setEditMasterPreviewErrorV126M50B4(
+            result?.message || "Perhitungan Master Workout belum tersedia.",
+          );
+          return;
+        }
+        setEditMasterPreviewV126M50B4(result);
+      } catch (error: any) {
+        if (!cancelled) {
+          setEditMasterPreviewV126M50B4(null);
+          setEditMasterPreviewErrorV126M50B4(
+            error?.message || "Gagal menghitung preview Master Workout.",
+          );
+        }
+      } finally {
+        if (!cancelled) setEditMasterPreviewLoadingV126M50B4(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    editingTypeV126M6,
+    editFormV126M6.calculation_mode,
+    editFormV126M6.activity_type,
+    editFormV126M6.duration_minutes,
+    editFormV126M6.distance_km,
+  ]);
 
   function historyDeleteRawPayloadV126M(item: any) {
     const raw = item?.raw_payload;
@@ -8975,7 +9178,7 @@ function HistoryTab({
             ) : (
               <>
                 <div className="rounded-2xl border border-sky-100 bg-sky-50 p-4 text-xs font-bold leading-5 text-sky-900">
-                  Pilih sumber perhitungan. <b>Hitung Manual</b> memakai Master Kalori Olahraga / MET. <b>Hitung dari Smartwatch</b> memakai angka yang Anda masukkan dari perangkat.
+                  Sumber input workout tetap Manual Peserta. <b>Master Workout</b> menghitung kalori otomatis; <b>Smartwatch</b> memakai angka dari perangkat.
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -8994,7 +9197,7 @@ function HistoryTab({
                         className="mt-1 h-4 w-4 accent-emerald-600"
                       />
                       <div>
-                        <div className="text-sm font-black text-slate-900">Hitung Manual</div>
+                        <div className="text-sm font-black text-slate-900">Hitung otomatis dari Master Workout</div>
                         <div className="mt-1 text-xs font-bold leading-5 text-slate-500">Kalori aktif dihitung ulang otomatis dari master saat disimpan.</div>
                       </div>
                     </div>
@@ -9019,7 +9222,7 @@ function HistoryTab({
                         className="mt-1 h-4 w-4 accent-sky-600"
                       />
                       <div>
-                        <div className="text-sm font-black text-slate-900">Hitung dari Smartwatch</div>
+                        <div className="text-sm font-black text-slate-900">Ambil dari Smartwatch</div>
                         <div className="mt-1 text-xs font-bold leading-5 text-slate-500">Kalori, HR, langkah, jarak, dan device dapat diisi sesuai ringkasan perangkat.</div>
                       </div>
                     </div>
@@ -9027,8 +9230,42 @@ function HistoryTab({
                 </div>
 
                 {editFormV126M6.calculation_mode !== "smartwatch" ? (
-                  <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
-                    Kalori aktif akan dihitung ulang oleh sistem dari Master Kalori Olahraga / MET. Nilai hasil hitung tetap dipakai oleh target, poin, total workout, dan grafik.
+                  <div className="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Hasil Sistem · Read Only</div>
+                        <div className="mt-1 text-xs font-black text-slate-900">Kalori Aktif dari Master Workout</div>
+                      </div>
+                      <div className="rounded-xl bg-white px-3 py-2 text-lg font-black text-emerald-700 shadow-sm">
+                        {editMasterPreviewLoadingV126M50B4
+                          ? "..."
+                          : editMasterPreviewV126M50B4?.active_calories != null
+                            ? `${Number(editMasterPreviewV126M50B4.active_calories).toLocaleString("id-ID")} kkal`
+                            : "-"}
+                      </div>
+                    </div>
+                    {editMasterPreviewErrorV126M50B4 ? (
+                      <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                        {editMasterPreviewErrorV126M50B4}
+                      </div>
+                    ) : editMasterPreviewV126M50B4 ? (
+                      <div className="mt-3 grid gap-1 text-[11px] font-bold text-slate-600 md:grid-cols-2">
+                        <div>Sumber input: <b className="text-slate-900">Manual Peserta</b></div>
+                        <div>Master: <b className="text-slate-900">{editMasterPreviewV126M50B4.activity_reference_name || "Fallback MET existing"}</b></div>
+                        <div>Metode: <b className="text-slate-900">{editMasterPreviewV126M50B4.calorie_method || "-"}</b></div>
+                        <div>BB: <b className="text-slate-900">{editMasterPreviewV126M50B4.participant_weight_kg_used || "-"} kg</b></div>
+                        {editMasterPreviewV126M50B4.warning ? (
+                          <div className="md:col-span-2 mt-1 rounded-xl bg-amber-50 px-3 py-2 text-amber-800">
+                            {editMasterPreviewV126M50B4.warning}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] font-bold text-emerald-900">Isi aktivitas dan durasi untuk menghitung ulang.</div>
+                    )}
+                    <div className="mt-2 text-[11px] font-bold leading-5 text-emerald-900">
+                      Saat Simpan & Verifikasi, backend menghitung ulang dari master. Nilai lama tidak dipakai sebagai input bebas.
+                    </div>
                   </div>
                 ) : null}
 
