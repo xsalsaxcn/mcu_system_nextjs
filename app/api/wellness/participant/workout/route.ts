@@ -462,41 +462,113 @@ function workoutCanonicalKeyV126M9(
   ].join(":");
 }
 
+function workoutComparableV126M50B6(item: any) {
+  const raw =
+    item?.raw_payload && typeof item.raw_payload === "object"
+      ? item.raw_payload
+      : {};
+
+  const numeric = (value: any) => {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  };
+
+  return JSON.stringify({
+    log_date: clean(item?.log_date),
+    activity: clean(item?.activity_name || item?.activity_type).toLowerCase(),
+    duration_minutes: numeric(item?.duration_minutes),
+    duration_seconds: numeric(item?.duration_seconds ?? raw?.duration_seconds),
+    calories: numeric(item?.calories ?? item?.active_calories),
+    distance_km: numeric(item?.distance_km),
+    steps: numeric(item?.steps),
+    start_time: clean(item?.start_time ?? raw?.start_time).slice(0, 5),
+    total_calories: numeric(
+      item?.smartwatch_total_calories ?? raw?.smartwatch_total_calories,
+    ),
+    average_heart_rate: numeric(
+      item?.average_heart_rate ?? raw?.average_heart_rate,
+    ),
+    max_heart_rate: numeric(item?.max_heart_rate ?? raw?.max_heart_rate),
+    calculation_mode: clean(
+      item?.calculation_mode ?? raw?.calculation_mode,
+    ).toLowerCase(),
+    device_source: clean(item?.device_source ?? raw?.device_source).toLowerCase(),
+  });
+}
+
+function isFreshEditedMirrorV126M50B6(item: any) {
+  if (clean(item?._canonical_source) === "google_sheet") return false;
+  const raw =
+    item?.raw_payload && typeof item.raw_payload === "object"
+      ? item.raw_payload
+      : {};
+  return Boolean(
+    clean(raw?.edited_at) &&
+      (
+        clean(raw?.marker) ===
+          "WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6" ||
+        clean(raw?.marker) ===
+          "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1"
+      ),
+  );
+}
+
 function mergeWorkoutHistoryV126M9(
   supabaseRows: any[] = [],
   sheetRows: any[] = [],
 ) {
-  const result: any[] = [];
-  const seen = new Set<string>();
+  const byKey = new Map<string, any>();
+  const insertionOrder: string[] = [];
 
-  // V126M50B.1: durable Google Sheet row wins when the same submission
-  // also exists in the Supabase mirror. This prevents a stale mirror from
-  // restoring the pre-edit values after refresh.
-  [...(sheetRows || []), ...(supabaseRows || [])].forEach(
-    (item: any, index: number) => {
-      const key = workoutCanonicalKeyV126M9(
-        item,
-        index,
-      );
-      if (seen.has(key)) return;
-      seen.add(key);
-      result.push(item);
-    },
+  function remember(item: any, index: number, origin: "sheet" | "mirror") {
+    const key = workoutCanonicalKeyV126M9(item, index);
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, item);
+      insertionOrder.push(key);
+      return;
+    }
+
+    if (origin !== "mirror") return;
+
+    // WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6
+    // Normally the durable Sheet row wins. Immediately after a successful
+    // edit, however, listRows can briefly return the pre-edit row. If the
+    // matching Supabase mirror carries a newer edit marker and the values
+    // differ, keep that edited mirror until Sheet read-back catches up.
+    if (
+      clean(existing?._canonical_source) === "google_sheet" &&
+      isFreshEditedMirrorV126M50B6(item) &&
+      workoutComparableV126M50B6(existing) !== workoutComparableV126M50B6(item)
+    ) {
+      byKey.set(key, item);
+    }
+  }
+
+  (sheetRows || []).forEach((item: any, index: number) =>
+    remember(item, index, "sheet"),
+  );
+  (supabaseRows || []).forEach((item: any, index: number) =>
+    remember(item, index + (sheetRows || []).length, "mirror"),
   );
 
-  return result.sort((left: any, right: any) =>
-    clean(
-      right?.started_at ||
-        right?.created_at ||
-        right?.log_date,
-    ).localeCompare(
+  return insertionOrder
+    .map((key) => byKey.get(key))
+    .filter(Boolean)
+    .sort((left: any, right: any) =>
       clean(
-        left?.started_at ||
-          left?.created_at ||
-          left?.log_date,
+        right?.started_at ||
+          right?.created_at ||
+          right?.log_date,
+      ).localeCompare(
+        clean(
+          left?.started_at ||
+            left?.created_at ||
+            left?.log_date,
+        ),
       ),
-    ),
-  );
+    );
 }
 
 function clean(value: any) {
@@ -1782,40 +1854,80 @@ export async function PATCH(req: NextRequest) {
       if (candidateErrors.length === 0) break;
     }
 
-    if (!verifiedRow || verificationErrors.length > 0) {
-      return NextResponse.json({
-        ok: true,
-        updated: true,
-        verification_pending: true,
-        readback_ok: false,
-        message:
-          "Workout sudah tersimpan di Google Sheet. Sinkronisasi read-back masih diproses dan history akan diperbarui otomatis.",
-        verification_errors: verificationErrors,
-        verified_log: verifiedWorkout,
-        google_sheet: result,
-        submitted_log: {
-          log_date: logDate,
-          activity_type: activityType,
-          activity_name: activityName,
-          duration_minutes: durationMinutes,
-          calories,
-          distance_km: distanceKm,
-          steps,
-          start_time: startTime || null,
-          calculation_mode: calculationMode,
-          total_calories:
-            calculationMode === "smartwatch" ? totalCalories : null,
-          average_heart_rate:
-            calculationMode === "smartwatch" ? averageHr : null,
-          max_heart_rate:
-            calculationMode === "smartwatch" ? maxHr : null,
-          device_source:
-            calculationMode === "smartwatch"
-              ? deviceSource || "Smartwatch"
-              : "Manual",
+    // WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6
+    // Do not return before aligning the mirror. B.5 returned here while
+    // read-back was pending, leaving the old mirror in place; the next GET
+    // could therefore rehydrate the pre-edit values and make the form appear
+    // to "snap back" even though the Sheet write was accepted.
+    const verificationPendingV126M50B6 =
+      !verifiedRow || verificationErrors.length > 0;
+
+    const submittedWorkoutV126M50B6 = {
+      id: effectiveSubmissionId
+        ? `manual_sheet_${effectiveSubmissionId}`
+        : `manual_sheet_row_${effectiveRowNumber || rowNumber}`,
+      _canonical_source: "supabase_edit_pending",
+      _google_sheet_row_number: effectiveRowNumber || rowNumber || null,
+      participant_id: Number(participant.id),
+      source: "manual",
+      provider: "manual",
+      input_source: "manual",
+      submission_id: effectiveSubmissionId || null,
+      activity_type: activityType,
+      activity_name: activityName,
+      log_date: logDate,
+      started_at: startTime
+        ? `${logDate}T${startTime}:00+07:00`
+        : `${logDate}T00:00:00+07:00`,
+      created_at: logDate,
+      updated_at: new Date().toISOString(),
+      duration_minutes: durationMinutes,
+      duration_seconds: durationSeconds,
+      calories,
+      active_calories: calories,
+      smartwatch_total_calories:
+        calculationMode === "smartwatch" ? totalCalories : null,
+      distance_km: distanceKm,
+      steps,
+      start_time: startTime || "",
+      calculation_mode: calculationMode,
+      average_heart_rate:
+        calculationMode === "smartwatch" ? averageHr : null,
+      max_heart_rate:
+        calculationMode === "smartwatch" ? maxHr : null,
+      device_source:
+        calculationMode === "smartwatch"
+          ? deviceSource || "Smartwatch"
+          : "Manual",
+      notes: notes || null,
+      raw_payload: {
+        submission_id: effectiveSubmissionId || null,
+        notes,
+        calculation_mode: calculationMode,
+        start_time: startTime || null,
+        duration_seconds: durationSeconds,
+        active_calories: calories,
+        smartwatch_total_calories:
+          calculationMode === "smartwatch" ? totalCalories : null,
+        average_heart_rate:
+          calculationMode === "smartwatch" ? averageHr : null,
+        max_heart_rate:
+          calculationMode === "smartwatch" ? maxHr : null,
+        device_source:
+          calculationMode === "smartwatch"
+            ? deviceSource || "Smartwatch"
+            : "Manual",
+        ...(calculationAudit || {}),
+        google_sheet: {
+          rowNumber: effectiveRowNumber || rowNumber || null,
+          row_number: effectiveRowNumber || rowNumber || null,
+          updated: true,
+          verification_pending: verificationPendingV126M50B6,
         },
-      });
-    }
+        edited_at: new Date().toISOString(),
+        marker: "WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6",
+      },
+    };
 
     // Keep the Supabase mirror aligned when a matching mirror exists. Failure
     // here does not overwrite the durable Sheet; GET now prefers the Sheet row.
@@ -1838,8 +1950,8 @@ export async function PATCH(req: NextRequest) {
         );
         return (
           (requestedMirrorId > 0 && Number(row?.id) === requestedMirrorId) ||
-          (submissionId && currentSubmissionId === submissionId) ||
-          (rowNumber > 0 && currentSheetRow === rowNumber)
+          (effectiveSubmissionId && currentSubmissionId === effectiveSubmissionId) ||
+          (effectiveRowNumber > 0 && currentSheetRow === effectiveRowNumber)
         );
       });
 
@@ -1849,7 +1961,11 @@ export async function PATCH(req: NextRequest) {
             ? mirror.raw_payload
             : {};
         const verifiedSheetRowNumber = Number(
-          verifiedRow?._rowNumber || verifiedRow?.row_number || rowNumber || 0,
+          verifiedRow?._rowNumber ||
+            verifiedRow?.row_number ||
+            effectiveRowNumber ||
+            rowNumber ||
+            0,
         );
         const startedAt = startTime
           ? `${logDate}T${startTime}:00+07:00`
@@ -1869,7 +1985,8 @@ export async function PATCH(req: NextRequest) {
             raw_payload: {
               ...previousRaw,
               notes,
-              submission_id: submissionId || previousRaw?.submission_id || null,
+              submission_id:
+                effectiveSubmissionId || previousRaw?.submission_id || null,
               calculation_mode: calculationMode,
               start_time: startTime || null,
               duration_seconds: durationSeconds,
@@ -1892,7 +2009,7 @@ export async function PATCH(req: NextRequest) {
                 updated: true,
               },
               edited_at: new Date().toISOString(),
-              marker: "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1",
+              marker: "WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6",
             },
           })
           .eq("id", Number(mirror.id))
@@ -1912,16 +2029,25 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       updated: true,
-      verified: true,
-      message: "Data workout berhasil diperbarui dan diverifikasi dari Google Sheet.",
-      log: verifiedWorkout,
+      verified: !verificationPendingV126M50B6,
+      verification_pending: verificationPendingV126M50B6,
+      readback_ok: !verificationPendingV126M50B6,
+      message: verificationPendingV126M50B6
+        ? "Workout berhasil diperbarui. Tampilan memakai nilai edit terbaru sambil menunggu read-back Google Sheet."
+        : "Data workout berhasil diperbarui dan diverifikasi dari Google Sheet.",
+      log: verificationPendingV126M50B6
+        ? submittedWorkoutV126M50B6
+        : verifiedWorkout,
+      verified_log: verifiedWorkout,
+      submitted_log: submittedWorkoutV126M50B6,
+      verification_errors: verificationErrors,
       google_sheet: result,
       mirror_updated: mirrorUpdated,
       mirror_warning: mirrorWarning || null,
       calculation_mode: calculationMode,
       active_calories: calories,
       calculation_audit: calculationAudit,
-      marker: "WELLNESS_WORKOUT_CALCULATION_MODE_V126M50B_3",
+      marker: "WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6",
     });
   } catch (error: any) {
     return NextResponse.json(

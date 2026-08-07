@@ -8591,24 +8591,78 @@ function HistoryTab({
         );
       }
 
-      // WELLNESS_WORKOUT_READBACK_RETRY_V126M50B_5
-      // A Sheet update can be durable while listRows is briefly behind. Give
-      // workout history a short window to catch up instead of showing a false
-      // save failure to the participant.
+      // WELLNESS_WORKOUT_EDIT_PERSISTENCE_V126M50B_6
+      // Keep the just-saved values on screen immediately. B.5 reloaded history
+      // while Sheet read-back could still contain the pre-edit row, causing the
+      // UI to jump back to the old values. The API now aligns the mirror first;
+      // the portal also applies the returned canonical log optimistically.
       if (
         editingTypeV126M6 ===
         "nutrition"
       ) {
         await loadNutritionHistory();
       } else {
-        if (result?.verification_pending) {
-          await new Promise((resolve) => window.setTimeout(resolve, 900));
+        const savedWorkoutV126M50B6 = result?.log;
+        if (savedWorkoutV126M50B6) {
+          setDirectWorkoutV126M6((previous: any) => {
+            const currentLogs = Array.isArray(previous?.logs)
+              ? previous.logs
+              : [];
+            const targetSubmissionId = clean(submissionId);
+            const targetRowNumber = Number(rowNumber || 0);
+            let replaced = false;
+
+            const nextLogs = currentLogs.map((item: any) => {
+              const raw = historyDeleteRawPayloadV126M(item);
+              const itemSubmissionId = clean(
+                historySubmissionIdV126M(item),
+              );
+              const itemRowNumber = Number(
+                historySheetRowV126M(item) ||
+                  raw?.google_sheet?.rowNumber ||
+                  raw?.google_sheet?.row_number ||
+                  0,
+              );
+              const matches = Boolean(
+                (targetSubmissionId &&
+                  itemSubmissionId === targetSubmissionId) ||
+                  (targetRowNumber > 0 &&
+                    itemRowNumber === targetRowNumber),
+              );
+              if (!matches) return item;
+              replaced = true;
+              return {
+                ...item,
+                ...savedWorkoutV126M50B6,
+                raw_payload: {
+                  ...(raw || {}),
+                  ...(savedWorkoutV126M50B6?.raw_payload || {}),
+                },
+              };
+            });
+
+            if (!replaced) {
+              nextLogs.unshift(savedWorkoutV126M50B6);
+            }
+
+            return {
+              ...(previous || {}),
+              ok: true,
+              logs: nextLogs,
+            };
+          });
+          setWorkoutHistoryLoadedV126M6(true);
         }
-        await loadWorkoutHistoryV126M6();
+
         if (result?.verification_pending) {
           window.setTimeout(() => {
             void loadWorkoutHistoryV126M6();
-          }, 1800);
+          }, 2200);
+          window.setTimeout(() => {
+            void loadWorkoutHistoryV126M6();
+          }, 5200);
+        } else {
+          await loadWorkoutHistoryV126M6();
         }
       }
 
