@@ -32,9 +32,28 @@ const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT";
 // Supabase remains a mirror. GET merges both so device refresh cannot hide a
 // workout row that exists in Google Sheet but is absent from the mirror.
 function sheetWorkoutNumberV126M9(value: any) {
-  const normalized = clean(value)
-    .replace(/\./g, "")
-    .replace(",", ".");
+  const text = clean(value).replace(/\s/g, "");
+  if (!text) return null;
+
+  let normalized = text.replace(/[^0-9,.-]/g, "");
+  const hasDot = normalized.includes(".");
+  const hasComma = normalized.includes(",");
+
+  if (hasDot && hasComma) {
+    // The last separator is treated as the decimal separator.
+    if (normalized.lastIndexOf(",") > normalized.lastIndexOf(".")) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    const thousandStyle = /^-?\d{1,3}(,\d{3})+$/.test(normalized);
+    normalized = thousandStyle ? normalized.replace(/,/g, "") : normalized.replace(",", ".");
+  } else if (hasDot) {
+    const thousandStyle = /^-?\d{1,3}(\.\d{3})+$/.test(normalized);
+    normalized = thousandStyle ? normalized.replace(/\./g, "") : normalized;
+  }
+
   const numberValue = Number(normalized);
   return Number.isFinite(numberValue) ? numberValue : null;
 }
@@ -75,6 +94,122 @@ function sheetWorkoutDistanceV126M9(row: any) {
   return match
     ? sheetWorkoutNumberV126M9(match[1])
     : null;
+}
+
+
+// WELLNESS_SMARTWATCH_WORKOUT_EDITOR_V126M50B_1
+// Extended smartwatch-style metadata is persisted inside the existing
+// achievement column so no Google Sheet schema/migration is required.
+function workoutAchievementTextV126M50B1(params: {
+  notes?: any;
+  steps?: number | null;
+  distanceKm?: number | null;
+  startTime?: string;
+  durationMinutes?: number | null;
+  durationSeconds?: number | null;
+  totalCalories?: number | null;
+  averageHr?: number | null;
+  maxHr?: number | null;
+  deviceSource?: string;
+}) {
+  const minutes = Math.max(0, Math.floor(Number(params.durationMinutes || 0)));
+  const seconds = Math.max(0, Math.min(59, Math.floor(Number(params.durationSeconds || 0))));
+  const durationExact = minutes > 0 || seconds > 0
+    ? `${minutes}:${String(seconds).padStart(2, "0")}`
+    : "";
+
+  return [
+    clean(params.notes),
+    params.steps != null && Number(params.steps) >= 0
+      ? `${Number(params.steps)} langkah`
+      : "",
+    params.distanceKm != null && Number(params.distanceKm) >= 0
+      ? `${Number(params.distanceKm)} km`
+      : "",
+    clean(params.startTime) ? `Waktu mulai: ${clean(params.startTime)}` : "",
+    durationExact ? `Durasi: ${durationExact}` : "",
+    params.totalCalories != null && Number(params.totalCalories) >= 0
+      ? `Kalori total: ${Number(params.totalCalories)} kkal`
+      : "",
+    params.averageHr != null && Number(params.averageHr) > 0
+      ? `HR rata-rata: ${Number(params.averageHr)} BPM`
+      : "",
+    params.maxHr != null && Number(params.maxHr) > 0
+      ? `HR maksimal: ${Number(params.maxHr)} BPM`
+      : "",
+    clean(params.deviceSource) ? `Sumber: ${clean(params.deviceSource)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function workoutAchievementV126M50B1(row: any) {
+  return clean(
+    row?.[
+      "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+    ],
+  );
+}
+
+function workoutSmartwatchNumberV126M50B1(row: any, pattern: RegExp) {
+  const match = workoutAchievementV126M50B1(row).match(pattern);
+  return match?.[1] ? sheetWorkoutNumberV126M9(match[1]) : null;
+}
+
+function workoutSmartwatchTextV126M50B1(row: any, pattern: RegExp) {
+  const match = workoutAchievementV126M50B1(row).match(pattern);
+  return clean(match?.[1]);
+}
+
+function workoutSmartwatchMetaV126M50B1(row: any) {
+  const durationText = workoutSmartwatchTextV126M50B1(
+    row,
+    /(?:^|[|·])\s*Durasi\s*:\s*(\d{1,4}:\d{2})/i,
+  );
+  const durationMatch = durationText.match(/^(\d+):(\d{2})$/);
+  const durationSeconds = durationMatch ? Number(durationMatch[2]) : 0;
+
+  return {
+    start_time: workoutSmartwatchTextV126M50B1(
+      row,
+      /(?:^|[|·])\s*Waktu mulai\s*:\s*([^|·]+)/i,
+    ),
+    duration_seconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+    smartwatch_total_calories: workoutSmartwatchNumberV126M50B1(
+      row,
+      /(?:^|[|·])\s*Kalori total\s*:\s*([\d.,]+)/i,
+    ),
+    average_heart_rate: workoutSmartwatchNumberV126M50B1(
+      row,
+      /(?:^|[|·])\s*HR rata-rata\s*:\s*([\d.,]+)/i,
+    ),
+    max_heart_rate: workoutSmartwatchNumberV126M50B1(
+      row,
+      /(?:^|[|·])\s*HR maksimal\s*:\s*([\d.,]+)/i,
+    ),
+    device_source: workoutSmartwatchTextV126M50B1(
+      row,
+      /(?:^|[|·])\s*Sumber\s*:\s*([^|·]+)/i,
+    ),
+  };
+}
+
+function workoutCleanNotesV126M50B1(row: any) {
+  const achievement = workoutAchievementV126M50B1(row);
+  if (!achievement) return "";
+
+  return achievement
+    .split(/\s*[|·]\s*/)
+    .filter((part) => {
+      const text = clean(part);
+      if (!text) return false;
+      return !(
+        /^[\d.,]+\s*(?:langkah|steps?)$/i.test(text) ||
+        /^[\d.,]+\s*km$/i.test(text) ||
+        /^(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Sumber)\s*:/i.test(text)
+      );
+    })
+    .join(" | ");
 }
 
 function isWorkoutSheetRowV126M9(row: any) {
@@ -178,6 +313,7 @@ function sheetRowToWorkoutV126M9(
   );
   const steps = sheetWorkoutStepsV126M9(row);
   const distanceKm = sheetWorkoutDistanceV126M9(row);
+  const smartwatchMeta = workoutSmartwatchMetaV126M50B1(row);
 
   return {
     id:
@@ -218,12 +354,26 @@ function sheetRowToWorkoutV126M9(
       submissionDate || logDate,
     duration_minutes:
       durationMinutes,
+    duration_seconds:
+      smartwatchMeta.duration_seconds || 0,
     calories,
+    active_calories:
+      calories,
+    smartwatch_total_calories:
+      smartwatchMeta.smartwatch_total_calories,
     distance_km:
       distanceKm,
     steps,
+    start_time:
+      smartwatchMeta.start_time || "",
+    average_heart_rate:
+      smartwatchMeta.average_heart_rate,
+    max_heart_rate:
+      smartwatchMeta.max_heart_rate,
+    device_source:
+      smartwatchMeta.device_source || "Manual",
     notes:
-      achievement || null,
+      workoutCleanNotesV126M50B1(row) || null,
     raw_payload: {
       ...row,
       submission_id:
@@ -302,7 +452,10 @@ function mergeWorkoutHistoryV126M9(
   const result: any[] = [];
   const seen = new Set<string>();
 
-  [...(supabaseRows || []), ...(sheetRows || [])].forEach(
+  // V126M50B.1: durable Google Sheet row wins when the same submission
+  // also exists in the Supabase mirror. This prevents a stale mirror from
+  // restoring the pre-edit values after refresh.
+  [...(sheetRows || []), ...(supabaseRows || [])].forEach(
     (item: any, index: number) => {
       const key = workoutCanonicalKeyV126M9(
         item,
@@ -1191,8 +1344,9 @@ export async function DELETE(req: NextRequest) {
 
 
 // WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
+// WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1
 export async function PATCH(req: NextRequest) {
-  const { participant } = await getParticipant(req);
+  const { supabase, participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
@@ -1205,14 +1359,29 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const submissionId = clean(body?.submission_id || body?.submissionId);
     const rowNumber = Number(body?.google_sheet_row_number || body?.row_number || 0);
+    const requestedMirrorId = Number(body?.mirror_id || 0);
     const logDate = safeLogDate(body?.log_date || body?.logDate);
     const activityType = clean(body?.activity_type || body?.activityType || body?.title);
     const activityName = clean(body?.activity_name || body?.activityName) || activityType;
-    const durationMinutes = toNumberOrNull(body?.duration_minutes || body?.durationMinutes);
+    const durationMinutesWhole = toNumberOrNull(body?.duration_minutes || body?.durationMinutes);
+    const durationSeconds = Math.max(
+      0,
+      Math.min(59, Math.floor(toNumberOrNull(body?.duration_seconds || body?.durationSeconds) || 0)),
+    );
+    const durationMinutes = durationMinutesWhole == null
+      ? null
+      : Number(durationMinutesWhole);
     const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);
     const notes = clean(body?.notes || body?.catatan);
-    const calories = toNumberOrNull(body?.calories);
+    // Active calories remain the canonical calories used by workout target/points.
+    const calories = toNumberOrNull(body?.active_calories ?? body?.calories);
+    // Smartwatch total calories are informational only and never replace active calories.
+    const totalCalories = toNumberOrNull(body?.total_calories ?? body?.smartwatch_total_calories);
+    const averageHr = toNumberOrNull(body?.average_heart_rate ?? body?.average_hr);
+    const maxHr = toNumberOrNull(body?.max_heart_rate ?? body?.max_hr);
+    const startTime = clean(body?.start_time || body?.started_time).slice(0, 5);
+    const deviceSource = clean(body?.device_source || body?.workout_source || "Manual");
     const expectedLogDate = safeLogDate(body?.expected_log_date || body?.expectedLogDate);
     const expectedActivityType = clean(body?.expected_activity_type || body?.expectedActivityType);
     const expectedDurationMinutes = toNumberOrNull(
@@ -1227,12 +1396,39 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    if (!logDate || !activityType || !durationMinutes || durationMinutes <= 0) {
+    if (!logDate || !activityType || durationMinutes == null || durationMinutes <= 0) {
       return NextResponse.json(
         { ok: false, message: "Tanggal, jenis workout, dan durasi wajib diisi." },
         { status: 400 },
       );
     }
+
+    if (calories == null || calories < 0) {
+      return NextResponse.json(
+        { ok: false, message: "Kalori aktif wajib berupa angka 0 atau lebih." },
+        { status: 400 },
+      );
+    }
+
+    if (startTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+      return NextResponse.json(
+        { ok: false, message: "Waktu mulai harus menggunakan format HH:MM." },
+        { status: 400 },
+      );
+    }
+
+    const achievement = workoutAchievementTextV126M50B1({
+      notes,
+      steps,
+      distanceKm,
+      startTime,
+      durationMinutes: durationMinutesWhole,
+      durationSeconds,
+      totalCalories,
+      averageHr,
+      maxHr,
+      deviceSource,
+    });
 
     const result = await postToWellnessWebhook({
       action: "updateSubmissionV126M6",
@@ -1252,10 +1448,9 @@ export async function PATCH(req: NextRequest) {
         "Log Date": logDate,
         "Melakukan Workout/Aktifitas Ringan?": "Ya",
         "Jenis Workout/Aktifitas": activityType,
-        "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)":
-          notes || [activityName, distanceKm ? `${distanceKm} km` : "", steps ? `${steps} steps` : ""].filter(Boolean).join(" · "),
+        "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)": achievement,
         "Berapa Menit anda melakukan nya ?": durationMinutes,
-        "Kalori Aktivitas": calories ?? 0,
+        "Kalori Aktivitas": calories,
       },
       allowedHeaders: [
         "Submission Date",
@@ -1272,21 +1467,178 @@ export async function PATCH(req: NextRequest) {
         durationMinutes: expectedDurationMinutes,
         calories: expectedCalories,
       },
-      marker: "WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6",
+      marker: "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1",
     });
 
     if (result?.updated !== true) {
       return NextResponse.json(
-        { ok: false, message: result?.message || "Data workout belum berhasil diperbarui.", google_sheet: result },
+        {
+          ok: false,
+          message: result?.message || "Data workout belum berhasil diperbarui.",
+          google_sheet: result,
+        },
         { status: 409 },
       );
+    }
+
+    // Read back the durable source before reporting success.
+    const readback = await fetchWellnessGoogleSheetRows({
+      participantId: Number(participant.id),
+      code: clean(participant?.code) || undefined,
+      logType: "workout",
+      limit: 1000,
+    });
+
+    const verifiedRow = (readback?.rows || [])
+      .filter(isWorkoutSheetRowV126M9)
+      .filter((row: any) => workoutSheetMatchesParticipantV126M9(row, participant))
+      .find((row: any) => {
+        const currentSubmissionId = clean(row?.["Submission ID"] || row?.submission_id);
+        const currentRow = Number(row?._rowNumber || row?.row_number || 0);
+        return (
+          (submissionId && currentSubmissionId === submissionId) ||
+          (rowNumber > 0 && currentRow === rowNumber)
+        );
+      });
+
+    if (!verifiedRow) {
+      return NextResponse.json(
+        {
+          ok: false,
+          updated: true,
+          message:
+            "Google Sheet sudah menerima update, tetapi read-back row yang sama belum ditemukan. Refresh beberapa detik lagi sebelum mengedit ulang.",
+          google_sheet: result,
+          readback_ok: false,
+        },
+        { status: 409 },
+      );
+    }
+
+    const verifiedWorkout = sheetRowToWorkoutV126M9(verifiedRow, participant);
+    const verifiedDuration = Number(verifiedWorkout?.duration_minutes || 0);
+    const verifiedCalories = Number(verifiedWorkout?.calories || 0);
+    const verificationErrors: string[] = [];
+
+    if (clean(verifiedWorkout?.log_date) !== logDate) verificationErrors.push("tanggal");
+    if (clean(verifiedWorkout?.activity_name) !== activityType) verificationErrors.push("jenis workout");
+    if (Math.abs(verifiedDuration - Number(durationMinutes)) > 0.02) verificationErrors.push("durasi");
+    if (Math.abs(verifiedCalories - Number(calories)) > 0.01) verificationErrors.push("kalori aktif");
+    if (steps != null && Math.abs(Number(verifiedWorkout?.steps || 0) - Number(steps)) > 0.01) verificationErrors.push("langkah");
+    if (distanceKm != null && Math.abs(Number(verifiedWorkout?.distance_km || 0) - Number(distanceKm)) > 0.01) verificationErrors.push("jarak");
+    if (startTime && clean(verifiedWorkout?.start_time) !== startTime) verificationErrors.push("waktu mulai");
+    if (totalCalories != null && Math.abs(Number(verifiedWorkout?.smartwatch_total_calories || 0) - Number(totalCalories)) > 0.01) verificationErrors.push("kalori total");
+    if (averageHr != null && Math.abs(Number(verifiedWorkout?.average_heart_rate || 0) - Number(averageHr)) > 0.01) verificationErrors.push("HR rata-rata");
+    if (maxHr != null && Math.abs(Number(verifiedWorkout?.max_heart_rate || 0) - Number(maxHr)) > 0.01) verificationErrors.push("HR maksimal");
+
+    if (verificationErrors.length > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          updated: true,
+          message: `Update sudah dikirim tetapi verifikasi belum cocok pada: ${verificationErrors.join(", ")}.`,
+          verification_errors: verificationErrors,
+          verified_log: verifiedWorkout,
+          google_sheet: result,
+        },
+        { status: 409 },
+      );
+    }
+
+    // Keep the Supabase mirror aligned when a matching mirror exists. Failure
+    // here does not overwrite the durable Sheet; GET now prefers the Sheet row.
+    const mirrorLookup = await supabase
+      .from("wellness_activity_logs")
+      .select("*")
+      .eq("participant_id", Number(participant.id))
+      .eq("source", "manual")
+      .limit(1000);
+
+    let mirrorUpdated = false;
+    let mirrorWarning = "";
+
+    if (!mirrorLookup.error) {
+      const mirror = (mirrorLookup.data || []).find((row: any) => {
+        const raw = row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : {};
+        const currentSubmissionId = clean(raw?.submission_id || raw?.submissionId);
+        const currentSheetRow = Number(
+          raw?.google_sheet?.rowNumber || raw?.google_sheet?.row_number || 0,
+        );
+        return (
+          (requestedMirrorId > 0 && Number(row?.id) === requestedMirrorId) ||
+          (submissionId && currentSubmissionId === submissionId) ||
+          (rowNumber > 0 && currentSheetRow === rowNumber)
+        );
+      });
+
+      if (mirror?.id) {
+        const previousRaw =
+          mirror?.raw_payload && typeof mirror.raw_payload === "object"
+            ? mirror.raw_payload
+            : {};
+        const verifiedSheetRowNumber = Number(
+          verifiedRow?._rowNumber || verifiedRow?.row_number || rowNumber || 0,
+        );
+        const startedAt = startTime
+          ? `${logDate}T${startTime}:00+07:00`
+          : `${logDate}T00:00:00+07:00`;
+
+        const mirrorResult = await supabase
+          .from("wellness_activity_logs")
+          .update({
+            activity_type: activityType,
+            activity_name: activityName,
+            log_date: logDate,
+            started_at: startedAt,
+            duration_minutes: durationMinutes,
+            calories,
+            distance_km: distanceKm,
+            steps,
+            raw_payload: {
+              ...previousRaw,
+              notes,
+              submission_id: submissionId || previousRaw?.submission_id || null,
+              start_time: startTime || null,
+              duration_seconds: durationSeconds,
+              active_calories: calories,
+              smartwatch_total_calories: totalCalories,
+              average_heart_rate: averageHr,
+              max_heart_rate: maxHr,
+              device_source: deviceSource || "Manual",
+              google_sheet: {
+                ...(previousRaw?.google_sheet || {}),
+                rowNumber: verifiedSheetRowNumber || null,
+                row_number: verifiedSheetRowNumber || null,
+                updated: true,
+              },
+              edited_at: new Date().toISOString(),
+              marker: "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1",
+            },
+          })
+          .eq("id", Number(mirror.id))
+          .eq("participant_id", Number(participant.id))
+          .eq("source", "manual");
+
+        if (mirrorResult.error) {
+          mirrorWarning = mirrorResult.error.message;
+        } else {
+          mirrorUpdated = true;
+        }
+      }
+    } else {
+      mirrorWarning = mirrorLookup.error.message;
     }
 
     return NextResponse.json({
       ok: true,
       updated: true,
-      message: "Data workout berhasil diperbarui di Google Sheet.",
+      verified: true,
+      message: "Data workout berhasil diperbarui dan diverifikasi dari Google Sheet.",
+      log: verifiedWorkout,
       google_sheet: result,
+      mirror_updated: mirrorUpdated,
+      mirror_warning: mirrorWarning || null,
+      marker: "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1",
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -1295,3 +1647,4 @@ export async function PATCH(req: NextRequest) {
     );
   }
 }
+
