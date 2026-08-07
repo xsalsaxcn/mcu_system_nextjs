@@ -234,6 +234,10 @@ export default function WellnessAdminMobilePage() {
   // WELLNESS_ADMIN_SUPPORT_CONTEXT_EXACT_V79R2
   const [controlSavingId, setControlSavingId] = useState<number | null>(null);
   const [controlNotice, setControlNotice] = useState("");
+  // WELLNESS_GOOGLE_FIT_PARTICIPANT_REPAIR_CENTER_V126M50A_2
+  const [googleFitRepair, setGoogleFitRepair] = useState<any>(null);
+  const [googleFitRepairLoading, setGoogleFitRepairLoading] = useState(false);
+  const [googleFitRepairAction, setGoogleFitRepairAction] = useState("");
   // WELLNESS_COMPANY_NAKES_DIRECT_LINK_V90_1
   const [nakesLinkCompany, setNakesLinkCompany] = useState<any>(null);
   const [nakesLinkCopied, setNakesLinkCopied] = useState(false);
@@ -683,6 +687,62 @@ export default function WellnessAdminMobilePage() {
       setControlNotice(result.message || "Kontrol peserta gagal disimpan.");
     }
     setControlSavingId(null);
+  }
+
+  async function openGoogleFitRepair(item: any) {
+    const participantId = Number(item?.participant_id || item?.id || 0);
+    if (!participantId) return;
+    setGoogleFitRepair({ participant: item, diagnosis: null, error: "" });
+    setGoogleFitRepairLoading(true);
+    const result = await fetch(
+      `/api/wellness/admin/google-fit-repair?participant_id=${participantId}&_=${Date.now()}`,
+      { method: "GET", credentials: "include", cache: "no-store" },
+    )
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      setGoogleFitRepair({ participant: item, diagnosis: result.diagnosis, error: "" });
+    } else {
+      setGoogleFitRepair({ participant: item, diagnosis: null, error: result.message || "Diagnosa Google Fit gagal." });
+    }
+    setGoogleFitRepairLoading(false);
+  }
+
+  async function runGoogleFitRepair(action: "force_resync" | "normalize_source") {
+    const item = googleFitRepair?.participant;
+    const participantId = Number(item?.participant_id || item?.id || 0);
+    if (!participantId || googleFitRepairAction) return;
+
+    setGoogleFitRepairAction(action);
+    const result = await fetch("/api/wellness/admin/google-fit-repair", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participant_id: participantId, action, days: 3 }),
+    })
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({ ok: false, message: error?.message || "Network error" }));
+
+    if (result.ok) {
+      setGoogleFitRepair({ participant: item, diagnosis: result.diagnosis, error: "", notice: result.message });
+      setControlNotice(result.message || "Google Fit peserta berhasil diperiksa ulang.");
+      await load();
+    } else {
+      setGoogleFitRepair((previous: any) => ({
+        ...(previous || {}),
+        error: result.message || "Perbaikan Google Fit gagal.",
+        reconnect_required: result.reconnect_required === true,
+      }));
+    }
+    setGoogleFitRepairAction("");
   }
 
   const rows = wellnessData?.rows || [];
@@ -2064,6 +2124,18 @@ export default function WellnessAdminMobilePage() {
                           </div>
                         ) : null}
 
+                        {source === "google_fit" || connected.includes("google_fit") ? (
+                          <button
+                            type="button"
+                            onClick={() => void openGoogleFitRepair(item)}
+                            disabled={saving}
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[10px] font-black text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+                          >
+                            <span>🩺</span>
+                            <span>Cek &amp; Perbaiki Google Fit</span>
+                          </button>
+                        ) : null}
+
                         {saving ? (
                           <div className="mt-2 text-[10px] font-black text-sky-700">
                             Menyimpan...
@@ -2468,6 +2540,142 @@ export default function WellnessAdminMobilePage() {
           ) : null}
         </div>
       </div>
+
+      {googleFitRepair ? (
+        <div className="fixed inset-0 z-[140] flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Tutup Google Fit Repair Center"
+            onClick={() => !googleFitRepairAction && setGoogleFitRepair(null)}
+            className="absolute inset-0 bg-slate-950/65 backdrop-blur-sm"
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Google Fit Repair Center"
+            className="relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-t-[2rem] bg-white p-5 shadow-2xl sm:max-w-xl sm:rounded-[2rem]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-amber-600">Google Fit Repair Center</div>
+                <h2 className="mt-1 text-xl font-black text-slate-950">
+                  {googleFitRepair?.participant?.name || "Peserta Wellness"}
+                </h2>
+                <div className="mt-1 text-xs font-bold text-slate-500">
+                  Kode {googleFitRepair?.participant?.code || "-"} · Participant ID {googleFitRepair?.participant?.participant_id || googleFitRepair?.participant?.id || "-"}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={Boolean(googleFitRepairAction)}
+                onClick={() => setGoogleFitRepair(null)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-sm font-black text-slate-600 disabled:opacity-40"
+              >
+                ×
+              </button>
+            </div>
+
+            {googleFitRepairLoading ? (
+              <div className="mt-5 rounded-2xl bg-sky-50 px-4 py-5 text-center text-sm font-black text-sky-800">
+                Memeriksa koneksi, token, last sync, dan snapshot Google Fit...
+              </div>
+            ) : googleFitRepair?.diagnosis ? (
+              <>
+                {(() => {
+                  const diagnosis = googleFitRepair.diagnosis;
+                  const status = clean(diagnosis.status || "UNKNOWN");
+                  const healthy = status === "HEALTHY";
+                  const bad = ["TOKEN_ERROR", "NOT_CONNECTED"].includes(status);
+                  const tone = healthy
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : bad
+                      ? "border-rose-200 bg-rose-50 text-rose-800"
+                      : "border-amber-200 bg-amber-50 text-amber-900";
+                  return (
+                    <div className="mt-5 space-y-3">
+                      <div className={`rounded-2xl border px-4 py-4 ${tone}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-black uppercase tracking-[0.12em]">Status {status}</div>
+                          <span className="rounded-full bg-white/80 px-3 py-1 text-[10px] font-black">
+                            {healthy ? "Sehat" : bad ? "Perlu reconnect" : "Perlu diperiksa"}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs font-bold leading-5">{diagnosis.message}</div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          ["Last Sync", diagnosis.integration?.last_sync_at_jakarta || "-"],
+                          ["Last Data", diagnosis.latest_data?.log_date || "-"],
+                          ["Steps Terakhir", Number(diagnosis.latest_data?.steps || 0).toLocaleString("id-ID")],
+                          ["Kalori Terakhir", `${Number(diagnosis.latest_data?.calories || 0).toLocaleString("id-ID")} kkal`],
+                          ["Sumber Aktif", (diagnosis.active_providers || []).join(", ") || "-"],
+                          ["Duplikat Tanggal", String((diagnosis.duplicate_dates || []).length)],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-2xl bg-slate-50 px-3 py-3">
+                            <div className="text-[9px] font-black uppercase text-slate-400">{label}</div>
+                            <div className="mt-1 break-words text-xs font-black text-slate-900">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {googleFitRepair?.notice ? (
+                        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
+                          {googleFitRepair.notice}
+                        </div>
+                      ) : null}
+
+                      {googleFitRepair?.error ? (
+                        <div className="rounded-2xl bg-rose-50 px-4 py-3 text-xs font-bold leading-5 text-rose-700">
+                          {googleFitRepair.error}
+                        </div>
+                      ) : null}
+
+                      {diagnosis.reconnect_required || googleFitRepair?.reconnect_required ? (
+                        <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs font-bold leading-5 text-violet-800">
+                          Admin tidak mengambil alih akun Google peserta. Minta peserta membuka Portal Peserta → Device Sync → Ganti/Konek Akun Google Fit.
+                        </div>
+                      ) : null}
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          disabled={!diagnosis.can_force_sync || Boolean(googleFitRepairAction)}
+                          onClick={() => void runGoogleFitRepair("force_resync")}
+                          className="rounded-xl bg-slate-950 px-4 py-3 text-xs font-black text-white disabled:opacity-40"
+                        >
+                          {googleFitRepairAction === "force_resync" ? "Sinkron ulang..." : "Paksa Sinkron Ulang"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(googleFitRepairAction)}
+                          onClick={() => void runGoogleFitRepair("normalize_source")}
+                          className="rounded-xl bg-amber-500 px-4 py-3 text-xs font-black text-white disabled:opacity-40"
+                        >
+                          {googleFitRepairAction === "normalize_source" ? "Menormalkan..." : "Normalisasi Sumber"}
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={Boolean(googleFitRepairAction)}
+                        onClick={() => void openGoogleFitRepair(googleFitRepair.participant)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 disabled:opacity-40"
+                      >
+                        Cek Ulang Status
+                      </button>
+                    </div>
+                  );
+                })()}
+              </>
+            ) : (
+              <div className="mt-5 rounded-2xl bg-rose-50 px-4 py-4 text-xs font-bold leading-5 text-rose-700">
+                {googleFitRepair?.error || "Diagnosa Google Fit belum tersedia."}
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
 
       {selectedParticipant ? (
         <div className="fixed inset-0 z-[120] flex items-end justify-center p-0 sm:items-center sm:p-4">
