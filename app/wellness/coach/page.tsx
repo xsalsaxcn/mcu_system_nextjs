@@ -134,11 +134,27 @@ function reminderMeta(item: any) {
   const nutritionDays = normalizedMissingDays(
     item?.compliance?.days_since_nutrition,
   );
-  const workoutDays = normalizedMissingDays(
+
+  // WELLNESS_COACH_WORKOUT_STATUS_FROM_CALORIES_V126M47_2
+  // Status ringkas Coach mengikuti kalori keluar canonical hari ini.
+  // Data device/Google Fit dengan kalori > 0 adalah workout yang sudah tercatat,
+  // walaupun tidak ada row workout manual dan days_since_workout masih stale.
+  const todayCaloriesOut = Number(
+    item?.today?.calories ??
+      item?.today?.workout_calories ??
+      item?.today?.calories_out ??
+      0,
+  );
+  const hasWorkoutCaloriesToday =
+    Number.isFinite(todayCaloriesOut) && todayCaloriesOut > 0;
+
+  const storedWorkoutDays = normalizedMissingDays(
     item?.compliance?.days_since_workout,
   );
+  const workoutDays = hasWorkoutCaloriesToday ? 0 : storedWorkoutDays;
   const nutritionMissing = nutritionDays === null || nutritionDays > 0;
-  const workoutMissing = workoutDays === null || workoutDays > 0;
+  const workoutMissing = !hasWorkoutCaloriesToday &&
+    (workoutDays === null || workoutDays > 0);
   const complete = !nutritionMissing && !workoutMissing;
   const neverInput =
     nutritionDays !== null &&
