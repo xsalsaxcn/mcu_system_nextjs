@@ -104,13 +104,14 @@ function workoutAchievementTextV126M50B1(params: {
   notes?: any;
   steps?: number | null;
   distanceKm?: number | null;
-  startTime?: string;
+  startTime?: string | null;
   durationMinutes?: number | null;
   durationSeconds?: number | null;
   totalCalories?: number | null;
   averageHr?: number | null;
   maxHr?: number | null;
-  deviceSource?: string;
+  deviceSource?: string | null;
+  calculationMode?: "manual_master" | "smartwatch";
 }) {
   const minutes = Math.max(0, Math.floor(Number(params.durationMinutes || 0)));
   const seconds = Math.max(0, Math.min(59, Math.floor(Number(params.durationSeconds || 0))));
@@ -136,6 +137,9 @@ function workoutAchievementTextV126M50B1(params: {
       : "",
     params.maxHr != null && Number(params.maxHr) > 0
       ? `HR maksimal: ${Number(params.maxHr)} BPM`
+      : "",
+    params.calculationMode
+      ? `Mode hitung: ${params.calculationMode === "smartwatch" ? "Smartwatch" : "Manual Master"}`
       : "",
     clean(params.deviceSource) ? `Sumber: ${clean(params.deviceSource)}` : "",
   ]
@@ -187,6 +191,17 @@ function workoutSmartwatchMetaV126M50B1(row: any) {
       row,
       /(?:^|[|·])\s*HR maksimal\s*:\s*([\d.,]+)/i,
     ),
+    calculation_mode: (() => {
+      const mode = workoutSmartwatchTextV126M50B1(
+        row,
+        /(?:^|[|·])\s*Mode hitung\s*:\s*([^|·]+)/i,
+      ).toLowerCase();
+      return mode.includes("smartwatch")
+        ? "smartwatch"
+        : mode.includes("manual")
+          ? "manual_master"
+          : "";
+    })(),
     device_source: workoutSmartwatchTextV126M50B1(
       row,
       /(?:^|[|·])\s*Sumber\s*:\s*([^|·]+)/i,
@@ -206,7 +221,7 @@ function workoutCleanNotesV126M50B1(row: any) {
       return !(
         /^[\d.,]+\s*(?:langkah|steps?)$/i.test(text) ||
         /^[\d.,]+\s*km$/i.test(text) ||
-        /^(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Sumber)\s*:/i.test(text)
+        /^(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Mode hitung|Sumber)\s*:/i.test(text)
       );
     })
     .join(" | ");
@@ -366,6 +381,8 @@ function sheetRowToWorkoutV126M9(
     steps,
     start_time:
       smartwatchMeta.start_time || "",
+    calculation_mode:
+      smartwatchMeta.calculation_mode || "",
     average_heart_rate:
       smartwatchMeta.average_heart_rate,
     max_heart_rate:
@@ -684,6 +701,13 @@ function buildWorkoutRow(params: {
   steps: number | null;
   notes: string | null;
   calories: number;
+  calculationMode?: "manual_master" | "smartwatch";
+  startTime?: string | null;
+  durationSeconds?: number | null;
+  totalCalories?: number | null;
+  averageHr?: number | null;
+  maxHr?: number | null;
+  deviceSource?: string | null;
   evidenceResult: any;
 }) {
   const row: any = buildBaseFormRow({
@@ -701,13 +725,31 @@ function buildWorkoutRow(params: {
 
   const driveUrl = getDriveUrl(params.evidenceResult);
   const previewUrl = getPreviewUrl(params.evidenceResult);
-  const achievements = [
-    params.notes,
-    params.steps ? `${params.steps} langkah` : "",
-    params.distanceKm ? `${params.distanceKm} km` : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
+  const achievements = workoutAchievementTextV126M50B1({
+    notes: params.notes,
+    steps: params.steps,
+    distanceKm: params.distanceKm,
+    startTime: params.startTime || null,
+    durationMinutes: params.durationMinutes,
+    durationSeconds: params.durationSeconds || 0,
+    totalCalories:
+      params.calculationMode === "smartwatch"
+        ? params.totalCalories ?? null
+        : null,
+    averageHr:
+      params.calculationMode === "smartwatch"
+        ? params.averageHr ?? null
+        : null,
+    maxHr:
+      params.calculationMode === "smartwatch"
+        ? params.maxHr ?? null
+        : null,
+    calculationMode: params.calculationMode || "manual_master",
+    deviceSource:
+      params.calculationMode === "smartwatch"
+        ? params.deviceSource || "Smartwatch"
+        : "Manual (Master Kalori)",
+  });
 
   row["Melakukan Workout/Aktifitas Ringan?"] = "Ya";
   row["Jenis Workout/Aktifitas"] = params.activityName || params.activityType;
@@ -972,11 +1014,28 @@ export async function POST(req: NextRequest) {
     }
 
     const logDate = safeLogDate(body?.log_date || body?.logDate) || todayDate();
-    const startedAt = isoFromLocal(body?.started_at) || `${logDate}T00:00:00.000+07:00`;
+    const submittedStartedAt = clean(body?.started_at || body?.startedAt);
+    const submittedStartTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(submittedStartedAt)
+      ? submittedStartedAt.slice(11, 16)
+      : "";
+    const startedAt = isoFromLocal(submittedStartedAt) || `${logDate}T00:00:00.000+07:00`;
     const activityName = clean(body?.activity_name || body?.activityName) || activityType;
     const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);
     const notes = clean(body?.notes || body?.catatan) || null;
+    const calculationMode: "manual_master" | "smartwatch" =
+      clean(body?.calculation_mode || body?.workout_calculation_mode).toLowerCase() === "smartwatch"
+        ? "smartwatch"
+        : "manual_master";
+    const durationSeconds = Math.max(
+      0,
+      Math.min(59, Math.floor(toNumberOrNull(body?.duration_seconds || body?.durationSeconds) || 0)),
+    );
+    const submittedActiveCalories = toNumberOrNull(body?.active_calories ?? body?.calories);
+    const totalCalories = toNumberOrNull(body?.total_calories ?? body?.smartwatch_total_calories);
+    const averageHr = toNumberOrNull(body?.average_heart_rate ?? body?.average_hr);
+    const maxHr = toNumberOrNull(body?.max_heart_rate ?? body?.max_hr);
+    const deviceSource = clean(body?.device_source || body?.workout_source || "Smartwatch");
     const companyName =
       getCompanyName(participant, body);
 
@@ -1013,19 +1072,39 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const weightKg =
-      await getLatestWeightKg(
-        supabase,
-        participant,
-      );
-    const activityRef = await findActivityReference(supabase, activityType, activityName);
-    const calculated = calculateCalories({
-      activityType,
-      durationMinutes,
-      distanceKm,
-      weightKg,
-      activityRef,
-    });
+    let weightKg: number | null = null;
+    let activityRef: any = null;
+    let calculated: {
+      calories: number;
+      method: string;
+      met: number | null;
+      calories_per_km: number | null;
+    };
+
+    if (calculationMode === "smartwatch") {
+      if (submittedActiveCalories == null || submittedActiveCalories < 0) {
+        return NextResponse.json(
+          { ok: false, message: "Kalori aktif dari smartwatch wajib berupa angka 0 atau lebih." },
+          { status: 400 },
+        );
+      }
+      calculated = {
+        calories: Number(submittedActiveCalories),
+        method: "smartwatch_input",
+        met: null,
+        calories_per_km: null,
+      };
+    } else {
+      weightKg = await getLatestWeightKg(supabase, participant);
+      activityRef = await findActivityReference(supabase, activityType, activityName);
+      calculated = calculateCalories({
+        activityType,
+        durationMinutes,
+        distanceKm,
+        weightKg,
+        activityRef,
+      });
+    }
 
     const evidenceResult = await uploadEvidenceToDrive({
       file: evidence,
@@ -1049,6 +1128,13 @@ export async function POST(req: NextRequest) {
       steps,
       notes,
       calories: calculated.calories,
+      calculationMode,
+      startTime: submittedStartTime,
+      durationSeconds,
+      totalCalories,
+      averageHr,
+      maxHr,
+      deviceSource,
       evidenceResult,
     });
 
@@ -1077,6 +1163,19 @@ export async function POST(req: NextRequest) {
       raw_payload: {
         ...body,
         notes,
+        calculation_mode: calculationMode,
+        duration_seconds: durationSeconds,
+        active_calories: calculated.calories,
+        smartwatch_total_calories:
+          calculationMode === "smartwatch" ? totalCalories : null,
+        average_heart_rate:
+          calculationMode === "smartwatch" ? averageHr : null,
+        max_heart_rate:
+          calculationMode === "smartwatch" ? maxHr : null,
+        device_source:
+          calculationMode === "smartwatch"
+            ? deviceSource || "Smartwatch"
+            : "Manual (Master Kalori)",
         participant_weight_kg_used: weightKg,
         activity_reference_id: activityRef?.id || null,
         activity_reference_name: activityRef?.activity_name || null,
@@ -1108,7 +1207,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      message: `Workout berhasil disimpan ke Google Sheet. Kalori otomatis: ${calculated.calories} kkal. Point harian: +${workoutPoint.points || 0}.`,
+      message:
+        calculationMode === "smartwatch"
+          ? `Workout smartwatch berhasil disimpan. Kalori aktif: ${calculated.calories} kkal. Point harian: +${workoutPoint.points || 0}.`
+          : `Workout berhasil disimpan ke Google Sheet. Kalori otomatis dari master: ${calculated.calories} kkal. Point harian: +${workoutPoint.points || 0}.`,
       log: data,
       points_total_delta: workoutPoint.delta || 0,
       workout_point: workoutPoint,
@@ -1345,6 +1447,7 @@ export async function DELETE(req: NextRequest) {
 
 // WELLNESS_HISTORY_EDIT_FOLLOWS_DELETE_V126M6
 // WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1
+// WELLNESS_WORKOUT_CALCULATION_MODE_V126M50B_3
 export async function PATCH(req: NextRequest) {
   const { supabase, participant } = await getParticipant(req);
 
@@ -1374,8 +1477,13 @@ export async function PATCH(req: NextRequest) {
     const distanceKm = toNumberOrNull(body?.distance_km || body?.distanceKm);
     const steps = toNumberOrNull(body?.steps);
     const notes = clean(body?.notes || body?.catatan);
-    // Active calories remain the canonical calories used by workout target/points.
-    const calories = toNumberOrNull(body?.active_calories ?? body?.calories);
+    const calculationMode: "manual_master" | "smartwatch" =
+      clean(body?.calculation_mode || body?.workout_calculation_mode).toLowerCase() === "smartwatch"
+        ? "smartwatch"
+        : "manual_master";
+    // Active calories remain the canonical calories used by workout target/points/graph.
+    const submittedCalories = toNumberOrNull(body?.active_calories ?? body?.calories);
+    let calories = submittedCalories;
     // Smartwatch total calories are informational only and never replace active calories.
     const totalCalories = toNumberOrNull(body?.total_calories ?? body?.smartwatch_total_calories);
     const averageHr = toNumberOrNull(body?.average_heart_rate ?? body?.average_hr);
@@ -1403,9 +1511,34 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    if (calories == null || calories < 0) {
+    let calculationAudit: any = null;
+    if (calculationMode === "manual_master") {
+      const weightKg = await getLatestWeightKg(supabase, participant);
+      const activityRef = await findActivityReference(
+        supabase,
+        activityType,
+        activityName,
+      );
+      const calculated = calculateCalories({
+        activityType,
+        durationMinutes: Number(durationMinutes),
+        distanceKm,
+        weightKg,
+        activityRef,
+      });
+      calories = calculated.calories;
+      calculationAudit = {
+        participant_weight_kg_used: weightKg,
+        activity_reference_id: activityRef?.id || null,
+        activity_reference_name: activityRef?.activity_name || null,
+        calorie_method: calculated.method,
+        met_used: calculated.met,
+        calories_per_km_used: calculated.calories_per_km,
+        calorie_match_status: activityRef?.match_status || "not_found",
+      };
+    } else if (calories == null || calories < 0) {
       return NextResponse.json(
-        { ok: false, message: "Kalori aktif wajib berupa angka 0 atau lebih." },
+        { ok: false, message: "Kalori aktif dari smartwatch wajib berupa angka 0 atau lebih." },
         { status: 400 },
       );
     }
@@ -1424,10 +1557,14 @@ export async function PATCH(req: NextRequest) {
       startTime,
       durationMinutes: durationMinutesWhole,
       durationSeconds,
-      totalCalories,
-      averageHr,
-      maxHr,
-      deviceSource,
+      totalCalories: calculationMode === "smartwatch" ? totalCalories : null,
+      averageHr: calculationMode === "smartwatch" ? averageHr : null,
+      maxHr: calculationMode === "smartwatch" ? maxHr : null,
+      calculationMode,
+      deviceSource:
+        calculationMode === "smartwatch"
+          ? deviceSource || "Smartwatch"
+          : "Manual (Master Kalori)",
     });
 
     const result = await postToWellnessWebhook({
@@ -1527,9 +1664,9 @@ export async function PATCH(req: NextRequest) {
     if (steps != null && Math.abs(Number(verifiedWorkout?.steps || 0) - Number(steps)) > 0.01) verificationErrors.push("langkah");
     if (distanceKm != null && Math.abs(Number(verifiedWorkout?.distance_km || 0) - Number(distanceKm)) > 0.01) verificationErrors.push("jarak");
     if (startTime && clean(verifiedWorkout?.start_time) !== startTime) verificationErrors.push("waktu mulai");
-    if (totalCalories != null && Math.abs(Number(verifiedWorkout?.smartwatch_total_calories || 0) - Number(totalCalories)) > 0.01) verificationErrors.push("kalori total");
-    if (averageHr != null && Math.abs(Number(verifiedWorkout?.average_heart_rate || 0) - Number(averageHr)) > 0.01) verificationErrors.push("HR rata-rata");
-    if (maxHr != null && Math.abs(Number(verifiedWorkout?.max_heart_rate || 0) - Number(maxHr)) > 0.01) verificationErrors.push("HR maksimal");
+    if (calculationMode === "smartwatch" && totalCalories != null && Math.abs(Number(verifiedWorkout?.smartwatch_total_calories || 0) - Number(totalCalories)) > 0.01) verificationErrors.push("kalori total");
+    if (calculationMode === "smartwatch" && averageHr != null && Math.abs(Number(verifiedWorkout?.average_heart_rate || 0) - Number(averageHr)) > 0.01) verificationErrors.push("HR rata-rata");
+    if (calculationMode === "smartwatch" && maxHr != null && Math.abs(Number(verifiedWorkout?.max_heart_rate || 0) - Number(maxHr)) > 0.01) verificationErrors.push("HR maksimal");
 
     if (verificationErrors.length > 0) {
       return NextResponse.json(
@@ -1598,13 +1735,21 @@ export async function PATCH(req: NextRequest) {
               ...previousRaw,
               notes,
               submission_id: submissionId || previousRaw?.submission_id || null,
+              calculation_mode: calculationMode,
               start_time: startTime || null,
               duration_seconds: durationSeconds,
               active_calories: calories,
-              smartwatch_total_calories: totalCalories,
-              average_heart_rate: averageHr,
-              max_heart_rate: maxHr,
-              device_source: deviceSource || "Manual",
+              smartwatch_total_calories:
+                calculationMode === "smartwatch" ? totalCalories : null,
+              average_heart_rate:
+                calculationMode === "smartwatch" ? averageHr : null,
+              max_heart_rate:
+                calculationMode === "smartwatch" ? maxHr : null,
+              device_source:
+                calculationMode === "smartwatch"
+                  ? deviceSource || "Smartwatch"
+                  : "Manual (Master Kalori)",
+              ...(calculationAudit || {}),
               google_sheet: {
                 ...(previousRaw?.google_sheet || {}),
                 rowNumber: verifiedSheetRowNumber || null,
@@ -1638,7 +1783,10 @@ export async function PATCH(req: NextRequest) {
       google_sheet: result,
       mirror_updated: mirrorUpdated,
       mirror_warning: mirrorWarning || null,
-      marker: "WELLNESS_SMARTWATCH_WORKOUT_EDIT_PERSISTENCE_V126M50B_1",
+      calculation_mode: calculationMode,
+      active_calories: calories,
+      calculation_audit: calculationAudit,
+      marker: "WELLNESS_WORKOUT_CALCULATION_MODE_V126M50B_3",
     });
   } catch (error: any) {
     return NextResponse.json(

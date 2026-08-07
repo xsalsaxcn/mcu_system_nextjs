@@ -1340,9 +1340,16 @@ export default function WellnessParticipantPortalPage() {
     started_at: "",
     activity_type: "Walking",
     activity_name: "",
+    calculation_mode: "manual_master",
     duration_minutes: "",
+    duration_seconds: "",
     distance_km: "",
     steps: "",
+    active_calories: "",
+    total_calories: "",
+    average_heart_rate: "",
+    max_heart_rate: "",
+    device_source: "Smartwatch",
     notes: "",
   });
   const [workoutEvidence, setWorkoutEvidence] = useState<File | null>(null);
@@ -2233,6 +2240,14 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       return;
     }
 
+    if (
+      workoutForm.calculation_mode === "smartwatch" &&
+      !clean(workoutForm.active_calories)
+    ) {
+      setMessage("Kalori aktif dari smartwatch wajib diisi.");
+      return;
+    }
+
     workoutSubmitInFlightV126L.current = true;
     openSavingOverlayV126M46(
       "workout",
@@ -2245,11 +2260,18 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
       workoutSubmitInFlightV126L.current = false;
     }, 30000);
 
+    const smartwatchModeV126M50B3 =
+      workoutForm.calculation_mode === "smartwatch";
+
     setMessage(
-      "Menyimpan workout manual ke Google Sheet dan menghitung kalori otomatis...",
+      smartwatchModeV126M50B3
+        ? "Menyimpan workout dari smartwatch ke Google Sheet..."
+        : "Menyimpan workout dan menghitung kalori otomatis dari Master Kalori Olahraga...",
     );
     updateSavingOverlayV126M46(
-      "Menyimpan workout dan menghitung kalori aktivitas...",
+      smartwatchModeV126M50B3
+        ? "Menyimpan angka workout dari smartwatch..."
+        : "Menghitung kalori aktivitas dari Master Kalori Olahraga...",
     );
 
     const submissionId =
@@ -2261,9 +2283,18 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
     body.append("started_at", workoutForm.started_at);
     body.append("activity_type", workoutForm.activity_type);
     body.append("activity_name", workoutForm.activity_name);
+    body.append("calculation_mode", workoutForm.calculation_mode);
     body.append("duration_minutes", workoutForm.duration_minutes);
+    body.append("duration_seconds", workoutForm.duration_seconds);
     body.append("distance_km", workoutForm.distance_km);
     body.append("steps", workoutForm.steps);
+    if (smartwatchModeV126M50B3) {
+      body.append("active_calories", workoutForm.active_calories);
+      body.append("total_calories", workoutForm.total_calories);
+      body.append("average_heart_rate", workoutForm.average_heart_rate);
+      body.append("max_heart_rate", workoutForm.max_heart_rate);
+      body.append("device_source", workoutForm.device_source);
+    }
     body.append("notes", workoutForm.notes);
     if (workoutEvidence) body.append("activity_evidence", workoutEvidence);
 
@@ -2284,8 +2315,14 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
         started_at: "",
         activity_name: "",
         duration_minutes: "",
+        duration_seconds: "",
         distance_km: "",
         steps: "",
+        active_calories: "",
+        total_calories: "",
+        average_heart_rate: "",
+        max_heart_rate: "",
+        device_source: previous.calculation_mode === "smartwatch" ? "Smartwatch" : previous.device_source,
         notes: "",
       }));
       setWorkoutEvidence(null);
@@ -6165,13 +6202,54 @@ function WorkoutTab({
   setValue: (key: string, value: string) => void;
   saveWorkout: () => void;
 }) {
+  const smartwatchModeV126M50B3 = form.calculation_mode === "smartwatch";
+
   return (
     <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-black">Input Workout Manual</h2>
       <p className="mt-1 text-sm font-bold text-slate-500">
-        Peserta cukup isi jenis aktivitas dan durasi. Kalori dihitung otomatis
-        dari Master KaloriOlahraga / MET.
+        Pilih cara hitung. Mode Manual memakai Master Kalori Olahraga / MET;
+        mode Smartwatch memakai angka yang tertera di perangkat.
       </p>
+
+      {/* WELLNESS_WORKOUT_CALCULATION_MODE_V126M50B_3 */}
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <label className={`cursor-pointer rounded-2xl border p-4 ${!smartwatchModeV126M50B3 ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}>
+          <div className="flex items-start gap-3">
+            <input
+              type="radio"
+              name="workout-calculation-mode"
+              checked={!smartwatchModeV126M50B3}
+              onChange={() => setValue("calculation_mode", "manual_master")}
+              className="mt-1 h-4 w-4 accent-emerald-600"
+            />
+            <div>
+              <div className="text-sm font-black text-slate-900">Hitung Manual</div>
+              <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                Sistem menghitung Kalori Aktif otomatis dari Master Kalori Olahraga / MET berdasarkan aktivitas, durasi, jarak, dan data peserta.
+              </div>
+            </div>
+          </div>
+        </label>
+
+        <label className={`cursor-pointer rounded-2xl border p-4 ${smartwatchModeV126M50B3 ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white"}`}>
+          <div className="flex items-start gap-3">
+            <input
+              type="radio"
+              name="workout-calculation-mode"
+              checked={smartwatchModeV126M50B3}
+              onChange={() => setValue("calculation_mode", "smartwatch")}
+              className="mt-1 h-4 w-4 accent-sky-600"
+            />
+            <div>
+              <div className="text-sm font-black text-slate-900">Hitung dari Smartwatch</div>
+              <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                Isi angka sesuai ringkasan Mi Fitness, Garmin, Samsung Health, Apple Watch, atau perangkat lain.
+              </div>
+            </div>
+          </div>
+        </label>
+      </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Input label="Tanggal">
@@ -6211,13 +6289,14 @@ function WorkoutTab({
             value={form.activity_name}
             onChange={(e) => setValue("activity_name", e.target.value)}
             className={fieldClass}
-            placeholder="Contoh: Jalan pagi, gym upper body"
+            placeholder="Contoh: Jalan pagi, Lari outdoor, gym upper body"
           />
         </Input>
 
-        <Input label="Durasi">
+        <Input label="Durasi — menit">
           <input
             type="number"
+            min="0"
             value={form.duration_minutes}
             onChange={(e) => setValue("duration_minutes", e.target.value)}
             className={fieldClass}
@@ -6225,9 +6304,25 @@ function WorkoutTab({
           />
         </Input>
 
+        {smartwatchModeV126M50B3 ? (
+          <Input label="Durasi — detik">
+            <input
+              type="number"
+              min="0"
+              max="59"
+              value={form.duration_seconds}
+              onChange={(e) => setValue("duration_seconds", e.target.value)}
+              className={fieldClass}
+              placeholder="0-59"
+            />
+          </Input>
+        ) : null}
+
         <Input label="Jarak">
           <input
             type="number"
+            min="0"
+            step="0.01"
             value={form.distance_km}
             onChange={(e) => setValue("distance_km", e.target.value)}
             className={fieldClass}
@@ -6235,15 +6330,78 @@ function WorkoutTab({
           />
         </Input>
 
-        <Input label="Steps">
+        <Input label="Langkah">
           <input
             type="number"
+            min="0"
+            step="1"
             value={form.steps}
             onChange={(e) => setValue("steps", e.target.value)}
             className={fieldClass}
             placeholder="opsional"
           />
         </Input>
+
+        {smartwatchModeV126M50B3 ? (
+          <>
+            <Input label="Kalori aktif (kkal) — dipakai target & grafik">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.active_calories}
+                onChange={(e) => setValue("active_calories", e.target.value)}
+                className={`${fieldClass} border-emerald-200 bg-emerald-50/40`}
+                placeholder="Contoh: 152"
+              />
+            </Input>
+
+            <Input label="Kalori total (kkal) — informasi">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.total_calories}
+                onChange={(e) => setValue("total_calories", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: 187"
+              />
+            </Input>
+
+            <Input label="HR rata-rata (BPM)">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.average_heart_rate}
+                onChange={(e) => setValue("average_heart_rate", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: 148"
+              />
+            </Input>
+
+            <Input label="HR maksimal (BPM)">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.max_heart_rate}
+                onChange={(e) => setValue("max_heart_rate", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: 169"
+              />
+            </Input>
+
+            <Input label="Sumber / device">
+              <input
+                value={form.device_source}
+                onChange={(e) => setValue("device_source", e.target.value)}
+                className={fieldClass}
+                placeholder="Contoh: Mi Fitness, Garmin, Samsung Health"
+              />
+            </Input>
+          </>
+        ) : null}
 
         <Input label="Bukti Aktivitas, opsional">
           <input
@@ -6269,9 +6427,12 @@ function WorkoutTab({
         </Input>
       </div>
 
-      <div className="mt-5 rounded-2xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
-        Field kalori disembunyikan dari peserta. Kalori manual workout akan
-        dihitung otomatis oleh sistem.
+      <div className={`mt-5 rounded-2xl p-4 text-xs font-bold leading-5 ${smartwatchModeV126M50B3 ? "bg-sky-50 text-sky-900" : "bg-emerald-50 text-emerald-900"}`}>
+        {smartwatchModeV126M50B3 ? (
+          <>Kalori Aktif yang Anda isi tetap menjadi nilai workout untuk target, poin, total workout, dan grafik. Kalori Total serta HR disimpan sebagai informasi smartwatch.</>
+        ) : (
+          <>Kalori Aktif tidak perlu diisi. Sistem memakai Master Kalori Olahraga / MET yang sudah ada. Hasilnya tetap masuk ke target, poin, total workout, dan grafik seperti fungsi sebelumnya.</>
+        )}
       </div>
 
       <button
@@ -7650,6 +7811,7 @@ function HistoryTab({
     portion_fraction: "",
     existing_photo_url: "",
     activity_type: "",
+    calculation_mode: "manual_master",
     start_time: "",
     duration_minutes: "",
     duration_seconds: "",
@@ -7767,15 +7929,23 @@ function HistoryTab({
   }
 
   function workoutEditNotesV126M50B1(item: any, raw: any) {
+    const itemNotes = clean(item?.notes);
+    if (itemNotes) return itemNotes;
+
     const direct = clean(raw?.notes || raw?.catatan);
-    if (direct) return direct;
+    if (
+      direct &&
+      !/(?:^|[|·])\s*(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Mode hitung|Sumber)\s*:/i.test(direct)
+    ) {
+      return direct;
+    }
 
     const achievement = clean(
-      item?.notes ||
-        item?.description ||
+      item?.description ||
         raw?.[
           "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
-        ],
+        ] ||
+        direct,
     );
 
     return achievement
@@ -7786,7 +7956,7 @@ function HistoryTab({
         return !(
           /^[\d.,]+\s*(?:langkah|steps?)$/i.test(text) ||
           /^[\d.,]+\s*km$/i.test(text) ||
-          /^(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Sumber)\s*:/i.test(text)
+          /^(?:Waktu mulai|Durasi|Kalori total|HR rata-rata|HR maksimal|Mode hitung|Sumber)\s*:/i.test(text)
         );
       })
       .join(" | ");
@@ -7847,6 +8017,35 @@ function HistoryTab({
           item?.activity_type ||
           raw?.["Jenis Workout/Aktifitas"],
       ),
+      calculation_mode: (() => {
+        const savedMode = clean(
+          item?.calculation_mode ||
+            raw?.calculation_mode ||
+            raw?.workout_calculation_mode,
+        ).toLowerCase();
+        if (savedMode === "smartwatch") return "smartwatch";
+        if (savedMode === "manual_master") return "manual_master";
+
+        const source = clean(
+          item?.device_source ||
+            raw?.device_source ||
+            workoutEditTextFromTextV126M50B1(
+              item?.notes || item?.description || raw?.["Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"],
+              /(?:^|[|·])\s*Sumber\s*:\s*([^|·]+)/i,
+            ),
+        ).toLowerCase();
+        const hasSmartwatchDetail = Boolean(
+          item?.smartwatch_total_calories ||
+            raw?.smartwatch_total_calories ||
+            item?.average_heart_rate ||
+            raw?.average_heart_rate ||
+            item?.max_heart_rate ||
+            raw?.max_heart_rate,
+        );
+        return hasSmartwatchDetail || (source && !source.includes("manual"))
+          ? "smartwatch"
+          : "manual_master";
+      })(),
       start_time: clean(
         item?.start_time ||
           raw?.start_time ||
@@ -8122,6 +8321,8 @@ function HistoryTab({
             editFormV126M6.activity_type,
           activity_name:
             editFormV126M6.activity_type,
+          calculation_mode:
+            editFormV126M6.calculation_mode,
           duration_minutes:
             editFormV126M6.duration_minutes,
           duration_seconds:
@@ -8773,9 +8974,63 @@ function HistoryTab({
               />
             ) : (
               <>
-                <div className="mt-5 rounded-3xl border border-sky-100 bg-sky-50 p-4 text-xs font-bold leading-5 text-sky-900">
-                  Isi seperti ringkasan smartwatch. <b>Kalori aktif</b> dipakai untuk target workout; <b>kalori total</b> hanya informasi dan tidak menggantikan kalori aktif.
+                <div className="rounded-2xl border border-sky-100 bg-sky-50 p-4 text-xs font-bold leading-5 text-sky-900">
+                  Pilih sumber perhitungan. <b>Hitung Manual</b> memakai Master Kalori Olahraga / MET. <b>Hitung dari Smartwatch</b> memakai angka yang Anda masukkan dari perangkat.
                 </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className={`cursor-pointer rounded-2xl border p-4 ${editFormV126M6.calculation_mode !== "smartwatch" ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="edit-workout-calculation-mode"
+                        checked={editFormV126M6.calculation_mode !== "smartwatch"}
+                        onChange={() =>
+                          setEditFormV126M6((previous) => ({
+                            ...previous,
+                            calculation_mode: "manual_master",
+                          }))
+                        }
+                        className="mt-1 h-4 w-4 accent-emerald-600"
+                      />
+                      <div>
+                        <div className="text-sm font-black text-slate-900">Hitung Manual</div>
+                        <div className="mt-1 text-xs font-bold leading-5 text-slate-500">Kalori aktif dihitung ulang otomatis dari master saat disimpan.</div>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className={`cursor-pointer rounded-2xl border p-4 ${editFormV126M6.calculation_mode === "smartwatch" ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white"}`}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="radio"
+                        name="edit-workout-calculation-mode"
+                        checked={editFormV126M6.calculation_mode === "smartwatch"}
+                        onChange={() =>
+                          setEditFormV126M6((previous) => ({
+                            ...previous,
+                            calculation_mode: "smartwatch",
+                            device_source:
+                              clean(previous.device_source).toLowerCase().includes("manual")
+                                ? "Smartwatch"
+                                : previous.device_source || "Smartwatch",
+                          }))
+                        }
+                        className="mt-1 h-4 w-4 accent-sky-600"
+                      />
+                      <div>
+                        <div className="text-sm font-black text-slate-900">Hitung dari Smartwatch</div>
+                        <div className="mt-1 text-xs font-bold leading-5 text-slate-500">Kalori, HR, langkah, jarak, dan device dapat diisi sesuai ringkasan perangkat.</div>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {editFormV126M6.calculation_mode !== "smartwatch" ? (
+                  <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
+                    Kalori aktif akan dihitung ulang oleh sistem dari Master Kalori Olahraga / MET. Nilai hasil hitung tetap dipakai oleh target, poin, total workout, dan grafik.
+                  </div>
+                ) : null}
 
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
                   <label className="block text-xs font-black text-slate-600">
@@ -8890,88 +9145,93 @@ function HistoryTab({
                     />
                   </label>
 
-                  <label className="block text-xs font-black text-emerald-700">
-                    Kalori aktif (kkal) — dipakai target
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={editFormV126M6.calories}
-                      onChange={(event) =>
-                        setEditFormV126M6((previous) => ({
-                          ...previous,
-                          calories: event.target.value,
-                        }))
-                      }
-                      className={`${fieldClass} mt-2 w-full border-emerald-200 bg-emerald-50/40`}
-                    />
-                  </label>
+                  {editFormV126M6.calculation_mode === "smartwatch" ? (
+                    <>
+                      <label className="block text-xs font-black text-emerald-700">
+                        Kalori aktif (kkal) — dipakai target
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editFormV126M6.calories}
+                          onChange={(event) =>
+                            setEditFormV126M6((previous) => ({
+                              ...previous,
+                              calories: event.target.value,
+                            }))
+                          }
+                          className={`${fieldClass} mt-2 w-full border-emerald-200 bg-emerald-50/40`}
+                        />
+                      </label>
 
-                  <label className="block text-xs font-black text-slate-600">
-                    Kalori total (kkal) — informasi
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={editFormV126M6.total_calories}
-                      onChange={(event) =>
-                        setEditFormV126M6((previous) => ({
-                          ...previous,
-                          total_calories: event.target.value,
-                        }))
-                      }
-                      className={`${fieldClass} mt-2 w-full`}
-                    />
-                  </label>
+                      <label className="block text-xs font-black text-slate-600">
+                        Kalori total (kkal) — informasi
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editFormV126M6.total_calories}
+                          onChange={(event) =>
+                            setEditFormV126M6((previous) => ({
+                              ...previous,
+                              total_calories: event.target.value,
+                            }))
+                          }
+                          className={`${fieldClass} mt-2 w-full`}
+                        />
+                      </label>
 
-                  <label className="block text-xs font-black text-slate-600">
-                    HR rata-rata (BPM)
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={editFormV126M6.average_heart_rate}
-                      onChange={(event) =>
-                        setEditFormV126M6((previous) => ({
-                          ...previous,
-                          average_heart_rate: event.target.value,
-                        }))
-                      }
-                      className={`${fieldClass} mt-2 w-full`}
-                    />
-                  </label>
+                      <label className="block text-xs font-black text-slate-600">
+                        HR rata-rata (BPM)
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editFormV126M6.average_heart_rate}
+                          onChange={(event) =>
+                            setEditFormV126M6((previous) => ({
+                              ...previous,
+                              average_heart_rate: event.target.value,
+                            }))
+                          }
+                          className={`${fieldClass} mt-2 w-full`}
+                        />
+                      </label>
 
-                  <label className="block text-xs font-black text-slate-600">
-                    HR maksimal (BPM)
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={editFormV126M6.max_heart_rate}
-                      onChange={(event) =>
-                        setEditFormV126M6((previous) => ({
-                          ...previous,
-                          max_heart_rate: event.target.value,
-                        }))
-                      }
-                      className={`${fieldClass} mt-2 w-full`}
-                    />
-                  </label>
+                      <label className="block text-xs font-black text-slate-600">
+                        HR maksimal (BPM)
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editFormV126M6.max_heart_rate}
+                          onChange={(event) =>
+                            setEditFormV126M6((previous) => ({
+                              ...previous,
+                              max_heart_rate: event.target.value,
+                            }))
+                          }
+                          className={`${fieldClass} mt-2 w-full`}
+                        />
+                      </label>
 
-                  <label className="block text-xs font-black text-slate-600 md:col-span-2">
-                    Sumber / device
-                    <input
-                      value={editFormV126M6.device_source}
-                      onChange={(event) =>
-                        setEditFormV126M6((previous) => ({
-                          ...previous,
-                          device_source: event.target.value,
-                        }))
-                      }
-                      placeholder="Contoh: Mi Fitness, Garmin, Samsung Health, Manual"
-                      className={`${fieldClass} mt-2 w-full`}
-                    />
-                  </label>
+                      <label className="block text-xs font-black text-slate-600 md:col-span-2">
+                        Sumber / device
+                        <input
+                          value={editFormV126M6.device_source}
+                          onChange={(event) =>
+                            setEditFormV126M6((previous) => ({
+                              ...previous,
+                              device_source: event.target.value,
+                            }))
+                          }
+                          placeholder="Contoh: Mi Fitness, Garmin, Samsung Health, Manual"
+                          className={`${fieldClass} mt-2 w-full`}
+                        />
+                      </label>
+
+                    </>
+                  ) : null}
 
                   <label className="block text-xs font-black text-slate-600 md:col-span-2">
                     Catatan
