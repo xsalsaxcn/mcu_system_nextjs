@@ -3,6 +3,7 @@
 // WELLNESS_ADMIN_SUPPORT_UNREAD_NORMALIZED_V79Q
 // WELLNESS_ADMIN_PARTICIPANT_DETAIL_UI_V89
 // WELLNESS_ADMIN_PARTICIPANT_FILTER_PAGINATION_SORT_V126E
+// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_LINK_V126M53_1
 
 import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
@@ -1363,6 +1364,15 @@ export default function WellnessAdminMobilePage() {
                 Read-only
               </span>
             </a>
+            <a
+              href="/wellness/admin/streak-diagnostic"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-teal-50 px-3 py-2.5 text-xs font-black text-teal-800 ring-1 ring-teal-100 transition hover:bg-teal-100"
+            >
+              Diagnostik Streak
+              <span className="rounded-full bg-teal-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                Read-only
+              </span>
+            </a>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
@@ -1553,6 +1563,26 @@ export default function WellnessAdminMobilePage() {
                   onClick={() => openView("ranking")}
                 />
               </section>
+
+              <a
+                href="/wellness/admin/streak-diagnostic"
+                className="flex items-center justify-between gap-4 rounded-[1.5rem] border border-teal-100 bg-gradient-to-r from-teal-50 to-cyan-50 p-4 shadow-sm transition hover:border-teal-200 hover:shadow-md"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-teal-600 text-xl text-white shadow-sm">
+                    🔎
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-black text-teal-950">Diagnostik Streak</div>
+                    <div className="mt-1 text-[10px] font-bold leading-4 text-teal-800">
+                      Cek seluruh peserta: nutrisi, kalori workout, target efektif, langkah, dan alasan PASS/FAIL.
+                    </div>
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[9px] font-black uppercase tracking-wide text-teal-700 ring-1 ring-teal-100">
+                  Read-only
+                </span>
+              </a>
 
               <section className="rounded-[1.65rem] border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
