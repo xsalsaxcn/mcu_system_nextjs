@@ -1677,6 +1677,15 @@ export default function WellnessCoachPortalPage() {
                             window.location.assign("/wellness/coach/monitoring?view=weekly")
                           }
                         />
+                        {/* WELLNESS_COACH_NAKES_MONITORING_BUTTON_V126M57_1 */}
+                        <CoachQuickAction
+                          icon="clipboard"
+                          label="Monitoring NAKES"
+                          tone="violet"
+                          onClick={() =>
+                            window.location.assign("/wellness/coach/monitoring-nakes")
+                          }
+                        />
                         <CoachQuickAction
                           icon="bell"
                           label="Kirim Pengingat"
