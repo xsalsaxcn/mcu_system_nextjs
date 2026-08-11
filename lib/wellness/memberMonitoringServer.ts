@@ -1,11 +1,11 @@
-// WELLNESS_MEMBER_MONITORING_PARITY_V126M55_2
+// WELLNESS_MEMBER_MONITORING_SCOPE_PARITY_V126M55_4
 // Read-only monitoring loader. Uses the same canonical helpers as Participant/Coach.
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
 import { buildEffectiveTargetTimeline, targetTimelineSummary } from "@/lib/wellness/effectiveDatedTargets";
 import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
-import { canonicalParticipantGroupName, participantScopeIds, type CoachGroupUnitMap } from "@/lib/wellness/coachGroupAccess";
+import { canonicalParticipantGroupName, matchingCoachAssignment, participantScopeIds, type CoachGroupUnitMap } from "@/lib/wellness/coachGroupAccess";
 
 function clean(v:any){return String(v??"").trim()}
 function num(v:any){const n=Number(v);return Number.isFinite(n)?n:0}
@@ -61,7 +61,7 @@ function status(day:any){
   return{key:"follow_up",label:"Perlu Follow Up",reason:`Workout ${Math.round(w)}/${Math.round(t)} kkal belum mencapai target.`};
 }
 
-export async function loadWellnessMemberMonitoring(opts:{supabase:any;participants:any[];groupUnitMap?:CoachGroupUnitMap;companyNameById?:Map<number,string>}){
+export async function loadWellnessMemberMonitoring(opts:{supabase:any;participants:any[];groupUnitMap?:CoachGroupUnitMap;companyNameById?:Map<number,string>;coachAssignments?:any[]}){
   const participants=(opts.participants||[]).filter(x=>pid(x)>0).sort((a,b)=>pname(a).localeCompare(pname(b),"id"));
   const ids=participants.map(pid); const dates=Array.from({length:7},(_,i)=>jakartaDay(i-6)); const today=dates.at(-1)||jakartaDay();
   if(!ids.length)return{generated_at:new Date().toISOString(),today,dates,summary:{total_participants:0,on_track:0,follow_up:0,not_updated:0,streak_success_today:0},participants:[],source_contract:"participant_coach_canonical"};
@@ -86,11 +86,14 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
     const days=dates.map(date=>{const d:any=byDate.get(date)||{date,nutrition_count:0,nutrition_calories:0,workout_calories:0,steps:0,workout_target_calories:num(timeline.current.workout)||300,target_effective_from:null,success:false};return{...d,status:status(d)}});
     const avg=(field:string)=>Math.round(days.reduce((sum:number,d:any)=>sum+num(d?.[field]),0)/7);
     const company=companyId(participant); const control=controlMap.get(id)||participant?.wellness_control||{};
+    const accessGroupIds=opts.groupUnitMap?participantScopeIds(participant,opts.groupUnitMap):[];
+    const assigned=opts.groupUnitMap&&opts.coachAssignments?matchingCoachAssignment(participant,opts.coachAssignments,opts.groupUnitMap):null;
     return{
       id,name:pname(participant),code:pcode(participant),company_id:company||null,
       company_name:opts.companyNameById?.get(company)||clean(participant?.company_name||participant?.company||participant?.nama_perusahaan)||"-",
       group_name:opts.groupUnitMap?canonicalParticipantGroupName(participant,opts.groupUnitMap):clean(participant?.group_unit_name||participant?.group_name||participant?.kelompok_name)||"-",
-      group_scope_ids:opts.groupUnitMap?participantScopeIds(participant,opts.groupUnitMap):[],
+      group_scope_ids:accessGroupIds,access_group_ids:accessGroupIds,
+      assigned_group_name:clean(assigned?.group_name||""),assigned_group_unit_id:clean(assigned?.wellness_group_unit_id||"")||null,
       fitness_source:clean(control?.fitness_source||"none").toLowerCase().replace(/-/g,"_"),
       streak:{current_streak:num(streak.current_streak),longest_streak:num(streak.longest_streak),success_dates:streak.success_dates||[]},
       target:{nutrition:num(timeline.current.nutrition),workout:num(timeline.current.workout)||300,steps:num(timeline.current.steps),timeline:targetTimelineSummary(timeline)},
