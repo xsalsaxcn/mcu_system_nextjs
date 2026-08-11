@@ -1,11 +1,14 @@
-// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_V126M53_1
-// Read-only Admin diagnostic for the canonical Wellness streak engine.
+// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_V126M54_1
+// Read-only Admin diagnostic. Canonical streak stays untouched, while the
+// participant Portal workout display is mirrored from DB + durable Google Sheet.
 // No writes, no schema changes, no Google Fit/Health Connect sync changes.
 
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
+import { fetchWellnessGoogleSheetRows } from "@/lib/wellness/googleSheetResponses";
+import { safeLogDate } from "@/lib/wellness/googleSheetWebhook";
 import {
   activityFitnessProvider,
   filterActivityRowsByFitnessSource,
@@ -88,6 +91,248 @@ function activityDiagnosticDate(row: any) {
       row?.updated_at ||
       row?.created_at,
   );
+}
+
+
+// WELLNESS_ADMIN_STREAK_PORTAL_MIRROR_V126M54
+// These helpers intentionally mirror the participant workout GET route's durable
+// Google Sheet history without changing that route. Supabase remains the device/
+// mirror source; Sheet rows are only added when the matching manual mirror is absent.
+function sheetWorkoutNumber(value: any) {
+  const text = clean(value).replace(/\s/g, "");
+  if (!text) return null;
+
+  let normalized = text.replace(/[^0-9,.-]/g, "");
+  const hasDot = normalized.includes(".");
+  const hasComma = normalized.includes(",");
+
+  if (hasDot && hasComma) {
+    if (normalized.lastIndexOf(",") > normalized.lastIndexOf(".")) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    const thousandStyle = /^-?\d{1,3}(,\d{3})+$/.test(normalized);
+    normalized = thousandStyle
+      ? normalized.replace(/,/g, "")
+      : normalized.replace(",", ".");
+  } else if (hasDot) {
+    const thousandStyle = /^-?\d{1,3}(\.\d{3})+$/.test(normalized);
+    normalized = thousandStyle ? normalized.replace(/\./g, "") : normalized;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sheetWorkoutSteps(row: any) {
+  const achievement = clean(
+    row?.[
+      "Jelaskan pencapaian Workout/Aktifitas yang anda lakukan (Berapa Set/Berapa banyak langkah kaki)"
+    ],
+  );
+  const match = achievement.match(/([\d.,]+)\s*(?:langkah|steps?)/i);
+  return match ? sheetWorkoutNumber(match[1]) : null;
+}
+
+function isWorkoutSheetRow(row: any) {
+  const logType = clean(row?.["Log Type"] || row?.log_type).toLowerCase();
+  if (logType === "workout" || logType === "activity") return true;
+  if (logType === "nutrition" || logType === "healthtalk") return false;
+  return Boolean(
+    clean(row?.["Jenis Workout/Aktifitas"]) ||
+      clean(row?.["Kalori Aktivitas"]) ||
+      clean(row?.["Melakukan Workout/Aktifitas Ringan?"]),
+  );
+}
+
+function workoutSheetMatchesParticipant(row: any, participant: any) {
+  const rowParticipantId = numberValue(row?.["Participant ID"] || row?.participant_id);
+  const participantId = numberValue(participant?.id);
+  const rowCode = clean(row?.KODE || row?.code || row?.participant_code).toLowerCase();
+  const participantCode = clean(
+    participant?.code || participant?.employee_code || participant?.no_karyawan,
+  ).toLowerCase();
+
+  return (
+    (rowParticipantId > 0 && participantId > 0 && rowParticipantId === participantId) ||
+    Boolean(rowCode && participantCode && rowCode === participantCode)
+  );
+}
+
+function sheetRowToWorkout(row: any, participant: any) {
+  const submissionId = clean(row?.["Submission ID"] || row?.submission_id);
+  const sheetRowNumber = numberValue(row?._rowNumber || row?.row_number);
+  const submissionDate = clean(row?.["Submission Date"] || row?.created_at);
+  const logDate = safeLogDate(row?.["Log Date"] || row?.log_date || submissionDate);
+  const activityName = clean(row?.["Jenis Workout/Aktifitas"]) || "Workout";
+  const calories = numberValue(sheetWorkoutNumber(row?.["Kalori Aktivitas"]));
+  const steps = numberValue(sheetWorkoutSteps(row));
+
+  return {
+    id: submissionId
+      ? `sheet-workout-${submissionId}`
+      : `sheet-workout-${sheetRowNumber || `${participant?.id}-${submissionDate}`}`,
+    _canonical_source: "google_sheet",
+    _google_sheet_row_number: sheetRowNumber || null,
+    participant_id: numberValue(participant?.id),
+    source: "manual",
+    provider: "manual",
+    input_source: "manual",
+    external_activity_id: submissionId
+      ? `manual_sheet_${submissionId}`
+      : `manual_sheet_row_${sheetRowNumber}`,
+    provider_activity_id: submissionId
+      ? `manual_sheet_${submissionId}`
+      : `manual_sheet_row_${sheetRowNumber}`,
+    activity_type: activityName,
+    activity_name: activityName,
+    log_date: logDate,
+    started_at: submissionDate || `${logDate}T00:00:00.000Z`,
+    created_at: submissionDate || logDate,
+    updated_at: submissionDate || logDate,
+    duration_minutes: numberValue(
+      sheetWorkoutNumber(row?.["Berapa Menit anda melakukan nya ?"]),
+    ),
+    calories,
+    active_calories: calories,
+    steps,
+    submission_id: submissionId,
+    raw_payload: {
+      ...row,
+      submission_id: submissionId || null,
+      google_sheet: {
+        rowNumber: sheetRowNumber || null,
+        row_number: sheetRowNumber || null,
+      },
+      marker: "WELLNESS_ADMIN_STREAK_PORTAL_MIRROR_V126M54",
+    },
+  };
+}
+
+function activitySourceText(row: any) {
+  const raw = parseRaw(row?.raw_payload);
+  return clean(
+    row?.source || row?.provider || row?.input_source || raw?.provider || raw?.source,
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+}
+
+function isManualActivityRow(row: any) {
+  const raw = parseRaw(row?.raw_payload);
+  const source = activitySourceText(row);
+  const externalId = clean(
+    row?.external_activity_id || row?.provider_activity_id || raw?.external_activity_id,
+  ).toLowerCase();
+  return (
+    source === "manual" ||
+    source === "google_sheet" ||
+    externalId.startsWith("manual_") ||
+    Boolean(raw?.submission_id || raw?.["Submission ID"])
+  );
+}
+
+function workoutCanonicalKey(item: any, index: number) {
+  const raw = parseRaw(item?.raw_payload);
+  const submissionId = clean(
+    item?.submission_id ||
+      item?.submissionId ||
+      raw?.submission_id ||
+      raw?.submissionId ||
+      raw?.["Submission ID"],
+  );
+  if (submissionId) return `submission:${submissionId}`;
+
+  const sheetRowNumber = numberValue(
+    item?._google_sheet_row_number ||
+      raw?.google_sheet?.rowNumber ||
+      raw?.google_sheet?.row_number ||
+      raw?._rowNumber,
+  );
+  if (sheetRowNumber > 0) return `sheet-row:${sheetRowNumber}`;
+
+  const databaseId = numberValue(
+    item?._supabase_id || (item?._canonical_source !== "google_sheet" ? item?.id : 0),
+  );
+  if (databaseId > 0) return `db:${databaseId}`;
+
+  return [
+    "fallback",
+    activitySourceText(item),
+    clean(item?.log_date),
+    clean(item?.activity_name || item?.activity_type),
+    clean(item?.started_at || item?.created_at),
+    String(index),
+  ].join(":");
+}
+
+function mergePortalManualWorkoutHistory(
+  supabaseRows: any[] = [],
+  sheetRows: any[] = [],
+) {
+  const byKey = new Map<string, any>();
+  const insertionOrder: string[] = [];
+
+  const remember = (item: any, index: number, preferExisting: boolean) => {
+    const key = workoutCanonicalKey(item, index);
+    if (!byKey.has(key)) {
+      byKey.set(key, item);
+      insertionOrder.push(key);
+      return;
+    }
+    if (!preferExisting) byKey.set(key, item);
+  };
+
+  // Participant workout GET treats durable Sheet rows as canonical first.
+  (sheetRows || []).forEach((item, index) => remember(item, index, true));
+  (supabaseRows || []).forEach((item, index) =>
+    remember(item, index + (sheetRows || []).length, true),
+  );
+
+  return insertionOrder.map((key) => byKey.get(key)).filter(Boolean);
+}
+
+function mergePortalActivityRows(
+  selectedDbRows: any[],
+  sheetRows: any[],
+) {
+  const manualDbRows = (selectedDbRows || []).filter(isManualActivityRow);
+  const nonManualRows = (selectedDbRows || []).filter((row) => !isManualActivityRow(row));
+  const canonicalManualRows = mergePortalManualWorkoutHistory(manualDbRows, sheetRows);
+  return {
+    rows: [...nonManualRows, ...canonicalManualRows],
+    manual_db_rows: manualDbRows.length,
+    manual_sheet_rows: sheetRows.length,
+    manual_merged_rows: canonicalManualRows.length,
+  };
+}
+
+function dayMetric(rows: any[], date: string) {
+  let workoutCalories = 0;
+  let steps = 0;
+  let rowCount = 0;
+  let manualCalories = 0;
+  let sheetManualRows = 0;
+
+  for (const row of rows || []) {
+    if (activityDiagnosticDate(row) !== date) continue;
+    rowCount += 1;
+    const calories = wellnessStreakWorkoutCalories(row);
+    workoutCalories += calories;
+    steps += wellnessStreakSteps(row);
+    if (isManualActivityRow(row)) manualCalories += calories;
+    if (clean(row?._canonical_source) === "google_sheet") sheetManualRows += 1;
+  }
+
+  return {
+    workout_calories: Math.round(workoutCalories),
+    steps: Math.round(steps),
+    activity_rows: rowCount,
+    manual_calories: Math.round(manualCalories),
+    sheet_manual_rows: sheetManualRows,
+  };
 }
 
 function providerWarnings(rows: any[]) {
@@ -182,21 +427,65 @@ async function selectParticipantRows(params: {
   select?: string;
   limitPerChunk?: number;
 }) {
+  // WELLNESS_ADMIN_STREAK_DIAGNOSTIC_PAGINATED_SOURCE_V126M54_1
+  // Supabase/PostgREST can cap a single response even when `.limit()` asks for
+  // more rows. The Admin diagnostic previously loaded every participant in one
+  // bulk request, so later activity rows could disappear while Participant and
+  // Coach (which read one participant at a time) still had the canonical data.
+  // Read the same tables in deterministic pages and never silently accept a
+  // truncated source. This is read-only and does not change the streak formula.
   const rows: any[] = [];
   const chunkSize = 100;
+  const pageSize = 1000;
   const select = params.select || "*";
-  const limitPerChunk = Math.max(1000, params.limitPerChunk || 50000);
+  const maxRowsPerChunk = Math.max(pageSize, params.limitPerChunk || 50000);
 
   for (let index = 0; index < params.participantIds.length; index += chunkSize) {
     const chunk = params.participantIds.slice(index, index + chunkSize);
-    const result = await params.supabase
-      .from(params.table)
-      .select(select)
-      .in("participant_id", chunk)
-      .limit(limitPerChunk);
+    let offset = 0;
+    let reachedCapWithFullPage = false;
 
-    if (result?.error) throw result.error;
-    rows.push(...(result?.data || []));
+    while (offset < maxRowsPerChunk) {
+      const upper = Math.min(offset + pageSize - 1, maxRowsPerChunk - 1);
+      const requested = upper - offset + 1;
+      const result = await params.supabase
+        .from(params.table)
+        .select(select)
+        .in("participant_id", chunk)
+        .order("participant_id", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, upper);
+
+      if (result?.error) throw result.error;
+
+      const pageRows = result?.data || [];
+      rows.push(...pageRows);
+
+      if (pageRows.length < requested) {
+        reachedCapWithFullPage = false;
+        break;
+      }
+
+      offset += pageRows.length;
+      reachedCapWithFullPage = offset >= maxRowsPerChunk;
+    }
+
+    if (reachedCapWithFullPage) {
+      const overflow = await params.supabase
+        .from(params.table)
+        .select("id")
+        .in("participant_id", chunk)
+        .order("participant_id", { ascending: true })
+        .order("id", { ascending: true })
+        .range(maxRowsPerChunk, maxRowsPerChunk);
+
+      if (overflow?.error) throw overflow.error;
+      if ((overflow?.data || []).length > 0) {
+        throw new Error(
+          `Diagnostic source ${params.table} melewati safety cap ${maxRowsPerChunk} rows per participant chunk; data tidak boleh ditampilkan dalam keadaan terpotong.`,
+        );
+      }
+    }
   }
 
   return rows;
@@ -298,7 +587,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const [activityRowsAll, noteRows, controlMap, nutritionBulk] =
+    const [activityRowsAll, noteRows, controlMap, nutritionBulk, workoutSheetBulk] =
       await Promise.all([
         selectParticipantRows({
           supabase,
@@ -316,6 +605,14 @@ export async function GET(request: NextRequest) {
         }),
         loadParticipantControlMap(supabase, participantIds),
         loadCanonicalNutritionHistories({ supabase, participants }),
+        fetchWellnessGoogleSheetRows({
+          logType: "workout",
+          limit: 10000,
+        }).catch((error: any) => ({
+          ok: false,
+          rows: [],
+          message: clean(error?.message || "Google Sheet workout source unavailable."),
+        })),
       ]);
 
     const activityByParticipant = new Map<number, any[]>();
@@ -336,6 +633,8 @@ export async function GET(request: NextRequest) {
       notesByParticipant.get(participantId)!.push(row);
     }
 
+    const workoutSheetRowsAll = (workoutSheetBulk?.rows || []).filter(isWorkoutSheetRow);
+
     const participantSummaries: any[] = [];
     const diagnosticRows: any[] = [];
 
@@ -348,6 +647,20 @@ export async function GET(request: NextRequest) {
           activityByParticipant.get(participantId) || [],
           controlMap,
         ),
+        "",
+        "",
+        ["log_date", "started_at", "created_at"],
+      );
+      const participantSheetWorkoutRows = workoutSheetRowsAll
+        .filter((row: any) => workoutSheetMatchesParticipant(row, participant))
+        .map((row: any) => sheetRowToWorkout(row, participant));
+      const portalActivityMirror = mergePortalActivityRows(
+        selectedActivityRows,
+        participantSheetWorkoutRows,
+      );
+      const portalActivityRows = filterOperationalRowsForProgram(
+        participant,
+        portalActivityMirror.rows,
         "",
         "",
         ["log_date", "started_at", "created_at"],
@@ -371,6 +684,16 @@ export async function GET(request: NextRequest) {
         targetTimeline,
         historyDays: 42,
       });
+      const portalDisplayStreak = buildWellnessStreakSummary({
+        nutritionRows,
+        activityRows: portalActivityRows,
+        workoutTargetCalories: numberValue(targetTimeline.current?.workout) || 300,
+        targetTimeline,
+        historyDays: 42,
+      });
+      const portalDayByDate = new Map(
+        (portalDisplayStreak.days || []).map((item: any) => [item.date, item]),
+      );
 
       const companyId = numberValue(
         participant.wellness_company_id || participant.company_id,
@@ -433,7 +756,20 @@ export async function GET(request: NextRequest) {
         const targetChangedToday = targetTimeline.revisions.some(
           (item) => item.effective_from === day.date,
         );
-        const warnings = providerWarnings(dayActivities);
+        const portalDay = portalDayByDate.get(day.date) || null;
+        const portalMetrics = dayMetric(portalActivityRows, day.date);
+        const canonicalMetrics = dayMetric(selectedActivityRows, day.date);
+        const mirrorMismatchReasons: string[] = [];
+        if (portalMetrics.workout_calories !== canonicalMetrics.workout_calories) {
+          mirrorMismatchReasons.push("PORTAL_WORKOUT_DIFFERS_FROM_STREAK_ENGINE");
+        }
+        if (portalMetrics.steps !== canonicalMetrics.steps) {
+          mirrorMismatchReasons.push("PORTAL_STEPS_DIFFERS_FROM_STREAK_ENGINE");
+        }
+        const warnings = providerWarnings([
+          ...dayActivities,
+          ...portalActivityRows.filter((item: any) => activityDiagnosticDate(item) === day.date),
+        ]);
 
         if (day.success) recentPass += 1;
         else recentIssue += 1;
@@ -455,7 +791,13 @@ export async function GET(request: NextRequest) {
           workout_calories: numberValue(day.workout_calories),
           workout_target: workoutTarget,
           workout_ok: workoutOk,
+          coach_workout_calories: canonicalMetrics.workout_calories,
+          portal_workout_calories: portalMetrics.workout_calories,
+          portal_manual_calories: portalMetrics.manual_calories,
+          portal_manual_sheet_rows: portalMetrics.sheet_manual_rows,
           steps: numberValue(day.steps),
+          coach_steps: canonicalMetrics.steps,
+          portal_steps: portalMetrics.steps,
           step_target: stepTarget,
           steps_ok: stepsOk,
           steps_are_streak_rule: false,
@@ -467,6 +809,11 @@ export async function GET(request: NextRequest) {
           fitness_source: clean(control?.fitness_source || "none"),
           source_connected: Boolean(control?.source_connected),
           activity_provider_rows: dayActivities.length,
+          canonical_activity_rows: canonicalMetrics.activity_rows,
+          portal_activity_rows: portalMetrics.activity_rows,
+          mirror_mismatch: mirrorMismatchReasons.length > 0,
+          mirror_mismatch_reasons: mirrorMismatchReasons,
+          portal_preview_success: Boolean(portalDay?.success),
           activity_providers: [
             ...new Set(dayActivities.map((item) => activityFitnessProvider(item))),
           ].filter((item) => item !== "none"),
@@ -488,6 +835,13 @@ export async function GET(request: NextRequest) {
         source_connected: Boolean(control?.source_connected),
         target_history: targetTimelineSummary(targetTimeline),
         nutrition_source: nutritionHistory?.sources || null,
+        portal_workout_source: {
+          google_sheet_ok: workoutSheetBulk?.ok !== false,
+          google_sheet_message: clean(workoutSheetBulk?.message),
+          manual_db_rows: portalActivityMirror.manual_db_rows,
+          manual_sheet_rows: portalActivityMirror.manual_sheet_rows,
+          manual_merged_rows: portalActivityMirror.manual_merged_rows,
+        },
         recent_7d_pass: recentPass,
         recent_7d_issue: recentIssue,
         recent_7d_steps_reached_but_streak_failed: recentStepsOnly,
@@ -516,7 +870,7 @@ export async function GET(request: NextRequest) {
         nutrition_min_submissions: 3,
         workout: "workout calories >= effective Coach target",
         steps: "informational_only",
-        note: "Langkah dapat tercapai tanpa menghasilkan streak bila target kalori workout belum tercapai.",
+        note: "Streak canonical tetap memakai pipeline Participant + Coach. Kolom Portal mirror hanya menunjukkan display workout yang juga membaca manual workout durable dari Google Sheet.",
       },
       filters: {
         participant_id: requestedParticipantId || null,
@@ -535,6 +889,16 @@ export async function GET(request: NextRequest) {
         provider_warning_days: diagnosticRows.filter(
           (row) => (row.provider_warnings || []).length > 0,
         ).length,
+        portal_mirror_mismatch_days: diagnosticRows.filter(
+          (row) => row.mirror_mismatch,
+        ).length,
+      },
+      mirror_sources: {
+        canonical_streak: "Participant + Coach shared DB/control/nutrition/target pipeline",
+        portal_workout_display: "canonical DB activities + durable Google Sheet manual workout history",
+        google_sheet_workout_ok: workoutSheetBulk?.ok !== false,
+        google_sheet_workout_message: clean(workoutSheetBulk?.message),
+        google_sheet_workout_rows: workoutSheetRowsAll.length,
       },
       nutrition_source: nutritionBulk.sources,
       participants: participantSummaries,

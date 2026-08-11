@@ -1,7 +1,7 @@
 "use client";
 
-// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_V126M53_1
-// Read-only Admin UI for canonical streak diagnostics.
+// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_V126M54
+// Read-only Admin UI showing canonical streak plus Participant Portal display mirror.
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -11,7 +11,8 @@ type StatusFilter =
   | "issue"
   | "steps_only"
   | "target_change"
-  | "provider_warning";
+  | "provider_warning"
+  | "mirror_mismatch";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -161,6 +162,9 @@ export default function WellnessAdminStreakDiagnosticPage() {
       ) {
         return false;
       }
+      if (statusFilter === "mirror_mismatch" && !row?.mirror_mismatch) {
+        return false;
+      }
       return true;
     });
   }, [data, query, companyFilter, statusFilter, selectedParticipantId]);
@@ -234,7 +238,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
 
         {data ? (
           <>
-            <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
               {[
                 ["Peserta", data?.summary?.participants, "👥", "bg-sky-50 text-sky-900"],
                 ["PASS 7 hari", data?.summary?.pass_days, "✅", "bg-emerald-50 text-emerald-900"],
@@ -250,6 +254,12 @@ export default function WellnessAdminStreakDiagnosticPage() {
                   data?.summary?.provider_warning_days,
                   "⌚",
                   "bg-violet-50 text-violet-900",
+                ],
+                [
+                  "Portal mirror beda",
+                  data?.summary?.portal_mirror_mismatch_days,
+                  "🔀",
+                  "bg-cyan-50 text-cyan-900",
                 ],
               ].map(([label, value, icon, tone]) => (
                 <div
@@ -271,7 +281,10 @@ export default function WellnessAdminStreakDiagnosticPage() {
               <span className="font-black">Rule yang sedang diuji:</span>{" "}
               Nutrisi ≥ {fmt(data?.rule?.nutrition_min_submissions)} input DAN
               kalori workout ≥ target Coach yang berlaku pada tanggal tersebut.
-              Langkah hanya informasi diagnostik dan bukan syarat streak.
+              <span className="ml-1">Streak/Coach memakai pipeline canonical.</span>{" "}
+              <span className="font-black">Portal mirror</span> membaca activity canonical
+              ditambah workout manual durable dari Google Sheet agar angka tampilan
+              peserta dapat dibandingkan tanpa mengubah rule streak.
             </section>
 
             <section className="mt-4 rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -341,6 +354,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
                     <option value="steps_only">Steps tercapai, streak gagal</option>
                     <option value="target_change">Tanggal target berubah</option>
                     <option value="provider_warning">Warning provider</option>
+                    <option value="mirror_mismatch">Portal mirror berbeda</option>
                   </select>
                 </div>
               </div>
@@ -367,6 +381,10 @@ export default function WellnessAdminStreakDiagnosticPage() {
                       </span>
                       <span className="rounded-full bg-white px-3 py-1.5 text-slate-700">
                         Target revisions {fmt(selectedParticipant.target_history?.revision_count)}
+                      </span>
+                      <span className="rounded-full bg-white px-3 py-1.5 text-slate-700">
+                        Sheet workout {selectedParticipant.portal_workout_source?.google_sheet_ok === false ? "error" : "OK"}
+                        {" · "}{fmt(selectedParticipant.portal_workout_source?.manual_sheet_rows)} row
                       </span>
                     </div>
                   </div>
@@ -405,8 +423,8 @@ export default function WellnessAdminStreakDiagnosticPage() {
                       <th className="px-4 py-3">Peserta</th>
                       <th className="px-3 py-3">Tanggal</th>
                       <th className="px-3 py-3">Nutrisi</th>
-                      <th className="px-3 py-3">Workout</th>
-                      <th className="px-3 py-3">Steps</th>
+                      <th className="px-3 py-3">Workout · Canonical vs Portal</th>
+                      <th className="px-3 py-3">Steps · Canonical vs Portal</th>
                       <th className="px-3 py-3">Target efektif</th>
                       <th className="px-3 py-3">Fitness</th>
                       <th className="px-3 py-3">Hasil</th>
@@ -439,12 +457,26 @@ export default function WellnessAdminStreakDiagnosticPage() {
                         </td>
                         <td className="px-3 py-3">
                           <div className={row.workout_ok ? "font-black text-emerald-700" : "font-black text-rose-700"}>
-                            {fmt(row.workout_calories)} / {fmt(row.workout_target)} kkal
+                            Streak/Coach {fmt(row.workout_calories)} / {fmt(row.workout_target)} kkal
                           </div>
+                          <div className={`mt-1 text-[9px] font-black ${row.mirror_mismatch ? "text-cyan-700" : "text-slate-400"}`}>
+                            Portal {fmt(row.portal_workout_calories)} kkal
+                            {Number(row.portal_manual_calories || 0) > 0
+                              ? ` · manual ${fmt(row.portal_manual_calories)} kkal`
+                              : ""}
+                          </div>
+                          {Number(row.portal_manual_sheet_rows || 0) > 0 ? (
+                            <div className="mt-1 text-[9px] font-bold text-cyan-700">
+                              {fmt(row.portal_manual_sheet_rows)} row manual dari Google Sheet
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3">
                           <div className={row.steps_ok ? "font-black text-blue-700" : "font-black text-slate-600"}>
-                            {fmt(row.steps)} / {fmt(row.step_target)}
+                            Streak/Coach {fmt(row.steps)} / {fmt(row.step_target)}
+                          </div>
+                          <div className={`mt-1 text-[9px] font-black ${Number(row.portal_steps || 0) !== Number(row.steps || 0) ? "text-cyan-700" : "text-slate-400"}`}>
+                            Portal {fmt(row.portal_steps)}
                           </div>
                           {row.steps_ok && !row.success ? (
                             <div className="mt-1 text-[9px] font-black text-amber-700">
@@ -466,6 +498,14 @@ export default function WellnessAdminStreakDiagnosticPage() {
                           <div className="font-black text-slate-700">
                             {row.fitness_source || "none"}
                           </div>
+                          <div className="mt-1 text-[9px] font-bold text-slate-400">
+                            canonical {fmt(row.canonical_activity_rows)} row · portal {fmt(row.portal_activity_rows)} row
+                          </div>
+                          {row.mirror_mismatch ? (
+                            <div className="mt-1 max-w-[14rem] text-[9px] font-black leading-4 text-cyan-700">
+                              🔀 Portal display berbeda dari source streak canonical
+                            </div>
+                          ) : null}
                           {(row.provider_warnings || []).map((warning: string) => (
                             <div
                               key={warning}
@@ -482,6 +522,11 @@ export default function WellnessAdminStreakDiagnosticPage() {
                           <div className="mt-2 max-w-[16rem] text-[10px] font-bold leading-4 text-slate-600">
                             {row.diagnosis_label}
                           </div>
+                          {row.mirror_mismatch ? (
+                            <div className="mt-1 max-w-[16rem] text-[9px] font-black leading-4 text-cyan-700">
+                              Portal mirror berbeda: {(row.mirror_mismatch_reasons || []).join(", ")}
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
                     ))}
@@ -523,12 +568,14 @@ export default function WellnessAdminStreakDiagnosticPage() {
                         <div className={`mt-1 text-xs font-black ${row.workout_ok ? "text-emerald-700" : "text-rose-700"}`}>
                           {fmt(row.workout_calories)}/{fmt(row.workout_target)}
                         </div>
+                        <div className="mt-1 text-[8px] font-bold text-cyan-700">Portal {fmt(row.portal_workout_calories)}</div>
                       </div>
                       <div className="rounded-xl bg-white p-2">
                         <div className="text-[8px] font-black uppercase text-slate-400">Steps</div>
                         <div className={`mt-1 text-xs font-black ${row.steps_ok ? "text-blue-700" : "text-slate-700"}`}>
                           {fmt(row.steps)}/{fmt(row.step_target)}
                         </div>
+                        <div className="mt-1 text-[8px] font-bold text-cyan-700">Portal {fmt(row.portal_steps)}</div>
                       </div>
                     </div>
                     <div className="mt-3 rounded-xl bg-white p-3 text-[10px] font-bold leading-4 text-slate-600">
@@ -538,6 +585,12 @@ export default function WellnessAdminStreakDiagnosticPage() {
                         {row.target_changed_today ? " · berubah hari ini" : ""}
                       </div>
                       <div className="mt-1">Fitness: {row.fitness_source || "none"}</div>
+                      <div className="mt-1">Source: canonical {fmt(row.canonical_activity_rows)} row · portal {fmt(row.portal_activity_rows)} row</div>
+                      {row.mirror_mismatch ? (
+                        <div className="mt-1 font-black text-cyan-700">
+                          🔀 Portal display berbeda dari streak canonical.
+                        </div>
+                      ) : null}
                       {row.steps_ok && !row.success ? (
                         <div className="mt-1 font-black text-amber-700">
                           Steps tercapai, tetapi langkah bukan syarat streak.
