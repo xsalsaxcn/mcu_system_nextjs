@@ -1660,6 +1660,23 @@ export default function WellnessCoachPortalPage() {
                       </h2>
 
                       <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-2">
+                        {/* WELLNESS_COACH_MEMBER_MONITORING_BUTTONS_V126M55 */}
+                        <CoachQuickAction
+                          icon="check"
+                          label="Pantau Harian"
+                          tone="emerald"
+                          onClick={() =>
+                            window.location.assign("/wellness/coach/monitoring?view=daily")
+                          }
+                        />
+                        <CoachQuickAction
+                          icon="trophy"
+                          label="Pantau Mingguan"
+                          tone="sky"
+                          onClick={() =>
+                            window.location.assign("/wellness/coach/monitoring?view=weekly")
+                          }
+                        />
                         <CoachQuickAction
                           icon="bell"
                           label="Kirim Pengingat"

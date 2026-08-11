@@ -1373,6 +1373,25 @@ export default function WellnessAdminMobilePage() {
                 Read-only
               </span>
             </a>
+            {/* WELLNESS_ADMIN_MEMBER_MONITORING_BUTTONS_V126M55 */}
+            <a
+              href="/wellness/admin/monitoring?view=daily"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-black text-emerald-800 ring-1 ring-emerald-100 transition hover:bg-emerald-100"
+            >
+              Pantau Harian
+              <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                Canonical
+              </span>
+            </a>
+            <a
+              href="/wellness/admin/monitoring?view=weekly"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-sky-50 px-3 py-2.5 text-xs font-black text-sky-800 ring-1 ring-sky-100 transition hover:bg-sky-100"
+            >
+              Pantau Mingguan
+              <span className="rounded-full bg-sky-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
+                7 Hari
+              </span>
+            </a>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
@@ -1562,6 +1581,48 @@ export default function WellnessAdminMobilePage() {
                   tone="border-orange-100 bg-orange-50 text-orange-950"
                   onClick={() => openView("ranking")}
                 />
+              </section>
+
+              {/* WELLNESS_ADMIN_MEMBER_MONITORING_HOME_V126M55 */}
+              <section className="grid gap-3 md:grid-cols-2">
+                <a
+                  href="/wellness/admin/monitoring?view=daily"
+                  className="flex items-center justify-between gap-4 rounded-[1.5rem] border border-emerald-100 bg-gradient-to-r from-emerald-50 to-teal-50 p-4 shadow-sm transition hover:border-emerald-200 hover:shadow-md"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-xl text-white shadow-sm">
+                      ✓
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-emerald-950">Pantau Harian</div>
+                      <div className="mt-1 text-[10px] font-bold leading-4 text-emerald-800">
+                        Monitoring member per hari memakai sumber canonical yang sama dengan Portal Peserta dan Coach.
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[9px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-100">
+                    Hari Ini
+                  </span>
+                </a>
+                <a
+                  href="/wellness/admin/monitoring?view=weekly"
+                  className="flex items-center justify-between gap-4 rounded-[1.5rem] border border-sky-100 bg-gradient-to-r from-sky-50 to-blue-50 p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-600 text-xl text-white shadow-sm">
+                      7D
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-sky-950">Pantau Mingguan</div>
+                      <div className="mt-1 text-[10px] font-bold leading-4 text-sky-800">
+                        Review 7 hari nutrisi, workout, langkah, target efektif, dan streak dengan formula yang sama.
+                      </div>
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1.5 text-[9px] font-black uppercase tracking-wide text-sky-700 ring-1 ring-sky-100">
+                    7 Hari
+                  </span>
+                </a>
               </section>
 
               <a
