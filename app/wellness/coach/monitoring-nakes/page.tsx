@@ -1,6 +1,6 @@
 "use client";
 
-// WELLNESS_COACH_NAKES_MONITORING_V126M57_1
+// WELLNESS_COACH_NAKES_MONITORING_V126M57_2
 // Read-only clinical monitoring for Coach. Participant scope always comes from
 // /api/wellness/coach/dashboard and /api/wellness/coach/participant-detail.
 // No Admin endpoint, database write, target, streak, point, or fitness sync change.
@@ -174,39 +174,271 @@ function MetricCard({ label, baseline, current, unit, tone = "text-slate-900" }:
 }
 
 function MiniChart({ title, rows, secondaryKey }: { title: string; rows: any[]; secondaryKey?: string }) {
-  const values = rows.map((row) => num(row?.value)).filter((value): value is number => value !== null);
-  const secondary = secondaryKey
-    ? rows.map((row) => num(row?.[secondaryKey])).filter((value): value is number => value !== null)
-    : [];
-  const all = [...values, ...secondary];
-  if (!all.length) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const normalizedRows = useMemo(
+    () =>
+      (Array.isArray(rows) ? rows : []).map((row: any, index: number) => ({
+        index,
+        label: clean(row?.label) || formatDate(row?.date),
+        primary: num(row?.value),
+        secondary: secondaryKey ? num(row?.[secondaryKey]) : null,
+      })),
+    [rows, secondaryKey],
+  );
+
+  const primaryValues = normalizedRows
+    .map((row) => row.primary)
+    .filter((value): value is number => value !== null);
+  const secondaryValues = normalizedRows
+    .map((row) => row.secondary)
+    .filter((value): value is number => value !== null);
+  const allValues = [...primaryValues, ...secondaryValues];
+
+  if (!allValues.length || !normalizedRows.length) {
     return (
       <div className="rounded-[1.25rem] border border-slate-200 bg-white p-4">
         <div className="text-sm font-black text-slate-900">{title}</div>
-        <div className="mt-4 flex h-24 items-center justify-center rounded-xl bg-slate-50 text-[10px] font-bold text-slate-300">Belum ada data</div>
+        <div className="mt-4 flex h-28 items-center justify-center rounded-xl bg-slate-50 text-[10px] font-bold text-slate-300">
+          Belum ada data
+        </div>
       </div>
     );
   }
-  const width = 320, height = 90, pad = 10;
-  const min = Math.min(...all), max = Math.max(...all), range = max - min || 1;
-  const points = (series: number[]) => series.map((value, index) => {
-    const x = series.length <= 1 ? width / 2 : pad + (index / (series.length - 1)) * (width - pad * 2);
-    const y = pad + ((max - value) / range) * (height - pad * 2);
-    return `${x},${y}`;
-  }).join(" ");
+
+  const width = 420;
+  const height = 178;
+  const padLeft = 22;
+  const padRight = 18;
+  const padTop = 18;
+  const padBottom = 30;
+  const minValue = Math.min(...allValues);
+  const maxValue = Math.max(...allValues);
+  const rawRange = maxValue - minValue;
+  const valuePadding = rawRange === 0 ? Math.max(Math.abs(maxValue) * 0.08, 1) : rawRange * 0.16;
+  const chartMin = minValue - valuePadding;
+  const chartMax = maxValue + valuePadding;
+  const chartRange = chartMax - chartMin || 1;
+
+  const xFor = (index: number) =>
+    normalizedRows.length <= 1
+      ? width / 2
+      : padLeft + (index / (normalizedRows.length - 1)) * (width - padLeft - padRight);
+  const yFor = (value: number) =>
+    padTop + ((chartMax - value) / chartRange) * (height - padTop - padBottom);
+
+  const primaryPoints = normalizedRows
+    .filter((row) => row.primary !== null)
+    .map((row) => ({ ...row, x: xFor(row.index), y: yFor(row.primary as number) }));
+  const secondaryPoints = normalizedRows
+    .filter((row) => row.secondary !== null)
+    .map((row) => ({ ...row, x: xFor(row.index), y: yFor(row.secondary as number) }));
+
+  const pathFor = (points: Array<{ x: number; y: number }>) =>
+    points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+
+  const activeRow = activeIndex === null ? null : normalizedRows[activeIndex] || null;
+  const activeX = activeRow ? xFor(activeRow.index) : 0;
+  const activePrimaryY = activeRow?.primary !== null && activeRow?.primary !== undefined ? yFor(activeRow.primary) : null;
+  const activeSecondaryY = activeRow?.secondary !== null && activeRow?.secondary !== undefined ? yFor(activeRow.secondary) : null;
+  const activeTopY = Math.min(
+    ...(activePrimaryY !== null ? [activePrimaryY] : []),
+    ...(activeSecondaryY !== null ? [activeSecondaryY] : []),
+  );
+
+  const tooltipWidth = secondaryKey ? 148 : 132;
+  const tooltipHeight = secondaryKey ? 58 : 44;
+  const tooltipX = Math.max(6, Math.min(width - tooltipWidth - 6, activeX - tooltipWidth / 2));
+  const tooltipCandidateY = Number.isFinite(activeTopY) ? activeTopY - tooltipHeight - 12 : 8;
+  const tooltipY = tooltipCandidateY < 6
+    ? Math.min(height - tooltipHeight - padBottom - 4, (Number.isFinite(activeTopY) ? activeTopY : 6) + 12)
+    : tooltipCandidateY;
+
+  const gridRatios = [0, 0.25, 0.5, 0.75, 1];
+
   return (
-    <div className="rounded-[1.25rem] border border-slate-200 bg-white p-4">
+    <div className="rounded-[1.25rem] border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-black text-slate-900">{title}</div>
-        <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-black text-slate-500">{rows.length} data</span>
+        <span className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-black text-slate-500">
+          {normalizedRows.length} data
+        </span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-24 w-full" role="img" aria-label={title}>
-        <polyline points={points(values)} fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600" />
-        {secondary.length ? <polyline points={points(secondary)} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-sky-500" /> : null}
+
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="mt-3 h-44 w-full overflow-visible sm:h-48"
+        role="img"
+        aria-label={`${title} - arahkan ke titik untuk melihat detail`}
+        onPointerLeave={() => setActiveIndex(null)}
+      >
+        {gridRatios.map((ratio) => {
+          const value = chartMax - chartRange * ratio;
+          const y = padTop + ratio * (height - padTop - padBottom);
+          return (
+            <g key={`grid-${ratio}`}>
+              <line
+                x1={padLeft}
+                x2={width - padRight}
+                y1={y}
+                y2={y}
+                stroke="currentColor"
+                strokeWidth="1"
+                strokeDasharray="3 5"
+                className="text-slate-100"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text x={padLeft} y={y - 4} fontSize="8" className="fill-slate-300 font-bold">
+                {fmt(value, 0)}
+              </text>
+            </g>
+          );
+        })}
+
+        {primaryPoints.length ? (
+          <path
+            d={pathFor(primaryPoints)}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-emerald-600"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+
+        {secondaryPoints.length ? (
+          <path
+            d={pathFor(secondaryPoints)}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-sky-500"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+
+        {activeRow ? (
+          <line
+            x1={activeX}
+            x2={activeX}
+            y1={padTop}
+            y2={height - padBottom}
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+            className="text-teal-200"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+
+        {normalizedRows.map((row) => {
+          const x = xFor(row.index);
+          const y = row.primary !== null ? yFor(row.primary) : row.secondary !== null ? yFor(row.secondary) : height / 2;
+          return (
+            <circle
+              key={`hit-${row.index}`}
+              cx={x}
+              cy={y}
+              r="14"
+              fill="transparent"
+              className="cursor-pointer"
+              onPointerEnter={() => setActiveIndex(row.index)}
+              onPointerMove={() => setActiveIndex(row.index)}
+              onTouchStart={() => setActiveIndex(row.index)}
+              tabIndex={0}
+              onFocus={() => setActiveIndex(row.index)}
+              onBlur={() => setActiveIndex(null)}
+              aria-label={`${row.label}: ${row.primary ?? "-"}${secondaryKey ? ` / ${row.secondary ?? "-"}` : ""}`}
+            />
+          );
+        })}
+
+        {primaryPoints.map((point) => {
+          const active = activeIndex === point.index;
+          return (
+            <circle
+              key={`primary-${point.index}`}
+              cx={point.x}
+              cy={point.y}
+              r={active ? 6.5 : 4.5}
+              fill="currentColor"
+              stroke="white"
+              strokeWidth="2.5"
+              className="pointer-events-none text-emerald-600 transition-all duration-150"
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+
+        {secondaryPoints.map((point) => {
+          const active = activeIndex === point.index;
+          return (
+            <circle
+              key={`secondary-${point.index}`}
+              cx={point.x}
+              cy={point.y}
+              r={active ? 6 : 4}
+              fill="currentColor"
+              stroke="white"
+              strokeWidth="2.5"
+              className="pointer-events-none text-sky-500 transition-all duration-150"
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+
+        {normalizedRows.map((row) => (
+          <text
+            key={`date-${row.index}`}
+            x={xFor(row.index)}
+            y={height - 8}
+            textAnchor="middle"
+            fontSize="8.5"
+            className={activeIndex === row.index ? "fill-slate-700 font-black" : "fill-slate-400 font-bold"}
+          >
+            {clean(row.label).slice(0, 10)}
+          </text>
+        ))}
+
+        {activeRow ? (
+          <g className="pointer-events-none">
+            <rect
+              x={tooltipX}
+              y={tooltipY}
+              width={tooltipWidth}
+              height={tooltipHeight}
+              rx="10"
+              fill="white"
+              stroke="#cbd5e1"
+              strokeWidth="1"
+              opacity="0.98"
+              vectorEffect="non-scaling-stroke"
+            />
+            <text x={tooltipX + 10} y={tooltipY + 16} fontSize="9" className="fill-slate-900 font-black">
+              {clean(activeRow.label).slice(0, 22)}
+            </text>
+            <circle cx={tooltipX + 11} cy={tooltipY + 30} r="3" className="fill-emerald-600" />
+            <text x={tooltipX + 19} y={tooltipY + 33} fontSize="9" className="fill-slate-700 font-bold">
+              {secondaryKey ? `Sistolik: ${activeRow.primary !== null ? fmt(activeRow.primary, 1) : "-"}` : `Nilai: ${activeRow.primary !== null ? fmt(activeRow.primary, 1) : "-"}`}
+            </text>
+            {secondaryKey ? (
+              <>
+                <circle cx={tooltipX + 11} cy={tooltipY + 45} r="3" className="fill-sky-500" />
+                <text x={tooltipX + 19} y={tooltipY + 48} fontSize="9" className="fill-slate-700 font-bold">
+                  Diastolik: {activeRow.secondary !== null ? fmt(activeRow.secondary, 1) : "-"}
+                </text>
+              </>
+            ) : null}
+          </g>
+        ) : null}
       </svg>
-      <div className="mt-1 flex justify-between text-[9px] font-bold text-slate-400">
-        <span>{rows[0]?.label || formatDate(rows[0]?.date)}</span>
-        <span>{rows.at?.(-1)?.label || formatDate(rows.at?.(-1)?.date)}</span>
+
+      <div className="mt-1 text-center text-[9px] font-bold text-slate-300">
+        Arahkan cursor atau sentuh titik untuk melihat detail
       </div>
     </div>
   );
