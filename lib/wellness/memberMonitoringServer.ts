@@ -1,4 +1,4 @@
-// WELLNESS_MEMBER_MONITORING_PARITY_V126M55
+// WELLNESS_MEMBER_MONITORING_PARITY_V126M55_2
 // Read-only monitoring loader. Uses the same canonical helpers as Participant/Coach.
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
@@ -34,6 +34,17 @@ async function pagedRows(supabase:any, table:string, ids:number[], orders:string
   return all;
 }
 
+// WELLNESS_MEMBER_MONITORING_RECENT_ACTIVITY_V126M55_2
+// Activity monitoring is about the newest 7-day window. Keep the newest rows per
+// participant so >2,000 historical sync rows cannot cut off the latest day.
+function latest2000(rows:any[], fields:string[]){
+  const map=new Map<number,any[]>();
+  for(const row of rows){const id=num(row?.participant_id);if(!id)continue;if(!map.has(id))map.set(id,[]);map.get(id)!.push(row)}
+  for(const [id,list] of map){list.sort((a,b)=>{const da=fields.map(k=>clean(a?.[k])).find(Boolean)||"";const db=fields.map(k=>clean(b?.[k])).find(Boolean)||"";return db.localeCompare(da)||num(b?.id)-num(a?.id)});map.set(id,list.slice(0,2000))}
+  return map;
+}
+
+// Preserve the existing target-note selection behavior.
 function first2000(rows:any[], fields:string[]){
   const map=new Map<number,any[]>();
   for(const row of rows){const id=num(row?.participant_id);if(!id)continue;if(!map.has(id))map.set(id,[]);map.get(id)!.push(row)}
@@ -61,7 +72,7 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
     pagedRows(opts.supabase,"wellness_activity_logs",ids,["participant_id","log_date","id"]),
     pagedRows(opts.supabase,"wellness_coach_notes",ids,["participant_id","session_date","created_at","id"]),
   ]);
-  const activities=first2000(activitiesAll,["log_date","started_at","created_at"]);
+  const activities=latest2000(activitiesAll,["log_date","started_at","updated_at","created_at"]);
   const notes=first2000(notesAll,["session_date","created_at","updated_at"]);
 
   const result=participants.map(participant=>{
