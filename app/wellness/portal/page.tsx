@@ -3821,6 +3821,17 @@ function HomeTab({
       workout_min_calories:
         asNumber(initialTargets?.workout_min_calories) ||
         current.workout_min_calories,
+      // WELLNESS_PARTICIPANT_TARGET_BB_FALLBACK_V126M64_1
+      // Hydrate current persisted/effective BB target immediately so Portal
+      // never flashes or falls back to an obsolete Coach note while canonical
+      // effective-targets is still loading.
+      target_weight_kg:
+        asNumber(
+          initialTargets?.target_weight_kg ||
+            initialTargets?.weight_kg ||
+            participant?.target_weight_kg ||
+            participant?.target_weight,
+        ) || current.target_weight_kg,
     }));
   }, [
     participantId,
@@ -3876,7 +3887,18 @@ function HomeTab({
       .then((response) => response.json())
       .catch(() => null);
 
-    const notes = Array.isArray(result?.notes) ? result.notes : [];
+    // WELLNESS_PARTICIPANT_TARGET_BB_FALLBACK_V126M64_1
+    // Canonical endpoint above remains authoritative. This fallback is only
+    // used when it is unavailable; always choose the newest target revision,
+    // never the first/oldest row returned by Coach Notes.
+    const notes = Array.isArray(result?.notes) ? [...result.notes] : [];
+    notes.sort((a: any, b: any) => {
+      const aDate = clean(a?.session_date || a?.updated_at || a?.created_at);
+      const bDate = clean(b?.session_date || b?.updated_at || b?.created_at);
+      const dateDiff = bDate.localeCompare(aDate);
+      if (dateDiff !== 0) return dateDiff;
+      return asNumber(b?.id) - asNumber(a?.id);
+    });
     const targetNote = notes.find(
       (item: any) =>
         clean(item?.topic).toLowerCase().includes("target wellness") ||
