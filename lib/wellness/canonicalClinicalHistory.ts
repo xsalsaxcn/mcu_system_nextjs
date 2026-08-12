@@ -190,7 +190,18 @@ export function canonicalNakesSheetRows(args: {
       const rowCode = clean(
         sheetField(row, "KODE", "Kode", "participant_code", "Kode Peserta"),
       ).toLowerCase();
-      return rowId === id || Boolean(code && rowCode === code);
+      // WELLNESS_NAKES_STRICT_IDENTITY_V126M61_1
+      // For rows carrying both identity keys, BOTH must match. This prevents
+      // duplicate names (e.g. Teguh 145 vs 176) from sharing a crossed row.
+      const hasRowId = rowId > 0;
+      const hasRowCode = Boolean(rowCode);
+      const idMatches = hasRowId && rowId === id;
+      const codeMatches = hasRowCode && Boolean(code && rowCode === code);
+
+      if (hasRowId && hasRowCode) return idMatches && codeMatches;
+      if (hasRowId) return idMatches;
+      if (hasRowCode) return codeMatches;
+      return false;
     })
     .map((row: any) => {
       const date = canonicalClinicalDateKey(

@@ -3822,6 +3822,44 @@ function HomeTab({
 
   async function loadCoachTargets() {
     if (!participantId) return;
+
+    // WELLNESS_PORTAL_EFFECTIVE_TARGET_PARITY_V126M61_1
+    // Effective-dated canonical is authoritative. Existing Coach-note resolver
+    // below remains untouched as compatibility fallback.
+    const effectiveTargetResult = await fetch(
+      `/api/wellness/participant/effective-targets?participant_id=${participantId}&t=${Date.now()}`,
+      { cache: "no-store", credentials: "include" },
+    )
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (
+      effectiveTargetResult?.ok &&
+      Number(effectiveTargetResult?.participant_id || 0) === participantId &&
+      effectiveTargetResult?.targets
+    ) {
+      const effectiveTargets = effectiveTargetResult.targets;
+      setCoachTargets((previous: any) => ({
+        ...previous,
+        nutrition_max_calories:
+          asNumber(effectiveTargets?.nutrition_max_calories) ||
+          previous?.nutrition_max_calories ||
+          0,
+        workout_min_calories:
+          asNumber(effectiveTargets?.workout_min_calories) ||
+          previous?.workout_min_calories ||
+          0,
+        daily_step_target:
+          asNumber(effectiveTargets?.daily_step_target) ||
+          previous?.daily_step_target ||
+          8000,
+        target_weight_kg:
+          asNumber(effectiveTargets?.target_weight_kg) ||
+          previous?.target_weight_kg ||
+          0,
+      }));
+      return;
+    }
     const result = await fetch(
       `/api/wellness/portal/coach-notes?participant_id=${participantId}&t=${Date.now()}`,
       { cache: "no-store" },
