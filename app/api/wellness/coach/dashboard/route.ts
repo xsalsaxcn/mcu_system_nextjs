@@ -27,6 +27,11 @@ import {
 } from "@/lib/wellness/streak";
 
 // WELLNESS_EDITABLE_STEP_TARGET_V126M34
+import {
+  buildEffectiveTargetTimeline,
+  effectiveTargetsForDate,
+} from "@/lib/wellness/effectiveDatedTargets";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -305,34 +310,27 @@ function mergeCoachNoteRows(...groups: any[][]) {
 // WELLNESS_COACH_TARGET_READBACK_V126M38
 // The newest individual Target Wellness note is the canonical override.
 // Participant fields and defaults are fallbacks only.
-function participantTargets(row: any, latestTargetNote: any) {
-  const fromNote = parseTargetsFromNote(latestTargetNote);
+// WELLNESS_COACH_EFFECTIVE_TARGET_PARITY_V126M65_1
+// Coach dashboard target display must use the same effective-dated canonical
+// resolver used by target audit / participant detail. No target data is written.
+function participantTargets(
+  row: any,
+  participantNotes: any[],
+  effectiveDate: string,
+) {
+  const timeline = buildEffectiveTargetTimeline({
+    participant: row,
+    notes: participantNotes || [],
+  });
+  const effective = effectiveTargetsForDate(timeline, effectiveDate);
 
   return {
-    nutrition_max_calories:
-      fromNote.nutrition_max_calories ||
-      asNumber(
-        row?.daily_calorie_limit || row?.target_calories || row?.calorie_limit,
-      ) ||
-      0,
-    workout_min_calories:
-      fromNote.workout_min_calories ||
-      asNumber(
-        row?.workout_calorie_target ||
-          row?.active_calorie_target ||
-          row?.daily_activity_calorie_target,
-      ) ||
-      0,
-    daily_step_target:
-      fromNote.daily_step_target ||
-      asNumber(row?.daily_step_target || row?.step_target) ||
-      8000,
+    nutrition_max_calories: asNumber(effective?.nutrition) || 0,
+    workout_min_calories: asNumber(effective?.workout) || 0,
+    daily_step_target: asNumber(effective?.steps) || 8000,
     workout_duration_target_minutes:
-      fromNote.workout_duration_target_minutes || 0,
-    target_weight_kg:
-      fromNote.target_weight_kg ||
-      asNumber(row?.target_weight_kg || row?.weight_target_kg) ||
-      0,
+      asNumber(effective?.duration_minutes) || 0,
+    target_weight_kg: asNumber(effective?.weight_kg) || 0,
   };
 }
 
@@ -799,7 +797,7 @@ export async function GET(request: NextRequest) {
         flag_reason: flag.reason,
         nutrition_history_sources: canonicalHistory?.sources || null,
         clinical: latestClinicalFor(id, clinicalRows),
-        targets: participantTargets(row, latestTargetNote),
+        targets: participantTargets(row, participantNotes, today),
         target_persistence: {
           source: latestTargetNote ? "individual_target_note" : "participant_or_default",
           note_id: latestTargetNote?.id || null,
