@@ -87,8 +87,14 @@ export default function AchievementChartsTab({
       2000
   );
 
+  // WELLNESS_PORTAL_CHART_COACH_TARGET_PARITY_V126M59
+  // Grafik harus memakai current effective target yang sama dengan Ringkasan/Coach.
+  // wellness_streak_targets dikirim oleh Portal participant payload dari canonical
+  // participant streak target pipeline. Field legacy tetap hanya sebagai fallback.
   const workoutMinTarget = Number(
-    participant?.workout_calorie_target ||
+    participant?.wellness_streak_targets?.workout_min_calories ||
+      participant?.workout_min_calories ||
+      participant?.workout_calorie_target ||
       participant?.active_calorie_target ||
       participant?.daily_activity_calorie_target ||
       300
