@@ -1360,8 +1360,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        message: "Gagal menyimpan workout.",
-        detail: error?.message || String(error),
+        message:
+          "Layanan penyimpanan workout belum merespons dengan benar. Silakan coba Simpan kembali.",
+        error_code: "WORKOUT_SAVE_FAILED",
+        marker: "WELLNESS_WORKOUT_SAFE_PUBLIC_ERROR_V126M62_4",
       },
       { status: 500 }
     );

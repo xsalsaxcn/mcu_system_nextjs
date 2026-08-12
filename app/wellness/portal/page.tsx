@@ -1589,8 +1589,15 @@ export default function WellnessParticipantPortalPage() {
         );
       }
 
-      await Promise.all([loadNutrition(), loadWorkoutV126M8(),
-loadNutrition(), loadHealthtalk(), loadPoints()]);
+      // WELLNESS_PORTAL_FAST_BOOT_WORKOUT_SAFE_ERROR_V126M62_4
+      // Secondary histories must not block the full-screen Portal loader.
+      // Also remove the accidental duplicate loadNutrition() request.
+      void Promise.allSettled([
+        loadNutrition(),
+        loadWorkoutV126M8(),
+        loadHealthtalk(),
+        loadPoints(),
+      ]);
     } else {
       setMessage(result.message || "Session Wellness belum aktif.");
       if (/dinonaktifkan|session|otp/i.test(clean(result.message))) {
@@ -2333,8 +2340,10 @@ loadNutrition(), loadHealthtalk(), loadPoints()]);
         result.message || "Workout manual berhasil disimpan.",
       );
     } else {
+      // WELLNESS_PORTAL_FAST_BOOT_WORKOUT_SAFE_ERROR_V126M62_4
+      // Never render raw upstream/server detail in Participant UI.
       const workoutErrorMessage =
-        result.detail || result.message || "Gagal menyimpan workout.";
+        result.message || "Gagal menyimpan workout.";
       setMessage(workoutErrorMessage);
       failSavingOverlayV126M46(workoutErrorMessage);
     }
