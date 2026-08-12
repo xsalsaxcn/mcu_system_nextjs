@@ -30,6 +30,7 @@ import {
 import {
   buildEffectiveTargetTimeline,
   effectiveTargetsForDate,
+  effectiveTargetRevisionForDate,
 } from "@/lib/wellness/effectiveDatedTargets";
 
 export const dynamic = "force-dynamic";
@@ -713,8 +714,33 @@ export async function GET(request: NextRequest) {
         (note) => !isChatNote(note),
       );
       const latestNote = instructionNotes[0] || null;
+      // WELLNESS_COACH_EFFECTIVE_LATEST_NOTE_V126M65_2
+      // The card Target Individual Terakhir must point to the same
+      // effective-dated revision used by participant.targets.
+      const targetTimelineV126M65_2 = buildEffectiveTargetTimeline({
+        participant: row,
+        notes: participantNotes,
+      });
+      const effectiveRevisionV126M65_2 =
+        effectiveTargetRevisionForDate(
+          targetTimelineV126M65_2,
+          today,
+        );
+      const effectiveTargetNoteIdV126M65_2 = asNumber(
+        effectiveRevisionV126M65_2?.note_id,
+      );
       const latestTargetNote =
-        newestNotes(participantNotes.filter(isTargetWellnessNote))[0] || null;
+        (effectiveTargetNoteIdV126M65_2 > 0
+          ? participantNotes.find(
+              (note: any) =>
+                asNumber(note?.id) ===
+                effectiveTargetNoteIdV126M65_2,
+            )
+          : null) ||
+        newestNotes(
+          participantNotes.filter(isTargetWellnessNote),
+        )[0] ||
+        null;
       const latestInstructionNote =
         instructionNotes.find((note) => !isTargetWellnessNote(note)) || null;
       const todayActs = acts.filter((item) => activityDate(item) === today);
