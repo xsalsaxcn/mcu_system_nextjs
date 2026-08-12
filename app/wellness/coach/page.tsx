@@ -3785,6 +3785,65 @@ function ParticipantDetail({
   const nutritionSources = detail?.nutrition_sources || null;
   const healthtalks = detail?.healthtalks || [];
   const pointRules = detail?.point_rules || {};
+
+  // WELLNESS_COACH_CANONICAL_TARGET_CARD_V126M67_1_1
+  // Card target membaca participant.targets canonical yang sudah effective-dated.
+  // latest_target_note hanya fallback bila canonical targets belum tersedia.
+  const canonicalTargetsV126M67_1_1 =
+    participant?.targets || {};
+
+  const canonicalTargetDisplayV126M67_1_1 = [
+    Number(
+      canonicalTargetsV126M67_1_1?.nutrition_max_calories ||
+        0,
+    ) > 0
+      ? `Target Nutrisi: ${fmtNumber(
+          canonicalTargetsV126M67_1_1.nutrition_max_calories,
+          0,
+        )} kkal/hari`
+      : "",
+    Number(
+      canonicalTargetsV126M67_1_1?.workout_min_calories ||
+        0,
+    ) > 0
+      ? `Target Workout: ${fmtNumber(
+          canonicalTargetsV126M67_1_1.workout_min_calories,
+          0,
+        )} kkal/hari`
+      : "",
+    Number(
+      canonicalTargetsV126M67_1_1?.daily_step_target ||
+        0,
+    ) > 0
+      ? `Target Langkah: ${fmtNumber(
+          canonicalTargetsV126M67_1_1.daily_step_target,
+          0,
+        )} langkah/hari`
+      : "",
+    Number(
+      canonicalTargetsV126M67_1_1
+        ?.workout_duration_target_minutes ||
+        0,
+    ) > 0
+      ? `Target Latihan: ${fmtNumber(
+          canonicalTargetsV126M67_1_1
+            .workout_duration_target_minutes,
+          0,
+        )} menit/hari aktif`
+      : "",
+    Number(
+      canonicalTargetsV126M67_1_1?.target_weight_kg ||
+        0,
+    ) > 0
+      ? `Target BB: ${fmtNumber(
+          canonicalTargetsV126M67_1_1.target_weight_kg,
+          1,
+        )} kg`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const streak = detail?.streak || {};
   const workoutSourceBreakdown = detail?.workout_source_breakdown || {};
   const workoutSourceSubtitle = [
@@ -4532,10 +4591,13 @@ function ParticipantDetail({
             <div className="text-[10px] font-black uppercase tracking-wide text-teal-700">
               Target Individual Terakhir
             </div>
-            {latestTargetNote ? (
+            {canonicalTargetDisplayV126M67_1_1 || latestTargetNote ? (
               <>
                 <div className="mt-2 whitespace-pre-line text-xs font-bold leading-5 text-slate-700">
-                  {latestTargetNote.action_plan || latestTargetNote.coach_note || "-"}
+                  {canonicalTargetDisplayV126M67_1_1 ||
+                    latestTargetNote?.action_plan ||
+                    latestTargetNote?.coach_note ||
+                    "-"}
                 </div>
                 <div className="mt-2 text-[10px] font-bold text-teal-800">
                   Kode {participant.code || "-"} • Participant ID {participant.id || "-"}

@@ -1165,6 +1165,10 @@ export async function GET(req: NextRequest) {
   // Participant manual-workout history has ONE visible source: Google Sheet.
   // Supabase remains an internal mirror for points/streak/reconciliation only
   // and is intentionally excluded from Portal history to prevent duplicates.
+  // WELLNESS_WORKOUT_SHEET_PRIMARY_MIRROR_FALLBACK_V126M67_1_1
+  // Google Sheet tetap primary. Supabase manual mirror hanya dibaca ketika
+  // hasil exact Sheet untuk peserta kosong/gagal. Kedua sumber TIDAK di-merge
+  // pada kondisi normal sehingga duplicate history tidak kembali muncul.
   const sheetResult = await fetchWellnessGoogleSheetRows({
     participantId: Number(participant.id),
     code: participantCode || undefined,
@@ -1178,22 +1182,7 @@ export async function GET(req: NextRequest) {
       "Gagal membaca Google Sheet.",
   }));
 
-  if (sheetResult?.ok === false) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          "Gagal membaca riwayat workout manual dari Google Sheet.",
-        google_sheet_message:
-          sheetResult?.message || "",
-        marker:
-          "WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1",
-      },
-      { status: 500 },
-    );
-  }
-
-  const logs =
+  const sheetLogsV126M67_1_1 =
     (sheetResult?.rows || [])
       .filter(isWorkoutSheetRowV126M9)
       .filter((row: any) =>
@@ -1222,20 +1211,93 @@ export async function GET(req: NextRequest) {
         ),
       );
 
+  let mirrorLogsV126M67_1_1: any[] = [];
+  let mirrorErrorV126M67_1_1 = "";
+
+  if (
+    sheetResult?.ok === false ||
+    sheetLogsV126M67_1_1.length === 0
+  ) {
+    const mirrorResultV126M67_1_1 = await supabase
+      .from("wellness_activity_logs")
+      .select("*")
+      .eq("participant_id", Number(participant.id))
+      .eq("source", "manual")
+      .order("log_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (mirrorResultV126M67_1_1.error) {
+      mirrorErrorV126M67_1_1 =
+        mirrorResultV126M67_1_1.error.message ||
+        "Gagal membaca mirror workout manual.";
+    } else {
+      mirrorLogsV126M67_1_1 =
+        mirrorResultV126M67_1_1.data || [];
+    }
+  }
+
+  const useMirrorFallbackV126M67_1_1 =
+    sheetLogsV126M67_1_1.length === 0 &&
+    mirrorLogsV126M67_1_1.length > 0;
+
+  if (
+    sheetResult?.ok === false &&
+    !useMirrorFallbackV126M67_1_1
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Gagal membaca riwayat workout manual dari Google Sheet dan mirror.",
+        google_sheet_message:
+          sheetResult?.message || "",
+        mirror_message:
+          mirrorErrorV126M67_1_1 || "",
+        marker:
+          "WELLNESS_WORKOUT_SHEET_PRIMARY_MIRROR_FALLBACK_V126M67_1_1",
+      },
+      { status: 500 },
+    );
+  }
+
+  const logs = useMirrorFallbackV126M67_1_1
+    ? mirrorLogsV126M67_1_1
+    : sheetLogsV126M67_1_1;
+
   return NextResponse.json({
     ok: true,
     marker:
-      "WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1",
+      "WELLNESS_WORKOUT_SHEET_PRIMARY_MIRROR_FALLBACK_V126M67_1_1",
     participant_id:
       Number(participant.id),
     logs,
+    history_source:
+      useMirrorFallbackV126M67_1_1
+        ? "supabase_mirror_fallback"
+        : "google_sheet",
     sources: {
-      canonical:
+      primary:
         "google_sheet",
+      canonical:
+        useMirrorFallbackV126M67_1_1
+          ? "supabase_mirror_fallback"
+          : "google_sheet",
       google_sheet:
-        logs.length,
-      supabase_history_read:
-        false,
+        sheetLogsV126M67_1_1.length,
+      google_sheet_ok:
+        sheetResult?.ok !== false,
+      google_sheet_message:
+        sheetResult?.message || "",
+      supabase_fallback:
+        mirrorLogsV126M67_1_1.length,
+      supabase_fallback_read:
+        sheetResult?.ok === false ||
+        sheetLogsV126M67_1_1.length === 0,
+      fallback_used:
+        useMirrorFallbackV126M67_1_1,
+      mirror_message:
+        mirrorErrorV126M67_1_1 || "",
     },
   });
 }
