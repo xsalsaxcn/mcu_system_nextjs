@@ -1315,6 +1315,13 @@ export default function WellnessParticipantPortalPage() {
   } | null>(null);
   const workoutSubmitInFlightV126L = useRef(false);
 
+  // WELLNESS_WORKOUT_STABLE_SUBMISSION_V126M66_1
+  // Retry manual untuk payload workout yang sama memakai Submission ID sama.
+  const workoutPendingSubmissionV126M66_1 = useRef<{
+    id: string;
+    fingerprint: string;
+  } | null>(null);
+
   function createSubmissionIdV126L(type: string) {
     const randomId =
       typeof crypto !== "undefined" &&
@@ -2281,9 +2288,40 @@ export default function WellnessParticipantPortalPage() {
         : "Menghitung kalori aktivitas dari Master Kalori Olahraga...",
     );
 
-    const submissionId =
-      createSubmissionIdV126L("workout");
+    const workoutFingerprintV126M66_1 = JSON.stringify([
+      clean(workoutForm.log_date),
+      clean(workoutForm.started_at),
+      clean(workoutForm.activity_type),
+      clean(workoutForm.activity_name),
+      clean(workoutForm.calculation_mode),
+      clean(workoutForm.duration_minutes),
+      clean(workoutForm.duration_seconds),
+      clean(workoutForm.distance_km),
+      clean(workoutForm.steps),
+      clean(workoutForm.notes),
+      clean(workoutForm.active_calories),
+      // WELLNESS_WORKOUT_STABLE_SUBMISSION_TYPE_HOTFIX_V126M66_1_1
+      clean(workoutForm.average_heart_rate),
+      clean(workoutForm.max_heart_rate),
+      clean(workoutForm.device_source),
+      workoutEvidence?.name || "",
+      workoutEvidence?.size || 0,
+      workoutEvidence?.lastModified || 0,
+    ]);
 
+    const previousWorkoutSubmissionV126M66_1 =
+      workoutPendingSubmissionV126M66_1.current;
+
+    const submissionId =
+      previousWorkoutSubmissionV126M66_1?.fingerprint ===
+      workoutFingerprintV126M66_1
+        ? previousWorkoutSubmissionV126M66_1.id
+        : createSubmissionIdV126L("workout");
+
+    workoutPendingSubmissionV126M66_1.current = {
+      id: submissionId,
+      fingerprint: workoutFingerprintV126M66_1,
+    };
     const body = new FormData();
     body.append("submission_id", submissionId);
     body.append("log_date", workoutForm.log_date);
@@ -2333,6 +2371,7 @@ export default function WellnessParticipantPortalPage() {
         notes: "",
       }));
       setWorkoutEvidence(null);
+      workoutPendingSubmissionV126M66_1.current = null;
       updateSavingOverlayV126M46("Data tersimpan. Memperbarui riwayat workout...");
       await loadMe({ keepMessage: true });
       setActiveTab("history");

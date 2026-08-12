@@ -27,6 +27,164 @@ export const runtime = "nodejs";
 
 const MARKER = "WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT";
 
+const WORKOUT_STABLE_DELIVERY_MARKER_V126M66_1 =
+  "WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1";
+
+function workoutSleepV126M66_1(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function workoutSheetSubmissionIdV126M66_1(row: any) {
+  return clean(
+    row?.["Submission ID"] ||
+      row?.submission_id ||
+      row?.submissionId ||
+      row?.["Submission Id"],
+  );
+}
+
+async function findWorkoutSheetSubmissionV126M66_1(params: {
+  participant: any;
+  submissionId: string;
+}) {
+  try {
+    const result = await fetchWellnessGoogleSheetRows({
+      participantId: Number(params.participant?.id),
+      code:
+        clean(
+          params.participant?.code ||
+            params.participant?.employee_code ||
+            params.participant?.no_karyawan,
+        ) || undefined,
+      logType: "workout",
+      limit: 1000,
+    });
+
+    if (result?.ok === false) return null;
+
+    return (
+      (result?.rows || []).find(
+        (row: any) =>
+          workoutSheetSubmissionIdV126M66_1(row) ===
+          params.submissionId,
+      ) || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function postWorkoutSheetStableV126M66_1(params: {
+  participant: any;
+  payload: any;
+  submissionId: string;
+}) {
+  const maxAttempts = 2;
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await Promise.race([
+        postToWellnessWebhook(params.payload),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("WORKOUT_SHEET_TIMEOUT")),
+            10000,
+          ),
+        ),
+      ]);
+
+      return result;
+    } catch (error: any) {
+      lastError = error;
+    }
+
+    // Response can be lost after Apps Script writes the row.
+    // Verify the SAME Submission ID before retrying.
+    await workoutSleepV126M66_1(800);
+
+    const recoveredRow =
+      await findWorkoutSheetSubmissionV126M66_1({
+        participant: params.participant,
+        submissionId: params.submissionId,
+      });
+
+    if (recoveredRow) {
+      return {
+        ok: true,
+        recovered: true,
+        submissionId: params.submissionId,
+        rowNumber:
+          Number(
+            recoveredRow?._rowNumber ||
+              recoveredRow?.rowNumber ||
+              0,
+          ) || null,
+        marker:
+          WORKOUT_STABLE_DELIVERY_MARKER_V126M66_1,
+      };
+    }
+
+    if (attempt < maxAttempts) {
+      await workoutSleepV126M66_1(700);
+    }
+  }
+
+  throw lastError || new Error("Workout Google Sheet gagal tanpa respons.");
+}
+
+async function uploadWorkoutEvidenceSafeV126M66_1(params: {
+  evidence: any;
+  participant: any;
+  companyName: string;
+  logDate: string;
+}) {
+  if (!params.evidence) {
+    return {
+      result: null,
+      warning: "",
+    };
+  }
+
+  try {
+    const result = await Promise.race([
+      uploadEvidenceToDrive({
+        file: params.evidence,
+        participant: params.participant,
+        companyName: params.companyName,
+        category: "Workout",
+        activeTab: "activity",
+        fieldKey: "activity_evidence",
+        logDate: params.logDate,
+        marker: MARKER,
+      }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("WORKOUT_EVIDENCE_UPLOAD_TIMEOUT")),
+          10000,
+        ),
+      ),
+    ]);
+
+    return {
+      result,
+      warning: "",
+    };
+  } catch (error: any) {
+    console.warn(
+      "WELLNESS_WORKOUT_EVIDENCE_FAIL_OPEN_V126M66_1",
+      error?.message || error,
+    );
+
+    return {
+      result: null,
+      warning:
+        "Bukti aktivitas belum berhasil diunggah, tetapi data workout tetap diproses.",
+    };
+  }
+}
+
+
 // WELLNESS_WORKOUT_CANONICAL_SHEET_HISTORY_V126M9
 // Google Sheet is the durable source for participant manual workout submissions.
 // Supabase remains a mirror. GET merges both so device refresh cannot hide a
@@ -911,81 +1069,16 @@ function googleSheetWorkoutLogsV126M6(rows: any[] = [], participant: any) {
 }
 
 export async function GET(req: NextRequest) {
-  const { supabase, participant } = await getParticipant(req);
+  const { participant } = await getParticipant(req);
 
   if (!participant?.id) {
     return NextResponse.json(
       {
         ok: false,
-        message:
-          "OTP/session peserta belum aktif.",
+        message: "OTP/session peserta belum aktif.",
       },
       { status: 401 },
     );
-  }
-
-  // WELLNESS_MASTER_WORKOUT_LIVE_CALCULATION_V126M50B_4
-  // Read-only preview. It uses the exact same master calorie engine as POST/PATCH,
-  // but never writes a workout row.
-  const requestUrlV126M50B4 = new URL(req.url);
-  if (requestUrlV126M50B4.searchParams.get("calculate") === "master") {
-    const activityType =
-      clean(requestUrlV126M50B4.searchParams.get("activity_type")) ||
-      "Workout";
-    const activityName = clean(
-      requestUrlV126M50B4.searchParams.get("activity_name"),
-    );
-    const durationMinutes = toNumberOrNull(
-      requestUrlV126M50B4.searchParams.get("duration_minutes"),
-    );
-    const distanceKm = toNumberOrNull(
-      requestUrlV126M50B4.searchParams.get("distance_km"),
-    );
-
-    if (!durationMinutes || durationMinutes <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          preview: true,
-          message: "Durasi wajib diisi untuk menghitung kalori dari Master Workout.",
-        },
-        { status: 400 },
-      );
-    }
-
-    const weightKg = await getLatestWeightKg(supabase, participant);
-    const activityRef = await findActivityReference(
-      supabase,
-      activityType,
-      activityName,
-    );
-    const calculated = calculateCalories({
-      activityType,
-      durationMinutes,
-      distanceKm,
-      weightKg,
-      activityRef,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      preview: true,
-      source: "manual",
-      calculation_source: "master_workout",
-      active_calories: calculated.calories,
-      participant_weight_kg_used: weightKg,
-      activity_reference_id: activityRef?.id || null,
-      activity_reference_name: activityRef?.activity_name || null,
-      master_found: Boolean(activityRef?.id),
-      calorie_method: calculated.method,
-      met_used: calculated.met,
-      calories_per_km_used: calculated.calories_per_km,
-      calorie_match_status: activityRef?.match_status || "not_found",
-      warning: activityRef?.id
-        ? null
-        : "Aktivitas belum ditemukan di Master Workout. Sistem memakai fallback MET existing.",
-      marker: "WELLNESS_MASTER_WORKOUT_LIVE_CALCULATION_V126M50B_4",
-    });
   }
 
   const participantCode = clean(
@@ -994,49 +1087,39 @@ export async function GET(req: NextRequest) {
       participant?.no_karyawan,
   );
 
-  const [mirrorResult, sheetResult] =
-    await Promise.all([
-      supabase
-        .from("wellness_activity_logs")
-        .select("*")
-        .eq(
-          "participant_id",
-          Number(participant.id),
-        )
-        .eq("source", "manual")
-        .order(
-          "log_date",
-          { ascending: false },
-        )
-        .order(
-          "created_at",
-          { ascending: false },
-        )
-        .limit(500),
-      fetchWellnessGoogleSheetRows({
-        participantId:
-          Number(participant.id),
-        code:
-          participantCode || undefined,
-        logType:
-          "workout",
-        limit:
-          1000,
-      }).catch((error: any) => ({
+  // WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1
+  // Participant manual-workout history has ONE visible source: Google Sheet.
+  // Supabase remains an internal mirror for points/streak/reconciliation only
+  // and is intentionally excluded from Portal history to prevent duplicates.
+  const sheetResult = await fetchWellnessGoogleSheetRows({
+    participantId: Number(participant.id),
+    code: participantCode || undefined,
+    logType: "workout",
+    limit: 1000,
+  }).catch((error: any) => ({
+    ok: false,
+    rows: [],
+    message:
+      error?.message ||
+      "Gagal membaca Google Sheet.",
+  }));
+
+  if (sheetResult?.ok === false) {
+    return NextResponse.json(
+      {
         ok: false,
-        rows: [],
         message:
-          error?.message ||
-          "Gagal membaca Google Sheet.",
-      })),
-    ]);
+          "Gagal membaca riwayat workout manual dari Google Sheet.",
+        google_sheet_message:
+          sheetResult?.message || "",
+        marker:
+          "WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1",
+      },
+      { status: 500 },
+    );
+  }
 
-  const mirrorRows =
-    mirrorResult.error
-      ? []
-      : mirrorResult.data || [];
-
-  const sheetRows =
+  const logs =
     (sheetResult?.rows || [])
       .filter(isWorkoutSheetRowV126M9)
       .filter((row: any) =>
@@ -1050,50 +1133,35 @@ export async function GET(req: NextRequest) {
           row,
           participant,
         ),
+      )
+      .sort((left: any, right: any) =>
+        clean(
+          right?.started_at ||
+            right?.created_at ||
+            right?.log_date,
+        ).localeCompare(
+          clean(
+            left?.started_at ||
+              left?.created_at ||
+              left?.log_date,
+          ),
+        ),
       );
-
-  if (
-    mirrorResult.error &&
-    sheetResult?.ok === false
-  ) {
-    return NextResponse.json(
-      {
-        ok: false,
-        message:
-          "Gagal membaca workout manual dari Supabase dan Google Sheet.",
-        detail:
-          mirrorResult.error.message,
-        google_sheet_message:
-          sheetResult?.message || "",
-      },
-      { status: 500 },
-    );
-  }
-
-  const logs =
-    mergeWorkoutHistoryV126M9(
-      mirrorRows,
-      sheetRows,
-    );
 
   return NextResponse.json({
     ok: true,
     marker:
-      "WELLNESS_WORKOUT_CANONICAL_SHEET_HISTORY_V126M9",
+      "WELLNESS_WORKOUT_SHEET_ONLY_STABLE_V126M66_1",
     participant_id:
       Number(participant.id),
     logs,
     sources: {
-      supabase:
-        mirrorRows.length,
+      canonical:
+        "google_sheet",
       google_sheet:
-        sheetRows.length,
-      merged:
         logs.length,
-      google_sheet_ok:
-        sheetResult?.ok !== false,
-      supabase_ok:
-        !mirrorResult.error,
+      supabase_history_read:
+        false,
     },
   });
 }
@@ -1242,16 +1310,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const evidenceResult = await uploadEvidenceToDrive({
-      file: evidence,
-      participant,
-      companyName,
-      category: "Workout",
-      activeTab: "activity",
-      fieldKey: "activity_evidence",
-      logDate,
-      marker: MARKER,
-    });
+    const evidenceDeliveryV126M66_1 =
+      await uploadWorkoutEvidenceSafeV126M66_1({
+        evidence,
+        participant,
+        companyName,
+        logDate,
+      });
+    const evidenceResult =
+      evidenceDeliveryV126M66_1.result;
+    const evidenceWarningV126M66_1 =
+      evidenceDeliveryV126M66_1.warning;
 
     const sheetRow = buildWorkoutRow({
       participant,
@@ -1275,12 +1344,16 @@ export async function POST(req: NextRequest) {
     });
 
     const sheetResult =
-      await postToWellnessWebhook({
-        sheet: getWellnessSheetName(),
-        row: sheetRow,
+      await postWorkoutSheetStableV126M66_1({
+        participant,
         submissionId,
-        submission_id: submissionId,
-        marker: MARKER,
+        payload: {
+          sheet: getWellnessSheetName(),
+          row: sheetRow,
+          submissionId,
+          submission_id: submissionId,
+          marker: MARKER,
+        },
       });
 
     const payload: any = {
@@ -1326,20 +1399,64 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const { data, error } = await supabase
+    let data: any = null;
+    let mirrorWarningV126M66_1 = "";
+
+    const mirrorInsertV126M66_1 = await supabase
       .from("wellness_activity_logs")
       .insert(payload)
       .select("*")
       .single();
 
-    if (error) throw error;
+    if (mirrorInsertV126M66_1.error) {
+      const existingMirrorV126M66_1 = await supabase
+        .from("wellness_activity_logs")
+        .select("*")
+        .eq("participant_id", Number(participant.id))
+        .eq("source", "manual")
+        .eq("external_activity_id", externalId)
+        .limit(1)
+        .maybeSingle();
 
-    const workoutPoint = await reconcileWorkoutDailyPoint({
-      supabase,
-      participant,
-      logDate,
-      sourceId: data?.id || null,
-    });
+      if (existingMirrorV126M66_1.data?.id) {
+        data = existingMirrorV126M66_1.data;
+      } else {
+        mirrorWarningV126M66_1 =
+          mirrorInsertV126M66_1.error?.message ||
+          "Google Sheet sudah tersimpan, tetapi mirror internal belum tersimpan.";
+      }
+    } else {
+      data = mirrorInsertV126M66_1.data;
+    }
+
+    let workoutPoint: any = {
+      ok: false,
+      points: 0,
+      delta: 0,
+      warning: mirrorWarningV126M66_1
+        ? "Poin workout menunggu mirror internal."
+        : "",
+    };
+
+    if (data?.id) {
+      try {
+        workoutPoint = await reconcileWorkoutDailyPoint({
+          supabase,
+          participant,
+          logDate,
+          sourceId: data.id,
+        });
+      } catch (pointError: any) {
+        workoutPoint = {
+          ok: false,
+          points: 0,
+          delta: 0,
+          warning:
+            pointError?.message ||
+            "Workout tersimpan, tetapi poin harian belum berhasil direkonsiliasi.",
+        };
+      }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -1350,9 +1467,21 @@ export async function POST(req: NextRequest) {
       log: data,
       points_total_delta: workoutPoint.delta || 0,
       workout_point: workoutPoint,
-      point_warnings: workoutPoint.warning ? [workoutPoint.warning] : [],
+      point_warnings: [
+        ...(workoutPoint.warning ? [workoutPoint.warning] : []),
+        ...(mirrorWarningV126M66_1 ? [mirrorWarningV126M66_1] : []),
+        ...(evidenceWarningV126M66_1 ? [evidenceWarningV126M66_1] : []),
+      ],
+      mirror_warning:
+        mirrorWarningV126M66_1 || null,
+      evidence_warning:
+        evidenceWarningV126M66_1 || null,
+      history_source:
+        "google_sheet",
       google_drive: evidenceResult,
       google_sheet: sheetResult,
+      stable_delivery_marker:
+        WORKOUT_STABLE_DELIVERY_MARKER_V126M66_1,
     });
   } catch (error: any) {
     console.error("WELLNESS_PARTICIPANT_ALL_FORMS_EXISTING_GS_V398_WORKOUT_ERROR", error);
