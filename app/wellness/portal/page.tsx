@@ -1383,12 +1383,26 @@ export default function WellnessParticipantPortalPage() {
     }
   }
 
+  // WELLNESS_MANUAL_HISTORY_STABLE_SOURCE_V126M66_3
+  const loadWorkoutSequenceV126M66_3 = useRef(0);
+
   async function loadWorkoutV126M8() {
+    const requestSequenceV126M66_3 =
+      ++loadWorkoutSequenceV126M66_3.current;
+
     const result = await fetch("/api/wellness/participant/workout", {
       cache: "no-store",
     })
       .then((response) => response.json())
       .catch(() => ({ ok: false, logs: [] }));
+
+    // Jangan biarkan response refresh lama menimpa hasil Sheet yang lebih baru.
+    if (
+      requestSequenceV126M66_3 !==
+      loadWorkoutSequenceV126M66_3.current
+    ) {
+      return result;
+    }
 
     if (result.ok) {
       setManualWorkoutLogsV126M8(
@@ -2486,8 +2500,27 @@ export default function WellnessParticipantPortalPage() {
           ? activitySummary
           : [];
 
+    // WELLNESS_MANUAL_HISTORY_STABLE_SOURCE_V126M66_3
+    // Manual workout visible di Participant History hanya dari Google Sheet.
+    // Supabase manual mirror tetap internal untuk point/streak/reconciliation.
+    const deviceActivityRowsV126M66_3 = activityRows.filter(
+      (item: any) => {
+        const raw = activityRawPayloadV72(item);
+        const provider = clean(
+          item?.source ||
+            item?.provider ||
+            item?.input_source ||
+            raw?.provider,
+        )
+          .toLowerCase()
+          .replace(/-/g, "_");
+
+        return provider !== "manual" && provider !== "google_sheet";
+      },
+    );
+
     const sourceRows = mergeWorkoutRowsV126M8(
-      activityRows,
+      deviceActivityRowsV126M66_3,
       manualWorkoutLogsV126M8,
     );
 
