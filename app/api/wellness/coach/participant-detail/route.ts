@@ -872,20 +872,75 @@ export async function GET(request: NextRequest) {
         value: Math.round(value * 10) / 10,
       }));
 
+    // WELLNESS_COACH_HARI_WAHYU_BMI_READ_FIX_V126M68_1
+    // Sangat sempit: fallback BMI hanya untuk Hari Wahyu Nugroho (participant 42).
+    // Data existing tidak diubah; peserta lain tetap memakai stored BMI existing.
+    const bodyMetricRowsV126M68 = mergeRows(scopedWeightRows, clinicalAll);
+    const hariValidHeightPointsV126M68 =
+      Number(participant.id) === 42
+        ? compactClinicalPoints(
+            bodyMetricRowsV126M68,
+            (row) => {
+              const height = nullableNumber(row?.height_cm, row?.height);
+              return height !== null && height >= 120 && height <= 230
+                ? height
+                : null;
+            }
+          )
+        : [];
+    const hariLatestValidHeightCmV126M68 =
+      hariValidHeightPointsV126M68.at(-1)?.value ?? null;
+
     const charts = {
       nutrition_calories: nutritionChart,
       workout_calories: workoutChart,
       steps: stepChart,
       weight_kg: compactClinicalPoints(
-        mergeRows(scopedWeightRows, clinicalAll),
+        bodyMetricRowsV126M68,
         (row) => nullableNumber(row?.weight_kg, row?.weight, row?.body_weight)
       ),
       bmi: compactClinicalPoints(
-        mergeRows(scopedWeightRows, clinicalAll),
-        (row) => nullableNumber(row?.bmi)
+        bodyMetricRowsV126M68,
+        (row) => {
+          const storedBmi = nullableNumber(row?.bmi);
+
+          // Semua peserta selain Hari tetap 100% memakai behavior existing.
+          if (Number(participant.id) !== 42) {
+            return storedBmi;
+          }
+
+          // BMI Hari yang masih wajar juga tidak disentuh.
+          if (storedBmi !== null && storedBmi >= 10 && storedBmi <= 80) {
+            return storedBmi;
+          }
+
+          // Hanya repair BMI Hari yang implausible.
+          if (storedBmi !== null && (storedBmi < 10 || storedBmi > 80)) {
+            const weight = nullableNumber(
+              row?.weight_kg,
+              row?.weight,
+              row?.body_weight
+            );
+            const rowHeight = nullableNumber(row?.height_cm, row?.height);
+            const height =
+              rowHeight !== null && rowHeight >= 120 && rowHeight <= 230
+                ? rowHeight
+                : hariLatestValidHeightCmV126M68;
+
+            if (weight !== null && weight > 0 && height !== null && height > 0) {
+              return (
+                Math.round(
+                  (weight / Math.pow(height / 100, 2)) * 10
+                ) / 10
+              );
+            }
+          }
+
+          return storedBmi;
+        }
       ),
       waist_cm: compactClinicalPoints(
-        mergeRows(scopedWeightRows, clinicalAll),
+        bodyMetricRowsV126M68,
         (row) => nullableNumber(row?.waist_cm, row?.waist_circumference)
       ),
       hba1c: compactClinicalPoints(
