@@ -1156,6 +1156,22 @@ export async function GET(request: NextRequest) {
         healthtalk_count: sheetHealthtalkRows.length,
         nakes_clinical_count: sheetNakesClinicalRows.length,
         manual_workout_count: sheetManualWorkoutRowsV126M72.length,
+        // WELLNESS_COACH_WORKOUT_SHEET_RUNTIME_DEBUG_V126M75_1
+        // Read-only response metadata only; no persistence or scoring changes.
+        workout_sheet_debug: {
+          fetch_ok: Boolean(sheetResult?.ok),
+          fetch_message: clean((sheetResult as any)?.message),
+          raw_rows: Array.isArray(sheetResult?.rows) ? sheetResult.rows.length : 0,
+          workout_like_rows: (sheetResult?.rows || []).filter((row: any) =>
+            isWorkoutSheetRowV126M72(row),
+          ).length,
+          participant_match_rows: (sheetResult?.rows || []).filter((row: any) =>
+            workoutSheetMatchesParticipantV126M72(row, participant),
+          ).length,
+          matched_workout_rows: sheetManualWorkoutRowsV126M72.length,
+          participant_id: participantId,
+          participant_code: code,
+        },
       },
     });
   } catch (error: any) {
