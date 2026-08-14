@@ -1,4 +1,5 @@
 // WELLNESS_CANONICAL_WORKOUT_READ_PATH_V126M71
+// WELLNESS_CANONICAL_WORKOUT_LEGACY_DEVICE_PRESERVE_V126M71_1
 // Read-only canonical workout history shared by Participant streak and Coach.
 // Contract:
 // - manual workout visible/counted = Google Sheet only
@@ -315,7 +316,9 @@ export async function loadCanonicalWorkoutHistories(params: {
           message: clean(params.sheetResult.message),
         })
       : fetchWellnessGoogleSheetRows({
-          logType: "workout",
+          // V126M71.1: do not depend on Apps Script global logType filtering.
+          // Existing Coach Ranking/Company flows already fetch the rows then
+          // classify locally; this also keeps legacy workout rows visible.
           limit: params.sheetLimit || 10000,
         }).catch((error: any) => ({
           ok: false,
@@ -347,8 +350,15 @@ export async function loadCanonicalWorkoutHistories(params: {
       hiddenManualCount.set(id, (hiddenManualCount.get(id) || 0) + 1);
       continue;
     }
-    const provider = activityFitnessProvider(row);
-    if (provider !== "google_fit" && provider !== "health_connect") continue;
+
+    // V126M71.1 regression fix:
+    // Keep every NON-MANUAL row that already passed the pre-existing
+    // filterActivityRowsByFitnessSource contract. Older Google Fit / Health
+    // Connect rows are not guaranteed to expose a source string that
+    // normalizeFitnessSource recognises exactly. V126M71 incorrectly applied
+    // a second strict provider gate here and dropped those historical rows.
+    // Manual mirrors remain excluded above, so this does not reintroduce the
+    // Sheet + Supabase manual duplicate.
     if (!deviceByParticipant.has(id)) deviceByParticipant.set(id, []);
     deviceByParticipant.get(id)!.push(row);
   }
@@ -441,12 +451,34 @@ export async function loadCanonicalWorkoutHistory(params: {
   sheetLimit?: number;
 }): Promise<CanonicalWorkoutParticipantHistory> {
   const id = participantId(params.participant);
+  const code = clean(
+    params.participant?.code ||
+      params.participant?.employee_code ||
+      params.participant?.no_karyawan,
+  );
+
+  // V126M71.1: single-participant consumers (Participant streak / Coach
+  // detail) should use the same exact participant-scoped Sheet read that the
+  // stable participant workout history uses. If the caller already fetched
+  // Sheet rows, preserve that result and do not issue another request.
+  const exactSheetResult = params.sheetResult
+    ? params.sheetResult
+    : await fetchWellnessGoogleSheetRows({
+        participantId: id || undefined,
+        code: code || undefined,
+        limit: params.sheetLimit || 2000,
+      }).catch((error: any) => ({
+        ok: false,
+        rows: [] as any[],
+        message: clean(error?.message || "Google Sheet workout source unavailable."),
+      }));
+
   const bulk = await loadCanonicalWorkoutHistories({
     supabase: params.supabase,
     participants: [params.participant],
     dbRows: params.dbRows,
     controlMap: params.controlMap,
-    sheetResult: params.sheetResult,
+    sheetResult: exactSheetResult,
     sheetLimit: params.sheetLimit,
   });
 
