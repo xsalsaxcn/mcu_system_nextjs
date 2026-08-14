@@ -459,6 +459,97 @@ function workoutSourceBreakdownV126M31(rows: any[], targetDate: string) {
   return result;
 }
 
+// WELLNESS_COACH_MANUAL_WORKOUT_ACCUMULATION_V126M72
+// Display-only canonical workout calories for Coach Participant Detail:
+// - preserve every device row that already passed the existing fitness-source flow;
+// - hide Supabase manual mirrors from display to avoid double counting;
+// - add durable manual workout rows from Google Sheet;
+// - point/streak success rules remain unchanged by this patch.
+function isManualWorkoutMirrorV126M72(row: any) {
+  const source = activitySourceKeyV126M31(row);
+  return source === "manual" || source === "google_sheet";
+}
+
+function isWorkoutSheetRowV126M72(row: any) {
+  const logType = clean(sheetField(row, "Log Type", "log_type")).toLowerCase();
+  if (logType === "workout" || logType === "activity") return true;
+  if (logType === "nutrition" || logType === "healthtalk") return false;
+
+  return Boolean(
+    clean(sheetField(row, "Jenis Workout/Aktifitas")) ||
+      clean(sheetField(row, "Kalori Aktivitas")) ||
+      clean(sheetField(row, "Melakukan Workout/Aktifitas Ringan?")),
+  );
+}
+
+function workoutSheetMatchesParticipantV126M72(row: any, participant: any) {
+  const rowParticipantId = asNumber(
+    sheetField(row, "Participant ID", "participant_id"),
+  );
+  const participantId = asNumber(participant?.id);
+  const rowCode = clean(
+    sheetField(row, "KODE", "Kode", "code", "participant_code"),
+  );
+  const participantCode = clean(
+    participant?.code || participant?.employee_code || participant?.no_karyawan,
+  );
+
+  return (
+    (rowParticipantId > 0 && participantId > 0 && rowParticipantId === participantId) ||
+    (Boolean(rowCode) && Boolean(participantCode) && rowCode === participantCode)
+  );
+}
+
+function googleSheetRowsToManualWorkoutV126M72(rows: any[], participant: any) {
+  return (rows || [])
+    .filter((row: any) => isWorkoutSheetRowV126M72(row))
+    .filter((row: any) => workoutSheetMatchesParticipantV126M72(row, participant))
+    .map((row: any, index: number) => {
+      const submissionId = clean(
+        sheetField(row, "Submission ID", "submission_id"),
+      );
+      const sheetRowNumber = asNumber(row?._rowNumber || row?.row_number);
+      const submissionDate = clean(
+        sheetField(row, "Submission Date", "Created At", "created_at"),
+      );
+      const logDate = normalizedClinicalDateKey(
+        sheetField(row, "Log Date", "log_date", "Submission Date", "Created At"),
+      );
+      const calories = nullableNumber(
+        sheetField(row, "Kalori Aktivitas", "calories", "activity_calories"),
+      ) ?? 0;
+
+      if (!logDate) return null;
+
+      return {
+        id: submissionId
+          ? `coach-sheet-workout-${submissionId}`
+          : `coach-sheet-workout-${sheetRowNumber || `${participant?.id}-${logDate}-${index}`}`,
+        participant_id: Number(participant?.id || 0),
+        source: "manual",
+        provider: "manual",
+        input_source: "manual",
+        external_activity_id: submissionId
+          ? `manual_sheet_${submissionId}`
+          : `manual_sheet_row_${sheetRowNumber || index}`,
+        activity_type: clean(sheetField(row, "Jenis Workout/Aktifitas")) || "Workout",
+        activity_name: clean(sheetField(row, "Jenis Workout/Aktifitas")) || "Workout",
+        log_date: logDate,
+        started_at: submissionDate || `${logDate}T00:00:00.000Z`,
+        created_at: submissionDate || logDate,
+        calories,
+        active_calories: calories,
+        raw_payload: {
+          canonical_source: "google_sheet",
+          submission_id: submissionId || null,
+          sheet_row_number: sheetRowNumber || null,
+          marker: "WELLNESS_COACH_MANUAL_WORKOUT_ACCUMULATION_V126M72",
+        },
+      };
+    })
+    .filter(Boolean);
+}
+
 function foodCalories(row: any) {
   return asNumber(
     row?.total_calories ??
@@ -722,6 +813,18 @@ export async function GET(request: NextRequest) {
       "",
     );
 
+    // V126M72 is intentionally display-only. Existing device rows are preserved
+    // exactly as returned by the stable pre-V126M71 flow. Only Supabase manual
+    // mirrors are removed before durable Google Sheet manual rows are appended.
+    const sheetManualWorkoutRowsV126M72 = googleSheetRowsToManualWorkoutV126M72(
+      sheetResult.rows || [],
+      participant,
+    );
+    const workoutDisplayRowsV126M72 = [
+      ...activityRows.filter((row: any) => !isManualWorkoutMirrorV126M72(row)),
+      ...sheetManualWorkoutRowsV126M72,
+    ];
+
     const mergedFoodRows =
       filterOperationalRowsForProgram(
         participant,
@@ -861,7 +964,8 @@ export async function GET(request: NextRequest) {
     const totalPoints = resolvedPointLedger.total;
 
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
-    const workoutChart = aggregateByDate(activityRows, wellnessStreakWorkoutCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
+    const workoutChart = aggregateByDate(workoutDisplayRowsV126M72, wellnessStreakWorkoutCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
+    // Steps stay on the original stable device flow; V126M72 changes workout calories only.
     const stepChart = aggregateByDate(activityRows, activitySteps, (row) => row?.log_date || row?.started_at || row?.created_at);
     const pointChart = [...dailyPoints.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -964,9 +1068,25 @@ export async function GET(request: NextRequest) {
       workoutTargetCalories,
       targetTimeline,
     });
+
+    // Keep streak success/current-streak exactly as before. Only replace the
+    // workout calorie value shown in each day card with device + Sheet manual.
+    const workoutDisplayByDateV126M72 = new Map(
+      workoutChart.map((item: any) => [clean(item?.date), Number(item?.value || 0)]),
+    );
+    const streakDisplayV126M72 = {
+      ...streak,
+      days: (streak.days || []).map((day: any) => ({
+        ...day,
+        workout_calories: workoutDisplayByDateV126M72.has(clean(day?.date))
+          ? Number(workoutDisplayByDateV126M72.get(clean(day?.date)) || 0)
+          : Number(day?.workout_calories || 0),
+      })),
+    };
+
     const latestWorkoutDateV126M31 = clean(streak.days.at(-1)?.date);
     const workoutSourceBreakdown = workoutSourceBreakdownV126M31(
-      activityRows,
+      workoutDisplayRowsV126M72,
       latestWorkoutDateV126M31,
     );
 
@@ -998,7 +1118,7 @@ export async function GET(request: NextRequest) {
         nutrition_log_count: mergedFoodRows.length,
         workout_log_count: activityRows.length,
         total_steps: activityRows.reduce((sum, row) => sum + activitySteps(row), 0),
-        total_workout_calories: Math.round(activityRows.reduce((sum, row) => sum + wellnessStreakWorkoutCalories(row), 0)),
+        total_workout_calories: Math.round(workoutDisplayRowsV126M72.reduce((sum, row) => sum + wellnessStreakWorkoutCalories(row), 0)),
         latest_weight_kg: latestWeight,
         latest_bmi: latestBmi,
         latest_systolic: latestBp?.value ?? null,
@@ -1025,7 +1145,7 @@ export async function GET(request: NextRequest) {
         healthtalk_online_or_without_evidence_points: 10,
       },
       charts,
-      streak,
+      streak: streakDisplayV126M72,
       workout_source_breakdown: workoutSourceBreakdown,
       nutrition_logs: mergedFoodRows,
       nutrition_sources: nutritionHistory.sources,
@@ -1035,6 +1155,7 @@ export async function GET(request: NextRequest) {
         nutrition_count: nutritionHistory.sources.google_sheet_rows,
         healthtalk_count: sheetHealthtalkRows.length,
         nakes_clinical_count: sheetNakesClinicalRows.length,
+        manual_workout_count: sheetManualWorkoutRowsV126M72.length,
       },
     });
   } catch (error: any) {
