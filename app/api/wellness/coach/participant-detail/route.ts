@@ -1169,6 +1169,32 @@ export async function GET(request: NextRequest) {
             workoutSheetMatchesParticipantV126M72(row, participant),
           ).length,
           matched_workout_rows: sheetManualWorkoutRowsV126M72.length,
+          // WELLNESS_COACH_WORKOUT_RUNTIME_CALORIE_DEBUG_V126M77_1
+          // Diagnostic-only metadata to pinpoint whether calories disappear during
+          // Sheet conversion, streak calorie normalization, display merge, or chart aggregation.
+          matched_workout_calories_total: Math.round(
+            sheetManualWorkoutRowsV126M72.reduce(
+              (sum: number, row: any) => sum + wellnessStreakWorkoutCalories(row),
+              0,
+            ),
+          ),
+          matched_workout_preview: sheetManualWorkoutRowsV126M72.slice(0, 10).map((row: any) => ({
+            date: clean(row?.log_date || row?.started_at || row?.created_at),
+            activity: clean(row?.activity_name || row?.activity_type),
+            calories: asNumber(row?.calories),
+            active_calories: asNumber(row?.active_calories),
+            streak_calories: wellnessStreakWorkoutCalories(row),
+            source: clean(row?.source),
+          })),
+          display_rows: workoutDisplayRowsV126M72.length,
+          display_calories_total: Math.round(
+            workoutDisplayRowsV126M72.reduce(
+              (sum: number, row: any) => sum + wellnessStreakWorkoutCalories(row),
+              0,
+            ),
+          ),
+          workout_chart_points: workoutChart.length,
+          workout_chart_preview: workoutChart.slice(-10),
           participant_id: participantId,
           participant_code: code,
         },
