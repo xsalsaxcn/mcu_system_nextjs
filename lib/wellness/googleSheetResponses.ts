@@ -231,8 +231,14 @@ function normalizeDriveView(value: any) {
   return text;
 }
 
+// WELLNESS_GOOGLE_SHEET_READ_WEBHOOK_SPLIT_V126M76
+// Read/listRows may use a dedicated Apps Script deployment so the existing
+// write/upload webhook can remain untouched.
 function getWebhookUrl() {
-  return clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL);
+  return (
+    clean(process.env.WELLNESS_GOOGLE_SHEET_READ_WEBHOOK_URL) ||
+    clean(process.env.WELLNESS_GOOGLE_SHEET_WEBHOOK_URL)
+  );
 }
 
 function getWebhookSecret() {
@@ -364,9 +370,22 @@ export async function fetchWellnessGoogleSheetRows(params?: {
     };
   }
 
+  // listRows contract must explicitly return a rows array. A generic
+  // webhook health response such as V370 (ok:true + message only) must not
+  // be treated as a successful empty Sheet read.
+  if (!Array.isArray(json?.rows)) {
+    return {
+      ok: false,
+      rows: [],
+      message:
+        json?.message ||
+        "Google Sheet listRows response tidak memiliki array rows.",
+    };
+  }
+
   return {
     ok: true,
-    rows: Array.isArray(json.rows) ? json.rows : [],
+    rows: json.rows,
     message: json.message || "",
   };
 }
