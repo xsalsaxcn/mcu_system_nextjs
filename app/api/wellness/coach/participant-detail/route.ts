@@ -8,7 +8,6 @@ import {
   googleSheetRowsToHealthtalkLogs,
 } from "@/lib/wellness/googleSheetResponses";
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
-import { loadCanonicalWorkoutHistory } from "@/lib/wellness/canonicalWorkoutHistory";
 import {
   canonicalNakesSheetRows,
   resolveCanonicalClinicalHistory,
@@ -20,7 +19,7 @@ import {
   canonicalParticipantGroupUnit,
   canonicalParticipantKelompokUnit,
 } from "@/lib/wellness/coachGroupAccess";
-import { loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { resolveWellnessPointBreakdown } from "@/lib/wellness/pointLedger";
 import {
   filterClinicalRowsForProgram,
@@ -644,9 +643,21 @@ export async function GET(request: NextRequest) {
       supabase,
       [participantId],
     );
-    // WELLNESS_CANONICAL_WORKOUT_READ_PATH_V126M71
-    // Canonical activityRows dibuat setelah Google Sheet dibaca di bawah.
-    // Jangan gunakan raw Supabase manual mirror sebagai visible workout.
+    const activityRows =
+      filterOperationalRowsForProgram(
+        participant,
+        filterActivityRowsByFitnessSource(
+          activityRowsRaw,
+          participantControlMap,
+        ),
+        "",
+        "",
+        [
+          "log_date",
+          "started_at",
+          "created_at",
+        ],
+      );
 
     const scopedFoodRows =
       filterOperationalRowsForProgram(
@@ -694,31 +705,8 @@ export async function GET(request: NextRequest) {
         participantId,
         code,
         limit: 2000,
-      }).catch((error: any) => ({
-        ok: false,
-        rows: [] as any[],
-        message: clean(error?.message || "Google Sheet unavailable."),
-      })),
+      }).catch(() => ({ ok: false, rows: [] as any[] })),
     ]);
-
-    const canonicalWorkoutHistoryV126M71 = await loadCanonicalWorkoutHistory({
-      supabase,
-      participant,
-      dbRows: activityRowsRaw,
-      controlMap: participantControlMap,
-      sheetResult: {
-        ok: sheetResult?.ok !== false,
-        rows: sheetResult?.rows || [],
-        message: clean(sheetResult?.message),
-      },
-    });
-    const activityRows = filterOperationalRowsForProgram(
-      participant,
-      canonicalWorkoutHistoryV126M71.logs || [],
-      "",
-      "",
-      ["log_date", "started_at", "created_at"],
-    );
 
     const sheetHealthtalkRows = googleSheetRowsToHealthtalkLogs(sheetResult.rows || []).filter((row: any) => {
       return asNumber(row.participant_id) === participantId;
@@ -1039,7 +1027,6 @@ export async function GET(request: NextRequest) {
       charts,
       streak,
       workout_source_breakdown: workoutSourceBreakdown,
-      workout_sources: canonicalWorkoutHistoryV126M71.sources,
       nutrition_logs: mergedFoodRows,
       nutrition_sources: nutritionHistory.sources,
       healthtalks,

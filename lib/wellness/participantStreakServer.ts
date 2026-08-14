@@ -3,8 +3,9 @@
 // Read-only: no database writes, schema changes, or Google Fit sync changes.
 
 import {
-  loadCanonicalWorkoutHistory,
-} from "@/lib/wellness/canonicalWorkoutHistory";
+  filterActivityRowsByFitnessSource,
+  loadParticipantControlMap,
+} from "@/lib/wellness/participantControls";
 import { loadCanonicalNutritionHistory } from "@/lib/wellness/nutritionHistory";
 import {
   loadEffectiveTargetTimeline,
@@ -38,33 +39,21 @@ export async function loadParticipantCanonicalStreak(params: {
   const participantId = numberValue(params.participant?.id);
   const warnings: string[] = [];
 
-  // WELLNESS_CANONICAL_WORKOUT_READ_PATH_V126M71
-  // Manual workout dihitung hanya dari Google Sheet. Supabase manual tetap
-  // internal mirror dan tidak masuk canonical streak. Device tetap memakai
-  // selected Google Fit / Health Connect source.
-  const workoutPromise = loadCanonicalWorkoutHistory({
-    supabase: params.supabase,
-    participant: params.participant,
-  }).catch((error: any) => {
-    warnings.push(`workout:${clean(error?.message || "unavailable")}`);
-    return {
-      participant_id: participantId,
-      logs: [],
-      control: fallbackControlMap(params.participant).get(participantId) || {},
-      sources: {
-        database_ok: false,
-        database_message: clean(error?.message || "Workout source unavailable."),
-        supabase_rows: 0,
-        supabase_manual_hidden: 0,
-        device_rows_visible: 0,
-        google_sheet_ok: false,
-        google_sheet_message: clean(error?.message || "Workout source unavailable."),
-        google_sheet_rows: 0,
-        unmatched_google_sheet_rows: 0,
-        canonical_rows: 0,
-        fitness_source: "none",
-      },
-    };
+  const activityPromise = params.supabase
+    .from("wellness_activity_logs")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("log_date", { ascending: true })
+    .limit(2000)
+    .then((result: any) => result)
+    .catch((error: any) => ({ data: [], error }));
+
+  const controlPromise = loadParticipantControlMap(
+    params.supabase,
+    [participantId],
+  ).catch((error: any) => {
+    warnings.push(`fitness-control:${clean(error?.message || "unavailable")}`);
+    return fallbackControlMap(params.participant);
   });
 
   const nutritionPromise = loadCanonicalNutritionHistory({
@@ -97,27 +86,26 @@ export async function loadParticipantCanonicalStreak(params: {
     });
   });
 
-  const [workoutHistory, nutritionHistory, targets] =
+  const [activityResult, controlMap, nutritionHistory, targets] =
     await Promise.all([
-      workoutPromise,
+      activityPromise,
+      controlPromise,
       nutritionPromise,
       targetPromise,
     ]);
 
-  if (workoutHistory?.sources?.database_ok === false) {
+  if (activityResult?.error) {
     warnings.push(
-      `activity:${clean(workoutHistory?.sources?.database_message || "unavailable")}`,
-    );
-  }
-  if (workoutHistory?.sources?.google_sheet_ok === false) {
-    warnings.push(
-      `workout-sheet:${clean(workoutHistory?.sources?.google_sheet_message || "unavailable")}`,
+      `activity:${clean(activityResult.error?.message || "unavailable")}`,
     );
   }
 
   const activityRows = filterOperationalRowsForProgram(
     params.participant,
-    workoutHistory?.logs || [],
+    filterActivityRowsByFitnessSource(
+      activityResult?.error ? [] : activityResult?.data || [],
+      controlMap,
+    ),
     "",
     "",
     ["log_date", "started_at", "created_at"],
@@ -141,7 +129,7 @@ export async function loadParticipantCanonicalStreak(params: {
   });
 
   const control =
-    workoutHistory?.control ||
+    controlMap.get(participantId) ||
     params.participant?.wellness_control ||
     {};
 
@@ -156,11 +144,8 @@ export async function loadParticipantCanonicalStreak(params: {
     sources: {
       nutrition: nutritionHistory?.sources || null,
       nutrition_rows: nutritionRows.length,
-      activity_ok:
-        workoutHistory?.sources?.database_ok !== false &&
-        workoutHistory?.sources?.google_sheet_ok !== false,
+      activity_ok: !activityResult?.error,
       activity_rows: activityRows.length,
-      activity: workoutHistory?.sources || null,
       fitness_source: clean(control?.fitness_source || "none"),
     },
     status: warnings.length > 0 ? "partial" : "ok",

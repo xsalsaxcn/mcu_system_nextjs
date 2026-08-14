@@ -2,9 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
-import { loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
-import { loadCanonicalWorkoutHistories } from "@/lib/wellness/canonicalWorkoutHistory";
 import {
   buildCoachGroupUnitMap,
   canCoachAccessParticipant,
@@ -593,9 +592,10 @@ export async function GET(request: NextRequest) {
             .limit(20000),
         ]);
 
-      // Keep raw rows here. Canonical workout loader below will select the
-      // active device provider and hide Supabase manual mirror rows.
-      activityRows = activityResult.error ? [] : activityResult.data || [];
+      activityRows = filterActivityRowsByFitnessSource(
+        activityResult.data || [],
+        participantControlMap,
+      );
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
       noteRows = mergeCoachNoteRows(
@@ -636,26 +636,11 @@ export async function GET(request: NextRequest) {
       ]),
     );
 
-    const [nutritionHistory, workoutHistoryV126M71] = await Promise.all([
-      loadCanonicalNutritionHistories({
-        supabase,
-        participants,
-        dbRows: foodRows,
-      }),
-      loadCanonicalWorkoutHistories({
-        supabase,
-        participants,
-        dbRows: activityRows,
-        controlMap: participantControlMap,
-      }),
-    ]);
-
-    // WELLNESS_CANONICAL_WORKOUT_READ_PATH_V126M71
-    // Manual visible/countable = Google Sheet only. Supabase manual mirror is
-    // excluded. Device rows remain selected Google Fit / Health Connect only.
-    activityRows = participants.flatMap((participant: any) =>
-      workoutHistoryV126M71.byParticipantId.get(getParticipantId(participant))?.logs || [],
-    );
+    const nutritionHistory = await loadCanonicalNutritionHistories({
+      supabase,
+      participants,
+      dbRows: foodRows,
+    });
 
     const participantCards = participants.map((row: any) => {
       const id = getParticipantId(row);
@@ -952,7 +937,6 @@ export async function GET(request: NextRequest) {
         flags: flagSummary,
       },
       participants: participantCards,
-      workout_sources: workoutHistoryV126M71.sources,
       notes: noteRows.filter((note) => !isChatNote(note)),
       today,
       monitoring_period: { from: fromDate, to: today, days: 7 },
