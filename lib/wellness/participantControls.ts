@@ -162,6 +162,34 @@ export async function loadParticipantControlMap(
       fitnessSource = derivedSource;
     }
 
+    // WELLNESS_FITNESS_SOURCE_LAST_SYNC_RECONCILE_V126M90
+    // Reconcile stale control/active flags with the provider that has actually
+    // synced AFTER the control was last changed. This is intentionally based on
+    // timestamps: an explicit source change made after an older provider sync
+    // remains authoritative, while a later real device sync can heal stale state.
+    const controlUpdatedAtV126M90 =
+      Date.parse(clean(row?.updated_at)) || 0;
+    const freshestSyncedProviderV126M90 = usableIntegrations
+      .map((item: any) => ({
+        source: normalizeFitnessSource(item?.provider),
+        synced_at: Date.parse(clean(item?.last_sync_at)) || 0,
+      }))
+      .filter(
+        (item: any) =>
+          item.source !== "none" &&
+          Number.isFinite(item.synced_at) &&
+          item.synced_at > 0,
+      )
+      .sort((a: any, b: any) => b.synced_at - a.synced_at)[0];
+
+    if (
+      freshestSyncedProviderV126M90 &&
+      freshestSyncedProviderV126M90.source !== fitnessSource &&
+      freshestSyncedProviderV126M90.synced_at > controlUpdatedAtV126M90
+    ) {
+      fitnessSource = freshestSyncedProviderV126M90.source;
+    }
+
     const fitnessEnabled = row
       ? enabled(row.fitness_enabled, fitnessSource !== "none")
       : fitnessSource !== "none";
