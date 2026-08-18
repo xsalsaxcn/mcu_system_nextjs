@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
+import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import {
   buildCoachGroupUnitMap,
@@ -642,8 +643,56 @@ export async function GET(request: NextRequest) {
       dbRows: foodRows,
     });
 
+    // WELLNESS_COACH_DASHBOARD_CANONICAL_WORKOUT_STATUS_V126M92_2
+    // Read the same canonical streak source used by Participant Portal / detail.
+    // Failure is isolated per participant and falls back to the existing dashboard
+    // flow, so previously working status/data is never removed.
+    const canonicalStreakEntriesV126M92_2 = await Promise.all(
+      participants.map(async (participantRow: any) => {
+        const participantId = getParticipantId(participantRow);
+        if (!participantId) return [0, null] as const;
+
+        try {
+          const payload = await loadParticipantCanonicalStreak({
+            supabase,
+            participant: {
+              ...participantRow,
+              wellness_control:
+                participantControlMap.get(Number(participantId)) ||
+                participantRow?.wellness_control,
+            },
+          });
+          return [Number(participantId), payload] as const;
+        } catch {
+          return [Number(participantId), null] as const;
+        }
+      }),
+    );
+    const canonicalStreakByParticipantV126M92_2 = new Map<number, any>(
+      canonicalStreakEntriesV126M92_2.filter(([participantId]) => participantId > 0),
+    );
+
     const participantCards = participants.map((row: any) => {
       const id = getParticipantId(row);
+      const canonicalPayloadV126M92_2 =
+        canonicalStreakByParticipantV126M92_2.get(Number(id)) || null;
+      const canonicalDaysV126M92_2 = Array.isArray(
+        canonicalPayloadV126M92_2?.streak?.days,
+      )
+        ? canonicalPayloadV126M92_2.streak.days
+        : [];
+      const canonicalWorkoutDatesV126M92_2 = canonicalDaysV126M92_2
+        .filter(
+          (day: any) =>
+            asNumber(day?.workout_calories) > 0 ||
+            asNumber(day?.steps) > 0,
+        )
+        .map((day: any) => clean(day?.date).slice(0, 10))
+        .filter(Boolean);
+      const canonicalTodayV126M92_2 =
+        canonicalDaysV126M92_2.find(
+          (day: any) => clean(day?.date).slice(0, 10) === today,
+        ) || null;
       const acts =
         filterOperationalRowsForProgram(
           row,
@@ -757,15 +806,26 @@ export async function GET(request: NextRequest) {
       const latestInstructionReadAt = latestInstructionNote
         ? readMap.get(`${asNumber(latestInstructionNote.id)}:${id}`) || null
         : null;
+      const existingWorkoutDatesV126M92_2 = acts
+        .filter(
+          (item) => activitySteps(item) > 0 || activityCalories(item) > 0,
+        )
+        .map(activityDate)
+        .filter(Boolean);
+      const workoutDatesForStatusV126M92_2 = [
+        ...new Set([
+          ...existingWorkoutDatesV126M92_2,
+          ...canonicalWorkoutDatesV126M92_2,
+        ]),
+      ];
+
       const flag = makeFlag({
         today,
         nutritionDates,
         nutritionHistoryDates,
-        workoutDates: acts
-          .filter(
-            (item) => activitySteps(item) > 0 || activityCalories(item) > 0,
-          )
-          .map(activityDate),
+        // Preserve every existing recognized workout day and only add canonical
+        // Portal/detail days that the dashboard source path previously missed.
+        workoutDates: workoutDatesForStatusV126M92_2,
         latestNote,
       });
 
@@ -802,16 +862,37 @@ export async function GET(request: NextRequest) {
         risk: participantRisk(row),
         raw: row,
         today: {
-          steps: todayActs.reduce((sum, item) => sum + activitySteps(item), 0),
-          calories: todayActs.reduce(
-            (sum, item) => sum + activityCalories(item),
-            0,
+          // Preserve the existing dashboard result. Canonical Portal/detail data
+          // may only raise a missing/stale value; it never lowers a working one.
+          steps: Math.max(
+            todayActs.reduce((sum, item) => sum + activitySteps(item), 0),
+            canonicalTodayV126M92_2
+              ? asNumber(canonicalTodayV126M92_2?.steps)
+              : 0,
+          ),
+          calories: Math.max(
+            todayActs.reduce(
+              (sum, item) => sum + activityCalories(item),
+              0,
+            ),
+            canonicalTodayV126M92_2
+              ? asNumber(canonicalTodayV126M92_2?.workout_calories)
+              : 0,
           ),
           nutrition_calories: todayFoods.reduce(
             (sum, item) => sum + foodCalories(item),
             0,
           ),
-          activity_count: todayActs.length,
+          activity_count: Math.max(
+            todayActs.length,
+            canonicalTodayV126M92_2 &&
+              (
+                asNumber(canonicalTodayV126M92_2?.workout_calories) > 0 ||
+                asNumber(canonicalTodayV126M92_2?.steps) > 0
+              )
+              ? 1
+              : 0,
+          ),
           nutrition_count: Math.max(
             todayFoods.length,
             todayNutritionPointCount,
