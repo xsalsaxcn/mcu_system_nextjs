@@ -1,5 +1,6 @@
 // WELLNESS_PARTICIPANT_CONTROLS_V79F
 // WELLNESS_GOOGLE_FIT_CONNECTION_TRUTH_V79G
+// WELLNESS_HEALTH_CONNECT_COACH_ADMIN_PARITY_V126M83
 // Central source of truth for participant portal access and the single active
 // fitness provider used by dashboards, ranking, and workout calculations.
 
@@ -146,7 +147,21 @@ export async function loadParticipantControlMap(
         ? "google_fit"
         : "none";
     const storedSource = normalizeFitnessSource(row?.fitness_source);
-    const fitnessSource = row ? storedSource : derivedSource;
+
+    // V126M83: active integration truth wins when exactly one provider is active.
+    // This prevents Coach/Admin from staying on stale Google Fit rows after the
+    // participant has selected Health Connect (or vice versa). When both are
+    // active, preserve the explicit stored selection if it is one of them.
+    let fitnessSource: FitnessSource = row ? storedSource : derivedSource;
+    if (activeProviders.length === 1) {
+      fitnessSource = activeProviders[0];
+    } else if (
+      activeProviders.length > 1 &&
+      !activeProviders.includes(fitnessSource)
+    ) {
+      fitnessSource = derivedSource;
+    }
+
     const fitnessEnabled = row
       ? enabled(row.fitness_enabled, fitnessSource !== "none")
       : fitnessSource !== "none";

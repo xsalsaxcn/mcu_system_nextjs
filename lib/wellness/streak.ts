@@ -1,4 +1,5 @@
 // WELLNESS_CANONICAL_STREAK_V126M23_1
+// WELLNESS_HEALTH_CONNECT_COACH_ADMIN_PARITY_V126M83
 // WELLNESS_STREAK_SUBMISSION_COUNT_V126M23_4_1
 // A nutrition streak counts canonical submissions, not unique meal labels.
 // Shared read-only streak calculation for Coach and Participant.
@@ -161,13 +162,21 @@ function isHealthConnectDaily(row: any) {
 
 export function wellnessStreakSteps(row: any) {
   const raw = rawPayload(row);
+
+  // V126M83: Health Connect daily rows may have DB `steps = 0` because the
+  // canonical step count is retained in raw_payload.health_connect_steps.
+  // Nullish coalescing treated that schema-default zero as authoritative and
+  // prevented the raw value from ever being read. Prefer a positive top-level
+  // value, otherwise fall back to provider/raw step fields.
+  const directSteps = numberValue(row?.steps ?? row?.total_steps);
+  if (directSteps > 0) return directSteps;
+
   return numberValue(
-    row?.steps ??
-      row?.total_steps ??
-      raw?.health_connect_steps ??
+    raw?.health_connect_steps ??
       raw?.google_fit_steps ??
       raw?.steps ??
-      raw?.total_steps,
+      raw?.total_steps ??
+      directSteps,
   );
 }
 
