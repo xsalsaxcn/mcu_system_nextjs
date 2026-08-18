@@ -47,6 +47,8 @@ import {
 } from "@/lib/wellness/effectiveDatedTargets";
 
 export const dynamic = "force-dynamic";
+import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
+
 export const runtime = "nodejs";
 
 // WELLNESS_COACH_PARTICIPANT_DETAIL_V55
@@ -751,6 +753,59 @@ export async function GET(request: NextRequest) {
         ],
       );
 
+    // WELLNESS_COACH_PORTAL_CANONICAL_SOURCE_PARITY_V126M91_2
+    // Resolve the participant's fitness source with the exact canonical loader
+    // used by Participant Portal. Coach-specific chart logic must not invent a
+    // separate provider decision.
+    const participantFitnessSettingsV126M91_2 =
+      participantControlMap.get(Number(participantId)) ||
+      participant?.wellness_control || {
+        participant_id: Number(participantId),
+        session_enabled: true,
+        fitness_enabled: false,
+        fitness_source: "none",
+        connected_providers: [],
+        active_providers: [],
+        has_multiple_active_providers: false,
+        source_connected: false,
+      };
+
+    const portalCanonicalStreakPayloadV126M91_2 =
+      await loadParticipantCanonicalStreak({
+        supabase,
+        participant: {
+          ...participant,
+          wellness_control: participantFitnessSettingsV126M91_2,
+        },
+      });
+
+    const portalCanonicalFitnessSourceV126M91_2 = clean(
+      portalCanonicalStreakPayloadV126M91_2?.sources?.fitness_source || "none",
+    )
+      .toLowerCase()
+      .replace(/-/g, "_");
+
+    // Device rows for Coach are selected from the raw activity table using the
+    // exact source resolved by the Portal canonical loader. Manual workout rows
+    // are intentionally NOT included here; Google Sheet manual remains the
+    // existing durable visible source below.
+    const portalCanonicalDeviceRowsV126M91_2 =
+      filterOperationalRowsForProgram(
+        participant,
+        (activityRowsRaw || []).filter((row: any) => {
+          const source = activitySourceKeyV126M31(row);
+          if (!["google_fit", "health_connect"].includes(source)) return false;
+          return source === portalCanonicalFitnessSourceV126M91_2;
+        }),
+        "",
+        "",
+        [
+          "log_date",
+          "started_at",
+          "created_at",
+        ],
+      );
+
 
     // WELLNESS_COACH_SOURCE_PARITY_RUNTIME_DEBUG_V126M85
     // Diagnostic-only: expose the exact control/provider rows seen by the Coach route.
@@ -854,7 +909,10 @@ export async function GET(request: NextRequest) {
       participant,
     );
     const workoutDisplayRowsV126M72 = [
-      ...activityRows.filter((row: any) => !isManualWorkoutMirrorV126M72(row)),
+      // V126M91.2: device source follows Participant Portal canonical source.
+      // Supabase manual mirrors stay hidden; Google Sheet remains the visible
+      // manual workout source exactly as before.
+      ...portalCanonicalDeviceRowsV126M91_2,
       ...sheetManualWorkoutRowsV126M72,
     ];
 
@@ -997,9 +1055,18 @@ export async function GET(request: NextRequest) {
     const totalPoints = resolvedPointLedger.total;
 
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
-    const workoutChart = aggregateByDate(workoutDisplayRowsV126M72, wellnessStreakWorkoutCalories, (row) => row?.log_date || row?.started_at || row?.created_at);
-    // Steps stay on the original stable device flow; V126M72 changes workout calories only.
-    const stepChart = aggregateByDate(activityRows, activitySteps, (row) => row?.log_date || row?.started_at || row?.created_at);
+    const workoutChart = aggregateByDate(
+      workoutDisplayRowsV126M72,
+      wellnessStreakWorkoutCalories,
+      (row) => row?.log_date || row?.started_at || row?.created_at,
+    );
+    // V126M91.2: Steps use the same resolver used by Participant Portal
+    // buildActivitySummary, including Health Connect raw_payload step fallback.
+    const stepChart = aggregateByDate(
+      portalCanonicalDeviceRowsV126M91_2,
+      wellnessStreakSteps,
+      (row) => row?.log_date || row?.started_at || row?.created_at,
+    );
     const pointChart = [...dailyPoints.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-30)
@@ -1095,12 +1162,17 @@ export async function GET(request: NextRequest) {
     const latestWeight = charts.weight_kg.at(-1)?.value ?? null;
     const latestBmi = charts.bmi.at(-1)?.value ?? null;
     const latestBp = charts.blood_pressure.at(-1) || null;
-    const streak = buildWellnessStreakSummary({
-      nutritionRows: mergedFoodRows,
-      activityRows,
-      workoutTargetCalories,
-      targetTimeline,
-    });
+    // V126M91.2: streak success/current-streak comes from the same canonical
+    // server loader used by Participant Portal. Existing display-only Google
+    // Sheet workout-calorie overlay below remains untouched.
+    const streak =
+      portalCanonicalStreakPayloadV126M91_2?.streak ||
+      buildWellnessStreakSummary({
+        nutritionRows: mergedFoodRows,
+        activityRows,
+        workoutTargetCalories,
+        targetTimeline,
+      });
 
     // Keep streak success/current-streak exactly as before. Only replace the
     // workout calorie value shown in each day card with device + Sheet manual.
@@ -1150,7 +1222,10 @@ export async function GET(request: NextRequest) {
         healthtalk_count: healthtalks.length,
         nutrition_log_count: mergedFoodRows.length,
         workout_log_count: activityRows.length,
-        total_steps: activityRows.reduce((sum, row) => sum + activitySteps(row), 0),
+        total_steps: portalCanonicalDeviceRowsV126M91_2.reduce(
+          (sum, row) => sum + wellnessStreakSteps(row),
+          0,
+        ),
         total_workout_calories: Math.round(workoutDisplayRowsV126M72.reduce((sum, row) => sum + wellnessStreakWorkoutCalories(row), 0)),
         latest_weight_kg: latestWeight,
         latest_bmi: latestBmi,
