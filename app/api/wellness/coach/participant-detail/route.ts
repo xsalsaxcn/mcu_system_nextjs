@@ -1,6 +1,7 @@
 // WELLNESS_CANONICAL_CLINICAL_PARITY_V126M42_7
 // WELLNESS_COACH_GRAPH_PARTICIPANT_PARITY_V126M45
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
+// WELLNESS_COACH_SOURCE_PARITY_RUNTIME_DEBUG_V126M85
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
@@ -750,6 +751,38 @@ export async function GET(request: NextRequest) {
         ],
       );
 
+
+    // WELLNESS_COACH_SOURCE_PARITY_RUNTIME_DEBUG_V126M85
+    // Diagnostic-only: expose the exact control/provider rows seen by the Coach route.
+    // No DB writes and no scoring/chart behavior changes.
+    const participantFitnessControlV126M85 =
+      participantControlMap.get(Number(participantId)) || null;
+    const providerCountsV126M85 = (rows: any[]) =>
+      (rows || []).reduce((acc: Record<string, number>, row: any) => {
+        const key = activitySourceKeyV126M31(row) || "none";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+    const recentRowsV126M85 = (rows: any[]) =>
+      [...(rows || [])]
+        .sort((a: any, b: any) =>
+          clean(b?.log_date || b?.started_at || b?.created_at).localeCompare(
+            clean(a?.log_date || a?.started_at || a?.created_at),
+          ),
+        )
+        .slice(0, 14)
+        .map((row: any) => ({
+          id: row?.id ?? null,
+          date: clean(row?.log_date || row?.started_at || row?.created_at),
+          source: activitySourceKeyV126M31(row) || "none",
+          external_activity_id: clean(row?.external_activity_id || row?.provider_activity_id),
+          db_steps: Number(row?.steps || 0),
+          resolved_steps: wellnessStreakSteps(row),
+          db_calories: Number(row?.calories || 0),
+          resolved_calories: wellnessStreakWorkoutCalories(row),
+          updated_at: clean(row?.updated_at || row?.synced_at),
+        }));
+
     const scopedFoodRows =
       filterOperationalRowsForProgram(
         participant,
@@ -1147,6 +1180,14 @@ export async function GET(request: NextRequest) {
       charts,
       streak: streakDisplayV126M72,
       workout_source_breakdown: workoutSourceBreakdown,
+      source_parity_debug_v126m85: {
+        participant_id: Number(participantId),
+        control: participantFitnessControlV126M85,
+        raw_provider_counts: providerCountsV126M85(activityRowsRaw),
+        filtered_provider_counts: providerCountsV126M85(activityRows),
+        raw_recent: recentRowsV126M85(activityRowsRaw),
+        filtered_recent: recentRowsV126M85(activityRows),
+      },
       nutrition_logs: mergedFoodRows,
       nutrition_sources: nutritionHistory.sources,
       healthtalks,
