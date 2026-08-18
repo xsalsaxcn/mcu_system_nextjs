@@ -51,6 +51,48 @@ function makeParticipantDisplay(participant: any, riskFromName: boolean) {
   return code ? `KODE ${code} - nama peserta perlu diperbaiki` : `Peserta #${participant?.id || "-"} - nama perlu diperbaiki`;
 }
 
+// WELLNESS_NAKES_PREFILL_PARTICIPANT_SOURCE_V126M79_4
+function validNakesAge(value: any) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 18 && number <= 119
+    ? Math.round(number)
+    : null;
+}
+
+function validNakesHeight(value: any) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 120 && number <= 230
+    ? Math.round(number * 10) / 10
+    : null;
+}
+
+function buildNakesPrefillMaps(rows: any[] = []) {
+  const ageByParticipant = new Map<number, number>();
+  const heightByParticipant = new Map<number, number>();
+
+  // Query is already newest-first. First valid value wins independently, so an
+  // invalid latest TB (e.g. 74 cm) does not erase an older valid height.
+  for (const row of rows || []) {
+    const participantId = Number(row?.participant_id || 0);
+    if (!(participantId > 0)) continue;
+
+    if (!heightByParticipant.has(participantId)) {
+      const height = validNakesHeight(row?.height_cm);
+      if (height !== null) heightByParticipant.set(participantId, height);
+    }
+
+    if (!ageByParticipant.has(participantId)) {
+      const raw = row?.raw_payload && typeof row.raw_payload === "object"
+        ? row.raw_payload
+        : {};
+      const age = validNakesAge(raw?.age_years ?? raw?.usia ?? row?.age_years ?? row?.usia);
+      if (age !== null) ageByParticipant.set(participantId, age);
+    }
+  }
+
+  return { ageByParticipant, heightByParticipant };
+}
+
 export async function GET(req: NextRequest) {
   const user = getWellnessNakesUser(req) || getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -58,6 +100,28 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
     const participants = await getAllowedWellnessParticipants(supabase, user);
+    const participantIds = (participants || [])
+      .map((item: any) => Number(item?.id || 0))
+      .filter((id: number) => id > 0);
+
+    let nakesHistoryRows: any[] = [];
+    if (participantIds.length) {
+      try {
+        const { data, error } = await supabase
+          .from("wellness_checkup_history")
+          .select("id,participant_id,checkup_date,height_cm,raw_payload")
+          .in("participant_id", participantIds)
+          .order("checkup_date", { ascending: false })
+          .order("id", { ascending: false });
+        if (!error) nakesHistoryRows = data || [];
+      } catch {
+        nakesHistoryRows = [];
+      }
+    }
+
+    const { ageByParticipant: nakesAgeByParticipant, heightByParticipant: nakesHeightByParticipant } =
+      buildNakesPrefillMaps(nakesHistoryRows);
+
     const companyIds = participants.map((item: any) => Number(item.wellness_company_id)).filter(Boolean);
     const unitIds = participants
       .flatMap((item: any) => [Number(item.wellness_kelompok_id), Number(item.wellness_group_unit_id)])
@@ -92,6 +156,8 @@ export async function GET(req: NextRequest) {
 
       return {
         ...participant,
+        nakes_prefill_age_years: nakesAgeByParticipant.get(Number(participant.id)) ?? null,
+        nakes_prefill_height_cm: nakesHeightByParticipant.get(Number(participant.id)) ?? null,
         participant_display_name: displayName,
         participant_name: displayName,
         risk_cluster: riskCluster,
