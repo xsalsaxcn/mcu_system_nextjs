@@ -4,6 +4,7 @@
 // WELLNESS_ADMIN_PARTICIPANT_DETAIL_UI_V89
 // WELLNESS_ADMIN_PARTICIPANT_FILTER_PAGINATION_SORT_V126E
 // WELLNESS_ADMIN_STREAK_DIAGNOSTIC_LINK_V126M53_1
+// WELLNESS_ADMIN_FITNESS_REFRESH_PROVIDER_FILTER_V126M80_1
 
 import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
@@ -239,6 +240,9 @@ export default function WellnessAdminMobilePage() {
   const [googleFitRepair, setGoogleFitRepair] = useState<any>(null);
   const [googleFitRepairLoading, setGoogleFitRepairLoading] = useState(false);
   const [googleFitRepairAction, setGoogleFitRepairAction] = useState("");
+  const [fitnessRefreshProvider, setFitnessRefreshProvider] = useState<"google_fit" | "health_connect">("google_fit");
+  const [fitnessRefreshAll, setFitnessRefreshAll] = useState<any>(null);
+  const [fitnessRefreshAllRunning, setFitnessRefreshAllRunning] = useState(false);
   // WELLNESS_COMPANY_NAKES_DIRECT_LINK_V90_1
   const [nakesLinkCompany, setNakesLinkCompany] = useState<any>(null);
   const [nakesLinkCopied, setNakesLinkCopied] = useState(false);
@@ -747,6 +751,129 @@ export default function WellnessAdminMobilePage() {
   }
 
   const rows = wellnessData?.rows || [];
+
+  function selectedFitnessProvider(item: any) {
+    const control = item?.wellness_control || {};
+    if (control?.fitness_enabled !== true) return "none";
+    const source = clean(control?.fitness_source || "none")
+      .toLowerCase()
+      .replace(/-/g, "_");
+    return ["google_fit", "health_connect"].includes(source) ? source : "none";
+  }
+
+  async function refreshFitnessParticipant(item: any) {
+    const participantId = Number(item?.participant_id || item?.id || 0);
+    const provider = selectedFitnessProvider(item);
+    const base = {
+      participant_id: participantId,
+      name: clean(item?.name) || `Peserta ${participantId || "-"}`,
+      code: clean(item?.code) || "-",
+      provider,
+    };
+
+    if (!participantId || provider === "none") {
+      return {
+        ...base,
+        ok: false,
+        status: "INVALID_TARGET",
+        message: "Fitness App peserta belum aktif atau sumber fitness belum dipilih.",
+      };
+    }
+
+    const endpoint =
+      provider === "google_fit"
+        ? "/api/wellness/admin/google-fit-repair"
+        : "/api/wellness/admin/health-connect-refresh";
+    const payload =
+      provider === "google_fit"
+        ? { participant_id: participantId, action: "force_resync", days: 3 }
+        : { participant_id: participantId, action: "refresh_check" };
+
+    const result = await fetch(endpoint, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(async (response) => ({
+        ...(await response.json().catch(() => ({}))),
+        http_status: response.status,
+      }))
+      .catch((error) => ({
+        ok: false,
+        status: "NETWORK_ERROR",
+        message: error?.message || "Network error",
+      }));
+
+    const warnings = Array.isArray(result?.result?.warnings)
+      ? result.result.warnings.filter(Boolean)
+      : [];
+    return {
+      ...base,
+      ok: result?.ok === true,
+      status: clean(result?.status || result?.diagnosis?.status || (result?.ok ? "OK" : "FAILED")),
+      message: clean(result?.message) || (result?.ok ? "Refresh selesai." : "Refresh gagal."),
+      detail: warnings.join(" · "),
+      reconnect_required:
+        result?.reconnect_required === true || result?.diagnosis?.reconnect_required === true,
+      last_sync_at: clean(
+        result?.last_sync_at_jakarta ||
+          result?.diagnosis?.integration?.last_sync_at_jakarta ||
+          result?.diagnosis?.latest_data?.log_date ||
+          "",
+      ),
+      mode: clean(
+        result?.mode ||
+          (provider === "health_connect" ? "device_push_check" : "server_force_sync"),
+      ),
+    };
+  }
+
+  async function runFitnessRefreshAll(provider = fitnessRefreshProvider) {
+    if (fitnessRefreshAllRunning) return;
+    const targets = rows.filter(
+      (item: any) => selectedFitnessProvider(item) === provider,
+    );
+
+    setFitnessRefreshAll({
+      provider,
+      total: targets.length,
+      completed: 0,
+      success: 0,
+      failed: 0,
+      results: [],
+    });
+
+    if (!targets.length) return;
+
+    setFitnessRefreshAllRunning(true);
+    const results: any[] = [];
+    const concurrency = 3;
+
+    try {
+      for (let index = 0; index < targets.length; index += concurrency) {
+        const group = targets.slice(index, index + concurrency);
+        const groupResults = await Promise.all(
+          group.map((item: any) => refreshFitnessParticipant(item)),
+        );
+        results.push(...groupResults);
+        const success = results.filter((item: any) => item.ok).length;
+        setFitnessRefreshAll({
+          provider,
+          total: targets.length,
+          completed: results.length,
+          success,
+          failed: results.length - success,
+          results: [...results],
+        });
+      }
+      await load();
+    } finally {
+      setFitnessRefreshAllRunning(false);
+    }
+  }
+
   const companyDashboards = wellnessData?.company_dashboards || [];
 
 
@@ -1397,6 +1524,34 @@ export default function WellnessAdminMobilePage() {
             <div className="rounded-xl bg-emerald-50 px-3 py-2 text-[10px] font-black text-emerald-800">
               Sync {lastLoadedLabel}
             </div>
+            {view === "participants" ? (
+              <div className="flex items-center gap-2">
+                <select
+                  value={fitnessRefreshProvider}
+                  disabled={fitnessRefreshAllRunning}
+                  onChange={(event) =>
+                    setFitnessRefreshProvider(
+                      event.target.value === "health_connect" ? "health_connect" : "google_fit",
+                    )
+                  }
+                  className="rounded-xl border border-sky-200 bg-white px-3 py-2.5 text-xs font-black text-slate-700 shadow-sm outline-none transition focus:border-sky-400 disabled:opacity-50"
+                  aria-label="Pilih provider untuk Refresh All"
+                >
+                  <option value="google_fit">Google Fit</option>
+                  <option value="health_connect">Health Connect</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void runFitnessRefreshAll(fitnessRefreshProvider)}
+                  disabled={fitnessRefreshAllRunning}
+                  className="rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {fitnessRefreshAllRunning
+                    ? `↻ Refreshing ${fitnessSourceLabel(fitnessRefreshProvider)}...`
+                    : `↻ Refresh All ${fitnessSourceLabel(fitnessRefreshProvider)}`}
+                </button>
+              </div>
+            ) : null}
             <a
               href={exportExcelUrl}
               className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-black text-white shadow-sm"
@@ -2631,6 +2786,140 @@ export default function WellnessAdminMobilePage() {
           ) : null}
         </div>
       </div>
+
+      {fitnessRefreshAll ? (
+        <div className="fixed inset-0 z-[150] flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Tutup hasil Refresh All Fitness"
+            onClick={() => !fitnessRefreshAllRunning && setFitnessRefreshAll(null)}
+            className="absolute inset-0 bg-slate-950/65 backdrop-blur-sm"
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Refresh All Fitness"
+            className="relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-t-[2rem] bg-white p-5 shadow-2xl sm:max-w-2xl sm:rounded-[2rem]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.14em] text-sky-600">
+                  Fitness Bulk Refresh
+                </div>
+                <h2 className="mt-1 text-xl font-black text-slate-950">
+                  Refresh All {fitnessSourceLabel(fitnessRefreshAll.provider || fitnessRefreshProvider)}
+                </h2>
+                <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                  {(fitnessRefreshAll.provider || fitnessRefreshProvider) === "google_fit"
+                    ? "Hanya peserta dengan Google Fit aktif yang diproses. Sistem menjalankan force sync melalui flow Google Fit yang sudah ada."
+                    : "Hanya peserta dengan Health Connect aktif yang diproses. Server memverifikasi push Android terbaru; Health Connect tidak dapat ditarik paksa langsung dari server."}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={fitnessRefreshAllRunning}
+                onClick={() => setFitnessRefreshAll(null)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-black text-slate-600 disabled:opacity-40"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-2xl bg-slate-100 px-3 py-3">
+                <div className="text-[9px] font-black uppercase text-slate-400">Diproses</div>
+                <div className="mt-1 text-xl font-black text-slate-950">
+                  {fmt(fitnessRefreshAll.completed)} / {fmt(fitnessRefreshAll.total)}
+                </div>
+              </div>
+              <div className="rounded-2xl bg-emerald-50 px-3 py-3">
+                <div className="text-[9px] font-black uppercase text-emerald-600">Berhasil</div>
+                <div className="mt-1 text-xl font-black text-emerald-800">{fmt(fitnessRefreshAll.success)}</div>
+              </div>
+              <div className="rounded-2xl bg-rose-50 px-3 py-3">
+                <div className="text-[9px] font-black uppercase text-rose-600">Gagal</div>
+                <div className="mt-1 text-xl font-black text-rose-800">{fmt(fitnessRefreshAll.failed)}</div>
+              </div>
+            </div>
+
+            {fitnessRefreshAllRunning ? (
+              <div className="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-xs font-black text-sky-800">
+                Memproses {fitnessSourceLabel(fitnessRefreshAll.provider || fitnessRefreshProvider)} secara bertahap agar API/server tidak dibanjiri request...
+              </div>
+            ) : fitnessRefreshAll.total === 0 ? (
+              <div className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900">
+                Tidak ada peserta aktif dengan provider {fitnessSourceLabel(fitnessRefreshAll.provider || fitnessRefreshProvider)}.
+              </div>
+            ) : null}
+
+            {(fitnessRefreshAll.results || []).filter((item: any) => !item.ok).length ? (
+              <div className="mt-5">
+                <div className="text-xs font-black uppercase tracking-[0.12em] text-rose-700">Perlu Tindak Lanjut</div>
+                <div className="mt-2 space-y-2">
+                  {(fitnessRefreshAll.results || [])
+                    .filter((item: any) => !item.ok)
+                    .map((item: any) => (
+                      <div
+                        key={`${item.provider}-${item.participant_id}`}
+                        className="rounded-2xl border border-rose-100 bg-rose-50 p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-black text-slate-950">{item.name}</div>
+                            <div className="mt-0.5 text-[10px] font-bold text-slate-500">
+                              Kode {item.code} · ID {item.participant_id}
+                            </div>
+                          </div>
+                          <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-black text-rose-700">
+                            {fitnessSourceLabel(item.provider)} · {item.status || "FAILED"}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-xs font-bold leading-5 text-rose-800">{item.message}</div>
+                        {item.detail ? (
+                          <div className="mt-1 text-[10px] font-bold leading-4 text-amber-800">{item.detail}</div>
+                        ) : null}
+                        {item.last_sync_at ? (
+                          <div className="mt-1 text-[10px] font-bold text-slate-500">Last sync: {item.last_sync_at}</div>
+                        ) : null}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : null}
+
+            {!fitnessRefreshAllRunning && fitnessRefreshAll.results?.length && fitnessRefreshAll.failed === 0 ? (
+              <div className="mt-5 rounded-2xl bg-emerald-50 px-4 py-4 text-xs font-bold leading-5 text-emerald-800">
+                Semua pengguna {fitnessSourceLabel(fitnessRefreshAll.provider || fitnessRefreshProvider)} yang aktif berhasil diproses / diverifikasi.
+              </div>
+            ) : null}
+
+            {!fitnessRefreshAllRunning && fitnessRefreshAll.results?.some((item: any) => item.ok) ? (
+              <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <summary className="cursor-pointer text-xs font-black text-slate-700">Lihat daftar yang berhasil</summary>
+                <div className="mt-2 space-y-1.5">
+                  {(fitnessRefreshAll.results || [])
+                    .filter((item: any) => item.ok)
+                    .map((item: any) => (
+                      <div
+                        key={`ok-${item.provider}-${item.participant_id}`}
+                        className="flex items-start justify-between gap-3 rounded-xl bg-white px-3 py-2"
+                      >
+                        <div>
+                          <div className="text-xs font-black text-slate-900">{item.name}</div>
+                          <div className="text-[9px] font-bold text-slate-500">
+                            {fitnessSourceLabel(item.provider)}
+                            {item.last_sync_at ? ` · ${item.last_sync_at}` : ""}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-black text-emerald-700">BERHASIL</span>
+                      </div>
+                    ))}
+                </div>
+              </details>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
 
       {googleFitRepair ? (
         <div className="fixed inset-0 z-[140] flex items-end justify-center p-0 sm:items-center sm:p-4">
