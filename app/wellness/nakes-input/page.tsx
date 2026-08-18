@@ -1267,11 +1267,13 @@ function WellnessNakesInput({
 
               <div className="grid gap-4 md:grid-cols-4">
                 <Field label="BB saat ini (kg)">
-                  <input
+                                  {/* WELLNESS_NAKES_WEIGHT_COMMA_DISPLAY_V126M93_2 */}
+<input
+                    inputMode="decimal"
                     className={inputClass()}
-                    value={form.weight_kg || ""}
+                    value={String(form.weight_kg || "").replace(".", ",")}
                     onChange={(event) => setValue("weight_kg", setNumberish(event.target.value))}
-                    placeholder="Contoh: 82.5"
+                    placeholder="Contoh: 73,8"
                   />
                 </Field>
 
