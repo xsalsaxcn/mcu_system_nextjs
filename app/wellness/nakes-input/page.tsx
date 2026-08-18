@@ -196,6 +196,7 @@ function setNumberish(value: any) {
 }
 
 // WELLNESS_NAKES_EXISTING_AGE_HEIGHT_PREFILL_V126M79_3_PAGE
+// WELLNESS_NAKES_HISTORY_TABLE_SAVE_OVERLAY_V126M81_PAGE
 function participantAge(participant: any) {
   const direct = Number(
     participant?.nakes_prefill_age_years ||
@@ -238,6 +239,60 @@ function participantHeightPrefill(participant: any) {
   return Number.isFinite(height) && height >= 120 && height <= 230
     ? String(Math.round(height * 10) / 10)
     : "";
+}
+
+function nakesDisplayValue(value: any, suffix = "") {
+  const text = clean(value);
+  if (!text || text === "null" || text === "undefined") return "-";
+  return suffix ? `${text}${suffix}` : text;
+}
+
+function nakesBloodPressure(row: any) {
+  const systolic = clean(row?.systolic);
+  const diastolic = clean(row?.diastolic);
+  return systolic || diastolic ? `${systolic || "-"}/${diastolic || "-"}` : "-";
+}
+
+function nakesHistoryAge(row: any) {
+  const age = Number(row?.age_years ?? row?.raw_payload?.age_years ?? row?.raw_payload?.usia ?? 0);
+  return Number.isFinite(age) && age > 0 ? String(Math.round(age)) : "-";
+}
+
+function savedExamItems(result: any) {
+  const row = result?.history || {};
+  const items: Array<{ label: string; value: string }> = [];
+  const push = (label: string, value: any, suffix = "") => {
+    const text = clean(value);
+    if (text && text !== "null" && text !== "undefined") {
+      items.push({ label, value: suffix ? `${text}${suffix}` : text });
+    }
+  };
+
+  push("Usia", row?.raw_payload?.age_years ?? row?.raw_payload?.usia, " tahun");
+  push("BB", row?.weight_kg, " kg");
+  push("TB", row?.height_cm, " cm");
+  push("BMI", row?.bmi);
+  push("Lingkar Perut", row?.waist_cm, " cm");
+  if (clean(row?.systolic) || clean(row?.diastolic)) {
+    items.push({ label: "Tekanan Darah", value: nakesBloodPressure(row) });
+  }
+  push("Nadi", row?.pulse, " bpm");
+  push("HbA1c", row?.hba1c_percent, "%");
+  push("Gula Darah", row?.glucose_value);
+  push("Kolesterol Total", row?.cholesterol_total);
+  push("LDL", row?.ldl);
+  push("HDL", row?.hdl);
+  push("Trigliserida", row?.triglyceride);
+  push("Asam Urat", row?.uric_acid);
+  push("SGOT", row?.sgot);
+  push("SGPT", row?.sgpt);
+  push("Risk Cluster", row?.risk_cluster);
+  push("Status Program", row?.program_status);
+  push("Fokus Intervensi", row?.intervention_focus);
+  push("Rencana Monitoring", row?.monitoring_plan);
+  push("Catatan Medis", row?.medical_validation_notes);
+  push("Follow-up", row?.next_followup_date);
+  return items;
 }
 
 function InfoPill({
@@ -326,6 +381,9 @@ function WellnessNakesInput({
   const [examMode, setExamMode] = useState<ExamMode>("");
   const [examModalOpen, setExamModalOpen] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [participantHistory, setParticipantHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [saveReceiptOpen, setSaveReceiptOpen] = useState(false);
 
   const [form, setForm] = useState<any>({
     checkup_date: today(),
@@ -535,10 +593,30 @@ function WellnessNakesInput({
     }));
   }
 
+  async function loadParticipantHistory(participantId: number) {
+    if (!(participantId > 0)) {
+      setParticipantHistory([]);
+      return;
+    }
+
+    setHistoryLoading(true);
+    const result = await fetch(
+      `/api/wellness/nakes-input?action=participant_history&participant_id=${encodeURIComponent(String(participantId))}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .catch(() => ({ ok: false, rows: [] }));
+
+    setParticipantHistory(Array.isArray(result?.rows) ? result.rows : []);
+    setHistoryLoading(false);
+  }
+
   function openParticipantExam(participant: any) {
     const defaultMode: Exclude<ExamMode, ""> = "routine";
     setExamMode(defaultMode);
     setLastResult(null);
+    setSaveReceiptOpen(false);
+    void loadParticipantHistory(Number(participant?.id || 0));
     setMessage(
       `Peserta ${participantName(participant)} dipilih. Lengkapi pemeriksaan lalu simpan.`,
     );
@@ -644,7 +722,6 @@ function WellnessNakesInput({
       }
     };
 
-    setSaving(false);
     setLastResult(result);
 
     if (result.ok) {
@@ -652,6 +729,9 @@ function WellnessNakesInput({
         result.message ||
           "Input NAKES berhasil disimpan. Dashboard grafik peserta akan membaca data ini sebagai titik pemeriksaan klinis."
       );
+
+      await loadParticipantHistory(Number(form.participant_id || 0));
+      setSaveReceiptOpen(true);
 
       setForm((previous: any) => ({
         participant_id: previous.participant_id,
@@ -665,6 +745,8 @@ function WellnessNakesInput({
     } else {
       setMessage(result.message || "Gagal menyimpan input NAKES.");
     }
+
+    setSaving(false);
   }
 
   async function retryGoogleSheetSync() {
@@ -1018,7 +1100,7 @@ function WellnessNakesInput({
                   role="dialog"
                   aria-modal="true"
                   aria-label="Form pemeriksaan NAKES peserta"
-                  className="my-auto w-full max-w-[1500px] overflow-hidden rounded-[2rem] border border-white/60 bg-slate-50 shadow-2xl shadow-slate-950/30"
+                  className="my-auto w-full max-w-[1680px] overflow-hidden rounded-[2rem] border border-white/60 bg-slate-50 shadow-2xl shadow-slate-950/30"
                   onMouseDown={(event) => event.stopPropagation()}
                 >
                   <header className="flex flex-col gap-4 border-b border-slate-200 bg-gradient-to-r from-teal-50 via-white to-blue-50 px-5 py-5 md:flex-row md:items-center md:justify-between md:px-7">
@@ -1050,7 +1132,7 @@ function WellnessNakesInput({
                     </button>
                   </header>
 
-                  <div className="grid max-h-[calc(100vh-8rem)] gap-5 overflow-y-auto p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_330px]">
+                  <div className="grid max-h-[calc(100vh-8rem)] gap-5 overflow-y-auto p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_540px]">
                     <div className="space-y-5">
             <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4">
               <h2 className="text-lg font-black text-slate-900">1. Informasi Kunjungan</h2>
@@ -1445,6 +1527,77 @@ function WellnessNakesInput({
                         </div>
                       </section>
 
+                      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              Riwayat Pemeriksaan
+                            </div>
+                            <div className="mt-1 text-base font-black text-slate-950">
+                              Hasil NAKES tersimpan
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => loadParticipantHistory(Number(selectedParticipant?.id || 0))}
+                            disabled={historyLoading}
+                            className="rounded-xl bg-slate-100 px-3 py-2 text-[10px] font-black text-slate-700 disabled:opacity-60"
+                          >
+                            {historyLoading ? "Memuat..." : "Refresh"}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+                          <table className="min-w-[1680px] border-collapse text-[10px]">
+                            <thead className="bg-slate-50 text-left uppercase tracking-wide text-slate-500">
+                              <tr>
+                                {[
+                                  "Tanggal", "Kunjungan", "Usia", "BB", "TB", "BMI", "Lingkar Perut",
+                                  "Tekanan Darah", "Nadi", "HbA1c", "Gula Darah", "Kolesterol", "LDL",
+                                  "HDL", "Trigliserida", "Asam Urat", "SGOT", "SGPT", "Risk", "Status", "Catatan"
+                                ].map((label) => (
+                                  <th key={label} className="whitespace-nowrap border-b border-slate-200 px-3 py-2 font-black">{label}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {historyLoading ? (
+                                <tr><td colSpan={21} className="px-4 py-5 text-center font-bold text-slate-500">Memuat riwayat pemeriksaan...</td></tr>
+                              ) : participantHistory.length ? (
+                                participantHistory.map((row: any) => (
+                                  <tr key={String(row?.id || `${row?.checkup_date}-${row?.visit_label}`)} className="border-b border-slate-100 last:border-b-0">
+                                    <td className="whitespace-nowrap px-3 py-2 font-black text-slate-700">{nakesDisplayValue(row?.checkup_date)}</td>
+                                    <td className="max-w-[180px] px-3 py-2 font-bold text-slate-700">{nakesDisplayValue(row?.visit_label || row?.history_type)}</td>
+                                    <td className="px-3 py-2">{nakesHistoryAge(row)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.weight_kg)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.height_cm)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.bmi)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.waist_cm)}</td>
+                                    <td className="px-3 py-2">{nakesBloodPressure(row)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.pulse)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.hba1c_percent)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.glucose_value)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.cholesterol_total)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.ldl)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.hdl)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.triglyceride)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.uric_acid)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.sgot)}</td>
+                                    <td className="px-3 py-2">{nakesDisplayValue(row?.sgpt)}</td>
+                                    <td className="max-w-[180px] px-3 py-2">{nakesDisplayValue(row?.risk_cluster)}</td>
+                                    <td className="max-w-[180px] px-3 py-2">{nakesDisplayValue(row?.program_status)}</td>
+                                    <td className="max-w-[260px] px-3 py-2">{nakesDisplayValue(row?.medical_validation_notes || row?.monitoring_plan || row?.intervention_focus)}</td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr><td colSpan={21} className="px-4 py-5 text-center font-bold text-slate-500">Belum ada riwayat pemeriksaan NAKES.</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="mt-2 text-[10px] font-bold text-slate-400">Geser tabel ke kanan untuk melihat seluruh parameter pemeriksaan.</div>
+                      </section>
+
                       <section className="rounded-3xl border border-blue-100 bg-blue-50 p-5">
                         <div className="text-[10px] font-black uppercase tracking-wide text-blue-700">
                           Pemeriksaan Aktif
@@ -1493,6 +1646,56 @@ function WellnessNakesInput({
                         </div>
                       </section>
                     </aside>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {saving ? (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-md rounded-[2rem] border border-white/60 bg-white p-8 text-center shadow-2xl">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-teal-50 text-3xl">⏳</div>
+                  <div className="mt-5 text-xl font-black text-slate-950">Saving in process...</div>
+                  <div className="mt-2 text-sm font-bold leading-6 text-slate-500">
+                    Menyimpan pemeriksaan {participantName(selectedParticipant)} ke history NAKES dan sinkronisasi terkait. Mohon tunggu sampai proses selesai.
+                  </div>
+                  <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full w-2/3 animate-pulse rounded-full bg-gradient-to-r from-teal-500 to-blue-600" />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {saveReceiptOpen && lastResult?.ok ? (
+              <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+                <div className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-emerald-100 bg-white p-6 shadow-2xl md:p-8">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.15em] text-emerald-600">Pemeriksaan berhasil disimpan</div>
+                      <h3 className="mt-2 text-2xl font-black text-slate-950">{lastResult?.participant?.name || participantName(selectedParticipant)}</h3>
+                      <div className="mt-1 text-xs font-bold text-slate-500">
+                        {lastResult?.summary?.visit_label || form.visit_label || "Pemeriksaan NAKES"} · {lastResult?.summary?.checkup_date || ""}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setSaveReceiptOpen(false)} className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">Tutup ×</button>
+                  </div>
+
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {savedExamItems(lastResult).map((item) => (
+                      <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div className="text-[9px] font-black uppercase tracking-wide text-slate-400">{item.label}</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{item.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!savedExamItems(lastResult).length ? (
+                    <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-500">Data berhasil disimpan. Tidak ada parameter numerik tambahan pada pemeriksaan ini.</div>
+                  ) : null}
+
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-emerald-50 p-4 text-xs font-bold text-emerald-800">
+                    <span>History ID {lastResult?.history?.id || "-"} · Revisi {lastResult?.summary?.revision || "-"}</span>
+                    <span>{lastResult?.google_sheet?.ok ? "Google Sheet tersinkron ✓" : "History tersimpan · Google Sheet perlu tindak lanjut"}</span>
                   </div>
                 </div>
               </div>

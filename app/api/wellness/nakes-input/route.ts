@@ -14,6 +14,7 @@ import { getWellnessSheetName, postToWellnessWebhook } from "@/lib/wellness/goog
 // WELLNESS_EVIDENCE_GALLERY_PROGRESS_V364_API
 // WELLNESS_DASHBOARD_NAKES_ACTIVITY_LOG_V379_API
 // WELLNESS_NAKES_AGE_CAPTURE_V126M42_API
+// WELLNESS_NAKES_HISTORY_TABLE_SAVE_OVERLAY_V126M81_API
 // WELLNESS_WORKOUT_CALORIES_ALIGN_V381_API
 // Wellness-only dashboard API.
 // Chart workout calories sekarang memakai kalkulasi yang sama dengan Log Activities,
@@ -1742,6 +1743,43 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
     const participants = await getAllowedWellnessParticipants(supabase, user);
+
+    if (cleanNakesValue(req.nextUrl.searchParams.get("action")) === "participant_history") {
+      const participantId = Number(req.nextUrl.searchParams.get("participant_id") || 0);
+      if (!(participantId > 0)) return fail("Participant ID wajib diisi.", 400);
+
+      const participant = (participants || []).find(
+        (item: any) => Number(item?.id) === participantId,
+      );
+      if (!participant) return fail("Peserta tidak ditemukan atau akses NAKES ditolak.", 404);
+
+      const { data, error } = await supabase
+        .from("wellness_checkup_history")
+        .select("*")
+        .eq("participant_id", participantId)
+        .order("checkup_date", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(100);
+
+      if (error) return fail(error.message || "Gagal membaca riwayat pemeriksaan NAKES.", 500);
+
+      return ok({
+        participant: {
+          id: participant?.id,
+          code: participant?.code || participant?.employee_code || "",
+          name: nakesParticipantName(participant),
+        },
+        rows: (data || []).map((row: any) => ({
+          ...row,
+          age_years:
+            row?.raw_payload?.age_years ??
+            row?.raw_payload?.usia ??
+            row?.raw_payload?.participant_snapshot?.age_years ??
+            null,
+        })),
+      });
+    }
+
     const participantIds = participants.map((p: any) => Number(p.id)).filter(Boolean);
     const participantCodes = participants
       .map((p: any) => String(p.code || p.employee_code || "").trim())
