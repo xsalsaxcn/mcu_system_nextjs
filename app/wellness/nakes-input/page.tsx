@@ -195,9 +195,14 @@ function setNumberish(value: any) {
   return text.replace(",", ".");
 }
 
+// WELLNESS_NAKES_EXISTING_AGE_HEIGHT_PREFILL_V126M79_3_PAGE
 function participantAge(participant: any) {
   const direct = Number(
-    participant?.age_years || participant?.age || participant?.usia || 0
+    participant?.nakes_prefill_age_years ||
+      participant?.age_years ||
+      participant?.age ||
+      participant?.usia ||
+      0
   );
   if (Number.isFinite(direct) && direct >= 18 && direct <= 119) {
     return String(Math.round(direct));
@@ -223,6 +228,16 @@ function participantAge(participant: any) {
   }
 
   return age >= 18 && age <= 119 ? String(age) : "";
+}
+
+function participantHeightPrefill(participant: any) {
+  const height = Number(
+    participant?.nakes_prefill_height_cm || participant?.height_cm || 0
+  );
+
+  return Number.isFinite(height) && height >= 120 && height <= 230
+    ? String(Math.round(height * 10) / 10)
+    : "";
 }
 
 function InfoPill({
@@ -451,9 +466,11 @@ function WellnessNakesInput({
 
   useEffect(() => {
     const resolvedAge = participantAge(selectedParticipant);
+    const resolvedHeight = participantHeightPrefill(selectedParticipant);
     setForm((previous: any) => ({
       ...previous,
       age_years: resolvedAge,
+      height_cm: resolvedHeight,
     }));
   }, [selectedParticipant?.id]);
 
@@ -528,7 +545,8 @@ function WellnessNakesInput({
     setForm((previous: any) => ({
       ...previous,
       participant_id: participant.id,
-      age_years: participantAge(participant) || previous.age_years || "",
+      age_years: participantAge(participant),
+      height_cm: participantHeightPrefill(participant),
       exam_mode: defaultMode,
     }));
     setExamModalOpen(true);
@@ -1178,7 +1196,7 @@ function WellnessNakesInput({
                 <Field label="TB (cm)">
                   <input
                     className={inputClass()}
-                    value={form.height_cm || clean(selectedParticipant?.height_cm) || ""}
+                    value={form.height_cm || participantHeightPrefill(selectedParticipant)}
                     onChange={(event) => setValue("height_cm", setNumberish(event.target.value))}
                     placeholder="Contoh: 165"
                   />

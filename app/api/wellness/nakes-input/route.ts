@@ -150,6 +150,46 @@ function firstClinicalHistory(rows: any[] = []) {
   );
 }
 
+// WELLNESS_NAKES_EXISTING_AGE_HEIGHT_PREFILL_V126M79_3_API
+function latestValidHistoryHeight(rows: any[] = []) {
+  const sorted = [...(rows || [])].sort((a: any, b: any) => {
+    const dateCompare = String(b?.checkup_date || "").localeCompare(String(a?.checkup_date || ""));
+    if (dateCompare !== 0) return dateCompare;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+
+  for (const row of sorted) {
+    const height = pickNumber(row?.height_cm);
+    if (height !== null && height >= 120 && height <= 230) return height;
+  }
+
+  return null;
+}
+
+function latestValidHistoryAge(rows: any[] = []) {
+  const sorted = [...(rows || [])].sort((a: any, b: any) => {
+    const dateCompare = String(b?.checkup_date || "").localeCompare(String(a?.checkup_date || ""));
+    if (dateCompare !== 0) return dateCompare;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+
+  for (const row of sorted) {
+    const raw = row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : {};
+    const age = pickNumber(raw?.age_years, raw?.usia, row?.age_years, row?.usia);
+    if (age !== null && age >= 18 && age <= 119) return Math.round(age);
+  }
+
+  return null;
+}
+
+function firstValidNakesHeight(...values: any[]) {
+  for (const value of values) {
+    const height = pickNumber(value);
+    if (height !== null && height >= 120 && height <= 230) return height;
+  }
+  return null;
+}
+
 function addChartPoint(points: any[], point: any) {
   const hasNumber = Object.entries(point).some(([key, value]) => {
     if (["label", "date", "source"].includes(key)) return false;
@@ -1815,6 +1855,12 @@ export async function GET(req: NextRequest) {
       const latestMiniMcu = latestByDate(miniMcuParticipantRows, "exam_date") || null;
       const latestHistory = latestByDate(historyParticipantRows, "checkup_date") || null;
       const baselineHistory = firstClinicalHistory(historyParticipantRows);
+      const nakesPrefillHeightCm = firstValidNakesHeight(
+        latestValidHistoryHeight(historyParticipantRows),
+        latestMiniMcu?.height_cm,
+        participant?.height_cm,
+      );
+      const nakesPrefillAgeYears = latestValidHistoryAge(historyParticipantRows);
 
       const baselineWeight = pickNumber(participant.initial_weight_kg, baselineHistory?.weight_kg);
       const baselineBmi = pickNumber(
@@ -2006,6 +2052,15 @@ export async function GET(req: NextRequest) {
           "-",
         old_group_name: groupName.get(Number(participant.group_id)) || "-",
         height_cm: participant.height_cm,
+        nakes_prefill_height_cm: nakesPrefillHeightCm,
+        nakes_prefill_age_years: nakesPrefillAgeYears,
+        birth_date:
+          participant.birth_date ||
+          participant.date_of_birth ||
+          participant.birthdate ||
+          participant.dob ||
+          participant.tanggal_lahir ||
+          null,
         initial_weight_kg: participant.initial_weight_kg,
         target_weight_kg: participant.target_weight_kg,
         baseline_weight_kg: baselineWeight ?? null,
