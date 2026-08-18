@@ -449,6 +449,31 @@ async function normalizeSource(supabase: any, participantId: number, user: any) 
   const google = integrations.find((row: any) => clean(row.provider) === "google_fit");
   if (!google) throw new Error("Google Fit belum terkoneksi untuk peserta ini.");
 
+  // WELLNESS_PARTICIPANT_FITNESS_SOURCE_AUTHORITY_V126M87
+  // Repairing Google Fit must not silently replace another provider explicitly
+  // selected by the participant/admin. When Health Connect is canonical, keep it
+  // canonical and leave provider activation/control untouched.
+  const selectedControlV126M87 = await participantControl(supabase, participantId);
+  const selectedSourceV126M87 = clean(
+    selectedControlV126M87?.fitness_source || "none",
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+
+  if (
+    selectedSourceV126M87 !== "none" &&
+    selectedSourceV126M87 !== "google_fit"
+  ) {
+    return {
+      ...(await diagnose(supabase, participantId)),
+      source_preserved: true,
+      preserved_fitness_source: selectedSourceV126M87,
+      message:
+        `Pilihan fitness peserta (${selectedSourceV126M87}) dipertahankan. ` +
+        "Google Fit repair tidak mengubah source aktif.",
+    };
+  }
+
   const disabled = await supabase
     .from("wellness_integrations")
     .update({ is_active: 0, updated_at: now })

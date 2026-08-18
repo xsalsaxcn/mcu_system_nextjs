@@ -653,6 +653,40 @@ async function handlePush(req: NextRequest) {
 
   let sourceChangedByParticipant = false;
 
+  // WELLNESS_PARTICIPANT_FITNESS_SOURCE_AUTHORITY_V126M87
+  // A manual Health Connect selection made by the participant is authoritative.
+  // If another admin/repair flow changed the control afterwards, a confirmed
+  // participant Health Connect selection may reclaim the canonical source before
+  // the normal Health Connect push guard is evaluated.
+  if (
+    (!control.fitness_enabled || control.fitness_source !== "health_connect") &&
+    participantConfirmedHealthConnect(body)
+  ) {
+    const participantActivation = await activateProviderFromParticipant(
+      supabase,
+      participantId,
+      control,
+      "health_connect",
+    );
+
+    if (!participantActivation.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          participant_id: participantId,
+          fitness_source: control.fitness_source,
+          message: participantActivation.message,
+        },
+        { status: participantActivation.status },
+      );
+    }
+
+    control = await loadParticipantControl(supabase, participantId);
+    sourceChangedByParticipant =
+      control.fitness_enabled === true &&
+      control.fitness_source === "health_connect";
+  }
+
   if (!control.fitness_enabled || control.fitness_source !== "health_connect") {
     return NextResponse.json(
       {
