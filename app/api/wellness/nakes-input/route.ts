@@ -1481,11 +1481,18 @@ export async function POST(req: NextRequest) {
       participant?.height_cm,
     );
     const weightKg = pickNumber(body?.weight_kg, existing?.weight_kg);
-    const bmi = pickNumber(
-      body?.bmi,
-      existing?.bmi,
-      calculateBmi(weightKg, heightCm),
-    );
+
+    // WELLNESS_NAKES_BMI_RECALCULATE_BEFORE_EXISTING_V126M93_5
+    // BB + TB are the canonical source of truth for BMI.
+    // Existing BMI is fallback only when BB/TB genuinely cannot produce BMI.
+    // Never let a previously corrupted BMI (for example 158.x) override
+    // a fresh valid BB/TB measurement.
+    const calculatedBmiV126M93_5 = calculateBmi(weightKg, heightCm);
+    const bmi =
+      calculatedBmiV126M93_5 !== null
+        ? calculatedBmiV126M93_5
+        : pickNumber(existing?.bmi);
+
     const systolic = pickNumber(body?.systolic, existing?.systolic);
     const diastolic = pickNumber(body?.diastolic, existing?.diastolic);
     const hba1c = pickNumber(body?.hba1c_percent, existing?.hba1c_percent);
