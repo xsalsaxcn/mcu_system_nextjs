@@ -36,6 +36,10 @@ import {
   workoutDailyPoints,
 } from "@/lib/wellness/pointRules";
 import {
+  pointActivityCalories,
+  pointActivityHasValue,
+} from "@/lib/wellness/pointWriter";
+import {
   buildWellnessStreakSummary,
   wellnessStreakSteps,
   wellnessStreakWorkoutCalories,
@@ -566,6 +570,107 @@ function healthtalkPoint(row: any) {
   return healthtalkPointsFromRow(row);
 }
 
+// WELLNESS_COACH_PARTICIPANT_POINT_PARITY_V126M94_5_1
+// Point calculation only:
+// normalize repeated device-daily snapshots exactly like Participant points.
+// Coach chart/display/streak/source selection remain untouched.
+function pointActivityDateV126M94_5_1(row: any) {
+  return dateKey(
+    row?.log_date ||
+      row?.date ||
+      row?.started_at ||
+      row?.raw_payload?.start_date_local ||
+      row?.raw_payload?.last_sync_at ||
+      row?.updated_at ||
+      row?.created_at,
+  );
+}
+
+function pointActivityUpdatedAtV126M94_5_1(row: any) {
+  const value =
+    row?.raw_payload?.last_sync_at ||
+    row?.raw_payload?.health_connect_last_sync_at ||
+    row?.updated_at ||
+    row?.started_at ||
+    row?.created_at;
+  const parsed = new Date(value || "").getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isPointDeviceDailyRowV126M94_5_1(row: any) {
+  const raw = row?.raw_payload || {};
+  const source = clean(
+    row?.source || row?.input_source || row?.provider || raw?.provider,
+  )
+    .toLowerCase()
+    .replace(/-/g, "_");
+
+  const externalId = clean(
+    row?.external_activity_id || row?.provider_activity_id || row?.id,
+  ).toLowerCase();
+
+  const syncMode = clean(raw?.sync_mode).toLowerCase();
+  const name = clean(
+    row?.activity_name || row?.activity_type || row?.nama_activities,
+  ).toLowerCase();
+
+  if (source === "google_fit") {
+    return (
+      externalId.includes("google_fit_daily_") ||
+      name.includes("google fit daily") ||
+      syncMode === "aggregate_daily"
+    );
+  }
+
+  if (source === "health_connect") {
+    return (
+      externalId.includes("health_connect_daily_") ||
+      name.includes("health connect daily") ||
+      syncMode === "daily_aggregate"
+    );
+  }
+
+  return false;
+}
+
+function normalizePointActivitiesV126M94_5_1(rows: any[] = []) {
+  const result = new Map<string, any>();
+
+  for (const row of rows) {
+    const date = pointActivityDateV126M94_5_1(row);
+    const key = isPointDeviceDailyRowV126M94_5_1(row)
+      ? `device_daily:${date}`
+      : `activity:${clean(
+          row?.id ||
+            row?.external_activity_id ||
+            `${date}:${result.size}`,
+        )}`;
+
+    const previous = result.get(key);
+
+    if (!previous) {
+      result.set(key, row);
+      continue;
+    }
+
+    const currentQuality =
+      pointActivityCalories(row) * 1000 + asNumber(row?.steps);
+    const previousQuality =
+      pointActivityCalories(previous) * 1000 + asNumber(previous?.steps);
+
+    if (
+      currentQuality > previousQuality ||
+      (currentQuality === previousQuality &&
+        pointActivityUpdatedAtV126M94_5_1(row) >=
+          pointActivityUpdatedAtV126M94_5_1(previous))
+    ) {
+      result.set(key, row);
+    }
+  }
+
+  return [...result.values()];
+}
+
 function parseTargetsFromNote(note: any) {
   const text = [note?.action_plan, note?.coach_note, note?.main_issue]
     .map(clean)
@@ -990,23 +1095,24 @@ export async function GET(request: NextRequest) {
       addDailyPoint(dailyPoints, date, points);
     }
 
+    const pointActivityRowsV126M94_5_1 =
+      normalizePointActivitiesV126M94_5_1(activityRows);
+
     const workoutRowsByDate = rowsByDate(
-      activityRows,
+      pointActivityRowsV126M94_5_1,
       (row) => row?.log_date || row?.started_at || row?.created_at
     );
     let activityPoints = 0;
     for (const [date, rows] of workoutRowsByDate.entries()) {
-      const calories = rows.reduce((sum, row) => sum + activityCalories(row), 0);
+      const calories = rows.reduce(
+        (sum, row) => sum + pointActivityCalories(row),
+        0,
+      );
       const datedTargets = effectiveTargetsForDate(targetTimeline, date);
       const points = workoutDailyPoints({
         calories,
         calorieTarget: datedTargets.workout,
-        hasActivity: rows.some(
-          (row) =>
-            activityCalories(row) > 0 ||
-            activitySteps(row) > 0 ||
-            asNumber(row?.duration_minutes) > 0,
-        ),
+        hasActivity: rows.some(pointActivityHasValue),
       });
       activityPoints += points;
       addDailyPoint(dailyPoints, date, points);
@@ -1041,9 +1147,11 @@ export async function GET(request: NextRequest) {
         other: otherPoints,
       },
       preferCalculated: {
-        nutrition: true,
-        workout: true,
-        healthtalk: true,
+        // V126M94.5.1 parity with Participant points:
+        // awarded ledger wins per category; calculated value is fallback.
+        nutrition: false,
+        workout: false,
+        healthtalk: false,
       },
     });
     const pointBreakdown = {
