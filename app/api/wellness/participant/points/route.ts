@@ -343,9 +343,19 @@ export async function GET(req: NextRequest) {
         other: otherPoints,
       },
       preferCalculated: {
-        nutrition: true,
-        workout: true,
-        healthtalk: true,
+        // WELLNESS_PARTICIPANT_POINTS_LEDGER_FIRST_FALLBACK_V126M94_3
+        // Canonical hybrid rule:
+        // - if a category already has awarded rows in wellness_point_logs,
+        //   keep that awarded ledger total;
+        // - if the category has no ledger rows, use the current calculated
+        //   canonical value as fallback.
+        //
+        // This preserves historical/awarded points without double-counting,
+        // while Workout / Health Talk can still be calculated when their
+        // ledger category is empty.
+        nutrition: false,
+        workout: false,
+        healthtalk: false,
       },
     });
 
