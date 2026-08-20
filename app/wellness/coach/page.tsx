@@ -3846,9 +3846,17 @@ function ParticipantDetail({
 
   const streak = detail?.streak || {};
   const workoutSourceBreakdown = detail?.workout_source_breakdown || {};
+  // WELLNESS_COACH_GOOGLEFIT_ACTIVE_CALORIE_DISPLAY_V126M96_10
+  // Google Fit total energy may be shown as context, but is explicitly not
+  // treated as workout active calories or compared with the workout target.
   const workoutSourceSubtitle = [
     Number(workoutSourceBreakdown?.google_fit || 0) > 0
       ? `Google Fit ${fmtNumber(workoutSourceBreakdown.google_fit)}`
+      : "",
+    Number(workoutSourceBreakdown?.google_fit_total_energy || 0) > 0
+      ? `Google Fit total energi ${fmtNumber(
+          workoutSourceBreakdown.google_fit_total_energy,
+        )} (bukan kalori aktif)`
       : "",
     Number(workoutSourceBreakdown?.health_connect || 0) > 0
       ? `Health Connect ${fmtNumber(workoutSourceBreakdown.health_connect)}`

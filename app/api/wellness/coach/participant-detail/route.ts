@@ -421,11 +421,64 @@ function activitySourceKeyV126M31(row: any) {
     .replace(/-/g, "_");
 }
 
+// WELLNESS_COACH_GOOGLEFIT_ACTIVE_CALORIE_DISPLAY_V126M96_10
+// Coach workout progress/graph must use the same calorie semantics as the
+// target calculator: Google Fit total energy includes resting energy and must
+// never be compared with an active-calorie workout target.
+function coachGoogleFitActiveCaloriesV126M96_10(row: any) {
+  const raw =
+    row?.raw_payload && typeof row.raw_payload === "object"
+      ? row.raw_payload
+      : {};
+  const exact =
+    raw?.exact_snapshot && typeof raw.exact_snapshot === "object"
+      ? raw.exact_snapshot
+      : {};
+
+  for (const value of [
+    raw?.google_fit_active_calories_exact,
+    raw?.google_fit_active_calories,
+    raw?.selected_active_calories,
+    raw?.sanitized_active_calories,
+    exact?.active_calories,
+  ]) {
+    const calories = asNumber(value);
+    if (calories > 0) return calories;
+  }
+
+  return 0;
+}
+
+function coachGoogleFitTotalEnergyV126M96_10(row: any) {
+  const raw =
+    row?.raw_payload && typeof row.raw_payload === "object"
+      ? row.raw_payload
+      : {};
+
+  return asNumber(
+    raw?.google_fit_calories_expended ??
+      raw?.google_fit_total_calories ??
+      raw?.total_calories ??
+      row?.total_calories ??
+      row?.calories ??
+      0,
+  );
+}
+
+function coachWorkoutDisplayCaloriesV126M96_10(row: any) {
+  if (activitySourceKeyV126M31(row) === "google_fit") {
+    return coachGoogleFitActiveCaloriesV126M96_10(row);
+  }
+
+  return wellnessStreakWorkoutCalories(row);
+}
+
 function workoutSourceBreakdownV126M31(rows: any[], targetDate: string) {
   const result = {
     date: targetDate,
     total: 0,
     google_fit: 0,
+    google_fit_total_energy: 0,
     health_connect: 0,
     strava: 0,
     manual: 0,
@@ -438,12 +491,16 @@ function workoutSourceBreakdownV126M31(rows: any[], targetDate: string) {
     );
     if (!targetDate || rowDate !== targetDate) continue;
 
-    const calories = wellnessStreakWorkoutCalories(row);
     const source = activitySourceKeyV126M31(row);
+    const calories = coachWorkoutDisplayCaloriesV126M96_10(row);
     result.total += calories;
 
-    if (source === "google_fit") result.google_fit += calories;
-    else if (source === "health_connect") result.health_connect += calories;
+    if (source === "google_fit") {
+      result.google_fit += calories;
+      if (!(calories > 0)) {
+        result.google_fit_total_energy += coachGoogleFitTotalEnergyV126M96_10(row);
+      }
+    } else if (source === "health_connect") result.health_connect += calories;
     else if (source === "strava") result.strava += calories;
     else if (!source || source === "manual" || source === "google_sheet") {
       result.manual += calories;
@@ -455,6 +512,7 @@ function workoutSourceBreakdownV126M31(rows: any[], targetDate: string) {
   for (const key of [
     "total",
     "google_fit",
+    "google_fit_total_energy",
     "health_connect",
     "strava",
     "manual",
@@ -1165,7 +1223,7 @@ export async function GET(request: NextRequest) {
     const nutritionChart = aggregateByDate(mergedFoodRows, foodCalories, (row) => row?.log_date || row?.created_at);
     const workoutChart = aggregateByDate(
       workoutDisplayRowsV126M72,
-      wellnessStreakWorkoutCalories,
+      coachWorkoutDisplayCaloriesV126M96_10,
       (row) => row?.log_date || row?.started_at || row?.created_at,
     );
     // V126M91.2: Steps use the same resolver used by Participant Portal
@@ -1334,7 +1392,12 @@ export async function GET(request: NextRequest) {
           (sum, row) => sum + wellnessStreakSteps(row),
           0,
         ),
-        total_workout_calories: Math.round(workoutDisplayRowsV126M72.reduce((sum, row) => sum + wellnessStreakWorkoutCalories(row), 0)),
+        total_workout_calories: Math.round(
+          workoutDisplayRowsV126M72.reduce(
+            (sum, row) => sum + coachWorkoutDisplayCaloriesV126M96_10(row),
+            0,
+          ),
+        ),
         latest_weight_kg: latestWeight,
         latest_bmi: latestBmi,
         latest_systolic: latestBp?.value ?? null,
@@ -1413,7 +1476,8 @@ export async function GET(request: NextRequest) {
           display_rows: workoutDisplayRowsV126M72.length,
           display_calories_total: Math.round(
             workoutDisplayRowsV126M72.reduce(
-              (sum: number, row: any) => sum + wellnessStreakWorkoutCalories(row),
+              (sum: number, row: any) =>
+                sum + coachWorkoutDisplayCaloriesV126M96_10(row),
               0,
             ),
           ),
