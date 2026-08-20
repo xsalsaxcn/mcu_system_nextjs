@@ -1147,11 +1147,11 @@ export async function GET(request: NextRequest) {
         other: otherPoints,
       },
       preferCalculated: {
-        // V126M94.5.1 parity with Participant points:
-        // awarded ledger wins per category; calculated value is fallback.
+        // WELLNESS_PARTICIPANT_POINT_INITIAL_LOAD_CANONICAL_WORKOUT_V126M95_1
+        // Same point-source contract as Participant.
         nutrition: false,
-        workout: false,
-        healthtalk: false,
+        workout: true,
+        healthtalk: true,
       },
     });
     const pointBreakdown = {

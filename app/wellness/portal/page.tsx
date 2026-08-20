@@ -1462,6 +1462,13 @@ export default function WellnessParticipantPortalPage() {
     }
 
     if (result.ok) {
+      // WELLNESS_PARTICIPANT_POINT_INITIAL_LOAD_CANONICAL_WORKOUT_V126M95_1
+      // pointSummary starts at 0. Always hydrate canonical points whenever
+      // the authenticated participant portal is successfully loaded/refreshed.
+      // The points endpoint reads the same participant session cookie, so this
+      // does not depend on participant React state being set first.
+      await loadPoints();
+
       // WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
       // Preserve canonical streak in the participant object so Home can render
       // immediately and can rehydrate after tab changes or device sync.

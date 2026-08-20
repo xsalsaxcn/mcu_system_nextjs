@@ -343,19 +343,16 @@ export async function GET(req: NextRequest) {
         other: otherPoints,
       },
       preferCalculated: {
-        // WELLNESS_PARTICIPANT_POINTS_LEDGER_FIRST_FALLBACK_V126M94_3
-        // Canonical hybrid rule:
-        // - if a category already has awarded rows in wellness_point_logs,
-        //   keep that awarded ledger total;
-        // - if the category has no ledger rows, use the current calculated
-        //   canonical value as fallback.
+        // WELLNESS_PARTICIPANT_POINT_INITIAL_LOAD_CANONICAL_WORKOUT_V126M95_1
+        // Confirmed source rule:
+        // Nutrition = awarded ledger (Google Sheet input/bonus writes are durable).
+        // Workout   = canonical recalculation from selected activity + effective target.
+        // HealthTalk= canonical recalculation from merged Health Talk source.
         //
-        // This preserves historical/awarded points without double-counting,
-        // while Workout / Health Talk can still be calculated when their
-        // ledger category is empty.
+        // A partially populated Workout ledger must not suppress valid activity days.
         nutrition: false,
-        workout: false,
-        healthtalk: false,
+        workout: true,
+        healthtalk: true,
       },
     });
 
