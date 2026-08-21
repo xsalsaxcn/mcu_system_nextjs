@@ -77,6 +77,46 @@ function parseImportedFood(row: any, rowNumber: number) {
   };
 }
 
+// WELLNESS_BULK_WORKOUT_IMPORT_V126M97_4
+function parseImportedActivity(row: any, rowNumber: number) {
+  const activityName = clean(
+    firstColumn(row, [
+      "Nama Aktivitas",
+      "Aktivitas",
+      "Workout",
+      "Activity",
+      "Activity Name",
+      "activity_name",
+      "Nama",
+    ]),
+  );
+  const met = parseNumber(firstColumn(row, ["MET", "Met", "met"]));
+  const caloriesPerKm = parseNumber(
+    firstColumn(row, [
+      "Kalori per km",
+      "Kalori/km",
+      "Calories per km",
+      "Calories/km",
+      "calories_per_km",
+    ]),
+  );
+  const unit =
+    clean(firstColumn(row, ["Unit", "Satuan", "unit"])) || "menit";
+  const category = clean(
+    firstColumn(row, ["Kategori", "Category", "category"]),
+  );
+
+  return {
+    row_number: rowNumber,
+    activity_name: activityName,
+    met,
+    calories_per_km: caloriesPerKm,
+    unit,
+    category,
+    valid: Boolean(activityName && (met > 0 || caloriesPerKm > 0)),
+  };
+}
+
 function WellnessMaster() {
   // WELLNESS_MASTER_SERVER_PAGINATION_V126J
   const [foods, setFoods] = useState<any[]>([]);
@@ -100,6 +140,13 @@ function WellnessMaster() {
   const [importFileName, setImportFileName] = useState("");
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  // WELLNESS_BULK_WORKOUT_IMPORT_V126M97_4
+  const [activityImportOpen, setActivityImportOpen] = useState(false);
+  const [activityImportRows, setActivityImportRows] = useState<any[]>([]);
+  const [activityImportFileName, setActivityImportFileName] = useState("");
+  const [activityImporting, setActivityImporting] = useState(false);
+  const activityImportInputRef = useRef<HTMLInputElement | null>(null);
 
   async function loadFoods(page = foodPage, search = foodSearch) {
     setFoodLoading(true);
@@ -295,6 +342,107 @@ function WellnessMaster() {
     }
   }
 
+  async function readActivityImportFile(file: File | null) {
+    if (!file) return;
+    setMessage("Membaca file Master Data Workout...");
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json<any>(workbook.Sheets[sheetName], {
+        defval: "",
+      });
+      const parsed = rows.map((row, index) =>
+        parseImportedActivity(row, index + 2),
+      );
+
+      setActivityImportFileName(file.name);
+      setActivityImportRows(parsed);
+      setActivityImportOpen(true);
+
+      const valid = parsed.filter((item) => item.valid).length;
+      setMessage(
+        `${valid} dari ${parsed.length} baris workout siap diimpor. ` +
+          `Nama aktivitas wajib diisi dan minimal MET atau Kalori/km harus > 0.`,
+      );
+    } catch (error: any) {
+      setActivityImportRows([]);
+      setActivityImportFileName("");
+      setMessage(
+        error?.message || "File Master Data Workout tidak dapat dibaca.",
+      );
+    } finally {
+      if (activityImportInputRef.current) {
+        activityImportInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function importMasterWorkout() {
+    const validRows = activityImportRows.filter((item) => item.valid);
+
+    if (!validRows.length) {
+      setMessage("Belum ada baris workout valid untuk diimpor.");
+      return;
+    }
+
+    setActivityImporting(true);
+    setMessage("Mengimpor Master Data Workout...");
+
+    try {
+      const json = await fetch("/api/wellness/reference/activities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activities: validRows.map((item) => ({
+            activity_name: item.activity_name,
+            met: item.met || null,
+            calories_per_km: item.calories_per_km || null,
+            unit: item.unit || "menit",
+            category: item.category || null,
+          })),
+        }),
+      }).then((response) => response.json());
+
+      if (!json.ok) {
+        throw new Error(json.message || "Import Master Workout gagal.");
+      }
+
+      const imported = Number(json.imported || validRows.length);
+      setMessage(`${imported} Master Workout berhasil diimpor.`);
+      setActivityImportRows([]);
+      setActivityImportFileName("");
+      setActivityImportOpen(false);
+      setActivitySearch("");
+      await loadActivities("");
+    } catch (error: any) {
+      setMessage(error?.message || "Import Master Workout gagal.");
+    } finally {
+      setActivityImporting(false);
+    }
+  }
+
+  function downloadWorkoutTemplate() {
+    const csv = [
+      "Nama Aktivitas,MET,Kalori per km,Unit,Kategori",
+      '"Push Up / Calisthenics Vigorous",8,,menit,"Strength / Bodyweight"',
+      '"Squat Bodyweight Moderate",5,,menit,"Strength / Bodyweight"',
+      '"Jalan Cepat",4.3,,menit,Cardio',
+      '"Lari",8.3,60,km,Cardio',
+    ].join("\r\n");
+
+    const blob = new Blob(["\ufeff", csv], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "template_master_data_workout.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function downloadTemplate() {
     const csv = [
       "Nama Makanan,Kalori,Porsi,Kategori,Alias",
@@ -311,6 +459,9 @@ function WellnessMaster() {
   }
 
   const validImportRows = importRows.filter((item) => item.valid);
+  const validActivityImportRows = activityImportRows.filter(
+    (item) => item.valid,
+  );
 
   return (
     <div className="space-y-6">
@@ -357,7 +508,7 @@ function WellnessMaster() {
         {message}
       </div>
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-5">
         <a
           href="/wellness/settings"
           className="rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white"
@@ -382,6 +533,13 @@ function WellnessMaster() {
           className="rounded-2xl bg-emerald-700 px-4 py-3 text-center text-sm font-black text-white"
         >
           Import Master Data Nutrisi
+        </button>
+        <button
+          type="button"
+          onClick={() => setActivityImportOpen((current) => !current)}
+          className="rounded-2xl bg-sky-700 px-4 py-3 text-center text-sm font-black text-white"
+        >
+          Import Master Data Workout
         </button>
       </section>
 
@@ -479,6 +637,126 @@ function WellnessMaster() {
                 {importing
                   ? "Mengimpor..."
                   : `Import ${validImportRows.length} Master Nutrisi`}
+              </button>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activityImportOpen ? (
+        <section className="rounded-[2rem] border border-sky-200 bg-sky-50 p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-xl font-black text-sky-950">
+                Import Master Data Workout
+              </div>
+              <div className="mt-1 text-sm font-semibold text-sky-800">
+                Upload CSV/XLSX. Nama aktivitas wajib diisi; minimal MET atau
+                Kalori/km harus memiliki nilai.
+              </div>
+              {activityImportFileName ? (
+                <div className="mt-2 text-xs font-black text-sky-700">
+                  File: {activityImportFileName}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={activityImportInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={(event) =>
+                  void readActivityImportFile(event.target.files?.[0] || null)
+                }
+              />
+              <button
+                type="button"
+                onClick={() => activityImportInputRef.current?.click()}
+                className="rounded-xl bg-sky-700 px-4 py-3 text-xs font-black text-white"
+              >
+                Pilih File Workout
+              </button>
+              <button
+                type="button"
+                onClick={downloadWorkoutTemplate}
+                className="rounded-xl border border-sky-300 bg-white px-4 py-3 text-xs font-black text-sky-800"
+              >
+                Download Template Workout
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivityImportOpen(false);
+                  setActivityImportRows([]);
+                  setActivityImportFileName("");
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs font-black text-slate-600"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+
+          {activityImportRows.length ? (
+            <>
+              <div className="mt-4 overflow-auto rounded-2xl border border-sky-100 bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-3 text-left">Baris</th>
+                      <th className="px-3 py-3 text-left">Aktivitas</th>
+                      <th className="px-3 py-3 text-left">MET</th>
+                      <th className="px-3 py-3 text-left">Kalori/km</th>
+                      <th className="px-3 py-3 text-left">Unit</th>
+                      <th className="px-3 py-3 text-left">Kategori</th>
+                      <th className="px-3 py-3 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activityImportRows.slice(0, 100).map((item) => (
+                      <tr key={item.row_number}>
+                        <td className="px-3 py-3">{item.row_number}</td>
+                        <td className="px-3 py-3 font-bold">
+                          {item.activity_name || "-"}
+                        </td>
+                        <td className="px-3 py-3">{item.met || "-"}</td>
+                        <td className="px-3 py-3">
+                          {item.calories_per_km || "-"}
+                        </td>
+                        <td className="px-3 py-3">{item.unit || "menit"}</td>
+                        <td className="px-3 py-3">
+                          {item.category || "-"}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-black ${
+                              item.valid
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-rose-100 text-rose-700"
+                            }`}
+                          >
+                            {item.valid ? "Siap" : "Tidak lengkap"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void importMasterWorkout()}
+                disabled={
+                  activityImporting || validActivityImportRows.length === 0
+                }
+                className="mt-4 w-full rounded-2xl bg-sky-700 px-5 py-4 text-sm font-black text-white disabled:opacity-50"
+              >
+                {activityImporting
+                  ? "Mengimpor Workout..."
+                  : `Import ${validActivityImportRows.length} Master Workout`}
               </button>
             </>
           ) : null}
