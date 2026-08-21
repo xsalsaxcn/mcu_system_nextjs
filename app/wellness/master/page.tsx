@@ -81,6 +81,8 @@ function WellnessMaster() {
   // WELLNESS_MASTER_SERVER_PAGINATION_V126J
   const [foods, setFoods] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
+  // WELLNESS_MASTER_WORKOUT_ADMIN_EXPORT_RANGE_V126M97_3
+  const [activitySearch, setActivitySearch] = useState("");
   const [foodSearch, setFoodSearch] = useState("");
   const [foodPage, setFoodPage] = useState(1);
   const [foodTotal, setFoodTotal] = useState(0);
@@ -140,9 +142,13 @@ function WellnessMaster() {
     }
   }
 
-  async function loadActivities() {
+  async function loadActivities(search = activitySearch) {
+    const params = new URLSearchParams();
+    if (clean(search)) params.set("q", clean(search));
+
+    const query = params.toString();
     const json = await fetch(
-      "/api/wellness/reference/activities",
+      `/api/wellness/reference/activities${query ? `?${query}` : ""}`,
       { cache: "no-store" },
     )
       .then((response) => response.json())
@@ -159,8 +165,12 @@ function WellnessMaster() {
   }
 
   useEffect(() => {
-    void loadActivities();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void loadActivities(activitySearch);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [activitySearch]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -181,7 +191,8 @@ function WellnessMaster() {
     }
     setMessage(`Setup berhasil: ${json.foods} makanan, ${json.activities} aktivitas.`);
     setFoodPage(1);
-      void loadFoods(1, foodSearch);
+    void loadFoods(1, foodSearch);
+    void loadActivities(activitySearch);
   }
 
   async function saveFood(event: React.FormEvent) {
@@ -213,8 +224,7 @@ function WellnessMaster() {
     );
     if (json.ok) {
       setActivityForm({ unit: "menit" });
-      setFoodPage(1);
-      void loadFoods(1, foodSearch);
+      void loadActivities(activitySearch);
     }
   }
 
@@ -639,6 +649,57 @@ function WellnessMaster() {
               Berikutnya
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-xl font-black text-slate-900">Master Workout</div>
+              <div className="text-sm font-semibold text-slate-500">
+                {activities.length.toLocaleString("id-ID")} aktivitas sesuai pencarian
+              </div>
+            </div>
+            <input
+              className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold"
+              placeholder="Cari workout / aktivitas"
+              value={activitySearch}
+              onChange={(event) => setActivitySearch(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="max-h-[520px] overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3 text-left">Aktivitas</th>
+                <th className="px-4 py-3 text-left">MET</th>
+                <th className="px-4 py-3 text-left">Kalori / km</th>
+                <th className="px-4 py-3 text-left">Unit</th>
+                <th className="px-4 py-3 text-left">Kategori</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {activities.map((activity) => (
+                <tr key={activity.id || activity.activity_name}>
+                  <td className="px-4 py-3 font-bold text-slate-900">{activity.activity_name}</td>
+                  <td className="px-4 py-3">{activity.met ?? "-"}</td>
+                  <td className="px-4 py-3">{activity.calories_per_km ?? "-"}</td>
+                  <td className="px-4 py-3 text-slate-600">{activity.unit || "menit"}</td>
+                  <td className="px-4 py-3 text-slate-600">{activity.category || "-"}</td>
+                </tr>
+              ))}
+              {activities.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center font-bold text-slate-400">
+                    Belum ada aktivitas yang sesuai.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

@@ -14,6 +14,16 @@ function pname(r:any){return clean(r?.name||r?.employee_name||r?.full_name||r?.n
 function pcode(r:any){return clean(r?.code||r?.employee_code||r?.kode_karyawan||r?.no_karyawan||r?.nik||"-")}
 function companyId(r:any){return num(r?.wellness_company_id||r?.company_id)}
 function jakartaDay(offset=0){const d=new Date(Date.now()+offset*86400000);return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"}).format(d)}
+// WELLNESS_MASTER_WORKOUT_ADMIN_EXPORT_RANGE_V126M97_3
+function validDateKey(v:any){const s=clean(v);if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return false;const d=new Date(`${s}T00:00:00Z`);return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===s}
+function dateKeys(from:any,to:any){
+  const start=clean(from),end=clean(to);
+  if(!validDateKey(start)||!validDateKey(end)||start>end)return[];
+  const a=new Date(`${start}T00:00:00Z`).getTime(),b=new Date(`${end}T00:00:00Z`).getTime();
+  const days=Math.floor((b-a)/86400000)+1;
+  if(days<1||days>366)return[];
+  return Array.from({length:days},(_,i)=>new Date(a+i*86400000).toISOString().slice(0,10));
+}
 function chunks<T>(rows:T[],size:number){const out:T[][]=[];for(let i=0;i<rows.length;i+=size)out.push(rows.slice(i,i+size));return out}
 
 async function pagedRows(supabase:any, table:string, ids:number[], orders:string[]){
@@ -61,9 +71,12 @@ function status(day:any){
   return{key:"follow_up",label:"Perlu Follow Up",reason:`Workout ${Math.round(w)}/${Math.round(t)} kkal belum mencapai target.`};
 }
 
-export async function loadWellnessMemberMonitoring(opts:{supabase:any;participants:any[];groupUnitMap?:CoachGroupUnitMap;companyNameById?:Map<number,string>;coachAssignments?:any[]}){
+export async function loadWellnessMemberMonitoring(opts:{supabase:any;participants:any[];groupUnitMap?:CoachGroupUnitMap;companyNameById?:Map<number,string>;coachAssignments?:any[];fromDate?:string;toDate?:string}){
   const participants=(opts.participants||[]).filter(x=>pid(x)>0).sort((a,b)=>pname(a).localeCompare(pname(b),"id"));
-  const ids=participants.map(pid); const dates=Array.from({length:7},(_,i)=>jakartaDay(i-6)); const today=dates.at(-1)||jakartaDay();
+  const ids=participants.map(pid);
+  const requestedDates=dateKeys(opts.fromDate,opts.toDate);
+  const dates=requestedDates.length?requestedDates:Array.from({length:7},(_,i)=>jakartaDay(i-6));
+  const today=dates.at(-1)||jakartaDay();
   if(!ids.length)return{generated_at:new Date().toISOString(),today,dates,summary:{total_participants:0,on_track:0,follow_up:0,not_updated:0,streak_success_today:0},participants:[],source_contract:"participant_coach_canonical"};
 
   const [controlMap,nutritionHistory,activitiesAll,notesAll]=await Promise.all([
@@ -84,7 +97,7 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
     const streak=buildWellnessStreakSummary({nutritionRows,activityRows,workoutTargetCalories:num(timeline.current.workout)||300,targetTimeline:timeline});
     const byDate=new Map((streak.days||[]).map((d:any)=>[clean(d.date),d]));
     const days=dates.map(date=>{const d:any=byDate.get(date)||{date,nutrition_count:0,nutrition_calories:0,workout_calories:0,steps:0,workout_target_calories:num(timeline.current.workout)||300,target_effective_from:null,success:false};return{...d,status:status(d)}});
-    const avg=(field:string)=>Math.round(days.reduce((sum:number,d:any)=>sum+num(d?.[field]),0)/7);
+    const avg=(field:string)=>Math.round(days.reduce((sum:number,d:any)=>sum+num(d?.[field]),0)/Math.max(days.length,1));
     const company=companyId(participant); const control=controlMap.get(id)||participant?.wellness_control||{};
     const accessGroupIds=opts.groupUnitMap?participantScopeIds(participant,opts.groupUnitMap):[];
     const assigned=opts.groupUnitMap&&opts.coachAssignments?matchingCoachAssignment(participant,opts.coachAssignments,opts.groupUnitMap):null;
@@ -98,10 +111,10 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
       streak:{current_streak:num(streak.current_streak),longest_streak:num(streak.longest_streak),success_dates:streak.success_dates||[]},
       target:{nutrition:num(timeline.current.nutrition),workout:num(timeline.current.workout)||300,steps:num(timeline.current.steps),timeline:targetTimelineSummary(timeline)},
       today:days.at(-1),days,
-      weekly:{success_days:days.filter((d:any)=>d.success).length,completion_percent:Math.round(days.filter((d:any)=>d.success).length/7*100),average_nutrition_calories:avg("nutrition_calories"),average_workout_calories:avg("workout_calories"),average_steps:avg("steps")},
+      weekly:{success_days:days.filter((d:any)=>d.success).length,completion_percent:Math.round(days.filter((d:any)=>d.success).length/Math.max(days.length,1)*100),period_days:days.length,average_nutrition_calories:avg("nutrition_calories"),average_workout_calories:avg("workout_calories"),average_steps:avg("steps")},
       sources:{nutrition:nutrition?.sources||null,nutrition_rows:nutritionRows.length,activity_rows:activityRows.length,fitness_source:clean(control?.fitness_source||"none")},
     };
   });
   const summary=result.reduce((a:any,item:any)=>{const k=clean(item?.today?.status?.key);if(k==="on_track")a.on_track++;else if(k==="not_updated")a.not_updated++;else a.follow_up++;if(item?.today?.success)a.streak_success_today++;return a},{total_participants:result.length,on_track:0,follow_up:0,not_updated:0,streak_success_today:0});
-  return{generated_at:new Date().toISOString(),today,dates,summary,participants:result,source_contract:"participant_coach_canonical",source_markers:{nutrition:"loadCanonicalNutritionHistories",activity:"filterActivityRowsByFitnessSource + filterOperationalRowsForProgram",targets:"buildEffectiveTargetTimeline",streak:"buildWellnessStreakSummary"}};
+  return{generated_at:new Date().toISOString(),today,dates,period:{from:dates[0]||today,to:dates.at(-1)||today,days:dates.length},summary,participants:result,source_contract:"participant_coach_canonical",source_markers:{nutrition:"loadCanonicalNutritionHistories",activity:"filterActivityRowsByFitnessSource + filterOperationalRowsForProgram",targets:"buildEffectiveTargetTimeline",streak:"buildWellnessStreakSummary"}};
 }
