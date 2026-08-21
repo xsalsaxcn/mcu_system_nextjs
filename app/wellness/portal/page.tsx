@@ -10202,7 +10202,11 @@ function DevicesTab({
   googleFitLastSyncSnapshot: any;
   fitnessSettings: any;
   syncing: string;
-  syncProvider: (provider: "strava" | "google-fit") => void;
+  // WELLNESS_GOOGLEFIT_MANUAL_BACKFILL_30D_V126M98_2_4
+  syncProvider: (
+    provider: "strava" | "google-fit",
+    options?: { silent?: boolean; days?: number },
+  ) => void;
 }) {
   // WELLNESS_PARTICIPANT_SINGLE_FITNESS_SOURCE_UI_V79F
   const enabled = fitnessSettings?.fitness_enabled === true;
@@ -10436,7 +10440,7 @@ function DevicesTab({
 
             <button
               type="button"
-              onClick={() => syncProvider("google-fit")}
+              onClick={() => syncProvider("google-fit", { days: 30 })}
               disabled={
                 !googleSelected ||
                 !googleFitConnected ||
