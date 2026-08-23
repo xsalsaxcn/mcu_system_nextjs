@@ -810,11 +810,15 @@ function WellnessNakesInput({
 
     try {
       const XLSX = await import("xlsx");
-      const headers = ["Kode Karyawan", "Nama Karyawan", ...exam.headers];
+      // WELLNESS_NAKES_TEMPLATE_AGE_V126M99_4_3
+      const headers = ["Kode Karyawan", "Nama Karyawan", "Usia", ...exam.headers];
       const rows = scoped.map((participant: any) => {
         const row: Record<string, any> = {
           "Kode Karyawan": clean(participant?.code),
           "Nama Karyawan": participantName(participant),
+          // Prefill bila usia sudah tersedia di aplikasi; bila belum tersedia,
+          // biarkan kosong agar NAKES mengisinya di template.
+          Usia: participantAge(participant) || "",
         };
         for (const header of exam.headers) row[header] = "";
 
@@ -983,6 +987,59 @@ function WellnessNakesInput({
         }
 
         const participant = matches[0];
+
+        // WELLNESS_NAKES_TEMPLATE_AGE_V126M99_4_3
+        // Usia dari file menjadi prioritas. Jika kosong, gunakan usia existing
+        // pada participant. Jika keduanya tidak tersedia, hentikan pada tahap
+        // Mapping supaya baris tidak baru gagal ketika Import.
+        const uploadedAgeRaw = nakesBulkCell(row, [
+          "Usia",
+          "Umur",
+          "Age",
+          "Usia (tahun)",
+          "Usia Tahun",
+        ]);
+        const uploadedAgeText = String(uploadedAgeRaw ?? "").trim();
+        const uploadedAge = nakesBulkNumber(uploadedAgeRaw);
+        const existingAge = nakesBulkNumber(participantAge(participant));
+
+        if (
+          uploadedAgeText &&
+          (uploadedAge === null || uploadedAge < 18 || uploadedAge > 119)
+        ) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: Number(participant?.id || 0) || null,
+            participantName: participantName(participant),
+            status: "invalid" as const,
+            message: `Usia "${uploadedAgeText}" tidak valid. Isi usia 18-119 tahun.`,
+            payload: {},
+          };
+        }
+
+        const resolvedBulkAgeV126M99_4_3 =
+          uploadedAge !== null
+            ? Math.round(uploadedAge)
+            : existingAge !== null && existingAge >= 18 && existingAge <= 119
+              ? Math.round(existingAge)
+              : null;
+
+        if (resolvedBulkAgeV126M99_4_3 === null) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: Number(participant?.id || 0) || null,
+            participantName: participantName(participant),
+            status: "invalid" as const,
+            message:
+              "Usia belum tersedia di aplikasi dan kolom Usia pada file masih kosong. Isi Usia lalu Mapping ulang.",
+            payload: {},
+          };
+        }
+
         const parsed = nakesBulkPayload(row, bulkExamType);
         if (!parsed.valid) {
           return {
@@ -1027,7 +1084,10 @@ function WellnessNakesInput({
           message: nameMismatch
             ? `Kode cocok. Nama file "${uploadedName}" berbeda dari master "${expectedName}", mapping tetap memakai Kode Karyawan.`
             : "Siap diimport.",
-          payload: parsed.payload,
+          payload: {
+            ...parsed.payload,
+            age_years: resolvedBulkAgeV126M99_4_3,
+          },
         };
       });
 
@@ -1584,6 +1644,7 @@ function WellnessNakesInput({
               {[
                 "Kode Karyawan",
                 "Nama Karyawan",
+                "Usia",
                 ...(NAKES_BULK_EXAM_OPTIONS.find(
                   (item) => item.value === bulkExamType,
                 )?.headers || []),
@@ -1601,7 +1662,7 @@ function WellnessNakesInput({
           <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <Field
               label="Upload hasil pemeriksaan"
-              helper="Format .xlsx atau .xls. Nama Karyawan hanya untuk validasi; pencocokan tetap memakai Kode Karyawan."
+              helper="Format .xlsx atau .xls. Nama Karyawan hanya untuk validasi; pencocokan tetap memakai Kode Karyawan. Usia akan dipakai dari file bila diisi, atau dari data existing bila tersedia."
             >
               <input
                 type="file"
