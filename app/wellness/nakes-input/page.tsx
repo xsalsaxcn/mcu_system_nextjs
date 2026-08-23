@@ -25,6 +25,196 @@ type VisitType =
 type ExamMode = "" | "routine" | "mini_mcu" | "notes";
 type ParticipantSort = "name_asc" | "code_asc" | "risk_asc";
 
+// WELLNESS_NAKES_TEMPLATE_MAPPING_IMPORT_V126M99_3
+type NakesBulkPrimaryKey = "employee_code";
+type NakesBulkExamType = "routine" | "mini_mcu" | "notes";
+type NakesBulkMapStatus =
+  | "ready"
+  | "unmatched"
+  | "ambiguous"
+  | "duplicate"
+  | "empty"
+  | "invalid";
+
+type NakesBulkMappedRow = {
+  rowNumber: number;
+  code: string;
+  uploadedName: string;
+  participantId: number | null;
+  participantName: string;
+  status: NakesBulkMapStatus;
+  message: string;
+  payload: Record<string, any>;
+};
+
+const NAKES_BULK_PRIMARY_KEY_OPTIONS: Array<{
+  value: NakesBulkPrimaryKey;
+  label: string;
+}> = [{ value: "employee_code", label: "Kode Karyawan" }];
+
+const NAKES_BULK_EXAM_OPTIONS: Array<{
+  value: NakesBulkExamType;
+  label: string;
+  helper: string;
+  headers: string[];
+}> = [
+  {
+    value: "routine",
+    label: "Pemeriksaan Rutin",
+    helper: "BB, TB, lingkar perut, tekanan darah, dan nadi.",
+    headers: ["BB", "TB", "LP", "TD", "Nadi"],
+  },
+  {
+    value: "mini_mcu",
+    label: "Mini MCU",
+    helper: "HbA1c, gula darah, lipid, asam urat, SGOT, dan SGPT.",
+    headers: [
+      "HbA1c",
+      "Gula Darah",
+      "Kolesterol Total",
+      "LDL",
+      "HDL",
+      "Trigliserida",
+      "Asam Urat",
+      "SGOT",
+      "SGPT",
+    ],
+  },
+  {
+    value: "notes",
+    label: "Tambah Catatan",
+    helper: "Status program, intervensi, monitoring, catatan medis, dan follow-up.",
+    headers: [
+      "Status Program",
+      "Fokus Intervensi",
+      "Rencana Monitoring",
+      "Catatan Validasi Medis",
+      "Tanggal Follow-up",
+      "Alert Klinis",
+    ],
+  },
+];
+
+function nakesBulkNormalizeCode(value: any) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function nakesBulkHeader(value: any) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[._\-\/()]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function nakesBulkCell(row: Record<string, any>, aliases: string[]) {
+  const entries = Object.entries(row || {});
+  for (const alias of aliases) {
+    const wanted = nakesBulkHeader(alias);
+    const match = entries.find(([key]) => nakesBulkHeader(key) === wanted);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+function nakesBulkNumber(value: any) {
+  const text = String(value ?? "")
+    .trim()
+    .replace(",", ".")
+    .replace(/[^0-9.\-]/g, "");
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function nakesBulkBloodPressure(value: any) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return { raw: "", systolic: null as number | null, diastolic: null as number | null, valid: true };
+  }
+  const match = text.match(/^(\d{2,3})\s*[\/\-]\s*(\d{2,3})$/);
+  if (!match) {
+    return { raw: text, systolic: null as number | null, diastolic: null as number | null, valid: false };
+  }
+  const systolic = Number(match[1]);
+  const diastolic = Number(match[2]);
+  const valid =
+    Number.isFinite(systolic) &&
+    Number.isFinite(diastolic) &&
+    systolic >= 60 &&
+    systolic <= 260 &&
+    diastolic >= 30 &&
+    diastolic <= 180;
+  return { raw: text, systolic, diastolic, valid };
+}
+
+function nakesBulkPayload(row: Record<string, any>, examType: NakesBulkExamType) {
+  if (examType === "routine") {
+    const bp = nakesBulkBloodPressure(
+      nakesBulkCell(row, ["TD", "Tensi", "Tekanan Darah", "Blood Pressure", "BP"]),
+    );
+    return {
+      payload: {
+        weight_kg: nakesBulkNumber(nakesBulkCell(row, ["BB", "Berat Badan", "Berat Badan (kg)"])),
+        height_cm: nakesBulkNumber(nakesBulkCell(row, ["TB", "Tinggi Badan", "Tinggi Badan (cm)"])),
+        waist_cm: nakesBulkNumber(nakesBulkCell(row, ["LP", "Lingkar Perut", "Lingkar Perut (cm)"])),
+        bp_raw: bp.raw || null,
+        systolic: bp.systolic,
+        diastolic: bp.diastolic,
+        pulse: nakesBulkNumber(nakesBulkCell(row, ["Nadi", "Pulse", "Denyut Nadi"])),
+      },
+      valid: bp.valid,
+      invalidMessage: bp.valid ? "" : `Format TD "${bp.raw}" tidak valid. Gunakan contoh 120/80.`,
+    };
+  }
+
+  if (examType === "mini_mcu") {
+    return {
+      payload: {
+        hba1c_percent: nakesBulkNumber(nakesBulkCell(row, ["HbA1c", "HbA1c (%)", "A1C"])),
+        glucose_value: nakesBulkNumber(nakesBulkCell(row, ["Gula Darah", "Glukosa", "Glucose"])),
+        cholesterol_total: nakesBulkNumber(
+          nakesBulkCell(row, ["Kolesterol Total", "Total Cholesterol", "Cholesterol"]),
+        ),
+        ldl: nakesBulkNumber(nakesBulkCell(row, ["LDL"])),
+        hdl: nakesBulkNumber(nakesBulkCell(row, ["HDL"])),
+        triglyceride: nakesBulkNumber(nakesBulkCell(row, ["Trigliserida", "Triglyceride", "TG"])),
+        uric_acid: nakesBulkNumber(nakesBulkCell(row, ["Asam Urat", "Uric Acid"])),
+        sgot: nakesBulkNumber(nakesBulkCell(row, ["SGOT", "AST"])),
+        sgpt: nakesBulkNumber(nakesBulkCell(row, ["SGPT", "ALT"])),
+      },
+      valid: true,
+      invalidMessage: "",
+    };
+  }
+
+  return {
+    payload: {
+      program_status: String(nakesBulkCell(row, ["Status Program"]) ?? "").trim() || null,
+      intervention_focus:
+        String(nakesBulkCell(row, ["Fokus Intervensi", "Intervensi"]) ?? "").trim() || null,
+      monitoring_plan:
+        String(nakesBulkCell(row, ["Rencana Monitoring", "Monitoring Plan"]) ?? "").trim() || null,
+      medical_validation_notes:
+        String(nakesBulkCell(row, ["Catatan Validasi Medis", "Catatan Medis"]) ?? "").trim() || null,
+      next_followup_date:
+        String(nakesBulkCell(row, ["Tanggal Follow-up", "Tanggal Followup", "Follow-up"]) ?? "").trim() ||
+        null,
+      clinical_alert:
+        String(nakesBulkCell(row, ["Alert Klinis", "Clinical Alert"]) ?? "").trim() || null,
+    },
+    valid: true,
+    invalidMessage: "",
+  };
+}
+
+function nakesBulkHasClinicalValue(payload: Record<string, any>) {
+  return Object.values(payload || {}).some(
+    (value) => value !== null && value !== undefined && String(value).trim() !== "",
+  );
+}
+
 const PARTICIPANTS_PER_PAGE = 8;
 
 const EXAM_MODE_OPTIONS: Array<{
@@ -385,6 +575,27 @@ function WellnessNakesInput({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [saveReceiptOpen, setSaveReceiptOpen] = useState(false);
 
+  // WELLNESS_NAKES_TEMPLATE_MAPPING_IMPORT_V126M99_3
+  const [bulkPrimaryKey, setBulkPrimaryKey] =
+    useState<NakesBulkPrimaryKey>("employee_code");
+  const [bulkExamType, setBulkExamType] =
+    useState<NakesBulkExamType>("routine");
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkMappedRows, setBulkMappedRows] =
+    useState<NakesBulkMappedRow[]>([]);
+  const [bulkMapped, setBulkMapped] = useState(false);
+  const [bulkCheckupDate, setBulkCheckupDate] = useState(today());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState(
+    "Download template, isi hasil pemeriksaan, lalu upload dan klik Mapping.",
+  );
+  const [bulkProgress, setBulkProgress] = useState({
+    done: 0,
+    total: 0,
+    success: 0,
+    failed: 0,
+  });
+
   const [form, setForm] = useState<any>({
     checkup_date: today(),
     history_type: "periodic_checkup",
@@ -559,6 +770,423 @@ function WellnessNakesInput({
 
   function setValue(key: string, value: any) {
     setForm((previous: any) => ({ ...previous, [key]: value }));
+  }
+
+  // WELLNESS_NAKES_TEMPLATE_MAPPING_IMPORT_V126M99_3
+  function nakesBulkScopedParticipants() {
+    const scoped = companyScopeName
+      ? participants.filter(
+          (participant: any) =>
+            clean(participant?.company_name) === clean(companyScopeName),
+        )
+      : participants;
+
+    return scoped
+      .filter((participant: any) => nakesBulkNormalizeCode(participant?.code))
+      .sort((left: any, right: any) =>
+        nakesBulkNormalizeCode(left?.code).localeCompare(
+          nakesBulkNormalizeCode(right?.code),
+          "id",
+          { numeric: true },
+        ),
+      );
+  }
+
+  async function downloadNakesBulkTemplate() {
+    if (bulkBusy) return;
+
+    const exam =
+      NAKES_BULK_EXAM_OPTIONS.find((item) => item.value === bulkExamType) ||
+      NAKES_BULK_EXAM_OPTIONS[0];
+    const scoped = nakesBulkScopedParticipants();
+
+    if (!scoped.length) {
+      setBulkMessage("Tidak ada peserta dengan Kode Karyawan pada scope NAKES ini.");
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkMessage("Menyiapkan template Excel...");
+
+    try {
+      const XLSX = await import("xlsx");
+      const headers = ["Kode Karyawan", "Nama Karyawan", ...exam.headers];
+      const rows = scoped.map((participant: any) => {
+        const row: Record<string, any> = {
+          "Kode Karyawan": clean(participant?.code),
+          "Nama Karyawan": participantName(participant),
+        };
+        for (const header of exam.headers) row[header] = "";
+
+        if (bulkExamType === "routine") {
+          const existingHeight = participantHeightPrefill(participant);
+          if (existingHeight) row["TB"] = existingHeight;
+        }
+
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows, {
+        header: headers,
+        skipHeader: false,
+      });
+      worksheet["!cols"] = headers.map((header) => ({
+        wch:
+          header === "Nama Karyawan"
+            ? 32
+            : header === "Kode Karyawan"
+              ? 18
+              : Math.max(12, Math.min(28, header.length + 4)),
+      }));
+      worksheet["!autofilter"] = {
+        ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}${rows.length + 1}`,
+      };
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Input NAKES");
+      const safeLabel = exam.label.toLowerCase().replace(/[^a-z0-9]+/gi, "_");
+      XLSX.writeFile(
+        workbook,
+        `template_nakes_${safeLabel}_${today().replace(/-/g, "")}.xlsx`,
+      );
+
+      setBulkMessage(
+        `Template ${exam.label} berhasil dibuat untuk ${rows.length} peserta. Primary key: Kode Karyawan.`,
+      );
+    } catch (error: any) {
+      setBulkMessage(error?.message || "Template Excel gagal dibuat.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function mapNakesBulkFile() {
+    if (bulkBusy) return;
+    if (!bulkFile) {
+      setBulkMessage("Pilih file Excel terlebih dahulu.");
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkMapped(false);
+    setBulkMappedRows([]);
+    setBulkProgress({ done: 0, total: 0, success: 0, failed: 0 });
+    setBulkMessage("Membaca file dan melakukan mapping Kode Karyawan...");
+
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await bulkFile.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) throw new Error("Workbook tidak memiliki sheet.");
+
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+        defval: "",
+        raw: false,
+      });
+
+      if (!rows.length) {
+        throw new Error("File tidak memiliki baris data.");
+      }
+
+      const scoped = nakesBulkScopedParticipants();
+      const participantsByCode = new Map<string, any[]>();
+      for (const participant of scoped) {
+        const code = nakesBulkNormalizeCode(participant?.code);
+        if (!code) continue;
+        const current = participantsByCode.get(code) || [];
+        current.push(participant);
+        participantsByCode.set(code, current);
+      }
+
+      const uploadCodeCount = new Map<string, number>();
+      for (const row of rows) {
+        const code = nakesBulkNormalizeCode(
+          nakesBulkCell(row, [
+            "Kode Karyawan",
+            "Kode",
+            "KODE",
+            "Employee Code",
+            "Kode Peserta",
+          ]),
+        );
+        if (code) uploadCodeCount.set(code, (uploadCodeCount.get(code) || 0) + 1);
+      }
+
+      const mapped: NakesBulkMappedRow[] = rows.map((row, index) => {
+        const rowNumber = index + 2;
+        const code = nakesBulkNormalizeCode(
+          nakesBulkCell(row, [
+            "Kode Karyawan",
+            "Kode",
+            "KODE",
+            "Employee Code",
+            "Kode Peserta",
+          ]),
+        );
+        const uploadedName = String(
+          nakesBulkCell(row, ["Nama Karyawan", "Nama", "Nama Peserta", "Employee Name"]) ?? "",
+        ).trim();
+
+        if (!code) {
+          return {
+            rowNumber,
+            code: "",
+            uploadedName,
+            participantId: null,
+            participantName: "",
+            status: "unmatched" as const,
+            message: "Kode Karyawan kosong.",
+            payload: {},
+          };
+        }
+
+        if ((uploadCodeCount.get(code) || 0) > 1) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: null,
+            participantName: "",
+            status: "duplicate" as const,
+            message: "Kode Karyawan muncul lebih dari satu kali di file upload.",
+            payload: {},
+          };
+        }
+
+        const matches = participantsByCode.get(code) || [];
+        if (!matches.length) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: null,
+            participantName: "",
+            status: "unmatched" as const,
+            message: "Kode Karyawan tidak ditemukan pada scope NAKES.",
+            payload: {},
+          };
+        }
+
+        if (matches.length > 1) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: null,
+            participantName: "",
+            status: "ambiguous" as const,
+            message: "Kode Karyawan terduplikasi pada master peserta.",
+            payload: {},
+          };
+        }
+
+        const participant = matches[0];
+        const parsed = nakesBulkPayload(row, bulkExamType);
+        if (!parsed.valid) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: Number(participant?.id || 0) || null,
+            participantName: participantName(participant),
+            status: "invalid" as const,
+            message: parsed.invalidMessage,
+            payload: parsed.payload,
+          };
+        }
+
+        if (!nakesBulkHasClinicalValue(parsed.payload)) {
+          return {
+            rowNumber,
+            code,
+            uploadedName,
+            participantId: Number(participant?.id || 0) || null,
+            participantName: participantName(participant),
+            status: "empty" as const,
+            message: "Tidak ada hasil pemeriksaan pada baris ini.",
+            payload: parsed.payload,
+          };
+        }
+
+        const expectedName = participantName(participant);
+        const nameMismatch =
+          uploadedName &&
+          expectedName &&
+          uploadedName.toLocaleLowerCase("id-ID") !==
+            expectedName.toLocaleLowerCase("id-ID");
+
+        return {
+          rowNumber,
+          code,
+          uploadedName,
+          participantId: Number(participant?.id || 0) || null,
+          participantName: expectedName,
+          status: "ready" as const,
+          message: nameMismatch
+            ? `Kode cocok. Nama file "${uploadedName}" berbeda dari master "${expectedName}", mapping tetap memakai Kode Karyawan.`
+            : "Siap diimport.",
+          payload: parsed.payload,
+        };
+      });
+
+      setBulkMappedRows(mapped);
+      setBulkMapped(true);
+
+      const ready = mapped.filter((item) => item.status === "ready").length;
+      const empty = mapped.filter((item) => item.status === "empty").length;
+      const problems = mapped.length - ready - empty;
+      setBulkMessage(
+        `Mapping selesai: ${ready} siap import, ${empty} baris kosong dilewati, ${problems} perlu diperiksa.`,
+      );
+    } catch (error: any) {
+      setBulkMessage(error?.message || "Mapping file gagal.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function importNakesBulkRows() {
+    if (bulkBusy) return;
+    if (!bulkMapped) {
+      setBulkMessage("Klik Mapping terlebih dahulu.");
+      return;
+    }
+    if (!bulkCheckupDate) {
+      setBulkMessage("Pilih Tanggal Pemeriksaan terlebih dahulu.");
+      return;
+    }
+
+    const readyRows = bulkMappedRows.filter(
+      (item) => item.status === "ready" && Number(item.participantId || 0) > 0,
+    );
+    if (!readyRows.length) {
+      setBulkMessage("Tidak ada baris yang siap diimport.");
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkProgress({
+      done: 0,
+      total: readyRows.length,
+      success: 0,
+      failed: 0,
+    });
+    setBulkMessage(`Mengimport 0/${readyRows.length} peserta...`);
+
+    let success = 0;
+    let failed = 0;
+    const nextRows = [...bulkMappedRows];
+
+    for (let index = 0; index < readyRows.length; index += 1) {
+      const item = readyRows[index];
+      const participant = participants.find(
+        (candidate: any) =>
+          Number(candidate?.id || 0) === Number(item.participantId || 0),
+      );
+      const ageYears = participantAge(participant);
+      const heightFallback = participantHeightPrefill(participant);
+
+      const payload: Record<string, any> = {
+        participant_id: item.participantId,
+        employee_code: item.code,
+        company_name: clean(participant?.company_name),
+        checkup_date: bulkCheckupDate,
+        history_type: "periodic_checkup",
+        visit_label: "Pemeriksaan Berkala",
+        exam_mode: bulkExamType,
+        age_years: ageYears || undefined,
+        ...item.payload,
+      };
+
+      if (
+        bulkExamType === "routine" &&
+        (payload.height_cm === null ||
+          payload.height_cm === undefined ||
+          payload.height_cm === "") &&
+        heightFallback
+      ) {
+        payload.height_cm = heightFallback;
+      }
+
+      try {
+        const response = await fetch("/api/wellness/nakes-input", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json().catch(() => ({
+          ok: false,
+          message: `Respons server tidak valid (HTTP ${response.status}).`,
+        }));
+
+        const mappedIndex = nextRows.findIndex(
+          (candidate) =>
+            candidate.rowNumber === item.rowNumber &&
+            candidate.code === item.code,
+        );
+
+        if (response.ok && result?.ok) {
+          success += 1;
+          if (mappedIndex >= 0) {
+            nextRows[mappedIndex] = {
+              ...nextRows[mappedIndex],
+              status: "ready",
+              message: result?.partial_success
+                ? `Tersimpan, dengan warning: ${result?.message || "-"}`
+                : "Berhasil diimport.",
+            };
+          }
+        } else {
+          failed += 1;
+          if (mappedIndex >= 0) {
+            nextRows[mappedIndex] = {
+              ...nextRows[mappedIndex],
+              status: "invalid",
+              message: result?.message || `Import gagal (HTTP ${response.status}).`,
+            };
+          }
+        }
+      } catch (error: any) {
+        failed += 1;
+        const mappedIndex = nextRows.findIndex(
+          (candidate) =>
+            candidate.rowNumber === item.rowNumber &&
+            candidate.code === item.code,
+        );
+        if (mappedIndex >= 0) {
+          nextRows[mappedIndex] = {
+            ...nextRows[mappedIndex],
+            status: "invalid",
+            message: error?.message || "Tidak dapat menghubungi server.",
+          };
+        }
+      }
+
+      const done = index + 1;
+      setBulkProgress({
+        done,
+        total: readyRows.length,
+        success,
+        failed,
+      });
+      setBulkMessage(
+        `Import ${done}/${readyRows.length}: ${success} berhasil, ${failed} gagal.`,
+      );
+    }
+
+    setBulkMappedRows(nextRows);
+    setBulkBusy(false);
+
+    if (success > 0) {
+      await load();
+      setBulkMessage(
+        `Import selesai: ${success} berhasil, ${failed} gagal. Data disimpan melalui flow NAKES existing.`,
+      );
+    } else {
+      setBulkMessage(`Import selesai tanpa data berhasil. ${failed} baris gagal.`);
+    }
   }
 
   async function copyPageLink() {
@@ -870,6 +1498,266 @@ function WellnessNakesInput({
               Scope perusahaan: {companyScopeName}
             </div>
           ) : null}
+        </section>
+
+        {/* WELLNESS_NAKES_TEMPLATE_MAPPING_IMPORT_V126M99_3 */}
+        <section className="rounded-[2rem] border border-emerald-200 bg-white p-5 shadow-xl shadow-slate-200/40 md:p-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-600">
+                Import Pemeriksaan NAKES
+              </div>
+              <h2 className="mt-2 text-xl font-black text-slate-950">
+                Template → Mapping → Tanggal Pemeriksaan → Import
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+                Tidak perlu memilih group. Template mengambil peserta yang tersedia pada scope akun
+                NAKES ini. Mapping selalu menggunakan primary key yang dipilih.
+              </p>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-black text-emerald-800 ring-1 ring-emerald-100">
+              {participants.length} peserta tersedia
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <Field label="Primary Key" helper="Untuk saat ini tersedia Kode Karyawan sebagai key utama mapping.">
+              <select
+                className={inputClass()}
+                value={bulkPrimaryKey}
+                onChange={(event) =>
+                  setBulkPrimaryKey(event.target.value as NakesBulkPrimaryKey)
+                }
+              >
+                {NAKES_BULK_PRIMARY_KEY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field
+              label="Tipe Pemeriksaan"
+              helper={
+                NAKES_BULK_EXAM_OPTIONS.find((item) => item.value === bulkExamType)?.helper
+              }
+            >
+              <select
+                className={inputClass()}
+                value={bulkExamType}
+                onChange={(event) => {
+                  setBulkExamType(event.target.value as NakesBulkExamType);
+                  setBulkMapped(false);
+                  setBulkMappedRows([]);
+                  setBulkProgress({ done: 0, total: 0, success: 0, failed: 0 });
+                  setBulkMessage(
+                    "Tipe pemeriksaan berubah. Download template baru atau upload file yang sesuai lalu klik Mapping.",
+                  );
+                }}
+              >
+                {NAKES_BULK_EXAM_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="grid content-end">
+              <button
+                type="button"
+                disabled={bulkBusy || loading}
+                onClick={downloadNakesBulkTemplate}
+                className="min-h-12 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ↓ Download Template
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+              Header template
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {[
+                "Kode Karyawan",
+                "Nama Karyawan",
+                ...(NAKES_BULK_EXAM_OPTIONS.find(
+                  (item) => item.value === bulkExamType,
+                )?.headers || []),
+              ].map((header) => (
+                <span
+                  key={header}
+                  className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-slate-700 ring-1 ring-slate-200"
+                >
+                  {header}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <Field
+              label="Upload hasil pemeriksaan"
+              helper="Format .xlsx atau .xls. Nama Karyawan hanya untuk validasi; pencocokan tetap memakai Kode Karyawan."
+            >
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                className={inputClass()}
+                onChange={(event) => {
+                  setBulkFile(event.target.files?.[0] || null);
+                  setBulkMapped(false);
+                  setBulkMappedRows([]);
+                  setBulkProgress({ done: 0, total: 0, success: 0, failed: 0 });
+                  setBulkMessage(
+                    event.target.files?.[0]
+                      ? `File ${event.target.files[0].name} siap. Klik Mapping.`
+                      : "Pilih file Excel.",
+                  );
+                }}
+              />
+            </Field>
+
+            <button
+              type="button"
+              disabled={bulkBusy || !bulkFile}
+              onClick={mapNakesBulkFile}
+              className="min-h-12 rounded-2xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-100 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {bulkBusy && !bulkMapped ? "Memproses..." : "Mapping"}
+            </button>
+          </div>
+
+          {bulkMapped ? (
+            <div className="mt-5 space-y-4">
+              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <Field
+                  label="Tanggal Pemeriksaan"
+                  helper="Tanggal ini diterapkan ke seluruh baris yang siap diimport."
+                >
+                  <input
+                    type="date"
+                    className={inputClass()}
+                    value={bulkCheckupDate}
+                    onChange={(event) => setBulkCheckupDate(event.target.value)}
+                  />
+                </Field>
+
+                <button
+                  type="button"
+                  disabled={
+                    bulkBusy ||
+                    !bulkCheckupDate ||
+                    !bulkMappedRows.some((item) => item.status === "ready")
+                  }
+                  onClick={importNakesBulkRows}
+                  className="min-h-12 rounded-2xl bg-slate-950 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {bulkBusy
+                    ? `Import ${bulkProgress.done}/${bulkProgress.total}`
+                    : `Import ${
+                        bulkMappedRows.filter((item) => item.status === "ready").length
+                      } Data`}
+                </button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-4">
+                {[
+                  {
+                    label: "Siap",
+                    value: bulkMappedRows.filter((item) => item.status === "ready").length,
+                    cls: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+                  },
+                  {
+                    label: "Kosong",
+                    value: bulkMappedRows.filter((item) => item.status === "empty").length,
+                    cls: "bg-slate-50 text-slate-700 ring-slate-200",
+                  },
+                  {
+                    label: "Tidak Match",
+                    value: bulkMappedRows.filter((item) =>
+                      ["unmatched", "ambiguous", "duplicate"].includes(item.status),
+                    ).length,
+                    cls: "bg-amber-50 text-amber-800 ring-amber-100",
+                  },
+                  {
+                    label: "Invalid",
+                    value: bulkMappedRows.filter((item) => item.status === "invalid").length,
+                    cls: "bg-rose-50 text-rose-700 ring-rose-100",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className={`rounded-2xl px-4 py-3 ring-1 ${item.cls}`}
+                  >
+                    <div className="text-[10px] font-black uppercase tracking-wide opacity-70">
+                      {item.label}
+                    </div>
+                    <div className="mt-1 text-xl font-black">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="max-h-[28rem] overflow-auto rounded-2xl border border-slate-200 bg-white">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 font-black">Baris</th>
+                      <th className="px-3 py-2 font-black">Kode Karyawan</th>
+                      <th className="px-3 py-2 font-black">Nama di Master</th>
+                      <th className="px-3 py-2 font-black">Nama di File</th>
+                      <th className="px-3 py-2 font-black">Status</th>
+                      <th className="min-w-[260px] px-3 py-2 font-black">Keterangan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkMappedRows.map((item) => (
+                      <tr
+                        key={`${item.rowNumber}-${item.code}`}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-3 py-2 font-bold text-slate-500">{item.rowNumber}</td>
+                        <td className="px-3 py-2 font-black text-slate-900">{item.code || "-"}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700">
+                          {item.participantName || "-"}
+                        </td>
+                        <td className="px-3 py-2 font-bold text-slate-600">
+                          {item.uploadedName || "-"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${
+                              item.status === "ready"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : item.status === "empty"
+                                  ? "bg-slate-100 text-slate-600"
+                                  : "bg-rose-50 text-rose-700"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-semibold text-slate-600">{item.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-xs font-bold leading-5 text-slate-200">
+            {bulkMessage}
+            {bulkProgress.total > 0 ? (
+              <span className="ml-2 text-cyan-300">
+                Progress {bulkProgress.done}/{bulkProgress.total} · berhasil {bulkProgress.success} ·
+                gagal {bulkProgress.failed}
+              </span>
+            ) : null}
+          </div>
         </section>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
