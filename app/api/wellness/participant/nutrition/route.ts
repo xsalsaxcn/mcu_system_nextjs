@@ -565,6 +565,226 @@ async function uploadNutritionPhoto(params: {
   });
 }
 
+// WELLNESS_NUTRITION_FAST_SAVE_BACKEND_V126M100_4A2
+// Current Portal submissions already carry estimated calories + breakdown.
+// The old route still loaded the entire food master first, then applied the
+// submitted estimate. This fast path validates only the referenced/selected
+// master foods. Any uncertain/legacy payload falls back to the old logic.
+async function resolveSubmittedNutritionFastV126M100_4A2(
+  supabase: any,
+  body: any,
+  foodName: string,
+) {
+  const submitted =
+    readSubmittedNutritionEstimateV45(
+      body,
+    );
+
+  const submittedCalories =
+    numberFromPostedNutritionV45(
+      submitted?.submitted_calories,
+    );
+
+  const submittedBreakdown =
+    Array.isArray(
+      submitted?.submitted_breakdown,
+    )
+      ? submitted.submitted_breakdown
+      : [];
+
+  if (
+    submittedCalories <= 0 ||
+    submittedBreakdown.length === 0
+  ) {
+    return null;
+  }
+
+  const referenceIds = Array.from(
+    new Set(
+      submittedBreakdown
+        .map((item: any) =>
+          Number(
+            item?.reference_id ||
+              item?.referenceId ||
+              0,
+          ),
+        )
+        .filter(
+          (value: number) =>
+            Number.isFinite(value) &&
+            value > 0,
+        ),
+    ),
+  ).slice(0, 30);
+
+  const matchedNames = Array.from(
+    new Set(
+      submittedBreakdown
+        .map((item: any) =>
+          clean(
+            item?.matched_name ||
+              item?.matchedName ||
+              item?.master_name ||
+              item?.masterName,
+          ),
+        )
+        .filter(Boolean),
+    ),
+  ).slice(0, 30);
+
+  let data: any[] | null = null;
+
+  if (
+    referenceIds.length ===
+    submittedBreakdown.length
+  ) {
+    const result =
+      await supabase
+        .from(
+          "wellness_food_calories",
+        )
+        .select(
+          "id,food_name,calories,category,aliases",
+        )
+        .eq("is_active", 1)
+        .in(
+          "id",
+          referenceIds,
+        );
+
+    if (result.error) {
+      return null;
+    }
+
+    data = result.data || [];
+  } else if (
+    matchedNames.length ===
+    submittedBreakdown.length
+  ) {
+    const result =
+      await supabase
+        .from(
+          "wellness_food_calories",
+        )
+        .select(
+          "id,food_name,calories,category,aliases",
+        )
+        .eq("is_active", 1)
+        .in(
+          "food_name",
+          matchedNames,
+        );
+
+    if (result.error) {
+      return null;
+    }
+
+    data = result.data || [];
+  } else {
+    return null;
+  }
+
+  if (
+    !Array.isArray(data) ||
+    data.length === 0
+  ) {
+    return null;
+  }
+
+  const rowsById = new Map(
+    data.map((row: any) => [
+      Number(row?.id),
+      row,
+    ]),
+  );
+
+  const rowsByName = new Map(
+    data.map((row: any) => [
+      clean(
+        row?.food_name,
+      ).toLowerCase(),
+      row,
+    ]),
+  );
+
+  for (
+    const item of submittedBreakdown
+  ) {
+    const referenceId =
+      Number(
+        item?.reference_id ||
+          item?.referenceId ||
+          0,
+      );
+
+    const matchedName =
+      clean(
+        item?.matched_name ||
+          item?.matchedName ||
+          item?.master_name ||
+          item?.masterName,
+      );
+
+    const master =
+      (
+        referenceId > 0
+          ? rowsById.get(referenceId)
+          : null
+      ) ||
+      (
+        matchedName
+          ? rowsByName.get(
+              matchedName.toLowerCase(),
+            )
+          : null
+      );
+
+    if (!master) {
+      return null;
+    }
+
+    const masterCalories =
+      numberFromPostedNutritionV45(
+        master?.calories,
+      );
+
+    const submittedBaseCalories =
+      numberFromPostedNutritionV45(
+        item?.base_calories ||
+          item?.baseCalories,
+      );
+
+    if (masterCalories <= 0) {
+      return null;
+    }
+
+    if (
+      submittedBaseCalories > 0 &&
+      Math.abs(
+        submittedBaseCalories -
+          masterCalories,
+      ) > 0.01
+    ) {
+      return null;
+    }
+  }
+
+  const fastBaseResult = {
+    total_calories:
+      submittedCalories,
+    breakdown: [],
+    detected_foods_text:
+      clean(foodName),
+    original_food_name:
+      clean(foodName),
+  };
+
+  return applySubmittedEstimateToCalorieResultV45(
+    fastBaseResult,
+    body,
+  );
+}
+
 // WELLNESS_NUTRITION_FULL_MASTER_PAGINATION_V126K
 async function loadFoodMaster(
   supabase: any,
@@ -990,11 +1210,28 @@ const portionMultiplier = Number.isFinite(portionMultiplierRaw)
           body?.company_name
       ) || "Tanpa Perusahaan";
 
-    let calorieResult = await calculateMultiFoodCalories(supabase, foodName);
+    // WELLNESS_NUTRITION_FAST_SAVE_BACKEND_V126M100_4A2
+    // Validate only selected master rows; preserve old full-master path as fallback.
+    let calorieResult =
+      await resolveSubmittedNutritionFastV126M100_4A2(
+        supabase,
+        body,
+        foodName,
+      );
 
-// PORTION_ESTIMATE_APPLIED_V45
-// Route ini membaca request lewat parseRequestBody(req), jadi estimasi porsi diambil dari body.
-calorieResult = applySubmittedEstimateToCalorieResultV45(calorieResult, body);
+    if (!calorieResult) {
+      calorieResult =
+        await calculateMultiFoodCalories(
+          supabase,
+          foodName,
+        );
+
+      calorieResult =
+        applySubmittedEstimateToCalorieResultV45(
+          calorieResult,
+          body,
+        );
+    }
 
     let photoResult: any = null;
     let photoWarning = "";
@@ -1827,17 +2064,28 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    // WELLNESS_NUTRITION_FAST_SAVE_BACKEND_V126M100_4A2
+    // Validate only selected master rows; preserve old full-master path as fallback.
     let calorieResult =
-      await calculateMultiFoodCalories(
+      await resolveSubmittedNutritionFastV126M100_4A2(
         supabase,
+        body,
         foodName,
       );
 
-    calorieResult =
-      applySubmittedEstimateToCalorieResultV45(
-        calorieResult,
-        body,
-      );
+    if (!calorieResult) {
+      calorieResult =
+        await calculateMultiFoodCalories(
+          supabase,
+          foodName,
+        );
+
+      calorieResult =
+        applySubmittedEstimateToCalorieResultV45(
+          calorieResult,
+          body,
+        );
+    }
 
     const calories =
       toNumberOrNull(
