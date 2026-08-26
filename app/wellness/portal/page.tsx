@@ -5148,124 +5148,24 @@ function NutritionTab({
 
    // WELLNESS_FULL_FOOD_MASTER_PAGINATION_V126K
   async function loadFoodMaster() {
-    setFoodMasterLoading(true);
+    // WELLNESS_NUTRITION_FOOD_SEARCH_ON_DEMAND_V126M100_4B2
+    // Do not download the complete food master on Nutrition mount.
+    // Food rows are fetched only when the participant types a query.
+    setFoodMaster([]);
+    setFoodMasterLoading(false);
     setFoodMasterMessage("");
-
-    const cacheKey = "wellness-food-master-cache-v126k";
 
     if (typeof window !== "undefined") {
       try {
         window.sessionStorage.removeItem(
           "wellness-food-master-cache-v82",
         );
-
-        const cached =
-          window.sessionStorage.getItem(cacheKey);
-
-        const cachedRows = cached
-          ? JSON.parse(cached)
-          : [];
-
-        if (
-          Array.isArray(cachedRows) &&
-          cachedRows.length > 0
-        ) {
-          setFoodMaster(cachedRows);
-        }
+        window.sessionStorage.removeItem(
+          "wellness-food-master-cache-v126k",
+        );
       } catch {
-        // Cache opsional.
+        // Browser storage is optional.
       }
-    }
-
-    try {
-      const firstResponse = await fetch(
-        "/api/wellness/reference/foods?page=1&page_size=200",
-        { cache: "no-store" },
-      );
-
-      const firstResult = await firstResponse
-        .json()
-        .catch(() => ({}));
-
-      if (!firstResponse.ok || firstResult?.ok === false) {
-        throw new Error(
-          firstResult?.message ||
-            "Master KaloriData gagal dimuat.",
-        );
-      }
-
-      const firstRows = Array.isArray(firstResult?.foods)
-        ? firstResult.foods
-        : [];
-
-      const totalPages = Math.max(
-        Number(
-          firstResult?.pagination?.total_pages || 1,
-        ),
-        1,
-      );
-
-      const remainingPages = Array.from(
-        {
-          length: Math.max(totalPages - 1, 0),
-        },
-        (_, index) => index + 2,
-      );
-
-      const pageResults = await Promise.all(
-        remainingPages.map(async (page) => {
-          const response = await fetch(
-            `/api/wellness/reference/foods?page=${page}&page_size=200`,
-            { cache: "no-store" },
-          );
-
-          const result = await response
-            .json()
-            .catch(() => ({}));
-
-          if (!response.ok || result?.ok === false) {
-            throw new Error(
-              result?.message ||
-                `KaloriData halaman ${page} gagal dimuat.`,
-            );
-          }
-
-          return Array.isArray(result?.foods)
-            ? result.foods
-            : [];
-        }),
-      );
-
-      const rows = [
-        firstRows,
-        ...pageResults,
-      ].flat();
-
-      if (rows.length === 0) {
-        throw new Error(
-          "Master KaloriData belum memiliki data aktif.",
-        );
-      }
-
-      setFoodMaster(rows);
-
-      if (typeof window !== "undefined") {
-        try {
-          window.sessionStorage.setItem(
-            cacheKey,
-            JSON.stringify(rows),
-          );
-        } catch {
-          // Cache opsional.
-        }
-      }
-    } catch (error: any) {
-      setFoodMasterMessage(
-        error?.message ||
-          "Master KaloriData belum dapat dimuat.",
-      );
-    } finally {
-      setFoodMasterLoading(false);
     }
   }
 
@@ -5291,6 +5191,129 @@ function NutritionTab({
   useEffect(() => {
     loadFoodMaster();
   }, []);
+
+  // WELLNESS_NUTRITION_FOOD_SEARCH_ON_DEMAND_V126M100_4B2
+  // Search only the active food fragment. Results are merged into a small
+  // rolling cache so multi-food breakdowns can still resolve earlier choices.
+  useEffect(() => {
+    const queryText =
+      clean(activeFoodQueryV126M35);
+
+    if (queryText.length < 2) {
+      setFoodMasterLoading(false);
+      return;
+    }
+
+    const controller =
+      new AbortController();
+
+    const timer =
+      window.setTimeout(
+        async () => {
+          setFoodMasterLoading(true);
+          setFoodMasterMessage("");
+
+          try {
+            const response =
+              await fetch(
+                `/api/wellness/reference/foods?q=${encodeURIComponent(
+                  queryText,
+                )}&page=1&page_size=100`,
+                {
+                  cache: "no-store",
+                  signal:
+                    controller.signal,
+                },
+              );
+
+            const result =
+              await response
+                .json()
+                .catch(() => ({}));
+
+            if (
+              !response.ok ||
+              result?.ok === false
+            ) {
+              throw new Error(
+                result?.message ||
+                  "Pencarian master makanan gagal.",
+              );
+            }
+
+            const rows =
+              Array.isArray(
+                result?.foods,
+              )
+                ? result.foods
+                : [];
+
+            setFoodMaster(
+              (previous: any[]) => {
+                const merged = [
+                  ...rows,
+                  ...(
+                    Array.isArray(previous)
+                      ? previous
+                      : []
+                  ),
+                ];
+
+                const seen =
+                  new Set<string>();
+
+                return merged
+                  .filter(
+                    (row: any) => {
+                      const key =
+                        Number(row?.id) > 0
+                          ? `id:${Number(
+                              row.id,
+                            )}`
+                          : `name:${clean(
+                              row?.food_name,
+                            ).toLowerCase()}`;
+
+                      if (
+                        !key ||
+                        seen.has(key)
+                      ) {
+                        return false;
+                      }
+
+                      seen.add(key);
+                      return true;
+                    },
+                  )
+                  .slice(0, 1200);
+              },
+            );
+          } catch (error: any) {
+            if (
+              error?.name !==
+              "AbortError"
+            ) {
+              setFoodMasterMessage(
+                error?.message ||
+                  "Pencarian master makanan gagal.",
+              );
+            }
+          } finally {
+            if (
+              !controller.signal.aborted
+            ) {
+              setFoodMasterLoading(false);
+            }
+          }
+        },
+        280,
+      );
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeFoodQueryV126M35]);
 
   useEffect(() => {
     loadDirectNutrition();
