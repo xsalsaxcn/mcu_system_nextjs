@@ -1440,10 +1440,10 @@ export default function WellnessParticipantPortalPage() {
     return result;
   }
 
-  async function loadMe(options?: { keepMessage?: boolean }) {
+  async function loadMe(options?: { keepMessage?: boolean; background?: boolean }) {
     const requestSequenceV126M47_3 =
       ++loadMeRequestSequenceV126M47_3.current;
-    setLoading(true);
+    if (!options?.background) setLoading(true);
 
     const result = await fetch("/api/wellness/participant/me", {
       cache: "no-store",
@@ -1636,6 +1636,7 @@ export default function WellnessParticipantPortalPage() {
     }
 
     if (
+      !options?.background &&
       requestSequenceV126M47_3 ===
       loadMeRequestSequenceV126M47_3.current
     ) {
@@ -2232,9 +2233,11 @@ export default function WellnessParticipantPortalPage() {
       } catch {
         // Browser storage is optional.
       }
-      updateSavingOverlayV126M46("Data tersimpan. Memperbarui poin dan riwayat...");
-      await loadPoints();
+      // WELLNESS_FAST_SAVE_UI_V126M100_1
+      // The API/Google Sheet success response is the visible save boundary.
+      // Point refresh remains active but must not keep the participant waiting.
       completeSavingOverlayV126M46(successMessage);
+      void loadPoints();
 
       nutritionSubmitInFlightV126L.current = false;
 
@@ -2393,12 +2396,11 @@ export default function WellnessParticipantPortalPage() {
       }));
       setWorkoutEvidence(null);
       workoutPendingSubmissionV126M66_1.current = null;
-      updateSavingOverlayV126M46("Data tersimpan. Memperbarui riwayat workout...");
-      await loadMe({ keepMessage: true });
       setActiveTab("history");
       completeSavingOverlayV126M46(
         result.message || "Workout manual berhasil disimpan.",
       );
+      void loadMe({ keepMessage: true, background: true });
     } else {
       // WELLNESS_PORTAL_FAST_BOOT_WORKOUT_SAFE_ERROR_V126M62_4
       // Never render raw upstream/server detail in Participant UI.
@@ -2951,7 +2953,7 @@ export default function WellnessParticipantPortalPage() {
                 workoutItems={workoutItems}
                 nutritionLogs={nutritionLogs}
                 healthtalkLogs={healthtalkLogs}
-                refresh={() => loadMe()}
+                refresh={() => loadMe({ background: true })}
               />
             ) : null}
 
@@ -5423,7 +5425,7 @@ function NutritionTab({
       setFieldErrors({});
       setPortionMap({});
       setQuantityMap({});
-      await loadDirectNutrition();
+      void loadDirectNutrition();
     }
     setSavingSmart(false);
   }
@@ -8748,7 +8750,7 @@ function HistoryTab({
         editingTypeV126M6 ===
         "nutrition"
       ) {
-        await loadNutritionHistory();
+        void loadNutritionHistory();
       } else {
         const savedWorkoutV126M50B6 = result?.log;
         if (savedWorkoutV126M50B6) {
@@ -8810,12 +8812,12 @@ function HistoryTab({
             void loadWorkoutHistoryV126M6();
           }, 5200);
         } else {
-          await loadWorkoutHistoryV126M6();
+          void loadWorkoutHistoryV126M6();
         }
       }
 
       if (refresh) {
-        await Promise.resolve(refresh());
+        void Promise.resolve(refresh()).catch(() => null);
       }
 
       setEditingItemV126M6(null);
