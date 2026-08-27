@@ -5020,7 +5020,8 @@ function normalizeFoodSuggestionTextV126M35(value: any) {
 
 function foodSuggestionScoreV126M35(item: any, rawQuery: string) {
   const query = normalizeFoodSuggestionTextV126M35(rawQuery);
-  if (query.length < 2) return 0;
+  // WELLNESS_NUTRITION_AUTOCOMPLETE_THRESHOLD_V126M102_3
+  if (!query) return 0;
 
   const name = normalizeFoodSuggestionTextV126M35(
     item?.food_name || item?.name || item?.nama_makanan,
@@ -5123,7 +5124,7 @@ function NutritionTab({
   }, [form.food_name]);
 
   const foodSuggestionsV126M35 = useMemo(() => {
-    if (activeFoodQueryV126M35.length < 2) return [];
+    if (!activeFoodQueryV126M35) return [];
 
     return (foodMaster || [])
       .map((item: any) => ({
@@ -5199,7 +5200,7 @@ function NutritionTab({
     const queryText =
       clean(activeFoodQueryV126M35);
 
-    if (queryText.length < 2) {
+    if (!queryText) {
       setFoodMasterLoading(false);
       return;
     }
@@ -5599,7 +5600,7 @@ function NutritionTab({
               </span>
             </span>
             <span className="rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold leading-5 text-teal-800">
-              Ketik minimal 2 huruf. Pilih referensi yang muncul atau lanjutkan input manual.
+              Ketik nama makanan. Rekomendasi akan muncul otomatis saat mulai mengetik.
             </span>
             <div className="relative">
               <textarea
@@ -5623,7 +5624,7 @@ function NutritionTab({
               />
 
               {foodSuggestionOpen &&
-              activeFoodQueryV126M35.length >= 2 &&
+              activeFoodQueryV126M35.length >= 1 &&
               foodSuggestionsV126M35.length > 0 ? (
                 <div
                   role="listbox"
