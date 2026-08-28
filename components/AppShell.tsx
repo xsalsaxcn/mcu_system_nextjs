@@ -58,6 +58,7 @@ const adminMenuGroups = [
   {
     title: "Admin",
     items: [
+      { label: "Print Label Manual", href: "/print-label" },
       { label: "Import Data", href: "/import" },
       { label: "Hapus Database", href: "/cleanup" },
       { label: "Master Users", href: "/master" },
