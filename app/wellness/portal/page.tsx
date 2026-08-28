@@ -5109,6 +5109,10 @@ function NutritionTab({
   const dateFieldRef = useRef<HTMLInputElement | null>(null);
   const mealFieldRef = useRef<HTMLDivElement | null>(null);
   const foodFieldRef = useRef<HTMLTextAreaElement | null>(null);
+  // WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+  // Small in-memory cache only; it avoids repeating the same suggestion call
+  // without reintroducing the old full-master browser cache.
+  const foodSearchCacheV126M105 = useRef<Map<string, any[]>>(new Map());
 
   const foodText = clean(
     form.food_name ||
@@ -5134,7 +5138,17 @@ function NutritionTab({
       .filter((entry: any) => entry.score > 0)
       .sort((a: any, b: any) => {
         if (b.score !== a.score) return b.score - a.score;
-        return clean(a.item?.food_name).localeCompare(clean(b.item?.food_name));
+
+        // WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+        // For the same relevance tier, prefer the simpler/shorter food name.
+        // Example: Pisang before long combination variants.
+        const aName = normalizeFoodSuggestionTextV126M35(a.item?.food_name);
+        const bName = normalizeFoodSuggestionTextV126M35(b.item?.food_name);
+        const aWords = aName.split(" ").filter(Boolean).length;
+        const bWords = bName.split(" ").filter(Boolean).length;
+        if (aWords !== bWords) return aWords - bWords;
+        if (aName.length !== bName.length) return aName.length - bName.length;
+        return clean(a.item?.food_name).localeCompare(clean(b.item?.food_name), "id");
       })
       .slice(0, 8)
       .map((entry: any) => entry.item);
@@ -5194,121 +5208,106 @@ function NutritionTab({
   }, []);
 
   // WELLNESS_NUTRITION_FOOD_SEARCH_ON_DEMAND_V126M100_4B2
-  // Search only the active food fragment. Results are merged into a small
-  // rolling cache so multi-food breakdowns can still resolve earlier choices.
+  // WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+  // Search across the full master on the server, but return only relevance-
+  // ranked candidates. No full-master download is performed in the browser.
   useEffect(() => {
-    const queryText =
-      clean(activeFoodQueryV126M35);
+    const queryText = clean(activeFoodQueryV126M35);
+    const queryKey = normalizeFoodSuggestionTextV126M35(queryText);
 
-    if (!queryText) {
+    if (!queryKey) {
       setFoodMasterLoading(false);
       return;
     }
 
-    const controller =
-      new AbortController();
+    // If the exact food is already in our small rolling cache (usually because
+    // the user selected it from suggestions), do not fire another request.
+    const alreadyHasExact = (foodMaster || []).some(
+      (row: any) =>
+        normalizeFoodSuggestionTextV126M35(row?.food_name) === queryKey,
+    );
 
-    const timer =
-      window.setTimeout(
-        async () => {
-          setFoodMasterLoading(true);
-          setFoodMasterMessage("");
+    if (alreadyHasExact) {
+      setFoodMasterLoading(false);
+      setFoodMasterMessage("");
+      return;
+    }
 
-          try {
-            const response =
-              await fetch(
-                `/api/wellness/reference/foods?q=${encodeURIComponent(
-                  queryText,
-                )}&page=1&page_size=100`,
-                {
-                  cache: "no-store",
-                  signal:
-                    controller.signal,
-                },
-              );
+    const cachedRows = foodSearchCacheV126M105.current.get(queryKey);
+    if (Array.isArray(cachedRows) && cachedRows.length > 0) {
+      setFoodMaster((previous: any[]) => {
+        const seen = new Set<string>();
+        return [...cachedRows, ...(Array.isArray(previous) ? previous : [])]
+          .filter((row: any) => {
+            const key = Number(row?.id) > 0
+              ? `id:${Number(row.id)}`
+              : `name:${normalizeFoodSuggestionTextV126M35(row?.food_name)}`;
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, 600);
+      });
+      setFoodMasterLoading(false);
+      setFoodMasterMessage("");
+      return;
+    }
 
-            const result =
-              await response
-                .json()
-                .catch(() => ({}));
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setFoodMasterLoading(true);
+      setFoodMasterMessage("");
 
-            if (
-              !response.ok ||
-              result?.ok === false
-            ) {
-              throw new Error(
-                result?.message ||
-                  "Pencarian master makanan gagal.",
-              );
-            }
+      try {
+        const response = await fetch(
+          `/api/wellness/reference/foods?q=${encodeURIComponent(queryText)}&mode=suggest`,
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
 
-            const rows =
-              Array.isArray(
-                result?.foods,
-              )
-                ? result.foods
-                : [];
+        const result = await response.json().catch(() => ({}));
 
-            setFoodMaster(
-              (previous: any[]) => {
-                const merged = [
-                  ...rows,
-                  ...(
-                    Array.isArray(previous)
-                      ? previous
-                      : []
-                  ),
-                ];
+        if (!response.ok || result?.ok === false) {
+          throw new Error(
+            result?.message || "Pencarian master makanan gagal.",
+          );
+        }
 
-                const seen =
-                  new Set<string>();
+        const rows = Array.isArray(result?.foods) ? result.foods : [];
 
-                return merged
-                  .filter(
-                    (row: any) => {
-                      const key =
-                        Number(row?.id) > 0
-                          ? `id:${Number(
-                              row.id,
-                            )}`
-                          : `name:${clean(
-                              row?.food_name,
-                            ).toLowerCase()}`;
+        foodSearchCacheV126M105.current.set(queryKey, rows);
+        if (foodSearchCacheV126M105.current.size > 24) {
+          const oldestKey = foodSearchCacheV126M105.current.keys().next().value;
+          if (oldestKey) foodSearchCacheV126M105.current.delete(oldestKey);
+        }
 
-                      if (
-                        !key ||
-                        seen.has(key)
-                      ) {
-                        return false;
-                      }
-
-                      seen.add(key);
-                      return true;
-                    },
-                  )
-                  .slice(0, 1200);
-              },
-            );
-          } catch (error: any) {
-            if (
-              error?.name !==
-              "AbortError"
-            ) {
-              setFoodMasterMessage(
-                error?.message ||
-                  "Pencarian master makanan gagal.",
-              );
-            }
-          } finally {
-            if (
-              !controller.signal.aborted
-            ) {
-              setFoodMasterLoading(false);
-            }
-          }
-        },
-        280,
-      );
+        setFoodMaster((previous: any[]) => {
+          const seen = new Set<string>();
+          return [...rows, ...(Array.isArray(previous) ? previous : [])]
+            .filter((row: any) => {
+              const key = Number(row?.id) > 0
+                ? `id:${Number(row.id)}`
+                : `name:${normalizeFoodSuggestionTextV126M35(row?.food_name)}`;
+              if (!key || seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .slice(0, 600);
+        });
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          setFoodMasterMessage(
+            error?.message || "Pencarian master makanan gagal.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setFoodMasterLoading(false);
+        }
+      }
+    }, 220);
 
     return () => {
       window.clearTimeout(timer);
@@ -5339,6 +5338,18 @@ function NutritionTab({
   const totalEstimatedCalories = parsedFoods.reduce((sum, item) => {
     return sum + Number(item.subtotal_calories || 0);
   }, 0);
+
+  // WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+  // A background suggestion lookup must not delay saving when every entered
+  // food is already resolved against the master.
+  const foodBreakdownReadyV126M105 =
+    parsedFoods.length > 0 &&
+    parsedFoods.every(
+      (item: any) =>
+        item.match_status === "matched" &&
+        normalizeFoodTextV29(item.input_name) ===
+          normalizeFoodTextV29(item.matched_name),
+    );
 
   const breakdownPayload = useMemo(() => {
     return parsedFoods.map((item) => ({
@@ -5677,7 +5688,7 @@ function NutritionTab({
 
           {foodMasterLoading ? (
             <div className="rounded-2xl bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700">
-              Memuat Master KaloriData agar estimasi porsi akurat...
+              Mencari referensi makanan yang paling sesuai...
             </div>
           ) : foodMasterMessage ? (
             <div className="rounded-2xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
@@ -5745,13 +5756,16 @@ function NutritionTab({
           <button
             type="button"
             onClick={submitNutritionSmart}
-            disabled={savingSmart || foodMasterLoading}
+            disabled={
+              savingSmart ||
+              (foodMasterLoading && !foodBreakdownReadyV126M105)
+            }
             className="w-full rounded-[1.4rem] bg-teal-600 px-5 py-4 text-sm font-black text-white shadow-lg shadow-teal-100 disabled:opacity-50"
           >
             {savingSmart
               ? "Menyimpan..."
-              : foodMasterLoading
-                ? "Menyiapkan KaloriData..."
+              : foodMasterLoading && !foodBreakdownReadyV126M105
+                ? "Mencari KaloriData..."
                 : "Simpan Nutrisi"}
           </button>
         </div>

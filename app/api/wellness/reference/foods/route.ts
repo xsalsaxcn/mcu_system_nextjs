@@ -13,6 +13,136 @@ function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+// WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+// Autocomplete must search across the full active master without downloading
+// the full table to the participant browser. The normal paginated master API
+// remains unchanged unless mode=suggest is explicitly requested.
+function normalizeFoodSearchTextV126M105(value: any) {
+  return clean(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function foodSuggestionServerScoreV126M105(item: any, rawQuery: string) {
+  const query = normalizeFoodSearchTextV126M105(rawQuery);
+  const name = normalizeFoodSearchTextV126M105(item?.food_name);
+  const aliases = normalizeFoodSearchTextV126M105(item?.aliases);
+
+  if (!query || !name) return 0;
+
+  const nameTokens = name.split(" ").filter(Boolean);
+  const extraWordPenalty = Math.min(Math.max(nameTokens.length - 1, 0) * 3, 45);
+
+  // Single food / exact master row always wins. Then simple variants whose
+  // names start with the requested food. Combination foods come afterwards.
+  if (name === query) return 1000;
+  if (name.startsWith(`${query} `)) return 900 - extraWordPenalty;
+  if (name.startsWith(query)) return 860 - extraWordPenalty;
+  if (nameTokens.includes(query)) return 760 - extraWordPenalty;
+  if (name.includes(query)) return 700 - extraWordPenalty;
+
+  const aliasTokens = aliases.split(" ").filter(Boolean);
+  if (aliases === query) return 620;
+  if (aliases.startsWith(`${query} `) || aliases.startsWith(query)) return 590;
+  if (aliasTokens.includes(query)) return 560;
+  if (aliases.includes(query)) return 530;
+
+  return 0;
+}
+
+async function loadFoodSuggestionsV126M105(supabase: any, rawQuery: string) {
+  const safeQuery = clean(rawQuery)
+    .replace(/[,%()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!safeQuery) return [];
+
+  const normalizedQuery = normalizeFoodSearchTextV126M105(safeQuery);
+
+  async function runPrefix(pattern: string, limit: number) {
+    const result = await supabase
+      .from("wellness_food_calories")
+      .select("*")
+      .eq("is_active", 1)
+      .ilike("food_name", pattern)
+      .order("food_name", { ascending: true })
+      .limit(limit);
+
+    if (result.error) throw result.error;
+    return Array.isArray(result.data) ? result.data : [];
+  }
+
+  async function runBroad(pattern: string, limit: number) {
+    const result = await supabase
+      .from("wellness_food_calories")
+      .select("*")
+      .eq("is_active", 1)
+      .or(`food_name.ilike.${pattern},aliases.ilike.${pattern}`)
+      .order("food_name", { ascending: true })
+      .limit(limit);
+
+    if (result.error) throw result.error;
+    return Array.isArray(result.data) ? result.data : [];
+  }
+
+  // One character remains supported using only a lightweight prefix lookup.
+  // From two characters onward only one additional bounded broad lookup is
+  // added. This is intentionally lighter than downloading/paging the master.
+  const requests: Promise<any[]>[] = [
+    runPrefix(`${safeQuery}%`, 80),
+  ];
+
+  if (normalizedQuery.length >= 2) {
+    requests.push(runBroad(`%${safeQuery}%`, 160));
+  }
+
+  const groups = await Promise.all(requests);
+  const seen = new Set<string>();
+  const merged: any[] = [];
+
+  for (const row of groups.flat()) {
+    const id = Number(row?.id || 0);
+    const key = id > 0
+      ? `id:${id}`
+      : `name:${normalizeFoodSearchTextV126M105(row?.food_name)}`;
+
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+  }
+
+  return merged
+    .map((item: any) => ({
+      item,
+      score: foodSuggestionServerScoreV126M105(item, safeQuery),
+      normalizedName: normalizeFoodSearchTextV126M105(item?.food_name),
+    }))
+    .filter((entry: any) => entry.score > 0)
+    .sort((left: any, right: any) => {
+      if (right.score !== left.score) return right.score - left.score;
+
+      const leftWords = left.normalizedName.split(" ").filter(Boolean).length;
+      const rightWords = right.normalizedName.split(" ").filter(Boolean).length;
+      if (leftWords !== rightWords) return leftWords - rightWords;
+
+      if (left.normalizedName.length !== right.normalizedName.length) {
+        return left.normalizedName.length - right.normalizedName.length;
+      }
+
+      return clean(left.item?.food_name).localeCompare(
+        clean(right.item?.food_name),
+        "id",
+      );
+    })
+    .slice(0, 100)
+    .map((entry: any) => entry.item);
+}
+
 function portionMultiplier(value: any) {
   const text = clean(value).toLowerCase().replace(/\s+/g, "");
   if (!text || text === "1" || text === "1porsi" || text === "1portion") return 1;
@@ -90,6 +220,27 @@ export async function GET(req: NextRequest) {
     }
 
     const q = clean(req.nextUrl.searchParams.get("q"));
+    const mode = clean(req.nextUrl.searchParams.get("mode")).toLowerCase();
+
+    // WELLNESS_NUTRITION_RELEVANCE_SEARCH_V126M105
+    // Participant autocomplete gets relevance-ranked candidates from the full
+    // master. Admin/master pagination below is intentionally left untouched.
+    if (mode === "suggest" && q) {
+      const foods = await loadFoodSuggestionsV126M105(supabase, q);
+
+      return ok({
+        foods,
+        suggestion_mode: true,
+        pagination: {
+          page: 1,
+          page_size: foods.length,
+          total: foods.length,
+          total_pages: 1,
+          from: foods.length > 0 ? 1 : 0,
+          to: foods.length,
+        },
+      });
+    }
 
     const page = Math.max(
       Number(req.nextUrl.searchParams.get("page") || 1),
