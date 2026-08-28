@@ -515,7 +515,7 @@ function ManualPrintLabel() {
       ).length;
       if (currentCount >= MAX_DETAIL_FIELDS) {
         setMessage(
-          `Maksimal ${MAX_DETAIL_FIELDS} baris detail agar layout CAPASKA 40 mm x 30 mm tetap aman. Nonaktifkan salah satu field dulu.`
+          `Maksimal ${MAX_DETAIL_FIELDS} baris detail agar layout CAPASKA landscape 50 mm x 30 mm tetap aman. Nonaktifkan salah satu field dulu.`
         );
         return;
       }
@@ -595,14 +595,14 @@ function ManualPrintLabel() {
     <div className="space-y-5">
       <style jsx global>{`
         @page {
-          size: 40mm 30mm;
+          size: 50mm 30mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 40mm;
+            width: 50mm;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
@@ -628,7 +628,7 @@ function ManualPrintLabel() {
           }
 
           .label-page {
-            width: 40mm !important;
+            width: 50mm !important;
             height: 30mm !important;
             page-break-after: always;
             break-after: page;
@@ -657,7 +657,7 @@ function ManualPrintLabel() {
             </div>
           </div>
           <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-            Performance V68 - CAPASKA 40 mm x 30 mm
+            Performance V69 - CAPASKA LANDSCAPE 50 mm x 30 mm
           </div>
         </div>
       </section>
@@ -976,7 +976,7 @@ function ManualPrintLabel() {
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">4</div>
             <div>
               <div className="font-black">Setup Print & Preview</div>
-              <div className="text-xs text-slate-500">Layout printer mengikuti CAPASKA Registrasi Ulang: 40 mm x 30 mm, margin 0.</div>
+              <div className="text-xs text-slate-500">Layout printer mengikuti persis modul Cetak Label CAPASKA: landscape 50 mm x 30 mm, margin 0.</div>
             </div>
           </div>
 
@@ -1140,83 +1140,87 @@ function ManualLabelCard({
       className={`${printMode ? "label-page" : ""} bg-white`}
       style={{
         position: "relative",
-        width: "40mm",
+        width: "50mm",
         height: "30mm",
         overflow: "hidden",
         border: showBorder ? "1px solid #d4d4d8" : undefined,
-        borderRadius: showBorder ? "18px" : undefined,
+        borderRadius: showBorder ? "1.4mm" : undefined,
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact",
         background: "#ffffff",
         boxSizing: "border-box",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          left: "8%",
-          top: "7%",
-          right: showQrEffective ? "34%" : "8%",
-          bottom: "5%",
-          zIndex: 2,
-          overflow: "hidden",
-          color: "#000000",
-          textAlign,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: textAlign === "left" ? "flex-start" : textAlign === "center" ? "center" : "flex-end",
-        }}
-      >
-        {title ? (
-          <div
-            style={{
-              width: "100%",
-              fontSize: `${safeTitleFont}px`,
-              lineHeight: 1.03,
-              fontWeight: 900,
-              whiteSpace: "normal",
-              wordBreak: "break-word",
-              overflowWrap: "anywhere",
-              textAlign,
-            }}
-          >
-            {title}
-          </div>
-        ) : null}
+      {title ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            top: "2.2mm",
+            right: showQrEffective ? `calc(${qrPx}px + 4mm)` : "2.4mm",
+            zIndex: 2,
+            fontSize: `${safeTitleFont}px`,
+            lineHeight: 0.94,
+            fontWeight: 900,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            letterSpacing: "-0.04em",
+            maxHeight: "9.2mm",
+            overflow: "hidden",
+            textAlign,
+          }}
+        >
+          {title}
+        </div>
+      ) : null}
 
-        {details.map((value, index) => (
-          <div
-            key={`${value}-${index}`}
-            style={{
-              width: "100%",
-              marginTop: title || index ? `${safeLineGap}mm` : 0,
-              fontSize: `${safeDetailFont}px`,
-              lineHeight: 1.12,
-              fontWeight: 700,
-              whiteSpace: "normal",
-              wordBreak: "break-word",
-              overflowWrap: "anywhere",
-              textAlign,
-            }}
-          >
-            {value}
-          </div>
-        ))}
-      </div>
+      {details.length ? (
+        <div
+          style={{
+            position: "absolute",
+            left: "2.4mm",
+            top: title ? "12.3mm" : "2.2mm",
+            right: showQrEffective ? `calc(${qrPx}px + 4mm)` : "2.4mm",
+            zIndex: 2,
+            fontSize: `${safeDetailFont}px`,
+            lineHeight: 1.02,
+            fontWeight: 700,
+            color: "#111827",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            maxHeight: title ? "15.2mm" : "25.2mm",
+            overflow: "hidden",
+            textAlign,
+          }}
+        >
+          {details.map((value, index) => (
+            <div
+              key={`${value}-${index}`}
+              style={{ marginTop: index ? `${Math.max(0.55, safeLineGap)}mm` : undefined }}
+            >
+              {value}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {showQrEffective ? (
         <div
           style={{
             position: "absolute",
-            right: "2%",
-            bottom: "5%",
+            right: "0.5mm",
+            top: "50%",
+            transform: "translateY(-50%)",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             background: "#ffffff",
-            zIndex: 3,
+            zIndex: 1,
           }}
         >
           <img
