@@ -105,12 +105,12 @@ function ManualPrintLabel() {
   const [showQr, setShowQr] = useState(false);
   const [includedColumns, setIncludedColumns] = useState<Record<string, boolean>>({});
   const [copies, setCopies] = useState(6);
-  const [qrSize, setQrSize] = useState(46);
-  const [titleFontSize, setTitleFontSize] = useState(13);
-  const [detailFontSize, setDetailFontSize] = useState(8);
+  const [qrSize, setQrSize] = useState(54);
+  const [titleFontSize, setTitleFontSize] = useState(15);
+  const [detailFontSize, setDetailFontSize] = useState(9);
   const [textAlign, setTextAlign] = useState<TextAlign>("left");
   const [lineGap, setLineGap] = useState(0.8);
-  const [showBorder, setShowBorder] = useState(true);
+  const [showBorder, setShowBorder] = useState(false);
   const [search, setSearch] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [newParameterName, setNewParameterName] = useState("");
@@ -515,7 +515,7 @@ function ManualPrintLabel() {
       ).length;
       if (currentCount >= MAX_DETAIL_FIELDS) {
         setMessage(
-          `Maksimal ${MAX_DETAIL_FIELDS} baris detail agar layout 50 mm x 30 mm tetap aman. Nonaktifkan salah satu field dulu.`
+          `Maksimal ${MAX_DETAIL_FIELDS} baris detail agar layout CAPASKA 40 mm x 30 mm tetap aman. Nonaktifkan salah satu field dulu.`
         );
         return;
       }
@@ -595,17 +595,18 @@ function ManualPrintLabel() {
     <div className="space-y-5">
       <style jsx global>{`
         @page {
-          size: 50mm 30mm;
+          size: 40mm 30mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 50mm;
+            width: 40mm;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
+            color: black !important;
           }
 
           header,
@@ -627,7 +628,7 @@ function ManualPrintLabel() {
           }
 
           .label-page {
-            width: 50mm !important;
+            width: 40mm !important;
             height: 30mm !important;
             page-break-after: always;
             break-after: page;
@@ -635,11 +636,14 @@ function ManualPrintLabel() {
             overflow: hidden;
             margin: 0 !important;
             background: white !important;
+            color: black !important;
+            border-radius: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
 
-          .label-page:last-child {
-            page-break-after: auto;
-            break-after: auto;
+          .label-page * {
+            box-sizing: border-box;
           }
         }
       `}</style>
@@ -653,7 +657,7 @@ function ManualPrintLabel() {
             </div>
           </div>
           <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-            Performance V67 - print dirender hanya saat tombol Print ditekan
+            Performance V68 - CAPASKA 40 mm x 30 mm
           </div>
         </div>
       </section>
@@ -972,7 +976,7 @@ function ManualPrintLabel() {
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">4</div>
             <div>
               <div className="font-black">Setup Print & Preview</div>
-              <div className="text-xs text-slate-500">Kertas tetap mengikuti fitur label existing: 50 mm x 30 mm, margin 0.</div>
+              <div className="text-xs text-slate-500">Layout printer mengikuti CAPASKA Registrasi Ulang: 40 mm x 30 mm, margin 0.</div>
             </div>
           </div>
 
@@ -985,11 +989,11 @@ function ManualPrintLabel() {
                 </label>
                 <label className="text-xs font-black text-slate-600">
                   Ukuran font nama
-                  <input type="number" min={7} max={28} step={0.5} className="input mt-2 w-full" value={titleFontSize} onChange={(event) => { setTitleFontSize(Number(event.target.value) || 13); invalidatePreparedPrint(); }} />
+                  <input type="number" min={7} max={28} step={0.5} className="input mt-2 w-full" value={titleFontSize} onChange={(event) => { setTitleFontSize(Number(event.target.value) || 15); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="text-xs font-black text-slate-600">
                   Ukuran font detail
-                  <input type="number" min={6} max={20} step={0.5} className="input mt-2 w-full" value={detailFontSize} onChange={(event) => { setDetailFontSize(Number(event.target.value) || 8); invalidatePreparedPrint(); }} />
+                  <input type="number" min={6} max={20} step={0.5} className="input mt-2 w-full" value={detailFontSize} onChange={(event) => { setDetailFontSize(Number(event.target.value) || 9); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="text-xs font-black text-slate-600">
                   Jarak antar baris (mm)
@@ -997,7 +1001,7 @@ function ManualPrintLabel() {
                 </label>
                 <label className="text-xs font-black text-slate-600">
                   Ukuran QR
-                  <input type="number" min={38} max={160} className="input mt-2 w-full" value={qrSize} disabled={!showQr || !qrColumn} onChange={(event) => { setQrSize(Number(event.target.value) || 46); invalidatePreparedPrint(); }} />
+                  <input type="number" min={38} max={80} className="input mt-2 w-full" value={qrSize} disabled={!showQr || !qrColumn} onChange={(event) => { setQrSize(Number(event.target.value) || 54); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="flex items-center gap-2 rounded-xl border px-3 py-3 text-xs font-black text-slate-700 sm:mt-6">
                   <input type="checkbox" checked={showBorder} onChange={(event) => { setShowBorder(event.target.checked); invalidatePreparedPrint(); }} />
@@ -1120,11 +1124,10 @@ function ManualLabelCard({
 }) {
   const title = clean(row.values[titleColumn]);
   const qrValue = clean(row.values[qrColumn]);
-  const qrPx = Math.min(160, Math.max(38, Number(qrSize || 46)));
+  const qrPx = Math.min(80, Math.max(38, Number(qrSize || 54)));
   const showQrEffective = Boolean(showQr && qrColumn && qrValue && qrSrc);
-  const textRight = showQrEffective ? `calc(${qrPx}px + 3mm)` : "2.4mm";
-  const safeTitleFont = Math.max(7, Math.min(28, Number(titleFontSize || 13)));
-  const safeDetailFont = Math.max(6, Math.min(20, Number(detailFontSize || 8)));
+  const safeTitleFont = Math.max(7, Math.min(28, Number(titleFontSize || 15)));
+  const safeDetailFont = Math.max(6, Math.min(20, Number(detailFontSize || 9)));
   const safeLineGap = Math.max(0, Math.min(4, Number(lineGap || 0)));
 
   const details = detailColumns
@@ -1137,11 +1140,11 @@ function ManualLabelCard({
       className={`${printMode ? "label-page" : ""} bg-white`}
       style={{
         position: "relative",
-        width: "50mm",
+        width: "40mm",
         height: "30mm",
         overflow: "hidden",
         border: showBorder ? "1px solid #d4d4d8" : undefined,
-        borderRadius: showBorder ? "1.4mm" : undefined,
+        borderRadius: showBorder ? "18px" : undefined,
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact",
         background: "#ffffff",
@@ -1151,10 +1154,10 @@ function ManualLabelCard({
       <div
         style={{
           position: "absolute",
-          left: "2.4mm",
-          top: "2.2mm",
-          right: textRight,
-          bottom: "2.2mm",
+          left: "8%",
+          top: "7%",
+          right: showQrEffective ? "34%" : "8%",
+          bottom: "5%",
           zIndex: 2,
           overflow: "hidden",
           color: "#000000",
@@ -1169,8 +1172,8 @@ function ManualLabelCard({
             style={{
               width: "100%",
               fontSize: `${safeTitleFont}px`,
-              lineHeight: 1,
-              fontWeight: 950,
+              lineHeight: 1.03,
+              fontWeight: 900,
               whiteSpace: "normal",
               wordBreak: "break-word",
               overflowWrap: "anywhere",
@@ -1188,8 +1191,8 @@ function ManualLabelCard({
               width: "100%",
               marginTop: title || index ? `${safeLineGap}mm` : 0,
               fontSize: `${safeDetailFont}px`,
-              lineHeight: 1,
-              fontWeight: 800,
+              lineHeight: 1.12,
+              fontWeight: 700,
               whiteSpace: "normal",
               wordBreak: "break-word",
               overflowWrap: "anywhere",
@@ -1205,9 +1208,8 @@ function ManualLabelCard({
         <div
           style={{
             position: "absolute",
-            right: "0.5mm",
-            top: "50%",
-            transform: "translateY(-50%)",
+            right: "2%",
+            bottom: "5%",
             width: `${qrPx}px`,
             height: `${qrPx}px`,
             display: "flex",
