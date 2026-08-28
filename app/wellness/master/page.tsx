@@ -130,6 +130,11 @@ function WellnessMaster() {
   const [foodFrom, setFoodFrom] = useState(0);
   const [foodTo, setFoodTo] = useState(0);
   const [foodLoading, setFoodLoading] = useState(false);
+  // WELLNESS_MASTER_FOOD_DELETE_V126M106
+  const [foodDeletingId, setFoodDeletingId] = useState<number | null>(null);
+  // WELLNESS_MASTER_FOOD_BULK_DELETE_V126M107
+  const [foodSelectedIds, setFoodSelectedIds] = useState<number[]>([]);
+  const [foodBulkDeleting, setFoodBulkDeleting] = useState(false);
   const [message, setMessage] = useState(
     "Master Wellness memakai database internal, bukan Google Sheet.",
   );
@@ -256,6 +261,168 @@ function WellnessMaster() {
       setFoodForm({});
       setFoodPage(1);
       void loadFoods(1, foodSearch);
+    }
+  }
+
+  // WELLNESS_MASTER_FOOD_DELETE_V126M106
+  // Soft delete only deactivates the master row. Existing participant nutrition
+  // history is not changed, and GET/suggest already reads only is_active = 1.
+  async function deleteFood(food: any) {
+    const id = Number(food?.id || 0);
+    const name = clean(food?.food_name) || "makanan ini";
+
+    if (!Number.isFinite(id) || id <= 0) {
+      setMessage("ID makanan tidak valid.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete "${name}" dari Master KaloriData? Data historis peserta tidak akan dihapus.`,
+    );
+    if (!confirmed) return;
+
+    setFoodDeletingId(id);
+    setMessage(`Menghapus ${name}...`);
+
+    try {
+      const response = await fetch("/api/wellness/reference/foods", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const json = await response.json().catch(() => ({}));
+
+      if (!response.ok || !json.ok) {
+        throw new Error(json.message || "Gagal menghapus makanan.");
+      }
+
+      setMessage(`"${name}" berhasil dihapus dari Master KaloriData.`);
+      setFoodSelectedIds((previous) => previous.filter((item) => item !== id));
+
+      const nextPage = foods.length === 1 && foodPage > 1 ? foodPage - 1 : foodPage;
+      if (nextPage !== foodPage) {
+        setFoodPage(nextPage);
+      } else {
+        void loadFoods(nextPage, foodSearch);
+      }
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal menghapus makanan.");
+    } finally {
+      setFoodDeletingId(null);
+    }
+  }
+
+  // WELLNESS_MASTER_FOOD_BULK_DELETE_V126M107
+  function foodIdsOnCurrentPage() {
+    return foods
+      .map((food: any) => Number(food?.id || 0))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
+  }
+
+  function allFoodsOnCurrentPageSelected() {
+    const pageIds = foodIdsOnCurrentPage();
+    if (!pageIds.length) return false;
+    const selected = new Set(foodSelectedIds);
+    return pageIds.every((id: number) => selected.has(id));
+  }
+
+  function toggleFoodSelection(idValue: any) {
+    const id = Number(idValue || 0);
+    if (!Number.isFinite(id) || id <= 0) return;
+
+    setFoodSelectedIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id],
+    );
+  }
+
+  function toggleAllFoodsOnCurrentPage() {
+    const pageIds = foodIdsOnCurrentPage();
+    if (!pageIds.length) return;
+
+    setFoodSelectedIds((previous) => {
+      const selected = new Set(previous);
+      const allSelected = pageIds.every((id: number) => selected.has(id));
+
+      if (allSelected) {
+        for (const id of pageIds) selected.delete(id);
+      } else {
+        for (const id of pageIds) selected.add(id);
+      }
+
+      return Array.from(selected);
+    });
+  }
+
+  async function deleteSelectedFoods() {
+    const ids = [
+      ...new Set(
+        foodSelectedIds
+          .map((value) => Number(value || 0))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    ];
+
+    if (!ids.length) {
+      setMessage("Pilih minimal satu makanan untuk dihapus.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete All ${ids.length.toLocaleString("id-ID")} makanan terpilih dari Master KaloriData? ` +
+        "Data historis peserta tidak akan dihapus.",
+    );
+    if (!confirmed) return;
+
+    setFoodBulkDeleting(true);
+    setMessage(`Menghapus ${ids.length.toLocaleString("id-ID")} makanan terpilih...`);
+
+    try {
+      let deletedCount = 0;
+
+      // Keep each request small. This is faster than deleting row-by-row and
+      // avoids a very large Supabase IN filter when selections span pages.
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        const chunk = ids.slice(offset, offset + 100);
+        const response = await fetch("/api/wellness/reference/foods", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: chunk }),
+        });
+        const json = await response.json().catch(() => ({}));
+
+        if (!response.ok || !json.ok) {
+          throw new Error(json.message || "Gagal menghapus makanan terpilih.");
+        }
+
+        deletedCount += Number(json.deleted_count || 0);
+      }
+
+      const selectedSet = new Set(ids);
+      const remainingOnCurrentPage = foods.filter(
+        (food: any) => !selectedSet.has(Number(food?.id || 0)),
+      ).length;
+
+      setFoodSelectedIds([]);
+      setMessage(
+        `${deletedCount.toLocaleString("id-ID")} makanan berhasil dihapus dari Master KaloriData.`,
+      );
+
+      const nextPage =
+        remainingOnCurrentPage === 0 && foodPage > 1
+          ? foodPage - 1
+          : foodPage;
+
+      if (nextPage !== foodPage) {
+        setFoodPage(nextPage);
+      } else {
+        await loadFoods(nextPage, foodSearch);
+      }
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal menghapus makanan terpilih.");
+    } finally {
+      setFoodBulkDeleting(false);
     }
   }
 
@@ -854,30 +1021,76 @@ function WellnessMaster() {
                   : `${foodFrom.toLocaleString("id-ID")}–${foodTo.toLocaleString("id-ID")} dari ${foodTotal.toLocaleString("id-ID")} makanan`}
               </div>
             </div>
-            <input
-              className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold"
-              placeholder="Cari makanan"
-              value={foodSearch}
-              onChange={(e) => {
-                setFoodSearch(e.target.value);
-                setFoodPage(1);
-              }}
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                className="rounded-2xl border border-slate-300 px-4 py-3 text-sm font-bold"
+                placeholder="Cari makanan"
+                value={foodSearch}
+                onChange={(e) => {
+                  setFoodSearch(e.target.value);
+                  setFoodPage(1);
+                  setFoodSelectedIds([]);
+                }}
+              />
+              {foodSelectedIds.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={foodBulkDeleting}
+                    onClick={() => setFoodSelectedIds([])}
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
+                  >
+                    Batal Pilih
+                  </button>
+                  <button
+                    type="button"
+                    disabled={foodBulkDeleting}
+                    onClick={() => void deleteSelectedFoods()}
+                    className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {foodBulkDeleting
+                      ? "Deleting..."
+                      : `Delete All (${foodSelectedIds.length.toLocaleString("id-ID")})`}
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="max-h-[520px] overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
+                <th className="w-12 px-4 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Pilih semua makanan di halaman ini"
+                    checked={allFoodsOnCurrentPageSelected()}
+                    disabled={foodLoading || foodBulkDeleting || foods.length === 0}
+                    onChange={toggleAllFoodsOnCurrentPage}
+                    className="h-4 w-4 cursor-pointer accent-rose-600"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left">Makanan</th>
                 <th className="px-4 py-3 text-left">Kalori / 1 Porsi</th>
                 <th className="px-4 py-3 text-left">Kategori</th>
                 <th className="px-4 py-3 text-left">Alias</th>
+                <th className="px-4 py-3 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {foods.map((food) => (
                 <tr key={food.id || food.food_name}>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label={`Pilih ${clean(food.food_name) || "makanan"}`}
+                      checked={foodSelectedIds.includes(Number(food.id))}
+                      disabled={foodBulkDeleting || foodDeletingId === Number(food.id)}
+                      onChange={() => toggleFoodSelection(food.id)}
+                      className="h-4 w-4 cursor-pointer accent-rose-600"
+                    />
+                  </td>
                   <td className="px-4 py-3 font-bold text-slate-900">
                     {food.food_name}
                   </td>
@@ -887,6 +1100,16 @@ function WellnessMaster() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {food.aliases || "-"}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      disabled={foodBulkDeleting || foodDeletingId === Number(food.id)}
+                      onClick={() => void deleteFood(food)}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {foodDeletingId === Number(food.id) ? "Deleting..." : "Delete"}
+                    </button>
                   </td>
                 </tr>
               ))}

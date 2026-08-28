@@ -345,3 +345,91 @@ export async function POST(req: NextRequest) {
     return fail(error?.message || "Gagal menyimpan referensi makanan.", 500);
   }
 }
+
+
+// WELLNESS_MASTER_FOOD_DELETE_V126M106
+// WELLNESS_MASTER_FOOD_BULK_DELETE_V126M107
+// Admin-only soft delete. Accepts the existing { id } request and a bounded
+// { ids: [...] } bulk request. GET pagination, mode=suggest, participant save,
+// and historical nutrition logs are intentionally unchanged.
+export async function DELETE(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+  if (!canManageWellness(user)) return fail("Akses ditolak.", 403);
+
+  const body = await req.json().catch(() => ({}));
+  const requestedIds = Array.isArray(body?.ids) ? body.ids : [body?.id];
+  const ids = [
+    ...new Set(
+      requestedIds
+        .map((value: any) => Number(value || 0))
+        .filter((id: number) => Number.isFinite(id) && id > 0),
+    ),
+  ];
+
+  if (!ids.length) {
+    return fail("ID makanan tidak valid.", 400);
+  }
+
+  // Frontend sends chunks of 100. Keep an upper bound server-side too.
+  if (ids.length > 200) {
+    return fail("Maksimal 200 makanan per request delete.", 400);
+  }
+
+  try {
+    const supabase = getSupabaseAdmin();
+    const existingResult = await supabase
+      .from("wellness_food_calories")
+      .select("id, food_name, is_active")
+      .in("id", ids);
+
+    if (existingResult.error) throw existingResult.error;
+
+    const existingFoods = Array.isArray(existingResult.data)
+      ? existingResult.data
+      : [];
+
+    if (!existingFoods.length) {
+      return fail("Makanan tidak ditemukan.", 404);
+    }
+
+    const activeIds = existingFoods
+      .filter((item: any) => Number(item?.is_active || 0) === 1)
+      .map((item: any) => Number(item.id))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
+
+    let deletedFoods: any[] = [];
+
+    if (activeIds.length > 0) {
+      const updateResult = await supabase
+        .from("wellness_food_calories")
+        .update({
+          is_active: 0,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", activeIds)
+        .eq("is_active", 1)
+        .select("id, food_name, is_active");
+
+      if (updateResult.error) throw updateResult.error;
+      deletedFoods = Array.isArray(updateResult.data)
+        ? updateResult.data
+        : [];
+    }
+
+    const singleFood =
+      ids.length === 1
+        ? deletedFoods[0] || existingFoods.find((item: any) => Number(item.id) === ids[0]) || null
+        : null;
+
+    return ok({
+      deleted: true,
+      requested_count: ids.length,
+      deleted_count: deletedFoods.length,
+      foods: deletedFoods,
+      food: singleFood,
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Gagal menghapus referensi makanan.", 500);
+  }
+}
