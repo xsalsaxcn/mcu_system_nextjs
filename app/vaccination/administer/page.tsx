@@ -318,11 +318,11 @@ export default function VaccinationAdministerPage() {
           </div>
         ) : null}
 
-        <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
+        <section id="vaccination-administer-participant-section" className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <h2 className="font-bold">1. Pilih Peserta</h2>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <select className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
+          <div id="vaccination-administer-top-controls" className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <select id="vaccination-administer-session" data-vaccination-role="session" className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
               <option value="">Pilih session</option>
               {sessions.map((session) => (
                 <option key={session.id} value={session.id}>
@@ -331,7 +331,7 @@ export default function VaccinationAdministerPage() {
               ))}
             </select>
 
-            <select className="rounded-xl border px-3 py-2.5" value={form.registrationId} onChange={(e) => setForm({ ...form, registrationId: e.target.value })}>
+            <select id="vaccination-administer-participant" data-vaccination-role="participant" className="rounded-xl border px-3 py-2.5" value={form.registrationId} onChange={(e) => setForm({ ...form, registrationId: e.target.value })}>
               <option value="">Pilih peserta / nomor antrian</option>
               {registrations.map((registration) => (
                 <option key={registration.id} value={registration.id}>
@@ -348,6 +348,8 @@ export default function VaccinationAdministerPage() {
             />
 
             <input
+              id="vaccination-administer-doctor-input"
+              data-vaccination-role="doctor"
               className="rounded-xl border px-3 py-2.5"
               placeholder="Nama dokter / petugas"
               value={form.administeredByName}
