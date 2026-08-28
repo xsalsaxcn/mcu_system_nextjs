@@ -22,6 +22,19 @@ function clean(value: unknown) {
     .trim();
 }
 
+function escapeHtml(value: unknown) {
+  return clean(value).replace(/[&<>"']/g, (char) => {
+    const map: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return map[char] || char;
+  });
+}
+
 function norm(value: unknown) {
   return clean(value)
     .toLowerCase()
@@ -572,22 +585,230 @@ function ManualPrintLabel() {
       return;
     }
 
+    // Last-known-good strategy: buka print-only window SEBELUM pekerjaan async.
+    // Ini mengikuti pola print vaksin yang stabil dan mengisolasi layout dari AppShell/page utama.
+    const printWindow = window.open("about:blank", "_blank", "width=900,height=600");
+    if (!printWindow) {
+      setMessage("Popup print diblokir browser. Izinkan popup untuk situs ini lalu klik Print Label lagi.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      '<!doctype html><html><head><meta charset="utf-8"><title>Menyiapkan Print Label</title></head>' +
+      '<body style="font-family:Arial,sans-serif;padding:18px">Menyiapkan label landscape 50 mm x 30 mm...</body></html>'
+    );
+    printWindow.document.close();
+
     try {
       setPreparingPrint(true);
       setPrintReady(false);
       setMessage(`Menyiapkan ${selectedDataRows.length} data x ${Math.max(1, copies)} copy = ${labelCount} label...`);
 
       const nextQrCache = await buildQrCache();
-      setQrCache(nextQrCache);
-      setPrintReady(true);
-      await nextPaint();
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      window.print();
+      const safeCopies = Math.max(1, Math.min(50, Number(copies || 1)));
+      const safeTitleFont = Math.max(7, Math.min(28, Number(titleFontSize || 15)));
+      const safeDetailFont = Math.max(6, Math.min(20, Number(detailFontSize || 9)));
+      const safeLineGap = Math.max(0, Math.min(4, Number(lineGap || 0)));
+      const safeQrPx = Math.min(80, Math.max(38, Number(qrSize || 54)));
+      const align = textAlign === "center" ? "center" : textAlign === "right" ? "right" : "left";
+
+      const labelsHtml: string[] = [];
+
+      for (const row of selectedDataRows) {
+        const title = clean(row.values[titleColumn]);
+        const qrValue = qrColumn ? clean(row.values[qrColumn]) : "";
+        const qrSrc = qrValue ? nextQrCache[qrValue] || "" : "";
+        const showQrEffective = Boolean(showQr && qrColumn && qrValue && qrSrc);
+        const details = detailColumns
+          .map((header) => clean(row.values[header]))
+          .filter(Boolean)
+          .slice(0, MAX_DETAIL_FIELDS);
+
+        const textRight = showQrEffective ? `calc(${safeQrPx}px + 4mm)` : "2.4mm";
+        const titleHtml = title
+          ? `<div class="label-title" style="right:${textRight};font-size:${safeTitleFont}px;text-align:${align}">${escapeHtml(title)}</div>`
+          : "";
+        const detailHtml = details.length
+          ? `<div class="label-details" style="top:${title ? "12.3mm" : "2.2mm"};right:${textRight};font-size:${safeDetailFont}px;text-align:${align};max-height:${title ? "15.2mm" : "25.2mm"}">${details
+              .map(
+                (value, index) =>
+                  `<div style="${index ? `margin-top:${Math.max(0.55, safeLineGap)}mm;` : ""}">${escapeHtml(value)}</div>`
+              )
+              .join("")}</div>`
+          : "";
+        const qrHtml = showQrEffective
+          ? `<div class="label-qr" style="width:${safeQrPx}px;height:${safeQrPx}px"><img src="${qrSrc}" alt="QR" style="width:${safeQrPx}px;height:${safeQrPx}px"></div>`
+          : "";
+
+        const borderStyle = showBorder ? "border:1px solid #d4d4d8;border-radius:1.4mm;" : "";
+        const oneLabel = `<section class="label-page" style="${borderStyle}">${titleHtml}${detailHtml}${qrHtml}</section>`;
+
+        for (let copyIndex = 0; copyIndex < safeCopies; copyIndex += 1) {
+          labelsHtml.push(oneLabel);
+        }
+      }
+
+      const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Print Label Manual</title>
+<style>
+  @page {
+    size: 50mm 30mm;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 50mm !important;
+    min-width: 50mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  body {
+    overflow: visible !important;
+  }
+
+  .label-page {
+    position: relative;
+    width: 50mm !important;
+    min-width: 50mm !important;
+    max-width: 50mm !important;
+    height: 30mm !important;
+    min-height: 30mm !important;
+    max-height: 30mm !important;
+    box-sizing: border-box;
+    overflow: hidden;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    page-break-after: always;
+    break-after: page;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .label-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .label-page * {
+    box-sizing: border-box;
+  }
+
+  .label-title {
+    position: absolute;
+    left: 2.4mm;
+    top: 2.2mm;
+    z-index: 2;
+    line-height: .94;
+    font-weight: 900;
+    color: #000;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    letter-spacing: -.04em;
+    max-height: 9.2mm;
+    overflow: hidden;
+  }
+
+  .label-details {
+    position: absolute;
+    left: 2.4mm;
+    z-index: 2;
+    line-height: 1.02;
+    font-weight: 700;
+    color: #111827;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+  }
+
+  .label-qr {
+    position: absolute;
+    right: .5mm;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    z-index: 1;
+  }
+
+  .label-qr img {
+    display: block;
+    background: #fff;
+    image-rendering: pixelated;
+  }
+
+  @media print {
+    html,
+    body {
+      width: 50mm !important;
+      min-width: 50mm !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .label-page {
+      width: 50mm !important;
+      height: 30mm !important;
+      margin: 0 !important;
+    }
+  }
+</style>
+</head>
+<body>
+${labelsHtml.join("\n")}
+<script>
+(function () {
+  function waitForImages() {
+    var images = Array.prototype.slice.call(document.images || []);
+    return Promise.all(images.map(function (img) {
+      if (img.complete) return Promise.resolve();
+      return new Promise(function (resolve) {
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+    }));
+  }
+
+  window.addEventListener('load', function () {
+    waitForImages().then(function () {
+      setTimeout(function () { window.print(); }, 350);
+    });
+  });
+})();
+</script>
+</body>
+</html>`;
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+
+      setMessage(
+        `Print-only window dibuka dengan engine last-known-good 50 mm x 30 mm. Total ${labelsHtml.length} label.`
+      );
+      setPreparingPrint(false);
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+      try {
+        printWindow.close();
+      } catch {}
+      const errorText = error instanceof Error ? error.message : String(error);
       setPreparingPrint(false);
       setPrintReady(false);
-      setMessage(`Gagal menyiapkan print: ${text}`);
+      setMessage(`Gagal menyiapkan print: ${errorText}`);
     }
   }
 
@@ -657,7 +878,7 @@ function ManualPrintLabel() {
             </div>
           </div>
           <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-            Performance V69 - CAPASKA LANDSCAPE 50 mm x 30 mm
+            Performance V70 - LAST KNOWN GOOD POPUP 50 mm x 30 mm
           </div>
         </div>
       </section>
@@ -1028,7 +1249,7 @@ function ManualPrintLabel() {
               <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-sm font-bold text-slate-700">
                 {selectedDataRows.length} data x {Math.max(1, copies)} copy = <span className="text-blue-700">{labelCount} label</span>
                 <div className="mt-1 text-xs font-semibold text-slate-500">
-                  Label printable tidak dibuat saat page load. Saat Print ditekan, QR dibuat satu kali per kode unik lalu dipakai ulang untuk semua copy.
+                  Label printable tidak dibuat saat page load. Saat Print ditekan, sistem membuka print-only window dengan geometry last-known-good 50 mm x 30 mm.
                 </div>
               </div>
 
