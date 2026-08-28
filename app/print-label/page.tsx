@@ -1,16 +1,19 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
-import QRCodeImage from "@/components/QRCodeImage";
 
-type ImportRow = {
+type DataRow = {
   id: number;
+  source: "import" | "manual";
   values: Record<string, string>;
 };
 
-const MAX_DETAIL_FIELDS = 5;
+type TextAlign = "left" | "center" | "right";
+
+const MAX_DETAIL_FIELDS = 7;
+const TABLE_PAGE_SIZE = 50;
+const DEFAULT_MANUAL_FIELDS = ["Nama", "Institusi", "Kode"];
 
 function clean(value: unknown) {
   return String(value ?? "")
@@ -77,31 +80,46 @@ function detectColumn(headers: string[], aliases: string[]) {
   return "";
 }
 
+function nextPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 export default function ManualPrintLabelPage() {
   return <AuthGate>{() => <ManualPrintLabel />}</AuthGate>;
 }
 
 function ManualPrintLabel() {
-  const workbookRef = useRef<XLSX.WorkBook | null>(null);
+  const workbookRef = useRef<any>(null);
+  const manualIdRef = useRef(1000000);
   const [fileName, setFileName] = useState("");
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [sheetName, setSheetName] = useState("");
   const [headerRow, setHeaderRow] = useState(1);
   const [headers, setHeaders] = useState<string[]>([]);
-  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [rows, setRows] = useState<DataRow[]>([]);
   const [selectedRows, setSelectedRows] = useState<Record<number, boolean>>({});
   const [titleColumn, setTitleColumn] = useState("");
   const [qrColumn, setQrColumn] = useState("");
-  const [showQr, setShowQr] = useState(true);
+  const [showQr, setShowQr] = useState(false);
   const [includedColumns, setIncludedColumns] = useState<Record<string, boolean>>({});
-  const [displayLabels, setDisplayLabels] = useState<Record<string, string>>({});
   const [copies, setCopies] = useState(6);
   const [qrSize, setQrSize] = useState(46);
-  const [fontSize, setFontSize] = useState(7);
+  const [titleFontSize, setTitleFontSize] = useState(13);
+  const [detailFontSize, setDetailFontSize] = useState(8);
+  const [textAlign, setTextAlign] = useState<TextAlign>("left");
+  const [lineGap, setLineGap] = useState(0.8);
   const [showBorder, setShowBorder] = useState(true);
   const [search, setSearch] = useState("");
+  const [pageNumber, setPageNumber] = useState(1);
+  const [newParameterName, setNewParameterName] = useState("");
+  const [printReady, setPrintReady] = useState(false);
+  const [preparingPrint, setPreparingPrint] = useState(false);
+  const [qrCache, setQrCache] = useState<Record<string, string>>({});
+  const [previewQrSrc, setPreviewQrSrc] = useState("");
   const [message, setMessage] = useState(
-    "Import Excel/CSV, mapping kolom, pilih isi label, lalu print. Data hanya dipakai di browser dan tidak masuk database."
+    "Pilih salah satu cara: import Excel/CSV atau tambah data manual. Data hanya dipakai di browser dan tidak masuk database."
   );
 
   const selectedDataRows = useMemo(
@@ -112,25 +130,14 @@ function ManualPrintLabel() {
   const detailColumns = useMemo(
     () =>
       headers
-        .filter(
-          (header) =>
-            includedColumns[header] &&
-            header !== titleColumn &&
-            header !== qrColumn
-        )
+        .filter((header) => includedColumns[header] && header !== titleColumn)
         .slice(0, MAX_DETAIL_FIELDS),
-    [headers, includedColumns, titleColumn, qrColumn]
+    [headers, includedColumns, titleColumn]
   );
 
   const detailCount = useMemo(
-    () =>
-      headers.filter(
-        (header) =>
-          includedColumns[header] &&
-          header !== titleColumn &&
-          header !== qrColumn
-      ).length,
-    [headers, includedColumns, titleColumn, qrColumn]
+    () => headers.filter((header) => includedColumns[header] && header !== titleColumn).length,
+    [headers, includedColumns, titleColumn]
   );
 
   const filteredRows = useMemo(() => {
@@ -144,17 +151,110 @@ function ManualPrintLabel() {
     );
   }, [rows, headers, search]);
 
-  const printRows = useMemo(() => {
-    const output: ImportRow[] = [];
-    selectedDataRows.forEach((row) => {
-      for (let copy = 0; copy < Math.max(1, copies); copy += 1) {
-        output.push(row);
-      }
-    });
-    return output;
-  }, [selectedDataRows, copies]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / TABLE_PAGE_SIZE));
+  const safePage = Math.min(pageNumber, totalPages);
+  const pagedRows = useMemo(() => {
+    const start = (safePage - 1) * TABLE_PAGE_SIZE;
+    return filteredRows.slice(start, start + TABLE_PAGE_SIZE);
+  }, [filteredRows, safePage]);
 
+  const manualRows = useMemo(() => rows.filter((row) => row.source === "manual"), [rows]);
   const previewRow = selectedDataRows[0] || rows[0] || null;
+  const labelCount = selectedDataRows.length * Math.max(1, copies);
+
+  const previewQrValue = useMemo(() => {
+    if (!previewRow || !showQr || !qrColumn) return "";
+    return clean(previewRow.values[qrColumn]);
+  }, [previewRow, showQr, qrColumn]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!previewQrValue) {
+      setPreviewQrSrc("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    (async () => {
+      try {
+        const mod = await import("qrcode");
+        const src = await mod.default.toDataURL(previewQrValue, {
+          width: 256,
+          margin: 3,
+          errorCorrectionLevel: "M",
+          color: { dark: "#000000", light: "#FFFFFF" },
+        });
+        if (!cancelled) setPreviewQrSrc(src);
+      } catch {
+        if (!cancelled) setPreviewQrSrc("");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewQrValue]);
+
+  useEffect(() => {
+    function cleanupAfterPrint() {
+      setPrintReady(false);
+      setPreparingPrint(false);
+    }
+
+    window.addEventListener("afterprint", cleanupAfterPrint);
+    return () => window.removeEventListener("afterprint", cleanupAfterPrint);
+  }, []);
+
+  function invalidatePreparedPrint() {
+    if (printReady) setPrintReady(false);
+  }
+
+  function applyColumnDefaults(nextHeaders: string[], preserveExisting = false) {
+    const autoTitle = detectColumn(nextHeaders, [
+      "nama",
+      "nama peserta",
+      "nama lengkap",
+      "name",
+      "patient name",
+      "participant name",
+    ]);
+    const autoQr = detectColumn(nextHeaders, [
+      "mcu id",
+      "nomor mcu",
+      "barcode",
+      "qr",
+      "kode",
+      "employee id",
+      "no karyawan",
+      "nik",
+      "id",
+    ]);
+
+    if (!preserveExisting || !titleColumn || !nextHeaders.includes(titleColumn)) {
+      setTitleColumn(autoTitle || nextHeaders[0] || "");
+    }
+    if (!preserveExisting || (qrColumn && !nextHeaders.includes(qrColumn))) {
+      setQrColumn(autoQr || "");
+      setShowQr(Boolean(autoQr));
+    }
+
+    setIncludedColumns((prev) => {
+      const next: Record<string, boolean> = {};
+      let autoDetails = 0;
+      nextHeaders.forEach((header) => {
+        if (preserveExisting && Object.prototype.hasOwnProperty.call(prev, header)) {
+          next[header] = prev[header];
+          return;
+        }
+        const isTitle = header === (autoTitle || nextHeaders[0] || "");
+        next[header] = !isTitle && autoDetails < 3;
+        if (next[header]) autoDetails += 1;
+      });
+      return next;
+    });
+  }
 
   function resetData() {
     workbookRef.current = null;
@@ -167,11 +267,13 @@ function ManualPrintLabel() {
     setSelectedRows({});
     setTitleColumn("");
     setQrColumn("");
-    setShowQr(true);
+    setShowQr(false);
     setIncludedColumns({});
-    setDisplayLabels({});
     setSearch("");
-    setMessage("Data import dibersihkan. Silakan pilih file Excel/CSV baru.");
+    setPageNumber(1);
+    setQrCache({});
+    setPrintReady(false);
+    setMessage("Data dibersihkan. Silakan import file atau tambah data manual.");
   }
 
   function parseSheet(nextSheetName: string, nextHeaderRow?: number) {
@@ -181,6 +283,12 @@ function ManualPrintLabel() {
     const sheet = workbook.Sheets[nextSheetName];
     if (!sheet) {
       setMessage(`Sheet ${nextSheetName} tidak ditemukan.`);
+      return;
+    }
+
+    const XLSX = workbook.__xlsxModule;
+    if (!XLSX) {
+      setMessage("Reader Excel belum siap. Import ulang file.");
       return;
     }
 
@@ -204,66 +312,34 @@ function ManualPrintLabel() {
         ? Math.max(0, Math.min(matrix.length - 1, nextHeaderRow - 1))
         : detectHeaderRow(matrix);
     const uniqueHeaders = makeUniqueHeaders(matrix[detectedIndex] || []);
-    const dataRows = matrix
+    const importedRows = matrix
       .slice(detectedIndex + 1)
       .map((cells, rowIndex) => {
         const values: Record<string, string> = {};
         uniqueHeaders.forEach((header, colIndex) => {
           values[header] = clean(cells?.[colIndex]);
         });
-        return { id: rowIndex + 1, values };
+        return { id: rowIndex + 1, source: "import" as const, values };
       })
       .filter((row) => uniqueHeaders.some((header) => clean(row.values[header])));
 
-    const autoTitle = detectColumn(uniqueHeaders, [
-      "nama",
-      "nama peserta",
-      "nama lengkap",
-      "name",
-      "patient name",
-      "participant name",
-    ]);
-    const autoQr = detectColumn(uniqueHeaders, [
-      "mcu id",
-      "nomor mcu",
-      "barcode",
-      "qr",
-      "kode",
-      "employee id",
-      "no karyawan",
-      "nik",
-      "id",
-    ]);
-
-    const nextIncluded: Record<string, boolean> = {};
-    const nextLabels: Record<string, string> = {};
-    let detailAdded = 0;
-    uniqueHeaders.forEach((header) => {
-      const isSpecial = header === autoTitle || header === autoQr;
-      const canDetail = !isSpecial && detailAdded < 3;
-      nextIncluded[header] = canDetail;
-      nextLabels[header] = header;
-      if (canDetail) detailAdded += 1;
-    });
-
     const allSelected: Record<number, boolean> = {};
-    dataRows.forEach((row) => {
+    importedRows.forEach((row) => {
       allSelected[row.id] = true;
     });
 
     setSheetName(nextSheetName);
     setHeaderRow(detectedIndex + 1);
     setHeaders(uniqueHeaders);
-    setRows(dataRows);
+    setRows(importedRows);
     setSelectedRows(allSelected);
-    setTitleColumn(autoTitle || uniqueHeaders[0] || "");
-    setQrColumn(autoQr || "");
-    setShowQr(Boolean(autoQr));
-    setIncludedColumns(nextIncluded);
-    setDisplayLabels(nextLabels);
+    applyColumnDefaults(uniqueHeaders, false);
     setSearch("");
+    setPageNumber(1);
+    setQrCache({});
+    setPrintReady(false);
     setMessage(
-      `Berhasil membaca ${dataRows.length} baris dan ${uniqueHeaders.length} kolom dari sheet ${nextSheetName}. Silakan cek mapping sebelum print.`
+      `Berhasil membaca ${importedRows.length} baris dan ${uniqueHeaders.length} kolom dari sheet ${nextSheetName}. Tabel hanya merender ${TABLE_PAGE_SIZE} baris per halaman agar tetap ringan.`
     );
   }
 
@@ -271,9 +347,17 @@ function ManualPrintLabel() {
     if (!file) return;
 
     try {
-      const buffer = await file.arrayBuffer();
+      setMessage("Membaca file... library Excel baru dimuat saat file dipilih agar halaman awal lebih ringan.");
+      const [xlsxModule, buffer] = await Promise.all([
+        import("xlsx"),
+        file.arrayBuffer(),
+      ]);
+      const XLSX: any = (xlsxModule as any).default?.read
+        ? (xlsxModule as any).default
+        : xlsxModule;
       const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
       const firstSheet = workbook.SheetNames[0] || "";
+      workbook.__xlsxModule = XLSX;
 
       workbookRef.current = workbook;
       setFileName(file.name);
@@ -301,40 +385,183 @@ function ManualPrintLabel() {
     parseSheet(sheetName, headerRow);
   }
 
+  function ensureManualHeaders() {
+    if (headers.length) return headers;
+    const next = [...DEFAULT_MANUAL_FIELDS];
+    setHeaders(next);
+    applyColumnDefaults(next, false);
+    return next;
+  }
+
+  function addManualRow() {
+    const currentHeaders = ensureManualHeaders();
+    const values: Record<string, string> = {};
+    currentHeaders.forEach((header) => {
+      values[header] = "";
+    });
+
+    const id = manualIdRef.current;
+    manualIdRef.current += 1;
+    const newRow: DataRow = { id, source: "manual", values };
+    setRows((prev) => [...prev, newRow]);
+    setSelectedRows((prev) => ({ ...prev, [id]: true }));
+    setPageNumber(1);
+    invalidatePreparedPrint();
+    setMessage("Baris manual ditambahkan. Isi nilainya pada editor Data Manual.");
+  }
+
+  function addManualParameter() {
+    const name = clean(newParameterName);
+    if (!name) {
+      setMessage("Isi nama parameter baru terlebih dahulu, misalnya Departemen, Nomor Kamar, atau Kode.");
+      return;
+    }
+    if (headers.some((header) => norm(header) === norm(name))) {
+      setMessage(`Parameter ${name} sudah ada.`);
+      return;
+    }
+
+    const nextHeaders = [...headers, name];
+    setHeaders(nextHeaders);
+    setRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        values: { ...row.values, [name]: "" },
+      }))
+    );
+    setIncludedColumns((prev) => ({
+      ...prev,
+      [name]: detailCount < MAX_DETAIL_FIELDS,
+    }));
+    if (!titleColumn) setTitleColumn(name);
+    setNewParameterName("");
+    invalidatePreparedPrint();
+    setMessage(`Parameter ${name} ditambahkan dan bisa langsung diisi pada baris manual.`);
+  }
+
+  function removeManualParameter(header: string) {
+    if (!headers.includes(header)) return;
+    const nextHeaders = headers.filter((item) => item !== header);
+    setHeaders(nextHeaders);
+    setRows((prev) =>
+      prev.map((row) => {
+        const values = { ...row.values };
+        delete values[header];
+        return { ...row, values };
+      })
+    );
+    setIncludedColumns((prev) => {
+      const next = { ...prev };
+      delete next[header];
+      return next;
+    });
+    if (titleColumn === header) setTitleColumn(nextHeaders[0] || "");
+    if (qrColumn === header) {
+      setQrColumn("");
+      setShowQr(false);
+    }
+    invalidatePreparedPrint();
+  }
+
+  function updateManualValue(rowId: number, header: string, value: string) {
+    setRows((prev) =>
+      prev.map((row) =>
+        row.id === rowId
+          ? { ...row, values: { ...row.values, [header]: value } }
+          : row
+      )
+    );
+    invalidatePreparedPrint();
+  }
+
+  function duplicateManualRow(rowId: number) {
+    const source = rows.find((row) => row.id === rowId);
+    if (!source) return;
+    const id = manualIdRef.current;
+    manualIdRef.current += 1;
+    setRows((prev) => [
+      ...prev,
+      { id, source: "manual", values: { ...source.values } },
+    ]);
+    setSelectedRows((prev) => ({ ...prev, [id]: true }));
+    invalidatePreparedPrint();
+  }
+
+  function deleteManualRow(rowId: number) {
+    setRows((prev) => prev.filter((row) => row.id !== rowId));
+    setSelectedRows((prev) => {
+      const next = { ...prev };
+      delete next[rowId];
+      return next;
+    });
+    invalidatePreparedPrint();
+  }
+
   function setAllRows(checked: boolean) {
     const next = { ...selectedRows };
     filteredRows.forEach((row) => {
       next[row.id] = checked;
     });
     setSelectedRows(next);
+    invalidatePreparedPrint();
   }
 
   function toggleDetail(header: string, checked: boolean) {
+    if (header === titleColumn && checked) return;
+
     if (checked) {
       const currentCount = headers.filter(
-        (item) =>
-          includedColumns[item] &&
-          item !== titleColumn &&
-          item !== qrColumn &&
-          item !== header
+        (item) => includedColumns[item] && item !== titleColumn && item !== header
       ).length;
-
-      if (
-        header !== titleColumn &&
-        header !== qrColumn &&
-        currentCount >= MAX_DETAIL_FIELDS
-      ) {
+      if (currentCount >= MAX_DETAIL_FIELDS) {
         setMessage(
-          `Maksimal ${MAX_DETAIL_FIELDS} field detail agar layout 50 mm x 30 mm tetap aman. Nonaktifkan salah satu field detail dulu.`
+          `Maksimal ${MAX_DETAIL_FIELDS} baris detail agar layout 50 mm x 30 mm tetap aman. Nonaktifkan salah satu field dulu.`
         );
         return;
       }
     }
 
     setIncludedColumns((prev) => ({ ...prev, [header]: checked }));
+    invalidatePreparedPrint();
   }
 
-  function printLabels() {
+  async function buildQrCache() {
+    if (!showQr || !qrColumn) return {} as Record<string, string>;
+
+    const values = Array.from(
+      new Set(selectedDataRows.map((row) => clean(row.values[qrColumn])).filter(Boolean))
+    );
+    if (!values.length) return {} as Record<string, string>;
+
+    const mod = await import("qrcode");
+    const QRCode = mod.default;
+    const next: Record<string, string> = {};
+    const chunkSize = 30;
+
+    for (let start = 0; start < values.length; start += chunkSize) {
+      const chunk = values.slice(start, start + chunkSize);
+      const generated = await Promise.all(
+        chunk.map(async (value) => {
+          const src = await QRCode.toDataURL(value, {
+            width: 320,
+            margin: 3,
+            errorCorrectionLevel: "M",
+            color: { dark: "#000000", light: "#FFFFFF" },
+          });
+          return [value, src] as const;
+        })
+      );
+      generated.forEach(([value, src]) => {
+        next[value] = src;
+      });
+      setMessage(`Menyiapkan QR ${Math.min(start + chunk.length, values.length)} / ${values.length}...`);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    return next;
+  }
+
+  async function printLabels() {
     if (!selectedDataRows.length) {
       setMessage("Pilih minimal 1 baris data yang akan dicetak.");
       return;
@@ -345,10 +572,23 @@ function ManualPrintLabel() {
       return;
     }
 
-    setMessage(
-      `Menyiapkan ${selectedDataRows.length} data x ${Math.max(1, copies)} copy = ${printRows.length} label.`
-    );
-    setTimeout(() => window.print(), 350);
+    try {
+      setPreparingPrint(true);
+      setPrintReady(false);
+      setMessage(`Menyiapkan ${selectedDataRows.length} data x ${Math.max(1, copies)} copy = ${labelCount} label...`);
+
+      const nextQrCache = await buildQrCache();
+      setQrCache(nextQrCache);
+      setPrintReady(true);
+      await nextPaint();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      window.print();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setPreparingPrint(false);
+      setPrintReady(false);
+      setMessage(`Gagal menyiapkan print: ${text}`);
+    }
   }
 
   return (
@@ -407,13 +647,13 @@ function ManualPrintLabel() {
       <section className="card p-5 no-print">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <div className="text-2xl font-black">Print Label - Import & Mapping</div>
+            <div className="text-2xl font-black">Print Label Manual</div>
             <div className="mt-1 max-w-3xl text-sm text-slate-500">
-              Page khusus cetak label. Import XLSX/XLS/CSV, mapping isi data, pilih field dan baris yang ingin dicetak, lalu print dengan ukuran printer label yang sama seperti fitur Cetak Label existing.
+              Dua cara input: import Excel/CSV atau tambah data manual. Isi label dicetak langsung sebagai nilai per baris tanpa awalan nama field.
             </div>
           </div>
           <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-            Local only - tidak simpan database
+            Performance V67 - print dirender hanya saat tombol Print ditekan
           </div>
         </div>
       </section>
@@ -422,54 +662,124 @@ function ManualPrintLabel() {
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">1</div>
           <div>
-            <div className="font-black">Import Data</div>
-            <div className="text-xs text-slate-500">Excel XLSX/XLS atau CSV. File hanya dibaca di browser.</div>
+            <div className="font-black">Sumber Data</div>
+            <div className="text-xs text-slate-500">Import file atau tambahkan baris serta parameter secara manual.</div>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_180px_auto]">
-          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
-            <span>{fileName || "Pilih file Excel / CSV"}</span>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={(event) => handleFile(event.target.files?.[0] || null)}
-            />
-          </label>
+        <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+          <div className="mb-3 text-xs font-black uppercase text-slate-500">A. Import Excel / CSV</div>
+          <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_180px_auto]">
+            <label className="flex cursor-pointer items-center justify-between rounded-xl border border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">
+              <span>{fileName || "Pilih file Excel / CSV"}</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(event) => handleFile(event.target.files?.[0] || null)}
+              />
+            </label>
 
-          <select
-            className="input"
-            value={sheetName}
-            disabled={!sheetNames.length}
-            onChange={(event) => changeSheet(event.target.value)}
-          >
-            {!sheetNames.length ? <option>Belum ada sheet</option> : null}
-            {sheetNames.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+            <select
+              className="input"
+              value={sheetName}
+              disabled={!sheetNames.length}
+              onChange={(event) => changeSheet(event.target.value)}
+            >
+              {!sheetNames.length ? <option>Belum ada sheet</option> : null}
+              {sheetNames.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500">Header baris</span>
-            <input
-              type="number"
-              min={1}
-              className="input min-w-0"
-              value={headerRow}
-              disabled={!rows.length && !sheetName}
-              onChange={(event) => setHeaderRow(Math.max(1, Number(event.target.value) || 1))}
-            />
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500">Header baris</span>
+              <input
+                type="number"
+                min={1}
+                className="input min-w-0"
+                value={headerRow}
+                disabled={!sheetName}
+                onChange={(event) => setHeaderRow(Math.max(1, Number(event.target.value) || 1))}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary" disabled={!sheetName} onClick={reReadHeader}>
+                Baca Ulang
+              </button>
+              <button type="button" className="btn-secondary" disabled={!rows.length && !fileName} onClick={resetData}>
+                Reset
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border bg-white p-4">
+          <div className="mb-3 text-xs font-black uppercase text-slate-500">B. Tambah Data Manual</div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <button type="button" className="btn-primary" onClick={addManualRow}>
+              + Tambah Baris Manual
+            </button>
+            <div className="flex min-w-0 flex-1 gap-2">
+              <input
+                className="input min-w-0 flex-1"
+                value={newParameterName}
+                onChange={(event) => setNewParameterName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addManualParameter();
+                  }
+                }}
+                placeholder="Parameter baru, contoh: Departemen / Kode / Nomor Kamar"
+              />
+              <button type="button" className="btn-secondary" onClick={addManualParameter}>
+                + Parameter
+              </button>
+            </div>
           </div>
 
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary" disabled={!sheetName} onClick={reReadHeader}>
-              Baca Ulang
-            </button>
-            <button type="button" className="btn-secondary" disabled={!fileName} onClick={resetData}>
-              Reset
-            </button>
-          </div>
+          {manualRows.length ? (
+            <div className="mt-4 overflow-auto rounded-xl border">
+              <table className="min-w-full text-left text-xs">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="sticky left-0 z-10 min-w-20 bg-slate-100 px-3 py-3">Aksi</th>
+                    {headers.map((header) => (
+                      <th key={header} className="min-w-48 px-3 py-3">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualRows.map((row) => (
+                    <tr key={row.id} className="border-t">
+                      <td className="sticky left-0 bg-white px-3 py-2">
+                        <div className="flex gap-1">
+                          <button type="button" className="rounded-lg border px-2 py-1 font-bold" onClick={() => duplicateManualRow(row.id)}>Copy</button>
+                          <button type="button" className="rounded-lg border border-red-200 px-2 py-1 font-bold text-red-600" onClick={() => deleteManualRow(row.id)}>Hapus</button>
+                        </div>
+                      </td>
+                      {headers.map((header) => (
+                        <td key={header} className="px-2 py-2">
+                          <input
+                            className="input w-full"
+                            value={row.values[header] || ""}
+                            onChange={(event) => updateManualValue(row.id, header, event.target.value)}
+                            placeholder={header}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="mt-3 text-xs font-semibold text-slate-500">
+              Belum ada baris manual. Tombol Tambah Baris Manual otomatis membuat parameter Nama, Institusi, dan Kode bila belum ada data.
+            </div>
+          )}
         </div>
 
         {message ? (
@@ -483,28 +793,52 @@ function ManualPrintLabel() {
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">2</div>
             <div>
               <div className="font-black">Mapping & Pilih Isi Label</div>
-              <div className="text-xs text-slate-500">Tentukan nama utama, sumber QR/kode, lalu centang field detail yang ingin masuk.</div>
+              <div className="text-xs text-slate-500">Nama utama menjadi baris pertama. Field yang dicentang dicetak sebagai nilai saja, tanpa teks seperti Asal Institusi:.</div>
             </div>
           </div>
 
           <div className="mt-4 grid gap-4 rounded-2xl border bg-slate-50 p-4 lg:grid-cols-2">
             <label className="text-sm font-bold text-slate-700">
-              Nama utama / headline
-              <select className="input mt-2 w-full" value={titleColumn} onChange={(event) => setTitleColumn(event.target.value)}>
+              Nama utama / baris pertama
+              <select
+                className="input mt-2 w-full"
+                value={titleColumn}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setTitleColumn(value);
+                  if (value) setIncludedColumns((prev) => ({ ...prev, [value]: false }));
+                  invalidatePreparedPrint();
+                }}
+              >
                 <option value="">Tidak dipakai</option>
                 {headers.map((header) => <option key={header} value={header}>{header}</option>)}
               </select>
             </label>
 
             <label className="text-sm font-bold text-slate-700">
-              Sumber QR / kode
+              Sumber QR / kode opsional
               <div className="mt-2 flex gap-2">
-                <select className="input min-w-0 flex-1" value={qrColumn} onChange={(event) => setQrColumn(event.target.value)}>
+                <select
+                  className="input min-w-0 flex-1"
+                  value={qrColumn}
+                  onChange={(event) => {
+                    setQrColumn(event.target.value);
+                    invalidatePreparedPrint();
+                  }}
+                >
                   <option value="">Tidak ada QR</option>
                   {headers.map((header) => <option key={header} value={header}>{header}</option>)}
                 </select>
                 <label className="flex items-center gap-2 rounded-xl border bg-white px-3 text-xs font-bold">
-                  <input type="checkbox" checked={showQr} disabled={!qrColumn} onChange={(event) => setShowQr(event.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={showQr}
+                    disabled={!qrColumn}
+                    onChange={(event) => {
+                      setShowQr(event.target.checked);
+                      invalidatePreparedPrint();
+                    }}
+                  />
                   Tampilkan QR
                 </label>
               </div>
@@ -512,38 +846,43 @@ function ManualPrintLabel() {
           </div>
 
           <div className="mt-4 overflow-hidden rounded-2xl border">
-            <div className="grid grid-cols-[90px_1fr_1fr] gap-3 bg-slate-100 px-4 py-3 text-xs font-black uppercase text-slate-500">
-              <div>Masuk</div>
-              <div>Kolom File</div>
-              <div>Nama di Label</div>
+            <div className="grid grid-cols-[120px_1fr_auto] gap-3 bg-slate-100 px-4 py-3 text-xs font-black uppercase text-slate-500">
+              <div>Tampil Teks</div>
+              <div>Parameter / Kolom</div>
+              <div>Aksi</div>
             </div>
             {headers.map((header) => {
-              const special = header === titleColumn || header === qrColumn;
+              const isTitle = header === titleColumn;
               return (
-                <div key={header} className="grid grid-cols-[90px_1fr_1fr] items-center gap-3 border-t px-4 py-3">
+                <div key={header} className="grid grid-cols-[120px_1fr_auto] items-center gap-3 border-t px-4 py-3">
                   <label className="flex items-center gap-2 text-sm font-bold">
                     <input
                       type="checkbox"
-                      checked={Boolean(includedColumns[header])}
-                      disabled={special}
+                      checked={isTitle ? true : Boolean(includedColumns[header])}
+                      disabled={isTitle}
                       onChange={(event) => toggleDetail(header, event.target.checked)}
                     />
-                    {special ? <span className="text-[10px] text-blue-700">SPECIAL</span> : null}
+                    {isTitle ? <span className="text-[10px] text-blue-700">NAMA</span> : null}
                   </label>
-                  <div className="truncate text-sm font-bold text-slate-800">{header}</div>
-                  <input
-                    className="input"
-                    value={displayLabels[header] || ""}
-                    onChange={(event) => setDisplayLabels((prev) => ({ ...prev, [header]: event.target.value }))}
-                    placeholder={header}
-                  />
+                  <div className="truncate text-sm font-bold text-slate-800">
+                    {header}
+                    {header === qrColumn ? <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">QR SOURCE</span> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 px-2 py-1 text-xs font-bold text-red-600"
+                    onClick={() => removeManualParameter(header)}
+                    title="Hapus parameter dari dataset aktif"
+                  >
+                    Hapus
+                  </button>
                 </div>
               );
             })}
           </div>
 
           <div className={`mt-3 rounded-xl p-3 text-xs font-bold ${detailCount > MAX_DETAIL_FIELDS ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}>
-            Field detail aktif: {Math.min(detailCount, MAX_DETAIL_FIELDS)}/{MAX_DETAIL_FIELDS}. Nama utama dan QR tidak dihitung sebagai field detail.
+            Baris detail aktif: {Math.min(detailCount, MAX_DETAIL_FIELDS)}/{MAX_DETAIL_FIELDS}. QR source boleh sekaligus dicentang sebagai teks sehingga kode dapat tampil sebagai baris biasa dan QR.
           </div>
         </section>
       ) : null}
@@ -555,10 +894,18 @@ function ManualPrintLabel() {
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">3</div>
               <div>
                 <div className="font-black">Pilih Baris yang Dicetak</div>
-                <div className="text-xs text-slate-500">Semua baris otomatis terpilih setelah import. Bisa uncheck sesuai kebutuhan.</div>
+                <div className="text-xs text-slate-500">Tabel dipaginasi 50 baris supaya data ratusan tidak membuat page freeze.</div>
               </div>
             </div>
-            <input className="input lg:w-80" placeholder="Cari data..." value={search} onChange={(event) => setSearch(event.target.value)} />
+            <input
+              className="input lg:w-80"
+              placeholder="Cari data..."
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPageNumber(1);
+              }}
+            />
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -569,26 +916,35 @@ function ManualPrintLabel() {
             </div>
           </div>
 
-          <div className="mt-4 max-h-[420px] overflow-auto rounded-2xl border">
+          <div className="mt-4 overflow-auto rounded-2xl border">
             <table className="min-w-full text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-slate-100">
+              <thead className="bg-slate-100">
                 <tr>
                   <th className="px-3 py-3">Print</th>
                   <th className="px-3 py-3">#</th>
+                  <th className="px-3 py-3">Sumber</th>
                   {headers.slice(0, 6).map((header) => <th key={header} className="min-w-40 px-3 py-3">{header}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row) => (
+                {pagedRows.map((row, index) => (
                   <tr key={row.id} className="border-t align-top">
                     <td className="px-3 py-3">
                       <input
                         type="checkbox"
                         checked={Boolean(selectedRows[row.id])}
-                        onChange={(event) => setSelectedRows((prev) => ({ ...prev, [row.id]: event.target.checked }))}
+                        onChange={(event) => {
+                          setSelectedRows((prev) => ({ ...prev, [row.id]: event.target.checked }));
+                          invalidatePreparedPrint();
+                        }}
                       />
                     </td>
-                    <td className="px-3 py-3 font-bold text-slate-500">{row.id}</td>
+                    <td className="px-3 py-3 font-bold text-slate-500">{(safePage - 1) * TABLE_PAGE_SIZE + index + 1}</td>
+                    <td className="px-3 py-3">
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-black ${row.source === "manual" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
+                        {row.source === "manual" ? "MANUAL" : "IMPORT"}
+                      </span>
+                    </td>
                     {headers.slice(0, 6).map((header) => (
                       <td key={header} className="max-w-64 px-3 py-3 text-slate-700">{row.values[header] || "-"}</td>
                     ))}
@@ -596,6 +952,16 @@ function ManualPrintLabel() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-600">
+            <div>
+              Menampilkan {pagedRows.length} dari {filteredRows.length} hasil - halaman {safePage}/{totalPages}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary" disabled={safePage <= 1} onClick={() => setPageNumber((prev) => Math.max(1, prev - 1))}>Sebelumnya</button>
+              <button type="button" className="btn-secondary" disabled={safePage >= totalPages} onClick={() => setPageNumber((prev) => Math.min(totalPages, prev + 1))}>Berikutnya</button>
+            </div>
           </div>
         </section>
       ) : null}
@@ -606,37 +972,64 @@ function ManualPrintLabel() {
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 font-black text-white">4</div>
             <div>
               <div className="font-black">Setup Print & Preview</div>
-              <div className="text-xs text-slate-500">Ukuran kertas dan print CSS sama dengan fitur label existing: 50 mm x 30 mm, margin 0.</div>
+              <div className="text-xs text-slate-500">Kertas tetap mengikuti fitur label existing: 50 mm x 30 mm, margin 0.</div>
             </div>
           </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
             <div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="text-xs font-black text-slate-600">
                   Jumlah copy / data
-                  <input type="number" min={1} max={50} className="input mt-2 w-full" value={copies} onChange={(event) => setCopies(Math.max(1, Number(event.target.value) || 1))} />
+                  <input type="number" min={1} max={50} className="input mt-2 w-full" value={copies} onChange={(event) => { setCopies(Math.max(1, Number(event.target.value) || 1)); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="text-xs font-black text-slate-600">
-                  Ukuran font
-                  <input type="number" min={6} max={14} step={0.5} className="input mt-2 w-full" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value) || 7)} />
+                  Ukuran font nama
+                  <input type="number" min={7} max={28} step={0.5} className="input mt-2 w-full" value={titleFontSize} onChange={(event) => { setTitleFontSize(Number(event.target.value) || 13); invalidatePreparedPrint(); }} />
+                </label>
+                <label className="text-xs font-black text-slate-600">
+                  Ukuran font detail
+                  <input type="number" min={6} max={20} step={0.5} className="input mt-2 w-full" value={detailFontSize} onChange={(event) => { setDetailFontSize(Number(event.target.value) || 8); invalidatePreparedPrint(); }} />
+                </label>
+                <label className="text-xs font-black text-slate-600">
+                  Jarak antar baris (mm)
+                  <input type="number" min={0} max={4} step={0.1} className="input mt-2 w-full" value={lineGap} onChange={(event) => { setLineGap(Math.max(0, Number(event.target.value) || 0)); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="text-xs font-black text-slate-600">
                   Ukuran QR
-                  <input type="number" min={38} max={160} className="input mt-2 w-full" value={qrSize} disabled={!showQr || !qrColumn} onChange={(event) => setQrSize(Number(event.target.value) || 46)} />
+                  <input type="number" min={38} max={160} className="input mt-2 w-full" value={qrSize} disabled={!showQr || !qrColumn} onChange={(event) => { setQrSize(Number(event.target.value) || 46); invalidatePreparedPrint(); }} />
                 </label>
                 <label className="flex items-center gap-2 rounded-xl border px-3 py-3 text-xs font-black text-slate-700 sm:mt-6">
-                  <input type="checkbox" checked={showBorder} onChange={(event) => setShowBorder(event.target.checked)} />
+                  <input type="checkbox" checked={showBorder} onChange={(event) => { setShowBorder(event.target.checked); invalidatePreparedPrint(); }} />
                   Border label
                 </label>
               </div>
 
-              <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-sm font-bold text-slate-700">
-                {selectedDataRows.length} data x {Math.max(1, copies)} copy = <span className="text-blue-700">{printRows.length} label</span>
+              <div className="mt-4">
+                <div className="mb-2 text-xs font-black text-slate-600">Rata teks</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["left", "center", "right"] as TextAlign[]).map((align) => (
+                    <button
+                      key={align}
+                      type="button"
+                      className={`rounded-xl border px-3 py-2 text-xs font-black ${textAlign === align ? "border-blue-600 bg-blue-50 text-blue-700" : "bg-white text-slate-600"}`}
+                      onClick={() => { setTextAlign(align); invalidatePreparedPrint(); }}
+                    >
+                      {align === "left" ? "Rata Kiri" : align === "center" ? "Rata Tengah" : "Rata Kanan"}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <button type="button" className="btn-primary mt-4 w-full" onClick={printLabels} disabled={!selectedDataRows.length}>
-                Print Label
+              <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-sm font-bold text-slate-700">
+                {selectedDataRows.length} data x {Math.max(1, copies)} copy = <span className="text-blue-700">{labelCount} label</span>
+                <div className="mt-1 text-xs font-semibold text-slate-500">
+                  Label printable tidak dibuat saat page load. Saat Print ditekan, QR dibuat satu kali per kode unik lalu dipakai ulang untuk semua copy.
+                </div>
+              </div>
+
+              <button type="button" className="btn-primary mt-4 w-full" onClick={printLabels} disabled={!selectedDataRows.length || preparingPrint}>
+                {preparingPrint ? "Menyiapkan Print..." : "Print Label"}
               </button>
             </div>
 
@@ -650,10 +1043,13 @@ function ManualPrintLabel() {
                     qrColumn={qrColumn}
                     showQr={showQr}
                     detailColumns={detailColumns}
-                    displayLabels={displayLabels}
                     qrSize={qrSize}
-                    fontSize={fontSize}
+                    titleFontSize={titleFontSize}
+                    detailFontSize={detailFontSize}
+                    textAlign={textAlign}
+                    lineGap={lineGap}
                     showBorder={showBorder}
+                    qrSrc={previewQrSrc}
                   />
                 </div>
               ) : null}
@@ -663,21 +1059,31 @@ function ManualPrintLabel() {
       ) : null}
 
       <section className="print-area hidden">
-        {printRows.map((row, index) => (
-          <ManualLabelCard
-            key={`${row.id}-print-${index}`}
-            row={row}
-            titleColumn={titleColumn}
-            qrColumn={qrColumn}
-            showQr={showQr}
-            detailColumns={detailColumns}
-            displayLabels={displayLabels}
-            qrSize={qrSize}
-            fontSize={fontSize}
-            showBorder={showBorder}
-            printMode
-          />
-        ))}
+        {printReady
+          ? selectedDataRows.map((row) =>
+              Array.from({ length: Math.max(1, copies) }, (_, copyIndex) => {
+                const qrValue = qrColumn ? clean(row.values[qrColumn]) : "";
+                return (
+                  <ManualLabelCard
+                    key={`${row.id}-print-${copyIndex}`}
+                    row={row}
+                    titleColumn={titleColumn}
+                    qrColumn={qrColumn}
+                    showQr={showQr}
+                    detailColumns={detailColumns}
+                    qrSize={qrSize}
+                    titleFontSize={titleFontSize}
+                    detailFontSize={detailFontSize}
+                    textAlign={textAlign}
+                    lineGap={lineGap}
+                    showBorder={showBorder}
+                    qrSrc={qrValue ? qrCache[qrValue] || "" : ""}
+                    printMode
+                  />
+                );
+              })
+            )
+          : null}
       </section>
     </div>
   );
@@ -689,45 +1095,42 @@ function ManualLabelCard({
   qrColumn,
   showQr,
   detailColumns,
-  displayLabels,
   qrSize,
-  fontSize,
+  titleFontSize,
+  detailFontSize,
+  textAlign,
+  lineGap,
   showBorder,
+  qrSrc,
   printMode = false,
 }: {
-  row: ImportRow;
+  row: DataRow;
   titleColumn: string;
   qrColumn: string;
   showQr: boolean;
   detailColumns: string[];
-  displayLabels: Record<string, string>;
   qrSize: number;
-  fontSize: number;
+  titleFontSize: number;
+  detailFontSize: number;
+  textAlign: TextAlign;
+  lineGap: number;
   showBorder: boolean;
+  qrSrc: string;
   printMode?: boolean;
 }) {
-  const title = clean(row.values[titleColumn]).toUpperCase();
+  const title = clean(row.values[titleColumn]);
   const qrValue = clean(row.values[qrColumn]);
-  const safeFont = Number(fontSize || 7);
   const qrPx = Math.min(160, Math.max(38, Number(qrSize || 46)));
-  const showQrEffective = Boolean(showQr && qrColumn && qrValue);
-  const textRight = showQrEffective ? `calc(${qrPx}px + 4mm)` : "2.4mm";
-  const detailTop = title ? "11.7mm" : "2.6mm";
-  const detailFont = Math.max(6, Math.min(9.5, safeFont + 0.7));
-  const titleFont = title.length > 34
-    ? Math.max(9.5, safeFont + 2)
-    : title.length > 24
-      ? Math.max(10.5, safeFont + 3)
-      : Math.max(12, safeFont + 5);
+  const showQrEffective = Boolean(showQr && qrColumn && qrValue && qrSrc);
+  const textRight = showQrEffective ? `calc(${qrPx}px + 3mm)` : "2.4mm";
+  const safeTitleFont = Math.max(7, Math.min(28, Number(titleFontSize || 13)));
+  const safeDetailFont = Math.max(6, Math.min(20, Number(detailFontSize || 8)));
+  const safeLineGap = Math.max(0, Math.min(4, Number(lineGap || 0)));
 
   const details = detailColumns
-    .map((header) => {
-      const value = clean(row.values[header]);
-      if (!value) return null;
-      const label = clean(displayLabels[header] || header);
-      return label ? `${label}: ${value}` : value;
-    })
-    .filter(Boolean) as string[];
+    .map((header) => clean(row.values[header]))
+    .filter(Boolean)
+    .slice(0, MAX_DETAIL_FIELDS);
 
   return (
     <section
@@ -745,56 +1148,58 @@ function ManualLabelCard({
         boxSizing: "border-box",
       }}
     >
-      {title ? (
-        <div
-          style={{
-            position: "absolute",
-            left: "2.4mm",
-            top: "2.2mm",
-            right: textRight,
-            zIndex: 2,
-            fontSize: `${titleFont}px`,
-            lineHeight: 0.94,
-            fontWeight: 950,
-            color: "#000000",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-            letterSpacing: "-0.04em",
-            maxHeight: "8.7mm",
-            overflow: "hidden",
-          }}
-        >
-          {title}
-        </div>
-      ) : null}
+      <div
+        style={{
+          position: "absolute",
+          left: "2.4mm",
+          top: "2.2mm",
+          right: textRight,
+          bottom: "2.2mm",
+          zIndex: 2,
+          overflow: "hidden",
+          color: "#000000",
+          textAlign,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: textAlign === "left" ? "flex-start" : textAlign === "center" ? "center" : "flex-end",
+        }}
+      >
+        {title ? (
+          <div
+            style={{
+              width: "100%",
+              fontSize: `${safeTitleFont}px`,
+              lineHeight: 1,
+              fontWeight: 950,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              textAlign,
+            }}
+          >
+            {title}
+          </div>
+        ) : null}
 
-      {details.length ? (
-        <div
-          style={{
-            position: "absolute",
-            left: "2.4mm",
-            top: detailTop,
-            right: textRight,
-            bottom: "2.2mm",
-            zIndex: 2,
-            fontSize: `${detailFont}px`,
-            lineHeight: 1.02,
-            fontWeight: 850,
-            color: "#111827",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-            overflowWrap: "anywhere",
-            overflow: "hidden",
-          }}
-        >
-          {details.slice(0, MAX_DETAIL_FIELDS).map((line, index) => (
-            <div key={`${line}-${index}`} style={{ marginTop: index ? "0.7mm" : undefined }}>
-              {line}
-            </div>
-          ))}
-        </div>
-      ) : null}
+        {details.map((value, index) => (
+          <div
+            key={`${value}-${index}`}
+            style={{
+              width: "100%",
+              marginTop: title || index ? `${safeLineGap}mm` : 0,
+              fontSize: `${safeDetailFont}px`,
+              lineHeight: 1,
+              fontWeight: 800,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              textAlign,
+            }}
+          >
+            {value}
+          </div>
+        ))}
+      </div>
 
       {showQrEffective ? (
         <div
@@ -809,10 +1214,21 @@ function ManualLabelCard({
             alignItems: "center",
             justifyContent: "center",
             background: "#ffffff",
-            zIndex: 1,
+            zIndex: 3,
           }}
         >
-          <QRCodeImage value={qrValue} size={qrPx} />
+          <img
+            src={qrSrc}
+            alt={`QR ${qrValue}`}
+            draggable={false}
+            style={{
+              width: qrPx,
+              height: qrPx,
+              display: "block",
+              background: "#ffffff",
+              imageRendering: "pixelated",
+            }}
+          />
         </div>
       ) : null}
     </section>
