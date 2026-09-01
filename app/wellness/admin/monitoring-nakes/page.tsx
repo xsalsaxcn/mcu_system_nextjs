@@ -34,6 +34,34 @@ function monthLabel(value: string) {
   }).format(parsed);
 }
 
+// WELLNESS_ADMIN_MONITORING_HISTORY_NAKES_RANGE_V126M110_ADMIN_NAKES_UI
+function monthEndDate(month: string) {
+  const parsed = new Date(`${month}-01T12:00:00+07:00`);
+  if (Number.isNaN(parsed.getTime())) return `${month}-01`;
+  const year = parsed.getFullYear();
+  const monthIndex = parsed.getMonth();
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return `${month}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function rangeLabel(from: string, to: string) {
+  const render = (value: string) => {
+    const parsed = new Date(`${value}T12:00:00+07:00`);
+    if (Number.isNaN(parsed.getTime())) return value || "-";
+    return new Intl.DateTimeFormat("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Asia/Jakarta",
+    }).format(parsed);
+  };
+  return `${render(from)} - ${render(to)}`;
+}
+
+function dateInRange(date: string, from: string, to: string) {
+  return Boolean(date && from && to && from <= to && date >= from && date <= to);
+}
+
 function clean(value: any) {
   return String(value ?? "").trim();
 }
@@ -528,7 +556,10 @@ export default function AdminMonitoringNakesPage() {
   const [calendarRows, setCalendarRows] = useState<any[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(true);
   const [clinicalExportLoading, setClinicalExportLoading] = useState(false);
-  const [examMonth, setExamMonth] = useState(currentJakartaMonth());
+  const initialExamMonthV126M110 = currentJakartaMonth();
+  const [examFrom, setExamFrom] = useState(`${initialExamMonthV126M110}-01`);
+  const [examTo, setExamTo] = useState(monthEndDate(initialExamMonthV126M110));
+  const examMonth = clean(examFrom).slice(0, 7) || initialExamMonthV126M110;
   const [groupFilter, setGroupFilter] = useState("all");
   const [examStatusFilter, setExamStatusFilter] =
     useState<ExaminationStatusFilter>("all");
@@ -712,8 +743,12 @@ export default function AdminMonitoringNakesPage() {
 
     setClinicalExportLoading(true);
     try {
+      if (!examFrom || !examTo || examFrom > examTo) {
+        throw new Error("Tanggal mulai dan tanggal akhir NAKES belum valid.");
+      }
       const params = new URLSearchParams({
-        month: examMonth,
+        from: examFrom,
+        to: examTo,
         company: companyFilter,
         group: groupFilter,
         status: examStatusFilter,
@@ -739,7 +774,7 @@ export default function AdminMonitoringNakesPage() {
       const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
       const filename =
         filenameMatch?.[1] ||
-        `monitoring_nakes_${examMonth.replace("-", "_")}.xlsx`;
+        `monitoring_nakes_${examFrom.replaceAll("-", "_")}_${examTo.replaceAll("-", "_")}.xlsx`;
       const objectUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
@@ -869,7 +904,7 @@ export default function AdminMonitoringNakesPage() {
           ? item.checkup_dates.map((value: any) => dateKey(value)).filter(Boolean)
           : [];
         const periodDates = dates.filter((date: string) =>
-          date.startsWith(`${examMonth}-`),
+          dateInRange(date, examFrom, examTo),
         );
 
         return {
@@ -906,7 +941,7 @@ export default function AdminMonitoringNakesPage() {
         }
         return clean(left?.name).localeCompare(clean(right?.name), "id");
       });
-  }, [calendarRows, query, companyFilter, groupFilter, examStatusFilter, examMonth]);
+  }, [calendarRows, query, companyFilter, groupFilter, examStatusFilter, examFrom, examTo]);
 
   const calendarPeriodBaseRows = useMemo(() => {
     const keyword = clean(query).toLowerCase();
@@ -916,7 +951,7 @@ export default function AdminMonitoringNakesPage() {
           ? item.checkup_dates.map((value: any) => dateKey(value)).filter(Boolean)
           : [];
         const periodDates = dates.filter((date: string) =>
-          date.startsWith(`${examMonth}-`),
+          dateInRange(date, examFrom, examTo),
         );
         return {
           ...item,
@@ -941,7 +976,7 @@ export default function AdminMonitoringNakesPage() {
           clean(item?.group_name || item?.kelompok_name) === groupFilter;
         return matchesKeyword && matchesCompany && matchesGroup;
       });
-  }, [calendarRows, query, companyFilter, groupFilter, examMonth]);
+  }, [calendarRows, query, companyFilter, groupFilter, examFrom, examTo]);
 
   const calendarExaminedCount = calendarPeriodBaseRows.filter(
     (item: any) => item.period_examined,
@@ -1617,13 +1652,20 @@ export default function AdminMonitoringNakesPage() {
               <h2 className="mt-1 text-xl font-black tracking-tight text-slate-950 sm:text-2xl">Status Pemeriksaan NAKES Peserta</h2>
               <p className="mt-2 max-w-3xl text-xs font-bold leading-5 text-slate-500">Daftar peserta yang sudah dan belum menjalani pemeriksaan pada periode terpilih. Data bersumber dari wellness_checkup_history.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[700px]">
-              <input type="month" value={examMonth} onChange={(event) => setExamMonth(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
-              <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
+            <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[860px] xl:grid-cols-4">
+              <label className="grid gap-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                Tanggal Mulai
+                <input type="date" value={examFrom} onChange={(event) => setExamFrom(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold normal-case tracking-normal text-slate-800 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+              </label>
+              <label className="grid gap-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                Tanggal Akhir
+                <input type="date" value={examTo} onChange={(event) => setExamTo(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold normal-case tracking-normal text-slate-800 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+              </label>
+              <select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className="h-11 self-end rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
                 <option value="all">Semua Kelompok</option>
                 {calendarGroups.map((group) => <option key={group} value={group}>{group}</option>)}
               </select>
-              <select value={examStatusFilter} onChange={(event) => setExamStatusFilter(event.target.value as ExaminationStatusFilter)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
+              <select value={examStatusFilter} onChange={(event) => setExamStatusFilter(event.target.value as ExaminationStatusFilter)} className="h-11 self-end rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100">
                 <option value="all">Semua Status</option>
                 <option value="examined">Sudah Pemeriksaan</option>
                 <option value="not_examined">Belum Pemeriksaan</option>
@@ -1632,7 +1674,7 @@ export default function AdminMonitoringNakesPage() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard label="Total Periode" value={calendarPeriodBaseRows.length} note={monthLabel(examMonth)} icon="👥" tone="border-slate-100 bg-slate-50 text-slate-950" />
+            <SummaryCard label="Total Periode" value={calendarPeriodBaseRows.length} note={rangeLabel(examFrom, examTo)} icon="👥" tone="border-slate-100 bg-slate-50 text-slate-950" />
             <SummaryCard label="Sudah Pemeriksaan" value={calendarExaminedCount} note="Memiliki pemeriksaan pada periode" icon="✅" tone="border-emerald-100 bg-emerald-50 text-emerald-950" />
             <SummaryCard label="Belum Pemeriksaan" value={calendarNotExaminedCount} note="Perlu dijadwalkan atau ditindaklanjuti" icon="⏳" tone="border-orange-100 bg-orange-50 text-orange-950" />
             <SummaryCard label="Penyelesaian (%)" value={calendarCompletion} note="Cakupan pemeriksaan periode" icon="📅" tone="border-sky-100 bg-sky-50 text-sky-950" />
@@ -1643,7 +1685,7 @@ export default function AdminMonitoringNakesPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-black text-slate-950">{monthLabel(examMonth)}</div>
-                  <div className="mt-1 text-[10px] font-bold text-slate-400">Angka menunjukkan jumlah peserta diperiksa</div>
+                  <div className="mt-1 text-[10px] font-bold text-slate-400">Rentang aktif: {rangeLabel(examFrom, examTo)}. Kalender visual mengikuti bulan tanggal mulai; daftar dan export mengikuti seluruh rentang.</div>
                 </div>
                 <span className="rounded-full bg-white px-3 py-1.5 text-[9px] font-black text-emerald-700 shadow-sm">{calendarExaminedCount} peserta</span>
               </div>

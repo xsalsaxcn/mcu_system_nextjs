@@ -97,6 +97,30 @@ function currentJakartaMonth() {
   return year && month ? `${year}-${month}` : "2026-07";
 }
 
+// WELLNESS_ADMIN_MONITORING_HISTORY_NAKES_RANGE_V126M110_NAKES_EXPORT
+function validDateRangeKey(value: any) {
+  const text = clean(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
+}
+
+function monthEndDate(month: string) {
+  const parsed = new Date(`${month}-01T12:00:00+07:00`);
+  if (Number.isNaN(parsed.getTime())) return `${month}-01`;
+  const last = new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0).getDate();
+  return `${month}-${String(last).padStart(2, "0")}`;
+}
+
+function rangeLabel(from: string, to: string) {
+  const render = (value: string) => {
+    const parsed = new Date(`${value}T12:00:00+07:00`);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat("id-ID", {day:"2-digit",month:"short",year:"numeric",timeZone:"Asia/Jakarta"}).format(parsed);
+  };
+  return `${render(from)} - ${render(to)}`;
+}
+
 async function safeRows(query: any) {
   try {
     const result = await query;
@@ -256,6 +280,17 @@ export async function GET(request: NextRequest) {
     const month = /^\d{4}-\d{2}$/.test(clean(url.searchParams.get("month")))
       ? clean(url.searchParams.get("month"))
       : currentJakartaMonth();
+    const requestedFrom = clean(url.searchParams.get("from"));
+    const requestedTo = clean(url.searchParams.get("to"));
+    const hasRequestedRange = Boolean(requestedFrom || requestedTo);
+    if (hasRequestedRange && (!validDateRangeKey(requestedFrom) || !validDateRangeKey(requestedTo))) {
+      return fail("Tanggal mulai dan tanggal akhir harus berformat YYYY-MM-DD.", 400);
+    }
+    if (hasRequestedRange && requestedFrom > requestedTo) {
+      return fail("Tanggal mulai tidak boleh setelah tanggal akhir.", 400);
+    }
+    const periodFrom = hasRequestedRange ? requestedFrom : `${month}-01`;
+    const periodTo = hasRequestedRange ? requestedTo : monthEndDate(month);
     const companyFilter = clean(url.searchParams.get("company")) || "all";
     const groupFilter = clean(url.searchParams.get("group")) || "all";
     const statusFilter = clean(url.searchParams.get("status")) || "all";
@@ -327,11 +362,10 @@ export async function GET(request: NextRequest) {
         );
         const allHistory = historyByParticipant.get(participantId) || [];
         const periodHistory = allHistory
-          .filter((history: any) =>
-            dateOnly(history?.checkup_date || history?.created_at).startsWith(
-              `${month}-`,
-            ),
-          )
+          .filter((history: any) => {
+            const date = dateOnly(history?.checkup_date || history?.created_at);
+            return Boolean(date && date >= periodFrom && date <= periodTo);
+          })
           .sort((left: any, right: any) =>
             dateOnly(left?.checkup_date || left?.created_at).localeCompare(
               dateOnly(right?.checkup_date || right?.created_at),
@@ -444,7 +478,7 @@ export async function GET(request: NextRequest) {
       ? Math.round((examinedCount / baseRows.length) * 100)
       : 0;
     const summaryRows = [
-      { Keterangan: "Periode", Nilai: monthLabel(month) },
+      { Keterangan: "Periode", Nilai: rangeLabel(periodFrom, periodTo) },
       { Keterangan: "Perusahaan", Nilai: companyFilter === "all" ? "Semua Perusahaan" : companyFilter },
       { Keterangan: "Kelompok", Nilai: groupFilter === "all" ? "Semua Kelompok" : groupFilter },
       { Keterangan: "Status", Nilai: statusFilter === "all" ? "Semua Status" : statusFilter === "examined" ? "Sudah Pemeriksaan" : "Belum Pemeriksaan" },
@@ -460,7 +494,7 @@ export async function GET(request: NextRequest) {
 
     const workbook = XLSX.utils.book_new();
     workbook.Props = {
-      Title: `Monitoring NAKES ${monthLabel(month)}`,
+      Title: `Monitoring NAKES ${rangeLabel(periodFrom, periodTo)}`,
       Subject: "Status dan hasil pemeriksaan NAKES",
       Author: "inHARMONY Wellness",
       Company: "inHARMONY",
@@ -485,7 +519,7 @@ export async function GET(request: NextRequest) {
       bookType: "xlsx",
       compression: true,
     });
-    const filename = `monitoring_nakes_${month.replace("-", "_")}.xlsx`;
+    const filename = `monitoring_nakes_${periodFrom.replaceAll("-", "_")}_${periodTo.replaceAll("-", "_")}.xlsx`;
 
     return new Response(new Uint8Array(output), {
       status: 200,
