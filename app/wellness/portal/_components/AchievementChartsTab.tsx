@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { wellnessStreakWorkoutCalories } from "@/lib/wellness/streak";
 
 // WELLNESS_CHART_DEVICE_PRIMARY_SOURCE_V72
 // WELLNESS_CHART_TODAY_ONLY_SUMMARY_V73
@@ -1277,16 +1278,10 @@ function chartCaloriesValue(item: any) {
   }
 
   if (provider === "google_fit") {
-    // Google Fit total calories include basal/resting energy. Use only an
-    // explicitly reported active-calorie value. Never estimate workout calories.
-    return firstNumber([
-      raw?.google_fit_active_calories_exact,
-      raw?.google_fit_active_calories,
-      raw?.selected_active_calories,
-      raw?.active_calories_available === true
-        ? raw?.sanitized_active_calories
-        : 0,
-    ]);
+    // WELLNESS_GOOGLEFIT_ACTIVE_ESTIMATE_FALLBACK_V126M111_PARTICIPANT_CHART
+    // Keep participant charts on the same canonical ACTIVE-workout semantics as
+    // Coach/Admin/Streak. Google Fit total energy remains display-only.
+    return wellnessStreakWorkoutCalories(item);
   }
 
   return firstNumber([

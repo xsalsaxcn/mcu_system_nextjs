@@ -11,6 +11,8 @@
 // Uses active calories only. Google Fit total calories, which include resting
 // energy, are never used as an activity target baseline.
 
+import { wellnessStreakWorkoutCalories } from "@/lib/wellness/streak";
+
 export type CoachActivityBaselineDay = {
   date: string;
   active_calories: number;
@@ -227,9 +229,16 @@ function activeCalories(row: any) {
         row?.total_calories ??
         row?.calories,
     );
+    // WELLNESS_GOOGLEFIT_ACTIVE_ESTIMATE_FALLBACK_V126M111_TARGET_CALCULATOR
+    const resolved = active > 0 ? active : wellnessStreakWorkoutCalories(row);
     return {
-      value: active > 0 ? active : 0,
-      kind: active > 0 ? ("exact" as const) : ("missing" as const),
+      value: resolved > 0 ? resolved : 0,
+      kind:
+        active > 0
+          ? ("exact" as const)
+          : resolved > 0
+            ? ("estimated" as const)
+            : ("missing" as const),
       ignoredTotalEnergy: active <= 0 && total > 0,
     };
   }

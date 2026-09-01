@@ -203,6 +203,67 @@ function activityDistance(row: any) {
   );
 }
 
+// WELLNESS_GOOGLEFIT_ACTIVE_ESTIMATE_FALLBACK_V126M111_CANONICAL
+// Google Fit total daily energy includes resting/BMR energy and remains
+// display-only. If exact ACTIVE calories are unavailable, derive a conservative
+// ACTIVE estimate from motion metrics already stored in the canonical daily row.
+// This is read-only: no historical activity row is rewritten.
+function estimatedGoogleFitActiveCaloriesV126M111(row: any) {
+  const raw = rawPayload(row);
+
+  // Some sync rows were already explicitly stored as an estimated active value.
+  // Reuse only values that are clearly marked as estimates; never reinterpret a
+  // Google Fit total-energy value as active workout calories.
+  const markedEstimated =
+    raw?.estimated_calories_used === true ||
+    clean(raw?.calories_source).toLowerCase().includes("estimated");
+  const storedEstimate = markedEstimated
+    ? numberValue(row?.activity_calories ?? row?.calories ?? row?.calories_burned)
+    : 0;
+  if (storedEstimate > 0 && storedEstimate <= 2500) {
+    return Math.round(storedEstimate);
+  }
+
+  const explicitEstimate = numberValue(
+    raw?.estimated_active_calories ??
+      raw?.estimated_active_calories_kcal ??
+      raw?.google_fit_estimated_active_calories,
+  );
+  if (explicitEstimate > 0 && explicitEstimate <= 2500) {
+    return Math.round(explicitEstimate);
+  }
+
+  const steps = wellnessStreakSteps(row);
+  const minutes = activityMinutes(row);
+  const rawDistance = activityDistance(row);
+
+  if (steps > 0) {
+    // Same conservative walking estimate family already used by Wellness for
+    // provider fallback: ~0.7 m/step, reference 70 kg, 0.53 kcal/kg/km.
+    // A plausibility envelope prevents malformed provider distance from inflating
+    // the estimate; the step cap is an additional safety ceiling.
+    const estimatedDistance = steps * 0.0007;
+    const minDistance = Math.max(0.05, steps * 0.00025);
+    const maxDistance = Math.max(0.3, steps * 0.0015);
+    const distance =
+      rawDistance >= minDistance && rawDistance <= maxDistance
+        ? rawDistance
+        : estimatedDistance;
+    const distanceEstimate = distance * 70 * 0.53;
+    return Math.max(1, Math.round(Math.min(distanceEstimate, steps * 0.1)));
+  }
+
+  if (minutes > 0) {
+    return Math.min(1200, Math.max(1, Math.round(minutes * 4.2)));
+  }
+
+  if (rawDistance > 0 && rawDistance <= 100) {
+    return Math.min(1200, Math.max(1, Math.round(rawDistance * 70 * 0.53)));
+  }
+
+  return 0;
+}
+
 function estimatedHealthConnectCalories(row: any) {
   const steps = wellnessStreakSteps(row);
   const minutes = activityMinutes(row);
@@ -251,7 +312,7 @@ export function wellnessStreakWorkoutCalories(row: any) {
       if (activeCalories > 0) return activeCalories;
     }
 
-    return 0;
+    return estimatedGoogleFitActiveCaloriesV126M111(row);
   }
 
   if (isHealthConnectDaily(row)) {

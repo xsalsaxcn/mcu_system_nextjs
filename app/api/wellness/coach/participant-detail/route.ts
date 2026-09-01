@@ -447,7 +447,11 @@ function coachGoogleFitActiveCaloriesV126M96_10(row: any) {
     if (calories > 0) return calories;
   }
 
-  return 0;
+  // WELLNESS_GOOGLEFIT_ACTIVE_ESTIMATE_FALLBACK_V126M111_COACH_DETAIL
+  // Exact active fields remain first priority above. When Google Fit exposes
+  // motion data but not an exact active-calorie field, use the same canonical
+  // conservative estimate as streak/Admin/points. Total energy is still ignored.
+  return wellnessStreakWorkoutCalories(row);
 }
 
 function coachGoogleFitTotalEnergyV126M96_10(row: any) {
