@@ -12,16 +12,13 @@ export default function QRCodeImage({
 }) {
   const [src, setSrc] = useState("");
   const text = String(value || "-").trim() || "-";
-  const safeSize = Math.max(32, Number(size || 64));
+  const safeSize = Math.max(28, Number(size || 64));
 
   useEffect(() => {
     let cancelled = false;
     const qrText = String(value || "-").trim() || "-";
-    const renderWidth = Math.max(768, Math.round(safeSize * 14));
+    const renderWidth = Math.max(768, Math.round(safeSize * 16));
 
-    // UNIVERSAL_QR_SENSITIVE_V225
-    // Short content + high-resolution PNG + real white quiet zone is the most stable option
-    // for Android scanners, iPhone scanner, and thermal label printers.
     try {
       (QRCode as any).toDataURL(
         qrText,

@@ -1,6 +1,3 @@
--- CAPASKA label print status v228
--- Jalankan di Supabase SQL Editor sebelum memakai filter Sudah/Belum print.
-
 alter table public.participants
   add column if not exists label_printed_at timestamptz,
   add column if not exists label_printed_by text,

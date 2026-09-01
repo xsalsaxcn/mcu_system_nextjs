@@ -4,10 +4,17 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function parseIds(value: any) {
   if (!Array.isArray(value)) return [];
-  return Array.from(new Set(value.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0)));
+  return Array.from(
+    new Set(
+      value
+        .map((x: any) => Number(x))
+        .filter((x: number) => Number.isFinite(x) && x > 0)
+    )
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -23,7 +30,6 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const printedBy = user.username || user.role || "admin";
 
-  // Ambil count lama supaya print count bertambah dengan aman.
   const { data: rows, error: selectError } = await supabase
     .from("participants")
     .select("id,label_print_count")
@@ -38,7 +44,7 @@ export async function POST(req: NextRequest) {
       .update({
         label_printed_at: now,
         label_printed_by: printedBy,
-        label_print_count: Number(row.label_print_count || 0) + 1,
+        label_print_count: Number(row.label_print_count || 0) + 1
       })
       .eq("id", row.id);
 
