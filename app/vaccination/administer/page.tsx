@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
+
 type SelectedVaccineItem = {
   itemId?: string;
   vaccineId: string;
@@ -77,8 +79,26 @@ export default function VaccinationAdministerPage() {
   async function loadSessions() {
     const json = await fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json());
     if (json.ok) {
-      setSessions(json.sessions || []);
-      if (!sessionId && json.sessions?.[0]?.id) setSessionId(String(json.sessions[0].id));
+      const loadedSessions = json.sessions || [];
+      setSessions(loadedSessions);
+
+      let lockedSessionId = "";
+      if (typeof window !== "undefined") {
+        try {
+          const saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null");
+          if (saved?.locked && saved?.sessionId) lockedSessionId = String(saved.sessionId);
+        } catch {
+          lockedSessionId = "";
+        }
+      }
+
+      const lockedExists = Boolean(
+        lockedSessionId && loadedSessions.some((item: any) => String(item.id) === lockedSessionId)
+      );
+
+      if (!sessionId && (lockedExists || loadedSessions?.[0]?.id)) {
+        setSessionId(lockedExists ? lockedSessionId : String(loadedSessions[0].id));
+      }
     }
   }
 
@@ -96,7 +116,7 @@ export default function VaccinationAdministerPage() {
     }
   }
 
-  async function loadData(id = sessionId) {
+  async function loadData(id = sessionId, preserveWorkingVaccines = false) {
     const url = id ? `/api/vaccination/administer?session_id=${id}` : "/api/vaccination/administer";
     const json = await fetch(url, { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) {
@@ -111,14 +131,16 @@ export default function VaccinationAdministerPage() {
     setCompletedRecords(json.completedRecords || []);
     setDoctorNames(json.doctorNames || []);
 
-    const nextSelected = (json.sessionVaccines || []).map((item: any) => ({
-      vaccineId: String(item.vaccine_id),
-      lotId: String(item.lot_id),
-      doseNumber: Number(item.dose_number || 1),
-      status: "WAITING",
-    }));
+    if (!preserveWorkingVaccines) {
+      const nextSelected = (json.sessionVaccines || []).map((item: any) => ({
+        vaccineId: String(item.vaccine_id),
+        lotId: String(item.lot_id),
+        doseNumber: Number(item.dose_number || 1),
+        status: "WAITING",
+      }));
 
-    setSelectedVaccines(nextSelected);
+      setSelectedVaccines(nextSelected);
+    }
   }
 
   function lotOptions(vaccineId: string) {
@@ -229,6 +251,25 @@ export default function VaccinationAdministerPage() {
   useEffect(() => {
     loadData(sessionId);
     loadPrintSetting(sessionId);
+
+    if (!sessionId) return;
+
+    const refreshParticipants = () => {
+      loadData(sessionId, true);
+    };
+
+    const timer = window.setInterval(refreshParticipants, 3000);
+    const onFocus = () => refreshParticipants();
+    const onQueueUpdated = () => refreshParticipants();
+
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("vaccination-queue-updated", onQueueUpdated as EventListener);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("vaccination-queue-updated", onQueueUpdated as EventListener);
+    };
   }, [sessionId]);
 
   const selectedRegistration = registrations.find((r) => String(r.id) === String(form.registrationId));
@@ -335,7 +376,7 @@ export default function VaccinationAdministerPage() {
               <option value="">Pilih peserta / nomor antrian</option>
               {registrations.map((registration) => (
                 <option key={registration.id} value={registration.id}>
-                  {registration.queue_number} · {registration.participant_name} · {registration.queue_status}
+                  {registration.queue_number || "-"} · {registration.participant_name} · {registration.queue_status}
                 </option>
               ))}
             </select>
@@ -359,7 +400,7 @@ export default function VaccinationAdministerPage() {
 
           {selectedRegistration ? (
             <div className="mt-4 rounded-xl border bg-white p-4 text-sm">
-              <div><b>{selectedRegistration.queue_number}</b> · {selectedRegistration.participant_name} · {selectedRegistration.company_name || "-"} · {selectedRegistration.department || "-"}</div>
+              <div><b>{selectedRegistration.queue_number || "-"}</b> · {selectedRegistration.participant_name} · {selectedRegistration.company_name || "-"} · {selectedRegistration.department || "-"}</div>
               {selectedRegistration.status_note ? <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700">Note registrasi: {selectedRegistration.status_note}</div> : null}
               {Array.isArray(selectedRegistration.items) && selectedRegistration.items.length ? (
                 <div className="mt-2 flex flex-wrap gap-2">

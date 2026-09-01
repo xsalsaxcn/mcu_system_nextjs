@@ -1,7 +1,27 @@
 import { NextRequest } from "next/server";
-import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
+import { clean, fail, formatQueueNumber, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
+
+async function getNextQueueNumber(supabase: any, sessionId: number) {
+  const result = await supabase
+    .from("vaccination_registrations")
+    .select("queue_number")
+    .eq("session_id", sessionId)
+    .not("queue_number", "is", null);
+
+  if (result.error) throw new Error(result.error.message);
+
+  let maxNumber = 0;
+  for (const row of result.data || []) {
+    const match = String(row.queue_number || "").match(/(\d+)$/);
+    if (!match) continue;
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n > maxNumber) maxNumber = n;
+  }
+
+  return formatQueueNumber(maxNumber + 1);
+}
 
 async function attachRegistrationItems(supabase: any, registrations: any[]) {
   const ids = (registrations || []).map((row: any) => Number(row.id)).filter(Boolean);
@@ -102,9 +122,40 @@ export async function POST(req: NextRequest) {
 
   if (!nextStatus) return fail("Action tidak dikenali.");
 
+  // Manual Call/Start can be used on imported rows that do not yet have a queue number.
+  // Keep the workflow consistent by assigning the next queue number before moving the row
+  // into WAITING/CALLED/IN_PROGRESS.
+  const existingResult = await supabase
+    .from("vaccination_registrations")
+    .select("id,session_id,queue_number,queue_status")
+    .eq("id", registrationId)
+    .single();
+
+  if (existingResult.error) return fail(existingResult.error.message, 500);
+
+  const activeQueueStatus = ["WAITING", "CALLED", "IN_PROGRESS"].includes(nextStatus);
+  let queueNumber = clean(existingResult.data?.queue_number);
+
+  if (activeQueueStatus && !queueNumber) {
+    try {
+      queueNumber = await getNextQueueNumber(
+        supabase,
+        toInt(existingResult.data?.session_id, sessionId) || sessionId
+      );
+    } catch (error: any) {
+      return fail(error?.message || "Gagal membuat nomor antrian.", 500);
+    }
+  }
+
+  const updatePayload: Record<string, any> = {
+    queue_status: nextStatus,
+    updated_at: new Date().toISOString(),
+  };
+  if (queueNumber) updatePayload.queue_number = queueNumber;
+
   const regResult = await supabase
     .from("vaccination_registrations")
-    .update({ queue_status: nextStatus, updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq("id", registrationId)
     .select("*")
     .single();

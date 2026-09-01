@@ -93,7 +93,6 @@ export async function GET(req: NextRequest) {
     .from("vaccination_registrations")
     .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days)")
     .in("queue_status", ["CALLED", "IN_PROGRESS", "WAITING", "WAITING_WITH_NOTE"])
-    .not("queue_number", "is", null)
     .order("queue_number", { ascending: true, nullsFirst: false })
     .limit(500);
 
