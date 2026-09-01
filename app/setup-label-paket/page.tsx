@@ -259,7 +259,7 @@ function SetupLabelPaket({ user }: { user: any }) {
           Atur jumlah print dan style stiker label per paket pemeriksaan. Setting ini dipakai otomatis di Registrasi Ulang.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Setup Label Paket v40 · stiker benar 40x30
+          Setup Label Paket v41 · anti rotate printer
         </div>
       </section>
 

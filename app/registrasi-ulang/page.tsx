@@ -592,17 +592,25 @@ function RegistrasiUlang({ user }: { user: any }) {
       />
 
       <style jsx global>{`
+        /*
+          v41 anti-rotate:
+          Xprinter kadang membaca label 40x30 sebagai kertas portrait 30x40.
+          Karena itu page dibuat 30x40, lalu kanvas label 40x30 diputar 90 derajat
+          supaya hasil tidak terbelah ke dua stiker.
+        */
         @page {
-          size: 40mm 30mm;
+          size: 30mm 40mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 40mm;
+            width: 30mm !important;
+            height: 40mm !important;
             margin: 0 !important;
             padding: 0 !important;
+            overflow: hidden !important;
             background: white !important;
             color: black !important;
           }
@@ -631,15 +639,23 @@ function RegistrasiUlang({ user }: { user: any }) {
             box-sizing: border-box;
             overflow: hidden;
             margin: 0 !important;
+            padding: 0 !important;
             background: white !important;
             color: black !important;
             border-radius: 0 !important;
+            transform-origin: top left !important;
+            transform: rotate(90deg) translateY(-30mm) !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
 
           .label-page * {
             box-sizing: border-box;
+          }
+
+          .label-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
           }
         }
       `}</style>
@@ -650,7 +666,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v40 · stiker benar 40x30
+          Registrasi Ulang v41 · anti rotate printer
         </div>
       </section>
 

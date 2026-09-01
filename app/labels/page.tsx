@@ -250,17 +250,25 @@ function LabelPrinter({ user }: { user: any }) {
   return (
     <div className="space-y-5">
       <style jsx global>{`
+        /*
+          v41 anti-rotate:
+          Xprinter kadang membaca label 40x30 sebagai kertas portrait 30x40.
+          Karena itu page dibuat 30x40, lalu kanvas label 40x30 diputar 90 derajat
+          supaya hasil tidak terbelah ke dua stiker.
+        */
         @page {
-          size: 40mm 30mm;
+          size: 30mm 40mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 40mm;
+            width: 30mm !important;
+            height: 40mm !important;
             margin: 0 !important;
             padding: 0 !important;
+            overflow: hidden !important;
             background: white !important;
             color: black !important;
           }
@@ -295,6 +303,8 @@ function LabelPrinter({ user }: { user: any }) {
             background: white !important;
             color: black !important;
             border-radius: 0 !important;
+            transform-origin: top left !important;
+            transform: rotate(90deg) translateY(-30mm) !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
@@ -316,7 +326,7 @@ function LabelPrinter({ user }: { user: any }) {
           Layout stiker final 40mm × 30mm: data peserta lengkap, QR Kecil, No MCU footer, tanpa border default.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Label v40 · stiker final 40x30 · fixed
+          Label v41 · anti rotate printer · 30x40 page
         </div>
       </section>
 
