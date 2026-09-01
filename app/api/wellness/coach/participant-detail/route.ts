@@ -47,6 +47,7 @@ import {
 import {
   buildEffectiveTargetTimeline,
   effectiveTargetsForDate,
+  loadEffectiveTargetTimeline,
   targetTimelineSummary,
 } from "@/lib/wellness/effectiveDatedTargets";
 
@@ -1123,10 +1124,19 @@ export async function GET(request: NextRequest) {
       "",
     );
 
-    const targetTimeline = buildEffectiveTargetTimeline({
+    // WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_TARGET_DETAIL
+    // Read the complete effective target timeline directly by participant_id.
+    // The existing targetNotes result remains a fallback only, so a temporary
+    // read failure cannot remove previously working detail behavior.
+    const targetTimeline = await loadEffectiveTargetTimeline({
+      supabase,
       participant,
-      notes: targetNotes,
-    });
+    }).catch(() =>
+      buildEffectiveTargetTimeline({
+        participant,
+        notes: targetNotes,
+      }),
+    );
     const nutritionTargetCalories = targetTimeline.current.nutrition;
     const workoutTargetCalories = targetTimeline.current.workout || 300;
     const dailyPoints = new Map<string, number>();

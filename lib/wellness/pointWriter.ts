@@ -11,6 +11,7 @@ import {
   filterActivityRowsByFitnessSource,
   loadParticipantControlMap,
 } from "@/lib/wellness/participantControls";
+import { wellnessStreakWorkoutCalories } from "@/lib/wellness/streak";
 import {
   effectiveTargetsForDate,
   loadEffectiveTargetTimeline,
@@ -264,20 +265,11 @@ export async function setDailyPoint(params: {
   }
 }
 
+// WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_POINT_ACTIVE_ONLY
+// Workout points use the same canonical ACTIVE-workout calorie resolver as
+// participant streak and Coach progress. Point rule values are unchanged.
 export function pointActivityCalories(row: any) {
-  const raw = row?.raw_payload || {};
-  return pointNumber(
-    row?.calories ??
-      row?.total_calories ??
-      row?.activity_calories ??
-      row?.calories_burned ??
-      raw?.selected_active_calories ??
-      raw?.sanitized_active_calories ??
-      raw?.health_connect_active_calories ??
-      raw?.health_connect_calories ??
-      raw?.google_fit_active_calories_exact ??
-      raw?.google_fit_active_calories,
-  );
+  return wellnessStreakWorkoutCalories(row);
 }
 
 export function pointActivityHasValue(row: any) {

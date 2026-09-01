@@ -297,7 +297,10 @@ function WeeklyStreak({ days, currentStreak }: { days: WellnessMomentumDay[]; cu
 
 function MonthlyCalendar({ successDates }: { successDates: string[] }) {
   const successSet = new Set(successDates);
-  const reference = successDates.length > 0 ? new Date(`${successDates[successDates.length - 1]}T12:00:00`) : new Date();
+  // WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_CURRENT_MONTH_CALENDAR
+  // Always open the calendar on the current month. Historical success dates
+  // remain intact; they simply no longer force the UI back to the last success month.
+  const reference = new Date();
   const year = reference.getFullYear();
   const month = reference.getMonth();
   const totalDays = new Date(year, month + 1, 0).getDate();

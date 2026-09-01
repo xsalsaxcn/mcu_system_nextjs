@@ -231,24 +231,27 @@ export function wellnessStreakWorkoutCalories(row: any) {
   const raw = rawPayload(row);
 
   if (isGoogleFitDaily(row)) {
-    const activeCalories = numberValue(
-      raw?.google_fit_active_calories_exact ??
-        raw?.google_fit_active_calories ??
-        raw?.selected_active_calories ??
-        raw?.sanitized_active_calories,
-    );
-    if (activeCalories > 0) return activeCalories;
+    // WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_GOOGLE_FIT_ACTIVE_ONLY
+    // Google Fit daily TOTAL energy includes resting/BMR energy. It may remain
+    // available for informational display, but it must never satisfy an ACTIVE
+    // workout target, streak, Coach progress, or workout-point threshold.
+    const exact =
+      raw?.exact_snapshot && typeof raw.exact_snapshot === "object"
+        ? raw.exact_snapshot
+        : {};
 
-    // When Google Fit exposes only its provider daily calorie value, use the
-    // exact same value already shown in the Coach graph and Participant card.
-    return numberValue(
-      raw?.google_fit_total_calories ??
-        raw?.google_fit_calories_expended ??
-        raw?.exact_snapshot?.total_calories ??
-        row?.total_calories ??
-        row?.calories ??
-        row?.calories_burned,
-    );
+    for (const value of [
+      raw?.google_fit_active_calories_exact,
+      raw?.google_fit_active_calories,
+      raw?.selected_active_calories,
+      raw?.sanitized_active_calories,
+      exact?.active_calories,
+    ]) {
+      const activeCalories = numberValue(value);
+      if (activeCalories > 0) return activeCalories;
+    }
+
+    return 0;
   }
 
   if (isHealthConnectDaily(row)) {

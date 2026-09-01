@@ -693,6 +693,20 @@ export async function GET(request: NextRequest) {
         canonicalDaysV126M92_2.find(
           (day: any) => clean(day?.date).slice(0, 10) === today,
         ) || null;
+      // WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_TARGET_DASHBOARD
+      // Reuse the canonical target timeline already loaded by
+      // loadParticipantCanonicalStreak. This avoids a second/stale interpretation
+      // of bulk Coach-note rows and makes a newly saved effective target visible
+      // after dashboard refresh without adding another database request.
+      const canonicalTargetHistoryV126M109_1 =
+        canonicalPayloadV126M92_2?.targets?.target_history || null;
+      const canonicalTargetCurrentV126M109_1 =
+        canonicalTargetHistoryV126M109_1?.current || null;
+      const canonicalTargetRevisionV126M109_1 =
+        canonicalTargetHistoryV126M109_1?.current_revision || null;
+      const canonicalTargetIsEffectiveTodayV126M109_1 =
+        !clean(canonicalTargetRevisionV126M109_1?.effective_from) ||
+        clean(canonicalTargetRevisionV126M109_1?.effective_from).slice(0, 10) <= today;
       const acts =
         filterOperationalRowsForProgram(
           row,
@@ -842,6 +856,34 @@ export async function GET(request: NextRequest) {
       const accessGroupIds = participantScopeIds(row, groupUnitMap);
       const profile = profileMap.get(String(id)) || {};
 
+      const fallbackTargetsV126M109_1 = participantTargets(
+        row,
+        participantNotes,
+        today,
+      );
+      const dashboardTargetsV126M109_1 =
+        canonicalTargetCurrentV126M109_1 &&
+        canonicalTargetIsEffectiveTodayV126M109_1
+        ? {
+            nutrition_max_calories:
+              asNumber(canonicalTargetCurrentV126M109_1?.nutrition) ||
+              fallbackTargetsV126M109_1.nutrition_max_calories,
+            workout_min_calories:
+              asNumber(canonicalTargetCurrentV126M109_1?.workout) ||
+              fallbackTargetsV126M109_1.workout_min_calories,
+            daily_step_target:
+              asNumber(canonicalTargetCurrentV126M109_1?.steps) ||
+              fallbackTargetsV126M109_1.daily_step_target ||
+              8000,
+            workout_duration_target_minutes: asNumber(
+              canonicalTargetCurrentV126M109_1?.duration_minutes,
+            ),
+            target_weight_kg: asNumber(
+              canonicalTargetCurrentV126M109_1?.weight_kg,
+            ),
+          }
+        : fallbackTargetsV126M109_1;
+
       return {
         id,
         name: participantName(row),
@@ -904,12 +946,28 @@ export async function GET(request: NextRequest) {
         flag_reason: flag.reason,
         nutrition_history_sources: canonicalHistory?.sources || null,
         clinical: latestClinicalFor(id, clinicalRows),
-        targets: participantTargets(row, participantNotes, today),
+        targets: dashboardTargetsV126M109_1,
         target_persistence: {
-          source: latestTargetNote ? "individual_target_note" : "participant_or_default",
-          note_id: latestTargetNote?.id || null,
+          source:
+            canonicalTargetRevisionV126M109_1 &&
+            canonicalTargetIsEffectiveTodayV126M109_1
+            ? "canonical_effective_target"
+            : latestTargetNote
+              ? "individual_target_note"
+              : "participant_or_default",
+          note_id:
+            (canonicalTargetIsEffectiveTodayV126M109_1
+              ? canonicalTargetRevisionV126M109_1?.note_id
+              : null) ||
+            latestTargetNote?.id ||
+            null,
           note_updated_at:
-            latestTargetNote?.updated_at || latestTargetNote?.created_at || null,
+            (canonicalTargetIsEffectiveTodayV126M109_1
+              ? canonicalTargetRevisionV126M109_1?.effective_at
+              : null) ||
+            latestTargetNote?.updated_at ||
+            latestTargetNote?.created_at ||
+            null,
         },
         latest_note: latestNote
           ? {
