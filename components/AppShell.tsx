@@ -1,426 +1,273 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import type { SessionUser } from "@/lib/shared/types";
 
-const adminMenuGroups = [
-  {
-    title: "Dashboard",
-    items: [
-      { label: "Dashboard Operasional", href: "/dashboard" },
-      { label: "Registrasi Ulang MCU", href: "/registrasi-ulang" },
-      { label: "Review Hasil", href: "/review" },
-    ],
-  },
-  {
-    title: "MCU",
-    items: [
-      { label: "Setup Parameter", href: "/setup-parameters" },
-      { label: "Setup Label Paket", href: "/setup-label-paket" },
-      { label: "Parameter Kelulusan", href: "/parameter-kelulusan" },
-      { label: "Input CAPASKA", href: "/input" },
-      { label: "Input Corporate", href: "/input-corporate" },
-      { label: "AI MCU Analyzer", href: "/ai-mcu/analyze" },
-      // CAPASKA_GENERATE_PDF_MENU_V332
-      { label: "Generate PDF CAPASKA", href: "/ai-mcu/generate?program=capaska" },
-      { label: "Training AI MCU", href: "/ai-mcu/train" },
-      { label: "Cetak Label", href: "/labels" },
-    ],
-  },
-  {
-    title: "Wellness",
-    items: [
-      // WELLNESS_PRO_WORKSPACE_V357_MENU
-      { label: "01 Dashboard Wellness", href: "/wellness/dashboard" },
-      { label: "02 Setting Parameter", href: "/wellness/settings" },
-      { label: "03 Import Peserta", href: "/wellness/import" },
-      { label: "04 Import History MCU", href: "/wellness/history-import" },
-      { label: "05 Input Harian", href: "/wellness/input" },
-      { label: "06 Master Kalori", href: "/wellness/master" },
-      { label: "07 Signup Peserta", href: "/wellness/signup" },
-      { label: "08 Profil Wellness", href: "/wellness/profile" },
-    ],
-  },
-  {
-    title: "Vaksinasi Perusahaan",
-    items: [
-      { label: "Dashboard Vaksinasi", href: "/vaccination/dashboard" },
-      { label: "Master Vaksin & Lot", href: "/vaccination/master" },
-      { label: "Session Vaksinasi", href: "/vaccination/session" },
-      { label: "Registrasi Vaksin", href: "/vaccination/register" },
-      { label: "Antrian Vaksin", href: "/vaccination/queue" },
-      { label: "Administered / Medis", href: "/vaccination/administer" },
-      { label: "Inventory Vaksin", href: "/vaccination/inventory" },
-      { label: "Reminder Vaksin", href: "/vaccination/reminder" },
-    ],
-  },
-  {
-    title: "Admin",
-    items: [
-      { label: "Print Label Manual", href: "/print-label" },
-      { label: "Import Data", href: "/import" },
-      { label: "Hapus Database", href: "/cleanup" },
-      { label: "Master Users", href: "/master" },
-    ],
-  },
-];
+type MenuItem = {
+  label: string;
+  href: string;
+  roles?: string[];
+  programs?: string[];
+};
 
-function valueOf(rawUser: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = rawUser[key];
-    if (value !== undefined && value !== null && String(value).trim()) {
-      return String(value);
+type MenuGroup = {
+  title: string;
+  items: MenuItem[];
+};
+
+function canSee(item: MenuItem, user: SessionUser) {
+  const role = String(user.role || "");
+  const program = String(user.program_type || "");
+
+  if (item.roles?.length && !item.roles.includes(role)) return false;
+  if (item.programs?.length && !item.programs.includes(program) && program !== "all") return false;
+
+  return true;
+}
+
+function groupedMenu(user: SessionUser): MenuGroup[] {
+  const role = String(user.role || "");
+  const program = String(user.program_type || "");
+
+  const adminOnly = ["admin"];
+  const clinicalRoles = ["admin", "supervisor", "doctor"];
+  const capaskaRoles = ["admin", "supervisor", "doctor", "operator"];
+
+  const groups: MenuGroup[] = [
+    {
+      title: "DASHBOARD",
+      items: [
+        { label: "Dashboard Operasional", href: "/dashboard" },
+        { label: "Registrasi Ulang MCU", href: "/registrasi-ulang", roles: adminOnly },
+        { label: "Review Hasil", href: "/review", roles: clinicalRoles }
+      ]
+    },
+    {
+      title: "CAPASKA",
+      items: [
+        { label: "Dashboard CAPASKA", href: "/dashboard", roles: capaskaRoles, programs: ["capaska", "all"] },
+        { label: "Registrasi Ulang CAPASKA", href: "/registrasi-ulang", roles: adminOnly, programs: ["capaska", "all"] },
+        { label: "Input CAPASKA", href: "/input", roles: ["admin", "operator"], programs: ["capaska", "all"] },
+        { label: "Review Hasil CAPASKA", href: "/review", roles: clinicalRoles, programs: ["capaska", "all"] },
+        { label: "Generate PDF CAPASKA", href: "/generate-pdf-capaska", roles: adminOnly, programs: ["capaska", "all"] }
+      ]
+    },
+    {
+      title: "MCU",
+      items: [
+        { label: "Setup Parameter", href: "/setup-parameters", roles: adminOnly },
+        { label: "Setup Label Paket", href: "/setup-label-paket", roles: adminOnly },
+        { label: "Parameter Kelulusan", href: "/parameter-kelulusan", roles: adminOnly },
+        { label: "Input Corporate", href: "/input-corporate", roles: ["admin", "operator"], programs: ["corporate", "all"] },
+        { label: "Cetak Label", href: "/labels", roles: adminOnly }
+      ]
+    },
+    {
+      title: "AI MCU",
+      items: [
+        { label: "AI MCU Analyzer", href: "/ai-mcu-analyzer", roles: adminOnly },
+        { label: "Training AI MCU", href: "/training-ai-mcu", roles: adminOnly }
+      ]
+    },
+    {
+      title: "ADMIN",
+      items: [
+        { label: "Import Peserta", href: "/import", roles: adminOnly },
+        { label: "Master Users", href: "/master", roles: adminOnly },
+        { label: "Hapus Database", href: "/cleanup", roles: adminOnly }
+      ]
+    },
+    {
+      title: "WELLNESS",
+      items: [
+        { label: "Dashboard Wellness", href: "/wellness", roles: adminOnly },
+        { label: "Import Wellness", href: "/wellness/import", roles: adminOnly }
+      ]
     }
+  ];
+
+  // Operator CAPASKA should still see their core input even if role/program metadata is partial.
+  if (role === "operator" && (program === "capaska" || program === "all")) {
+    return [
+      {
+        title: "DASHBOARD",
+        items: [
+          { label: "Dashboard Operasional", href: "/dashboard" }
+        ]
+      },
+      {
+        title: "CAPASKA",
+        items: [
+          { label: "Input CAPASKA", href: "/input" }
+        ]
+      }
+    ];
   }
 
-  return "";
-}
-
-function getRole(rawUser: Record<string, unknown>) {
-  return valueOf(rawUser, ["role", "role_name", "user_role"]).toLowerCase();
-}
-
-function getProgram(rawUser: Record<string, unknown>) {
-  return valueOf(rawUser, ["program_type", "program", "program_status"]).toLowerCase();
-}
-
-function getPost(rawUser: Record<string, unknown>) {
-  return valueOf(rawUser, ["post", "post_name", "post_label", "assigned_post", "station", "parameter"]).toLowerCase();
-}
-
-function getUsername(rawUser: Record<string, unknown>) {
-  return valueOf(rawUser, ["username", "email", "name"]).toLowerCase();
-}
-
-function isWellnessParticipantUser(rawUser: Record<string, unknown>) {
-  const role = getRole(rawUser);
-  const program = getProgram(rawUser);
-  return role === "wellness_participant" || role === "participant" || program === "wellness";
-}
-
-function getWellnessParticipantMenuGroups() {
-  return [
-    {
-      title: "Wellness",
-      items: [
-        { label: "Dashboard Saya", href: "/wellness/dashboard" },
-        { label: "Input Harian", href: "/wellness/input" },
-        { label: "Profil Saya", href: "/wellness/profile" },
-      ],
-    },
-  ];
-}
-
-function getOperatorFormRoute(rawUser: Record<string, unknown>) {
-  const program = getProgram(rawUser);
-  const post = getPost(rawUser);
-  const username = getUsername(rawUser);
-
-  if (post.includes("registrasi")) {
-    return "/registrasi-ulang";
+  // Operator Corporate should remain simple.
+  if (role === "operator" && program === "corporate") {
+    return [
+      {
+        title: "DASHBOARD",
+        items: [
+          { label: "Dashboard Operasional", href: "/dashboard" }
+        ]
+      },
+      {
+        title: "MCU",
+        items: [
+          { label: "Input Corporate", href: "/input-corporate" }
+        ]
+      }
+    ];
   }
 
-  const corporateTokens = [
-    "corporate",
-    "corp",
-    "antropometri",
-    "vital",
-    "laboratorium",
-    "lab",
-    "ekg",
-    "audiometri",
-    "spirometri",
-    "treadmill",
+  return groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canSee(item, user))
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+function mainToolbar(user: SessionUser) {
+  const role = String(user.role || "");
+  const program = String(user.program_type || "");
+
+  const items: MenuItem[] = [
+    { label: "Dashboard", href: "/dashboard" }
   ];
 
-  const isCorporate =
-    program.includes("corporate") ||
-    corporateTokens.some((token) => post.includes(token) || username.includes(token));
+  if (role === "admin") {
+    items.push({ label: "Registrasi Ulang", href: "/registrasi-ulang" });
+  }
 
-  return isCorporate ? "/input-corporate" : "/input";
+  if (role === "operator" && (program === "capaska" || program === "all")) {
+    items.push({ label: "Input CAPASKA", href: "/input" });
+  }
+
+  if (role === "operator" && program === "corporate") {
+    items.push({ label: "Input Corporate", href: "/input-corporate" });
+  }
+
+  if (role === "supervisor" || role === "doctor") {
+    items.push({ label: "Review Hasil", href: "/review" });
+  }
+
+  return items;
 }
 
-function getOperatorFormLabel(rawUser: Record<string, unknown>) {
-  const post = getPost(rawUser);
-  const program = getProgram(rawUser);
-
-  if (post.includes("registrasi")) return "Registrasi Ulang";
-  if (program.includes("corporate")) return "Form Corporate";
-
-  return "Form CAPASKA";
-}
-
-function getOperatorMenuGroups(rawUser: Record<string, unknown>) {
-  const formRoute = getOperatorFormRoute(rawUser);
-  const formLabel = getOperatorFormLabel(rawUser);
-
-  return [
-    {
-      title: "Operator",
-      items: [
-        { label: "Dashboard Operator", href: "/dashboard" },
-        { label: formLabel, href: formRoute },
-      ],
-    },
-  ];
-}
-
-function MenuDrawer({ groups }: { groups: typeof adminMenuGroups }) {
+export default function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const groups = useMemo(() => groupedMenu(user), [user]);
+  const toolbarItems = useMemo(() => mainToolbar(user), [user]);
 
-  useEffect(() => {
-    if (!open) return;
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+  }
 
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+  function itemClass(href: string, compact = false) {
+    const active = pathname === href;
 
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
+    return compact
+      ? `whitespace-nowrap rounded-2xl px-4 py-2.5 text-sm font-black transition ${
+          active ? "bg-blue-600 text-white shadow-sm" : "bg-slate-100 text-slate-800 hover:bg-slate-200"
+        }`
+      : `block rounded-2xl px-4 py-3 text-sm font-black transition ${
+          active ? "bg-blue-600 text-white shadow-sm" : "bg-white text-slate-800 hover:bg-slate-50"
+        }`;
+  }
 
-    window.addEventListener("keydown", handleEscape);
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
+          <div>
+            <div className="text-xl font-black text-slate-900">MCU System</div>
+            <div className="text-xs font-semibold text-slate-500">
+              {user.name} · {user.role} · {user.post_name || "-"}
+            </div>
+          </div>
 
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm hover:bg-slate-50"
+              onClick={() => setOpen(true)}
+            >
+              ☰ Menu
+            </button>
 
-  const drawer = open && mounted
-    ? createPortal(
-        <div
-          aria-label="Menu navigasi"
-          style={{
-            position: "fixed",
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-            zIndex: 2147483000,
-            pointerEvents: "auto",
-          }}
-        >
-          <button
-            type="button"
-            aria-label="Tutup menu"
-            onClick={() => setOpen(false)}
-            style={{
-              position: "fixed",
-              top: 0,
-              right: 0,
-              bottom: 0,
-              left: 0,
-              zIndex: 2147483001,
-              border: 0,
-              padding: 0,
-              margin: 0,
-              cursor: "default",
-              background: "rgba(15, 23, 42, 0.56)",
-            }}
-          />
+            <button className="btn-secondary" onClick={logout}>Logout</button>
+          </div>
+        </div>
 
-          <div
-            aria-modal="true"
-            aria-label="Menu navigasi Harmony Health App"
-            style={{
-              position: "fixed",
-              top: "84px",
-              right: "12px",
-              bottom: "12px",
-              zIndex: 2147483002,
-              width: "min(420px, calc(100vw - 24px))",
-              maxWidth: "calc(100vw - 24px)",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-              borderRadius: "28px",
-              border: "1px solid rgb(226 232 240)",
-              background: "#ffffff",
-              color: "#0f172a",
-              boxShadow: "0 25px 50px -12px rgba(15, 23, 42, 0.45)",
-              opacity: 1,
-              filter: "none",
-              backdropFilter: "none",
-            }}
-          >
-            <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-blue-700 via-indigo-700 to-slate-950 px-5 py-5 text-white">
-              <div>
-                <div className="text-base font-black">Harmony Health App</div>
-                <div className="mt-1 text-xs font-semibold text-blue-100">
-                  Navigasi layanan
+        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3">
+          {toolbarItems.map((item) => (
+            <Link key={item.href + item.label} href={item.href} className={itemClass(item.href, true)}>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </header>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/50 px-3 py-8">
+          <div className="max-h-[88vh] w-full max-w-md overflow-hidden rounded-[2rem] border border-white/50 bg-white shadow-2xl">
+            <div className="bg-gradient-to-r from-blue-600 via-indigo-700 to-slate-950 px-5 py-4 text-white">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black">Harmony Health App</div>
+                  <div className="text-sm font-semibold text-blue-100">Navigasi layanan</div>
                 </div>
+
+                <button
+                  type="button"
+                  className="rounded-2xl border border-white/70 px-4 py-2 text-sm font-black text-white hover:bg-white/10"
+                  onClick={() => setOpen(false)}
+                >
+                  Tutup
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-2xl border border-white/25 bg-white/15 px-3 py-2 text-xs font-black text-white transition hover:bg-white/25"
-              >
-                Tutup
-              </button>
+              <div className="mt-3 rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
+                Menu v42 · Modul CAPASKA restored
+              </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3 pb-8">
+            <div className="max-h-[calc(88vh-96px)] space-y-3 overflow-y-auto bg-slate-50 p-4">
               {groups.map((group) => (
-                <section
-                  key={group.title}
-                  className="mb-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-sm"
-                >
-                  <div className="mb-2 px-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                <section key={group.title} className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="px-2 pb-2 text-xs font-black uppercase tracking-wide text-slate-400">
                     {group.title}
                   </div>
 
-                  <div className="grid gap-1">
+                  <div className="space-y-2">
                     {group.items.map((item) => (
-                      <a
-                        key={`${group.title}-${item.href}`}
+                      <Link
+                        key={item.href + item.label}
                         href={item.href}
+                        className={itemClass(item.href)}
                         onClick={() => setOpen(false)}
-                        className="block rounded-2xl px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
                       >
                         {item.label}
-                      </a>
+                      </Link>
                     ))}
                   </div>
                 </section>
               ))}
             </div>
           </div>
-        </div>,
-        document.body
-      )
-    : null;
-
-  return (
-    <div className="relative z-[100]">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="nav-menu-button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        <span className="nav-menu-lines" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-        Menu
-      </button>
-
-      {drawer}
-    </div>
-  );
-}
-
-export default function AppShell({
-  user,
-  children,
-}: {
-  user: SessionUser;
-  children: ReactNode;
-}) {
-  async function logout() {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-      });
-    } catch {
-      // Ignore logout network error.
-    }
-
-    window.location.href = "/login";
-  }
-
-  const rawUser = user as unknown as Record<string, unknown>;
-  const role = getRole(rawUser);
-  const isOperator = role === "operator";
-
-  const displayName = String(
-    rawUser.name ||
-      rawUser.username ||
-      rawUser.email ||
-      "Administrator"
-  );
-
-  const roleLabel = String(
-    rawUser.role ||
-      rawUser.role_name ||
-      "Admin"
-  );
-
-  const isWellnessParticipant = isWellnessParticipantUser(rawUser);
-  const menuGroups = isWellnessParticipant ? getWellnessParticipantMenuGroups() : isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
-  const operatorFormRoute = getOperatorFormRoute(rawUser);
-  const operatorFormLabel = getOperatorFormLabel(rawUser);
-
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
-          <div className="flex min-w-0 items-center gap-3 md:gap-4">
-            <a
-              href="/dashboard"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-sm font-black text-white shadow-sm md:h-12 md:w-12"
-            >
-              HHA
-            </a>
-
-            <div className="min-w-0">
-              <a href="/dashboard" className="group block">
-                <div className="truncate text-xl font-black tracking-tight text-slate-900 group-hover:text-blue-700 md:text-2xl">
-                  Harmony Health App
-                </div>
-              </a>
-              <div className="mt-0.5 truncate text-xs font-semibold text-slate-500 md:text-sm">
-                {displayName} - {roleLabel}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <a href="/dashboard" className="top-nav-link">
-              Dashboard
-            </a>
-
-            {isWellnessParticipant ? (
-              <a href="/wellness/dashboard" className="top-nav-link">
-                Wellness Saya
-              </a>
-            ) : isOperator ? (
-              <a href={operatorFormRoute} className="top-nav-link">
-                {operatorFormLabel}
-              </a>
-            ) : (
-              <a href="/registrasi-ulang" className="top-nav-link">
-                Registrasi Ulang
-              </a>
-            )}
-
-            <div className="ml-0 flex items-center gap-2 md:ml-3">
-              <MenuDrawer groups={menuGroups} />
-            </div>
-
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:px-4"
-            >
-              Logout
-            </button>
-          </div>
         </div>
-      </header>
+      )}
 
-      <main className="mx-auto max-w-7xl px-4 py-6 md:px-5 md:py-8">
-        {children}
-      </main>
+      <main className="mx-auto max-w-7xl px-4 py-5">{children}</main>
     </div>
   );
 }
