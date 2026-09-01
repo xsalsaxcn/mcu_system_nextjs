@@ -650,7 +650,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v39 · stiker final 40x30
+          Registrasi Ulang v40 · stiker benar 40x30
         </div>
       </section>
 
