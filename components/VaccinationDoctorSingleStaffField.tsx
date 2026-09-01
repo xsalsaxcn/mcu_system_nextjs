@@ -63,9 +63,6 @@ async function fetchStaffNames() {
 }
 
 function findParticipantSection() {
-  const explicit = document.getElementById("vaccination-administer-participant-section") as HTMLElement | null;
-  if (explicit) return explicit;
-
   const nodes = Array.from(document.querySelectorAll("section, form, div")) as HTMLElement[];
 
   return (
@@ -80,19 +77,17 @@ function findParticipantSection() {
 }
 
 function findOriginalDoctorInput() {
-  const explicit = document.getElementById("vaccination-administer-doctor-input") as HTMLInputElement | null;
-  if (explicit) return explicit;
-
   const section = findParticipantSection() || document.body;
   const inputs = Array.from(section.querySelectorAll("input")) as HTMLInputElement[];
 
-  return inputs.find((input) => /Nama dokter|Nama petugas|dokter|petugas/i.test(input.placeholder || "")) || null;
+  return (
+    inputs.find((input) => /Nama dokter|Nama petugas|dokter|petugas/i.test(input.placeholder || "")) ||
+    inputs.find((input) => /dr\.|dokter|petugas/i.test(input.value || "")) ||
+    null
+  );
 }
 
 function findTopControlRow() {
-  const explicit = document.getElementById("vaccination-administer-top-controls") as HTMLElement | null;
-  if (explicit) return explicit;
-
   const section = findParticipantSection();
   if (!section) return null;
 
@@ -122,18 +117,15 @@ function setNativeInputValue(input: HTMLInputElement, value: string) {
 
 function isStaffSelect(select: HTMLSelectElement) {
   const id = cleanText(select.id);
-  const role = cleanText(select.getAttribute("data-vaccination-role"));
-  const firstOptionText = cleanText(select.options[0]?.textContent);
-
-  // Participant names can legitimately contain titles such as "dr.".
-  // Never classify the participant selector as a doctor/staff selector.
-  if (id === "vaccination-administer-participant" || role === "participant") return false;
+  const text = cleanText(select.textContent);
+  const value = cleanText(select.value);
 
   return (
     id.includes("doctor-staff") ||
     id.includes("single-doctor") ||
-    role === "doctor" ||
-    /Pilih nama dokter|Nama dokter|Nama petugas|Belum ada petugas/i.test(firstOptionText)
+    /Pilih nama dokter|Nama dokter|Nama petugas|Belum ada petugas/i.test(text) ||
+    /dr\.|dokter|petugas/i.test(value) ||
+    /dr\./i.test(text)
   );
 }
 
@@ -163,13 +155,7 @@ function hideDuplicateStaffControls(keep: HTMLSelectElement) {
 
   const inputs = Array.from(section.querySelectorAll("input")) as HTMLInputElement[];
   for (const input of inputs) {
-    const role = cleanText(input.getAttribute("data-vaccination-role"));
-    const isDoctorInput =
-      input.id === "vaccination-administer-doctor-input" ||
-      role === "doctor" ||
-      /Nama dokter|Nama petugas|dokter|petugas/i.test(input.placeholder || "");
-
-    if (!isDoctorInput) continue;
+    if (!/Nama dokter|Nama petugas|dokter|petugas/i.test(input.placeholder || "") && !/dr\.|dokter|petugas/i.test(input.value || "")) continue;
 
     input.style.display = "none";
     input.setAttribute("aria-hidden", "true");
@@ -214,7 +200,6 @@ async function ensureSingleDoctorField() {
     select = document.createElement("select");
     select.id = "hha-single-doctor-staff-v125";
     select.setAttribute("data-hha-single-doctor-staff", "1");
-    select.setAttribute("data-vaccination-role", "doctor");
     styleSelect(select);
 
     if (originalInput?.parentElement) {

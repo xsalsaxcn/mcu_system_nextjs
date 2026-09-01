@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -295,6 +295,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [form, setForm] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [printReady, setPrintReady] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -539,6 +540,52 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }
 
+
+  /* DELETE_SELECTED_PARTICIPANT_V271
+     Admin-only UI action. No data changes happen automatically; deletion only runs
+     after the admin clicks Hapus Peserta and confirms by typing HAPUS.
+  */
+  async function deleteSelectedParticipantV271() {
+    if (!form?.id) return;
+
+    const label = String(form.name || form.mcu_id || form.external_id || form.id || 'Peserta');
+    const okFirst = window.confirm('Hapus peserta "' + label + '"? Tindakan ini akan menghapus data peserta terpilih dan hasil pemeriksaannya.');
+    if (!okFirst) return;
+
+    const typed = window.prompt('Ketik HAPUS untuk konfirmasi penghapusan peserta terpilih.');
+    if (typed !== 'HAPUS') {
+      setMessage('Hapus peserta dibatalkan. Konfirmasi tidak sesuai.');
+      return;
+    }
+
+    setDeleting(true);
+    setMessage('Menghapus peserta terpilih...');
+
+    try {
+      const res = await fetch('/api/registrasi-ulang/participant?id=' + encodeURIComponent(String(form.id)), {
+        method: 'DELETE',
+        cache: 'no-store'
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.ok) {
+        setMessage(json.message || 'Gagal menghapus peserta.');
+        return;
+      }
+
+      setForm(null);
+      setSelected(null);
+      setResults([]);
+      setKeyword('');
+      setPrintReady(false);
+      setMessage(json.message || 'Peserta berhasil dihapus.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Gagal menghapus peserta.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function printBarcode() {
     setPrintReady(true);
     setTimeout(() => window.print(), 300);
@@ -592,25 +639,17 @@ function RegistrasiUlang({ user }: { user: any }) {
       />
 
       <style jsx global>{`
-        /*
-          v41 anti-rotate:
-          Xprinter kadang membaca label 40x30 sebagai kertas portrait 30x40.
-          Karena itu page dibuat 30x40, lalu kanvas label 40x30 diputar 90 derajat
-          supaya hasil tidak terbelah ke dua stiker.
-        */
         @page {
-          size: 30mm 40mm;
+          size: 40mm 30mm;
           margin: 0;
         }
 
         @media print {
           html,
           body {
-            width: 30mm !important;
-            height: 40mm !important;
+            width: 40mm;
             margin: 0 !important;
             padding: 0 !important;
-            overflow: hidden !important;
             background: white !important;
             color: black !important;
           }
@@ -639,23 +678,15 @@ function RegistrasiUlang({ user }: { user: any }) {
             box-sizing: border-box;
             overflow: hidden;
             margin: 0 !important;
-            padding: 0 !important;
             background: white !important;
             color: black !important;
             border-radius: 0 !important;
-            transform-origin: top left !important;
-            transform: rotate(90deg) translateY(-30mm) !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
 
           .label-page * {
             box-sizing: border-box;
-          }
-
-          .label-page:last-child {
-            page-break-after: auto;
-            break-after: auto;
           }
         }
       `}</style>
@@ -666,7 +697,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v41 · anti rotate printer
+          Registrasi Ulang v38  -  auto close hasil retrieve
         </div>
       </section>
 
@@ -726,7 +757,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               >
                 <div className="font-black">{p.name}</div>
                 <div className="text-sm text-slate-500">
-                  {p.mcu_id || p.external_id || "-"} · NIK {p.employee_nik || p.nik || "-"} · MCU {formatDate(p.examination_date || p.exam_date)} · Lahir {formatDate(p.birth_date || p.date_of_birth)} · {p.source_name || "-"}
+                  {p.mcu_id || p.external_id || "-"}  -  NIK {p.employee_nik || p.nik || "-"}  -  MCU {formatDate(p.examination_date || p.exam_date)}  -  Lahir {formatDate(p.birth_date || p.date_of_birth)}  -  {p.source_name || "-"}
                 </div>
               </button>
             ))}
@@ -750,6 +781,14 @@ function RegistrasiUlang({ user }: { user: any }) {
               </button>
               <button type="button" className="btn-secondary" onClick={() => fileRef.current?.click()}>
                 Upload dari Galeri
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+                disabled={saving || deleting || !form?.id}
+                onClick={deleteSelectedParticipantV271}
+              >
+                {deleting ? "Menghapus..." : "Hapus Peserta"}
               </button>
               <button type="button" className="btn-primary" disabled={saving} onClick={save}>
                 {saving ? "Menyimpan..." : "Save"}
@@ -857,7 +896,7 @@ function RegistrasiUlang({ user }: { user: any }) {
             <div>
               <div className="text-xl font-black">Setting Print Barcode / Label Station</div>
               <div className="text-sm text-slate-500">
-                Setting stiker final 40x30 mengikuti Setup Label Paket. Default disarankan: font 9, border off, QR kecil on, No MCU footer on.
+                Jumlah print dan style label otomatis mengikuti Setup Label Paket. Pengaturan di bawah bisa override sementara sebelum print.
               </div>
             </div>
 
@@ -911,7 +950,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                 checked={showLabelBarcodeText}
                 onChange={(e) => setShowLabelBarcodeText(e.target.checked)}
               />
-              No MCU Footer
+              Tampilkan No MCU Footer
             </label>
           </div>
 
@@ -960,7 +999,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           {printJobs.map((job) => (
             <StationPrintLabel
               key={`${job.station.key}-${job.copyIndex}`}
-              participant={form}
+              form={form}
               station={job.station}
               fontSize={labelFontSize}
               showBorder={showLabelBorder}
@@ -977,170 +1016,142 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 
 function StationPrintLabel({
-  participant,
   station,
+  form,
   fontSize,
   showBorder,
   showQr,
   showBarcodeText
 }: {
-  participant: Participant;
   station: StationPrintOption;
+  form: any;
   fontSize: number;
   showBorder: boolean;
   showQr: boolean;
   showBarcodeText: boolean;
 }) {
-  const idText = safeText(participant.mcu_id || participant.external_id || String(participant.id));
-  const nameText = safeText(participant.name);
-  const nikKaryawanText = safeText(participant.employee_nik || participant.nik);
-  const genderText = getGenderShort(participant.gender);
-  const birthText = formatDate(participant.birth_date || participant.date_of_birth);
-  const ageText = participant.age || calcAge(participant.birth_date || participant.date_of_birth) || "-";
-  const examDate = formatDate(participant.examination_date || participant.exam_date || todayISO());
-  const departmentText = safeText(participant.department, "");
-  const packageText = safeText(participant.package_name || participant.company_name || participant.source_name || "MCU");
-
-  const shortStation =
+  const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
+  const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
+  const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
+  const birthDate = String(form?.date_of_birth || form?.birth_date || form?.tanggal_lahir || form?.dob || "").trim();
+  const provinceText = String(form?.province || form?.provinsi || form?.location || form?.lokasi || "").trim();
+  const stationText =
     station.label === "PENYAKIT DALAM"
-      ? "P. DALAM"
+      ? "PENYAKIT DALAM"
       : station.label === "PEMERIKSAAN FISIK"
         ? "FISIK"
         : station.label.replace(" - ", " ");
 
-  const metaFont = Math.max(fontSize - 2, 7);
-  const headerFont = Math.max(fontSize - 2, 7);
-  const nameFont = Math.max(fontSize + 1, 10);
-  const footerFont = Math.max(fontSize - 2, 7);
+  const safeFont = Number(fontSize || 10);
+  const nameFont =
+    nameText.length > 34 ? Math.max(12, safeFont + 2) :
+    nameText.length > 24 ? Math.max(14, safeFont + 4) :
+    Math.max(16, safeFont + 6);
+
+  const qrPx = 54;
+  const qrValue = idText || nameText;
 
   return (
-    <div
+    <section
       className="label-page bg-white text-black"
       style={{
-        width: "40mm",
-        height: "30mm",
-        padding: "0.7mm 0.8mm 0.6mm 0.8mm",
-        boxSizing: "border-box",
-        border: showBorder ? "0.18mm solid #111" : "none",
+        position: "relative",
         overflow: "hidden",
-        fontFamily: "Arial, Helvetica, sans-serif",
+        border: showBorder ? "1px solid #d4d4d8" : undefined,
+        borderRadius: showBorder ? "18px" : undefined,
         WebkitPrintColorAdjust: "exact",
         printColorAdjust: "exact"
       }}
     >
       <div
-        className="grid h-full w-full"
         style={{
-          gridTemplateRows: "3.6mm 4.3mm 1fr 3.5mm",
-          rowGap: "0.25mm"
+          position: "absolute",
+          left: "8%",
+          top: "7%",
+          right: "8%",
+          zIndex: 2
         }}
       >
         <div
-          className="grid items-center"
           style={{
-            gridTemplateColumns: "1fr auto auto",
-            columnGap: "1mm",
-            fontSize: `${headerFont}px`,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
+            fontSize: `${nameFont}px`,
+            lineHeight: 1.03,
+            fontWeight: 900,
+            color: "#000000",
+            whiteSpace: "normal",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            letterSpacing: "-0.03em",
+            maxHeight: "34%",
             overflow: "hidden"
           }}
         >
-          <div className="truncate font-black tracking-wide">{shortStation}</div>
-          <div className="font-black">{genderText} / {ageText}</div>
-          <div className="font-black">{examDate}</div>
+          {nameText || "-"}
         </div>
+      </div>
 
+      <div
+        style={{
+          position: "absolute",
+          left: "8%",
+          top: "39%",
+          right: showQr ? "34%" : "8%",
+          zIndex: 2,
+          fontSize: `${Math.max(9, safeFont)}px`,
+          lineHeight: 1.12,
+          fontWeight: 700,
+          color: "#111827",
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          overflowWrap: "anywhere"
+        }}
+      >
+        <div>MCU: {idText || "-"}</div>
+        <div style={{ marginTop: "4px" }}>Stage: {stationText}</div>
+        {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
+        {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
+        <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
+      </div>
+
+      {showQr && (
         <div
-          className="truncate font-black uppercase"
           style={{
-            fontSize: `${nameFont}px`,
+            position: "absolute",
+            right: "2%",
+            bottom: showBarcodeText ? "12%" : "5%",
+            width: `${qrPx}px`,
+            height: `${qrPx}px`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#ffffff",
+            zIndex: 1
+          }}
+        >
+          <QRCodeImage value={qrValue} size={qrPx} />
+        </div>
+      )}
+
+      {showQr && showBarcodeText && (
+        <div
+          style={{
+            position: "absolute",
+            right: "1%",
+            bottom: "3%",
+            width: "34%",
+            textAlign: "center",
+            fontSize: "9px",
             lineHeight: 1,
+            fontWeight: 800,
+            color: "#111827",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis"
           }}
         >
-          {nameText}
+          {idText || "-"}
         </div>
-
-        <div
-          className="grid min-h-0"
-          style={{
-            gridTemplateColumns: showQr ? "1fr 9.6mm" : "1fr",
-            columnGap: "0.8mm"
-          }}
-        >
-          <div
-            className="grid min-w-0"
-            style={{
-              gridTemplateRows: "repeat(5, 1fr)",
-              rowGap: "0.1mm",
-              fontSize: `${metaFont}px`,
-              lineHeight: 1,
-              overflow: "hidden"
-            }}
-          >
-            {[
-              ["No MCU", idText],
-              ["NIK K", nikKaryawanText],
-              ["Lahir", birthText],
-              ["Paket", packageText],
-              ["Dept", departmentText || "-"]
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="grid min-w-0 items-center"
-                style={{
-                  gridTemplateColumns: "7.6mm 1mm 1fr",
-                  columnGap: "0.3mm",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden"
-                }}
-              >
-                <div className="truncate font-bold">{label}</div>
-                <div className="font-bold">:</div>
-                <div className="truncate font-bold">{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {showQr && (
-            <div className="flex items-start justify-end overflow-hidden">
-              <QRCodeImage value={idText} size={34} />
-            </div>
-          )}
-        </div>
-
-        <div
-          className="grid min-w-0 items-end"
-          style={{
-            gridTemplateColumns: "1fr auto",
-            columnGap: "1mm",
-            fontSize: `${footerFont}px`,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-            overflow: "hidden"
-          }}
-        >
-          <div
-            className="truncate font-mono font-black tracking-[0.06em]"
-            style={{ visibility: showBarcodeText ? "visible" : "hidden" }}
-          >
-            {idText}
-          </div>
-
-          <div
-            className="font-black"
-            style={{
-              fontSize: `${Math.max(fontSize + 2, 11)}px`,
-              lineHeight: 1
-            }}
-          >
-            {station.shortCode}
-          </div>
-        </div>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }

@@ -27,27 +27,19 @@ function parseQueueNumber(text: string) {
 }
 
 function findAdministerSelects() {
-  const explicitParticipant = document.getElementById("vaccination-administer-participant") as HTMLSelectElement | null;
-  const explicitSession = document.getElementById("vaccination-administer-session") as HTMLSelectElement | null;
   const selects = Array.from(document.querySelectorAll("select")) as HTMLSelectElement[];
 
   const participantSelect =
-    explicitParticipant ||
     selects.find((select) => {
-      const first = String(select.options[0]?.textContent || "").trim();
       const text = optionText(select);
-      return /Pilih peserta|nomor antrian/i.test(first) || /^A-\d+/i.test(text) || /-(WAITING|IN_PROGRESS|DONE|NOT DONE|DOKTER|DIPANGGIL)/i.test(text);
-    }) ||
-    null;
+      return /^A-\d+/i.test(text) || /-(WAITING|IN_PROGRESS|DONE|NOT DONE|DOKTER|DIPANGGIL)/i.test(text);
+    }) || selects[1] || null;
 
   const sessionSelect =
-    explicitSession ||
     selects.find((select) => {
-      const first = String(select.options[0]?.textContent || "").trim();
       const text = optionText(select);
-      return /Pilih session/i.test(first) || /HEALTHDAY|VAKSIN|BINUS|SESSION/i.test(text);
-    }) ||
-    null;
+      return /HEALTHDAY|VAKSIN|BINUS|SESSION/i.test(text);
+    }) || selects[0] || null;
 
   return { participantSelect, sessionSelect };
 }
