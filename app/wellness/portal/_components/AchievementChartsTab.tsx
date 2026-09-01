@@ -132,7 +132,12 @@ export default function AchievementChartsTab({
     });
   }, [JSON.stringify(nutritionData?.logs || [])]);
 
-  const googleFitTotalOnlyModeV79O = useMemo(
+  // WELLNESS_GOOGLEFIT_PARTICIPANT_DISPLAY_PARITY_V126M116
+  // V79O used total Google Fit energy when exact active calories were absent.
+  // Since V111 provides the canonical conservative ACTIVE fallback, the chart
+  // must always use chartCaloriesValue()/wellnessStreakWorkoutCalories instead.
+  // Total energy remains informational only and never becomes workout/streak/point.
+  const googleFitLegacyTotalRowsPresentV126M116 = useMemo(
     () =>
       normalizeWorkoutItemsForChartV72(workoutItems || []).some((item: any) =>
         googleFitTotalOnlyRowV79O(item),
@@ -143,10 +148,7 @@ export default function AchievementChartsTab({
   const workoutSeries = useMemo(() => {
     return aggregateChartSeries(normalizeWorkoutItemsForChartV72(workoutItems || []), {
       dateKeys: ["log_date", "created_at", "updated_at", "date"],
-      valueGetter: (item: any) =>
-        googleFitTotalOnlyRowV79O(item)
-          ? chartGoogleFitTotalCaloriesV79O(item)
-          : chartCaloriesValue(item),
+      valueGetter: (item: any) => chartCaloriesValue(item),
       average: false,
     });
   }, [JSON.stringify(workoutItems || [])]);
@@ -253,7 +255,6 @@ export default function AchievementChartsTab({
 
   const nutritionRedFlag = todayNutrition > nutritionLimit;
   const workoutRedFlag =
-    !googleFitTotalOnlyModeV79O &&
     todayWorkout > 0 &&
     todayWorkout < workoutMinTarget;
 
@@ -288,6 +289,12 @@ export default function AchievementChartsTab({
           <WorkoutMomentumSpotlight data={workoutSeries} target={workoutMinTarget} />
         </div>
 
+        {googleFitLegacyTotalRowsPresentV126M116 ? (
+          <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
+            Grafik workout memakai kalori aktif canonical yang sama dengan Ringkasan, Coach, streak, dan point. Energi total Google Fit yang mencakup basal tetap disimpan untuk informasi, tetapi tidak dipakai sebagai nilai workout.
+          </div>
+        ) : null}
+
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <ChartStatusCard
             title="Kalori masuk hari ini"
@@ -303,25 +310,15 @@ export default function AchievementChartsTab({
           />
 
           <ChartStatusCard
-            title={
-              googleFitTotalOnlyModeV79O
-                ? "Energi total Google Fit hari ini"
-                : "Workout hari ini"
-            }
+            title="Workout aktif hari ini"
             value={`${fmtNumber(todayWorkout, 0)} kkal`}
-            note={
-              googleFitTotalOnlyModeV79O
-                ? "Nilai exact provider, termasuk energi basal; bukan poin workout"
-                : `Target minimal ${fmtNumber(workoutMinTarget, 0)} kkal per hari`
-            }
+            note={`Target minimal ${fmtNumber(workoutMinTarget, 0)} kkal per hari`}
             danger={workoutRedFlag}
-            dangerText="Red flag: kalori terbakar masih rendah"
+            dangerText="Red flag: kalori workout aktif masih di bawah target"
             safeText={
-              googleFitTotalOnlyModeV79O
-                ? "Ditampilkan sesuai snapshot Google Fit"
-                : todayWorkout > 0
-                  ? "Aktivitas memenuhi target minimal"
-                  : "Belum ada workout hari ini"
+              todayWorkout > 0
+                ? "Kalori workout aktif terbaca dari provider/canonical resolver"
+                : "Belum ada workout aktif hari ini"
             }
           />
         </div>
@@ -339,25 +336,13 @@ export default function AchievementChartsTab({
         />
 
         <SmoothDashboardChart
-          title={
-            googleFitTotalOnlyModeV79O
-              ? "Grafik Energi Total Google Fit"
-              : "Grafik Workout Kalori Terbakar"
-          }
-          description={
-            googleFitTotalOnlyModeV79O
-              ? "Nilai total energi exact dari Google Fit, termasuk energi basal. Tidak digunakan sebagai poin workout."
-              : "Total kalori aktivitas per hari dari manual, Google Fit, atau Health Connect."
-          }
+          title="Grafik Workout Kalori Aktif"
+          description="Kalori workout aktif per hari dari manual, Google Fit, atau Health Connect. Untuk Google Fit, energi total termasuk basal hanya informasi dan tidak diplot sebagai workout."
           unit="kkal"
           data={workoutSeries}
-          limit={googleFitTotalOnlyModeV79O ? undefined : workoutMinTarget}
-          dangerMode={googleFitTotalOnlyModeV79O ? undefined : "below"}
-          emptyText={
-            googleFitTotalOnlyModeV79O
-              ? "Belum ada snapshot total energi Google Fit."
-              : "Belum ada data workout untuk dibuat grafik."
-          }
+          limit={workoutMinTarget}
+          dangerMode="below"
+          emptyText="Belum ada data workout aktif untuk dibuat grafik."
         />
       </div>
 

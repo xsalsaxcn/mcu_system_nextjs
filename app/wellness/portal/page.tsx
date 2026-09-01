@@ -524,6 +524,40 @@ function googleFitTotalCaloriesValueV73(item: any) {
   );
 }
 
+// WELLNESS_GOOGLEFIT_PARTICIPANT_DISPLAY_PARITY_V126M116
+// Presentation helper only. It does not change the canonical calorie resolver.
+// Exact ACTIVE calories, when present, are distinguished from the V111
+// conservative motion estimate so participant-facing labels can explain why
+// Google Fit total energy and workout calories are intentionally different.
+function googleFitExactActiveCaloriesV126M116(item: any) {
+  if (!isGoogleFitDailyRow(item)) return 0;
+  const raw = activityRawPayloadV72(item);
+  const exact =
+    raw?.exact_snapshot && typeof raw.exact_snapshot === "object"
+      ? raw.exact_snapshot
+      : {};
+
+  return asNumber(
+    raw?.google_fit_active_calories_exact ??
+      raw?.google_fit_active_calories ??
+      raw?.selected_active_calories ??
+      raw?.sanitized_active_calories ??
+      exact?.active_calories,
+  );
+}
+
+function latestGoogleFitDailyRowV126M116(items: any[], dateKey: string) {
+  return (items || [])
+    .filter(
+      (item: any) =>
+        isGoogleFitDailyRow(item) && activityDateKey(item) === dateKey,
+    )
+    .sort(
+      (left: any, right: any) =>
+        activityUpdatedAtMs(right) - activityUpdatedAtMs(left),
+    )[0] || null;
+}
+
 function historyWorkoutNoteV73(item: any) {
   const activeCalories = historyCaloriesValueV41(item);
   const steps = historyStepsValueV41(item);
@@ -2984,6 +3018,7 @@ export default function WellnessParticipantPortalPage() {
                     fitnessLastSyncSnapshot
                       .google_fit || null
                   }
+                  workoutItems={workoutItems || []}
                   fitnessSettings={
                     fitnessSettings
                   }
@@ -4316,9 +4351,29 @@ function HomeTab({
     )?.workoutCalories,
   );
 
+  const todayGoogleFitRowV126M116 = useMemo(
+    () => latestGoogleFitDailyRowV126M116(workoutItems || [], todayKeyV73),
+    [JSON.stringify(workoutItems || []), todayKeyV73],
+  );
+  const todayGoogleFitTotalEnergyV126M116 = googleFitTotalCaloriesValueV73(
+    todayGoogleFitRowV126M116,
+  );
+  const todayGoogleFitExactActiveV126M116 = googleFitExactActiveCaloriesV126M116(
+    todayGoogleFitRowV126M116,
+  );
+  const todayGoogleFitWorkoutModeV126M116 =
+    todayWorkoutBreakdownV126M31.googleFit > 0
+      ? todayGoogleFitExactActiveV126M116 > 0
+        ? "aktif exact"
+        : "workout estimasi aktif"
+      : "";
+
   const workoutSourceSubtitleV126M31 = [
     todayWorkoutBreakdownV126M31.googleFit > 0
-      ? `Google Fit ${fmtNumber(todayWorkoutBreakdownV126M31.googleFit, 0)}`
+      ? `Google Fit ${todayGoogleFitWorkoutModeV126M116} ${fmtNumber(
+          todayWorkoutBreakdownV126M31.googleFit,
+          0,
+        )}`
       : "",
     todayWorkoutBreakdownV126M31.healthConnect > 0
       ? `Health Connect ${fmtNumber(todayWorkoutBreakdownV126M31.healthConnect, 0)}`
@@ -4373,10 +4428,14 @@ function HomeTab({
 
         {googleFitActiveCaloriesUnavailable ? (
           <div className="mt-5 rounded-[1.5rem] border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
-            Google Fit mengirim kalori total yang dapat mencakup energi basal.
-            Sesuai aturan program, kartu <strong>Total Kalori Workout</strong>
-            menggabungkan Google Fit/device dan workout manual untuk dibandingkan
-            dengan target Coach.
+            <div>
+              Google Fit total energi hari ini: <strong>{fmtNumber(todayGoogleFitTotalEnergyV126M116, 0)} kkal</strong>.
+              Nilai ini mencakup energi istirahat/basal dan hanya ditampilkan sebagai informasi.
+            </div>
+            <div className="mt-1">
+              Kalori workout yang dipakai target/streak/point: <strong>{fmtNumber(todayWorkoutBreakdownV126M31.googleFit, 0)} kkal</strong>.
+              Karena active calories exact tidak tersedia, nilai workout memakai estimasi aktif konservatif dari gerak (steps/distance/active minutes) melalui resolver canonical yang sama dengan Coach dan Admin.
+            </div>
           </div>
         ) : null}
 
@@ -10231,6 +10290,7 @@ function DevicesTab({
   healthConnectLastSyncAt,
   googleFitLastSyncAt,
   googleFitLastSyncSnapshot,
+  workoutItems,
   fitnessSettings,
   syncing,
   syncProvider,
@@ -10240,6 +10300,7 @@ function DevicesTab({
   healthConnectLastSyncAt: string;
   googleFitLastSyncAt: string;
   googleFitLastSyncSnapshot: any;
+  workoutItems: any[];
   fitnessSettings: any;
   syncing: string;
   // WELLNESS_GOOGLEFIT_MANUAL_BACKFILL_30D_V126M98_2_4
@@ -10253,6 +10314,23 @@ function DevicesTab({
   const source = clean(fitnessSettings?.fitness_source || "none")
     .toLowerCase()
     .replace(/-/g, "_");
+  const googleFitTodayRowV126M116 = latestGoogleFitDailyRowV126M116(
+    workoutItems || [],
+    todayDate(),
+  );
+  const googleFitWorkoutCaloriesV126M116 = wellnessStreakWorkoutCalories(
+    googleFitTodayRowV126M116,
+  );
+  const googleFitExactActiveV126M116 = googleFitExactActiveCaloriesV126M116(
+    googleFitTodayRowV126M116,
+  );
+  const googleFitWorkoutSourceV126M116 =
+    googleFitWorkoutCaloriesV126M116 > 0
+      ? googleFitExactActiveV126M116 > 0
+        ? "Active calories exact dari provider"
+        : "Estimasi aktif konservatif dari steps/distance/active minutes"
+      : "Belum ada kalori workout aktif";
+
   const sourceLabel =
     source === "health_connect"
       ? "Health Connect"
@@ -10407,8 +10485,8 @@ function DevicesTab({
               tidak perlu memilih email kembali.
             </div>
             <div className="mt-1">
-              Kalori yang disinkronkan adalah total Google Fit termasuk energi
-              istirahat/basal. Kalori aktif tidak ditebak atau diestimasi.
+              Energi total Google Fit dapat mencakup energi istirahat/basal dan hanya ditampilkan sebagai informasi.
+              Untuk target workout, streak, dan point, sistem memakai active calories exact bila tersedia; bila Google Fit tidak menyediakannya, sistem memakai estimasi aktif konservatif dari steps/distance/active minutes melalui resolver canonical yang sama dengan Coach/Admin.
             </div>
           </div>
 
@@ -10445,13 +10523,27 @@ function DevicesTab({
                 </div>
                 <div className="rounded-xl bg-white/80 px-3 py-2">
                   <div className="text-[9px] font-black uppercase tracking-wide text-blue-400">
-                    Kalori total saat sync
+                    Energi total Google Fit · info
                   </div>
                   <div className="mt-1 text-base font-black text-blue-950">
                     {fmtNumber(
                       googleFitLastSyncSnapshot.total_calories || 0,
                       0,
                     )} kkal
+                  </div>
+                  <div className="mt-1 text-[9px] font-bold leading-4 text-blue-600">
+                    Termasuk energi basal; bukan target workout.
+                  </div>
+                </div>
+                <div className="col-span-2 rounded-xl border border-blue-100 bg-white/90 px-3 py-2">
+                  <div className="text-[9px] font-black uppercase tracking-wide text-teal-600">
+                    Kalori workout dipakai target
+                  </div>
+                  <div className="mt-1 text-base font-black text-teal-800">
+                    {fmtNumber(googleFitWorkoutCaloriesV126M116, 0)} kkal
+                  </div>
+                  <div className="mt-1 text-[9px] font-bold leading-4 text-slate-500">
+                    {googleFitWorkoutSourceV126M116}
                   </div>
                 </div>
                 <div className="col-span-2 break-all rounded-xl bg-white/60 px-3 py-2 text-[9px] font-bold leading-4 text-blue-700">
