@@ -30,6 +30,10 @@ function defaultSettings(packageId: number, programType: string) {
     station_label: station.label,
     short_code: station.shortCode,
     default_copies: station.defaultCopies,
+    font_size: 9,
+    show_border: 0,
+    show_qr: 1,
+    show_footer_text: 1,
     is_active: 1
   }));
 }
@@ -65,14 +69,18 @@ export async function GET(req: NextRequest) {
   if (error) return fail(error.message, 500);
 
   if (!data?.length) {
+    const defaults = defaultSettings(packageId, program);
+
     return ok({
-      settings: defaultSettings(packageId, program),
+      settings: defaults,
+      label_style: defaults[0],
       source: "default"
     });
   }
 
   return ok({
     settings: data,
+    label_style: data[0],
     source: "database"
   });
 }
@@ -97,6 +105,10 @@ export async function POST(req: NextRequest) {
     station_label: String(setting.station_label || ""),
     short_code: String(setting.short_code || ""),
     default_copies: Math.max(0, Math.min(20, Number(setting.default_copies || 0))),
+    font_size: Math.max(7, Math.min(14, Number(setting.font_size || body.font_size || 9))),
+    show_border: Number(setting.show_border ?? body.show_border ?? 0) === 1 ? 1 : 0,
+    show_qr: Number(setting.show_qr ?? body.show_qr ?? 1) === 1 ? 1 : 0,
+    show_footer_text: Number(setting.show_footer_text ?? body.show_footer_text ?? 1) === 1 ? 1 : 0,
     is_active: 1,
     updated_at: new Date().toISOString()
   })).filter((row: any) => row.station_key);

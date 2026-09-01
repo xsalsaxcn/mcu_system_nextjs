@@ -55,6 +55,10 @@ function SetupLabelPaket({ user }: { user: any }) {
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [packageId, setPackageId] = useState("");
   const [copies, setCopies] = useState<Record<string, number>>(() => defaultCopies());
+  const [fontSize, setFontSize] = useState(9);
+  const [showBorder, setShowBorder] = useState(false);
+  const [showQr, setShowQr] = useState(true);
+  const [showFooterText, setShowFooterText] = useState(true);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -137,7 +141,13 @@ function SetupLabelPaket({ user }: { user: any }) {
         }
       });
 
+      const style = json.label_style || json.settings?.[0] || {};
+
       setCopies(next);
+      setFontSize(Math.max(7, Math.min(14, Number(style.font_size || 9))));
+      setShowBorder(Number(style.show_border || 0) === 1);
+      setShowQr(Number(style.show_qr ?? 1) === 1);
+      setShowFooterText(Number(style.show_footer_text ?? 1) === 1);
       setMessage("Setting siap diedit.");
     } catch (err: any) {
       setCopies(defaultCopies());
@@ -170,6 +180,25 @@ function SetupLabelPaket({ user }: { user: any }) {
     setCopies(defaultCopies());
   }
 
+  function applyStickerFinalPreset() {
+    setFontSize(9);
+    setShowBorder(false);
+    setShowQr(true);
+    setShowFooterText(true);
+  }
+
+  function applyAllStationOnePreset() {
+    applyStickerFinalPreset();
+    setCopies(
+      Object.fromEntries(
+        STATION_PRINT_OPTIONS.map((station) => [
+          station.key,
+          station.key === "gigi" ? 2 : 1
+        ])
+      ) as Record<string, number>
+    );
+  }
+
   async function save() {
     if (!packageId) {
       setMessage("Pilih paket dulu.");
@@ -184,7 +213,11 @@ function SetupLabelPaket({ user }: { user: any }) {
         station_key: station.key,
         station_label: station.label,
         short_code: station.shortCode,
-        default_copies: Number(copies[station.key] || 0)
+        default_copies: Number(copies[station.key] || 0),
+        font_size: Number(fontSize || 9),
+        show_border: showBorder ? 1 : 0,
+        show_qr: showQr ? 1 : 0,
+        show_footer_text: showFooterText ? 1 : 0
       }));
 
       const res = await fetch("/api/package-label-settings", {
@@ -193,6 +226,10 @@ function SetupLabelPaket({ user }: { user: any }) {
         body: JSON.stringify({
           program_type: program,
           package_id: Number(packageId),
+          font_size: Number(fontSize || 9),
+          show_border: showBorder ? 1 : 0,
+          show_qr: showQr ? 1 : 0,
+          show_footer_text: showFooterText ? 1 : 0,
           settings
         })
       });
@@ -219,10 +256,10 @@ function SetupLabelPaket({ user }: { user: any }) {
       <section className="card p-5">
         <div className="text-2xl font-black">Setup Label Paket</div>
         <div className="mt-1 text-sm text-slate-500">
-          Atur default jumlah print label per station berdasarkan paket pemeriksaan. Setting ini dipakai otomatis di Registrasi Ulang.
+          Atur jumlah print dan style stiker label per paket pemeriksaan. Setting ini dipakai otomatis di Registrasi Ulang.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Setup Label Paket v29 · package-based print count
+          Setup Label Paket v39 · stiker final 40x30
         </div>
       </section>
 
@@ -261,6 +298,66 @@ function SetupLabelPaket({ user }: { user: any }) {
             {message}
           </div>
         )}
+      </section>
+
+      <section className="card p-5">
+        <div className="mb-4">
+          <div className="text-xl font-black">Style Label Paket</div>
+          <div className="text-sm text-slate-500">
+            Pengaturan ini dipakai otomatis saat Registrasi Ulang mencetak stiker label 40mm × 30mm untuk paket ini.
+          </div>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary" onClick={applyStickerFinalPreset}>
+            Preset Stiker Final 40×30
+          </button>
+          <button type="button" className="btn-secondary" onClick={applyAllStationOnePreset}>
+            Preset Semua Station
+          </button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <div>
+            <label className="label">Ukuran Font</label>
+            <input
+              type="number"
+              min={7}
+              max={14}
+              className="input"
+              value={fontSize}
+              onChange={(e) => setFontSize(Number(e.target.value || 9))}
+            />
+            <div className="mt-1 text-xs text-slate-500">Final: 9 untuk 40×30. Turunkan ke 8 jika nama/No MCU terlalu panjang.</div>
+          </div>
+
+          <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold">
+            <input
+              type="checkbox"
+              checked={showBorder}
+              onChange={(e) => setShowBorder(e.target.checked)}
+            />
+            Border Line
+          </label>
+
+          <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold">
+            <input
+              type="checkbox"
+              checked={showQr}
+              onChange={(e) => setShowQr(e.target.checked)}
+            />
+            QR Kecil
+          </label>
+
+          <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold">
+            <input
+              type="checkbox"
+              checked={showFooterText}
+              onChange={(e) => setShowFooterText(e.target.checked)}
+            />
+            No MCU Footer
+          </label>
+        </div>
       </section>
 
       <section className="card p-5">
