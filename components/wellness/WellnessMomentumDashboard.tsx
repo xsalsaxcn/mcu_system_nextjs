@@ -297,10 +297,12 @@ function WeeklyStreak({ days, currentStreak }: { days: WellnessMomentumDay[]; cu
 
 function MonthlyCalendar({ successDates }: { successDates: string[] }) {
   const successSet = new Set(successDates);
-  // WELLNESS_COACH_TARGET_STREAK_PARITY_V126M109_1_CURRENT_MONTH_CALENDAR
-  // Always open the calendar on the current month. Historical success dates
-  // remain intact; they simply no longer force the UI back to the last success month.
-  const reference = new Date();
+  // WELLNESS_STREAK_CALENDAR_PREV_MONTH_V126M113
+  // Keep the current month as default, while allowing the immediately previous
+  // month to be inspected. This changes presentation only, not streak rules.
+  const [monthOffset, setMonthOffset] = useState(0);
+  const now = new Date();
+  const reference = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
   const year = reference.getFullYear();
   const month = reference.getMonth();
   const totalDays = new Date(year, month + 1, 0).getDate();
@@ -309,16 +311,39 @@ function MonthlyCalendar({ successDates }: { successDates: string[] }) {
     if (index < firstDay) return null;
     const day = index - firstDay + 1;
     const date = new Date(year, month, day);
-    return { day, key: dateKey(date), today: dateKey(date) === dateKey(new Date()) };
+    return { day, key: dateKey(date), today: dateKey(date) === dateKey(now) };
   });
+  const viewingPreviousMonth = monthOffset === -1;
 
   return (
     <article className="rounded-[1.7rem] border border-slate-100 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.07)]">
-      <div>
-        <h3 className="text-base font-black text-slate-950">Kalender Streak</h3>
-        <p className="mt-1 text-[11px] font-bold text-slate-400">
-          {reference.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-black text-slate-950">Kalender Streak</h3>
+          <p className="mt-1 text-[11px] font-bold text-slate-400">
+            {reference.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setMonthOffset(-1)}
+            disabled={viewingPreviousMonth}
+            aria-label="Lihat bulan sebelumnya"
+            className="grid h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => setMonthOffset(0)}
+            disabled={!viewingPreviousMonth}
+            aria-label="Kembali ke bulan ini"
+            className="grid h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            ›
+          </button>
+        </div>
       </div>
       <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[9px] font-black text-slate-400">
         {['M','S','S','R','K','J','S'].map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}
