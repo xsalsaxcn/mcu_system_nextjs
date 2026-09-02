@@ -1,4 +1,5 @@
 // WELLNESS_COACH_GOAL_WEIGHT_SAFETY_FALLBACK_V126M40_5
+// WELLNESS_COACH_WORKOUT_HISTORY_TRUTH_V126M119_9
 "use client";
 
 // WELLNESS_COACH_MOBILE_TABLE_MODAL_V58
@@ -152,15 +153,21 @@ function reminderMeta(item: any) {
     item?.compliance?.days_since_workout,
   );
   const workoutDays = hasWorkoutCaloriesToday ? 0 : storedWorkoutDays;
+  const workoutHistoryState = clean(
+    item?.compliance?.workout_history_state,
+  ).toLowerCase();
   const nutritionMissing = nutritionDays === null || nutritionDays > 0;
   const workoutMissing = !hasWorkoutCaloriesToday &&
     (workoutDays === null || workoutDays > 0);
   const complete = !nutritionMissing && !workoutMissing;
+  const workoutNeverConfirmed =
+    workoutDays !== null &&
+    workoutDays >= 99 &&
+    workoutHistoryState === "no_history_evidence";
   const neverInput =
     nutritionDays !== null &&
     nutritionDays >= 99 &&
-    workoutDays !== null &&
-    workoutDays >= 99;
+    workoutNeverConfirmed;
   const urgent =
     !complete &&
     (neverInput ||
@@ -202,6 +209,7 @@ function reminderMeta(item: any) {
   return {
     nutritionDays,
     workoutDays,
+    workoutHistoryState,
     nutritionMissing,
     workoutMissing,
     complete,
@@ -2936,10 +2944,25 @@ function coachCompactStatus(
   label: "Nutrisi" | "Workout",
   missing: boolean,
   days: any,
+  workoutHistoryState?: any,
 ) {
   if (!missing) return `${label} lengkap`;
 
   const age = formatDaysWithoutInput(days);
+
+  if (label === "Workout" && age === "Belum pernah input") {
+    const state = clean(workoutHistoryState).toLowerCase();
+
+    if (state === "integration_without_storage") {
+      return "Riwayat workout belum terbaca";
+    }
+
+    if (state === "recorded") {
+      return "Riwayat workout tercatat";
+    }
+
+    return "Workout belum ada riwayat tercatat";
+  }
 
   if (age === "Belum pernah input") {
     return `${label} belum pernah input`;
@@ -3190,6 +3213,7 @@ function CoachPriorityParticipantRow({
           "Workout",
           true,
           item.compliance?.days_since_workout,
+          item.compliance?.workout_history_state,
         )
       : "Input hari ini lengkap";
 
@@ -3269,6 +3293,7 @@ function CoachParticipantCompactRow({
     "Workout",
     meta.workoutMissing,
     item.compliance?.days_since_workout,
+    item.compliance?.workout_history_state,
   );
 
   return (

@@ -1,4 +1,5 @@
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
+// WELLNESS_COACH_WORKOUT_HISTORY_TRUTH_V126M119_9
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
@@ -174,6 +175,32 @@ function nutritionPointIdentity(row: any) {
   return clean(row?.source_id) || clean(row?.point_key) || clean(row?.id);
 }
 
+// WELLNESS_COACH_WORKOUT_HISTORY_TRUTH_V126M119_9
+// Strict durable workout-point evidence only. Free-text descriptions are not
+// accepted because Nutrition rows can mention steps/kcal and would false-match.
+function isWorkoutPoint(row: any) {
+  const sourceType = clean(row?.source_type).toLowerCase();
+  const pointKey = clean(row?.point_key).toLowerCase();
+  const status = clean(row?.status).toLowerCase();
+  const rejected = new Set(["rejected", "revoked", "cancelled", "canceled", "void"]);
+
+  return (
+    asNumber(row?.points) > 0 &&
+    !rejected.has(status) &&
+    (
+      sourceType === "workout_daily" ||
+      sourceType.startsWith("workout_") ||
+      pointKey === "workout_daily" ||
+      pointKey.startsWith("workout_")
+    )
+  );
+}
+
+function isFitnessIntegration(row: any) {
+  const provider = clean(row?.provider).toLowerCase().replace(/-/g, "_");
+  return provider === "google_fit" || provider === "health_connect";
+}
+
 // WELLNESS_GOOGLEFIT_PORTAL_COACH_PARITY_V126M47_1
 // Dashboard compliance and cards use the same device metric resolver as the
 // Portal, participant detail, point calculation, and streak calculation.
@@ -341,6 +368,8 @@ function makeFlag(params: {
   nutritionDates: string[];
   nutritionHistoryDates?: string[];
   workoutDates: string[];
+  workoutHistoryDates?: string[];
+  workoutHistoryState?: string;
   latestNote: any;
 }) {
   const nutritionDays = new Set(params.nutritionDates.filter(Boolean)).size;
@@ -355,13 +384,21 @@ function makeFlag(params: {
     ),
   ].sort();
   const workoutDateList = [...new Set(params.workoutDates.filter(Boolean))].sort();
+  const workoutHistoryDateList = [
+    ...new Set(
+      (params.workoutHistoryDates || params.workoutDates).filter(Boolean),
+    ),
+  ].sort();
+  const workoutHistoryState =
+    clean(params.workoutHistoryState) ||
+    (workoutHistoryDateList.length > 0 ? "recorded" : "no_history_evidence");
   const lastNutritionDate =
     nutritionHistoryDateList.length > 0
       ? nutritionHistoryDateList[nutritionHistoryDateList.length - 1]
       : "";
   const lastWorkoutDate =
-    workoutDateList.length > 0
-      ? workoutDateList[workoutDateList.length - 1]
+    workoutHistoryDateList.length > 0
+      ? workoutHistoryDateList[workoutHistoryDateList.length - 1]
       : "";
   const daysSinceNutrition = lastNutritionDate
     ? daysBetween(lastNutritionDate, params.today)
@@ -369,6 +406,9 @@ function makeFlag(params: {
   const daysSinceWorkout = lastWorkoutDate
     ? daysBetween(lastWorkoutDate, params.today)
     : 99;
+  // WELLNESS_COACH_WORKOUT_HISTORY_FLAG_ISOLATION_V126M119_9A
+  // Keep flag recency based on the existing monitoring-window workout dates.
+  // Historical workout affects only last_workout_date / days_since_workout.
   const allDates = [...nutritionHistoryDateList, ...workoutDateList].sort();
   const lastDate = allDates.length > 0 ? allDates[allDates.length - 1] : "";
   const daysSinceLastInput = lastDate
@@ -386,6 +426,7 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      workout_history_state: workoutHistoryState,
       last_nutrition_date: lastNutritionDate || null,
       last_workout_date: lastWorkoutDate || null,
       days_since_nutrition: daysSinceNutrition,
@@ -406,6 +447,7 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      workout_history_state: workoutHistoryState,
       last_nutrition_date: lastNutritionDate || null,
       last_workout_date: lastWorkoutDate || null,
       days_since_nutrition: daysSinceNutrition,
@@ -426,6 +468,7 @@ function makeFlag(params: {
       compliance_percent: compliancePercent,
       nutrition_days: nutritionDays,
       workout_days: workoutDays,
+      workout_history_state: workoutHistoryState,
       last_nutrition_date: lastNutritionDate || null,
       last_workout_date: lastWorkoutDate || null,
       days_since_nutrition: daysSinceNutrition,
@@ -442,6 +485,7 @@ function makeFlag(params: {
     compliance_percent: compliancePercent,
     nutrition_days: nutritionDays,
     workout_days: workoutDays,
+    workout_history_state: workoutHistoryState,
     last_nutrition_date: lastNutritionDate || null,
     last_workout_date: lastWorkoutDate || null,
     days_since_nutrition: daysSinceNutrition,
@@ -537,6 +581,8 @@ export async function GET(request: NextRequest) {
     const fromDate = jakartaDate(-6);
 
     let activityRows: any[] = [];
+    let activityHistoryRows: any[] = [];
+    let integrationRows: any[] = [];
     let foodRows: any[] = [];
     let clinicalRows: any[] = [];
     let noteRows: any[] = [];
@@ -546,6 +592,8 @@ export async function GET(request: NextRequest) {
     if (participantIds.length > 0) {
       const [
         activityResult,
+        activityHistoryResult,
+        integrationResult,
         foodResult,
         clinicalResult,
         noteResult,
@@ -558,6 +606,19 @@ export async function GET(request: NextRequest) {
             .in("participant_id", participantIds)
             .gte("log_date", fromDate)
             .limit(10000),
+          // Historical read is intentionally separate from the 7-day compliance
+          // query. It never changes today's activity or compliance numerator.
+          supabase
+            .from("wellness_activity_logs")
+            .select("*")
+            .in("participant_id", participantIds)
+            .order("log_date", { ascending: false })
+            .limit(20000),
+          supabase
+            .from("wellness_integrations")
+            .select("*")
+            .in("participant_id", participantIds)
+            .limit(5000),
           supabase
             .from("wellness_food_logs")
             .select("*")
@@ -597,6 +658,10 @@ export async function GET(request: NextRequest) {
         activityResult.data || [],
         participantControlMap,
       );
+      activityHistoryRows = activityHistoryResult.error
+        ? []
+        : activityHistoryResult.data || [];
+      integrationRows = integrationResult.error ? [] : integrationResult.data || [];
       foodRows = foodResult.error ? [] : foodResult.data || [];
       clinicalRows = clinicalResult.error ? [] : clinicalResult.data || [];
       noteRows = mergeCoachNoteRows(
@@ -833,6 +898,66 @@ export async function GET(request: NextRequest) {
         ]),
       ];
 
+      // WELLNESS_COACH_WORKOUT_HISTORY_TRUTH_V126M119_9
+      // Compliance remains 7-day. Historical evidence is used ONLY to describe
+      // when workout was last recorded, so an old Google Fit/Health Connect/manual
+      // row is never mislabeled as "belum pernah input".
+      const workoutHistoryFromDateV126M119_9 =
+        clean(
+          row?.program_start_date ||
+            row?.program_start ||
+            row?.start_date,
+        ) || "1900-01-01";
+      const historicalActsV126M119_9 = filterOperationalRowsForProgram(
+        row,
+        activityHistoryRows.filter(
+          (item) => asNumber(item?.participant_id) === id,
+        ),
+        workoutHistoryFromDateV126M119_9,
+        today,
+        ["log_date", "started_at", "created_at"],
+      );
+      const historicalActivityWorkoutDatesV126M119_9 =
+        historicalActsV126M119_9
+          .filter(
+            (item) => activitySteps(item) > 0 || activityCalories(item) > 0,
+          )
+          .map(activityDate)
+          .filter(Boolean);
+      const historicalWorkoutPointDatesV126M119_9 = pointRows
+        .filter(
+          (item) =>
+            asNumber(item?.participant_id) === id &&
+            isWorkoutPoint(item) &&
+            isOperationalRowInProgramWindow(
+              row,
+              item,
+              workoutHistoryFromDateV126M119_9,
+              today,
+              ["log_date", "created_at"],
+            ),
+        )
+        .map(pointLogDate)
+        .filter(Boolean);
+      const workoutHistoryDatesV126M119_9 = [
+        ...new Set([
+          ...historicalActivityWorkoutDatesV126M119_9,
+          ...historicalWorkoutPointDatesV126M119_9,
+          ...canonicalWorkoutDatesV126M92_2,
+        ]),
+      ].sort();
+      const fitnessIntegrationObservedV126M119_9 = integrationRows.some(
+        (item) =>
+          asNumber(item?.participant_id) === id &&
+          isFitnessIntegration(item),
+      );
+      const workoutHistoryStateV126M119_9 =
+        workoutHistoryDatesV126M119_9.length > 0
+          ? "recorded"
+          : fitnessIntegrationObservedV126M119_9
+            ? "integration_without_storage"
+            : "no_history_evidence";
+
       const flag = makeFlag({
         today,
         nutritionDates,
@@ -840,6 +965,9 @@ export async function GET(request: NextRequest) {
         // Preserve every existing recognized workout day and only add canonical
         // Portal/detail days that the dashboard source path previously missed.
         workoutDates: workoutDatesForStatusV126M92_2,
+        // Historical dates do not contribute to 7-day compliance.
+        workoutHistoryDates: workoutHistoryDatesV126M119_9,
+        workoutHistoryState: workoutHistoryStateV126M119_9,
         latestNote,
       });
 
