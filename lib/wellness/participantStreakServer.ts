@@ -664,6 +664,240 @@ function nutritionCountByDate(rows: any[]) {
   return counts;
 }
 
+// WELLNESS_DURABLE_STREAK_EXACT_PROOF_V126M119_18
+// Exact historical success proof from V119.16/V119.17.
+// Nutrition identities prove >=3 submissions. workout_daily +10 proves the
+// dated workout target was reached. This proof changes success state only;
+// it never invents calories and never treats total/basal/resting energy as workout.
+const DURABLE_STREAK_POINT_PROOF: Record<
+  number,
+  Record<string, { nutrition: number[]; workout: number[] }>
+> = {
+  "48": {
+    "2026-08-08": {
+      "nutrition": [
+        3117,
+        3256,
+        3259
+      ],
+      "workout": [
+        3122
+      ]
+    }
+  },
+  "83": {
+    "2026-08-09": {
+      "nutrition": [
+        3351,
+        3386,
+        3485
+      ],
+      "workout": [
+        3349
+      ]
+    }
+  },
+  "88": {
+    "2026-08-08": {
+      "nutrition": [
+        3321,
+        3324,
+        3325
+      ],
+      "workout": [
+        3326
+      ]
+    },
+    "2026-08-09": {
+      "nutrition": [
+        3327,
+        3744,
+        3745
+      ],
+      "workout": [
+        3329
+      ]
+    }
+  },
+  "35": {
+    "2026-08-02": {
+      "nutrition": [
+        1590,
+        1756,
+        1758
+      ],
+      "workout": [
+        1644
+      ]
+    },
+    "2026-08-03": {
+      "nutrition": [
+        1802,
+        1933,
+        1993
+      ],
+      "workout": [
+        1852
+      ]
+    },
+    "2026-08-04": {
+      "nutrition": [
+        2083,
+        2231,
+        2232
+      ],
+      "workout": [
+        2027
+      ]
+    },
+    "2026-08-05": {
+      "nutrition": [
+        2384,
+        2385,
+        2493
+      ],
+      "workout": [
+        2390
+      ]
+    }
+  },
+  "95": {
+    "2026-08-09": {
+      "nutrition": [
+        3318,
+        3402,
+        3475
+      ],
+      "workout": [
+        3316
+      ]
+    }
+  },
+  "57": {
+    "2026-08-06": {
+      "nutrition": [
+        2607,
+        2688,
+        2748
+      ],
+      "workout": [
+        2619
+      ]
+    }
+  },
+  "59": {
+    "2026-08-03": {
+      "nutrition": [
+        1857,
+        1923,
+        1996
+      ],
+      "workout": [
+        1859
+      ]
+    }
+  },
+  "94": {
+    "2026-08-04": {
+      "nutrition": [
+        2071,
+        2104,
+        2108,
+        2172,
+        2173
+      ],
+      "workout": [
+        2170
+      ]
+    },
+    "2026-08-05": {
+      "nutrition": [
+        2319,
+        2362,
+        2367,
+        2368,
+        2424
+      ],
+      "workout": [
+        2369
+      ]
+    }
+  }
+};
+
+function isDurableWorkoutReachedPoint(row: any) {
+  const status = clean(row?.status).toLowerCase();
+  if (
+    ["rejected", "revoked", "cancelled", "canceled", "void"].includes(status)
+  ) {
+    return false;
+  }
+  const sourceType = clean(row?.source_type).toLowerCase();
+  const pointKey = clean(row?.point_key).toLowerCase();
+  return (
+    Math.abs(numberValue(row?.points) - 10) < 0.001 &&
+    (sourceType === "workout_daily" || pointKey === "workout_daily")
+  );
+}
+
+function durableProofLongestStreak(successDates: string[]) {
+  const dates = [...new Set((successDates || []).map(clean).filter(Boolean))].sort();
+  let longest = 0;
+  let running = 0;
+  let previousEpoch: number | null = null;
+
+  for (const date of dates) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!match) {
+      running = 0;
+      previousEpoch = null;
+      continue;
+    }
+    const epoch = Date.UTC(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+    );
+    running =
+      previousEpoch !== null && epoch - previousEpoch === 24 * 60 * 60 * 1000
+        ? running + 1
+        : 1;
+    longest = Math.max(longest, running);
+    previousEpoch = epoch;
+  }
+
+  return longest;
+}
+
+function applyDurableStreakSuccessProof(streak: any, proofDates: Set<string>) {
+  if (!proofDates.size) return streak;
+
+  const successDates = [
+    ...new Set([
+      ...((Array.isArray(streak?.success_dates) ? streak.success_dates : []) as string[]),
+      ...proofDates,
+    ]),
+  ]
+    .map(clean)
+    .filter(Boolean)
+    .sort();
+
+  // These exact allowlisted proofs are historical August 2026 dates.
+  // Preserve live current_streak semantics; only historical success/longest
+  // and any matching returned day need supplementation.
+  return {
+    ...streak,
+    longest_streak: Math.max(
+      numberValue(streak?.longest_streak),
+      durableProofLongestStreak(successDates),
+    ),
+    success_dates: successDates,
+    days: (Array.isArray(streak?.days) ? streak.days : []).map((day: any) =>
+      proofDates.has(clean(day?.date)) ? { ...day, success: true } : day,
+    ),
+  };
+}
+
 function fallbackControlMap(participant: any) {
   const participantId = numberValue(participant?.id);
   const map = new Map<number, any>();
@@ -692,8 +926,15 @@ export async function loadParticipantCanonicalStreak(params: {
 
   const historicalProofByDate =
     HISTORICAL_STREAK_NUTRITION_POINT_IDS[participantId] || {};
+  const durableProofByDate = DURABLE_STREAK_POINT_PROOF[participantId] || {};
+  const durableProofPointIds = Object.values(durableProofByDate).flatMap(
+    (proof) => [...(proof?.nutrition || []), ...(proof?.workout || [])],
+  );
   const historicalProofPointIds = [
-    ...new Set(Object.values(historicalProofByDate).flat()),
+    ...new Set([
+      ...Object.values(historicalProofByDate).flat(),
+      ...durableProofPointIds,
+    ]),
   ];
   const historicalProofPromise =
     historicalProofPointIds.length > 0
@@ -850,14 +1091,96 @@ export async function loadParticipantCanonicalStreak(params: {
     ...operationalHistoricalProofRows,
   ];
 
+  // V119.18: validate every durable success date again from exact live point IDs.
+  // No row-number-only or description-only mapping is accepted.
+  const validatedDurableProofDateRows: any[] = [];
+  for (const [date, proof] of Object.entries(durableProofByDate)) {
+    const exactNutritionRows = (proof?.nutrition || [])
+      .map((pointId) => liveProofRowsById.get(numberValue(pointId)))
+      .filter(
+        (row: any) =>
+          row &&
+          historicalProofDate(row) === date &&
+          isHistoricalNutritionInputPoint(row),
+      );
+    const exactWorkoutRows = (proof?.workout || [])
+      .map((pointId) => liveProofRowsById.get(numberValue(pointId)))
+      .filter(
+        (row: any) =>
+          row &&
+          historicalProofDate(row) === date &&
+          isDurableWorkoutReachedPoint(row),
+      );
+
+    const nutritionIds = new Set(
+      exactNutritionRows.map((row: any) => numberValue(row?.id)).filter(Boolean),
+    );
+    const workoutIds = new Set(
+      exactWorkoutRows.map((row: any) => numberValue(row?.id)).filter(Boolean),
+    );
+    if (nutritionIds.size < 3 || workoutIds.size < 1) continue;
+
+    validatedDurableProofDateRows.push({
+      log_date: date,
+      source_type: "durable_streak_success_point_proof",
+    });
+  }
+
+  const operationalDurableProofDateRows = filterOperationalRowsForProgram(
+    params.participant,
+    validatedDurableProofDateRows,
+    "",
+    "",
+    ["log_date"],
+  );
+  const durableProofDatesApplied = new Set(
+    operationalDurableProofDateRows
+      .map((row: any) => historicalProofDate(row))
+      .filter(Boolean),
+  );
+
+  // Supplement Nutrition count only when canonical + V119.7 proof still has <3.
+  // Zero-calorie synthetic rows exist only inside streak computation.
+  const existingStreakNutritionCounts = nutritionCountByDate(streakNutritionRows);
+  const durableNutritionProofRows: any[] = [];
+  for (const date of durableProofDatesApplied) {
+    const currentCount = existingStreakNutritionCounts.get(date) || 0;
+    const missingCount = Math.max(0, 3 - currentCount);
+    for (let index = 0; index < missingCount; index += 1) {
+      durableNutritionProofRows.push({
+        log_date: date,
+        total_calories: 0,
+        calories: 0,
+        source_type: "durable_streak_nutrition_point_proof",
+        point_key: `durable_streak_nutrition_point_proof_${index + 1}`,
+      });
+    }
+  }
+
+  const operationalDurableNutritionProofRows = filterOperationalRowsForProgram(
+    params.participant,
+    durableNutritionProofRows,
+    "",
+    "",
+    ["log_date"],
+  );
+  const finalStreakNutritionRows = [
+    ...streakNutritionRows,
+    ...operationalDurableNutritionProofRows,
+  ];
+
   const nutritionTarget = numberValue(targets?.current?.nutrition);
   const workoutTarget = numberValue(targets?.current?.workout) || 300;
-  const streak = buildWellnessStreakSummary({
-    nutritionRows: streakNutritionRows,
+  const baseStreak = buildWellnessStreakSummary({
+    nutritionRows: finalStreakNutritionRows,
     activityRows,
     workoutTargetCalories: workoutTarget,
     targetTimeline: targets,
   });
+  const streak = applyDurableStreakSuccessProof(
+    baseStreak,
+    durableProofDatesApplied,
+  );
 
   const control =
     controlMap.get(participantId) ||
@@ -877,6 +1200,9 @@ export async function loadParticipantCanonicalStreak(params: {
       nutrition_rows: nutritionRows.length,
       historical_streak_proof_rows: operationalHistoricalProofRows.length,
       historical_streak_proof_dates: historicalProofDatesApplied,
+      durable_streak_proof_dates: durableProofDatesApplied.size,
+      durable_streak_nutrition_rows:
+        operationalDurableNutritionProofRows.length,
       activity_ok: !activityResult?.error,
       activity_rows: activityRows.length,
       fitness_source: clean(control?.fitness_source || "none"),
