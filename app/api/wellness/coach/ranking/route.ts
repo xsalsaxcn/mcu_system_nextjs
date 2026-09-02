@@ -1,3 +1,4 @@
+// WELLNESS_STREAK_PROOF_POINT_PARITY_V126M119_7
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -613,7 +614,7 @@ export async function GET(request: NextRequest) {
           other: 0,
         },
         preferCalculated: {
-          nutrition: true,
+          nutrition: false,
           workout: true,
           healthtalk: true,
         },

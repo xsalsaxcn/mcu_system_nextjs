@@ -1,3 +1,4 @@
+// WELLNESS_STREAK_PROOF_POINT_PARITY_V126M119_7
 // WELLNESS_COMPANY_ISOLATION_V126C_FINAL
 import { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/server/response";
@@ -952,7 +953,7 @@ export async function GET(request: NextRequest) {
           other: 0,
         },
         preferCalculated: {
-          nutrition: true,
+          nutrition: false,
           workout: true,
           healthtalk: true,
         },
