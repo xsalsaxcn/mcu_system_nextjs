@@ -7,6 +7,8 @@ import { wellnessStreakWorkoutCalories } from "@/lib/wellness/streak";
 // WELLNESS_CHART_TODAY_ONLY_SUMMARY_V73
 // WELLNESS_CHART_NO_GOOGLE_FIT_CALORIE_GUESS_V79N
 // WELLNESS_CHART_GOOGLE_FIT_TOTAL_DISPLAY_V79O
+// WELLNESS_GOOGLEFIT_TOTAL_ENERGY_INFO_GRAPH_V126M118
+// Display-only: active workout stays canonical; Google Fit total energy is shown in a separate informational graph only.
 
 type ChartPoint = {
   date: string;
@@ -153,6 +155,19 @@ export default function AchievementChartsTab({
     });
   }, [JSON.stringify(workoutItems || [])]);
 
+  const googleFitTotalEnergySeriesV126M118 = useMemo(() => {
+    return aggregateChartSeries(
+      normalizeWorkoutItemsForChartV72(workoutItems || []).filter(
+        (item: any) => chartDeviceProviderV72(item) === "google_fit",
+      ),
+      {
+        dateKeys: ["log_date", "created_at", "updated_at", "date"],
+        valueGetter: (item: any) => chartGoogleFitTotalCaloriesV79O(item),
+        average: false,
+      },
+    );
+  }, [JSON.stringify(workoutItems || [])]);
+
   const weightSeries = useMemo(() => {
     const rows = clinicalHistory || [];
     const series = aggregateChartSeries(rows, {
@@ -253,6 +268,10 @@ export default function AchievementChartsTab({
     workoutSeries.find((item) => item.date === todayKeyV73)?.value || 0
   );
 
+  const todayGoogleFitTotalEnergyV126M118 = Number(
+    googleFitTotalEnergySeriesV126M118.find((item) => item.date === todayKeyV73)?.value || 0
+  );
+
   const nutritionRedFlag = todayNutrition > nutritionLimit;
   const workoutRedFlag =
     todayWorkout > 0 &&
@@ -291,7 +310,7 @@ export default function AchievementChartsTab({
 
         {googleFitLegacyTotalRowsPresentV126M116 ? (
           <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold leading-5 text-blue-900">
-            Grafik workout memakai kalori aktif canonical yang sama dengan Ringkasan, Coach, streak, dan point. Energi total Google Fit yang mencakup basal tetap disimpan untuk informasi, tetapi tidak dipakai sebagai nilai workout.
+            Grafik workout memakai kalori aktif canonical yang sama dengan Ringkasan, Coach, streak, dan point. Energi total Google Fit yang mencakup basal ditampilkan pada grafik informasi terpisah dan tidak pernah dipakai sebagai nilai workout.
           </div>
         ) : null}
 
@@ -321,6 +340,19 @@ export default function AchievementChartsTab({
                 : "Belum ada workout aktif hari ini"
             }
           />
+          {todayGoogleFitTotalEnergyV126M118 > 0 ? (
+            <div className="md:col-span-2 rounded-[1.3rem] border border-blue-100 bg-blue-50 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-wide text-blue-500">
+                Energi total Google Fit · informasi
+              </div>
+              <div className="mt-1 text-lg font-black text-blue-950">
+                {fmtNumber(todayGoogleFitTotalEnergyV126M118, 0)} kkal
+              </div>
+              <div className="mt-1 text-[10px] font-bold leading-4 text-blue-700">
+                Termasuk energi basal/istirahat. Nilai ini tidak dipakai untuk target workout, streak, atau point.
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -337,12 +369,20 @@ export default function AchievementChartsTab({
 
         <SmoothDashboardChart
           title="Grafik Workout Kalori Aktif"
-          description="Kalori workout aktif per hari dari manual, Google Fit, atau Health Connect. Untuk Google Fit, energi total termasuk basal hanya informasi dan tidak diplot sebagai workout."
+          description="Kalori workout aktif per hari dari manual, Google Fit, atau Health Connect. Nilai ini yang dipakai untuk target workout; rule streak/point tetap mengikuti resolver canonical."
           unit="kkal"
           data={workoutSeries}
           limit={workoutMinTarget}
           dangerMode="below"
           emptyText="Belum ada data workout aktif untuk dibuat grafik."
+        />
+
+        <SmoothDashboardChart
+          title="Energi Total Google Fit · Informasi"
+          description="Energi total provider per hari, termasuk komponen basal/istirahat. Grafik ini hanya informasi dan tidak digunakan untuk target workout, streak, point, atau penentuan status peserta."
+          unit="kkal"
+          data={googleFitTotalEnergySeriesV126M118}
+          emptyText="Belum ada snapshot energi total Google Fit untuk ditampilkan."
         />
       </div>
 
