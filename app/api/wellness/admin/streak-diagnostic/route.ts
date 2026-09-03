@@ -407,42 +407,56 @@ function providerWarnings(rows: any[]) {
   return [...warnings];
 }
 
+// WELLNESS_ADMIN_DIAGNOSTIC_ACTIVITY_OR_RULE_V126M119_51
 function diagnosisLabel(params: {
   nutritionOk: boolean;
   workoutOk: boolean;
   stepsOk: boolean;
   activityZero: boolean;
 }) {
-  if (params.nutritionOk && params.workoutOk) {
-    return { code: "PASS", label: "Target streak tercapai" };
-  }
-  if (!params.nutritionOk && !params.workoutOk) {
+  if (params.nutritionOk && (params.workoutOk || params.stepsOk)) {
+    if (params.workoutOk && params.stepsOk) {
+      return {
+        code: "PASS_BOTH_ACTIVITY_TARGETS",
+        label: "Target streak tercapai: workout dan langkah memenuhi target",
+      };
+    }
+    if (params.workoutOk) {
+      return {
+        code: "PASS_WORKOUT_TARGET",
+        label: "Target streak tercapai melalui kalori workout",
+      };
+    }
     return {
-      code: "NUTRISI_DAN_WORKOUT_KURANG",
-      label: "Nutrisi dan workout belum memenuhi target",
+      code: "PASS_STEPS_TARGET",
+      label: "Target streak tercapai melalui langkah",
     };
   }
+
+  if (!params.nutritionOk && !params.workoutOk && !params.stepsOk) {
+    return {
+      code: "NUTRISI_DAN_AKTIVITAS_KURANG",
+      label: "Nutrisi kurang dan target workout maupun langkah belum tercapai",
+    };
+  }
+
   if (!params.nutritionOk) {
     return {
       code: "NUTRISI_KURANG",
-      label: "Input nutrisi kurang dari 3 kali",
+      label: "Aktivitas tercapai, tetapi input nutrisi kurang dari 3 kali",
     };
   }
+
   if (params.activityZero) {
     return {
       code: "DATA_ACTIVITY_NOL",
-      label: "Workout/aktivitas terbaca 0 pada tanggal ini",
+      label: "Workout dan langkah terbaca 0 pada tanggal ini",
     };
   }
-  if (params.stepsOk) {
-    return {
-      code: "WORKOUT_KURANG_STEPS_TERCAPAI",
-      label: "Langkah tercapai, tetapi kalori workout belum mencapai target",
-    };
-  }
+
   return {
-    code: "WORKOUT_KURANG",
-    label: "Kalori workout belum mencapai target",
+    code: "AKTIVITAS_TARGET_BELUM_TERCAPAI",
+    label: "Kalori workout dan langkah belum mencapai target",
   };
 }
 
@@ -853,7 +867,7 @@ export async function GET(request: NextRequest) {
           portal_steps: portalMetrics.steps,
           step_target: stepTarget,
           steps_ok: stepsOk,
-          steps_are_streak_rule: false,
+          steps_are_streak_rule: true,
           success: Boolean(day.success),
           diagnosis_code: diagnosis.code,
           diagnosis_label: diagnosis.label,

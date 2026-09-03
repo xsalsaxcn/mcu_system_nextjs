@@ -434,11 +434,22 @@ export function buildWellnessStreakSummary(params: {
     const revision = params.targetTimeline?.revisions
       ?.filter((item) => item.effective_from <= date)
       .at(-1);
+    // WELLNESS_STREAK_ACTIVITY_OR_RULE_V126M119_51
+    // Final activity rule: nutrition is mandatory, while the activity side
+    // can be satisfied by EITHER effective workout calories OR effective steps.
+    const stepTarget = Math.round(datedTargets?.steps || 8000);
+    const steps = Math.round(bucket?.steps || 0);
+    const workoutReached =
+      workoutTargetCalories > 0
+        ? workoutCalories >= workoutTargetCalories
+        : workoutCalories > 0;
+    const stepsReached =
+      stepTarget > 0
+        ? steps >= stepTarget
+        : steps > 0;
     const success =
       nutritionCount >= 3 &&
-      (workoutTargetCalories > 0
-        ? workoutCalories >= workoutTargetCalories
-        : workoutCalories > 0);
+      (workoutReached || stepsReached);
 
     allDays.push({
       date,
@@ -446,7 +457,7 @@ export function buildWellnessStreakSummary(params: {
       nutrition_count: nutritionCount,
       nutrition_calories: Math.round(bucket?.nutritionCalories || 0),
       workout_calories: workoutCalories,
-      steps: Math.round(bucket?.steps || 0),
+      steps,
       workout_target_calories: workoutTargetCalories,
       target_effective_from: revision?.effective_from || null,
       success,

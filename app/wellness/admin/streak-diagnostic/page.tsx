@@ -26,6 +26,7 @@ function fmt(value: any, maximumFractionDigits = 0) {
   );
 }
 
+// WELLNESS_ADMIN_DIAGNOSTIC_ACTIVITY_OR_UI_V126M119_51
 function statusTone(row: any) {
   if (row?.success) return "border-emerald-200 bg-emerald-50 text-emerald-800";
   if (row?.diagnosis_code === "WORKOUT_KURANG_STEPS_TERCAPAI") {
@@ -259,7 +260,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
                 [`PASS ${data?.period?.days || 30} hari`, data?.summary?.pass_days, "✅", "bg-emerald-50 text-emerald-900"],
                 ["Perlu cek", data?.summary?.issue_days, "⚠️", "bg-rose-50 text-rose-900"],
                 [
-                  "Steps tercapai, streak gagal",
+                  "Steps tercapai, nutrisi belum",
                   data?.summary?.steps_reached_but_streak_failed,
                   "👟",
                   "bg-amber-50 text-amber-900",
@@ -411,7 +412,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
                     <option value="issue">Perlu cek</option>
                     <option value="all">Semua</option>
                     <option value="pass">PASS</option>
-                    <option value="steps_only">Steps tercapai, streak gagal</option>
+                    <option value="steps_only">Steps tercapai, nutrisi belum</option>
                     <option value="target_change">Tanggal target berubah</option>
                     <option value="provider_warning">Warning provider</option>
                     <option value="mirror_mismatch">Portal mirror berbeda</option>
@@ -540,7 +541,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
                           </div>
                           {row.steps_ok && !row.success ? (
                             <div className="mt-1 text-[9px] font-black text-amber-700">
-                              bukan syarat streak
+                              aktivitas tercapai · nutrisi belum memenuhi syarat
                             </div>
                           ) : null}
                         </td>
@@ -653,7 +654,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
                       ) : null}
                       {row.steps_ok && !row.success ? (
                         <div className="mt-1 font-black text-amber-700">
-                          Steps tercapai, tetapi langkah bukan syarat streak.
+                          Steps tercapai, tetapi langkah aktivitas tercapai · nutrisi belum memenuhi syarat.
                         </div>
                       ) : null}
                       {(row.provider_warnings || []).map((warning: string) => (
