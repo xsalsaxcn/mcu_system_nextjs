@@ -28,6 +28,7 @@ import {
 } from "@/lib/wellness/streak";
 import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
 
+import { applyParticipantCanonicalHistoricalSuccessProof } from "@/lib/wellness/participantStreakServer";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -720,21 +721,30 @@ export async function GET(request: NextRequest) {
         participant,
         notes: notesByParticipant.get(participantId) || [],
       });
-      const streak = buildWellnessStreakSummary({
+      // WELLNESS_ADMIN_DIAGNOSTIC_CANONICAL_TRUTH_PARITY_V126M119_49A
+      const streakBase = buildWellnessStreakSummary({
         nutritionRows,
         activityRows: selectedActivityRows,
         workoutTargetCalories: numberValue(targetTimeline.current?.workout) || 300,
         targetTimeline,
         historyDays: diagnosticHistoryDayCount,
       });
-      const portalDisplayStreak = buildWellnessStreakSummary({
+      const streak = applyParticipantCanonicalHistoricalSuccessProof(
+        streakBase,
+        participantId,
+      );
+      const portalDisplayStreakBase = buildWellnessStreakSummary({
         nutritionRows,
         activityRows: portalActivityRows,
         workoutTargetCalories: numberValue(targetTimeline.current?.workout) || 300,
         targetTimeline,
         historyDays: diagnosticHistoryDayCount,
       });
-      const portalDayByDate = new Map(
+      const portalDisplayStreak = applyParticipantCanonicalHistoricalSuccessProof(
+        portalDisplayStreakBase,
+        participantId,
+      );
+      const portalDayByDate = new Map<string, any>(
         (portalDisplayStreak.history_days.filter((day: any) => day.date >= fromDate && day.date <= toDate) || []).map((item: any) => [item.date, item]),
       );
 

@@ -1609,6 +1609,12 @@ function applyDurableStreakSuccessProof(streak: any, proofDates: Set<string>) {
       durableProofLongestStreak(successDates),
     ),
     success_dates: successDates,
+    // WELLNESS_DURABLE_PROOF_HISTORY_DAYS_V126M119_49
+    history_days: (
+      Array.isArray(streak?.history_days) ? streak.history_days : []
+    ).map((day: any) =>
+      proofDates.has(clean(day?.date)) ? { ...day, success: true } : day,
+    ),
     days: (Array.isArray(streak?.days) ? streak.days : []).map((day: any) =>
       proofDates.has(clean(day?.date)) ? { ...day, success: true } : day,
     ),
@@ -2960,6 +2966,26 @@ function applyAugustHistoricalTruthUnion<T>(value: T, args: any[]): T {
       AUGUST_HISTORICAL_STREAK_SUCCESS_SOURCES[pid] ?? {},
   } as T;
 }
+
+// WELLNESS_ADMIN_DIAGNOSTIC_CANONICAL_TRUTH_EXPORT_V126M119_49
+// Pure helper for Admin diagnostic parity. No source/data reads are performed.
+export function applyParticipantCanonicalHistoricalSuccessProof(
+  streak: any,
+  participantIdValue: any,
+) {
+  const participantId = String(Number(participantIdValue || 0) || "").trim();
+  if (!participantId) return streak;
+
+  const historical =
+    AUGUST_HISTORICAL_STREAK_SUCCESS_DATES[participantId] ?? [];
+  if (!historical.length) return streak;
+
+  return applyDurableStreakSuccessProof(
+    streak,
+    new Set(historical.map(String)),
+  );
+}
+
 async function loadParticipantCanonicalStreakBase(params: {
   supabase: any;
   participant: any;
