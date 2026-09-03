@@ -66,7 +66,9 @@ export default function WellnessAdminStreakDiagnosticPage() {
   const [fromDate, setFromDate] = useState(() => jakartaDiagnosticDate(-29));
   const [toDate, setToDate] = useState(() => jakartaDiagnosticDate(0));
   const [page, setPage] = useState(1);
-  const pageSize = 100;
+  // WELLNESS_ADMIN_STREAK_DIAGNOSTIC_PAGINATION_V126M119_50
+  // Keep long date ranges readable: 10 diagnostic rows per page.
+  const pageSize = 10;
 
   async function load() {
     setLoading(true);
@@ -183,7 +185,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
   }, [data, query, companyFilter, statusFilter, selectedParticipantId]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const safePage = Math.min(page, totalPages);
+  const safePage = Math.min(Math.max(1, page), totalPages);
   const paginatedRows = filteredRows.slice(
     (safePage - 1) * pageSize,
     safePage * pageSize,
@@ -454,7 +456,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
                 <div>
                   <div className="text-sm font-black text-slate-950">
-                    Hasil Diagnostik 7 Hari
+                    Hasil Diagnostik · {data?.period?.days || filteredRows.length} Hari
                   </div>
                   <div className="mt-1 text-[10px] font-bold text-slate-500">
                     {fmt(filteredRows.length)} baris sesuai filter · Generated {clean(data?.generated_at) || "-"}
