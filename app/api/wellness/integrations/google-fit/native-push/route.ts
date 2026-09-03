@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
 import { loadParticipantControl } from "@/lib/wellness/participantControls";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -367,6 +368,13 @@ const exactSnapshot = {
       syncedAt: nowIso,
     });
 
+    // WELLNESS_PROVIDER_SYNC_WORKOUT_RECONCILIATION_V126M119_27
+    const workoutPointReconciliation = await reconcileWorkoutDailyPoint({
+      supabase,
+      participant,
+      logDate: normalizeDate(exactSnapshot?.date),
+    });
+
     const action =
       `native_snapshot_${dailyRowAction}`;
 
@@ -399,6 +407,13 @@ const exactSnapshot = {
       last_sync_snapshot: exactSnapshot,
       active_calories_available: activeCaloriesAvailable,
       daily_row_action: dailyRowAction,
+      workout_point_reconciliation: {
+        ok: workoutPointReconciliation.ok,
+        points: workoutPointReconciliation.points,
+        calories: workoutPointReconciliation.calories,
+        target: workoutPointReconciliation.target,
+        warning: workoutPointReconciliation.warning || "",
+      },
     });
   } catch (error: any) {
     console.error("WELLNESS_GOOGLE_FIT_NATIVE_LIVE_PUSH_ERROR", error);

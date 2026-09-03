@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 // WELLNESS_STRAVA_SYNC_SCOPE_DETAIL_FIX_V419
 // Fix:
@@ -340,6 +341,7 @@ async function handleSync(req: NextRequest) {
     let inserted = 0;
     let updated = 0;
     let skipped = 0;
+    const workoutReconcileDates = new Set<string>();
 
     for (const activity of activities) {
       const result = await saveActivity(
@@ -348,9 +350,33 @@ async function handleSync(req: NextRequest) {
         activity
       );
 
-      if (result.inserted) inserted += 1;
-      else if (result.updated) updated += 1;
-      else skipped += 1;
+      if (result.inserted) {
+        inserted += 1;
+        const logDate = dateOnly(activity?.start_date_local || activity?.start_date);
+        if (logDate) workoutReconcileDates.add(logDate);
+      } else if (result.updated) {
+        updated += 1;
+        const logDate = dateOnly(activity?.start_date_local || activity?.start_date);
+        if (logDate) workoutReconcileDates.add(logDate);
+      } else skipped += 1;
+    }
+
+    // WELLNESS_PROVIDER_SYNC_WORKOUT_RECONCILIATION_V126M119_27
+    const workoutPointReconciliation = [];
+    for (const logDate of Array.from(workoutReconcileDates).sort()) {
+      const result = await reconcileWorkoutDailyPoint({
+        supabase,
+        participant,
+        logDate,
+      });
+      workoutPointReconciliation.push({
+        date: logDate,
+        ok: result.ok,
+        points: result.points,
+        calories: result.calories,
+        target: result.target,
+        warning: result.warning || "",
+      });
     }
 
     await supabase
@@ -370,6 +396,7 @@ async function handleSync(req: NextRequest) {
       updated,
       skipped,
       scope: acceptedScope,
+      workout_point_reconciliation: workoutPointReconciliation,
       message:
         activities.length > 0
           ? `Sync Strava berhasil. ${inserted} baru, ${updated} update.`

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { getParticipantFromPortalSession } from "@/lib/wellness/portalAuth";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 export const runtime = "nodejs";
 
@@ -566,6 +567,26 @@ export async function POST(req: NextRequest) {
       if (saved.action === "updated") updated += 1;
     }
 
+    // WELLNESS_PROVIDER_SYNC_WORKOUT_RECONCILIATION_V126M119_27
+    // Provider sync mutates canonical activity rows, so recompute workout_daily
+    // using the same pointWriter contract already used by manual workout input.
+    const workoutPointReconciliation = [];
+    for (const row of dailyRows) {
+      const result = await reconcileWorkoutDailyPoint({
+        supabase,
+        participant,
+        logDate: row.date,
+      });
+      workoutPointReconciliation.push({
+        date: row.date,
+        ok: result.ok,
+        points: result.points,
+        calories: result.calories,
+        target: result.target,
+        warning: result.warning || "",
+      });
+    }
+
     const nowIso = new Date().toISOString();
 
     await supabase
@@ -606,6 +627,7 @@ export async function POST(req: NextRequest) {
       fetched_daily: dailyRows.length,
       inserted,
       updated,
+      workout_point_reconciliation: workoutPointReconciliation,
       daily: dailyRows,
     });
   } catch (error: any) {

@@ -6,6 +6,7 @@ import {
   loadParticipantControl,
   normalizeFitnessSource,
 } from "@/lib/wellness/participantControls";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 // WELLNESS_HEALTH_CONNECT_REPORTED_ACTIVE_CALORIE_V71
 // WELLNESS_PROFILE_AND_SYNC_CUTOFF_V126F
@@ -741,6 +742,7 @@ async function handlePush(req: NextRequest) {
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
+  const workoutReconcileDates = new Set<string>();
 
   const workouts = Array.isArray(body?.workouts)
     ? body.workouts
@@ -842,9 +844,13 @@ async function handlePush(req: NextRequest) {
 
     const result = await saveActivityLog(supabase, dailyPayload);
 
-    if (result.inserted) inserted += 1;
-    else if (result.updated) updated += 1;
-    else skipped += 1;
+    if (result.inserted) {
+      inserted += 1;
+      workoutReconcileDates.add(date);
+    } else if (result.updated) {
+      updated += 1;
+      workoutReconcileDates.add(date);
+    } else skipped += 1;
   } else if (hasDailyData && emptyDailyPayload) {
     skipped += 1;
   }
@@ -929,9 +935,31 @@ async function handlePush(req: NextRequest) {
 
     const result = await saveActivityLog(supabase, payload);
 
-    if (result.inserted) inserted += 1;
-    else if (result.updated) updated += 1;
-    else skipped += 1;
+    if (result.inserted) {
+      inserted += 1;
+      workoutReconcileDates.add(workoutDate);
+    } else if (result.updated) {
+      updated += 1;
+      workoutReconcileDates.add(workoutDate);
+    } else skipped += 1;
+  }
+
+  // WELLNESS_PROVIDER_SYNC_WORKOUT_RECONCILIATION_V126M119_27
+  const workoutPointReconciliation = [];
+  for (const logDate of Array.from(workoutReconcileDates).sort()) {
+    const result = await reconcileWorkoutDailyPoint({
+      supabase,
+      participant,
+      logDate,
+    });
+    workoutPointReconciliation.push({
+      date: logDate,
+      ok: result.ok,
+      points: result.points,
+      calories: result.calories,
+      target: result.target,
+      warning: result.warning || "",
+    });
   }
 
   await upsertIntegration(supabase, participantId, body);
@@ -947,6 +975,7 @@ async function handlePush(req: NextRequest) {
     skipped_empty_daily_payload: emptyDailyPayload,
     source_changed_by_participant: sourceChangedByParticipant,
     fitness_source: "health_connect",
+    workout_point_reconciliation: workoutPointReconciliation,
     message: emptyDailyPayload
       ? `Health Connect terbaca kosong, data tidak dioverwrite. ${inserted} baru, ${updated} update, ${skipped} skip.`
       : `Health Connect diterima. ${inserted} baru, ${updated} update, ${skipped} skip.`,
