@@ -2933,21 +2933,32 @@ function participantIdFromStreakArgs(args: any[], result: any): string {
   return "";
 }
 
+// WELLNESS_AUGUST_HISTORICAL_TRUTH_NESTED_STREAK_FIX_V126M119_45
 function applyAugustHistoricalTruthUnion<T>(value: T, args: any[]): T {
   if (!value || typeof value !== "object") return value;
+
   const result: any = value as any;
-  const key = Array.isArray(result.success_dates) ? "success_dates" : (Array.isArray(result.successDates) ? "successDates" : "");
-  if (!key) return value;
   const pid = participantIdFromStreakArgs(args, result);
   const historical = AUGUST_HISTORICAL_STREAK_SUCCESS_DATES[pid] ?? [];
   if (!historical.length) return value;
-  const merged = Array.from(new Set([...(result[key] ?? []).map(String), ...historical])).sort();
-  const next: any = { ...result, [key]: merged };
-  for (const countKey of ["success_count","success_days","total_success","total_success_days"]) {
-    if (typeof result[countKey] === "number") next[countKey] = merged.length;
+
+  const proofDates = new Set(historical.map(String));
+
+  if (result?.streak && typeof result.streak === "object") {
+    return {
+      ...result,
+      streak: applyDurableStreakSuccessProof(result.streak, proofDates),
+      historical_success_sources:
+        AUGUST_HISTORICAL_STREAK_SUCCESS_SOURCES[pid] ?? {},
+    } as T;
   }
-  next.historical_success_sources = AUGUST_HISTORICAL_STREAK_SUCCESS_SOURCES[pid] ?? {};
-  return next as T;
+
+  const patchedStreak = applyDurableStreakSuccessProof(result, proofDates);
+  return {
+    ...patchedStreak,
+    historical_success_sources:
+      AUGUST_HISTORICAL_STREAK_SUCCESS_SOURCES[pid] ?? {},
+  } as T;
 }
 async function loadParticipantCanonicalStreakBase(params: {
   supabase: any;

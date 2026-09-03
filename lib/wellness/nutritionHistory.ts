@@ -440,6 +440,14 @@ function normalizeSheetFood(
   foodIndex: ReturnType<typeof buildFoodIndex>,
 ) {
   const participantId = Number(participant?.id || 0);
+  // WELLNESS_CANONICAL_NUTRITION_LOG_DATE_V126M119_46A
+  // Log Date is the operational achievement date; Submission Date is audit time only.
+  const explicitLogDate = findColumn(row, [
+    "log date",
+    "log_date",
+    "tanggal log",
+    "tanggal aktivitas",
+  ]);
   const submissionDate = findColumn(row, [
     "submission date",
     "timestamp",
@@ -485,7 +493,7 @@ function normalizeSheetFood(
     google_sheet_row_number: Number(row.__row_index || 0),
     participant_id: participantId,
     participant_code: clean(participant?.code),
-    log_date: normalizeSheetDate(submissionDate),
+    log_date: normalizeSheetDate(explicitLogDate || submissionDate),
     meal_time: mealTime || "-",
     meal_type: mealTime || "-",
     food_name: mealText || "Food log",
