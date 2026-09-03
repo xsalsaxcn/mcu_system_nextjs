@@ -12,6 +12,7 @@ import {
 } from "@/lib/wellness/streak";
 import { canonicalParticipantGroupName, matchingCoachAssignment, participantScopeIds, type CoachGroupUnitMap } from "@/lib/wellness/coachGroupAccess";
 
+import { applyParticipantCanonicalHistoricalSuccessProof } from "@/lib/wellness/participantStreakServer";
 function clean(v:any){return String(v??"").trim()}
 function num(v:any){const n=Number(v);return Number.isFinite(n)?n:0}
 function pid(r:any){return num(r?.id||r?.participant_id||r?.wellness_participant_id)}
@@ -129,7 +130,9 @@ function requestedPeriodDaysV126M110(opts:{dates:string[];nutritionRows:any[];ac
     const activity=activityByDate.get(date)||{workout:0,steps:0};
     const datedTargets=effectiveTargetsForDate(opts.timeline,date);
     const workoutTarget=Math.round(num(datedTargets?.workout)||num(opts.fallbackWorkout));
+    const stepTarget=Math.round(num(datedTargets?.steps)||8000);
     const workoutCalories=Math.round(activity.workout||0);
+    const steps=Math.round(activity.steps||0);
     const revision=opts.timeline?.revisions?.filter((item:any)=>clean(item?.effective_from)<=date).at(-1);
     return{
       date,
@@ -137,21 +140,59 @@ function requestedPeriodDaysV126M110(opts:{dates:string[];nutritionRows:any[];ac
       nutrition_count:nutrition.count,
       nutrition_calories:Math.round(nutrition.calories||0),
       workout_calories:workoutCalories,
-      steps:Math.round(activity.steps||0),
+      steps,
       workout_target_calories:workoutTarget,
       target_effective_from:clean(revision?.effective_from)||null,
-      success:nutrition.count>=3&&(workoutTarget>0?workoutCalories>=workoutTarget:workoutCalories>0),
+      success:nutrition.count>=3&&((workoutTarget>0?workoutCalories>=workoutTarget:workoutCalories>0)||(stepTarget>0?steps>=stepTarget:steps>0)),
     };
   });
 }
 
+// WELLNESS_MEMBER_MONITORING_CANONICAL_MIRROR_V126M119_52A
 function status(day:any){
-  const n=num(day?.nutrition_count), w=num(day?.workout_calories), t=num(day?.workout_target_calories), s=num(day?.steps);
-  if(n===0&&w===0&&s===0)return{key:"not_updated",label:"Belum Update",reason:"Belum ada input nutrisi atau aktivitas pada tanggal ini."};
-  if(day?.success)return{key:"on_track",label:"On Track",reason:"Target nutrisi dan workout untuk streak tercapai."};
-  if(n<3&&w<t)return{key:"follow_up",label:"Perlu Follow Up",reason:`Nutrisi ${n}/3 dan workout ${Math.round(w)}/${Math.round(t)} kkal belum tercapai.`};
-  if(n<3)return{key:"follow_up",label:"Perlu Follow Up",reason:`Input nutrisi baru ${n}/3.`};
-  return{key:"follow_up",label:"Perlu Follow Up",reason:`Workout ${Math.round(w)}/${Math.round(t)} kkal belum mencapai target.`};
+  const n=num(day?.nutrition_count);
+  const w=num(day?.workout_calories);
+  const wt=num(day?.workout_target_calories);
+  const s=num(day?.steps);
+  const st=num(day?.step_target)||8000;
+  const workoutOk=wt>0?w>=wt:w>0;
+  const stepsOk=st>0?s>=st:s>0;
+
+  if(n===0&&w===0&&s===0){
+    return{key:"not_updated",label:"Belum Update",reason:"Belum ada input nutrisi atau aktivitas pada tanggal ini."};
+  }
+
+  if(day?.success){
+    if(workoutOk&&stepsOk){
+      return{key:"on_track",label:"On Track",reason:"Nutrisi tercapai; target workout dan langkah tercapai."};
+    }
+    if(workoutOk){
+      return{key:"on_track",label:"On Track",reason:"Nutrisi tercapai; target aktivitas dipenuhi melalui kalori workout."};
+    }
+    if(stepsOk){
+      return{key:"on_track",label:"On Track",reason:"Nutrisi tercapai; target aktivitas dipenuhi melalui langkah."};
+    }
+    return{key:"on_track",label:"On Track",reason:"Streak tercapai berdasarkan canonical historical proof peserta."};
+  }
+
+  if(n<3&&!workoutOk&&!stepsOk){
+    return{key:"follow_up",label:"Perlu Follow Up",reason:`Nutrisi ${n}/3, workout ${Math.round(w)}/${Math.round(wt)} kkal, dan langkah ${Math.round(s)}/${Math.round(st)} belum tercapai.`};
+  }
+
+  if(n<3){
+    return{key:"follow_up",label:"Perlu Follow Up",reason:`Input nutrisi baru ${n}/3; target aktivitas sudah tercapai.`};
+  }
+
+  return{key:"follow_up",label:"Perlu Follow Up",reason:`Workout ${Math.round(w)}/${Math.round(wt)} kkal dan langkah ${Math.round(s)}/${Math.round(st)} belum mencapai target aktivitas.`};
+}
+
+function monitoringCanonicalHistoryDaysV126M119_52A(fromDate:any){
+  const from=clean(fromDate);
+  const today=jakartaDay();
+  const start=Date.parse(`${from}T00:00:00Z`);
+  const finish=Date.parse(`${today}T00:00:00Z`);
+  if(!Number.isFinite(start)||!Number.isFinite(finish)||start>finish)return 42;
+  return Math.max(42,Math.floor((finish-start)/86400000)+1);
 }
 
 export async function loadWellnessMemberMonitoring(opts:{supabase:any;participants:any[];groupUnitMap?:CoachGroupUnitMap;companyNameById?:Map<number,string>;coachAssignments?:any[];fromDate?:string;toDate?:string}){
@@ -177,18 +218,45 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
     const nutrition=nutritionHistory.byParticipantId.get(id);
     const nutritionRows=filterOperationalRowsForProgram(participant,nutrition?.logs||[],"","",["log_date","created_at"]);
     const timeline=buildEffectiveTargetTimeline({participant,notes:notes.get(id)||[]});
-    const streak=buildWellnessStreakSummary({nutritionRows,activityRows,workoutTargetCalories:num(timeline.current.workout)||300,targetTimeline:timeline});
+    const streakBase=buildWellnessStreakSummary({
+      nutritionRows,
+      activityRows,
+      workoutTargetCalories:num(timeline.current.workout)||300,
+      targetTimeline:timeline,
+      historyDays:monitoringCanonicalHistoryDaysV126M119_52A(dates[0]),
+    });
+    const streak=applyParticipantCanonicalHistoricalSuccessProof(streakBase,id);
+    const canonicalHistory=Array.isArray(streak?.history_days)
+      ? streak.history_days
+      : (streak?.days||[]);
     const periodSourceDays=requestedDates.length
-      ? requestedPeriodDaysV126M110({
-          dates,
-          nutritionRows,
-          activityRows,
-          timeline,
-          fallbackWorkout:num(timeline.current.workout)||300,
-        })
+      ? canonicalHistory.filter((d:any)=>
+          clean(d?.date)>=clean(dates[0])&&
+          clean(d?.date)<=clean(dates.at(-1))
+        )
       : (streak.days||[]);
     const byDate=new Map(periodSourceDays.map((d:any)=>[clean(d.date),d]));
-    const days=dates.map(date=>{const d:any=byDate.get(date)||{date,nutrition_count:0,nutrition_calories:0,workout_calories:0,steps:0,workout_target_calories:num(timeline.current.workout)||300,target_effective_from:null,success:false};return{...d,status:status(d)}});
+
+    const days=dates.map(date=>{
+      const datedTarget=effectiveTargetsForDate(timeline,date);
+      const base:any=byDate.get(date)||{
+        date,
+        nutrition_count:0,
+        nutrition_calories:0,
+        workout_calories:0,
+        steps:0,
+        workout_target_calories:num(datedTarget?.workout)||300,
+        target_effective_from:null,
+        success:false,
+      };
+      const d:any={
+        ...base,
+        workout_target_calories:
+          num(base?.workout_target_calories)||num(datedTarget?.workout)||300,
+        step_target:num(datedTarget?.steps)||8000,
+      };
+      return{...d,status:status(d)};
+    });
     const avg=(field:string)=>Math.round(days.reduce((sum:number,d:any)=>sum+num(d?.[field]),0)/Math.max(days.length,1));
     const company=companyId(participant); const control=controlMap.get(id)||participant?.wellness_control||{};
     const accessGroupIds=opts.groupUnitMap?participantScopeIds(participant,opts.groupUnitMap):[];
