@@ -65,6 +65,31 @@ function jakartaDate(offsetDays = 0) {
   }).format(shifted);
 }
 
+// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_RANGE_V126M119_48
+function validDiagnosticDate(value: any) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(clean(value));
+}
+
+function diagnosticDateKeys(fromDate: string, toDate: string) {
+  const start = Date.parse(`${fromDate}T00:00:00Z`);
+  const end = Date.parse(`${toDate}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    return [] as string[];
+  }
+  const days = Math.floor((end - start) / 86_400_000) + 1;
+  if (days < 1 || days > 366) return [] as string[];
+  return Array.from({ length: days }, (_, index) =>
+    new Date(start + index * 86_400_000).toISOString().slice(0, 10),
+  );
+}
+
+function diagnosticHistoryDays(fromDate: string, today: string) {
+  const start = Date.parse(`${fromDate}T00:00:00Z`);
+  const end = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 42;
+  return Math.max(42, Math.floor((end - start) / 86_400_000) + 1);
+}
+
 function parseRaw(value: any) {
   if (!value) return {};
   if (typeof value === "object") return value;
@@ -509,6 +534,24 @@ export async function GET(request: NextRequest) {
     const requestedCompanyId = numberValue(url.searchParams.get("company_id"));
     const query = clean(url.searchParams.get("q")).toLowerCase();
 
+    const today = jakartaDate(0);
+    const requestedFrom = clean(url.searchParams.get("from"));
+    const requestedTo = clean(url.searchParams.get("to"));
+    const fromDate = validDiagnosticDate(requestedFrom)
+      ? requestedFrom
+      : jakartaDate(-29);
+    const toDate = validDiagnosticDate(requestedTo)
+      ? requestedTo
+      : today;
+    const diagnosticDates = diagnosticDateKeys(fromDate, toDate);
+    if (!diagnosticDates.length) {
+      return fail("Range tanggal Diagnostik Streak tidak valid atau melebihi 366 hari.", 400);
+    }
+    if (toDate > today) {
+      return fail("Tanggal akhir Diagnostik Streak tidak boleh melewati hari ini.", 400);
+    }
+    const diagnosticHistoryDayCount = diagnosticHistoryDays(fromDate, today);
+
     const [participantResult, companyResult, groupResult] = await Promise.all([
       supabase.from("wellness_participants").select("*").limit(10000),
       supabase.from("wellness_companies").select("id,name,code,is_active").limit(5000),
@@ -682,17 +725,17 @@ export async function GET(request: NextRequest) {
         activityRows: selectedActivityRows,
         workoutTargetCalories: numberValue(targetTimeline.current?.workout) || 300,
         targetTimeline,
-        historyDays: 42,
+        historyDays: diagnosticHistoryDayCount,
       });
       const portalDisplayStreak = buildWellnessStreakSummary({
         nutritionRows,
         activityRows: portalActivityRows,
         workoutTargetCalories: numberValue(targetTimeline.current?.workout) || 300,
         targetTimeline,
-        historyDays: 42,
+        historyDays: diagnosticHistoryDayCount,
       });
       const portalDayByDate = new Map(
-        (portalDisplayStreak.days || []).map((item: any) => [item.date, item]),
+        (portalDisplayStreak.history_days.filter((day: any) => day.date >= fromDate && day.date <= toDate) || []).map((item: any) => [item.date, item]),
       );
 
       const companyId = numberValue(
@@ -731,7 +774,7 @@ export async function GET(request: NextRequest) {
       let recentIssue = 0;
       let recentStepsOnly = 0;
 
-      for (const day of streak.days || []) {
+      for (const day of streak.history_days.filter((day: any) => day.date >= fromDate && day.date <= toDate) || []) {
         const targets = effectiveTargetsForDate(targetTimeline, day.date);
         const workoutTarget = Math.round(
           numberValue(day.workout_target_calories || targets.workout || 0),
@@ -845,6 +888,9 @@ export async function GET(request: NextRequest) {
         recent_7d_pass: recentPass,
         recent_7d_issue: recentIssue,
         recent_7d_steps_reached_but_streak_failed: recentStepsOnly,
+        period_pass: recentPass,
+        period_issue: recentIssue,
+        period_steps_reached_but_streak_failed: recentStepsOnly,
       });
     }
 
@@ -872,10 +918,17 @@ export async function GET(request: NextRequest) {
         steps: "informational_only",
         note: "Streak canonical tetap memakai pipeline Participant + Coach. Kolom Portal mirror hanya menunjukkan display workout yang juga membaca manual workout durable dari Google Sheet.",
       },
+      period: {
+        from: fromDate,
+        to: toDate,
+        days: diagnosticDates.length,
+      },
       filters: {
         participant_id: requestedParticipantId || null,
         company_id: requestedCompanyId || null,
         q: query,
+        from: fromDate,
+        to: toDate,
       },
       summary: {
         participants: participantSummaries.length,

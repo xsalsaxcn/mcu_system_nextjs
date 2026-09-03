@@ -44,14 +44,27 @@ function providerWarningLabel(code: string) {
   return code;
 }
 
+// WELLNESS_ADMIN_STREAK_DIAGNOSTIC_RANGE_UI_V126M119_48
+function jakartaDiagnosticDate(offsetDays = 0) {
+  const shifted = new Date(Date.now() + offsetDays * 86_400_000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(shifted);
+}
+
 export default function WellnessAdminStreakDiagnosticPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("issue");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedParticipantId, setSelectedParticipantId] = useState("all");
+  const [fromDate, setFromDate] = useState(() => jakartaDiagnosticDate(-29));
+  const [toDate, setToDate] = useState(() => jakartaDiagnosticDate(0));
   const [page, setPage] = useState(1);
   const pageSize = 100;
 
@@ -59,7 +72,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
     setLoading(true);
     setError("");
     const result = await fetch(
-      `/api/wellness/admin/streak-diagnostic?_=${Date.now()}`,
+      `/api/wellness/admin/streak-diagnostic?from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}&_=${Date.now()}`,
       {
         method: "GET",
         credentials: "include",
@@ -92,7 +105,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, companyFilter, statusFilter, selectedParticipantId]);
+  }, [query, companyFilter, statusFilter, selectedParticipantId, fromDate, toDate]);
 
   const participants = useMemo(() => {
     return [...(data?.participants || [])].sort((left: any, right: any) =>
@@ -241,7 +254,7 @@ export default function WellnessAdminStreakDiagnosticPage() {
             <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
               {[
                 ["Peserta", data?.summary?.participants, "👥", "bg-sky-50 text-sky-900"],
-                ["PASS 7 hari", data?.summary?.pass_days, "✅", "bg-emerald-50 text-emerald-900"],
+                [`PASS ${data?.period?.days || 30} hari`, data?.summary?.pass_days, "✅", "bg-emerald-50 text-emerald-900"],
                 ["Perlu cek", data?.summary?.issue_days, "⚠️", "bg-rose-50 text-rose-900"],
                 [
                   "Steps tercapai, streak gagal",
@@ -288,6 +301,51 @@ export default function WellnessAdminStreakDiagnosticPage() {
             </section>
 
             <section className="mt-4 rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="mb-4 grid gap-3 rounded-2xl border border-teal-100 bg-teal-50/60 p-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-[0.12em] text-teal-700">
+                    Dari tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    max={toDate}
+                    onChange={(event) => setFromDate(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-teal-200 bg-white px-3 text-xs font-black outline-none focus:border-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase tracking-[0.12em] text-teal-700">
+                    Sampai tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    min={fromDate}
+                    max={jakartaDiagnosticDate(0)}
+                    onChange={(event) => setToDate(event.target.value)}
+                    className="mt-1 h-11 w-full rounded-xl border border-teal-200 bg-white px-3 text-xs font-black outline-none focus:border-teal-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={loading || !fromDate || !toDate || fromDate > toDate}
+                  onClick={() => {
+                    setPage(1);
+                    void load();
+                  }}
+                  className="h-11 rounded-xl bg-teal-700 px-5 text-xs font-black text-white shadow-sm disabled:opacity-50"
+                >
+                  {loading ? "Memuat..." : "Terapkan Periode"}
+                </button>
+              </div>
+              <div className="mb-3 text-[10px] font-bold text-slate-500">
+                Periode aktif:{" "}
+                <span className="font-black text-slate-800">{data?.period?.from || fromDate}</span>
+                {" "}s.d.{" "}
+                <span className="font-black text-slate-800">{data?.period?.to || toDate}</span>
+                {" "}· {data?.period?.days || "-"} hari
+              </div>
               <div className="grid gap-3 lg:grid-cols-5">
                 <div className="lg:col-span-2">
                   <label className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">

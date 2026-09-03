@@ -27,6 +27,10 @@ export type WellnessStreakSummary = {
   current_streak: number;
   longest_streak: number;
   success_dates: string[];
+  // WELLNESS_STREAK_HISTORY_DAYS_V126M119_48
+  // Full computed history for Admin/report consumers only.
+  // Existing Participant/Coach `days` stays exactly last 7 days.
+  history_days: WellnessStreakDay[];
   days: WellnessStreakDay[];
 };
 
@@ -475,6 +479,7 @@ export function buildWellnessStreakSummary(params: {
     current_streak: currentStreak,
     longest_streak: longestStreak,
     success_dates: allDays.filter((day) => day.success).map((day) => day.date),
+    history_days: allDays,
     days: allDays.slice(-7),
   };
 }
