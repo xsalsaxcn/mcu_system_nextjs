@@ -472,7 +472,7 @@ export default function VaccinationRegisterPage() {
     }
   }
 
-  async function releaseQueue(registration: any) {
+  async function releaseQueueV147Original(registration: any) {
     setReleasingId(registration.id);
     setError("");
     try {
@@ -488,6 +488,55 @@ export default function VaccinationRegisterPage() {
       setReleasingId(null);
     }
   }
+
+  // VACCINATION_QUEUE_TICKET_PRINT_V147_1
+// VACCINATION_QUEUE_TICKET_POPUP_V147_5
+  async function releaseQueue(...args: any[]) {
+    const rawRegistration = args[0];
+    const registrationId = Number(rawRegistration?.id ?? rawRegistration ?? 0);
+
+    // VACCINATION_QUEUE_TICKET_POPUP_V147_5
+    // Buka blank popup langsung dari click event agar browser tidak menunda/menggabungkan window.
+    const ticketWindow = registrationId
+      ? window.open("about:blank", "_blank", "width=520,height=720")
+      : null;
+
+    if (ticketWindow) {
+      ticketWindow.document.open();
+      ticketWindow.document.write(
+        "<!doctype html><html><head><title>Menyiapkan Tiket Antrian</title></head><body style='font-family:Arial,sans-serif;padding:20px'><b>Menyiapkan tiket antrian...</b><br><span style='font-size:12px'>Nomor antrian sedang dirilis.</span></body></html>",
+      );
+      ticketWindow.document.close();
+      ticketWindow.focus();
+    } else if (registrationId) {
+      console.warn("Popup tiket antrian diblokir browser.");
+    }
+
+    try {
+      await (releaseQueueV147Original as any)(...args);
+
+      if (!registrationId) return;
+
+      const ticketUrl = `/vaccination/queue-ticket/${registrationId}?autoprint=1`;
+
+      if (ticketWindow && !ticketWindow.closed) {
+        ticketWindow.location.replace(ticketUrl);
+        ticketWindow.focus();
+      } else {
+        window.open(ticketUrl, "_blank");
+      }
+    } catch (error) {
+      if (ticketWindow && !ticketWindow.closed) {
+        ticketWindow.document.open();
+        ticketWindow.document.write(
+          "<!doctype html><html><head><title>Rilis Antrian Gagal</title></head><body style='font-family:Arial,sans-serif;padding:20px;color:#b91c1c'><b>Rilis antrian gagal.</b><br><span style='font-size:12px'>Tutup window ini dan coba kembali.</span></body></html>",
+        );
+        ticketWindow.document.close();
+      }
+      throw error;
+    }
+  }
+
 
   async function submit() {
     setError("");
