@@ -168,6 +168,12 @@ export async function POST(req: NextRequest) {
   const regResult = await supabase.from("vaccination_registrations").select("*").eq("id", registrationId).single();
   if (regResult.error) return fail(regResult.error.message, 500);
   const reg = regResult.data;
+  // V148_SERVER_PROCESS_REQUIRED
+  const queueStatus = clean(reg.queue_status).toUpperCase();
+  if (queueStatus !== "IN_PROGRESS") {
+    return fail("Wajib klik Proses Tindakan terlebih dahulu sebelum menyelesaikan produk/tindakan dokter.", 409);
+  }
+
   const printLabelHandler = await getPrintLabelHandler(
     supabase,
     toInt(reg.session_id, 0),

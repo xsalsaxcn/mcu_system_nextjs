@@ -182,6 +182,13 @@ export default function VaccinationAdministerPage() {
         return;
       }
 
+      const currentRegistration = registrations.find((row) => String(row.id) === String(form.registrationId));
+      const currentQueueStatus = String(currentRegistration?.queue_status || "").toUpperCase();
+      if (currentQueueStatus !== "IN_PROGRESS") {
+        setError("Wajib klik Proses Tindakan terlebih dahulu sebelum menyelesaikan produk/tindakan dokter.");
+        return;
+      }
+
       const isValidationPrint = printLabelHandler === "VALIDASI";
       const sourceVaccines: SelectedVaccineItem[] = typeof targetIndex === "number"
         ? (selectedVaccines[targetIndex] ? [selectedVaccines[targetIndex]] : [])
@@ -232,7 +239,33 @@ export default function VaccinationAdministerPage() {
 
       setMessage(json.message);
       setForm((f) => ({ ...f, notes: "" }));
-      await loadData();
+
+      // Keep the just-completed participant visible immediately in "Peserta Sudah Selesai"
+      // while the authoritative GET refresh runs. This is important when queue_status moves
+      // from IN_PROGRESS to PENDING_VALIDATION and the participant leaves the active selector.
+      const justCompleted = Array.isArray(json.records)
+        ? json.records
+        : (json.record ? [json.record] : []);
+      if (justCompleted.length) {
+        setCompletedRecords((previous) => {
+          const newIds = new Set(justCompleted.map((record: any) => Number(record.id)).filter(Boolean));
+          const enriched = justCompleted.map((record: any) => ({
+            ...record,
+            registration: record.registration || (currentRegistration ? {
+              id: currentRegistration.id,
+              queue_number: currentRegistration.queue_number,
+              participant_name: currentRegistration.participant_name,
+              mcu_id: currentRegistration.mcu_id,
+              employee_id: currentRegistration.employee_id,
+              department: currentRegistration.department,
+              company_name: currentRegistration.company_name,
+            } : undefined),
+          }));
+          return [...enriched, ...previous.filter((record: any) => !newIds.has(Number(record.id)))];
+        });
+      }
+
+      await loadData(sessionId, true);
       if (!isValidationPrint && json.stickerUrl) {
         if (printWindow) printWindow.location.href = json.stickerUrl;
         else window.open(json.stickerUrl, "_blank", "width=520,height=720");
@@ -273,6 +306,8 @@ export default function VaccinationAdministerPage() {
   }, [sessionId]);
 
   const selectedRegistration = registrations.find((r) => String(r.id) === String(form.registrationId));
+  // V148_REQUIRED_PROCESS_AND_COMPLETED_LIST
+  const processStarted = String(selectedRegistration?.queue_status || "").toUpperCase() === "IN_PROGRESS";
 
   useEffect(() => {
     if (!selectedRegistration) return;
@@ -482,7 +517,8 @@ export default function VaccinationAdministerPage() {
                   ) : (
                     <button
                       type="button"
-                      disabled={processingIndex !== null}
+                      disabled={processingIndex !== null || !processStarted}
+                      title={processStarted ? "Tandai produk selesai." : "Wajib klik Proses Tindakan terlebih dahulu."}
                       onClick={() => donePrint(index)}
                       className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-60"
                     >
@@ -511,8 +547,25 @@ export default function VaccinationAdministerPage() {
 
           <textarea className="mt-3 w-full rounded-xl border px-3 py-2.5" placeholder="Catatan opsional" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
 
-          <button disabled={processingIndex !== null} onClick={() => donePrint()} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
-            {processingIndex === "all" ? "Memproses..." : printLabelHandler === "VALIDASI" ? "Done Semua Produk - Kirim ke Tim Validasi" : "Done + Print Semua Vaksin Not Done"}
+          {!processStarted ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              Wajib klik <b>Proses Tindakan</b> terlebih dahulu. Tombol selesai akan aktif setelah status peserta menjadi IN_PROGRESS.
+            </div>
+          ) : null}
+
+          <button
+            disabled={processingIndex !== null || !processStarted}
+            title={processStarted ? "Selesaikan tindakan dokter." : "Klik Proses Tindakan terlebih dahulu."}
+            onClick={() => donePrint()}
+            className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 disabled:opacity-100"
+          >
+            {processingIndex === "all"
+              ? "Memproses..."
+              : !processStarted
+                ? "Klik Proses Tindakan Terlebih Dahulu"
+                : printLabelHandler === "VALIDASI"
+                  ? "Selesai Dokter - Kirim ke Tim Validasi"
+                  : "Selesai Dokter + Print Semua Sticker"}
           </button>
         </section>
 

@@ -180,8 +180,13 @@ function decorateFinalButton() {
 
     if (!button.dataset.hhaFinalDoctorButton) {
       button.dataset.hhaFinalDoctorButton = "1";
-      button.textContent = "Selesai Dokter + Print Semua Sticker";
-      button.title = "Klik ini setelah semua produk vaksin sudah Done. Baru di tahap ini status selesai dan print semua sticker.";
+      // V148_1_FIX_VALIDATION_MODE_TXT
+      const txt = textOf(button);
+      const validationMode = /Tim Validasi/i.test(txt);
+      button.textContent = validationMode ? "Selesai Dokter - Kirim ke Tim Validasi" : "Selesai Dokter + Print Semua Sticker";
+      button.title = validationMode
+        ? "Klik setelah Proses Tindakan. Peserta akan dikirim ke Tim Validasi untuk print label dan final validasi."
+        : "Klik setelah Proses Tindakan. Status selesai dan semua sticker disiapkan untuk print.";
       button.style.fontWeight = "900";
     }
   }
@@ -221,10 +226,29 @@ function ensureProcessButton() {
   decorateFinalButton();
   decorateProductDoneButtons();
 
-  if (document.getElementById("hha-proses-tindakan-button")) return;
-
   const { participantSelect } = findAdministerSelects();
   if (!participantSelect) return;
+
+  // V148_PROCESS_BUTTON_REUSABLE
+  const currentRegistrationId = selectedValue(participantSelect);
+  const existingWrapper = document.getElementById("hha-proses-tindakan-button");
+  if (existingWrapper) {
+    const existingButton = document.getElementById("hha-proses-tindakan-action") as HTMLButtonElement | null;
+    const existingNote = document.getElementById("hha-proses-tindakan-note") as HTMLSpanElement | null;
+    const inProgress = /IN_PROGRESS/i.test(optionText(participantSelect));
+
+    if (existingButton && existingButton.dataset.hhaRegistrationId !== currentRegistrationId) {
+      existingButton.dataset.hhaRegistrationId = currentRegistrationId;
+      existingButton.disabled = inProgress;
+      existingButton.textContent = inProgress ? "Sedang Proses Tindakan" : "Proses Tindakan";
+      existingButton.style.cursor = inProgress ? "default" : "pointer";
+      if (existingNote) {
+        existingNote.textContent = inProgress ? "Status antrian: Dokter / Proses Tindakan." : "Klik saat dokter mulai proses tindakan.";
+        existingNote.style.color = inProgress ? "#047857" : "#64748b";
+      }
+    }
+    return;
+  }
 
   const host =
     participantSelect.closest("section") ||
@@ -242,6 +266,7 @@ function ensureProcessButton() {
 
   const button = document.createElement("button");
   button.id = "hha-proses-tindakan-action";
+  button.dataset.hhaRegistrationId = currentRegistrationId;
   button.type = "button";
   button.textContent = "Proses Tindakan";
   button.style.border = "0";
@@ -254,6 +279,7 @@ function ensureProcessButton() {
   button.style.cursor = "pointer";
 
   const note = document.createElement("span");
+  note.id = "hha-proses-tindakan-note";
   note.textContent = "Klik saat dokter mulai proses tindakan.";
   note.style.fontSize = "13px";
   note.style.fontWeight = "700";
@@ -342,8 +368,14 @@ function handleCaptureClick(event: MouseEvent) {
   }
 
   if (isFinalDoctorDoneButton(button)) {
-    button.textContent = "Memproses selesai dokter + print...";
-    setInlineInfo("Menyelesaikan tindakan dokter dan menyiapkan print semua sticker vaksin.", "success");
+    const validationMode = /Tim Validasi/i.test(textOf(button));
+    button.textContent = validationMode ? "Memproses selesai dokter..." : "Memproses selesai dokter + print...";
+    setInlineInfo(
+      validationMode
+        ? "Menyelesaikan tindakan dokter dan mengirim peserta ke Tim Validasi."
+        : "Menyelesaikan tindakan dokter dan menyiapkan print semua sticker vaksin.",
+      "success"
+    );
   }
 }
 
