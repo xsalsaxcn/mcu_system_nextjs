@@ -75,13 +75,13 @@ export default function VaccinationBulkStickerPage() {
   return (
     <main className="vaccination-sticker-page bg-white text-black">
       <style jsx global>{`
-        /* VACCINATION STICKER V138 CONTENT FILL + V137 ORIENTATION LOCK
-           Restore exact last-known-good V135/V133 orientation and layout. No geometry changes.
-           IMPORTANT: rotation geometry is LOCKED and must not be changed here.
-           Physical media: 40mm x 30mm.
-           Xprinter workstation currently needs 90deg CW pre-rotation. */
+        /* VACCINATION STICKER V144 ACTUAL STOCK 50.8x39.878 + V137 ORIENTATION LOCK
+           Same V138 visual hierarchy and +90deg CW orientation.
+           Only physical canvas + typography are scaled to the REAL label stock.
+           Physical media: 2.00in x 1.57in = 50.8mm x 39.878mm.
+           Xprinter workstation keeps Portrait + 90deg CW pre-rotation. */
         @page {
-          size: 40mm 30mm;
+          size: 50.8mm 39.878mm;
           margin: 0;
         }
 
@@ -93,15 +93,15 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .vaccination-sticker-page {
-          width: 40mm;
+          width: 50.8mm;
           margin: 0;
           padding: 0;
           background: #fff;
         }
 
         .label-card {
-          width: 40mm;
-          height: 30mm;
+          width: 50.8mm;
+          height: 39.878mm;
           position: relative;
           box-sizing: border-box;
           overflow: hidden;
@@ -115,11 +115,11 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-rotator {
-          width: 40mm;
-          height: 30mm;
+          width: 50.8mm;
+          height: 39.878mm;
           box-sizing: border-box;
           overflow: hidden;
-          padding: 0.7mm 0.85mm;
+          padding: 0.9mm 1.05mm;
           background: #fff;
           color: #000;
         }
@@ -131,25 +131,25 @@ export default function VaccinationBulkStickerPage() {
           text-transform: uppercase;
           letter-spacing: 0.005em;
           border-bottom: 0.18mm solid #111;
-          padding-bottom: 0.3mm;
-          margin-bottom: 0.5mm;
+          padding-bottom: 0.38mm;
+          margin-bottom: 0.62mm;
           white-space: nowrap;
           overflow: hidden;
         }
 
         .label-name {
-          font-size: 11.6pt;
-          line-height: 0.98;
+          font-size: 14.2pt;
+          line-height: 0.97;
           font-weight: 900;
           letter-spacing: -0.025em;
-          max-height: 9.6mm;
+          max-height: 12.2mm;
           overflow: hidden;
           overflow-wrap: anywhere;
         }
 
         .label-vaccine {
-          margin-top: 0.3mm;
-          font-size: 9.2pt;
+          margin-top: 0.38mm;
+          font-size: 11.3pt;
           line-height: 1;
           font-weight: 900;
           letter-spacing: -0.015em;
@@ -159,10 +159,10 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-date-row {
-          margin-top: 0.75mm;
+          margin-top: 0.95mm;
           display: grid;
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-          gap: 0.7mm;
+          gap: 0.9mm;
         }
 
         .label-date-right {
@@ -170,7 +170,7 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-caption {
-          font-size: 5.0pt;
+          font-size: 6.1pt;
           line-height: 1;
           font-weight: 900;
           text-transform: uppercase;
@@ -178,8 +178,8 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-date {
-          margin-top: 0.2mm;
-          font-size: 7.1pt;
+          margin-top: 0.25mm;
+          font-size: 8.7pt;
           line-height: 1;
           font-weight: 900;
           letter-spacing: -0.02em;
@@ -187,8 +187,8 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-lot {
-          margin-top: 0.5mm;
-          font-size: 6.3pt;
+          margin-top: 0.62mm;
+          font-size: 7.7pt;
           line-height: 1;
           font-weight: 900;
           white-space: nowrap;
@@ -197,13 +197,13 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-footer {
-          margin-top: 0.45mm;
-          border-top: 0.15mm solid #222;
-          padding-top: 0.3mm;
+          margin-top: 0.58mm;
+          border-top: 0.18mm solid #222;
+          padding-top: 0.38mm;
           display: flex;
           justify-content: space-between;
           gap: 0.7mm;
-          font-size: 5.0pt;
+          font-size: 6.1pt;
           line-height: 1;
           font-weight: 900;
           white-space: nowrap;
@@ -211,7 +211,7 @@ export default function VaccinationBulkStickerPage() {
         }
 
         .label-footer span:last-child {
-          max-width: 18mm;
+          max-width: 23mm;
           overflow: hidden;
           text-overflow: ellipsis;
           text-align: right;
@@ -230,7 +230,7 @@ export default function VaccinationBulkStickerPage() {
         @media screen {
           .vaccination-sticker-page {
             width: auto;
-            min-width: 40mm;
+            min-width: 50.8mm;
             padding: 10px;
           }
 
@@ -243,9 +243,9 @@ export default function VaccinationBulkStickerPage() {
         @media print {
           html,
           body {
-            width: 40mm !important;
-            min-width: 40mm !important;
-            max-width: 40mm !important;
+            width: 50.8mm !important;
+            min-width: 50.8mm !important;
+            max-width: 50.8mm !important;
             min-height: 0 !important;
             height: auto !important;
             overflow: visible !important;
@@ -263,18 +263,18 @@ export default function VaccinationBulkStickerPage() {
           }
 
           .vaccination-sticker-page {
-            width: 40mm !important;
-            min-width: 40mm !important;
-            max-width: 40mm !important;
+            width: 50.8mm !important;
+            min-width: 50.8mm !important;
+            max-width: 50.8mm !important;
             margin: 0 !important;
             padding: 0 !important;
           }
 
           .label-card {
-            width: 40mm !important;
-            height: 30mm !important;
-            min-height: 30mm !important;
-            max-height: 30mm !important;
+            width: 50.8mm !important;
+            height: 39.878mm !important;
+            min-height: 39.878mm !important;
+            max-height: 39.878mm !important;
             margin: 0 !important;
             padding: 0 !important;
             break-after: auto !important;
@@ -287,19 +287,19 @@ export default function VaccinationBulkStickerPage() {
           }
 
           .label-rotator {
-            /* LAST VISUALLY ACCEPTED V133 GEOMETRY. DO NOT MODIFY ROTATION HERE. */
+            /* V138 POSITION/ROTATION PRESERVED; canvas expanded to actual stock only. */
             position: absolute !important;
             left: 50% !important;
             top: 50% !important;
-            width: 30mm !important;
-            height: 40mm !important;
+            width: 39.878mm !important;
+            height: 50.8mm !important;
             transform: translate(-50%, -50%) rotate(90deg) !important;
             transform-origin: center center !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: center !important;
             align-items: stretch !important;
-            padding: 0.45mm 0.55mm !important;
+            padding: 0.58mm 0.72mm !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
           }
