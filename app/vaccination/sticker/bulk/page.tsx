@@ -75,13 +75,12 @@ export default function VaccinationBulkStickerPage() {
   return (
     <main className="vaccination-sticker-page bg-white text-black">
       <style jsx global>{`
-        /* VACCINATION STICKER V144 ACTUAL STOCK 50.8x39.878 + V137 ORIENTATION LOCK
-           Same V138 visual hierarchy and +90deg CW orientation.
-           Only physical canvas + typography are scaled to the REAL label stock.
-           Physical media: 2.00in x 1.57in = 50.8mm x 39.878mm.
-           Xprinter workstation keeps Portrait + 90deg CW pre-rotation. */
+        /* VACCINATION STICKER V146 WHITE LABEL 50.8x30 NATIVE PRINT
+           Same V145 content, fonts, spacing, order, centered position, and native orientation.
+           White label canvas: 50.8mm x 30mm; inter-label gap is handled by the Xprinter media sensor/driver.
+           This keeps browser page height equal to ONE white sticker, avoiding the oversized former page pitch. */
         @page {
-          size: 50.8mm 39.878mm;
+          size: 50.8mm 30mm;
           margin: 0;
         }
 
@@ -101,7 +100,7 @@ export default function VaccinationBulkStickerPage() {
 
         .label-card {
           width: 50.8mm;
-          height: 39.878mm;
+          height: 30mm;
           position: relative;
           box-sizing: border-box;
           overflow: hidden;
@@ -116,7 +115,7 @@ export default function VaccinationBulkStickerPage() {
 
         .label-rotator {
           width: 50.8mm;
-          height: 39.878mm;
+          height: 30mm;
           box-sizing: border-box;
           overflow: hidden;
           padding: 0.9mm 1.05mm;
@@ -272,9 +271,9 @@ export default function VaccinationBulkStickerPage() {
 
           .label-card {
             width: 50.8mm !important;
-            height: 39.878mm !important;
-            min-height: 39.878mm !important;
-            max-height: 39.878mm !important;
+            height: 30mm !important;
+            min-height: 30mm !important;
+            max-height: 30mm !important;
             margin: 0 !important;
             padding: 0 !important;
             break-after: auto !important;
@@ -287,13 +286,13 @@ export default function VaccinationBulkStickerPage() {
           }
 
           .label-rotator {
-            /* V138 POSITION/ROTATION PRESERVED; canvas expanded to actual stock only. */
+            /* V146: same centered native print; page height now matches the 30mm WHITE label only. */
             position: absolute !important;
             left: 50% !important;
             top: 50% !important;
-            width: 39.878mm !important;
-            height: 50.8mm !important;
-            transform: translate(-50%, -50%) rotate(90deg) !important;
+            width: 50.8mm !important;
+            height: 30mm !important;
+            transform: translate(-50%, -50%) !important;
             transform-origin: center center !important;
             display: flex !important;
             flex-direction: column !important;
