@@ -248,7 +248,7 @@ function ensureSessionPrintModeField() {
 }
 
 function ensureValidationMenuLink() {
-  if (!isVaccinationPage() || window.location.pathname.includes("/validation")) return;
+  if (!isVaccinationPage() || window.location.pathname.includes("/validation") || window.location.pathname.includes("/sticker")) return;
   if (document.getElementById("hha-validation-menu-link-v129")) return;
 
   const link = document.createElement("a");
