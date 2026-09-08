@@ -1,6 +1,9 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
 
+// VACCINATION_ROLE_GUARD_V150
 // V148_VALIDATION_DETAIL_API
 // V148_5_VALIDATION_FILTERS_AND_EXACT_STICKER
 // V148_6_RECOVER_LABEL_RECORDS_AND_SESSION_LOCATIONS
@@ -137,6 +140,9 @@ async function loadItemsForRegistrations(supabase: any, registrationIds: number[
 }
 
 export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return json({ ok: false, message: "Unauthorized", rows: [] }, 401);
+  if (!canVaccinationAccess(user, "validation")) return json({ ok: false, message: "Akses Tim Validasi ditolak untuk role ini.", rows: [] }, 403);
   try {
     const url = new URL(req.url);
     const sessionId = clean(url.searchParams.get("session_id"));
@@ -220,6 +226,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return json({ ok: false, message: "Unauthorized" }, 401);
+  if (!canVaccinationAccess(user, "validation")) return json({ ok: false, message: "Akses Tim Validasi ditolak untuk role ini." }, 403);
   try {
     const body = await req.json().catch(() => ({}));
     const action = clean(body.action).toUpperCase();

@@ -1,5 +1,9 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
+
+// VACCINATION_ROLE_GUARD_V150
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,6 +19,9 @@ function mode(value: any) { const raw = clean(value).toUpperCase(); return raw =
 function isMissing(error: any) { const msg = String(error?.message || "").toLowerCase(); const code = String(error?.code || ""); return code === "42P01" || code === "42703" || msg.includes("does not exist") || msg.includes("column") || msg.includes("schema cache"); }
 
 export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return json({ ok: false, message: "Unauthorized" }, 401);
+  if (!canVaccinationAccess(user, "session") && !canVaccinationAccess(user, "administer") && !canVaccinationAccess(user, "validation")) return json({ ok: false, message: "Akses setting print ditolak untuk role ini." }, 403);
   try {
     const url = new URL(req.url);
     const sessionId = clean(url.searchParams.get("session_id"));
@@ -53,6 +60,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return json({ ok: false, message: "Unauthorized" }, 401);
+  if (!canVaccinationAccess(user, "session")) return json({ ok: false, message: "Hanya role session/admin vaksinasi yang dapat mengubah setting print." }, 403);
   try {
     const body = await req.json().catch(() => ({}));
     const sessionId = clean(body.session_id ?? body.sessionId);

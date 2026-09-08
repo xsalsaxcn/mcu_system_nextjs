@@ -1,11 +1,14 @@
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 
+// VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "session") && !canVaccinationAccess(user, "administer")) return fail("Akses vaksin session ditolak untuk role ini.", 403);
 
   const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
   if (!sessionId) return fail("session_id wajib diisi.");
@@ -30,6 +33,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "session")) return fail("Hanya role session/admin vaksinasi yang dapat mengubah vaksin session.", 403);
 
   const body = await req.json().catch(() => ({}));
   const action = clean(body.action);

@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
+// VACCINATION_ROLE_GUARD_V150
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
@@ -71,6 +73,7 @@ function sourceFromMovement(movement: any) {
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "inventory") && !canVaccinationAccess(user, "dashboard")) return fail("Akses audit inventory ditolak untuk role ini.", 403);
 
   try {
     const supabase = getSupabaseAdmin();

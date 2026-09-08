@@ -3,6 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { SessionUser } from "@/lib/shared/types";
+import { canVaccinationAccess, isVaccinationRole } from "@/lib/vaccination/access";
+
+// VACCINATION_PORTAL_ROLE_ACCESS_V150
 
 const adminMenuGroups = [
   {
@@ -45,12 +48,14 @@ const adminMenuGroups = [
   {
     title: "Vaksinasi Perusahaan",
     items: [
+      { label: "Portal Vaksinasi", href: "/vaccination/portal" },
       { label: "Dashboard Vaksinasi", href: "/vaccination/dashboard" },
       { label: "Master Vaksin & Lot", href: "/vaccination/master" },
       { label: "Session Vaksinasi", href: "/vaccination/session" },
       { label: "Registrasi Vaksin", href: "/vaccination/register" },
       { label: "Antrian Vaksin", href: "/vaccination/queue" },
       { label: "Administered / Medis", href: "/vaccination/administer" },
+      { label: "Tim Validasi", href: "/vaccination/validation" },
       { label: "Inventory Vaksin", href: "/vaccination/inventory" },
       { label: "Reminder Vaksin", href: "/vaccination/reminder" },
     ],
@@ -96,6 +101,44 @@ function isWellnessParticipantUser(rawUser: Record<string, unknown>) {
   const role = getRole(rawUser);
   const program = getProgram(rawUser);
   return role === "wellness_participant" || role === "participant" || program === "wellness";
+}
+
+function getVaccinationRoleMenuGroups(rawUser: Record<string, unknown>) {
+  const user = rawUser as any;
+  const items = [
+    { permission: "portal", label: "Portal Vaksinasi", href: "/vaccination/portal" },
+    { permission: "dashboard", label: "Dashboard Vaksinasi", href: "/vaccination/dashboard" },
+    { permission: "master", label: "Master Vaksin & Lot", href: "/vaccination/master" },
+    { permission: "session", label: "Session Vaksinasi", href: "/vaccination/session" },
+    { permission: "register", label: "Registrasi Vaksin", href: "/vaccination/register" },
+    { permission: "queue", label: "Antrian Vaksin", href: "/vaccination/queue" },
+    { permission: "administer", label: "Administered / Medis", href: "/vaccination/administer" },
+    { permission: "validation", label: "Tim Validasi", href: "/vaccination/validation" },
+    { permission: "inventory", label: "Inventory Vaksin", href: "/vaccination/inventory" },
+    { permission: "inventory", label: "Alokasi Stock Session", href: "/vaccination/portal/stock" },
+    { permission: "users", label: "Role Tim Vaksinasi", href: "/vaccination/portal/users" },
+  ].filter((item) => canVaccinationAccess(user, item.permission as any));
+  return [{ title: "Portal Vaksinasi", items }];
+}
+
+function vaccinationPathAllowed(rawUser: Record<string, unknown>, path: string) {
+  const user = rawUser as any;
+  if (!isVaccinationRole(user)) return true;
+  if (path.startsWith("/vaccination/portal")) return true;
+  if (path.startsWith("/vaccination/sticker")) return canVaccinationAccess(user, "administer") || canVaccinationAccess(user, "validation");
+  const rules = [
+    ["/vaccination/administer", "administer"],
+    ["/vaccination/validation", "validation"],
+    ["/vaccination/register", "register"],
+    ["/vaccination/queue", "queue"],
+    ["/vaccination/inventory", "inventory"],
+    ["/vaccination/master", "master"],
+    ["/vaccination/session", "session"],
+    ["/vaccination/dashboard", "dashboard"],
+  ] as const;
+  const matched = rules.find(([prefix]) => path.startsWith(prefix));
+  if (!matched) return false;
+  return canVaccinationAccess(user, matched[1] as any);
 }
 
 function getWellnessParticipantMenuGroups() {
@@ -340,6 +383,15 @@ export default function AppShell({
   const rawUser = user as unknown as Record<string, unknown>;
   const role = getRole(rawUser);
   const isOperator = role === "operator";
+  const vaccinationRestricted = isVaccinationRole(user);
+  const homeHref = vaccinationRestricted ? "/vaccination/portal" : "/dashboard";
+
+  useEffect(() => {
+    if (!vaccinationRestricted || typeof window === "undefined") return;
+    if (!vaccinationPathAllowed(rawUser, window.location.pathname)) {
+      window.location.replace("/vaccination/portal");
+    }
+  }, [vaccinationRestricted, rawUser]);
 
   const displayName = String(
     rawUser.name ||
@@ -355,7 +407,13 @@ export default function AppShell({
   );
 
   const isWellnessParticipant = isWellnessParticipantUser(rawUser);
-  const menuGroups = isWellnessParticipant ? getWellnessParticipantMenuGroups() : isOperator ? getOperatorMenuGroups(rawUser) : adminMenuGroups;
+  const menuGroups = vaccinationRestricted
+    ? getVaccinationRoleMenuGroups(rawUser)
+    : isWellnessParticipant
+      ? getWellnessParticipantMenuGroups()
+      : isOperator
+        ? getOperatorMenuGroups(rawUser)
+        : adminMenuGroups;
   const operatorFormRoute = getOperatorFormRoute(rawUser);
   const operatorFormLabel = getOperatorFormLabel(rawUser);
 
@@ -365,14 +423,14 @@ export default function AppShell({
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
           <div className="flex min-w-0 items-center gap-3 md:gap-4">
             <a
-              href="/dashboard"
+              href={homeHref}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 text-sm font-black text-white shadow-sm md:h-12 md:w-12"
             >
               HHA
             </a>
 
             <div className="min-w-0">
-              <a href="/dashboard" className="group block">
+              <a href={homeHref} className="group block">
                 <div className="truncate text-xl font-black tracking-tight text-slate-900 group-hover:text-blue-700 md:text-2xl">
                   Harmony Health App
                 </div>
@@ -384,11 +442,13 @@ export default function AppShell({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <a href="/dashboard" className="top-nav-link">
-              Dashboard
-            </a>
+            {vaccinationRestricted ? (
+              <a href="/vaccination/portal" className="top-nav-link">Portal Vaksinasi</a>
+            ) : (
+              <a href="/dashboard" className="top-nav-link">Dashboard</a>
+            )}
 
-            {isWellnessParticipant ? (
+            {vaccinationRestricted ? null : isWellnessParticipant ? (
               <a href="/wellness/dashboard" className="top-nav-link">
                 Wellness Saya
               </a>

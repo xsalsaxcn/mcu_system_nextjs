@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { addDays, clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
+import { canVaccinationAccess } from "@/lib/vaccination/access";
 
+// VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
 function normalizePrintHandler(value: any) {
@@ -11,6 +13,53 @@ function normalizePrintHandler(value: any) {
 function missingColumn(error: any) {
   const msg = String(error?.message || "").toLowerCase();
   return String(error?.code || "") === "42703" || msg.includes("column") || msg.includes("schema cache");
+}
+
+function allocationTableMissing(error: any) {
+  const code = String(error?.code || "");
+  const msg = String(error?.message || "").toLowerCase();
+  return code === "42P01" || (msg.includes("vaccination_session_stock_allocations") && msg.includes("does not exist"));
+}
+
+async function validateSessionStockAccess(supabase: any, sessionId: number, lot: any) {
+  const globalRemaining = Number(lot?.stock_initial || 0) + Number(lot?.stock_added || 0) - Number(lot?.stock_used || 0);
+  if (globalRemaining <= 0) {
+    return { ok: false, message: `Stock Lot ${lot?.lot_number || "-"} sudah habis.` };
+  }
+
+  const allocationResult = await supabase
+    .from("vaccination_session_stock_allocations")
+    .select("id,session_id,lot_id,allocated_qty,low_stock_threshold,dedicated,active")
+    .eq("lot_id", Number(lot?.id))
+    .eq("active", true);
+
+  if (allocationResult.error) {
+    if (allocationTableMissing(allocationResult.error)) return { ok: true, migrationMissing: true };
+    return { ok: false, message: allocationResult.error.message || "Gagal memvalidasi alokasi stock session." };
+  }
+
+  const dedicatedRows = (allocationResult.data || []).filter((row: any) => row.dedicated !== false);
+  if (!dedicatedRows.length) return { ok: true };
+
+  const owned = dedicatedRows.find((row: any) => Number(row.session_id) === Number(sessionId));
+  if (!owned) {
+    return { ok: false, message: `Lot ${lot?.lot_number || "-"} didedikasikan untuk session lain dan tidak dapat digunakan pada session ini.` };
+  }
+
+  const usedResult = await supabase
+    .from("vaccination_records")
+    .select("id,status")
+    .eq("session_id", sessionId)
+    .eq("lot_id", Number(lot?.id))
+    .limit(20000);
+  if (usedResult.error) return { ok: false, message: usedResult.error.message || "Gagal menghitung pemakaian alokasi session." };
+  const used = (usedResult.data || []).filter((row: any) => !["CANCELLED", "CANCELED", "VOID", "BATAL"].includes(String(row.status || "").toUpperCase())).length;
+  const remaining = Number(owned.allocated_qty || 0) - used;
+  if (remaining <= 0) {
+    return { ok: false, message: `Alokasi Lot ${lot?.lot_number || "-"} untuk session ini sudah habis.` };
+  }
+
+  return { ok: true, allocationRemaining: remaining, threshold: Number(owned.low_stock_threshold || 0) };
 }
 
 async function getPrintLabelHandler(supabase: any, sessionId: number, fallback: any) {
@@ -85,6 +134,7 @@ async function getRegistrationItems(supabase: any, registrationId: number) {
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "administer")) return fail("Akses Administered / Medis ditolak untuk role ini.", 403);
 
   const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
   const supabase = supabaseAdmin();
@@ -245,6 +295,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
+  if (!canVaccinationAccess(user, "administer")) return fail("Akses Administered / Medis ditolak untuk role ini.", 403);
 
   const body = await req.json().catch(() => ({}));
   const registrationId = toInt(body.registrationId || body.registration_id, 0);
@@ -363,6 +414,10 @@ export async function POST(req: NextRequest) {
     if (Number(lot.vaccine_id) !== Number(item.vaccineId)) {
       return fail(`Lot ${lot.lot_number} tidak sesuai dengan vaksin ${vaccine.name}.`);
     }
+
+    // V150 dedicated stock guard: server-side enforcement.
+    const stockAccess = await validateSessionStockAccess(supabase, toInt(reg.session_id, 0), lot);
+    if (!stockAccess.ok) return fail(stockAccess.message || "Stock session tidak dapat digunakan.", 409);
 
     const nextDueDate = addDays(administeredAt, vaccine.default_next_dose_days);
 

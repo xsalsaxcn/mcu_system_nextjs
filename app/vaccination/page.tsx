@@ -2,6 +2,8 @@
 
 import HarmonyMenu from "@/components/HarmonyMenu";
 
+// VACCINATION_PORTAL_ENTRY_V150
+
 type MenuItem = {
   title: string;
   href: string;
@@ -66,9 +68,10 @@ export default function VaccinationPage() {
                 </div>
               </div>
 
-              <a href="/dashboard" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-50">
-                Dashboard Operasional
-              </a>
+              <div className="flex flex-wrap gap-2">
+                <a href="/vaccination/portal" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-50">Portal Vaksinasi</a>
+                <a href="/dashboard" className="rounded-2xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20">Dashboard Operasional</a>
+              </div>
             </div>
           </div>
         </section>
