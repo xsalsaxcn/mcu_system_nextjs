@@ -111,7 +111,14 @@ export async function GET(req: NextRequest) {
 
   const rows = registrations.map((registration: any) => {
     const recs = recordsByReg.get(Number(registration.id)) || [];
-    const isDone = recs.length > 0 || registration.queue_status === "ADMINISTERED";
+    // V148_6_DASHBOARD_WORKFLOW_STATUS_SYNC
+    const legacyIsDone = recs.length > 0 || registration.queue_status === "ADMINISTERED";
+    const workflowDone = ["ADMINISTERED", "PENDING_VALIDATION", "DONE"].includes(
+      String(registration.queue_status || "").toUpperCase()
+    ) || ["PENDING", "DONE"].includes(
+      String(registration.validation_status || "").toUpperCase()
+    );
+    const isDone = workflowDone || legacyIsDone;
 
     const vaccineNames = Array.from(new Set(recs.map((record) => clean(record.vaccine_name)).filter(Boolean))).join(" | ");
     const lotNumbers = Array.from(new Set(recs.map((record) => clean(record.lot_number)).filter(Boolean))).join(" | ");

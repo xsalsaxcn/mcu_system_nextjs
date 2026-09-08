@@ -2,6 +2,7 @@
 
 // V148_VALIDATION_DETAIL_AND_STICKER_PRINT
 // V148_5_LOCATION_DATE_SEARCH_AND_EXACT_ADMINISTERED_LABEL
+// V148_6_RECOVER_PRINT_AND_SESSION_LOCATIONS
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -78,6 +79,7 @@ function stickerUrlFor(row: Row) {
 
 export default function VaccinationValidationPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [sessionLocations, setSessionLocations] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
@@ -96,6 +98,15 @@ export default function VaccinationValidationPage() {
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat validasi.");
       setRows(json.rows || []);
+      setSessionLocations(
+        Array.from(
+          new Set(
+            (Array.isArray(json.session_locations) ? json.session_locations : [])
+              .map((session: any) => clean(session?.location))
+              .filter((location: string) => location && location !== "-")
+          )
+        ) as string[]
+      );
       setMessage(`Data validasi dimuat: ${(json.rows || []).length} peserta.`);
     } catch (error: any) {
       setMessage(error?.message || "Gagal memuat validasi.");
@@ -110,9 +121,12 @@ export default function VaccinationValidationPage() {
 
   const locations = useMemo(() => {
     return Array.from(
-      new Set(rows.map((row) => clean(row.location)).filter((value) => value && value !== "-"))
+      new Set([
+        ...sessionLocations,
+        ...rows.map((row) => clean(row.location)).filter((value) => value && value !== "-"),
+      ])
     ).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
+  }, [rows, sessionLocations]);
 
   const shown = useMemo(() => {
     const keyword = filter.toLowerCase().trim();
@@ -162,26 +176,60 @@ export default function VaccinationValidationPage() {
     }
   }
 
-  function handlePrint(row: Row) {
-    const url = stickerUrlFor(row);
-    if (!url) {
-      setMessage("Belum ada vaccination record untuk label ini. Data layanan tetap tampil, tetapi label tidak dicetak agar tidak membuat label yang berbeda dari Administered.");
-      return;
-    }
-
-    // EXACT SAME PRINT SOURCE AS ADMINISTERED:
-    // single record -> /vaccination/sticker/[recordId]
-    // multi record  -> /vaccination/sticker/bulk?ids=...
-    // Tidak ada HTML label buatan Tim Validasi lagi.
-    const printWindow = window.open(url, "_blank", "width=520,height=720");
+  async function handlePrint(row: Row) {
+    // Popup dibuka sinkron dari click agar Chrome tidak memblokir setelah request async.
+    const printWindow = window.open("about:blank", "_blank", "width=520,height=720");
     if (!printWindow) {
       setMessage("Popup print diblokir browser. Izinkan popup lalu coba lagi.");
       return;
     }
-    printWindow.focus();
 
-    setMessage(`${recordIds(row).length} label dibuka dengan layout yang sama persis seperti Administered.`);
-    void update(row, "PRINTED");
+    printWindow.document.open();
+    printWindow.document.write(
+      "<!doctype html><html><head><meta charset='utf-8'><title>Menyiapkan Label</title></head><body style='font-family:Arial,sans-serif;padding:18px'><b>Menyiapkan label vaksin...</b></body></html>"
+    );
+    printWindow.document.close();
+
+    try {
+      let ids = recordIds(row);
+      let url = stickerUrlFor(row);
+
+      // Legacy/test data bisa sudah PENDING_VALIDATION tetapi belum punya vaccination_records.
+      // Buat record label dari registration_items TANPA mengurangi stok lagi.
+      if (!url) {
+        setMessage(`Membuat record label untuk ${row.patient_name || "peserta"}...`);
+        const res = await fetch("/api/vaccination/validation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ id: row.id, action: "ENSURE_LABEL_RECORDS", actor }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) throw new Error(json.message || "Gagal menyiapkan record label.");
+
+        ids = Array.isArray(json.record_ids)
+          ? json.record_ids.map(Number).filter((id: number) => Number.isFinite(id) && id > 0)
+          : [];
+        url = clean(json.stickerUrl);
+
+        if (!url && ids.length) {
+          url = ids.length === 1
+            ? `/vaccination/sticker/${ids[0]}`
+            : `/vaccination/sticker/bulk?ids=${encodeURIComponent(ids.join(","))}`;
+        }
+      }
+
+      if (!url) throw new Error("URL sticker belum tersedia setelah record label disiapkan.");
+
+      // Hasil akhir tetap route Sticker V146 yang SAMA dengan Administered.
+      printWindow.location.replace(url);
+      printWindow.focus();
+      setMessage(`${ids.length || recordIds(row).length} label dibuka dengan layout Administered.`);
+      await update(row, "PRINTED");
+    } catch (error: any) {
+      if (!printWindow.closed) printWindow.close();
+      setMessage(error?.message || "Gagal menyiapkan label vaksin.");
+    }
   }
 
   async function saveStatus(row: Row) {
@@ -253,6 +301,7 @@ export default function VaccinationValidationPage() {
               ) : shown.map((row) => {
                 const products = Array.isArray(row.products) ? row.products : [];
                 const labelCount = recordIds(row).length;
+                const canPrepareLabel = labelCount > 0 || products.length > 0;
                 return (
                   <tr key={row.id} className="border-t border-slate-100 align-top">
                     <td className="px-5 py-4">
@@ -289,8 +338,14 @@ export default function VaccinationValidationPage() {
                     <td className="px-5 py-4"><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{row.validation_status || row.queue_status || "PENDING"}</span></td>
                     <td className="px-5 py-4">
                       <div className="flex min-w-[280px] flex-col gap-2">
-                        <button type="button" onClick={() => handlePrint(row)} disabled={!labelCount} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300">
-                          {!labelCount ? "Record Label Belum Ada" : labelCount > 1 ? `Print ${labelCount} Label` : "Print Label"}
+                        <button type="button" onClick={() => handlePrint(row)} disabled={!canPrepareLabel} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                          {!canPrepareLabel
+                            ? "Data Label Belum Ada"
+                            : !labelCount
+                              ? "Buat & Print Label"
+                              : labelCount > 1
+                                ? `Print ${labelCount} Label`
+                                : "Print Label"}
                         </button>
                         <select className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black" value={draft[row.id] || ""} onChange={(e) => setDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}>
                           <option value="">Ubah Status</option>

@@ -3,6 +3,8 @@ import { supabaseAdmin } from "../_utils";
 
 // V148_VALIDATION_DETAIL_API
 // V148_5_VALIDATION_FILTERS_AND_EXACT_STICKER
+// V148_6_RECOVER_LABEL_RECORDS_AND_SESSION_LOCATIONS
+// V148_6_1_SUPABASE_RELATION_TYPE_FIX
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -188,7 +190,30 @@ export async function GET(req: NextRequest) {
       )
     );
 
-    return json({ ok: true, rows });
+    // V148.6: pilihan lokasi berasal dari vaccination_sessions, bukan hanya peserta pending.
+    let sessionLocationQuery = supabase
+      .from("vaccination_sessions")
+      .select("id,session_name,company_name,location,session_date")
+      .order("session_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(2000);
+
+    if (sessionId) sessionLocationQuery = sessionLocationQuery.eq("id", sessionId);
+
+    const sessionLocationResult = await sessionLocationQuery;
+    const sessionLocations = sessionLocationResult.error
+      ? []
+      : (sessionLocationResult.data || [])
+          .map((session: any) => ({
+            session_id: Number(session.id),
+            session_name: clean(session.session_name) || `Session ${session.id}`,
+            company_name: clean(session.company_name),
+            location: clean(session.location),
+            session_date: session.session_date || null,
+          }))
+          .filter((session: any) => session.location);
+
+    return json({ ok: true, rows, session_locations: sessionLocations });
   } catch (error: any) {
     return json({ ok: false, message: error?.message || "Gagal membaca validasi.", rows: [] }, 500);
   }
@@ -221,6 +246,149 @@ export async function POST(req: NextRequest) {
     if (!rowId) return json({ ok: false, message: "ID peserta/registrasi tidak terbaca." }, 400);
 
     const now = new Date().toISOString();
+
+    // V148.6 recovery hanya membuat vaccination_records yang hilang untuk keperluan label.
+    // TIDAK mengurangi stok dan TIDAK membuat inventory movement baru.
+    if (action === "ENSURE_LABEL_RECORDS" || action === "ENSURE_PRINT_RECORDS") {
+      const registrationResult = await supabase
+        .from("vaccination_registrations")
+        .select("*")
+        .eq("id", rowId)
+        .maybeSingle();
+
+      if (registrationResult.error || !registrationResult.data) {
+        return json({ ok: false, message: registrationResult.error?.message || "Registrasi tidak ditemukan." }, 404);
+      }
+
+      const registration = registrationResult.data;
+
+      const itemsResult = await supabase
+        .from("vaccination_registration_items")
+        .select("id,registration_id,vaccine_id,lot_id,dose_number,status,administered_record_id,administered_at,item_note,payment_note,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+        .eq("registration_id", rowId)
+        .eq("active", true)
+        .order("id", { ascending: true });
+
+      if (itemsResult.error) {
+        return json({ ok: false, message: itemsResult.error.message || "Gagal membaca item vaksin." }, 500);
+      }
+
+      const existingResult = await supabase
+        .from("vaccination_records")
+        .select("id,registration_id,session_id,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,status")
+        .eq("registration_id", rowId)
+        .order("id", { ascending: true });
+
+      if (existingResult.error) {
+        return json({ ok: false, message: existingResult.error.message || "Gagal membaca vaccination record." }, 500);
+      }
+
+      const existingRecords: any[] = [...(existingResult.data || [])];
+      const ensuredIds: number[] = [];
+
+      for (const item of itemsResult.data || []) {
+        const vaccineId = toId(item.vaccine_id);
+        const lotId = toId(item.lot_id);
+        const doseNumber = Number(item.dose_number || 1);
+        if (!vaccineId || !lotId) continue;
+
+        let record = existingRecords.find((candidate: any) =>
+          Number(candidate.id) === Number(item.administered_record_id)
+        );
+
+        if (!record) {
+          record = existingRecords.find((candidate: any) =>
+            Number(candidate.vaccine_id) === vaccineId &&
+            Number(candidate.lot_id) === lotId &&
+            Number(candidate.dose_number || 1) === doseNumber
+          );
+        }
+
+        if (!record) {
+          const administeredAt = item.administered_at || registration.updated_at || registration.created_at || now;
+          const administeredBy = clean(
+            registration.administered_by ||
+            registration.doctor_name ||
+            registration.petugas_name ||
+            registration.updated_by ||
+            actor
+          ) || actor || "Tim Validasi";
+
+          // V148.6.1: Supabase relation hasil select dapat ditipkan sebagai array.
+          // Normalisasi ke satu object sebelum membaca name / lot_number.
+          const vaccineRelation: any = Array.isArray(item.vaccine) ? item.vaccine[0] : item.vaccine;
+          const lotRelation: any = Array.isArray(item.lot) ? item.lot[0] : item.lot;
+
+          const payload = {
+            registration_id: rowId,
+            session_id: Number(registration.session_id),
+            participant_name: clean(registration.participant_name || registration.patient_name || registration.name) || "Peserta",
+            vaccine_id: vaccineId,
+            lot_id: lotId,
+            vaccine_name: clean(vaccineRelation?.name || (item as any).vaccine_name) || "Vaksin",
+            lot_number: clean(lotRelation?.lot_number || (item as any).lot_number) || "-",
+            dose_number: doseNumber,
+            administered_at: administeredAt,
+            administered_by: administeredBy,
+            notes: clean(item.item_note || item.payment_note || "") || null,
+            status: "ADMINISTERED",
+          };
+
+          const inserted = await supabase
+            .from("vaccination_records")
+            .insert(payload)
+            .select("*")
+            .single();
+
+          if (inserted.error || !inserted.data) {
+            return json({ ok: false, message: inserted.error?.message || "Gagal membuat record label." }, 500);
+          }
+
+          record = inserted.data;
+          existingRecords.push(record);
+        }
+
+        const recordId = Number(record.id);
+        if (recordId > 0) ensuredIds.push(recordId);
+
+        const itemUpdate = await supabase
+          .from("vaccination_registration_items")
+          .update({
+            administered_record_id: recordId,
+            administered_at: item.administered_at || record.administered_at || now,
+            status: "ADMINISTERED",
+          })
+          .eq("id", item.id);
+
+        if (itemUpdate.error) {
+          return json({ ok: false, message: itemUpdate.error.message || "Gagal menghubungkan record label ke item." }, 500);
+        }
+      }
+
+      // Jika item legacy tidak tersedia tetapi record sebenarnya sudah ada, tetap gunakan record yang ada.
+      if (!ensuredIds.length) {
+        for (const record of existingRecords) {
+          const recordId = Number(record.id);
+          if (recordId > 0) ensuredIds.push(recordId);
+        }
+      }
+
+      const recordIds = Array.from(new Set(ensuredIds));
+      if (!recordIds.length) {
+        return json({ ok: false, message: "Data vaksin/lot belum cukup untuk membuat label. Cek item vaksin peserta." }, 400);
+      }
+
+      const stickerUrl = recordIds.length === 1
+        ? `/vaccination/sticker/${recordIds[0]}`
+        : `/vaccination/sticker/bulk?ids=${encodeURIComponent(recordIds.join(","))}`;
+
+      return json({
+        ok: true,
+        message: `${recordIds.length} record label siap dicetak.`,
+        record_ids: recordIds,
+        stickerUrl,
+      });
+    }
     let payload: any = {};
 
     if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
