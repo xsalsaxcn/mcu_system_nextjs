@@ -46,6 +46,7 @@ type LotSummary = {
   remaining: number;
   physical: number | null;
   diff: number | null;
+  unattributed_used?: number;
   in_sources: string[];
   out_companies: string[];
 };
@@ -280,6 +281,23 @@ export default function VaccinationInventoryMovementEnhancer() {
         }
         inCell.textContent = lotSummary?.in_sources?.join(", ") || "-";
         outCell.textContent = lotSummary?.out_companies?.join(", ") || "-";
+
+        // V150.1: numeric columns must use the same filtered/canonical report as
+        // the cards. This prevents e.g. table Terpakai=15 while card Terpakai=12.
+        if (lotSummary) {
+          const currentHeaders = Array.from(headerRow.querySelectorAll("th")).map((th) => clean(th.textContent).toUpperCase());
+          const currentCells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
+          const setByHeader = (label: string, value: any) => {
+            const index = currentHeaders.indexOf(label);
+            if (index >= 0 && currentCells[index]) currentCells[index].textContent = String(value ?? "-");
+          };
+          setByHeader("JUMLAH AWAL", lotSummary.initial);
+          setByHeader("TAMBAHAN STOK", lotSummary.added);
+          setByHeader("TERPAKAI", lotSummary.used);
+          setByHeader("SISA SISTEM", lotSummary.remaining);
+          if (lotSummary.physical != null) setByHeader("SISA FISIK", lotSummary.physical);
+          if (lotSummary.diff != null) setByHeader("SELISIH", lotSummary.diff);
+        }
       }
     }
 
@@ -345,7 +363,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
         </div>
-        <div className="mt-3 text-xs text-slate-500">Card di atas mengikuti filter produk dan date range aktif. Export mengikuti filter yang sama.</div>
+        <div className="mt-3 text-xs text-slate-500">Card dan angka tabel mengikuti filter yang sama. Tanpa date range, Terpakai memakai saldo kumulatif canonical Inventory (termasuk rekonsiliasi legacy bila ada). Dengan date range, Terpakai memakai record bertanggal yang dapat ditelusuri. Export mengikuti filter yang sama.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}
       </section>
 

@@ -121,6 +121,14 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     const lotMovements = movements.filter((row: any) => Number(row.lot_id) === lotId);
     const lotRecords = records.filter((row: any) => Number(row.lot_id) === lotId);
 
+    // V150.1: keep Inventory card/report usage identical to the canonical Inventory API.
+    // Legacy stock_used can be higher than traceable vaccination_records; when no date
+    // range is active, preserve that cumulative value instead of silently lowering usage.
+    const traceableUsedAll = lotRecords.length;
+    const canonicalUsedAll = Math.max(num(lot.stock_used), traceableUsedAll);
+    const legacyUnattributedUsed = Math.max(0, canonicalUsedAll - traceableUsedAll);
+    const hasDateFilter = Boolean(from || to);
+
     const initialMovements = lotMovements.filter((row: any) => isInitial(row.movement_type));
     if (initialMovements.length) {
       for (const movement of initialMovements) {
@@ -253,7 +261,37 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       });
     }
 
-    const filteredUsed = lotRecords.filter((row: any) => inRange(row.administered_at || row.created_at, from, to)).length;
+    // If old stock_used contains usage that predates / lacks vaccination_records, show
+    // one explicit reconciliation row so drill-down and export still total to the same
+    // number as the Inventory table/card. A date filter cannot safely date legacy usage,
+    // therefore this reconciliation row is only included for the cumulative view.
+    if (!hasDateFilter && legacyUnattributedUsed > 0) {
+      details.push({
+        date: null,
+        direction: "OUT",
+        movement_type: "Terpakai - rekonsiliasi legacy",
+        company: "Perusahaan belum terpetakan",
+        participant: "",
+        employee_id: "",
+        mcu_id: "",
+        session: "",
+        location: "",
+        vaccine_id: Number(lot.vaccine_id),
+        vaccine: vaccineName,
+        brand,
+        lot: clean(lot.lot_number),
+        dose: "",
+        doctor: "",
+        qty: legacyUnattributedUsed,
+        print_status: "",
+        validation_status: "",
+        reference: "vaccination_vaccine_lots.stock_used",
+        note: `Rekonsiliasi ${legacyUnattributedUsed} pemakaian lama yang belum memiliki vaccination_records.`,
+      });
+    }
+
+    const traceableUsedFiltered = lotRecords.filter((row: any) => inRange(row.administered_at || row.created_at, from, to)).length;
+    const filteredUsed = hasDateFilter ? traceableUsedFiltered : canonicalUsedAll;
     const filteredAdded = details
       .filter((row: any) => row.vaccine_id === Number(lot.vaccine_id) && row.lot === clean(lot.lot_number) && row.movement_type === "Tambahan Stok")
       .reduce((sum: number, row: any) => sum + num(row.qty), 0);
@@ -278,6 +316,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       remaining,
       physical: lot.stock_physical_count == null ? null : num(lot.stock_physical_count),
       diff: lot.stock_physical_count == null ? null : num(lot.stock_physical_count) - remaining,
+      unattributed_used: hasDateFilter ? 0 : legacyUnattributedUsed,
       in_sources: inSources.length ? inSources : ["Sumber belum dicatat"],
       out_companies: outCompanies,
     });
