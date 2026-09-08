@@ -1,6 +1,7 @@
 "use client";
 
 // V148_VALIDATION_DETAIL_AND_STICKER_PRINT
+// V148_5_LOCATION_DATE_SEARCH_AND_EXACT_ADMINISTERED_LABEL
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -27,6 +28,9 @@ type Row = {
   print_status?: string;
   validation_status?: string;
   queue_status?: string;
+  location?: string;
+  session_date?: string | null;
+  session_name?: string;
   products?: ProductDetail[];
   record_ids?: number[];
   raw?: any;
@@ -41,6 +45,19 @@ function fmtDate(value: any) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return clean(value);
   return date.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+}
+
+function dateKey(value: any) {
+  const raw = clean(value);
+  if (!raw) return "";
+  const direct = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function recordIds(row: Row) {
@@ -64,6 +81,9 @@ export default function VaccinationValidationPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [actor, setActor] = useState("Tim Validasi");
   const [draft, setDraft] = useState<Record<number, string>>({});
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -88,9 +108,14 @@ export default function VaccinationValidationPage() {
     loadRows();
   }, []);
 
+  const locations = useMemo(() => {
+    return Array.from(
+      new Set(rows.map((row) => clean(row.location)).filter((value) => value && value !== "-"))
+    ).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
   const shown = useMemo(() => {
     const keyword = filter.toLowerCase().trim();
-    if (!keyword) return rows;
 
     return rows.filter((row) => {
       const productText = (row.products || [])
@@ -105,11 +130,20 @@ export default function VaccinationValidationPage() {
         row.note,
         row.print_status,
         row.validation_status,
+        row.location,
+        row.session_name,
         productText,
       ].map((value) => clean(value).toLowerCase()).join(" ");
-      return haystack.includes(keyword);
+
+      const locationOk = locationFilter === "all" || clean(row.location) === locationFilter;
+      const effectiveDate = dateKey(row.session_date || row.products?.[0]?.administered_at);
+      const fromOk = !dateFrom || (effectiveDate && effectiveDate >= dateFrom);
+      const toOk = !dateTo || (effectiveDate && effectiveDate <= dateTo);
+      const searchOk = !keyword || haystack.includes(keyword);
+
+      return locationOk && fromOk && toOk && searchOk;
     });
-  }, [filter, rows]);
+  }, [dateFrom, dateTo, filter, locationFilter, rows]);
 
   async function update(row: Row, action: string, note?: string) {
     setMessage("Mengubah status...");
@@ -131,27 +165,22 @@ export default function VaccinationValidationPage() {
   function handlePrint(row: Row) {
     const url = stickerUrlFor(row);
     if (!url) {
-      setMessage("Belum ada record vaksin yang dapat dicetak untuk peserta ini.");
+      setMessage("Belum ada vaccination record untuk label ini. Data layanan tetap tampil, tetapi label tidak dicetak agar tidak membuat label yang berbeda dari Administered.");
       return;
     }
 
-    // Open synchronously from the click event so Chrome does not block the print window.
-    // The destination page is the same V146 vaccination sticker route used by Medis.
-    const printWindow = window.open("about:blank", "_blank", "width=520,height=720");
+    // EXACT SAME PRINT SOURCE AS ADMINISTERED:
+    // single record -> /vaccination/sticker/[recordId]
+    // multi record  -> /vaccination/sticker/bulk?ids=...
+    // Tidak ada HTML label buatan Tim Validasi lagi.
+    const printWindow = window.open(url, "_blank", "width=520,height=720");
     if (!printWindow) {
       setMessage("Popup print diblokir browser. Izinkan popup lalu coba lagi.");
       return;
     }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      "<!doctype html><html><head><meta charset='utf-8'><title>Menyiapkan Label Vaksin</title></head><body style='font-family:Arial,sans-serif;padding:18px'><b>Menyiapkan label vaksin...</b><br><span style='font-size:12px'>Menggunakan format sticker 50.8 x 30 mm.</span></body></html>"
-    );
-    printWindow.document.close();
-    printWindow.location.replace(url);
     printWindow.focus();
 
-    setMessage(`${recordIds(row).length} label disiapkan untuk ${row.patient_name || "peserta"}.`);
+    setMessage(`${recordIds(row).length} label dibuka dengan layout yang sama persis seperti Administered.`);
     void update(row, "PRINTED");
   }
 
@@ -181,10 +210,22 @@ export default function VaccinationValidationPage() {
           <a href="/vaccination" className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800">☰ Menu Vaksinasi</a>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-          <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" placeholder="Cari pasien / dokter / produk / lot" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" placeholder="Nama petugas validasi" value={actor} onChange={(e) => setActor(e.target.value)} />
+        <div className="mt-6 grid gap-3 lg:grid-cols-6">
+          <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none lg:col-span-2" placeholder="Cari pasien / dokter / produk / lot / lokasi" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <select className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
+            <option value="all">Semua Lokasi</option>
+            {locations.map((location) => <option key={location} value={location}>{location}</option>)}
+          </select>
+          <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Tanggal mulai" />
+          <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Tanggal akhir" />
           <button type="button" onClick={loadRows} className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+          <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" placeholder="Nama petugas validasi" value={actor} onChange={(e) => setActor(e.target.value)} />
+          <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700">
+            Tampil {shown.length} dari {rows.length} peserta
+          </div>
         </div>
 
         {message ? <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm font-bold text-blue-700">{message}</div> : null}
@@ -221,6 +262,7 @@ export default function VaccinationValidationPage() {
                     <td className="px-5 py-4">
                       <div className="font-black text-slate-900">{row.patient_name || "-"}</div>
                       <div className="mt-1 text-sm font-bold text-slate-500">{row.queue_number || "-"}</div>
+                      <div className="mt-2 text-xs font-bold text-slate-500">{row.location || "-"}{row.session_date ? ` · ${dateKey(row.session_date)}` : ""}</div>
                     </td>
                     <td className="px-5 py-4">
                       {products.length ? (
@@ -248,7 +290,7 @@ export default function VaccinationValidationPage() {
                     <td className="px-5 py-4">
                       <div className="flex min-w-[280px] flex-col gap-2">
                         <button type="button" onClick={() => handlePrint(row)} disabled={!labelCount} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300">
-                          {labelCount > 1 ? `Print ${labelCount} Label` : "Print Label"}
+                          {!labelCount ? "Record Label Belum Ada" : labelCount > 1 ? `Print ${labelCount} Label` : "Print Label"}
                         </button>
                         <select className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black" value={draft[row.id] || ""} onChange={(e) => setDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}>
                           <option value="">Ubah Status</option>

@@ -2,6 +2,7 @@
 import { supabaseAdmin } from "../_utils";
 
 // V148_VALIDATION_DETAIL_API
+// V148_5_VALIDATION_FILTERS_AND_EXACT_STICKER
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,8 +46,23 @@ function productDetail(record: any) {
   };
 }
 
-function display(row: any, recordRows: any[] = []) {
-  const products = (recordRows || []).map(productDetail);
+function itemDetail(item: any) {
+  return {
+    record_id: toId(item?.administered_record_id),
+    vaccine_name: clean(item?.vaccine?.name || item?.vaccine_name) || "Vaksin",
+    lot_number: clean(item?.lot?.lot_number || item?.lot_number) || "-",
+    dose_number: Number(item?.dose_number || 1),
+    administered_at: item?.administered_at || null,
+    administered_by: "-",
+    note: "",
+    status: clean(item?.status) || "ADMINISTERED",
+  };
+}
+
+function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
+  const products = (recordRows || []).length
+    ? (recordRows || []).map(productDetail)
+    : (itemRows || []).map(itemDetail);
   const firstRecord = recordRows?.[0] || null;
   const recordIds = products.map((item) => item.record_id).filter(Boolean);
   const productName = products.length === 1
@@ -67,6 +83,9 @@ function display(row: any, recordRows: any[] = []) {
     print_status: row.print_status || "NOT_PRINTED",
     validation_status: row.validation_status || "PENDING",
     queue_status: row.queue_status || row.status || "",
+    location: clean(row.session?.location || row.location) || "-",
+    session_date: row.session?.session_date || row.session_date || null,
+    session_name: clean(row.session?.session_name || row.session_name) || "-",
     products,
     record_ids: recordIds,
     raw: row,
@@ -94,6 +113,27 @@ async function loadRecordsForRegistrations(supabase: any, registrationIds: numbe
   return byRegistration;
 }
 
+async function loadItemsForRegistrations(supabase: any, registrationIds: number[]) {
+  if (!registrationIds.length) return new Map<number, any[]>();
+
+  const result = await supabase
+    .from("vaccination_registration_items")
+    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,administered_record_id,administered_at,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+    .in("registration_id", registrationIds)
+    .eq("active", true)
+    .order("id", { ascending: true });
+
+  if (result.error) throw new Error(result.error.message);
+
+  const byRegistration = new Map<number, any[]>();
+  for (const item of result.data || []) {
+    const key = Number(item.registration_id);
+    if (!byRegistration.has(key)) byRegistration.set(key, []);
+    byRegistration.get(key)!.push(item);
+  }
+  return byRegistration;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -102,9 +142,9 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from("vaccination_registrations")
-      .select("*")
+      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
       .order("id", { ascending: false })
-      .limit(300);
+      .limit(1000);
 
     if (sessionId) query = query.eq("session_id", sessionId);
     query = query.or("queue_status.eq.PENDING_VALIDATION,validation_status.eq.PENDING");
@@ -113,9 +153,9 @@ export async function GET(req: NextRequest) {
     if (result.error && missingColumn(result.error)) {
       let fallback = supabase
         .from("vaccination_registrations")
-        .select("*")
+        .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
         .order("id", { ascending: false })
-        .limit(300);
+        .limit(1000);
       if (sessionId) fallback = fallback.eq("session_id", sessionId);
       result = await fallback;
     }
@@ -132,14 +172,20 @@ export async function GET(req: NextRequest) {
 
     const registrationIds = pendingRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
     let recordsByRegistration = new Map<number, any[]>();
+    let itemsByRegistration = new Map<number, any[]>();
     try {
       recordsByRegistration = await loadRecordsForRegistrations(supabase, registrationIds);
+      itemsByRegistration = await loadItemsForRegistrations(supabase, registrationIds);
     } catch (error: any) {
       return json({ ok: false, message: error?.message || "Gagal membaca detail layanan vaksin.", rows: [] }, 500);
     }
 
     const rows = pendingRegistrations.map((row: any) =>
-      display(row, recordsByRegistration.get(Number(row.id)) || [])
+      display(
+        row,
+        recordsByRegistration.get(Number(row.id)) || [],
+        itemsByRegistration.get(Number(row.id)) || []
+      )
     );
 
     return json({ ok: true, rows });

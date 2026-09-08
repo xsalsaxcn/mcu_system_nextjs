@@ -128,9 +128,101 @@ export async function GET(req: NextRequest) {
   const recordsResult = await recordsQuery;
   if (recordsResult.error) return fail(recordsResult.error.message, 500);
 
+  // V148_5_COMPLETED_FALLBACK
+  // Registrasi yang sudah PENDING_VALIDATION / DONE tetap harus terlihat di
+  // Peserta Sudah Selesai, termasuk data lama yang vaccination_records-nya belum lengkap.
+  let completedRecords: any[] = [...(recordsResult.data || [])];
+  const recordedRegistrationIds = new Set(
+    completedRecords.map((record: any) => Number(record.registration_id)).filter(Boolean)
+  );
+
+  let completedRegQuery = supabase
+    .from("vaccination_registrations")
+    .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+    .in("queue_status", ["ADMINISTERED", "PENDING_VALIDATION", "DONE"])
+    .order("updated_at", { ascending: false })
+    .limit(1000);
+
+  if (sessionId) completedRegQuery = completedRegQuery.eq("session_id", sessionId);
+
+  const completedRegsResult = await completedRegQuery;
+  if (!completedRegsResult.error) {
+    const fallbackRegs = (completedRegsResult.data || []).filter(
+      (row: any) => !recordedRegistrationIds.has(Number(row.id))
+    );
+    const fallbackIds = fallbackRegs.map((row: any) => Number(row.id)).filter(Boolean);
+
+    if (fallbackIds.length) {
+      const fallbackItemsResult = await supabase
+        .from("vaccination_registration_items")
+        .select("id,registration_id,vaccine_id,lot_id,dose_number,status,administered_record_id,administered_at,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+        .in("registration_id", fallbackIds)
+        .eq("active", true)
+        .order("id", { ascending: true });
+
+      const itemsByRegistration = new Map<number, any[]>();
+      if (!fallbackItemsResult.error) {
+        for (const item of fallbackItemsResult.data || []) {
+          const key = Number(item.registration_id);
+          if (!itemsByRegistration.has(key)) itemsByRegistration.set(key, []);
+          itemsByRegistration.get(key)!.push(item);
+        }
+      }
+
+      for (const registration of fallbackRegs) {
+        const itemRows = itemsByRegistration.get(Number(registration.id)) || [];
+        const common = {
+          registration_id: registration.id,
+          session_id: registration.session_id,
+          participant_name: registration.participant_name,
+          administered_at: registration.updated_at || registration.created_at || new Date().toISOString(),
+          administered_by: clean(registration.administered_by || registration.doctor_name || registration.updated_by) || "-",
+          status: "ADMINISTERED",
+          registration: {
+            id: registration.id,
+            queue_number: registration.queue_number,
+            participant_name: registration.participant_name,
+            mcu_id: registration.mcu_id,
+            employee_id: registration.employee_id,
+            department: registration.department,
+            company_name: registration.company_name,
+          },
+          session: registration.session || null,
+        };
+
+        if (itemRows.length) {
+          itemRows.forEach((item: any, index: number) => {
+            completedRecords.push({
+              ...common,
+              id: `fallback-${registration.id}-${item.id || index}`,
+              vaccine_id: item.vaccine_id,
+              lot_id: item.lot_id,
+              vaccine_name: item.vaccine?.name || "Vaksin",
+              lot_number: item.lot?.lot_number || "-",
+              dose_number: Number(item.dose_number || 1),
+              administered_at: item.administered_at || common.administered_at,
+            });
+          });
+        } else {
+          completedRecords.push({
+            ...common,
+            id: `fallback-${registration.id}`,
+            vaccine_name: registration.vaccine_name || "Vaksin",
+            lot_number: registration.lot_number || "-",
+            dose_number: 1,
+          });
+        }
+      }
+    }
+  }
+
+  completedRecords.sort((a: any, b: any) =>
+    new Date(b.administered_at || 0).getTime() - new Date(a.administered_at || 0).getTime()
+  );
+
   const sessionVaccines = sessionId ? await getSessionVaccines(supabase, sessionId) : [];
   const doctorNames = Array.from(
-    new Set((recordsResult.data || []).map((record: any) => clean(record.administered_by)).filter(Boolean))
+    new Set(completedRecords.map((record: any) => clean(record.administered_by)).filter((name: string) => name && name !== "-"))
   ).sort();
 
   let registrationsWithItems: any[] = [];
@@ -145,7 +237,7 @@ export async function GET(req: NextRequest) {
     vaccines: vaccinesResult.data || [],
     lots: lotsResult.data || [],
     sessionVaccines,
-    completedRecords: recordsResult.data || [],
+    completedRecords,
     doctorNames,
   });
 }
