@@ -124,7 +124,10 @@ function getVaccinationRoleMenuGroups(rawUser: Record<string, unknown>) {
 function vaccinationPathAllowed(rawUser: Record<string, unknown>, path: string) {
   const user = rawUser as any;
   if (!isVaccinationRole(user)) return true;
-  if (path.startsWith("/vaccination/portal")) return true;
+  const role = getRole(rawUser);
+  const isDedicatedMedis = role === "vaccination_medis";
+  if (path.startsWith("/vaccination/medis")) return isDedicatedMedis;
+  if (path.startsWith("/vaccination/portal")) return !isDedicatedMedis;
   if (path.startsWith("/vaccination/sticker")) return canVaccinationAccess(user, "administer") || canVaccinationAccess(user, "validation");
   const rules = [
     ["/vaccination/administer", "administer"],
@@ -387,14 +390,19 @@ export default function AppShell({
   const role = getRole(rawUser);
   const isOperator = role === "operator";
   const vaccinationRestricted = isVaccinationRole(user);
-  const homeHref = vaccinationRestricted ? "/vaccination/portal" : "/dashboard";
+  const isVaccinationMedis = role === "vaccination_medis";
+  const homeHref = isVaccinationMedis
+    ? "/vaccination/medis"
+    : vaccinationRestricted
+      ? "/vaccination/portal"
+      : "/dashboard";
 
   useEffect(() => {
     if (!vaccinationRestricted || typeof window === "undefined") return;
     if (!vaccinationPathAllowed(rawUser, window.location.pathname)) {
-      window.location.replace("/vaccination/portal");
+      window.location.replace(isVaccinationMedis ? "/vaccination/medis" : "/vaccination/portal");
     }
-  }, [vaccinationRestricted, rawUser]);
+  }, [vaccinationRestricted, isVaccinationMedis, rawUser]);
 
   const displayName = String(
     rawUser.name ||
@@ -408,6 +416,41 @@ export default function AppShell({
       rawUser.role_name ||
       "Admin"
   );
+
+  // VACCINATION_MEDIS_WORKSPACE_V150_3
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.dataset.hhaVaccinationRole = role;
+    document.documentElement.dataset.hhaVaccinationUser = displayName;
+
+    if (!isVaccinationMedis) return;
+
+    const hideForbiddenMedisLinks = () => {
+      const selector = [
+        'a[href="/vaccination"]',
+        'a[href="/vaccination/validation"]',
+        '#hha-validation-menu-link-v129',
+      ].join(",");
+      document.querySelectorAll(selector).forEach((node) => {
+        const element = node as HTMLElement;
+        element.dataset.hhaMedisHiddenV1503 = "1";
+        element.style.display = "none";
+      });
+    };
+
+    hideForbiddenMedisLinks();
+    const observer = new MutationObserver(hideForbiddenMedisLinks);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      document.querySelectorAll('[data-hha-medis-hidden-v1503="1"]').forEach((node) => {
+        const element = node as HTMLElement;
+        element.style.display = "";
+        delete element.dataset.hhaMedisHiddenV1503;
+      });
+    };
+  }, [role, displayName, isVaccinationMedis]);
 
   const isWellnessParticipant = isWellnessParticipantUser(rawUser);
   const menuGroups = vaccinationRestricted
@@ -445,7 +488,13 @@ export default function AppShell({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            {vaccinationRestricted ? (
+            {isVaccinationMedis ? (
+              <>
+                <a href="/vaccination/administer" className="top-nav-link">Tindakan Medis</a>
+                <a href="/vaccination/medis/rekap" className="top-nav-link">Rekap Saya</a>
+                <a href="/vaccination/medis/laporan" className="top-nav-link">Laporan Medis</a>
+              </>
+            ) : vaccinationRestricted ? (
               <a href="/vaccination/portal" className="top-nav-link">Portal Vaksinasi</a>
             ) : (
               <a href="/dashboard" className="top-nav-link">Dashboard</a>
@@ -465,9 +514,11 @@ export default function AppShell({
               </a>
             )}
 
-            <div className="ml-0 flex items-center gap-2 md:ml-3">
-              <MenuDrawer groups={menuGroups} />
-            </div>
+            {isVaccinationMedis ? null : (
+              <div className="ml-0 flex items-center gap-2 md:ml-3">
+                <MenuDrawer groups={menuGroups} />
+              </div>
+            )}
 
             <button
               type="button"

@@ -55,10 +55,12 @@ export async function POST(req: NextRequest) {
     program_type: String(user.program_type || "vaccination") as any,
   };
 
+  // VACCINATION_MEDIS_WORKSPACE_V150_3
+  const redirect = rawRole === "vaccination_medis" ? "/vaccination/medis" : "/vaccination/portal";
   const response = NextResponse.json({
     ok: true,
     user: sessionUser,
-    redirect: "/vaccination/portal",
+    redirect,
   });
   setSessionCookie(response, sessionUser);
   return response;

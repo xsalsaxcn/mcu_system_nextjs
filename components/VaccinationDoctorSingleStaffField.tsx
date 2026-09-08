@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 
@@ -237,7 +237,10 @@ function styleSelect(select: HTMLSelectElement) {
 async function ensureSingleDoctorField() {
   if (!isAdministerPage()) return;
 
-  const names = await fetchStaffNames();
+  // VACCINATION_MEDIS_WORKSPACE_V150_3
+  const dedicatedMedis = cleanText(document.documentElement.dataset.hhaVaccinationRole).toLowerCase() === "vaccination_medis";
+  const dedicatedMedisName = cleanText(document.documentElement.dataset.hhaVaccinationUser);
+  const names = dedicatedMedis && dedicatedMedisName ? [dedicatedMedisName] : await fetchStaffNames();
   const originalInput = findOriginalDoctorInput();
 
   if (originalInput) restoreHiddenParents(originalInput.parentElement);
@@ -271,7 +274,9 @@ async function ensureSingleDoctorField() {
 
   styleSelect(select);
 
-  const current = select.value || cleanText(originalInput?.value || "");
+  const current = dedicatedMedis && dedicatedMedisName
+    ? dedicatedMedisName
+    : select.value || cleanText(originalInput?.value || "");
 
   select.innerHTML = "";
 
@@ -296,6 +301,11 @@ async function ensureSingleDoctorField() {
     }
     select.value = current;
   }
+
+  select.disabled = dedicatedMedis && Boolean(dedicatedMedisName);
+  select.title = dedicatedMedis && dedicatedMedisName
+    ? "Akun Vaccination Medis dikunci ke identitas petugas yang sedang login."
+    : "";
 
   select.onchange = () => {
     const input = findOriginalDoctorInput();

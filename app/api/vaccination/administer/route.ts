@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { addDays, clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
-import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { canVaccinationAccess, vaccinationRole } from "@/lib/vaccination/access";
 
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
@@ -270,6 +270,19 @@ export async function GET(req: NextRequest) {
     new Date(b.administered_at || 0).getTime() - new Date(a.administered_at || 0).getTime()
   );
 
+  // VACCINATION_MEDIS_WORKSPACE_V150_3
+  // Dedicated Medis hanya melihat rekap selesai miliknya sendiri.
+  if (vaccinationRole(user) === "vaccination_medis") {
+    const aliases = new Set(
+      [clean((user as any).name), clean((user as any).username), String((user as any).id || "")]
+        .filter(Boolean)
+        .map((value) => clean(value).toLowerCase().replace(/\s+/g, " "))
+    );
+    completedRecords = completedRecords.filter((record: any) =>
+      aliases.has(clean(record.administered_by).toLowerCase().replace(/\s+/g, " "))
+    );
+  }
+
   const sessionVaccines = sessionId ? await getSessionVaccines(supabase, sessionId) : [];
   const doctorNames = Array.from(
     new Set(completedRecords.map((record: any) => clean(record.administered_by)).filter((name: string) => name && name !== "-"))
@@ -302,7 +315,10 @@ export async function POST(req: NextRequest) {
   const doseNumber = Math.max(1, toInt(body.doseNumber, 1));
   const administeredAtRaw = clean(body.administeredAt);
   const administeredAt = administeredAtRaw ? new Date(administeredAtRaw) : new Date();
-  const administeredBy = clean(body.administeredByName) || clean(body.doctorName) || ((user as any).email || (user as any).name || (user as any).id || "system");
+  const loggedInMedisName = clean((user as any).name) || clean((user as any).username) || String((user as any).id || "Medis");
+  const administeredBy = vaccinationRole(user) === "vaccination_medis"
+    ? loggedInMedisName
+    : clean(body.administeredByName) || clean(body.doctorName) || ((user as any).email || (user as any).name || (user as any).id || "system");
 
   if (!registrationId) return fail("Peserta/antrian wajib dipilih.");
 

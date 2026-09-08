@@ -27,7 +27,8 @@ export default function VaccinationLoginPage() {
           data?.user &&
           (role === "admin" || role.startsWith("vaccination_"))
         ) {
-          router.replace("/vaccination/portal");
+          // VACCINATION_MEDIS_WORKSPACE_V150_3
+          router.replace(role === "vaccination_medis" ? "/vaccination/medis" : "/vaccination/portal");
           return;
         }
       } catch {
@@ -71,7 +72,7 @@ export default function VaccinationLoginPage() {
         return;
       }
 
-      router.replace("/vaccination/portal");
+      router.replace(data.redirect || "/vaccination/portal");
       router.refresh();
     } catch {
       setError("Tidak dapat terhubung ke server. Coba lagi.");
