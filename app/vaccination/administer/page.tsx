@@ -418,8 +418,7 @@ export default function VaccinationAdministerPage() {
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
         {printLabelHandler === "VALIDASI" ? (
           <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-bold text-blue-800">
-            {/* V148_4_VALIDATION_SINGLE_FINISH */}
-            Mode session: <b>Print Label = Tim Validasi</b>. Dokter cukup klik <b>Proses Tindakan</b>, lalu <b>Selesai Dokter + Kirim ke Tim Validasi</b>. Print label dilakukan di Tim Validasi.
+            Mode session: <b>Print Label = Tim Validasi</b>. Dokter klik <b>Proses Tindakan</b>, lalu <b>Done Semua Produk - Kirim ke Tim Validasi</b>. Print label dilakukan di Tim Validasi.
           </div>
         ) : null}
 
@@ -550,6 +549,8 @@ export default function VaccinationAdministerPage() {
                   ) : (
                     <button
                       type="button"
+                      data-vaccination-canonical-administer="1"
+                      data-vaccination-product-done="1"
                       disabled={processingIndex !== null || !processStarted}
                       title={processStarted ? "Tandai produk selesai." : "Wajib klik Proses Tindakan terlebih dahulu."}
                       onClick={() => donePrint(index)}
@@ -587,8 +588,10 @@ export default function VaccinationAdministerPage() {
           ) : null}
 
           <button
+            id="vaccination-administer-final-action"
+            data-vaccination-canonical-administer="1"
             disabled={processingIndex !== null || !processStarted}
-            title={processStarted ? "Selesaikan tindakan dokter." : "Klik Proses Tindakan terlebih dahulu."}
+            title={processStarted ? "Selesaikan seluruh produk sesuai mode print session." : "Klik Proses Tindakan terlebih dahulu."}
             onClick={() => donePrint()}
             className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 disabled:opacity-100"
           >
@@ -597,8 +600,8 @@ export default function VaccinationAdministerPage() {
               : !processStarted
                 ? "Klik Proses Tindakan Terlebih Dahulu"
                 : printLabelHandler === "VALIDASI"
-                  ? "Selesai Dokter + Kirim ke Tim Validasi"
-                  : "Selesai Dokter + Print Semua Sticker"}
+                  ? "Done Semua Produk - Kirim ke Tim Validasi"
+                  : "Done Semua Produk + Print Sticker"}
           </button>
         </section>
 

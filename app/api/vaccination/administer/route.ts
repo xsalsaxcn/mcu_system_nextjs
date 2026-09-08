@@ -270,18 +270,9 @@ export async function GET(req: NextRequest) {
     new Date(b.administered_at || 0).getTime() - new Date(a.administered_at || 0).getTime()
   );
 
-  // VACCINATION_MEDIS_WORKSPACE_V150_3
-  // Dedicated Medis hanya melihat rekap selesai miliknya sendiri.
-  if (vaccinationRole(user) === "vaccination_medis") {
-    const aliases = new Set(
-      [clean((user as any).name), clean((user as any).username), String((user as any).id || "")]
-        .filter(Boolean)
-        .map((value) => clean(value).toLowerCase().replace(/\s+/g, " "))
-    );
-    completedRecords = completedRecords.filter((record: any) =>
-      aliases.has(clean(record.administered_by).toLowerCase().replace(/\s+/g, " "))
-    );
-  }
+  // VACCINATION_ADMINISTER_MIRROR_COMPLETED_V150_6
+  // Akun portal hanya menentukan hak akses. Riwayat selesai tetap mirror seluruh
+  // vaccination_records pada session dan dapat difilter berdasarkan dokter di UI.
 
   const sessionVaccines = sessionId ? await getSessionVaccines(supabase, sessionId) : [];
   const doctorNames = Array.from(
@@ -315,12 +306,17 @@ export async function POST(req: NextRequest) {
   const doseNumber = Math.max(1, toInt(body.doseNumber, 1));
   const administeredAtRaw = clean(body.administeredAt);
   const administeredAt = administeredAtRaw ? new Date(administeredAtRaw) : new Date();
-  const loggedInMedisName = clean((user as any).name) || clean((user as any).username) || String((user as any).id || "Medis");
-  const administeredBy = vaccinationRole(user) === "vaccination_medis"
-    ? loggedInMedisName
-    : clean(body.administeredByName) || clean(body.doctorName) || ((user as any).email || (user as any).name || (user as any).id || "system");
+  // VACCINATION_ADMINISTER_SELECTED_DOCTOR_V150_6
+  // Login menentukan authorization saja. Pelaksana klinis wajib berasal dari pilihan
+  // dokter/petugas pada form yang sumbernya adalah Staff Options di Session Vaksinasi.
+  const selectedDoctorName = clean(body.administeredByName) || clean(body.doctorName);
+  const loggedInActor = clean((user as any).email) || clean((user as any).name) || String((user as any).id || "system");
+  const administeredBy = selectedDoctorName || loggedInActor;
 
   if (!registrationId) return fail("Peserta/antrian wajib dipilih.");
+  if (vaccinationRole(user) === "vaccination_medis" && !selectedDoctorName) {
+    return fail("Pilih nama dokter/petugas yang sudah disetting di Session Vaksinasi.", 400);
+  }
 
   const supabase = supabaseAdmin();
 

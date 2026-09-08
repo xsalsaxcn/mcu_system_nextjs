@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 
@@ -113,12 +113,19 @@ function setInlineInfo(message: string, tone: "info" | "success" | "error" = "in
   }
 }
 
+function isCanonicalAdministerAction(button: HTMLButtonElement) {
+  return button.getAttribute("data-vaccination-canonical-administer") === "1" ||
+    button.id === "vaccination-administer-final-action";
+}
+
 function isFinalDoctorDoneButton(button: HTMLButtonElement) {
+  if (isCanonicalAdministerAction(button)) return false;
   const txt = textOf(button);
   return /Done\s*\+\s*Print|Print Semua|Selesai Dokter|Selesaikan Tindakan/i.test(txt);
 }
 
 function isProductDoneButton(button: HTMLButtonElement) {
+  if (isCanonicalAdministerAction(button)) return false;
   const txt = textOf(button);
   if (txt !== "Done") return false;
   if (button.id === "hha-proses-tindakan-action") return false;
@@ -357,6 +364,10 @@ function handleCaptureClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
   const button = target?.closest("button") as HTMLButtonElement | null;
   if (!button) return;
+
+  // V150_6_CANONICAL_ACTION_GUARD
+  // Tombol React terbaru tidak boleh disentuh enhancer legacy.
+  if (isCanonicalAdministerAction(button)) return;
 
   if (isProductDoneButton(button)) {
     event.preventDefault();

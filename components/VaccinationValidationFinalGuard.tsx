@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 
@@ -278,7 +278,13 @@ function currentModeSync() {
   return getModeLocal(getSessionInfo());
 }
 
+function isCanonicalAdministerAction(button: HTMLButtonElement) {
+  return button.getAttribute("data-vaccination-canonical-administer") === "1" ||
+    button.id === "vaccination-administer-final-action";
+}
+
 function isFinalDoctorButton(button: HTMLButtonElement) {
+  if (isCanonicalAdministerAction(button)) return false;
   const text = textOf(button);
   return /Selesai Dokter|Print Semua|Semua Sticker|Done\s*\+\s*Print|Done \+ Print/i.test(text);
 }
@@ -401,7 +407,7 @@ function installGuards() {
     if (!isAdministerPage()) return;
     const target = event.target as HTMLElement | null;
     const button = target?.closest("button") as HTMLButtonElement | null;
-    if (!button || !isFinalDoctorButton(button)) return;
+    if (!button || isCanonicalAdministerAction(button) || !isFinalDoctorButton(button)) return;
     const mode = currentModeSync();
     const isMarked = button.getAttribute("data-hha-validation-final-v129") === "1";
     if (mode !== "VALIDASI" && !isMarked) return;

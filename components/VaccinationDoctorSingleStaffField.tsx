@@ -64,26 +64,30 @@ async function fetchHistoricalDoctorNames() {
 }
 
 async function fetchStaffNames() {
-  // V148_4_DOCTOR_NAMES_FALLBACK
+  // V150_6_SESSION_STAFF_SOURCE
+  // Prioritaskan nama dokter/petugas yang memang disetting lewat Session/Staff Options.
+  // Riwayat administered_by hanya dipakai sebagai fallback bila setup staff belum tersedia.
   const local = readLocalStaffNames();
-  const historical = await fetchHistoricalDoctorNames();
 
   try {
     const res = await fetch("/api/vaccination/staff-options", { cache: "no-store" });
     const json = await res.json().catch(() => ({}));
 
     if (json?.ok && Array.isArray(json.staff)) {
-      const apiNames = json.staff
+      const apiNames: string[] = json.staff
         .map((item: StaffOption) => cleanText(item?.name))
         .filter(Boolean);
-
-      return Array.from(new Set([...apiNames, ...historical, ...local])).sort((a, b) => a.localeCompare(b));
+      const configured: string[] = Array.from(new Set<string>([...apiNames, ...local])).sort((a, b) => a.localeCompare(b));
+      if (configured.length) return configured;
     }
 
-    return Array.from(new Set([...historical, ...local])).sort((a, b) => a.localeCompare(b));
+    if (local.length) return local;
   } catch (_error) {
-    return Array.from(new Set([...historical, ...local])).sort((a, b) => a.localeCompare(b));
+    if (local.length) return local;
   }
+
+  const historical: string[] = await fetchHistoricalDoctorNames();
+  return Array.from(new Set<string>(historical)).sort((a, b) => a.localeCompare(b));
 }
 
 function findParticipantSection() {
@@ -237,10 +241,10 @@ function styleSelect(select: HTMLSelectElement) {
 async function ensureSingleDoctorField() {
   if (!isAdministerPage()) return;
 
-  // VACCINATION_MEDIS_WORKSPACE_V150_3
-  const dedicatedMedis = cleanText(document.documentElement.dataset.hhaVaccinationRole).toLowerCase() === "vaccination_medis";
-  const dedicatedMedisName = cleanText(document.documentElement.dataset.hhaVaccinationUser);
-  const names = dedicatedMedis && dedicatedMedisName ? [dedicatedMedisName] : await fetchStaffNames();
+  // VACCINATION_MEDIS_SESSION_DOCTORS_V150_6
+  // vaccination_medis tetap memilih dokter/petugas dari daftar Session/Staff Options.
+  // Nama akun login tidak boleh dipakai sebagai nama dokter secara otomatis.
+  const names = await fetchStaffNames();
   const originalInput = findOriginalDoctorInput();
 
   if (originalInput) restoreHiddenParents(originalInput.parentElement);
@@ -274,9 +278,8 @@ async function ensureSingleDoctorField() {
 
   styleSelect(select);
 
-  const current = dedicatedMedis && dedicatedMedisName
-    ? dedicatedMedisName
-    : select.value || cleanText(originalInput?.value || "");
+  const rawCurrent = select.value || cleanText(originalInput?.value || "");
+  const current = names.includes(rawCurrent) ? rawCurrent : "";
 
   select.innerHTML = "";
 
@@ -292,20 +295,10 @@ async function ensureSingleDoctorField() {
     select.appendChild(option);
   }
 
-  if (current) {
-    if (!names.includes(current)) {
-      const option = document.createElement("option");
-      option.value = current;
-      option.textContent = current;
-      select.appendChild(option);
-    }
-    select.value = current;
-  }
+  if (current) select.value = current;
 
-  select.disabled = dedicatedMedis && Boolean(dedicatedMedisName);
-  select.title = dedicatedMedis && dedicatedMedisName
-    ? "Akun Vaccination Medis dikunci ke identitas petugas yang sedang login."
-    : "";
+  select.disabled = false;
+  select.title = "Pilih dokter/petugas yang sudah disetting di Session Vaksinasi.";
 
   select.onchange = () => {
     const input = findOriginalDoctorInput();
@@ -317,7 +310,8 @@ async function ensureSingleDoctorField() {
   };
 
   if (originalInput) {
-    setNativeInputValue(originalInput, select.value || cleanText(originalInput.value));
+    // Bersihkan nilai lama seperti nama akun login bila tidak ada di Staff Options.
+    setNativeInputValue(originalInput, select.value);
     originalInput.style.display = "none";
     originalInput.setAttribute("aria-hidden", "true");
     originalInput.tabIndex = -1;
