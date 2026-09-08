@@ -1,4 +1,4 @@
-﻿import "./globals.css";
+import "./globals.css";
 import type { Metadata } from "next";
 
 import VaccinationProcessTindakanEnhancer from "../components/VaccinationProcessTindakanEnhancer";
@@ -6,6 +6,7 @@ import VaccinationSessionLightFeatures from "../components/VaccinationSessionLig
 import VaccinationQueueDecodeCleanup from "../components/VaccinationQueueDecodeCleanup";
 import VaccinationDoctorSingleStaffField from "../components/VaccinationDoctorSingleStaffField";
 import VaccinationValidationFinalGuard from "../components/VaccinationValidationFinalGuard";
+import VaccinationMedisWorkspaceMenu from "../components/VaccinationMedisWorkspaceMenu";
 import LoginQuickAccessAllCapaska from "../components/LoginQuickAccessAllCapaska";
 import CapaskaHideDuplicateThtRhinitis from "../components/CapaskaHideDuplicateThtRhinitis";
 import CapaskaCombineHipospadiaHidrokelV145 from "../components/CapaskaCombineHipospadiaHidrokelV145";
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <CapaskaHideDuplicateThtRhinitis />
         <LoginQuickAccessAllCapaska />
         <VaccinationValidationFinalGuard />
+        <VaccinationMedisWorkspaceMenu />
         <VaccinationDoctorSingleStaffField />
         <VaccinationQueueDecodeCleanup />
         <VaccinationSessionLightFeatures />

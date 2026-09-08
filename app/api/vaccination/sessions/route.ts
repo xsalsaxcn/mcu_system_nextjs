@@ -222,7 +222,11 @@ async function insertSessionVaccines(
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
-  if (!canVaccinationAccess(user, "session")) return fail("Akses modul vaksinasi ditolak untuk role ini.", 403);
+  // VACCINATION_MEDIS_SESSION_READ_V150_4
+  // Medis perlu READ session untuk dropdown Administer, tetapi POST tetap permission session.
+  if (!canVaccinationAccess(user, "session") && !canVaccinationAccess(user, "administer")) {
+    return fail("Akses baca session vaksinasi ditolak untuk role ini.", 403);
+  }
 
   const supabase = supabaseAdmin();
   const result = await supabase
