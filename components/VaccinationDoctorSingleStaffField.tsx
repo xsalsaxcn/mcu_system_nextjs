@@ -43,8 +43,30 @@ function readLocalStaffNames() {
   }
 }
 
+function currentAdministerSessionId() {
+  if (!isAdministerPage()) return "";
+  const select = document.getElementById("vaccination-administer-session") as HTMLSelectElement | null;
+  return String(select?.value || "").trim();
+}
+
+async function fetchHistoricalDoctorNames() {
+  try {
+    const sessionId = currentAdministerSessionId();
+    const url = sessionId
+      ? `/api/vaccination/administer?session_id=${encodeURIComponent(sessionId)}`
+      : "/api/vaccination/administer";
+    const json = await fetch(url, { cache: "no-store" }).then((res) => res.json());
+    if (!json?.ok || !Array.isArray(json.doctorNames)) return [];
+    return json.doctorNames.map((name: any) => cleanText(name)).filter(Boolean);
+  } catch (_error) {
+    return [];
+  }
+}
+
 async function fetchStaffNames() {
+  // V148_4_DOCTOR_NAMES_FALLBACK
   const local = readLocalStaffNames();
+  const historical = await fetchHistoricalDoctorNames();
 
   try {
     const res = await fetch("/api/vaccination/staff-options", { cache: "no-store" });
@@ -55,12 +77,12 @@ async function fetchStaffNames() {
         .map((item: StaffOption) => cleanText(item?.name))
         .filter(Boolean);
 
-      return Array.from(new Set([...apiNames, ...local])).sort((a, b) => a.localeCompare(b));
+      return Array.from(new Set([...apiNames, ...historical, ...local])).sort((a, b) => a.localeCompare(b));
     }
 
-    return local;
+    return Array.from(new Set([...historical, ...local])).sort((a, b) => a.localeCompare(b));
   } catch (_error) {
-    return local;
+    return Array.from(new Set([...historical, ...local])).sort((a, b) => a.localeCompare(b));
   }
 }
 

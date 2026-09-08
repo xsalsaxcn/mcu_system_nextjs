@@ -128,7 +128,22 @@ export default function VaccinationAdministerPage() {
     setVaccines(json.vaccines || []);
     setLots(json.lots || []);
     setSessionVaccines(json.sessionVaccines || []);
-    setCompletedRecords(json.completedRecords || []);
+    // V148_4_PROCESS_STATE_AND_COMPLETED_PERSISTENCE
+    const serverCompletedRecords = json.completedRecords || [];
+    if (preserveWorkingVaccines) {
+      setCompletedRecords((previous) => {
+        const serverIds = new Set(
+          serverCompletedRecords.map((record: any) => String(record?.id || "")).filter(Boolean)
+        );
+        const localOnly = previous.filter((record: any) => {
+          const id = String(record?.id || "");
+          return !id || !serverIds.has(id);
+        });
+        return [...serverCompletedRecords, ...localOnly];
+      });
+    } else {
+      setCompletedRecords(serverCompletedRecords);
+    }
     setDoctorNames(json.doctorNames || []);
 
     if (!preserveWorkingVaccines) {
@@ -293,7 +308,20 @@ export default function VaccinationAdministerPage() {
 
     const timer = window.setInterval(refreshParticipants, 3000);
     const onFocus = () => refreshParticipants();
-    const onQueueUpdated = () => refreshParticipants();
+    const onQueueUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<any>)?.detail;
+      const updated = detail?.registration;
+
+      // Update state synchronously from the successful Proses Tindakan response.
+      // Selesai Dokter becomes active immediately without waiting for polling.
+      if (updated?.id) {
+        setRegistrations((current) => current.map((row: any) =>
+          String(row.id) === String(updated.id) ? { ...row, ...updated } : row
+        ));
+      } else {
+        refreshParticipants();
+      }
+    };
 
     window.addEventListener("focus", onFocus);
     window.addEventListener("vaccination-queue-updated", onQueueUpdated as EventListener);
@@ -390,7 +418,8 @@ export default function VaccinationAdministerPage() {
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
         {printLabelHandler === "VALIDASI" ? (
           <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-bold text-blue-800">
-            Mode session: print label oleh Tim Validasi. Tombol Done di halaman ini tidak akan membuka printout; peserta masuk ke Tim Validasi setelah semua produk selesai.
+            {/* V148_4_VALIDATION_SINGLE_FINISH */}
+            Mode session: <b>Print Label = Tim Validasi</b>. Dokter cukup klik <b>Proses Tindakan</b>, lalu <b>Selesai Dokter + Kirim ke Tim Validasi</b>. Print label dilakukan di Tim Validasi.
           </div>
         ) : null}
 
@@ -514,6 +543,10 @@ export default function VaccinationAdministerPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {isDoneStatus(item.status) ? (
                     <button type="button" disabled className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-500">Done</button>
+                  ) : printLabelHandler === "VALIDASI" ? (
+                    <span className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">
+                      Diproses saat Selesai Dokter
+                    </span>
                   ) : (
                     <button
                       type="button"
@@ -564,7 +597,7 @@ export default function VaccinationAdministerPage() {
               : !processStarted
                 ? "Klik Proses Tindakan Terlebih Dahulu"
                 : printLabelHandler === "VALIDASI"
-                  ? "Selesai Dokter - Kirim ke Tim Validasi"
+                  ? "Selesai Dokter + Kirim ke Tim Validasi"
                   : "Selesai Dokter + Print Semua Sticker"}
           </button>
         </section>

@@ -22,8 +22,25 @@ export async function GET(req: NextRequest) {
     const sessionKey = clean(url.searchParams.get("session_key")) || slug(sessionName || sessionId);
     const supabase = supabaseAdmin();
     if (sessionId) {
+      // V148_4_PRINT_SETTING_PRECEDENCE
+      // Dedicated Session Print Setting is the source of truth for Administer.
+      // Check it BEFORE vaccination_sessions.print_label_handler because the latter
+      // can still contain an older/default MEDIS value.
+      const bySessionId = await supabase
+        .from("vaccination_session_print_settings")
+        .select("session_id, session_key, print_label_handler, updated_at")
+        .eq("session_id", sessionId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!bySessionId.error && bySessionId.data?.print_label_handler) {
+        return json({ ok: true, print_label_handler: mode(bySessionId.data.print_label_handler) });
+      }
+
       const a = await supabase.from("vaccination_sessions").select("id, print_label_handler").eq("id", sessionId).maybeSingle();
-      if (!a.error && a.data?.print_label_handler) return json({ ok: true, print_label_handler: mode(a.data.print_label_handler) });
+      if (!a.error && a.data?.print_label_handler) {
+        return json({ ok: true, print_label_handler: mode(a.data.print_label_handler) });
+      }
     }
     if (sessionKey) {
       const b = await supabase.from("vaccination_session_print_settings").select("session_key, print_label_handler").eq("session_key", sessionKey).maybeSingle();
