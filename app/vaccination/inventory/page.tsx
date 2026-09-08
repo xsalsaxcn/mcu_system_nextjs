@@ -1,5 +1,8 @@
 "use client";
 
+import VaccinationInventoryMovementEnhancer from "@/components/VaccinationInventoryMovementEnhancer";
+// VACCINATION_INVENTORY_MOVEMENT_ENHANCER_V149
+
 import { useEffect, useMemo, useState } from "react";
 
 function diffClass(value: any) {
@@ -149,6 +152,9 @@ export default function VaccinationInventoryPage() {
           </table>
         </section>
       </div>
-    </main>
+
+      {/* VACCINATION_INVENTORY_MOVEMENT_AUDIT_V149 */}
+      <VaccinationInventoryMovementEnhancer />
+</main>
   );
 }

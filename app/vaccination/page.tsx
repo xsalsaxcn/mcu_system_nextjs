@@ -23,6 +23,8 @@ const menuItems: MenuItem[] = [
   { title: "Registrasi Vaksin", href: "/vaccination/register", desc: "Check-in peserta, rilis nomor antrian, NIK, payment note, dan export per stage.", tag: "Frontdesk", stage: "Pelaksanaan" },
   { title: "Antrian Vaksin", href: "/vaccination/queue", desc: "Panggil nomor antrian berjalan dan monitor status menunggu/dokter/selesai.", tag: "Queue", stage: "Pelaksanaan" },
   { title: "Administered / Medis", href: "/vaccination/administer", desc: "Input dokter, vaksin, lot number, Done, dan print sticker label.", tag: "Medis", stage: "Pelaksanaan" },
+  // VACCINATION_VALIDATION_MENU_V149
+  { title: "Tim Validasi", href: "/vaccination/validation", desc: "Print label, validasi akhir, dan penyelesaian status peserta vaksinasi.", tag: "Validasi", stage: "Pelaksanaan" },
   { title: "Dashboard Vaksinasi", href: "/vaccination/dashboard", desc: "Filter sudah/belum vaksin, dokter/petugas, dan export data.", tag: "Report", stage: "Pelaporan" },
   { title: "Inventory", href: "/vaccination/inventory", desc: "Lihat stok awal, tambahan stok, terpakai, sisa, selisih fisik, dan keterangan.", tag: "Stock", stage: "Pelaporan" },
   { title: "Reminder Status", href: "/vaccination/reminder", desc: "Pantau Sent, Failed dengan alasan, incoming reminder, dan manual reminder.", tag: "Soon", stage: "Reminder" },
