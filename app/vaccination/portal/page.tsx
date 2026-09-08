@@ -33,9 +33,16 @@ export default function VaccinationPortalPage() {
     try {
       const me = await fetch("/api/auth/me", { cache: "no-store" }).then((r) => r.json());
       if (!me.ok || !me.user) {
-        window.location.href = "/login";
+        window.location.href = "/vaccination/login";
         return;
       }
+      const currentRole = clean(me.user?.role).toLowerCase();
+      if (currentRole !== "admin" && !isVaccinationRole(me.user)) {
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+        window.location.href = "/vaccination/login";
+        return;
+      }
+
       setUser(me.user);
       const alertJson = await fetch("/api/vaccination/stock-alerts", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
       setAlerts(alertJson.alerts || []);
@@ -46,6 +53,12 @@ export default function VaccinationPortalPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  // VACCINATION_DEDICATED_LOGIN_V150_2
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    window.location.href = "/vaccination/login";
+  }
 
   const modules = useMemo(() => {
     if (!user) return [];
@@ -72,6 +85,7 @@ export default function VaccinationPortalPage() {
               {alerts.length ? <span className="absolute -right-2 -top-2 rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{alerts.length}</span> : null}
             </button>
             <button type="button" onClick={load} className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-900">Refresh</button>
+            <button type="button" onClick={logout} className="rounded-2xl border border-white/30 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20">Logout</button>
           </div>
         </div>
 

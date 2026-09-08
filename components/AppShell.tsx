@@ -377,7 +377,10 @@ export default function AppShell({
       // Ignore logout network error.
     }
 
-    window.location.href = "/login";
+    // VACCINATION_DEDICATED_LOGOUT_V150_2
+    const currentRole = String(user?.role || "").trim().toLowerCase();
+    window.location.href =
+      currentRole.startsWith("vaccination_") ? "/vaccination/login" : "/login";
   }
 
   const rawUser = user as unknown as Record<string, unknown>;
