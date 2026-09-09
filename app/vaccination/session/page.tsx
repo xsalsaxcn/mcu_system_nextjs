@@ -22,6 +22,17 @@ type BatchMappingDraft = {
   doseNumber: number;
 };
 
+type EditSessionDraft = {
+  id: string;
+  sessionName: string;
+  companyName: string;
+  location: string;
+  sessionDate: string;
+  timeSlot: string;
+  participantCountPlanned: string;
+  printLabelHandler: "MEDIS" | "VALIDASI";
+};
+
 type LocationOption = {
   key: string;
   locationName: string;
@@ -40,6 +51,17 @@ const emptyDraft: SessionVaccineDraft = {
   doseNumber: 1,
 };
 
+const emptyEditSession: EditSessionDraft = {
+  id: "",
+  sessionName: "",
+  companyName: "",
+  location: "",
+  sessionDate: "",
+  timeSlot: "",
+  participantCountPlanned: "",
+  printLabelHandler: "MEDIS",
+};
+
 const allLocationsKey = "__all__";
 
 export default function VaccinationSessionPage() {
@@ -49,6 +71,11 @@ export default function VaccinationSessionPage() {
   const [lots, setLots] = useState<any[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
+  const [editingSession, setEditingSession] = useState<any | null>(null);
+  const [editSessionForm, setEditSessionForm] = useState<EditSessionDraft>(emptyEditSession);
+  const [loadingEditPrintMode, setLoadingEditPrintMode] = useState(false);
+  const [editPrintModeReady, setEditPrintModeReady] = useState(false);
+  const [savingEditSession, setSavingEditSession] = useState(false);
 
   const [draft, setDraft] = useState<SessionVaccineDraft>(emptyDraft);
   const [sessionVaccines, setSessionVaccines] = useState<SessionVaccineDraft[]>(
@@ -192,6 +219,128 @@ export default function VaccinationSessionPage() {
             : item,
         ),
       );
+    }
+  }
+
+  async function openEditSession(session: any) {
+    setError("");
+    setMessage("");
+    setEditingSession(session);
+    setLoadingEditPrintMode(true);
+    setEditPrintModeReady(false);
+    setEditSessionForm({
+      id: String(session.id || ""),
+      sessionName: String(session.session_name || ""),
+      companyName: String(session.company_name || ""),
+      location: String(session.location || ""),
+      sessionDate: String(session.session_date || ""),
+      timeSlot: String(session.time_slot || ""),
+      participantCountPlanned:
+        session.participant_count_planned === null || session.participant_count_planned === undefined
+          ? ""
+          : String(session.participant_count_planned),
+      printLabelHandler:
+        String(session.print_label_handler || "").toUpperCase() === "VALIDASI"
+          ? "VALIDASI"
+          : "MEDIS",
+    });
+
+    try {
+      const qs = new URLSearchParams({
+        session_id: String(session.id || ""),
+        session_name: String(session.session_name || ""),
+      });
+      const res = await fetch(`/api/vaccination/session-print-setting?${qs.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal membaca setting print session.");
+      }
+      setEditSessionForm((prev) => ({
+        ...prev,
+        printLabelHandler:
+          String(json.print_label_handler || "").toUpperCase() === "VALIDASI"
+            ? "VALIDASI"
+            : "MEDIS",
+      }));
+      setEditPrintModeReady(true);
+    } catch (err: any) {
+      setEditPrintModeReady(false);
+      setError(err?.message || "Gagal membaca setting print session.");
+    } finally {
+      setLoadingEditPrintMode(false);
+    }
+  }
+
+  function closeEditSession() {
+    if (savingEditSession) return;
+    setEditingSession(null);
+    setEditSessionForm(emptyEditSession);
+    setLoadingEditPrintMode(false);
+    setEditPrintModeReady(false);
+  }
+
+  async function saveEditSession() {
+    if (!editSessionForm.id) return;
+    if (!editSessionForm.sessionName.trim()) {
+      setError("Nama session wajib diisi.");
+      return;
+    }
+    if (loadingEditPrintMode || !editPrintModeReady) {
+      setError("Setting print session belum berhasil dimuat. Tutup Edit Session lalu buka kembali sebelum menyimpan.");
+      return;
+    }
+
+    setSavingEditSession(true);
+    setError("");
+    setMessage("Menyimpan perubahan session...");
+
+    try {
+      const res = await fetch("/api/vaccination/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-session",
+          id: editSessionForm.id,
+          sessionName: editSessionForm.sessionName,
+          companyName: editSessionForm.companyName,
+          location: editSessionForm.location,
+          sessionDate: editSessionForm.sessionDate,
+          timeSlot: editSessionForm.timeSlot,
+          participantCountPlanned: editSessionForm.participantCountPlanned,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Gagal menyimpan perubahan session.");
+      }
+
+      const printRes = await fetch("/api/vaccination/session-print-setting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          session_id: editSessionForm.id,
+          session_name: editSessionForm.sessionName,
+          print_label_handler: editSessionForm.printLabelHandler,
+        }),
+      });
+      const printJson = await printRes.json().catch(() => ({}));
+      if (!printRes.ok || !printJson.ok) {
+        throw new Error(
+          printJson.message ||
+            "Data session tersimpan, tetapi setting print belum berhasil disimpan. Silakan klik Simpan Perubahan lagi.",
+        );
+      }
+
+      setMessage("Session dan pilihan petugas print label berhasil diperbarui.");
+      setEditingSession(null);
+      setEditSessionForm(emptyEditSession);
+      await loadSessions();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menyimpan perubahan session.");
+      setMessage("Edit session belum selesai.");
+    } finally {
+      setSavingEditSession(false);
     }
   }
 
@@ -813,14 +962,24 @@ export default function VaccinationSessionPage() {
                     </a>
                   </td>
                   <td className="p-3">
-                    <button
-                      type="button"
-                      onClick={() => deleteSession(session)}
-                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
-                      title="Hapus session"
-                    >
-                      🗑 Hapus
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditSession(session)}
+                        className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
+                        title="Edit session"
+                      >
+                        ✏ Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSession(session)}
+                        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
+                        title="Hapus session"
+                      >
+                        🗑 Hapus
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -834,6 +993,139 @@ export default function VaccinationSessionPage() {
             </tbody>
           </table>
         </section>
+
+        {editingSession ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border bg-white p-6 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black">Edit Session</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Edit informasi session tanpa mengubah source database, daftar vaksin/lot, registrasi, antrian, atau record vaksinasi.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeEditSession}
+                  disabled={savingEditSession}
+                  className="rounded-xl border px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Tutup
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-sm font-bold text-slate-700 md:col-span-2">
+                  Nama Session
+                  <input
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.sessionName}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, sessionName: e.target.value }))}
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Nama Perusahaan
+                  <input
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.companyName}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, companyName: e.target.value }))}
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Lokasi
+                  <input
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.location}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, location: e.target.value }))}
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Tanggal
+                  <input
+                    type="date"
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.sessionDate}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, sessionDate: e.target.value }))}
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Jam / Slot
+                  <input
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.timeSlot}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, timeSlot: e.target.value }))}
+                    placeholder="Contoh: 09.00 - 14.00"
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Peserta Rencana
+                  <input
+                    type="number"
+                    min={0}
+                    className="rounded-xl border px-3 py-2.5 font-medium"
+                    value={editSessionForm.participantCountPlanned}
+                    onChange={(e) => setEditSessionForm((prev) => ({ ...prev, participantCountPlanned: e.target.value }))}
+                  />
+                </label>
+
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  Petugas Print Label
+                  <select
+                    className="rounded-xl border px-3 py-2.5 font-bold"
+                    value={editSessionForm.printLabelHandler}
+                    disabled={loadingEditPrintMode || !editPrintModeReady}
+                    onChange={(e) =>
+                      setEditSessionForm((prev) => ({
+                        ...prev,
+                        printLabelHandler: e.target.value === "VALIDASI" ? "VALIDASI" : "MEDIS",
+                      }))
+                    }
+                  >
+                    <option value="MEDIS">Dokter / Medis</option>
+                    <option value="VALIDASI">Tim Validasi</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                <div className="font-black">Routing Print Label</div>
+                {loadingEditPrintMode ? (
+                  <div className="mt-1">Memuat setting print session...</div>
+                ) : !editPrintModeReady ? (
+                  <div className="mt-1 font-bold text-red-700">Setting print belum berhasil dimuat. Tutup lalu klik Edit lagi agar pilihan print tidak salah tersimpan.</div>
+                ) : editSessionForm.printLabelHandler === "VALIDASI" ? (
+                  <div className="mt-1">Tim Validasi: Medis menyelesaikan produk lalu mengirim ke Tim Validasi. Sticker dicetak di Tim Validasi.</div>
+                ) : (
+                  <div className="mt-1">Dokter / Medis: proses dan print sticker tetap dilakukan di workflow Medis sesuai aturan Administer.</div>
+                )}
+              </div>
+
+              <div className="mt-6 flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeEditSession}
+                  disabled={savingEditSession}
+                  className="rounded-xl border px-4 py-3 text-sm font-bold hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={saveEditSession}
+                  disabled={savingEditSession || loadingEditPrintMode || !editPrintModeReady}
+                  className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingEditSession ? "Menyimpan..." : "Simpan Perubahan"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   );

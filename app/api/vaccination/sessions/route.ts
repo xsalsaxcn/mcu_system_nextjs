@@ -250,6 +250,40 @@ export async function POST(req: NextRequest) {
   const action = clean(body.action);
   const supabase = supabaseAdmin();
 
+  if (action === "update-session") {
+    const id = toInt(body.id || body.sessionId, 0);
+    if (!id) return fail("ID session tidak valid.");
+
+    const sessionName = clean(body.sessionName);
+    if (!sessionName) return fail("Nama session wajib diisi.");
+
+    const participantCountText = clean(body.participantCountPlanned);
+    const payload = {
+      session_name: sessionName,
+      company_name: clean(body.companyName) || null,
+      location: clean(body.location) || null,
+      session_date: clean(body.sessionDate) || null,
+      time_slot: clean(body.timeSlot) || null,
+      participant_count_planned: participantCountText
+        ? Math.max(0, toInt(participantCountText, 0))
+        : null,
+    };
+
+    const result = await supabase
+      .from("vaccination_sessions")
+      .update(payload)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    return ok({
+      message: "Session vaksinasi berhasil diperbarui.",
+      session: result.data,
+    });
+  }
+
   if (action === "delete-session") {
     const id = toInt(body.id || body.sessionId, 0);
     if (!id) return fail("ID session tidak valid.");
