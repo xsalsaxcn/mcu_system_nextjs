@@ -56,6 +56,7 @@ export default function VaccinationAdministerPage() {
   const [error, setError] = useState("");
   const [processingIndex, setProcessingIndex] = useState<number | "all" | null>(null);
   const [printLabelHandler, setPrintLabelHandler] = useState<"MEDIS" | "VALIDASI">("MEDIS");
+  const [printSettingReady, setPrintSettingReady] = useState(false);
 
   const [form, setForm] = useState({
     registrationId: "",
@@ -102,26 +103,21 @@ export default function VaccinationAdministerPage() {
     }
   }
 
-  async function loadPrintSetting(id = sessionId) {
-    if (!id) {
-      setPrintLabelHandler("MEDIS");
-      return;
-    }
-    try {
-      const json = await fetch(`/api/vaccination/session-print-setting?session_id=${encodeURIComponent(id)}`, { cache: "no-store" }).then((r) => r.json());
-      const mode = String(json?.print_label_handler || "MEDIS").toUpperCase() === "VALIDASI" ? "VALIDASI" : "MEDIS";
-      setPrintLabelHandler(mode);
-    } catch {
-      setPrintLabelHandler("MEDIS");
-    }
-  }
-
   async function loadData(id = sessionId, preserveWorkingVaccines = false) {
     const url = id ? `/api/vaccination/administer?session_id=${id}` : "/api/vaccination/administer";
     const json = await fetch(url, { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) {
+      setPrintSettingReady(false);
       setError(json.message || "Gagal mengambil data.");
       return;
+    }
+
+    if (id && json.printLabelHandler) {
+      const rawMode = String(json.printLabelHandler || "").toUpperCase();
+      setPrintLabelHandler(rawMode === "VALIDASI" || rawMode === "TIM_VALIDASI" || rawMode === "TIM VALIDASI" ? "VALIDASI" : "MEDIS");
+      setPrintSettingReady(true);
+    } else if (id) {
+      setPrintSettingReady(false);
     }
 
     setRegistrations(json.registrations || []);
@@ -192,6 +188,11 @@ export default function VaccinationAdministerPage() {
     setProcessingIndex(typeof targetIndex === "number" ? targetIndex : "all");
 
     try {
+      if (!printSettingReady) {
+        setError("Setting print session belum terbaca. Tunggu sampai mode session selesai dimuat sebelum menyelesaikan tindakan.");
+        return;
+      }
+
       if (!form.registrationId) {
         setError("Pilih peserta/antrian terlebih dahulu.");
         return;
@@ -297,8 +298,8 @@ export default function VaccinationAdministerPage() {
   }, []);
 
   useEffect(() => {
+    setPrintSettingReady(false);
     loadData(sessionId);
-    loadPrintSetting(sessionId);
 
     if (!sessionId) return;
 
@@ -542,6 +543,10 @@ export default function VaccinationAdministerPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {isDoneStatus(item.status) ? (
                     <button type="button" disabled className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-500">Done</button>
+                  ) : !printSettingReady ? (
+                    <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">
+                      Memuat setting print...
+                    </span>
                   ) : printLabelHandler === "VALIDASI" ? (
                     <span className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">
                       Diproses saat Selesai Dokter
@@ -590,18 +595,20 @@ export default function VaccinationAdministerPage() {
           <button
             id="vaccination-administer-final-action"
             data-vaccination-canonical-administer="1"
-            disabled={processingIndex !== null || !processStarted}
-            title={processStarted ? "Selesaikan seluruh produk sesuai mode print session." : "Klik Proses Tindakan terlebih dahulu."}
+            disabled={processingIndex !== null || !processStarted || !printSettingReady}
+            title={!printSettingReady ? "Menunggu setting print session." : processStarted ? "Selesaikan seluruh produk sesuai mode print session." : "Klik Proses Tindakan terlebih dahulu."}
             onClick={() => donePrint()}
             className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 disabled:opacity-100"
           >
             {processingIndex === "all"
               ? "Memproses..."
-              : !processStarted
-                ? "Klik Proses Tindakan Terlebih Dahulu"
-                : printLabelHandler === "VALIDASI"
-                  ? "Done Semua Produk - Kirim ke Tim Validasi"
-                  : "Done Semua Produk + Print Sticker"}
+              : !printSettingReady
+                ? "Memuat Setting Print Session..."
+                : !processStarted
+                  ? "Klik Proses Tindakan Terlebih Dahulu"
+                  : printLabelHandler === "VALIDASI"
+                    ? "Done Semua Produk - Kirim ke Tim Validasi"
+                    : "Done Semua Produk + Print Sticker"}
           </button>
         </section>
 

@@ -129,6 +129,9 @@ export default function VaccinationMedisWorkspaceMenu() {
   }
 
   if (!mounted || !user) return null;
+  // V150_7_STICKER_PRINT_ISOLATION: keep the Medis workspace control out of
+  // sticker pages. The sticker component/layout itself is intentionally untouched.
+  if (currentPath().startsWith("/vaccination/sticker")) return null;
 
   const drawer = open
     ? createPortal(

@@ -66,6 +66,22 @@ async function getPrintLabelHandler(supabase: any, sessionId: number, fallback: 
   const fallbackMode = normalizePrintHandler(fallback || "MEDIS");
   if (!sessionId) return fallbackMode;
 
+  // V150_7_RESTORE_SESSION_PRINT_ROUTING
+  // Dedicated per-session print setting is the source of truth. This preserves
+  // the previously-correct Tim Validasi routing even when the legacy column on
+  // vaccination_sessions still contains MEDIS/default data.
+  const dedicated = await supabase
+    .from("vaccination_session_print_settings")
+    .select("session_id,print_label_handler,updated_at")
+    .eq("session_id", sessionId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!dedicated.error && dedicated.data?.print_label_handler) {
+    return normalizePrintHandler(dedicated.data.print_label_handler);
+  }
+
   const result = await supabase
     .from("vaccination_sessions")
     .select("print_label_handler")
@@ -286,6 +302,10 @@ export async function GET(req: NextRequest) {
     return fail(error?.message || "Gagal mengambil item produk peserta.", 500);
   }
 
+  const printLabelHandler = sessionId
+    ? await getPrintLabelHandler(supabase, sessionId, "MEDIS")
+    : "MEDIS";
+
   return ok({
     registrations: registrationsWithItems,
     vaccines: vaccinesResult.data || [],
@@ -293,6 +313,7 @@ export async function GET(req: NextRequest) {
     sessionVaccines,
     completedRecords,
     doctorNames,
+    printLabelHandler,
   });
 }
 
