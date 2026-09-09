@@ -21,14 +21,23 @@ export async function GET(req: NextRequest) {
 
   const lotIds = (result.data || []).map((lot: any) => Number(lot.id)).filter(Boolean);
   const usedByLot = new Map<number, number>();
+  const inboundByLot = new Map<number, number>();
+  const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
 
   if (lotIds.length) {
-    const recordsResult = await supabase
-      .from("vaccination_records")
-      .select("id,lot_id,status")
-      .in("lot_id", lotIds)
-      .neq("status", "VOIDED")
-      .limit(20000);
+    const [recordsResult, movementsResult] = await Promise.all([
+      supabase
+        .from("vaccination_records")
+        .select("id,lot_id,status")
+        .in("lot_id", lotIds)
+        .neq("status", "VOIDED")
+        .limit(20000),
+      supabase
+        .from("vaccination_inventory_movements")
+        .select("id,lot_id,movement_type,qty")
+        .in("lot_id", lotIds)
+        .limit(20000),
+    ]);
 
     if (!recordsResult.error) {
       for (const record of recordsResult.data || []) {
@@ -36,11 +45,25 @@ export async function GET(req: NextRequest) {
         usedByLot.set(key, (usedByLot.get(key) || 0) + 1);
       }
     }
+
+    if (!movementsResult.error) {
+      for (const movement of movementsResult.data || []) {
+        const type = clean(movement.movement_type).toUpperCase();
+        if (!inboundTypes.has(type)) continue;
+        const key = Number(movement.lot_id);
+        inboundByLot.set(key, (inboundByLot.get(key) || 0) + Math.abs(Number(movement.qty || 0)));
+      }
+    }
   }
 
   const rows = (result.data || []).map((lot: any) => {
     const initial = Number(lot.stock_initial || 0);
-    const added = Number(lot.stock_added || 0);
+    const addedFromField = Number(lot.stock_added || 0);
+    const addedFromMovements = inboundByLot.get(Number(lot.id)) || 0;
+    // V150.12: cumulative inbound is canonicalized from both the lot field and
+    // traceable stock-in/return movements. This prevents the report enhancer
+    // from reverting a successful stock transaction back to an older balance.
+    const added = Math.max(addedFromField, addedFromMovements);
     const usedFromRecords = usedByLot.get(Number(lot.id)) || 0;
     const used = Math.max(Number(lot.stock_used || 0), usedFromRecords);
     const systemRemaining = initial + added - used;
@@ -88,17 +111,30 @@ export async function POST(req: NextRequest) {
     if (beforeResult.error) return fail(beforeResult.error.message, 500);
     if (!beforeResult.data) return fail("Lot tidak ditemukan.", 404);
 
-    const recordsResult = await supabase
-      .from("vaccination_records")
-      .select("id,status")
-      .eq("lot_id", lotId)
-      .neq("status", "VOIDED")
-      .limit(20000);
+    const [recordsResult, movementsResult] = await Promise.all([
+      supabase
+        .from("vaccination_records")
+        .select("id,status")
+        .eq("lot_id", lotId)
+        .neq("status", "VOIDED")
+        .limit(20000),
+      supabase
+        .from("vaccination_inventory_movements")
+        .select("id,movement_type,qty")
+        .eq("lot_id", lotId)
+        .limit(20000),
+    ]);
     if (recordsResult.error) return fail(recordsResult.error.message, 500);
+    if (movementsResult.error) return fail(movementsResult.error.message, 500);
 
     const lot = beforeResult.data as any;
     const initial = Number(lot.stock_initial || 0);
-    const beforeAdded = Number(lot.stock_added || 0);
+    const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
+    const movementAdded = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+      const type = clean(movement.movement_type).toUpperCase();
+      return inboundTypes.has(type) ? sum + Math.abs(Number(movement.qty || 0)) : sum;
+    }, 0);
+    const beforeAdded = Math.max(Number(lot.stock_added || 0), movementAdded);
     const used = Math.max(Number(lot.stock_used || 0), (recordsResult.data || []).length);
     const beforeRemaining = initial + beforeAdded - used;
     const physicalBefore = lot.stock_physical_count === null || lot.stock_physical_count === undefined ? null : Number(lot.stock_physical_count);

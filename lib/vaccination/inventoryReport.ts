@@ -182,6 +182,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     }
 
     const stockInMovements = lotMovements.filter((row: any) => isStockIn(row.movement_type));
+    const stockInMovementTotalAll = stockInMovements.reduce((sum: number, movement: any) => sum + Math.abs(num(movement.qty)), 0);
     if (stockInMovements.length) {
       for (const movement of stockInMovements) {
         if (!inRange(movement.created_at, from, to)) continue;
@@ -206,6 +207,35 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           validation_status: "",
           reference: clean(movement.reference_type),
           note: clean(movement.notes),
+        });
+      }
+
+      // V150.12: if the cumulative lot field contains legacy inbound that is
+      // not represented by movement rows, keep that delta visible in the
+      // no-date-filter report instead of silently dropping it.
+      const legacyInboundGap = Math.max(0, num(lot.stock_added) - stockInMovementTotalAll);
+      if (!hasDateFilter && legacyInboundGap > 0) {
+        details.push({
+          date: lot.created_at,
+          direction: "IN",
+          movement_type: "Tambahan Stok",
+          company: clean(lot.inventory_notes) || "Sumber belum dicatat",
+          participant: "",
+          employee_id: "",
+          mcu_id: "",
+          session: "",
+          location: "",
+          vaccine_id: Number(lot.vaccine_id),
+          vaccine: vaccineName,
+          brand,
+          lot: clean(lot.lot_number),
+          dose: "",
+          doctor: "",
+          qty: legacyInboundGap,
+          print_status: "",
+          validation_status: "",
+          reference: "vaccination_vaccine_lots.stock_added",
+          note: "Rekonsiliasi tambahan stok legacy yang belum memiliki movement.",
         });
       }
     } else if (num(lot.stock_added) > 0 && (!from && !to || inRange(lot.created_at, from, to))) {
@@ -292,9 +322,15 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
 
     const traceableUsedFiltered = lotRecords.filter((row: any) => inRange(row.administered_at || row.created_at, from, to)).length;
     const filteredUsed = hasDateFilter ? traceableUsedFiltered : canonicalUsedAll;
-    const filteredAdded = details
+    const filteredMovementAdded = details
       .filter((row: any) => row.vaccine_id === Number(lot.vaccine_id) && row.lot === clean(lot.lot_number) && row.movement_type === "Tambahan Stok")
       .reduce((sum: number, row: any) => sum + num(row.qty), 0);
+    // No date filter = cumulative inventory. Reconcile the persisted lot field
+    // with traceable stock-in/return movements and never let one stale source
+    // lower the canonical total. Date-filtered reports remain movement-based.
+    const filteredAdded = hasDateFilter
+      ? filteredMovementAdded
+      : Math.max(num(lot.stock_added), stockInMovementTotalAll, filteredMovementAdded);
     const filteredInitial = num(lot.stock_initial);
     const remaining = filteredInitial + filteredAdded - filteredUsed;
     const outCompanies = uniq(lotRecords.map((row: any) => {
