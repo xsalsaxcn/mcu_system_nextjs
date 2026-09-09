@@ -66,30 +66,83 @@ async function getPrintLabelHandler(supabase: any, sessionId: number, fallback: 
   const fallbackMode = normalizePrintHandler(fallback || "MEDIS");
   if (!sessionId) return fallbackMode;
 
-  // V150_7_RESTORE_SESSION_PRINT_ROUTING
-  // Dedicated per-session print setting is the source of truth. This preserves
-  // the previously-correct Tim Validasi routing even when the legacy column on
-  // vaccination_sessions still contains MEDIS/default data.
-  const dedicated = await supabase
-    .from("vaccination_session_print_settings")
-    .select("session_id,print_label_handler,updated_at")
-    .eq("session_id", sessionId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // V150_8_SESSION_SOURCE_PRINT_ROUTING
+  // Existing Session Print settings can be stored against the vaccination
+  // source/database used to generate a session. Administer works with the generated
+  // vaccination_sessions.id, so resolve session-specific and source-level settings
+  // before falling back to the legacy print_label_handler column.
+  const slugKey = (value: any) =>
+    clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 
-  if (!dedicated.error && dedicated.data?.print_label_handler) {
-    return normalizePrintHandler(dedicated.data.print_label_handler);
-  }
-
-  const result = await supabase
+  const sessionResult = await supabase
     .from("vaccination_sessions")
-    .select("print_label_handler")
+    .select("id,session_name,source_id,source_name,print_label_handler")
     .eq("id", sessionId)
     .maybeSingle();
 
-  if (result.error) return fallbackMode;
-  return normalizePrintHandler(result.data?.print_label_handler || fallbackMode);
+  const session = !sessionResult.error ? sessionResult.data : null;
+  const sessionKey = slugKey(session?.session_name || "");
+  const sourceId = Number(session?.source_id || 0);
+  const sourceKey = slugKey(session?.source_name || "");
+
+  const readById = async (id: number, expectedKey: string) => {
+    if (!id) return null;
+    const result = await supabase
+      .from("vaccination_session_print_settings")
+      .select("session_id,session_key,print_label_handler,updated_at")
+      .eq("session_id", id)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+
+    if (result.error) return null;
+    const rows = (result.data || []).filter((row: any) => row?.print_label_handler);
+    if (!rows.length) return null;
+
+    if (!expectedKey) return normalizePrintHandler(rows[0].print_label_handler);
+
+    const exact = rows.find((row: any) => clean(row.session_key) === expectedKey);
+    if (exact) return normalizePrintHandler(exact.print_label_handler);
+
+    const unkeyed = rows.find((row: any) => !clean(row.session_key));
+    return unkeyed ? normalizePrintHandler(unkeyed.print_label_handler) : null;
+  };
+
+  const readByKey = async (key: string) => {
+    if (!key) return null;
+    const result = await supabase
+      .from("vaccination_session_print_settings")
+      .select("session_key,print_label_handler,updated_at")
+      .eq("session_key", key)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (result.error || !result.data?.print_label_handler) return null;
+    return normalizePrintHandler(result.data.print_label_handler);
+  };
+
+  // 1. Session-specific setting wins.
+  const bySessionId = await readById(sessionId, sessionKey);
+  if (bySessionId) return bySessionId;
+
+  const bySessionKey = await readByKey(sessionKey);
+  if (bySessionKey) return bySessionKey;
+
+  // 2. Compatibility with the existing Session setup: a print setting can be
+  // attached to the source/database from which this operational session was made.
+  const bySourceId = sourceId && sourceId !== sessionId
+    ? await readById(sourceId, sourceKey)
+    : null;
+  if (bySourceId) return bySourceId;
+
+  const bySourceKey = await readByKey(sourceKey);
+  if (bySourceKey) return bySourceKey;
+
+  // 3. Legacy per-session column is the final persisted fallback only.
+  if (!sessionResult.error && session?.print_label_handler) {
+    return normalizePrintHandler(session.print_label_handler);
+  }
+
+  return fallbackMode;
 }
 
 async function getSessionVaccines(supabase: any, sessionId: number) {
