@@ -128,6 +128,11 @@ export default function VaccinationInventoryMovementEnhancer() {
   }, [queryString]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const handleInventoryUpdated = () => { load(); };
+    window.addEventListener("vaccination-inventory-updated", handleInventoryUpdated);
+    return () => window.removeEventListener("vaccination-inventory-updated", handleInventoryUpdated);
+  }, [load]);
 
   const products = report.products || [];
   const summaries = report.lotSummaries || [];
@@ -192,6 +197,7 @@ export default function VaccinationInventoryMovementEnhancer() {
   }, [activeBucket, details, summaries]);
 
   const summaryMap = useMemo(() => report.summary || { initial: 0, added: 0, used: 0, remaining: 0, diff: 0 }, [report.summary]);
+  const hasReportFilter = selectedProducts.length > 0 || Boolean(dateFrom || dateTo);
 
   const findLotSummary = useCallback((vaccineName: string, lotNumber: string) => {
     const v = norm(vaccineName);
@@ -214,36 +220,21 @@ export default function VaccinationInventoryMovementEnhancer() {
         node.setAttribute("role", "button");
         node.setAttribute("tabindex", "0");
         node.style.cursor = "pointer";
+        // Unfiltered Inventory numbers belong to the canonical /api/vaccination/inventory
+        // response. The report enhancer may replace numbers only when its own product/date
+        // filter is active. This prevents a stale report snapshot from reverting stock.
         const valueNode = node.children?.[1] as HTMLElement | undefined;
-        if (valueNode) valueNode.textContent = String((summaryMap as any)[bucket] ?? 0);
+        if (hasReportFilter && valueNode) valueNode.textContent = String((summaryMap as any)[bucket] ?? 0);
       }
 
-      const table = Array.from(document.querySelectorAll<HTMLTableElement>("table")).find((candidate) => {
-        const header = Array.from(candidate.querySelectorAll("th")).map((th) => clean(th.textContent).toUpperCase()).join(" | ");
-        return header.includes("NAMA VAKSIN / PRODUK") && header.includes("LOT NUMBER") && header.includes("TERPAKAI");
-      });
+      // V150.14: the main Inventory table structure is now owned 100% by React.
+      // Never insert/remove TH/TD nodes from this table. Structural DOM injection can
+      // desynchronise React's child indexes and make canonical stock values appear stale.
+      const table = document.querySelector<HTMLTableElement>('table[data-inventory-canonical-table="1"]');
       if (!table) return;
 
       const headerRow = table.querySelector("thead tr");
       if (!headerRow) return;
-      const headers = Array.from(headerRow.querySelectorAll("th"));
-      const usedIndex = headers.findIndex((th) => clean(th.textContent).toUpperCase() === "TERPAKAI");
-      if (usedIndex < 0) return;
-
-      if (!headerRow.querySelector('[data-inventory-in-v150="1"]') && !headers.some((th) => clean(th.textContent).toUpperCase() === "IN DARI / SUMBER")) {
-        const sample = headers[usedIndex];
-        const inHeader = document.createElement("th");
-        inHeader.dataset.inventoryInV150 = "1";
-        inHeader.className = sample.className;
-        inHeader.textContent = "IN DARI / SUMBER";
-        const outHeader = document.createElement("th");
-        outHeader.dataset.inventoryOutV150 = "1";
-        outHeader.className = sample.className;
-        outHeader.textContent = "OUT KE / PERUSAHAAN";
-        const target = headers[usedIndex + 1] || null;
-        headerRow.insertBefore(inHeader, target);
-        headerRow.insertBefore(outHeader, target);
-      }
 
       for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))) {
         const cells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
@@ -264,27 +255,14 @@ export default function VaccinationInventoryMovementEnhancer() {
         }
         row.style.display = "";
 
-        let inCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-in-v150="1"],td[data-inventory-in-v149="1"]');
-        let outCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-out-v150="1"],td[data-inventory-out-v149="1"]');
-        if (!inCell || !outCell) {
-          const currentCells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
-          const insertBefore = currentCells[usedIndex + 1] || null;
-          const sampleCell = currentCells[usedIndex] || currentCells[0];
-          inCell = document.createElement("td");
-          inCell.dataset.inventoryInV150 = "1";
-          inCell.className = sampleCell.className;
-          outCell = document.createElement("td");
-          outCell.dataset.inventoryOutV150 = "1";
-          outCell.className = sampleCell.className;
-          row.insertBefore(inCell, insertBefore);
-          row.insertBefore(outCell, insertBefore);
-        }
-        inCell.textContent = lotSummary?.in_sources?.join(", ") || "-";
-        outCell.textContent = lotSummary?.out_companies?.join(", ") || "-";
+        const inCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-in-v150="1"]');
+        const outCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-out-v150="1"]');
+        if (inCell) inCell.textContent = lotSummary?.in_sources?.join(", ") || "-";
+        if (outCell) outCell.textContent = lotSummary?.out_companies?.join(", ") || "-";
 
-        // V150.1: numeric columns must use the same filtered/canonical report as
-        // the cards. This prevents e.g. table Terpakai=15 while card Terpakai=12.
-        if (lotSummary) {
+        // Numeric columns are owned by the canonical Inventory API in the normal
+        // (unfiltered) view. The report may replace them only for an active report filter.
+        if (hasReportFilter && lotSummary) {
           const currentHeaders = Array.from(headerRow.querySelectorAll("th")).map((th) => clean(th.textContent).toUpperCase());
           const currentCells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
           const setByHeader = (label: string, value: any) => {
@@ -323,7 +301,7 @@ export default function VaccinationInventoryMovementEnhancer() {
       document.removeEventListener("click", click);
       document.removeEventListener("keydown", key);
     };
-  }, [findLotSummary, selectedProducts, summaryMap]);
+  }, [findLotSummary, selectedProducts, summaryMap, hasReportFilter]);
 
   function toggleProduct(id: number) {
     const key = String(id);

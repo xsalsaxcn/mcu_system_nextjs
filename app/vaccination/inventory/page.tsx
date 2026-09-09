@@ -62,6 +62,7 @@ export default function VaccinationInventoryPage() {
     setMessage(json.message || "Inventory berhasil diupdate.");
     setEditing(null);
     await load();
+    window.dispatchEvent(new Event("vaccination-inventory-updated"));
   }
 
   useEffect(() => { load(); }, []);
@@ -109,7 +110,7 @@ export default function VaccinationInventoryPage() {
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <div className="grid gap-3 md:grid-cols-[1fr_auto]">
             <input className="rounded-xl border px-3 py-2.5" placeholder="Cari produk, lot, keterangan..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <button onClick={load} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700">Refresh</button>
+            <button onClick={async () => { await load(); window.dispatchEvent(new Event("vaccination-inventory-updated")); }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700">Refresh</button>
           </div>
         </section>
 
@@ -157,7 +158,7 @@ export default function VaccinationInventoryPage() {
         ) : null}
 
         <section className="mt-6 overflow-hidden rounded-2xl border">
-          <table className="min-w-full text-sm">
+          <table data-inventory-canonical-table="1" className="min-w-full text-sm">
             <thead className="bg-slate-100 text-xs uppercase text-slate-600">
               <tr>
                 <th className="p-3 text-left">Nama Vaksin / Produk</th>
@@ -165,6 +166,8 @@ export default function VaccinationInventoryPage() {
                 <th className="p-3 text-left">Jumlah Awal</th>
                 <th className="p-3 text-left">Tambahan Stok</th>
                 <th className="p-3 text-left">Terpakai</th>
+                <th className="p-3 text-left">IN Dari / Sumber</th>
+                <th className="p-3 text-left">OUT Ke / Perusahaan</th>
                 <th className="p-3 text-left">Sisa Sistem</th>
                 <th className="p-3 text-left">Sisa Fisik</th>
                 <th className="p-3 text-left">Selisih</th>
@@ -180,6 +183,8 @@ export default function VaccinationInventoryPage() {
                   <td className="p-3">{row.stock_initial || 0}</td>
                   <td className="p-3">{row.stock_added || 0}</td>
                   <td className="p-3">{row.stock_used || 0}</td>
+                  <td data-inventory-in-v150="1" className="p-3">-</td>
+                  <td data-inventory-out-v150="1" className="p-3">-</td>
                   <td className="p-3 font-bold">{row.stock_system_remaining}</td>
                   <td className="p-3">{row.stock_physical_count ?? "-"}</td>
                   <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span></td>
@@ -187,7 +192,7 @@ export default function VaccinationInventoryPage() {
                   <td className="p-3"><button onClick={() => startEdit(row)} className="rounded-xl border px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit</button></td>
                 </tr>
               ))}
-              {!filteredRows.length ? <tr><td colSpan={10} className="p-5 text-center text-slate-500">Belum ada data inventory.</td></tr> : null}
+              {!filteredRows.length ? <tr><td colSpan={12} className="p-5 text-center text-slate-500">Belum ada data inventory.</td></tr> : null}
             </tbody>
           </table>
         </section>
