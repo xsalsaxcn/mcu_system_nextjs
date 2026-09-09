@@ -39,7 +39,7 @@ function isInitial(type: any) {
 }
 
 function isStockIn(type: any) {
-  return ["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "ADJUSTMENT_IN"].includes(clean(type).toUpperCase());
+  return ["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"].includes(clean(type).toUpperCase());
 }
 
 function movementSource(row: any) {

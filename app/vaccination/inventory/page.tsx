@@ -17,7 +17,7 @@ export default function VaccinationInventoryPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<any | null>(null);
-  const [form, setForm] = useState({ stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" });
+  const [form, setForm] = useState({ stockAction: "ADD_STOCK", inventoryTarget: "SYSTEM", quantity: "", inventoryNotes: "" });
   const [message, setMessage] = useState("Inventory membaca stok terpakai dari data dokter/Administered yang sudah Done.");
   const [error, setError] = useState("");
 
@@ -31,8 +31,9 @@ export default function VaccinationInventoryPage() {
   function startEdit(row: any) {
     setEditing(row);
     setForm({
-      stockAdded: Number(row.stock_added || 0),
-      stockPhysicalCount: row.stock_physical_count == null ? "" : String(row.stock_physical_count),
+      stockAction: "ADD_STOCK",
+      inventoryTarget: "SYSTEM",
+      quantity: "",
       inventoryNotes: row.inventory_notes || "",
     });
   }
@@ -40,10 +41,21 @@ export default function VaccinationInventoryPage() {
   async function saveInventory() {
     if (!editing) return;
     setError("");
+    const quantity = Math.max(0, Number(form.quantity || 0));
+    if (form.inventoryTarget === "SYSTEM" && !quantity) { setError("Jumlah stok wajib lebih dari 0."); return; }
+    if (form.inventoryTarget === "PHYSICAL" && form.quantity === "") { setError("Sisa fisik wajib diisi."); return; }
+
     const json = await fetch("/api/vaccination/inventory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lotId: editing.id, ...form }),
+      body: JSON.stringify({
+        action: "stock-transaction",
+        lotId: editing.id,
+        stockAction: form.stockAction,
+        inventoryTarget: form.inventoryTarget,
+        quantity,
+        inventoryNotes: form.inventoryNotes,
+      }),
     }).then((r) => r.json());
 
     if (!json.ok) { setError(json.message || "Gagal update inventory."); return; }
@@ -104,10 +116,38 @@ export default function VaccinationInventoryPage() {
         {editing ? (
           <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
             <div className="text-lg font-black text-amber-900">Edit Inventory: {editing.vaccine?.name} · Lot {editing.lot_number}</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Tambahan stok" value={form.stockAdded} onChange={(e) => setForm({ ...form, stockAdded: Number(e.target.value || 0) })} />
-              <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Sisa fisik" value={form.stockPhysicalCount} onChange={(e) => setForm({ ...form, stockPhysicalCount: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2.5" placeholder="Keterangan" value={form.inventoryNotes} onChange={(e) => setForm({ ...form, inventoryNotes: e.target.value })} />
+            <p className="mt-1 text-sm text-amber-900/80">Sisa Fisik otomatis disamakan dengan Sisa Sistem setelah transaksi. Return Stock berarti stok kembali masuk ke inventory.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                Stok
+                <select disabled={form.inventoryTarget === "PHYSICAL"} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={form.stockAction} onChange={(e) => setForm({ ...form, stockAction: e.target.value })}>
+                  <option value="ADD_STOCK">Tambah Stock</option>
+                  <option value="RETURN_STOCK">Return Stock</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                Pilih Inventory
+                <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={form.inventoryTarget} onChange={(e) => { const value = e.target.value; setForm({ ...form, inventoryTarget: value, quantity: value === "PHYSICAL" && Number(editing.stock_system_remaining || 0) >= 0 ? String(Number(editing.stock_system_remaining || 0)) : "" }); }}>
+                  <option value="SYSTEM">Sistem</option>
+                  <option value="PHYSICAL">Fisik</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : "Jumlah Stock Masuk"}
+                <input type="number" min={form.inventoryTarget === "PHYSICAL" ? 0 : 1} step={1} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder={form.inventoryTarget === "PHYSICAL" ? "Harus sama dengan Sisa Sistem" : "Jumlah stok"} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+              </label>
+              <div className="rounded-xl border bg-white px-3 py-2.5">
+                <div className="text-xs font-black uppercase text-slate-500">Sisa Sistem Saat Ini</div>
+                <div className="mt-1 text-lg font-black text-slate-900">{Number(editing.stock_system_remaining || 0)}</div>
+              </div>
+              <div className="rounded-xl border bg-white px-3 py-2.5">
+                <div className="text-xs font-black uppercase text-slate-500">Sisa Setelah Simpan</div>
+                <div className="mt-1 text-lg font-black text-emerald-700">{form.inventoryTarget === "PHYSICAL" ? Number(editing.stock_system_remaining || 0) : Number(editing.stock_system_remaining || 0) + Math.max(0, Number(form.quantity || 0))}</div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+              <input className="rounded-xl border bg-white px-3 py-2.5" placeholder="Keterangan / sumber stock" value={form.inventoryNotes} onChange={(e) => setForm({ ...form, inventoryNotes: e.target.value })} />
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800">{form.inventoryTarget === "PHYSICAL" ? "Fisik hanya bisa disimpan jika sama dengan Sisa Sistem." : "Sistem hanya disimpan jika hasil akhirnya match Sisa Fisik yang sudah tercatat."}</div>
             </div>
             <div className="mt-4 flex gap-3">
               <button onClick={saveInventory} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">Simpan Inventory</button>

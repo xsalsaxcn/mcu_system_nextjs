@@ -53,6 +53,9 @@ function isStockInMovement(movement: any) {
     "ADD",
     "ADDED",
     "RESTOCK",
+    "RETURN_STOCK",
+    "STOCK_RETURN",
+    "RETURN_IN",
     "ADJUSTMENT_IN",
   ].includes(clean(movement?.movement_type).toUpperCase());
 }
