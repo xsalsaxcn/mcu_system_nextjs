@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
+const ADMINISTER_SESSION_LOCK_KEY = "hha_vaccination_administer_session_lock_v150_9";
+
+function localDateTimeNow() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
 
 type SelectedVaccineItem = {
   itemId?: string;
@@ -43,6 +50,7 @@ function vaccineLabel(vaccine: any) {
 export default function VaccinationAdministerPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
+  const [sessionLocked, setSessionLocked] = useState(false);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
@@ -83,24 +91,69 @@ export default function VaccinationAdministerPage() {
       const loadedSessions = json.sessions || [];
       setSessions(loadedSessions);
 
-      let lockedSessionId = "";
+      let administerLockedSessionId = "";
+      let registerLockedSessionId = "";
       if (typeof window !== "undefined") {
         try {
-          const saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null");
-          if (saved?.locked && saved?.sessionId) lockedSessionId = String(saved.sessionId);
+          const administerSaved = JSON.parse(window.localStorage.getItem(ADMINISTER_SESSION_LOCK_KEY) || "null");
+          if (administerSaved?.locked && administerSaved?.sessionId) {
+            administerLockedSessionId = String(administerSaved.sessionId);
+          }
         } catch {
-          lockedSessionId = "";
+          administerLockedSessionId = "";
+        }
+
+        try {
+          const registerSaved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null");
+          if (registerSaved?.locked && registerSaved?.sessionId) {
+            registerLockedSessionId = String(registerSaved.sessionId);
+          }
+        } catch {
+          registerLockedSessionId = "";
         }
       }
 
-      const lockedExists = Boolean(
-        lockedSessionId && loadedSessions.some((item: any) => String(item.id) === lockedSessionId)
+      const administerLockedExists = Boolean(
+        administerLockedSessionId && loadedSessions.some((item: any) => String(item.id) === administerLockedSessionId)
+      );
+      const registerLockedExists = Boolean(
+        registerLockedSessionId && loadedSessions.some((item: any) => String(item.id) === registerLockedSessionId)
       );
 
-      if (!sessionId && (lockedExists || loadedSessions?.[0]?.id)) {
-        setSessionId(lockedExists ? lockedSessionId : String(loadedSessions[0].id));
+      setSessionLocked(administerLockedExists);
+
+      if (!sessionId && (administerLockedExists || registerLockedExists || loadedSessions?.[0]?.id)) {
+        setSessionId(
+          administerLockedExists
+            ? administerLockedSessionId
+            : registerLockedExists
+              ? registerLockedSessionId
+              : String(loadedSessions[0].id)
+        );
       }
     }
+  }
+
+  function saveAdministerSessionLock(nextLocked: boolean) {
+    if (typeof window === "undefined") return;
+
+    if (!nextLocked) {
+      window.localStorage.removeItem(ADMINISTER_SESSION_LOCK_KEY);
+      setSessionLocked(false);
+      return;
+    }
+
+    if (!sessionId) {
+      setError("Pilih session terlebih dahulu sebelum mengunci pilihan.");
+      return;
+    }
+
+    window.localStorage.setItem(ADMINISTER_SESSION_LOCK_KEY, JSON.stringify({
+      locked: true,
+      sessionId,
+    }));
+    setSessionLocked(true);
+    setError("");
   }
 
   async function loadData(id = sessionId, preserveWorkingVaccines = false) {
@@ -294,6 +347,12 @@ export default function VaccinationAdministerPage() {
   }
 
   useEffect(() => {
+    setForm((current) => current.administeredAt
+      ? current
+      : { ...current, administeredAt: localDateTimeNow() });
+  }, []);
+
+  useEffect(() => {
     loadSessions();
   }, []);
 
@@ -427,14 +486,32 @@ export default function VaccinationAdministerPage() {
           <h2 className="font-bold">1. Pilih Peserta</h2>
 
           <div id="vaccination-administer-top-controls" className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <select id="vaccination-administer-session" data-vaccination-role="session" className="rounded-xl border px-3 py-2.5" value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
-              <option value="">Pilih session</option>
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {sessionLabel(session)}
-                </option>
-              ))}
-            </select>
+            <div className="min-w-0">
+              <select
+                id="vaccination-administer-session"
+                data-vaccination-role="session"
+                disabled={sessionLocked}
+                className="w-full rounded-xl border px-3 py-2.5 disabled:bg-slate-100 disabled:text-slate-700"
+                value={sessionId}
+                onChange={(e) => setSessionId(e.target.value)}
+              >
+                <option value="">Pilih session</option>
+                {sessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {sessionLabel(session)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => saveAdministerSessionLock(!sessionLocked)}
+                className={`mt-2 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-black ${sessionLocked ? "border-amber-200 bg-amber-50 text-amber-800" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                title={sessionLocked ? "Klik untuk membuka kunci session di device ini." : "Kunci session ini di device ini agar tidak berubah saat operasional."}
+              >
+                <span>{sessionLocked ? "🔒" : "🔓"}</span>
+                <span>{sessionLocked ? "Session Terkunci" : "Kunci Session"}</span>
+              </button>
+            </div>
 
             <select id="vaccination-administer-participant" data-vaccination-role="participant" className="rounded-xl border px-3 py-2.5" value={form.registrationId} onChange={(e) => setForm({ ...form, registrationId: e.target.value })}>
               <option value="">Pilih peserta / nomor antrian</option>

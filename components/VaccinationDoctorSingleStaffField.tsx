@@ -10,8 +10,28 @@ const STAFF_STORAGE_KEYS = [
   "hha_vaccination_staff_options_v117",
 ];
 
+const LAST_DOCTOR_DEVICE_KEY = "hha_vaccination_administer_last_doctor_v150_9";
+
 function cleanText(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function readLastDoctorOnDevice() {
+  try {
+    return cleanText(window.localStorage.getItem(LAST_DOCTOR_DEVICE_KEY) || "");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function saveLastDoctorOnDevice(value: string) {
+  try {
+    const name = cleanText(value);
+    if (name) window.localStorage.setItem(LAST_DOCTOR_DEVICE_KEY, name);
+    else window.localStorage.removeItem(LAST_DOCTOR_DEVICE_KEY);
+  } catch (_error) {
+    // Device/browser storage is best effort only.
+  }
 }
 
 function isAdministerPage() {
@@ -278,7 +298,7 @@ async function ensureSingleDoctorField() {
 
   styleSelect(select);
 
-  const rawCurrent = select.value || cleanText(originalInput?.value || "");
+  const rawCurrent = select.value || cleanText(originalInput?.value || "") || readLastDoctorOnDevice();
   const current = names.includes(rawCurrent) ? rawCurrent : "";
 
   select.innerHTML = "";
@@ -301,6 +321,7 @@ async function ensureSingleDoctorField() {
   select.title = "Pilih dokter/petugas yang sudah disetting di Session Vaksinasi.";
 
   select.onchange = () => {
+    saveLastDoctorOnDevice(select!.value);
     const input = findOriginalDoctorInput();
     if (input) {
       restoreHiddenParents(input.parentElement);
