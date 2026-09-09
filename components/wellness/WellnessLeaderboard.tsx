@@ -72,6 +72,14 @@ function fmt(value: any) {
   );
 }
 
+// WELLNESS_COACH_RANKING_CANONICAL_STREAK_UI_V126M119_54
+function displayCanonicalStreak(value: any) {
+  if (value === null || value === undefined || value === "") return "—";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `${fmt(parsed)} hari` : "—";
+}
+
+
 function formatDate(value: any) {
   const text = clean(value);
   if (!text) return "-";
@@ -144,7 +152,7 @@ function ChampionCard({ row, metric, metricOption }: any) {
             {row.name}
           </h3>
           <p className="mt-0.5 break-words text-xs font-bold text-slate-500">
-            {row.group_name || "-"} · streak {fmt(row.current_streak)} hari
+            {row.group_name || "-"} · streak {displayCanonicalStreak(row.current_streak)}
           </p>
           <div className="mt-3 flex items-end gap-2">
             <div className="text-3xl font-black leading-none text-slate-950">
@@ -384,7 +392,7 @@ export default function WellnessLeaderboard({ groups }: { groups: any[] }) {
                         {item.name}
                       </div>
                       <div className="mt-0.5 break-words text-[10px] font-bold leading-4 text-slate-500">
-                        {item.group_name || "-"} · streak {fmt(item.current_streak)} hari
+                        {item.group_name || "-"} · streak {displayCanonicalStreak(item.current_streak)}
                       </div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                         <div

@@ -37,6 +37,7 @@ import {
   targetTimelineSummary,
 } from "@/lib/wellness/effectiveDatedTargets";
 
+import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
 // WELLNESS_COACH_GROUP_RANKING_API_V76
 // WELLNESS_COACH_RANKING_SINGLE_FITNESS_SOURCE_V79F
 // WELLNESS_COACH_RANKING_ADMIN_PARITY_V112
@@ -642,26 +643,10 @@ export async function GET(request: NextRequest) {
             effectiveDays
           ) * 100,
         );
-      const successDates = new Set<string>();
-      for (const date of new Set([
-        ...foodByDate.keys(),
-        ...workoutByDate.keys(),
-      ])) {
-        const nutritionOk = (foodByDate.get(date)?.size || 0) >= 3;
-        const workoutCalories = workoutByDate.get(date)?.calories || 0;
-        const datedTargets = effectiveTargetsForDate(targetTimeline, date);
-        const workoutOk = workoutCalories >= datedTargets.workout;
-        if (nutritionOk && workoutOk) successDates.add(date);
-      }
-      let currentStreak = 0;
-      for (let offset = 0; offset > -effectiveDays; offset -= 1) {
-        const date = jakartaDate(offset);
-        if (!successDates.has(date)) {
-          if (offset === 0) continue;
-          break;
-        }
-        currentStreak += 1;
-      }
+      // WELLNESS_COACH_RANKING_CANONICAL_STREAK_V126M119_54
+      // Ranking points remain period-scoped. Streak is hydrated later
+      // from the exact Participant canonical loader for visible rows only.
+      const currentStreak: number | null = null;
 
       const totalPoints = pointLedger.total;
       const profile = profileMap.get(String(id)) || {};
@@ -707,12 +692,83 @@ export async function GET(request: NextRequest) {
       1,
       ...rows.map((row: any) => metricValue(row, metric)),
     );
-    const ranked = rows.slice(0, 10).map((row: any, index: number) => ({
+    const rankedBase = rows.slice(0, 10).map((row: any, index: number) => ({
       ...row,
       rank: index + 1,
       metric_value: metricValue(row, metric),
       progress_percent: Math.round((metricValue(row, metric) / maxValue) * 100),
     }));
+
+
+    // WELLNESS_COACH_RANKING_CANONICAL_STREAK_V126M119_54
+    // Only the visible top-10 ranking rows are hydrated. This avoids an N+1
+    // canonical load for every assigned participant while guaranteeing the
+    // streak shown by Coach is the same Participant canonical streak.
+    const participantByIdV126M119_54 = new Map<number, any>(
+      participants.map((participant: any) => [
+        participantId(participant),
+        participant,
+      ]),
+    );
+
+    const ranked = await Promise.all(
+      rankedBase.map(async (row: any) => {
+        const id = asNumber(row?.participant_id);
+        const participant = participantByIdV126M119_54.get(id);
+
+        if (!participant) {
+          return {
+            ...row,
+            current_streak: null,
+            streak_source: "participant_canonical_unavailable",
+          };
+        }
+
+        const control =
+          participantControlMap.get(id) ||
+          participant?.wellness_control || {
+            participant_id: id,
+            session_enabled: true,
+            fitness_enabled: false,
+            fitness_source: "none",
+            connected_providers: [],
+            active_providers: [],
+            has_multiple_active_providers: false,
+            source_connected: false,
+          };
+
+        try {
+          const canonical = await loadParticipantCanonicalStreak({
+            supabase,
+            participant: {
+              ...participant,
+              wellness_control: control,
+            },
+          });
+
+          const rawCurrent = canonical?.streak?.current_streak;
+          const parsedCurrent =
+            rawCurrent === null || rawCurrent === undefined || rawCurrent === ""
+              ? null
+              : Number(rawCurrent);
+
+          return {
+            ...row,
+            current_streak:
+              parsedCurrent !== null && Number.isFinite(parsedCurrent)
+                ? parsedCurrent
+                : null,
+            streak_source: "participant_canonical",
+          };
+        } catch {
+          return {
+            ...row,
+            current_streak: null,
+            streak_source: "participant_canonical_unavailable",
+          };
+        }
+      }),
+    );
 
     return NextResponse.json({
       ok: true,
