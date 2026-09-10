@@ -292,13 +292,30 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const file = form.get("file");
     const mode = historyText(form.get("mode") || "preview").toLowerCase();
-    const companyName = historyText(form.get("companyName"));
+    const sourceId = Number(historyText(form.get("sourceId")) || 0);
     const fallbackYear = historyYear(form.get("sourceYear"));
     const mapping = parseColumnMapping(form.get("mapping"));
     const defaultParticipantType = historyText(form.get("defaultParticipantType")).toUpperCase() === "DEPENDENT" ? "DEPENDENT" : "EMPLOYEE";
 
     if (!(file instanceof File)) return fail("File Excel wajib dipilih.");
-    if (!companyName) return fail("Nama perusahaan wajib diisi.");
+    if (!sourceId) return fail("Pilih perusahaan / database vaksinasi terlebih dahulu.");
+
+    const supabase = supabaseAdmin();
+    const sourceResult = await supabase
+      .from("participant_sources")
+      .select("id,name,institution_name,description,program_type")
+      .eq("id", sourceId)
+      .maybeSingle();
+    if (sourceResult.error) throw new Error(sourceResult.error.message);
+    if (!sourceResult.data) return fail("Database perusahaan yang dipilih tidak ditemukan.", 404);
+
+    const sourceProgram = historyText(sourceResult.data.program_type).toLowerCase();
+    if (sourceProgram && !["vaccination", "corporate", "all"].includes(sourceProgram)) {
+      return fail("Database yang dipilih bukan sumber yang dapat digunakan untuk Vaksinasi.", 400);
+    }
+
+    const companyName = historyText(sourceResult.data.institution_name) || historyText(sourceResult.data.name);
+    if (!companyName) return fail("Nama perusahaan pada database yang dipilih belum tersedia.");
     if (!/\.(xlsx|xls)$/i.test(file.name || "")) return fail("Gunakan file Excel .xlsx atau .xls.");
     if (file.size > 20 * 1024 * 1024) return fail("Ukuran file maksimal 20 MB.");
 
@@ -347,7 +364,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const supabase = supabaseAdmin();
     const companyKey = historyCompanyKey(companyName);
     let companyResult = await supabase.from("vaccination_history_companies").select("*").eq("company_key", companyKey).maybeSingle();
     if (companyResult.error) throw new Error(companyResult.error.message);
@@ -492,7 +508,16 @@ export async function POST(req: NextRequest) {
       skipped_rows: skippedRows,
       status: "IMPORTED",
       imported_by: historyUserLabel(user),
-      metadata: { warnings: parsed.warnings, summary, mapping, defaultParticipantType },
+      metadata: {
+        warnings: parsed.warnings,
+        summary,
+        mapping,
+        defaultParticipantType,
+        sourceId,
+        sourceName: historyText(sourceResult.data.name),
+        sourceInstitutionName: historyText(sourceResult.data.institution_name),
+        sourceProgramType: sourceProgram || null,
+      },
     }).select("*").single();
     if (batchInsert.error) throw new Error(batchInsert.error.message);
     const batchId = Number(batchInsert.data.id);
@@ -517,6 +542,7 @@ export async function POST(req: NextRequest) {
       mode: "import",
       message: `Import selesai: ${summary.personRows} baris identitas diproses, ${insertedServices.length} history layanan baru tersimpan.`,
       company: { id: companyId, name: companyName, publicToken: company.public_token },
+      source: { id: sourceId, name: historyText(sourceResult.data.name), institutionName: historyText(sourceResult.data.institution_name) },
       batchId,
       template: parsed.template,
       warnings: parsed.warnings,

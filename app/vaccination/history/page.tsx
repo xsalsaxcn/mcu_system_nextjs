@@ -24,6 +24,15 @@ type HeaderInfo = {
   suggestedDefaultParticipantType: "EMPLOYEE" | "DEPENDENT";
 };
 
+type VaccinationCompanySource = {
+  id: number;
+  name: string;
+  institutionName: string;
+  companyName: string;
+  programType: string;
+  label: string;
+};
+
 type MappingField = { key: string; label: string; group: "Peserta" | "Parent / Wali" | "Layanan"; required?: boolean };
 
 const MAPPING_FIELDS: MappingField[] = [
@@ -53,7 +62,12 @@ function number(value: any) {
 }
 
 export default function VaccinationHistoryPage() {
-  const [companyName, setCompanyName] = useState("BINUS");
+  const [selectedCompanySourceId, setSelectedCompanySourceId] = useState("");
+  const [companySources, setCompanySources] = useState<VaccinationCompanySource[]>([]);
+  const [loadingCompanySources, setLoadingCompanySources] = useState(true);
+  const [companySourceError, setCompanySourceError] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [sourceYear, setSourceYear] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -66,8 +80,13 @@ export default function VaccinationHistoryPage() {
   const [batches, setBatches] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({ persons: 0, services: 0, dependents: 0 });
 
-  const canPreview = useMemo(() => Boolean(file && companyName.trim() && headerInfo), [file, companyName, headerInfo]);
-  const canImport = useMemo(() => Boolean(file && companyName.trim() && preview), [file, companyName, preview]);
+  const canPreview = useMemo(() => Boolean(selectedCompanySourceId && file && companyName.trim() && headerInfo), [selectedCompanySourceId, file, companyName, headerInfo]);
+  const canImport = useMemo(() => Boolean(selectedCompanySourceId && file && companyName.trim() && preview), [selectedCompanySourceId, file, companyName, preview]);
+
+  const selectedCompanySource = useMemo(
+    () => companySources.find((source) => String(source.id) === selectedCompanySourceId) || null,
+    [companySources, selectedCompanySourceId],
+  );
 
   function changeMapping(field: string, header: string) {
     setMapping((current) => {
@@ -78,9 +97,34 @@ export default function VaccinationHistoryPage() {
     setPreview(null);
   }
 
-  async function loadBatches() {
+  async function loadCompanySources() {
+    setLoadingCompanySources(true);
+    setCompanySourceError("");
+    try {
+      const json = await fetch("/api/vaccination/history/sources", { cache: "no-store" }).then((r) => r.json());
+      if (!json.ok) {
+        setCompanySources([]);
+        setCompanySourceError(json.message || "Gagal memuat database perusahaan vaksinasi.");
+        return;
+      }
+      setCompanySources(Array.isArray(json.sources) ? json.sources : []);
+    } catch {
+      setCompanySources([]);
+      setCompanySourceError("Gagal memuat database perusahaan vaksinasi.");
+    } finally {
+      setLoadingCompanySources(false);
+    }
+  }
+
+  async function loadBatches(company = companyName) {
+    const selectedCompany = company.trim();
+    if (!selectedCompany) {
+      setBatches([]);
+      setStats({ persons: 0, services: 0, dependents: 0 });
+      return;
+    }
     const params = new URLSearchParams();
-    if (companyName.trim()) params.set("company", companyName.trim());
+    params.set("company", selectedCompany);
     const json = await fetch(`/api/vaccination/history/batches?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
     if (json.ok) {
       setBatches(json.batches || []);
@@ -88,15 +132,32 @@ export default function VaccinationHistoryPage() {
     }
   }
 
+  function chooseCompanySource(sourceId: string) {
+    setSelectedCompanySourceId(sourceId);
+    const selected = companySources.find((source) => String(source.id) === sourceId) || null;
+    const nextCompany = selected?.companyName || "";
+    setCompanyName(nextCompany);
+    setSourceYear("");
+    setFile(null);
+    setFileInputKey((current) => current + 1);
+    setHeaderInfo(null);
+    setMapping({});
+    setPreview(null);
+    setMessage("");
+    setError("");
+  }
+
   async function send(mode: "headers" | "preview" | "import") {
+    if (!selectedCompanySourceId) { setError("Pilih perusahaan / database vaksinasi terlebih dahulu."); return; }
     if (!file) { setError("Pilih file Excel terlebih dahulu."); return; }
-    if (!companyName.trim()) { setError("Nama perusahaan wajib diisi."); return; }
+    if (!companyName.trim()) { setError("Perusahaan dari database belum terbaca."); return; }
     setLoading(true);
     setError("");
     setMessage("");
     try {
       const form = new FormData();
       form.set("file", file);
+      form.set("sourceId", selectedCompanySourceId);
       form.set("companyName", companyName.trim());
       form.set("mode", mode);
       if (sourceYear.trim()) form.set("sourceYear", sourceYear.trim());
@@ -127,7 +188,8 @@ export default function VaccinationHistoryPage() {
     }
   }
 
-  useEffect(() => { void loadBatches(); }, []);
+  useEffect(() => { void loadCompanySources(); }, []);
+  useEffect(() => { void loadBatches(companyName); }, [companyName]);
 
   return (
     <main className="min-h-screen bg-slate-50 p-6">
@@ -152,21 +214,32 @@ export default function VaccinationHistoryPage() {
 
           <div className="mt-6 grid gap-3 md:grid-cols-3">
             <label className="block">
-              <span className="text-xs font-black uppercase text-slate-500">Perusahaan</span>
-              <input value={companyName} onChange={(e) => { setCompanyName(e.target.value); setPreview(null); }} className="mt-2 w-full rounded-xl border px-3 py-3" placeholder="Contoh: BINUS" />
+              <span className="text-xs font-black uppercase text-slate-500">Perusahaan / Database Vaksinasi</span>
+              <select value={selectedCompanySourceId} onChange={(e) => chooseCompanySource(e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 font-bold">
+                <option value="">{loadingCompanySources ? "Memuat perusahaan..." : "Pilih perusahaan terlebih dahulu"}</option>
+                {companySources.map((source) => (
+                  <option key={source.id} value={source.id}>{source.label}</option>
+                ))}
+              </select>
+              {companySourceError ? <div className="mt-2 text-xs font-bold text-red-600">{companySourceError}</div> : null}
+              {selectedCompanySource ? (
+                <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+                  Company History: {companyName} · Database: {selectedCompanySource.name}
+                </div>
+              ) : null}
             </label>
             <label className="block">
               <span className="text-xs font-black uppercase text-slate-500">Tahun Sumber (opsional)</span>
-              <input value={sourceYear} onChange={(e) => { setSourceYear(e.target.value); setPreview(null); }} className="mt-2 w-full rounded-xl border px-3 py-3" placeholder="2022 / 2023 / 2024 / 2025" inputMode="numeric" />
+              <input disabled={!selectedCompanySourceId} value={sourceYear} onChange={(e) => { setSourceYear(e.target.value); setPreview(null); }} className="mt-2 w-full rounded-xl border px-3 py-3 disabled:bg-slate-100" placeholder="2022 / 2023 / 2024 / 2025" inputMode="numeric" />
             </label>
             <label className="block">
               <span className="text-xs font-black uppercase text-slate-500">File Excel</span>
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setPreview(null); setHeaderInfo(null); setMapping({}); }} className="mt-2 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm" />
+              <input key={fileInputKey} disabled={!selectedCompanySourceId} type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setPreview(null); setHeaderInfo(null); setMapping({}); }} className="mt-2 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm disabled:bg-slate-100" />
             </label>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" disabled={loading || !file} onClick={() => void send("headers")} className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memproses..." : "1. Baca Header & Mapping"}</button>
+            <button type="button" disabled={loading || !selectedCompanySourceId || !file} onClick={() => void send("headers")} className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memproses..." : "1. Baca Header & Mapping"}</button>
             <button type="button" disabled={loading || !canPreview} onClick={() => void send("preview")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">2. Preview File</button>
             <button type="button" disabled={loading || !canImport} onClick={() => void send("import")} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">3. Import History</button>
           </div>
