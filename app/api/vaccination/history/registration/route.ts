@@ -23,7 +23,16 @@ function same(a: unknown, b: unknown) {
   return Boolean(a && b && String(a) === String(b));
 }
 
-async function findCandidates(supabase: any, companyId: number, registration: any) {
+function personIdentity(person: any) {
+  return {
+    nikKey: historyIdentityKey(person?.nik_key || person?.nik),
+    employeeKey: historyIdentityKey(person?.employee_key || person?.employee_id),
+    emailKey: historyEmailKey(person?.email_key || person?.email),
+    nameKey: historyNameKey(person?.name_key || person?.participant_name),
+  };
+}
+
+async function candidateQueries(supabase: any, registration: any, companyId?: number | null) {
   const map = new Map<number, Candidate>();
   const nikKey = historyIdentityKey(registration.nik);
   const employeeKey = historyIdentityKey(registration.employee_id || registration.mcu_id);
@@ -31,10 +40,28 @@ async function findCandidates(supabase: any, companyId: number, registration: an
   const nameKey = historyNameKey(registration.participant_name);
 
   const queries: Promise<any>[] = [];
-  if (nikKey) queries.push(supabase.from("vaccination_persons").select("*").eq("company_id", companyId).eq("nik_key", nikKey).limit(10));
-  if (employeeKey) queries.push(supabase.from("vaccination_persons").select("*").eq("company_id", companyId).eq("employee_key", employeeKey).limit(10));
-  if (emailKey) queries.push(supabase.from("vaccination_persons").select("*").eq("company_id", companyId).eq("email_key", emailKey).limit(10));
-  if (nameKey) queries.push(supabase.from("vaccination_persons").select("*").eq("company_id", companyId).eq("name_key", nameKey).limit(20));
+  const scoped = () => {
+    let query = supabase.from("vaccination_persons").select("*");
+    if (companyId) query = query.eq("company_id", companyId);
+    return query;
+  };
+
+  // Canonical normalized keys first.
+  if (nikKey) queries.push(scoped().eq("nik_key", nikKey).limit(20));
+  if (employeeKey) queries.push(scoped().eq("employee_key", employeeKey).limit(20));
+  if (emailKey) queries.push(scoped().eq("email_key", emailKey).limit(20));
+  if (nameKey) queries.push(scoped().eq("name_key", nameKey).limit(30));
+
+  // V151.1 compatibility fallback: older/imported rows may have the raw value
+  // populated correctly while a derived *_key field is absent/stale.
+  const rawNik = historyText(registration.nik);
+  const rawEmployee = historyText(registration.employee_id || registration.mcu_id);
+  const rawEmail = historyText(registration.email);
+  const rawName = historyText(registration.participant_name);
+  if (rawNik) queries.push(scoped().eq("nik", rawNik).limit(20));
+  if (rawEmployee) queries.push(scoped().eq("employee_id", rawEmployee).limit(20));
+  if (rawEmail) queries.push(scoped().ilike("email", rawEmail).limit(20));
+  if (rawName) queries.push(scoped().ilike("participant_name", rawName).limit(30));
 
   const results = await Promise.all(queries);
   for (const result of results) {
@@ -61,37 +88,38 @@ async function findCandidates(supabase: any, companyId: number, registration: an
   }
 
   for (const candidate of map.values()) {
-    const person = candidate.person;
-    if (nameKey && same(person.name_key, nameKey)) {
+    const own = personIdentity(candidate.person);
+    if (nameKey && same(own.nameKey, nameKey)) {
       candidate.score += 50;
       candidate.reasons.push("nama");
     }
-    if (nikKey && same(person.nik_key, nikKey)) {
+    if (nikKey && same(own.nikKey, nikKey)) {
       candidate.score += 120;
       candidate.reasons.push("NIK");
     }
-    if (employeeKey && same(person.employee_key, employeeKey)) {
+    if (employeeKey && same(own.employeeKey, employeeKey)) {
       candidate.score += 110;
       candidate.reasons.push("NIP/Employee ID");
     }
-    if (emailKey && same(person.email_key, emailKey)) {
+    if (emailKey && same(own.emailKey, emailKey)) {
       candidate.score += 100;
       candidate.reasons.push("email");
     }
 
-    if (person.participant_type === "DEPENDENT") {
-      const parent = parentByDependent.get(Number(person.id));
+    if (candidate.person.participant_type === "DEPENDENT") {
+      const parent = parentByDependent.get(Number(candidate.person.id));
       candidate.parent = parent || null;
       if (parent) {
-        if (nikKey && same(parent.nik_key, nikKey)) {
+        const parentIdentity = personIdentity(parent);
+        if (nikKey && same(parentIdentity.nikKey, nikKey)) {
           candidate.score += 110;
           candidate.reasons.push("NIK parent");
         }
-        if (employeeKey && same(parent.employee_key, employeeKey)) {
+        if (employeeKey && same(parentIdentity.employeeKey, employeeKey)) {
           candidate.score += 100;
           candidate.reasons.push("NIP parent");
         }
-        if (emailKey && same(parent.email_key, emailKey)) {
+        if (emailKey && same(parentIdentity.emailKey, emailKey)) {
           candidate.score += 90;
           candidate.reasons.push("email parent");
         }
@@ -100,6 +128,70 @@ async function findCandidates(supabase: any, companyId: number, registration: an
   }
 
   return Array.from(map.values()).sort((a, b) => b.score - a.score);
+}
+
+async function findCandidates(supabase: any, companyId: number, registration: any) {
+  return candidateQueries(supabase, registration, companyId);
+}
+
+async function findGlobalCandidates(supabase: any, registration: any) {
+  return candidateQueries(supabase, registration, null);
+}
+
+function isSafeGlobalMatch(candidates: Candidate[]) {
+  const best = candidates[0] || null;
+  if (!best) return null;
+  const second = candidates[1] || null;
+  if (second && second.score === best.score) return null;
+
+  const reasons = new Set(best.reasons);
+  const ownStrong = ["NIK", "NIP/Employee ID", "email"].filter((reason) => reasons.has(reason)).length;
+  const parentStrong = ["NIK parent", "NIP parent", "email parent"].filter((reason) => reasons.has(reason)).length;
+  const hasName = reasons.has("nama");
+
+  if (best.person.participant_type === "DEPENDENT") {
+    return hasName && parentStrong >= 1 && best.score >= 140 ? best : null;
+  }
+  return ((ownStrong >= 2 && best.score >= 200) || (hasName && ownStrong >= 1 && best.score >= 150)) ? best : null;
+}
+
+function companyHintMatches(companyKey: string, hint: string) {
+  if (!companyKey || companyKey === "unknown-company" || !hint) return false;
+  const hintKey = historyCompanyKey(hint);
+  if (hintKey === companyKey) return true;
+  return (`-${hintKey}-`).includes(`-${companyKey}-`);
+}
+
+async function resolveHistoryCompany(supabase: any, registration: any, session: any) {
+  const hints = [registration.company_name, session?.company_name, session?.source_name, session?.session_name]
+    .map(historyText)
+    .filter(Boolean);
+  const exactKeys = Array.from(new Set(hints.map(historyCompanyKey).filter((key) => key && key !== "unknown-company")));
+
+  for (const key of exactKeys) {
+    const result = await supabase
+      .from("vaccination_history_companies")
+      .select("id,company_name,company_key,public_token")
+      .eq("company_key", key)
+      .maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    if (result.data) return { company: result.data, reason: "company-exact" };
+  }
+
+  // Common operational sessions can carry a source prefix, e.g.
+  // "HEALTHDAY V5 · BINUS" while historical import company is simply "BINUS".
+  const allCompanies = await supabase
+    .from("vaccination_history_companies")
+    .select("id,company_name,company_key,public_token")
+    .eq("active", true)
+    .limit(500);
+  if (allCompanies.error) throw new Error(allCompanies.error.message);
+
+  const aliasMatches = (allCompanies.data || []).filter((company: any) =>
+    hints.some((hint) => companyHintMatches(historyText(company.company_key), hint)),
+  );
+  if (aliasMatches.length === 1) return { company: aliasMatches[0], reason: "company-alias" };
+  return { company: null, reason: "company-not-found" };
 }
 
 async function familyForPerson(supabase: any, person: any) {
@@ -142,7 +234,7 @@ export async function GET(req: NextRequest) {
   try {
     const regResult = await supabase
       .from("vaccination_registrations")
-      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+      .select("*, session:vaccination_sessions(id,session_name,company_name,source_name,location,session_date)")
       .eq("id", registrationId)
       .single();
     if (regResult.error) return fail(regResult.error.message, 404);
@@ -152,7 +244,7 @@ export async function GET(req: NextRequest) {
 
     const currentRegsResult = await supabase
       .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,email,company_name,registered_at,session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+      .select("id,session_id,participant_name,employee_id,nik,email,company_name,registered_at,session:vaccination_sessions(id,session_name,company_name,source_name,location,session_date)")
       .eq("participant_name", registration.participant_name)
       .order("id", { ascending: false })
       .limit(100);
@@ -177,25 +269,40 @@ export async function GET(req: NextRequest) {
       return ok({ registration, company: null, match: null, person: null, family: { parent: null, dependents: [] }, historical: [], current: currentRecords });
     }
 
-    const companyResult = await supabase
-      .from("vaccination_history_companies")
-      .select("id,company_name,company_key,public_token")
-      .eq("company_key", historyCompanyKey(companyName))
-      .maybeSingle();
-    if (companyResult.error) throw new Error(companyResult.error.message);
-    const company = companyResult.data;
-    if (!company) {
-      return ok({ registration, company: null, match: null, person: null, family: { parent: null, dependents: [] }, historical: [], current: currentRecords });
+    const resolvedCompany = await resolveHistoryCompany(supabase, registration, session);
+    let company = resolvedCompany.company;
+    let candidates: Candidate[] = company ? await findCandidates(supabase, Number(company.id), registration) : [];
+    let best = candidates[0] || null;
+    let matched = best && best.score >= 100 ? best : null;
+    let matchScope = company ? resolvedCompany.reason : "company-not-found";
+
+    // V151.1 safe fallback: if operational company naming differs from the imported
+    // history company, allow a cross-company lookup ONLY when strong identity is
+    // unambiguous. This is especially important for legacy sessions/source names.
+    if (!matched) {
+      const globalCandidates = await findGlobalCandidates(supabase, registration);
+      const globalMatched = isSafeGlobalMatch(globalCandidates);
+      if (globalMatched) {
+        matched = globalMatched;
+        best = globalMatched;
+        matchScope = "strong-identity-fallback";
+        const matchedCompany = await supabase
+          .from("vaccination_history_companies")
+          .select("id,company_name,company_key,public_token")
+          .eq("id", Number(globalMatched.person.company_id))
+          .maybeSingle();
+        if (matchedCompany.error) throw new Error(matchedCompany.error.message);
+        company = matchedCompany.data || company;
+      } else if (!best && globalCandidates[0]) {
+        best = globalCandidates[0];
+      }
     }
 
-    const candidates = await findCandidates(supabase, Number(company.id), registration);
-    const best = candidates[0] || null;
-    const matched = best && best.score >= 100 ? best : null;
     if (!matched) {
       return ok({
         registration,
         company,
-        match: best ? { status: "REVIEW", score: best.score, reasons: best.reasons } : { status: "NOT_FOUND", score: 0, reasons: [] },
+        match: best ? { status: "REVIEW", score: best.score, reasons: best.reasons, scope: matchScope } : { status: "NOT_FOUND", score: 0, reasons: [], scope: matchScope },
         person: null,
         family: { parent: null, dependents: [] },
         historical: [],
@@ -215,7 +322,7 @@ export async function GET(req: NextRequest) {
     return ok({
       registration,
       company,
-      match: { status: "MATCHED", score: matched.score, reasons: matched.reasons },
+      match: { status: "MATCHED", score: matched.score, reasons: matched.reasons, scope: matchScope },
       person: matched.person,
       family,
       historical: historyResult.data || [],
