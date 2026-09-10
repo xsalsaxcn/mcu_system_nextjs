@@ -28,6 +28,7 @@ const menuItems: MenuItem[] = [
   // VACCINATION_VALIDATION_MENU_V149
   { title: "Tim Validasi", href: "/vaccination/validation", desc: "Print label, validasi akhir, dan penyelesaian status peserta vaksinasi.", tag: "Validasi", stage: "Pelaksanaan" },
   { title: "Dashboard Vaksinasi", href: "/vaccination/dashboard", desc: "Filter sudah/belum vaksin, dokter/petugas, dan export data.", tag: "Report", stage: "Pelaporan" },
+  { title: "History Company Service", href: "/vaccination/company-history", desc: "Database per perusahaan untuk melihat peserta dan benefit atau layanan yang sudah diambil.", tag: "Database", stage: "Pelaporan" },
   { title: "Inventory", href: "/vaccination/inventory", desc: "Lihat stok awal, tambahan stok, terpakai, sisa, selisih fisik, dan keterangan.", tag: "Stock", stage: "Pelaporan" },
   { title: "Reminder Status", href: "/vaccination/reminder", desc: "Pantau Sent, Failed dengan alasan, incoming reminder, dan manual reminder.", tag: "Soon", stage: "Reminder" },
 ];
