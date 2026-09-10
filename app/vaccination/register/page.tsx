@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
 type ProductItem = {
   id?: string;
@@ -116,6 +117,7 @@ export default function VaccinationRegisterPage() {
   const [contextLocked, setContextLocked] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: "queue", direction: "asc" });
   const [search, setSearch] = useState("");
+  const [historyRegistration, setHistoryRegistration] = useState<any | null>(null);
 
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
@@ -589,7 +591,10 @@ export default function VaccinationRegisterPage() {
             <h1 className="text-2xl font-bold">Registrasi Vaksin</h1>
             <p className="mt-2 text-sm text-slate-600">Dashboard antrian registrasi, edit produk layanan, harga/payment note, dan export per stage.</p>
           </div>
-          <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          <div className="flex flex-wrap gap-2">
+            <a href="/vaccination/history" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-100">History Layanan</a>
+            <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          </div>
         </div>
 
         {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
@@ -781,7 +786,11 @@ export default function VaccinationRegisterPage() {
                   return (
                     <tr key={registration.id}>
                       <td className="p-3 text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</td>
-                      <td className="p-3 font-bold">{registration.participant_name}</td>
+                      <td className="p-3 font-bold">
+                        <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
+                          {registration.participant_name}
+                        </button>
+                      </td>
                       <td className="p-3">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
                       <td className="p-3">
                         <div className="space-y-1">
@@ -809,6 +818,7 @@ export default function VaccinationRegisterPage() {
           </div>
         </section>
       </div>
+      {historyRegistration ? <VaccinationParticipantHistoryModal registration={historyRegistration} onClose={() => setHistoryRegistration(null)} /> : null}
     </main>
   );
 }
