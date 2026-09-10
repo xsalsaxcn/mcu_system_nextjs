@@ -45,6 +45,37 @@ export type VaccinationHistoryParseResult = {
   headers: string[];
 };
 
+export type VaccinationHistoryColumnMapping = Partial<Record<
+  | "participantType"
+  | "participantName"
+  | "employeeId"
+  | "nik"
+  | "email"
+  | "phone"
+  | "birthDate"
+  | "gender"
+  | "parentName"
+  | "parentEmployeeId"
+  | "parentNik"
+  | "parentEmail"
+  | "parentPhone"
+  | "serviceDate"
+  | "serviceName"
+  | "productBrand"
+  | "location"
+  | "nextDueDate"
+  | "notes",
+  string
+>>;
+
+export type VaccinationHistoryWorkbookInspection = {
+  template: string;
+  sheetName: string;
+  headers: string[];
+  suggestedMapping: VaccinationHistoryColumnMapping;
+  suggestedDefaultParticipantType: "EMPLOYEE" | "DEPENDENT";
+};
+
 function key(value: unknown) {
   return historyText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -64,6 +95,66 @@ function value(row: any[], headers: Map<string, number>, aliases: string[]) {
     if (index != null) return row[index];
   }
   return "";
+}
+
+const MAPPING_ALIASES: Record<keyof VaccinationHistoryColumnMapping, string[]> = {
+  participantType: ["Kategori", "Participant Type", "Jenis Peserta", "Category", "Type"],
+  participantName: ["Nama", "NAMA", "Name", "Title", "ChildName", "Participant Name", "Nama Peserta", "Employee Name", "Patient Name"],
+  employeeId: ["NIP", "Employee ID", "EmployeeId", "BINUSIAN ID", "BinusianID", "Staff ID", "ID Karyawan"],
+  nik: ["NIK", "No NIK", "Nomor NIK", "KTP", "NIK/KTP"],
+  email: ["Email", "EMAIL", "Email Peserta", "Email Address", "E-mail"],
+  phone: ["No. Telp", "NO. TELP", "No Telp", "Phone", "PhoneNumber", "NoHp", "No HP", "Mobile"],
+  birthDate: ["Tanggal Lahir", "Birth of Date", "DOB", "Birth Date", "Tanggallahir", "Date of Birth"],
+  gender: ["Gender", "Jenis Kelamin", "Sex", "ChildGender"],
+  parentName: ["ParentName", "Nama Orang Tua", "Parent Name", "Nama Parent", "Nama Wali"],
+  parentEmployeeId: ["ParentBinusianID", "Parent NIP", "Parent Employee ID", "Parent ID", "NIP Orang Tua"],
+  parentNik: ["Parent NIK", "NIK Parent", "NIK Orang Tua", "NIK Wali"],
+  parentEmail: ["ParentEmail", "Parent Email", "Email Parent", "Email Orang Tua", "Email Wali"],
+  parentPhone: ["ParentHP", "Parent Phone", "No HP Parent", "HP Orang Tua", "Phone Parent"],
+  serviceDate: ["Tanggal Suntik", "TANGGAL SUNTIK", "Tanggal Vaksin", "Tanggalvaksin", "Tanggal Layanan", "Service Date", "Date", "TimeAreaName"],
+  serviceName: ["Jenis Layanan", "JENIS LAYANAN", "Jenis Vaksin", "Jenis vaksin", "Layanan", "Service", "Service Name", "BatchName", "Benefit"],
+  productBrand: ["Merk Layanan", "MERK LAYANAN", "Merk", "Brand", "Product Brand", "Vaccine Brand"],
+  location: ["Lokasi Vaksin", "LOKASI VAKSIN", "Lokasi", "Location", "TimeAreaName", "Site", "Venue"],
+  nextDueDate: ["Jadwal Selanjutnya", "JADWAL SELANJUTNYA", "Next Schedule", "Next Due Date", "Next Dose", "Next Date"],
+  notes: ["Keterangan", "KETERANGAN", "Notes", "Note", "Remark", "Remarks", "Keterangan pembayaran", "Employee Type", "ChildAge"],
+};
+
+function mappedValue(
+  row: any[],
+  headers: Map<string, number>,
+  mapping: VaccinationHistoryColumnMapping | undefined,
+  field: keyof VaccinationHistoryColumnMapping,
+  aliases?: string[],
+) {
+  const mappedHeader = historyText(mapping?.[field]);
+  if (mappedHeader) {
+    const mappedIndex = headers.get(key(mappedHeader));
+    if (mappedIndex != null) return row[mappedIndex];
+  }
+  return value(row, headers, aliases || MAPPING_ALIASES[field] || []);
+}
+
+function hasManualMapping(mapping?: VaccinationHistoryColumnMapping) {
+  return Boolean(mapping && Object.values(mapping).some((item) => historyText(item)));
+}
+
+export function suggestVaccinationHistoryMapping(headers: string[]) {
+  const byKey = new Map<string, string>();
+  for (const header of headers) {
+    const normalized = key(header);
+    if (normalized && !byKey.has(normalized)) byKey.set(normalized, header);
+  }
+  const mapping: VaccinationHistoryColumnMapping = {};
+  for (const [field, aliases] of Object.entries(MAPPING_ALIASES) as Array<[keyof VaccinationHistoryColumnMapping, string[]]>) {
+    for (const alias of aliases) {
+      const header = byKey.get(key(alias));
+      if (header) {
+        mapping[field] = header;
+        break;
+      }
+    }
+  }
+  return mapping;
 }
 
 function detect(headers: string[]) {
@@ -145,6 +236,84 @@ function rowGeneric(row: any[], h: Map<string, number>, rowNo: number, fallbackY
     location: historyText(value(row, h, ["Lokasi Vaksin", "Lokasi", "Location", "TimeAreaName"])),
     nextDueDate: historyDateOnly(value(row, h, ["Jadwal Selanjutnya", "Next Schedule", "Next Due Date"])),
     notes: historyText(value(row, h, ["Keterangan", "Notes", "Note"])),
+    serviceCategory: historyServiceCategory(serviceName, productBrand),
+    sourceYear: sourceYearFromDate(serviceDate, fallbackYear),
+    identityOnly: !serviceName,
+    raw: {},
+  };
+}
+
+function rowMapped(
+  template: string,
+  row: any[],
+  h: Map<string, number>,
+  rowNo: number,
+  fallbackYear: number | null | undefined,
+  mapping: VaccinationHistoryColumnMapping,
+  defaultParticipantType: "EMPLOYEE" | "DEPENDENT",
+): VaccinationHistoryRow | null {
+  const participantName = historyText(mappedValue(row, h, mapping, "participantName"));
+  if (!participantName) return null;
+
+  const typeText = historyText(mappedValue(row, h, mapping, "participantType")).toLowerCase();
+  let dependent = defaultParticipantType === "DEPENDENT";
+  if (/anak|child|dependent|tanggungan/.test(typeText)) dependent = true;
+  if (/employee|karyawan|adult|dewasa/.test(typeText)) dependent = false;
+
+  let employeeId = historyText(mappedValue(row, h, mapping, "employeeId"));
+  let nik = historyText(mappedValue(row, h, mapping, "nik"));
+  let email = historyEmailKey(mappedValue(row, h, mapping, "email"));
+  let phone = historyPhone(mappedValue(row, h, mapping, "phone"));
+  let parentName = historyText(mappedValue(row, h, mapping, "parentName"));
+  let parentEmployeeId = historyText(mappedValue(row, h, mapping, "parentEmployeeId"));
+  let parentNik = historyText(mappedValue(row, h, mapping, "parentNik"));
+  let parentEmail = historyEmailKey(mappedValue(row, h, mapping, "parentEmail"));
+  let parentPhone = historyPhone(mappedValue(row, h, mapping, "parentPhone"));
+
+  // Rekap lama sering memakai ID/email parent pada baris anak tanpa header Parent khusus.
+  if (dependent && template === "BINUS_REKAP_2025") {
+    if (!parentEmployeeId) parentEmployeeId = employeeId;
+    if (!parentNik) parentNik = nik;
+    if (!parentEmail) parentEmail = email;
+    if (!parentPhone) parentPhone = phone;
+    if (!historyText(mapping.employeeId)) employeeId = "";
+    if (!historyText(mapping.nik)) nik = "";
+    if (!historyText(mapping.email)) email = "";
+    if (!historyText(mapping.phone)) phone = "";
+  }
+
+  const rawServiceDate = mappedValue(row, h, mapping, "serviceDate");
+  const serviceDate = historyDateOnly(rawServiceDate);
+  let serviceName = historyText(mappedValue(row, h, mapping, "serviceName"));
+  if (!serviceName && template === "BINUS_CHILD_2024") serviceName = "Vaksin Influenza";
+  const productBrand = historyText(mappedValue(row, h, mapping, "productBrand"));
+  const rawLocation = mappedValue(row, h, mapping, "location");
+  const locationHeader = historyText(mapping.location);
+  const location = /timeareaname/i.test(locationHeader) || ["BINUS_2022", "BINUS_CHILD_2024"].includes(template)
+    ? locationWithoutDate(rawLocation)
+    : historyText(rawLocation);
+
+  return {
+    sourceRow: rowNo,
+    participantType: dependent ? "DEPENDENT" : "EMPLOYEE",
+    participantName,
+    employeeId,
+    nik,
+    email,
+    phone,
+    birthDate: historyDateOnly(mappedValue(row, h, mapping, "birthDate")),
+    gender: historyText(mappedValue(row, h, mapping, "gender")),
+    parentName,
+    parentEmployeeId,
+    parentNik,
+    parentEmail,
+    parentPhone,
+    serviceDate,
+    serviceName,
+    productBrand,
+    location,
+    nextDueDate: historyDateOnly(mappedValue(row, h, mapping, "nextDueDate")),
+    notes: historyText(mappedValue(row, h, mapping, "notes")),
     serviceCategory: historyServiceCategory(serviceName, productBrand),
     sourceYear: sourceYearFromDate(serviceDate, fallbackYear),
     identityOnly: !serviceName,
@@ -242,30 +411,52 @@ function normalizeRow(template: string, row: any[], h: Map<string, number>, rowN
   return rowGeneric(row, h, rowNo, fallbackYear);
 }
 
-export function parseVaccinationHistoryWorkbook(buffer: Buffer, fallbackYear?: number | null): VaccinationHistoryParseResult {
+function readWorkbook(buffer: Buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = workbook.SheetNames.find((name) => {
     const sheet = workbook.Sheets[name];
-    return sheet && Object.keys(sheet).some((key) => !key.startsWith("!"));
+    return sheet && Object.keys(sheet).some((cell) => !cell.startsWith("!"));
   });
   if (!sheetName) throw new Error("Workbook tidak memiliki sheet berisi data.");
-
   const sheet = workbook.Sheets[sheetName];
   const rows = sheetRows(sheet);
   if (!rows.length) throw new Error("Sheet kosong.");
-
   const headerRow = rows[0].map((item: any) => historyText(item));
+  return { sheetName, rows, headerRow, template: detect(headerRow) };
+}
+
+export function inspectVaccinationHistoryWorkbook(buffer: Buffer): VaccinationHistoryWorkbookInspection {
+  const { sheetName, headerRow, template } = readWorkbook(buffer);
+  const headers = headerRow.filter(Boolean);
+  return {
+    template,
+    sheetName,
+    headers,
+    suggestedMapping: suggestVaccinationHistoryMapping(headers),
+    suggestedDefaultParticipantType: template === "BINUS_CHILD_2024" ? "DEPENDENT" : "EMPLOYEE",
+  };
+}
+
+export function parseVaccinationHistoryWorkbook(
+  buffer: Buffer,
+  fallbackYear?: number | null,
+  mapping?: VaccinationHistoryColumnMapping,
+  defaultParticipantType: "EMPLOYEE" | "DEPENDENT" = "EMPLOYEE",
+): VaccinationHistoryParseResult {
+  const { sheetName, rows, headerRow, template } = readWorkbook(buffer);
   const headerMap = mapHeaders(rows[0]);
-  const template = detect(headerRow);
   const warnings: string[] = [];
-  if (template === "GENERIC") warnings.push("Template tidak dikenali sebagai BINUS 2022/2023/2024/2025. Importer memakai alias kolom generik; cek Preview sebelum Import.");
+  if (template === "GENERIC") warnings.push("Template tidak dikenali. Gunakan Menu Mapping Header bila nama kolom berbeda, lalu cek Preview sebelum Import.");
   if (template === "BINUS_ADULT_2024_IDENTITY") warnings.push("File 2024 Dewasa tidak memiliki tanggal/jenis layanan yang memadai. File ini dipakai sebagai identity enrichment, bukan service history.");
+  if (hasManualMapping(mapping)) warnings.push("Manual Header Mapping aktif. Preview menggunakan mapping yang dipilih user.");
 
   const parsed: VaccinationHistoryRow[] = [];
   for (let index = 1; index < rows.length; index += 1) {
     const rawRow = rows[index];
     if (!rawRow || !rawRow.some((item: any) => historyText(item))) continue;
-    const normalized = normalizeRow(template, rawRow, headerMap, index + 1, fallbackYear);
+    const normalized = hasManualMapping(mapping)
+      ? rowMapped(template, rawRow, headerMap, index + 1, fallbackYear, mapping || {}, defaultParticipantType)
+      : normalizeRow(template, rawRow, headerMap, index + 1, fallbackYear);
     if (!normalized || !historyNameKey(normalized.participantName)) continue;
     const raw: Record<string, any> = {};
     headerRow.forEach((header, cellIndex) => {

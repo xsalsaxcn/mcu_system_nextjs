@@ -11,8 +11,10 @@ import {
   historyYear,
 } from "@/lib/vaccination/history";
 import {
+  inspectVaccinationHistoryWorkbook,
   parseVaccinationHistoryWorkbook,
   summarizeVaccinationHistoryRows,
+  type VaccinationHistoryColumnMapping,
   type VaccinationHistoryRow,
 } from "@/lib/vaccination/historyImport";
 
@@ -20,6 +22,28 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const CHUNK = 300;
+
+const MAPPING_FIELDS = [
+  "participantType", "participantName", "employeeId", "nik", "email", "phone", "birthDate", "gender",
+  "parentName", "parentEmployeeId", "parentNik", "parentEmail", "parentPhone",
+  "serviceDate", "serviceName", "productBrand", "location", "nextDueDate", "notes",
+] as const;
+
+function parseColumnMapping(value: FormDataEntryValue | null): VaccinationHistoryColumnMapping {
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const input = JSON.parse(value);
+    if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+    const mapping: VaccinationHistoryColumnMapping = {};
+    for (const field of MAPPING_FIELDS) {
+      const header = historyText((input as any)[field]);
+      if (header) mapping[field] = header;
+    }
+    return mapping;
+  } catch {
+    return {};
+  }
+}
 
 type PersonRow = {
   id?: number;
@@ -270,6 +294,8 @@ export async function POST(req: NextRequest) {
     const mode = historyText(form.get("mode") || "preview").toLowerCase();
     const companyName = historyText(form.get("companyName"));
     const fallbackYear = historyYear(form.get("sourceYear"));
+    const mapping = parseColumnMapping(form.get("mapping"));
+    const defaultParticipantType = historyText(form.get("defaultParticipantType")).toUpperCase() === "DEPENDENT" ? "DEPENDENT" : "EMPLOYEE";
 
     if (!(file instanceof File)) return fail("File Excel wajib dipilih.");
     if (!companyName) return fail("Nama perusahaan wajib diisi.");
@@ -278,7 +304,19 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
-    const parsed = parseVaccinationHistoryWorkbook(buffer, fallbackYear);
+
+    if (mode === "headers") {
+      const inspection = inspectVaccinationHistoryWorkbook(buffer);
+      return ok({
+        mode: "headers",
+        companyName,
+        fileName: file.name,
+        fileHash,
+        ...inspection,
+      });
+    }
+
+    const parsed = parseVaccinationHistoryWorkbook(buffer, fallbackYear, mapping, defaultParticipantType);
     const summary = summarizeVaccinationHistoryRows(parsed.rows);
     const preview = parsed.rows.slice(0, 12).map((row) => ({
       row: row.sourceRow,
@@ -303,6 +341,9 @@ export async function POST(req: NextRequest) {
         warnings: parsed.warnings,
         summary,
         preview,
+        headers: parsed.headers,
+        mapping,
+        defaultParticipantType,
       });
     }
 
@@ -451,7 +492,7 @@ export async function POST(req: NextRequest) {
       skipped_rows: skippedRows,
       status: "IMPORTED",
       imported_by: historyUserLabel(user),
-      metadata: { warnings: parsed.warnings, summary },
+      metadata: { warnings: parsed.warnings, summary, mapping, defaultParticipantType },
     }).select("*").single();
     if (batchInsert.error) throw new Error(batchInsert.error.message);
     const batchId = Number(batchInsert.data.id);

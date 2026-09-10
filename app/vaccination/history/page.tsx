@@ -13,6 +13,41 @@ type Preview = {
   preview: any[];
 };
 
+type HeaderInfo = {
+  companyName: string;
+  fileName: string;
+  fileHash: string;
+  template: string;
+  sheetName: string;
+  headers: string[];
+  suggestedMapping: Record<string, string>;
+  suggestedDefaultParticipantType: "EMPLOYEE" | "DEPENDENT";
+};
+
+type MappingField = { key: string; label: string; group: "Peserta" | "Parent / Wali" | "Layanan"; required?: boolean };
+
+const MAPPING_FIELDS: MappingField[] = [
+  { key: "participantName", label: "Nama Peserta", group: "Peserta", required: true },
+  { key: "participantType", label: "Tipe Peserta", group: "Peserta" },
+  { key: "employeeId", label: "NIP / Employee ID", group: "Peserta" },
+  { key: "nik", label: "NIK / KTP", group: "Peserta" },
+  { key: "email", label: "Email", group: "Peserta" },
+  { key: "phone", label: "No. HP / Telepon", group: "Peserta" },
+  { key: "birthDate", label: "Tanggal Lahir", group: "Peserta" },
+  { key: "gender", label: "Gender", group: "Peserta" },
+  { key: "parentName", label: "Nama Parent / Wali", group: "Parent / Wali" },
+  { key: "parentEmployeeId", label: "NIP / Employee ID Parent", group: "Parent / Wali" },
+  { key: "parentNik", label: "NIK Parent", group: "Parent / Wali" },
+  { key: "parentEmail", label: "Email Parent", group: "Parent / Wali" },
+  { key: "parentPhone", label: "No. HP Parent", group: "Parent / Wali" },
+  { key: "serviceDate", label: "Tanggal Layanan / Suntik", group: "Layanan" },
+  { key: "serviceName", label: "Jenis Layanan / Benefit", group: "Layanan" },
+  { key: "productBrand", label: "Merk / Brand", group: "Layanan" },
+  { key: "location", label: "Lokasi", group: "Layanan" },
+  { key: "nextDueDate", label: "Jadwal Selanjutnya", group: "Layanan" },
+  { key: "notes", label: "Keterangan", group: "Layanan" },
+];
+
 function number(value: any) {
   return new Intl.NumberFormat("id-ID").format(Number(value || 0));
 }
@@ -22,13 +57,26 @@ export default function VaccinationHistoryPage() {
   const [sourceYear, setSourceYear] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [headerInfo, setHeaderInfo] = useState<HeaderInfo | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [defaultParticipantType, setDefaultParticipantType] = useState<"EMPLOYEE" | "DEPENDENT">("EMPLOYEE");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [batches, setBatches] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({ persons: 0, services: 0, dependents: 0 });
 
+  const canPreview = useMemo(() => Boolean(file && companyName.trim() && headerInfo), [file, companyName, headerInfo]);
   const canImport = useMemo(() => Boolean(file && companyName.trim() && preview), [file, companyName, preview]);
+
+  function changeMapping(field: string, header: string) {
+    setMapping((current) => {
+      const next = { ...current };
+      if (header) next[field] = header; else delete next[field];
+      return next;
+    });
+    setPreview(null);
+  }
 
   async function loadBatches() {
     const params = new URLSearchParams();
@@ -40,7 +88,7 @@ export default function VaccinationHistoryPage() {
     }
   }
 
-  async function send(mode: "preview" | "import") {
+  async function send(mode: "headers" | "preview" | "import") {
     if (!file) { setError("Pilih file Excel terlebih dahulu."); return; }
     if (!companyName.trim()) { setError("Nama perusahaan wajib diisi."); return; }
     setLoading(true);
@@ -52,14 +100,22 @@ export default function VaccinationHistoryPage() {
       form.set("companyName", companyName.trim());
       form.set("mode", mode);
       if (sourceYear.trim()) form.set("sourceYear", sourceYear.trim());
+      form.set("mapping", JSON.stringify(mapping));
+      form.set("defaultParticipantType", defaultParticipantType);
       const json = await fetch("/api/vaccination/history/import", { method: "POST", body: form }).then((r) => r.json());
       if (!json.ok) {
         setError(json.message || "Proses history gagal.");
         return;
       }
-      if (mode === "preview") {
+      if (mode === "headers") {
+        setHeaderInfo(json);
+        setMapping({});
+        setDefaultParticipantType(json.suggestedDefaultParticipantType === "DEPENDENT" ? "DEPENDENT" : "EMPLOYEE");
+        setPreview(null);
+        setMessage(`Header terbaca: ${json.headers?.length || 0} kolom. Template: ${json.template}. Atur mapping bila nama header berbeda.`);
+      } else if (mode === "preview") {
         setPreview(json);
-        setMessage("Preview berhasil. Periksa template, jumlah baris, peserta anak, dan contoh data sebelum Import.");
+        setMessage("Preview berhasil. Periksa mapping, jumlah baris, peserta anak, dan contoh data sebelum Import.");
       } else {
         setMessage(json.message || "Import history selesai.");
         await loadBatches();
@@ -105,14 +161,64 @@ export default function VaccinationHistoryPage() {
             </label>
             <label className="block">
               <span className="text-xs font-black uppercase text-slate-500">File Excel</span>
-              <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setPreview(null); }} className="mt-2 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm" />
+              <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setPreview(null); setHeaderInfo(null); setMapping({}); }} className="mt-2 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm" />
             </label>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" disabled={loading || !file} onClick={() => void send("preview")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memproses..." : "Preview File"}</button>
-            <button type="button" disabled={loading || !canImport} onClick={() => void send("import")} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">Import History</button>
+            <button type="button" disabled={loading || !file} onClick={() => void send("headers")} className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memproses..." : "1. Baca Header & Mapping"}</button>
+            <button type="button" disabled={loading || !canPreview} onClick={() => void send("preview")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">2. Preview File</button>
+            <button type="button" disabled={loading || !canImport} onClick={() => void send("import")} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">3. Import History</button>
           </div>
+
+          {headerInfo ? (
+            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="text-xs font-black uppercase text-blue-700">Menu Mapping Header</div>
+                  <h2 className="mt-1 text-lg font-black text-slate-900">Cocokkan kolom Excel ke field History</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Nama header tidak harus sama antar perusahaan. Kosongkan pilihan untuk memakai Auto Detect; pilih header secara manual bila berbeda.</p>
+                  <div className="mt-2 text-xs font-bold text-slate-500">{headerInfo.fileName} · {headerInfo.sheetName} · Deteksi: {headerInfo.template} · {headerInfo.headers.length} header</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => { setMapping(headerInfo.suggestedMapping || {}); setPreview(null); }} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">Gunakan Saran Otomatis</button>
+                  <button type="button" onClick={() => { setMapping({}); setPreview(null); }} className="rounded-xl border bg-white px-3 py-2 text-xs font-black hover:bg-slate-50">Reset ke Auto</button>
+                </div>
+              </div>
+
+              <div className="mt-4 max-w-md">
+                <label className="block">
+                  <span className="text-xs font-black uppercase text-slate-500">Default Tipe Peserta bila tidak ada kolom tipe</span>
+                  <select value={defaultParticipantType} onChange={(e) => { setDefaultParticipantType(e.target.value === "DEPENDENT" ? "DEPENDENT" : "EMPLOYEE"); setPreview(null); }} className="mt-2 w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-bold">
+                    <option value="EMPLOYEE">Karyawan / Dewasa</option>
+                    <option value="DEPENDENT">Anak / Tanggungan</option>
+                  </select>
+                </label>
+              </div>
+
+              {(["Peserta", "Parent / Wali", "Layanan"] as const).map((group) => (
+                <div key={group} className="mt-5">
+                  <div className="mb-2 text-sm font-black text-slate-900">{group}</div>
+                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                    {MAPPING_FIELDS.filter((field) => field.group === group).map((field) => (
+                      <label key={field.key} className="rounded-xl border bg-white p-3">
+                        <span className="text-xs font-black text-slate-600">{field.label}{field.required ? " *" : ""}</span>
+                        <select value={mapping[field.key] || ""} onChange={(e) => changeMapping(field.key, e.target.value)} className="mt-2 w-full rounded-lg border px-2 py-2 text-sm">
+                          <option value="">Auto Detect / tidak dipaksa</option>
+                          {headerInfo.headers.map((header) => <option key={`${field.key}-${header}`} value={header}>{header}</option>)}
+                        </select>
+                        <div className="mt-1 truncate text-[11px] font-semibold text-slate-400">Saran: {headerInfo.suggestedMapping?.[field.key] || "belum terdeteksi"}</div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-900">
+                Wajib pastikan Nama Peserta terdeteksi. Untuk anak/tanggungan, map Nama Anak serta minimal salah satu NIK/NIP/Email Parent. Preview ulang setiap kali mapping diubah.
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
             Safety: preview tidak menulis database. Import file yang sama bersifat idempotent berdasarkan hash file + sheet + row. File 2024 Dewasa dipakai sebagai identity enrichment bila tidak memiliki tanggal/jenis layanan.
