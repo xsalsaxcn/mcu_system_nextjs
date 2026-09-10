@@ -1,6 +1,6 @@
 "use client";
 
-import HarmonyMenu from "@/components/HarmonyMenu";
+import VaccinationWorkspaceMenu from "@/components/VaccinationWorkspaceMenu";
 
 // VACCINATION_PORTAL_ENTRY_V150
 
@@ -41,73 +41,76 @@ const stageColors: Record<MenuItem["stage"], string> = {
 };
 
 export default function VaccinationPage() {
+  // VACCINATION_WORKSPACE_DRAWER_V151_3
   const stages = ["Persiapan", "Pelaksanaan", "Pelaporan", "Reminder"] as const;
+  const totalMenu = menuItems.length;
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen bg-slate-100/70">
       <section className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-5">
-          <div>
-            <div className="text-2xl font-black tracking-tight text-slate-900">Harmony Health App</div>
-            <div className="text-sm font-medium text-slate-500">Vaksinasi Perusahaan</div>
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-5 py-4 lg:px-8">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-600 text-sm font-black text-white shadow-sm">H</div>
+            <div>
+              <div className="text-lg font-black tracking-tight text-slate-900">Harmony Health App</div>
+              <div className="text-xs font-semibold text-slate-500">Vaccination Operational Workspace</div>
+            </div>
           </div>
-          <HarmonyMenu />
+          <VaccinationWorkspaceMenu />
         </div>
       </section>
 
-      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-slate-900 p-8 text-white">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div className="mx-auto max-w-[1500px] px-5 py-6 lg:px-8">
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-6 py-5 lg:px-8">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-3xl font-black">Vaksinasi Perusahaan</div>
-                <p className="mt-2 max-w-3xl text-sm font-medium text-emerald-50">
-                  Flow existing tetap dipakai: persiapan produk/session, registrasi, antrian, administered, inventory, sticker, dan pelaporan.
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Operational Overview</div>
+                <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Vaksinasi Perusahaan</h1>
+                <p className="mt-1 text-sm font-medium text-slate-500">
+                  Navigasi modul dipusatkan di tombol hamburger Menu Vaksinasi. Workflow dan fungsi existing tetap sama.
                 </p>
-                <div className="mt-4 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-black text-white">
-                  Vaccination Workflow Only · MCU Corporate & CAPASKA tidak disentuh
-                </div>
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <a href="/vaccination/portal" className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-emerald-700 shadow-sm transition hover:bg-emerald-50">Portal Vaksinasi</a>
-                <a href="/dashboard" className="rounded-2xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20">Dashboard Operasional</a>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-700">
+                {totalMenu} menu aktif
               </div>
             </div>
           </div>
-        </section>
 
-        <section className="grid gap-5">
-          {stages.map((stage) => {
-            const items = menuItems.filter((item) => item.stage === stage);
-            return (
-              <div key={stage} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <div className="text-xl font-black text-slate-900">Stage {stage}</div>
-                    <div className="mt-1 text-sm font-semibold text-slate-500">{stageNotes[stage]}</div>
+          <div className="grid gap-4 p-6 sm:grid-cols-2 xl:grid-cols-4 lg:p-8">
+            {stages.map((stage) => {
+              const count = menuItems.filter((item) => item.stage === stage).length;
+              return (
+                <div key={stage} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Stage</div>
+                      <div className="mt-1 text-lg font-black text-slate-900">{stage}</div>
+                    </div>
+                    <div className="grid h-10 min-w-10 place-items-center rounded-xl bg-slate-100 px-3 text-base font-black text-slate-700">{count}</div>
                   </div>
-                  <span className={`w-fit rounded-full border px-3 py-1 text-xs font-black ${stageColors[stage]}`}>{items.length} menu</span>
+                  <div className="mt-4 text-sm font-medium leading-6 text-slate-500">{stageNotes[stage]}</div>
                 </div>
+              );
+            })}
+          </div>
 
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {items.map((item) => (
-                    <a key={item.href} href={item.href} className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-black text-slate-900 group-hover:text-emerald-700">{item.title}</div>
-                          <div className="mt-2 text-sm font-medium leading-6 text-slate-500">{item.desc}</div>
-                        </div>
-                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
-                          {item.tag}
-                        </span>
-                      </div>
-                    </a>
-                  ))}
+          <div className="border-t border-slate-200 bg-slate-50 px-6 py-6 lg:px-8">
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="text-sm font-black text-slate-900">Navigasi lebih ringkas</div>
+                <div className="mt-2 text-sm font-medium leading-6 text-slate-500">
+                  Klik <span className="font-black text-slate-800">☰ Menu Vaksinasi</span>. Drawer dari kiri akan menampilkan dropdown Persiapan, Pelaksanaan, Pelaporan, dan Reminder seperti dashboard enterprise.
                 </div>
               </div>
-            );
-          })}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="text-sm font-black text-slate-900">UI only</div>
+                <div className="mt-2 text-sm font-medium leading-6 text-slate-500">
+                  Perubahan hanya tampilan dan navigasi halaman utama Vaksinasi. Tidak mengubah transaksi, database, Administer, Inventory, Sticker, maupun Label.
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </main>
