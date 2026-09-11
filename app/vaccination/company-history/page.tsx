@@ -42,11 +42,16 @@ export default function VaccinationCompanyHistoryPage() {
   const [serviceEditor, setServiceEditor] = useState<any>(null);
   const [savingService, setSavingService] = useState(false);
   const [portalCard, setPortalCard] = useState<any>(null);
+  const [participantEditor, setParticipantEditor] = useState<any>(null);
+  const [participantForm, setParticipantForm] = useState<any>({});
+  const [participantFile, setParticipantFile] = useState<File | null>(null);
+  const [savingParticipant, setSavingParticipant] = useState(false);
+  const [participantMessage, setParticipantMessage] = useState("");
 
   async function fetchJson(url: string, options?: RequestInit) {
     const response = await fetch(url, { cache: "no-store", ...options });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error || "Request gagal.");
+    if (!response.ok) throw new Error(payload?.error || payload?.message || "Request gagal.");
     return payload?.data ?? payload;
   }
 
@@ -121,6 +126,107 @@ export default function VaccinationCompanyHistoryPage() {
   function printCompanyPortalQr() {
     if (!portalCard) return;
     window.print();
+  }
+
+  function emptyParticipantForm() {
+    return {
+      participant_type: "EMPLOYEE",
+      participant_name: "",
+      employee_id: "",
+      nik: "",
+      email: "",
+      phone: "",
+      birth_date: "",
+      gender: "",
+      parent_employee_id: "",
+      parent_nik: "",
+      parent_email: "",
+      service_name: "",
+      product_brand: "",
+      service_date: "",
+      next_due_date: "",
+      location: "",
+      dose_number: "",
+      lot_number: "",
+      notes: "",
+    };
+  }
+
+  function openParticipantEditor(company: any) {
+    setParticipantEditor({ company_id: Number(company.id), company_name: company.company_name, tab: "MANUAL" });
+    setParticipantForm(emptyParticipantForm());
+    setParticipantFile(null);
+    setParticipantMessage("");
+    setError("");
+  }
+
+  function setParticipantValue(key: string, value: string) {
+    setParticipantForm((previous: any) => ({ ...previous, [key]: value }));
+  }
+
+  async function refreshAfterParticipantChange() {
+    await loadCompanies();
+    await loadCompany(1, "", "ALL");
+    setPage(1);
+    setSearch("");
+    setType("ALL");
+  }
+
+  async function saveManualParticipant() {
+    if (!participantEditor?.company_id) return;
+    if (!String(participantForm.participant_name || "").trim()) {
+      setParticipantMessage("Nama Lengkap wajib diisi.");
+      return;
+    }
+    const dependent = participantForm.participant_type === "DEPENDENT";
+    if (!dependent && (!String(participantForm.employee_id || "").trim() || !String(participantForm.email || "").trim())) {
+      setParticipantMessage("Karyawan wajib memiliki NIP / Employee ID dan Email Perusahaan.");
+      return;
+    }
+    if (dependent && ((!String(participantForm.parent_employee_id || "").trim() && !String(participantForm.parent_nik || "").trim()) || !String(participantForm.parent_email || "").trim())) {
+      setParticipantMessage("Anak / tanggungan wajib memiliki Parent NIP/NIK dan Parent Email Perusahaan.");
+      return;
+    }
+
+    setSavingParticipant(true);
+    setParticipantMessage("Menyimpan peserta...");
+    try {
+      const data = await fetchJson("/api/vaccination/history/manual-participants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...participantForm, company_id: participantEditor.company_id }),
+      });
+      setParticipantMessage(data.message || "Peserta berhasil disimpan.");
+      setParticipantForm(emptyParticipantForm());
+      await refreshAfterParticipantChange();
+    } catch (e: any) {
+      setParticipantMessage(String(e?.message || e));
+    } finally {
+      setSavingParticipant(false);
+    }
+  }
+
+  async function importManualParticipants() {
+    if (!participantEditor?.company_id || !participantFile) {
+      setParticipantMessage("Pilih file Excel template terlebih dahulu.");
+      return;
+    }
+    setSavingParticipant(true);
+    setParticipantMessage("Mengimport peserta dan history layanan...");
+    try {
+      const formData = new FormData();
+      formData.set("company_id", String(participantEditor.company_id));
+      formData.set("file", participantFile);
+      const data = await fetchJson("/api/vaccination/history/manual-participants", { method: "POST", body: formData });
+      const review = Number(data.skipped || 0) > 0 ? ` ${data.skipped} baris perlu review.` : "";
+      setParticipantMessage(`${data.message || "Import selesai."}${review}`);
+      setParticipantFile(null);
+      await refreshAfterParticipantChange();
+    } catch (e: any) {
+      setParticipantMessage(String(e?.message || e));
+    } finally {
+      setSavingParticipant(false);
+    }
   }
 
   function openAddService() {
@@ -280,6 +386,7 @@ export default function VaccinationCompanyHistoryPage() {
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           <button type="button" onClick={() => setCompanyId(String(company.id))} className={`rounded-xl px-3 py-2 text-xs font-black ${active ? "bg-emerald-600 text-white" : "border bg-white hover:bg-slate-50"}`}>{active ? "Terpilih" : "Lihat Peserta"}</button>
                           {active ? <button type="button" onClick={() => openCompanyPortalQr(company)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">QR Portal Peserta</button> : null}
+                          {active ? <button type="button" onClick={() => openParticipantEditor(company)} className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-800 hover:bg-violet-100">+ Tambah Peserta Manual</button> : null}
                         </div>
                       </td>
                     </tr>
@@ -377,6 +484,102 @@ export default function VaccinationCompanyHistoryPage() {
           </section>
         ) : null}
       </div>
+
+      {participantEditor ? (
+        <div className="fixed inset-0 z-[135] flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !savingParticipant) setParticipantEditor(null); }}>
+          <section className="max-h-[94vh] w-full max-w-5xl overflow-auto rounded-3xl border bg-white shadow-2xl">
+            <div className="sticky top-0 z-20 border-b bg-white p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-xs font-black uppercase text-violet-700">Tambah Peserta History</div>
+                  <h3 className="mt-1 text-2xl font-black text-slate-900">{participantEditor.company_name}</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">Tambahkan peserta yang belum ada melalui isi field atau import Excel template. Peserta karyawan dengan NIP + Email Perusahaan otomatis dapat memakai QR Portal Peserta dan OTP.</p>
+                </div>
+                <button type="button" onClick={() => setParticipantEditor(null)} disabled={savingParticipant} className="rounded-xl border px-4 py-2 text-sm font-black disabled:opacity-50">Tutup</button>
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button type="button" onClick={() => { setParticipantEditor((v: any) => ({ ...v, tab: "MANUAL" })); setParticipantMessage(""); }} className={`rounded-xl px-4 py-2 text-sm font-black ${participantEditor.tab === "MANUAL" ? "bg-violet-600 text-white" : "border bg-white"}`}>Isi Field</button>
+                <button type="button" onClick={() => { setParticipantEditor((v: any) => ({ ...v, tab: "IMPORT" })); setParticipantMessage(""); }} className={`rounded-xl px-4 py-2 text-sm font-black ${participantEditor.tab === "IMPORT" ? "bg-violet-600 text-white" : "border bg-white"}`}>Import Excel</button>
+              </div>
+            </div>
+
+            {participantMessage ? <div className="mx-5 mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-800">{participantMessage}</div> : null}
+
+            {participantEditor.tab === "MANUAL" ? (
+              <div className="space-y-5 p-5">
+                <div className="rounded-2xl border p-4">
+                  <div className="text-sm font-black text-slate-900">Identitas Peserta</div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="text-xs font-black uppercase text-slate-500">Tipe Peserta *</span>
+                      <select value={participantForm.participant_type || "EMPLOYEE"} onChange={(e) => setParticipantValue("participant_type", e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-2.5">
+                        <option value="EMPLOYEE">Karyawan / Dewasa</option>
+                        <option value="DEPENDENT">Anak / Tanggungan</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span className="text-xs font-black uppercase text-slate-500">Nama Lengkap *</span>
+                      <input value={participantForm.participant_name || ""} onChange={(e) => setParticipantValue("participant_name", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+                    </label>
+                    {participantForm.participant_type !== "DEPENDENT" ? (
+                      <>
+                        <label><span className="text-xs font-black uppercase text-slate-500">NIP / Employee ID *</span><input value={participantForm.employee_id || ""} onChange={(e) => setParticipantValue("employee_id", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                        <label><span className="text-xs font-black uppercase text-slate-500">Email Perusahaan *</span><input type="email" value={participantForm.email || ""} onChange={(e) => setParticipantValue("email", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                      </>
+                    ) : (
+                      <>
+                        <label><span className="text-xs font-black uppercase text-slate-500">Parent NIP / Employee ID *</span><input value={participantForm.parent_employee_id || ""} onChange={(e) => setParticipantValue("parent_employee_id", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                        <label><span className="text-xs font-black uppercase text-slate-500">Parent Email Perusahaan *</span><input type="email" value={participantForm.parent_email || ""} onChange={(e) => setParticipantValue("parent_email", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                        <label><span className="text-xs font-black uppercase text-slate-500">Parent NIK</span><input value={participantForm.parent_nik || ""} onChange={(e) => setParticipantValue("parent_nik", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                      </>
+                    )}
+                    <label><span className="text-xs font-black uppercase text-slate-500">NIK Peserta</span><input value={participantForm.nik || ""} onChange={(e) => setParticipantValue("nik", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">No. HP</span><input value={participantForm.phone || ""} onChange={(e) => setParticipantValue("phone", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Tanggal Lahir</span><input type="date" value={participantForm.birth_date || ""} onChange={(e) => setParticipantValue("birth_date", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Gender</span><select value={participantForm.gender || ""} onChange={(e) => setParticipantValue("gender", e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-2.5"><option value="">-</option><option value="Laki-laki">Laki-laki</option><option value="Perempuan">Perempuan</option></select></label>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="text-sm font-black text-slate-900">History Layanan <span className="font-semibold text-slate-400">(opsional jika hanya mendaftarkan identitas)</span></div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label><span className="text-xs font-black uppercase text-slate-500">Nama Layanan</span><input value={participantForm.service_name || ""} onChange={(e) => setParticipantValue("service_name", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" placeholder="Contoh: Vaksin Influenza" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Merk / Brand</span><input value={participantForm.product_brand || ""} onChange={(e) => setParticipantValue("product_brand", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" placeholder="Contoh: Influvac Tetra" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Tanggal Layanan</span><input type="date" value={participantForm.service_date || ""} onChange={(e) => setParticipantValue("service_date", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Next Schedule</span><input type="date" value={participantForm.next_due_date || ""} onChange={(e) => setParticipantValue("next_due_date", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Lokasi</span><input value={participantForm.location || ""} onChange={(e) => setParticipantValue("location", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Dose</span><input type="number" min="1" value={participantForm.dose_number || ""} onChange={(e) => setParticipantValue("dose_number", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label><span className="text-xs font-black uppercase text-slate-500">Lot Number</span><input value={participantForm.lot_number || ""} onChange={(e) => setParticipantValue("lot_number", e.target.value)} className="mt-2 w-full rounded-xl border px-3 py-2.5" /></label>
+                    <label className="md:col-span-2"><span className="text-xs font-black uppercase text-slate-500">Catatan</span><textarea value={participantForm.notes || ""} onChange={(e) => setParticipantValue("notes", e.target.value)} className="mt-2 min-h-20 w-full rounded-xl border px-3 py-2.5" /></label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setParticipantEditor(null)} disabled={savingParticipant} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button>
+                  <button type="button" onClick={() => void saveManualParticipant()} disabled={savingParticipant} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">{savingParticipant ? "Menyimpan..." : "Simpan Peserta"}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-5 p-5">
+                <div className="rounded-2xl border border-violet-100 bg-violet-50 p-5">
+                  <h4 className="text-lg font-black text-violet-950">Import Peserta via Excel</h4>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-violet-900/70">Gunakan template resmi agar NIP, Email Perusahaan, parent-anak, dan history layanan masuk ke field yang benar. Satu baris dapat berisi identitas peserta + satu history layanan.</p>
+                  <a href={`/api/vaccination/history/manual-participants/template?company_id=${encodeURIComponent(String(participantEditor.company_id))}`} className="mt-4 inline-flex rounded-xl bg-white px-4 py-2.5 text-sm font-black text-violet-800 shadow-sm ring-1 ring-violet-200">Download Template Excel</a>
+                </div>
+                <label className="block rounded-2xl border p-5">
+                  <span className="text-xs font-black uppercase text-slate-500">File Excel Template</span>
+                  <input type="file" accept=".xlsx,.xls" onChange={(e) => setParticipantFile(e.target.files?.[0] || null)} className="mt-3 block w-full rounded-xl border p-3" />
+                  <div className="mt-3 text-xs font-semibold leading-5 text-slate-500">Karyawan: NIP + Email Perusahaan wajib. Anak: Parent NIP/NIK + Parent Email wajib. Parent dapat berada di baris mana pun pada file yang sama karena karyawan diproses terlebih dahulu.</div>
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setParticipantEditor(null)} disabled={savingParticipant} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button>
+                  <button type="button" onClick={() => void importManualParticipants()} disabled={savingParticipant || !participantFile} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">{savingParticipant ? "Mengimport..." : "Import Peserta"}</button>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : null}
 
       {portalCard ? (
         <>
