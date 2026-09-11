@@ -32,18 +32,12 @@ function maskEmail(value: string) {
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className={`relative inline-flex shrink-0 items-center justify-center ${compact ? "h-8 w-8" : "h-10 w-10"}`} aria-hidden="true">
-        <svg viewBox="0 0 48 48" className="h-full w-full" fill="none">
-          <path d="M24.1 24.2C25.8 13.7 33.8 6 44 5.2c.1 10.6-6.8 19-17.4 20.8-1 .2-1.9-.7-1.7-1.8Z" fill={GREEN} />
-          <path d="M21.3 23.6C11.9 22.9 4.7 16.8 3.1 8c9.7-.7 17.4 4.4 20.2 13.2.4 1.2-.7 2.5-2 2.4Z" fill="#63C4C9" />
-          <path d="M23.3 25.5c-2.3 6.1-2.7 12.2-1.5 18.2" stroke={NAVY} strokeWidth="3.1" strokeLinecap="round" />
-        </svg>
-      </span>
-      <div className="leading-none">
-        <div className={`${compact ? "text-[15px]" : "text-lg"} font-black tracking-[-0.02em] text-[#042E66]`}>inHARMONY</div>
-        {!compact ? <div className="mt-1 text-[9px] font-semibold tracking-wide text-slate-400">Sehat · Peduli · Berkelanjutan</div> : null}
-      </div>
+    <div className="flex items-center">
+      <img
+        src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRg0_q07dOGAm3PFhiVogP8j3OXI_EkRKE_dAmLToPG3rloUuzkCi5lc_c&s=10"
+        alt="inHARMONY"
+        className={`${compact ? "h-9" : "h-12"} w-auto max-w-[180px] object-contain`}
+      />
     </div>
   );
 }
