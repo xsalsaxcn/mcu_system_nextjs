@@ -250,7 +250,7 @@ export async function GET(req: NextRequest) {
     if (!companyId) {
       const companiesResult = await supabase
         .from("vaccination_history_companies")
-        .select("id,company_name,company_key,active,created_at")
+        .select("id,company_name,company_key,public_token,active,created_at")
         .eq("active", true)
         .order("company_name", { ascending: true })
         .limit(500);

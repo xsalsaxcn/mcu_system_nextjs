@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import QRCodeImage from "@/components/QRCodeImage";
 
 function number(value: unknown) {
   return Number(value || 0).toLocaleString("id-ID");
@@ -38,9 +39,12 @@ export default function VaccinationCompanyHistoryPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [serviceEditor, setServiceEditor] = useState<any>(null);
+  const [savingService, setSavingService] = useState(false);
+  const [portalCard, setPortalCard] = useState<any>(null);
 
-  async function fetchJson(url: string) {
-    const response = await fetch(url, { cache: "no-store" });
+  async function fetchJson(url: string, options?: RequestInit) {
+    const response = await fetch(url, { cache: "no-store", ...options });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error || "Request gagal.");
     return payload?.data ?? payload;
@@ -96,6 +100,88 @@ export default function VaccinationCompanyHistoryPage() {
       setError(String(e?.message || e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  function openCompanyPortalQr(company: any) {
+    const token = String(company?.public_token || "").trim();
+    if (!token) {
+      setError("Public token perusahaan belum tersedia. Refresh Database Perusahaan lalu coba lagi.");
+      return;
+    }
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    setPortalCard({
+      company_id: company.id,
+      company_name: company.company_name,
+      public_token: token,
+      url: `${origin}/vaccination/history-portal?company=${encodeURIComponent(token)}`,
+    });
+  }
+
+  function printCompanyPortalQr() {
+    if (!portalCard) return;
+    window.print();
+  }
+
+  function openAddService() {
+    if (!detail?.person?.id || !detail?.company?.id) return;
+    setServiceEditor({
+      mode: "ADD",
+      service_id: null,
+      service_name: "",
+      product_brand: "",
+      service_date: "",
+      next_due_date: "",
+      location: "",
+      dose_number: "",
+      lot_number: "",
+      notes: "",
+    });
+  }
+
+  function openEditService(service: any) {
+    if (!service || service.source === "SYSTEM") return;
+    setServiceEditor({
+      mode: "EDIT",
+      service_id: service.id,
+      service_name: service.service_name || "",
+      product_brand: service.product_brand || "",
+      service_date: service.service_date || "",
+      next_due_date: service.next_due_date || "",
+      location: service.location || "",
+      dose_number: service.dose_number || "",
+      lot_number: service.lot_number || "",
+      notes: service.notes || "",
+    });
+  }
+
+  async function saveService() {
+    if (!serviceEditor || !detail?.person?.id || !detail?.company?.id) return;
+    if (!String(serviceEditor.service_name || "").trim()) {
+      setError("Nama layanan wajib diisi.");
+      return;
+    }
+    setSavingService(true);
+    setError("");
+    try {
+      const method = serviceEditor.mode === "EDIT" ? "PATCH" : "POST";
+      await fetchJson("/api/vaccination/history/admin-service", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...serviceEditor,
+          company_id: detail.company.id,
+          person_id: detail.person.id,
+        }),
+      });
+      setServiceEditor(null);
+      await loadDetail(Number(detail.person.id));
+      await loadCompany(page, search, type);
+      await loadCompanies();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setSavingService(false);
     }
   }
 
@@ -191,7 +277,10 @@ export default function VaccinationCompanyHistoryPage() {
                       <td className="p-3 text-right font-bold text-emerald-700">{number(company.history_services)}</td>
                       <td className="p-3">{date(company.latest_service_date)}</td>
                       <td className="p-3 text-center">
-                        <button type="button" onClick={() => setCompanyId(String(company.id))} className={`rounded-xl px-3 py-2 text-xs font-black ${active ? "bg-emerald-600 text-white" : "border bg-white hover:bg-slate-50"}`}>{active ? "Terpilih" : "Lihat Peserta"}</button>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <button type="button" onClick={() => setCompanyId(String(company.id))} className={`rounded-xl px-3 py-2 text-xs font-black ${active ? "bg-emerald-600 text-white" : "border bg-white hover:bg-slate-50"}`}>{active ? "Terpilih" : "Lihat Peserta"}</button>
+                          {active ? <button type="button" onClick={() => openCompanyPortalQr(company)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">QR Portal Peserta</button> : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -289,6 +378,38 @@ export default function VaccinationCompanyHistoryPage() {
         ) : null}
       </div>
 
+      {portalCard ? (
+        <>
+          <style jsx global>{`
+            @media print {
+              body * { visibility: hidden !important; }
+              #vaccination-history-portal-print, #vaccination-history-portal-print * { visibility: visible !important; }
+              #vaccination-history-portal-print { position: absolute !important; inset: 0 !important; margin: 0 auto !important; width: 100% !important; min-height: 100vh !important; display: flex !important; align-items: center !important; justify-content: center !important; background: #fff !important; }
+              .vaccination-history-no-print { display: none !important; }
+            }
+          `}</style>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setPortalCard(null); }}>
+            <section className="w-full max-w-xl overflow-hidden rounded-3xl border bg-white shadow-2xl">
+              <div id="vaccination-history-portal-print" className="bg-white p-7 text-center">
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">inHARMONY Vaccination</div>
+                <h3 className="mt-2 text-2xl font-black text-slate-900">Portal Riwayat Layanan</h3>
+                <div className="mt-2 text-lg font-black text-slate-700">{portalCard.company_name}</div>
+                <div className="mx-auto mt-6 w-fit rounded-3xl border bg-white p-4 shadow-sm">
+                  <QRCodeImage value={portalCard.url} size={260} />
+                </div>
+                <p className="mx-auto mt-5 max-w-md text-sm font-semibold leading-6 text-slate-600">Scan QR, masukkan NIP / Employee ID dan Email Perusahaan, lalu verifikasi OTP yang dikirim ke email terdaftar.</p>
+                <div className="mt-4 break-all rounded-2xl bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500">{portalCard.url}</div>
+              </div>
+              <div className="vaccination-history-no-print grid gap-2 border-t p-5 sm:grid-cols-3">
+                <button type="button" onClick={() => setPortalCard(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Tutup</button>
+                <a href={portalCard.url} target="_blank" rel="noreferrer" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-center text-sm font-black text-blue-800">Buka Portal</a>
+                <button type="button" onClick={printCompanyPortalQr} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white">Print QR Portal</button>
+              </div>
+            </section>
+          </div>
+        </>
+      ) : null}
+
       {detail ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setDetail(null); }}>
           <section className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl border bg-white shadow-2xl">
@@ -298,7 +419,10 @@ export default function VaccinationCompanyHistoryPage() {
                 <h3 className="mt-1 text-2xl font-black text-slate-900">{detail.person?.participant_name}</h3>
                 <div className="mt-1 text-sm font-semibold text-slate-500">{detail.company?.company_name} · {detail.person?.participant_type === "DEPENDENT" ? "Anak / Tanggungan" : "Karyawan"}</div>
               </div>
-              <button type="button" onClick={() => setDetail(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={openAddService} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700">+ Tambah Layanan</button>
+                <button type="button" onClick={() => setDetail(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
+              </div>
             </div>
 
             <div className="space-y-5 p-5">
@@ -351,11 +475,73 @@ export default function VaccinationCompanyHistoryPage() {
                         {service.source_filename ? <span>Sumber: {service.source_filename}</span> : null}
                       </div>
                       {service.notes ? <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{service.notes}</div> : null}
+                      <div className="mt-3">
+                        {service.source === "SYSTEM" ? (
+                          <span className="text-xs font-semibold text-slate-400">Record sistem read-only agar transaksi dan inventory tetap aman.</span>
+                        ) : (
+                          <button type="button" onClick={() => openEditService(service)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">Edit Layanan</button>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {!detail.services?.length ? <div className="rounded-2xl border border-dashed p-8 text-center font-semibold text-slate-500">Belum ada benefit / layanan yang tercatat.</div> : null}
                 </div>
               </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {serviceEditor && detail ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !savingService) setServiceEditor(null); }}>
+          <section className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-3xl border bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white p-5">
+              <div>
+                <div className="text-xs font-black uppercase text-emerald-700">{serviceEditor.mode === "EDIT" ? "Edit History" : "Tambah Layanan"}</div>
+                <h3 className="mt-1 text-xl font-black text-slate-900">{detail.person?.participant_name}</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-500">Perubahan tersimpan ke History dan langsung terbaca di Portal Peserta.</p>
+              </div>
+              <button type="button" onClick={() => setServiceEditor(null)} disabled={savingService} className="rounded-xl border px-3 py-2 text-sm font-black disabled:opacity-50">Tutup</button>
+            </div>
+
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <label className="md:col-span-2">
+                <span className="text-xs font-black uppercase text-slate-500">Nama Layanan *</span>
+                <input value={serviceEditor.service_name} onChange={(e) => setServiceEditor((v: any) => ({ ...v, service_name: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" placeholder="Contoh: Vaksin Flu" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Merk / Brand</span>
+                <input value={serviceEditor.product_brand} onChange={(e) => setServiceEditor((v: any) => ({ ...v, product_brand: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" placeholder="Contoh: Influvac Tetra" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Lokasi</span>
+                <input value={serviceEditor.location} onChange={(e) => setServiceEditor((v: any) => ({ ...v, location: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Tanggal Layanan</span>
+                <input type="date" value={serviceEditor.service_date} onChange={(e) => setServiceEditor((v: any) => ({ ...v, service_date: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Next Schedule</span>
+                <input type="date" value={serviceEditor.next_due_date} onChange={(e) => setServiceEditor((v: any) => ({ ...v, next_due_date: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Dose</span>
+                <input type="number" min="1" value={serviceEditor.dose_number} onChange={(e) => setServiceEditor((v: any) => ({ ...v, dose_number: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+              <label>
+                <span className="text-xs font-black uppercase text-slate-500">Lot Number</span>
+                <input value={serviceEditor.lot_number} onChange={(e) => setServiceEditor((v: any) => ({ ...v, lot_number: e.target.value }))} className="mt-2 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+              <label className="md:col-span-2">
+                <span className="text-xs font-black uppercase text-slate-500">Catatan</span>
+                <textarea value={serviceEditor.notes} onChange={(e) => setServiceEditor((v: any) => ({ ...v, notes: e.target.value }))} className="mt-2 min-h-24 w-full rounded-xl border px-3 py-2.5" />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t p-5 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setServiceEditor(null)} disabled={savingService} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button>
+              <button type="button" onClick={() => void saveService()} disabled={savingService || !String(serviceEditor.service_name || "").trim()} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">{savingService ? "Menyimpan..." : "Simpan History"}</button>
             </div>
           </section>
         </div>
