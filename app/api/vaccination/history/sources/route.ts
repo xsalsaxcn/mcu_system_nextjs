@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok, requireUser, supabaseAdmin } from "../../_utils";
-import { historyText } from "@/lib/vaccination/history";
+import { historyCompanyKey, historyText } from "@/lib/vaccination/history";
 
 export const dynamic = "force-dynamic";
 
@@ -17,34 +17,51 @@ export async function GET(req: NextRequest) {
     const result = await supabase
       .from("participant_sources")
       .select("id,name,institution_name,description,program_type,created_at")
-      .or("program_type.eq.vaccination,program_type.eq.corporate,program_type.eq.all,program_type.is.null")
+      .eq("program_type", "vaccination")
       .order("created_at", { ascending: false })
       .limit(1000);
 
     if (result.error) throw new Error(result.error.message);
 
-    const sources = (result.data || [])
-      .map((row: any) => {
-        const name = historyText(row?.name);
-        const institutionName = historyText(row?.institution_name);
-        const companyName = institutionName || name;
-        const label = companyName && name && companyName.toLowerCase() !== name.toLowerCase()
-          ? `${companyName} · ${name}`
-          : companyName || name;
-        return {
-          id: Number(row?.id || 0),
-          name,
-          institutionName,
-          companyName,
-          programType: historyText(row?.program_type),
-          label,
-        };
-      })
-      .filter((row: any) => row.id && row.companyName)
-      .sort((a: any, b: any) => a.label.localeCompare(b.label, "id"));
+    const grouped = new Map<string, any>();
+    let skippedWithoutInstitution = 0;
 
-    return ok({ sources });
+    // Company selector is institution-based, not database-name based.
+    // participant_sources is ordered newest-first, so the first row in each group
+    // becomes a representative source_id used only for server-side validation/audit.
+    for (const row of result.data || []) {
+      const institutionName = historyText(row?.institution_name);
+      if (!institutionName) {
+        skippedWithoutInstitution += 1;
+        continue;
+      }
+
+      const key = historyCompanyKey(institutionName);
+      const sourceId = Number(row?.id || 0);
+      if (!sourceId) continue;
+
+      const existing = grouped.get(key);
+      if (!existing) {
+        grouped.set(key, {
+          id: sourceId,
+          name: historyText(row?.name),
+          institutionName,
+          companyName: institutionName,
+          programType: historyText(row?.program_type),
+          label: institutionName,
+          databaseCount: 1,
+        });
+        continue;
+      }
+
+      existing.databaseCount += 1;
+    }
+
+    const sources = Array.from(grouped.values())
+      .sort((a: any, b: any) => a.companyName.localeCompare(b.companyName, "id"));
+
+    return ok({ sources, skippedWithoutInstitution });
   } catch (error: any) {
-    return fail(String(error?.message || error || "Gagal memuat database perusahaan vaksinasi."), 500);
+    return fail(String(error?.message || error || "Gagal memuat daftar perusahaan vaksinasi."), 500);
   }
 }

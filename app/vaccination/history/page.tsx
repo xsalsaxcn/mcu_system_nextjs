@@ -31,6 +31,7 @@ type VaccinationCompanySource = {
   companyName: string;
   programType: string;
   label: string;
+  databaseCount: number;
 };
 
 type MappingField = { key: string; label: string; group: "Peserta" | "Parent / Wali" | "Layanan"; required?: boolean };
@@ -104,13 +105,13 @@ export default function VaccinationHistoryPage() {
       const json = await fetch("/api/vaccination/history/sources", { cache: "no-store" }).then((r) => r.json());
       if (!json.ok) {
         setCompanySources([]);
-        setCompanySourceError(json.message || "Gagal memuat database perusahaan vaksinasi.");
+        setCompanySourceError(json.message || "Gagal memuat daftar perusahaan vaksinasi.");
         return;
       }
       setCompanySources(Array.isArray(json.sources) ? json.sources : []);
     } catch {
       setCompanySources([]);
-      setCompanySourceError("Gagal memuat database perusahaan vaksinasi.");
+      setCompanySourceError("Gagal memuat daftar perusahaan vaksinasi.");
     } finally {
       setLoadingCompanySources(false);
     }
@@ -148,7 +149,7 @@ export default function VaccinationHistoryPage() {
   }
 
   async function send(mode: "headers" | "preview" | "import") {
-    if (!selectedCompanySourceId) { setError("Pilih perusahaan / database vaksinasi terlebih dahulu."); return; }
+    if (!selectedCompanySourceId) { setError("Pilih perusahaan terlebih dahulu."); return; }
     if (!file) { setError("Pilih file Excel terlebih dahulu."); return; }
     if (!companyName.trim()) { setError("Perusahaan dari database belum terbaca."); return; }
     setLoading(true);
@@ -214,18 +215,21 @@ export default function VaccinationHistoryPage() {
 
           <div className="mt-6 grid gap-3 md:grid-cols-3">
             <label className="block">
-              <span className="text-xs font-black uppercase text-slate-500">Perusahaan / Database Vaksinasi</span>
+              <span className="text-xs font-black uppercase text-slate-500">Perusahaan / Instansi</span>
               <select value={selectedCompanySourceId} onChange={(e) => chooseCompanySource(e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-3 font-bold">
                 <option value="">{loadingCompanySources ? "Memuat perusahaan..." : "Pilih perusahaan terlebih dahulu"}</option>
                 {companySources.map((source) => (
-                  <option key={source.id} value={source.id}>{source.label}</option>
+                  <option key={source.id} value={source.id}>{source.companyName}</option>
                 ))}
               </select>
               {companySourceError ? <div className="mt-2 text-xs font-bold text-red-600">{companySourceError}</div> : null}
               {selectedCompanySource ? (
                 <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
-                  Company History: {companyName} · Database: {selectedCompanySource.name}
+                  Perusahaan History: {companyName} · {selectedCompanySource.databaseCount} database vaksinasi terhubung
                 </div>
+              ) : null}
+              {!selectedCompanySource && !loadingCompanySources ? (
+                <div className="mt-2 text-xs font-semibold text-slate-500">Daftar diambil dari field Nama Instansi / Source yang disetting saat Import Database.</div>
               ) : null}
             </label>
             <label className="block">
