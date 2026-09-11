@@ -8,6 +8,7 @@ import {
   historyNameKey,
   historyText,
 } from "@/lib/vaccination/history";
+import { vaccinationDependentsForEmployee } from "@/lib/vaccination/historyFamily";
 
 export const dynamic = "force-dynamic";
 
@@ -219,18 +220,9 @@ async function parentMapForDependents(supabase: any, dependentIds: number[]) {
   return map;
 }
 
-async function dependentsForParent(supabase: any, parentId: number) {
-  const result = await supabase
-    .from("vaccination_person_relationships")
-    .select("relationship_type,dependent:vaccination_persons!vaccination_person_relationships_dependent_person_id_fkey(id,participant_name,birth_date,gender)")
-    .eq("parent_person_id", parentId)
-    .eq("active", true)
-    .order("id", { ascending: true });
-  if (result.error) throw new Error(result.error.message);
-  return (result.data || []).map((row: any) => ({
-    relationship_type: row.relationship_type,
-    ...(Array.isArray(row.dependent) ? row.dependent[0] : row.dependent),
-  })).filter((row: any) => row?.id);
+async function dependentsForParent(supabase: any, parent: any) {
+  const family = await vaccinationDependentsForEmployee(supabase, parent);
+  return family.dependents;
 }
 
 export async function GET(req: NextRequest) {
@@ -318,7 +310,7 @@ export async function GET(req: NextRequest) {
 
       const parentMap = await parentMapForDependents(supabase, person.participant_type === "DEPENDENT" ? [Number(person.id)] : []);
       const parent = parentMap.get(Number(person.id)) || null;
-      const dependents = person.participant_type === "EMPLOYEE" ? await dependentsForParent(supabase, Number(person.id)) : [];
+      const dependents = person.participant_type === "EMPLOYEE" ? await dependentsForParent(supabase, person) : [];
 
       const historyResult = await supabase
         .from("vaccination_service_history")

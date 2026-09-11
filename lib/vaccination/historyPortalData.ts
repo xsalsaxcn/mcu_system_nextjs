@@ -5,6 +5,7 @@ import {
   historyNameKey,
   historyText,
 } from "@/lib/vaccination/history";
+import { vaccinationDependentsForEmployee } from "@/lib/vaccination/historyFamily";
 
 const PAGE_LIMIT = 200;
 
@@ -185,21 +186,12 @@ export async function loadVaccinationHistoryPortalData(supabase: any, parent: an
   if (!companyResult.data) throw new Error("Perusahaan history tidak ditemukan.");
   const company = companyResult.data;
 
-  const relationResult = await supabase
-    .from("vaccination_person_relationships")
-    .select("relationship_type,dependent:vaccination_persons!vaccination_person_relationships_dependent_person_id_fkey(id,company_id,participant_type,participant_name,employee_id,employee_key,nik,nik_key,email,email_key,phone,birth_date,gender,active)")
-    .eq("company_id", parent.company_id)
-    .eq("parent_person_id", parent.id)
-    .eq("active", true)
-    .order("id", { ascending: true });
-  if (relationResult.error) throw new Error(relationResult.error.message);
-
-  const dependents = (relationResult.data || [])
-    .map((row: any) => ({
-      ...(Array.isArray(row.dependent) ? row.dependent[0] : row.dependent),
-      relationship_type: row.relationship_type,
-    }))
-    .filter((row: any) => row?.id && row?.active !== false);
+  // Family relationship must follow the logical employee identity, not only one physical
+  // vaccination_persons row. Legacy/import/manual flows can leave an equivalent employee
+  // record with the relationship attached to another alias row. Resolve those aliases safely
+  // using company-scoped strong identifiers before loading children.
+  const family = await vaccinationDependentsForEmployee(supabase, parent);
+  const dependents = family.dependents;
 
   const people = [parent, ...dependents];
   const ids = people.map((row: any) => Number(row.id)).filter(Boolean);
