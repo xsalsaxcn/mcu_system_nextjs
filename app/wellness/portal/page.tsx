@@ -1474,12 +1474,18 @@ export default function WellnessParticipantPortalPage() {
     return result;
   }
 
-  async function loadMe(options?: { keepMessage?: boolean; background?: boolean }) {
+  // WELLNESS_PORTAL_FAST_BOOTSTRAP_V126M119_56B
+  async function loadMe(options?: { keepMessage?: boolean;
+    fastBootstrap?: boolean; background?: boolean }) {
     const requestSequenceV126M47_3 =
       ++loadMeRequestSequenceV126M47_3.current;
     if (!options?.background) setLoading(true);
 
-    const result = await fetch("/api/wellness/participant/me", {
+    const participantMeUrlV126M119_56B = options?.fastBootstrap
+      ? "/api/wellness/participant/me?bootstrap=1"
+      : "/api/wellness/participant/me";
+
+    const result = await fetch(participantMeUrlV126M119_56B, {
       cache: "no-store",
     })
       .then((response) => response.json())
@@ -1685,9 +1691,9 @@ export default function WellnessParticipantPortalPage() {
 
     if (notice) {
       setMessage(noticeText(notice));
-      loadMe({ keepMessage: true });
+      void loadMe({ keepMessage: true, fastBootstrap: true });
     } else {
-      loadMe();
+      void loadMe({ fastBootstrap: true });
     }
   }, []);
 
@@ -1855,7 +1861,7 @@ export default function WellnessParticipantPortalPage() {
 
     if (result.ok) {
       setMessage("OTP berhasil. Memuat portal peserta...");
-      await loadMe();
+      await loadMe({ fastBootstrap: true });
     } else {
       setMessage(result.message || "OTP tidak valid.");
     }
@@ -2523,7 +2529,10 @@ export default function WellnessParticipantPortalPage() {
     if (!googleFitConnected) return;
 
     // Sync segera ketika portal dibuka, lalu ulang setiap 10 menit selama terbuka.
-    void syncProvider("google-fit", { silent: true, days: 2 });
+    // WELLNESS_PORTAL_FAST_BOOTSTRAP_V126M119_56B
+    const initialGoogleFitSyncV126M119_56B = window.setTimeout(() => {
+      void syncProvider("google-fit", { silent: true, days: 2 });
+    }, 2500);
 
     const intervalId = window.setInterval(
       () => {
@@ -2532,7 +2541,10 @@ export default function WellnessParticipantPortalPage() {
       10 * 60 * 1000,
     );
 
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearTimeout(initialGoogleFitSyncV126M119_56B);
+      window.clearInterval(intervalId);
+    };
   }, [step, googleFitConnected, fitnessEnabled, activeFitnessSource]);
 
   const workoutItems = useMemo(() => {

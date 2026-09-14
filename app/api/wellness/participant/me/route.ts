@@ -142,6 +142,12 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
     const participant = await getParticipantFromPortalSession(supabase, req);
+
+    // WELLNESS_PARTICIPANT_ME_FAST_BOOTSTRAP_V126M119_56B
+    // First paint may skip ONLY the expensive canonical streak payload.
+    // Full /participant/me requests keep their existing behavior.
+    const fastBootstrapV126M119_56B =
+      req.nextUrl.searchParams.get("bootstrap") === "1";
     if (!participant) return fail("OTP/session peserta belum aktif.", 401);
 
     const { data: integrations } = await supabase
@@ -296,7 +302,9 @@ export async function GET(req: NextRequest) {
     // WELLNESS_PARTICIPANT_STREAK_INITIAL_DELIVERY_V126M26_1
     // Streak is included in the same authenticated response that opens the portal.
     // The dedicated endpoint remains available for later refreshes.
-    const canonicalStreakPayload = await loadParticipantCanonicalStreak({
+    const canonicalStreakPayload = fastBootstrapV126M119_56B
+      ? null
+      : await loadParticipantCanonicalStreak({
       supabase,
       participant: {
         ...participant,
@@ -323,11 +331,13 @@ export async function GET(req: NextRequest) {
       activities: selectedActivities,
       activity_summary,
       clinical_history,
-      streak_participant_id: canonicalStreakPayload.participant_id,
-      streak: canonicalStreakPayload.streak,
-      streak_targets: canonicalStreakPayload.targets,
-      streak_sources: canonicalStreakPayload.sources,
-      streak_status: canonicalStreakPayload.status,
+      streak_participant_id:
+        canonicalStreakPayload?.participant_id || participant.id,
+      streak: canonicalStreakPayload?.streak || null,
+      streak_targets: canonicalStreakPayload?.targets || null,
+      streak_sources: canonicalStreakPayload?.sources || null,
+      streak_status: canonicalStreakPayload?.status || null,
+      streak_deferred: fastBootstrapV126M119_56B,
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal memuat portal peserta.", 500);
