@@ -1,5 +1,7 @@
 "use client";
 
+// VACCINATION_REMINDER_MANUAL_SEND_V152_1
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -67,6 +69,8 @@ export default function VaccinationReminderPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [manualSending, setManualSending] = useState(false);
+  const [manualMessage, setManualMessage] = useState("");
 
   async function load() {
     setLoading(true);
@@ -82,6 +86,48 @@ export default function VaccinationReminderPage() {
       setError(String(e?.message || e || "Gagal memuat reminder."));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function sendManualReminder() {
+    if (manualSending) return;
+
+    const confirmed = window.confirm(
+      "Kirim reminder manual sekarang? Sistem hanya akan mengirim reminder yang sudah due hari ini atau tertunda, bukan reminder masa depan.",
+    );
+    if (!confirmed) return;
+
+    setManualSending(true);
+    setManualMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/vaccination/reminder/cron", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || `HTTP ${response.status}`);
+      }
+
+      const delivery = payload?.delivery || payload?.data?.delivery || {};
+      const sync = payload?.sync || payload?.data?.sync || {};
+      const sent = Number(delivery?.sent || 0);
+      const failed = Number(delivery?.failed || 0);
+      const skipped = Number(delivery?.skipped || 0);
+      const claimed = Number(delivery?.claimed || 0);
+      const schedules = Number(sync?.schedules || 0);
+
+      setManualMessage(
+        `Manual reminder selesai · diproses ${claimed} · sent ${sent} · failed ${failed} · skipped ${skipped} · schedule aktif ${schedules}.`,
+      );
+      await load();
+    } catch (e: any) {
+      setError(String(e?.message || e || "Gagal menjalankan reminder manual."));
+    } finally {
+      setManualSending(false);
     }
   }
 
@@ -108,8 +154,16 @@ export default function VaccinationReminderPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={sendManualReminder}
+                disabled={manualSending}
+                className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {manualSending ? "Mengirim Reminder..." : "Kirim Reminder Manual"}
+              </button>
+              <button
                 onClick={load}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50"
+                disabled={loading || manualSending}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Refresh
               </button>
@@ -164,6 +218,12 @@ export default function VaccinationReminderPage() {
               </div>
             </div>
           </div>
+
+          {manualMessage ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              {manualMessage}
+            </div>
+          ) : null}
 
           {error ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
