@@ -312,6 +312,147 @@ export default function VaccinationBulkStickerPage() {
       {records.map((record) => (
         <Label key={record.id} record={record} />
       ))}
+
+      <style jsx global>{`
+        /* VACCINATION BULK STICKER V153.4 EQUAL ROW ALIGNMENT
+           BULK ROUTE ONLY.
+           Keep V146 physical geometry, fonts, content, pagination, and native print unchanged.
+           Purpose: every service label uses the same vertical slots so one participant
+           with multiple vaccine records prints with aligned rows. */
+
+        .label-card {
+          display: grid !important;
+          grid-template-rows:
+            3.2mm
+            6.1mm
+            3.5mm
+            5.3mm
+            2.3mm
+            minmax(2.5mm, 1fr) !important;
+          row-gap: 0.2mm !important;
+          align-content: stretch !important;
+        }
+
+        .label-card > .label-rotator,
+        .label-card > .label-flow {
+          grid-row: 1 / -1 !important;
+          min-width: 0 !important;
+          min-height: 0 !important;
+        }
+
+        .label-rotator,
+        .label-flow {
+          display: grid !important;
+          grid-template-rows:
+            3.2mm
+            6.1mm
+            3.5mm
+            5.3mm
+            2.3mm
+            minmax(2.5mm, 1fr) !important;
+          row-gap: 0.2mm !important;
+          align-content: stretch !important;
+        }
+
+        .label-title {
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          min-height: 0 !important;
+          max-height: 3.2mm !important;
+          align-self: start !important;
+          overflow: hidden !important;
+        }
+
+        .label-name {
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          min-height: 6.1mm !important;
+          height: 6.1mm !important;
+          max-height: 6.1mm !important;
+          align-self: start !important;
+          overflow: hidden !important;
+        }
+
+        .label-vaccine {
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          min-height: 3.5mm !important;
+          height: 3.5mm !important;
+          max-height: 3.5mm !important;
+          align-self: start !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+        }
+
+        .label-date-row {
+          width: 100% !important;
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          min-height: 5.3mm !important;
+          height: 5.3mm !important;
+          max-height: 5.3mm !important;
+          align-self: start !important;
+          display: grid !important;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+          align-items: start !important;
+        }
+
+        .label-date-row > div {
+          min-width: 0 !important;
+        }
+
+        .label-date-right {
+          text-align: right !important;
+        }
+
+        .label-lot {
+          width: 100% !important;
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          min-height: 2.3mm !important;
+          height: 2.3mm !important;
+          max-height: 2.3mm !important;
+          align-self: start !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+        }
+
+        .label-footer {
+          width: 100% !important;
+          margin-top: 0 !important;
+          margin-bottom: 0 !important;
+          align-self: end !important;
+          min-width: 0 !important;
+          overflow: hidden !important;
+        }
+
+        .label-footer span:last-child {
+          min-width: 0 !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+          text-align: right !important;
+        }
+
+        @media print {
+          .label-card,
+          .label-rotator,
+          .label-flow {
+            row-gap: 0.2mm !important;
+          }
+
+          .label-title,
+          .label-name,
+          .label-vaccine,
+          .label-date-row,
+          .label-lot,
+          .label-footer {
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
     </main>
   );
 }
