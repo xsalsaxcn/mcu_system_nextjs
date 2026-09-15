@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+// VACCINATION_SESSION_MAPPING_PERSISTENCE_V153_2
+import VaccinationSessionMappingPersistence from "@/components/VaccinationSessionMappingPersistence";
 type SourceItem = {
   id: number;
   name: string;
@@ -584,6 +586,7 @@ export default function VaccinationSessionPage() {
 
   return (
     <main className="p-6">
+        <VaccinationSessionMappingPersistence />
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:justify-between">
           <div>
