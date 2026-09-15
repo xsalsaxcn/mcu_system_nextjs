@@ -289,13 +289,14 @@ export default function VaccinationBulkStickerPage() {
           }
 
           .label-rotator {
-            /* V146: same centered native print; page height now matches the 30mm WHITE label only. */
-            position: absolute !important;
-            left: 50% !important;
-            top: 50% !important;
+            /* V153.7: keep the V146 page-2 visual position on every bulk page.
+               Absolute centering shifts page 1 in Chromium multi-page print preview. */
+            position: relative !important;
+            left: auto !important;
+            top: auto !important;
             width: 50.8mm !important;
             height: 30mm !important;
-            transform: translate(-50%, -50%) !important;
+            transform: none !important;
             transform-origin: center center !important;
             display: flex !important;
             flex-direction: column !important;
