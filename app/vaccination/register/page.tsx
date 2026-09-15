@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
+// VACCINATION_REGISTER_MASTER_SEARCH_V153_0_1
+import VaccinationParticipantMasterSearch from "@/components/VaccinationParticipantMasterSearch";
 type ProductItem = {
   id?: string;
   vaccineId: string;
@@ -678,6 +680,8 @@ export default function VaccinationRegisterPage() {
           <h2 className="font-bold">2. Registrasi Ulang Manual / Walk-in</h2>
           <p className="mt-1 text-sm text-slate-500">NIK, harga pribadi, metode payment, dan catatan payment dapat diisi saat registrasi.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <VaccinationParticipantMasterSearch form={form} setForm={setForm} />
+
             <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
             <input className="rounded-xl border px-3 py-2.5" placeholder="Employee ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
             <input className="rounded-xl border px-3 py-2.5" placeholder="NIK KTP" value={form.nik} onChange={(e) => setForm({ ...form, nik: e.target.value })} />
