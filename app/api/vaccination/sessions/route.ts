@@ -29,34 +29,203 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
 
   const sessionIds = sessions.map((session) => session.id);
 
-  const svResult = await supabase
-    .from("vaccination_session_vaccines")
-    .select(
-      `
-      *,
-      vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,reminder_days_before),
-      lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_used,stock_added)
-    `,
-    )
-    .in("session_id", sessionIds)
-    .eq("active", true)
-    .order("id", { ascending: true });
+  const [svResult, mappingResult] = await Promise.all([
+    supabase
+      .from("vaccination_session_vaccines")
+      .select(
+        `
+        *,
+        vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days,reminder_days_before),
+        lot:vaccination_vaccine_lots(id,lot_number,expiry_date,stock_initial,stock_used,stock_added)
+      `,
+      )
+      .in("session_id", sessionIds)
+      .eq("active", true)
+      .order("id", { ascending: true }),
+    supabase
+      .from("vaccination_session_batch_mappings")
+      .select(
+        "id,session_id,source_id,source_batch_name,vaccine_id,lot_id,dose_number,active,created_at,updated_at",
+      )
+      .in("session_id", sessionIds)
+      .eq("active", true)
+      .order("id", { ascending: true }),
+  ]);
 
-  if (svResult.error) {
-    return sessions.map((session) => ({ ...session, session_vaccines: [] }));
+  const vaccineGrouped = new Map<number, any[]>();
+  if (!svResult.error) {
+    for (const item of svResult.data || []) {
+      const key = Number(item.session_id);
+      if (!vaccineGrouped.has(key)) vaccineGrouped.set(key, []);
+      vaccineGrouped.get(key)!.push(item);
+    }
   }
 
-  const grouped = new Map<number, any[]>();
-  for (const item of svResult.data || []) {
-    const key = Number(item.session_id);
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(item);
+  const mappingGrouped = new Map<number, any[]>();
+  if (!mappingResult.error) {
+    for (const item of mappingResult.data || []) {
+      const key = Number(item.session_id);
+      if (!mappingGrouped.has(key)) mappingGrouped.set(key, []);
+      mappingGrouped.get(key)!.push(item);
+    }
   }
 
   return sessions.map((session) => ({
     ...session,
-    session_vaccines: grouped.get(Number(session.id)) || [],
+    session_vaccines: vaccineGrouped.get(Number(session.id)) || [],
+    batch_mappings: mappingGrouped.get(Number(session.id)) || [],
   }));
+}
+
+function sessionVaccineKey(vaccineId: any, lotId: any, doseNumber: any) {
+  return `${toInt(vaccineId, 0)}|${toInt(lotId, 0)}|${Math.max(1, toInt(doseNumber, 1))}`;
+}
+
+async function syncSessionVaccines(
+  supabase: any,
+  sessionId: number,
+  sessionVaccines: any[],
+) {
+  const desired = new Map<string, any>();
+  for (const item of sessionVaccines || []) {
+    const vaccineId = toInt(item.vaccineId, 0);
+    const lotId = toInt(item.lotId, 0);
+    const doseNumber = Math.max(1, toInt(item.doseNumber, 1));
+    if (!vaccineId || !lotId) continue;
+    desired.set(sessionVaccineKey(vaccineId, lotId, doseNumber), {
+      vaccineId,
+      lotId,
+      doseNumber,
+    });
+  }
+
+  const currentResult = await supabase
+    .from("vaccination_session_vaccines")
+    .select("id,session_id,vaccine_id,lot_id,dose_number,active")
+    .eq("session_id", sessionId);
+  if (currentResult.error) throw new Error(currentResult.error.message);
+
+  const seen = new Set<string>();
+  for (const row of currentResult.data || []) {
+    const key = sessionVaccineKey(row.vaccine_id, row.lot_id, row.dose_number);
+    if (desired.has(key)) {
+      seen.add(key);
+      if (row.active !== true) {
+        const activateResult = await supabase
+          .from("vaccination_session_vaccines")
+          .update({ active: true, updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (activateResult.error) throw new Error(activateResult.error.message);
+      }
+    } else if (row.active === true) {
+      const deactivateResult = await supabase
+        .from("vaccination_session_vaccines")
+        .update({ active: false, updated_at: new Date().toISOString() })
+        .eq("id", row.id);
+      if (deactivateResult.error) throw new Error(deactivateResult.error.message);
+    }
+  }
+
+  const inserts = Array.from(desired.entries())
+    .filter(([key]) => !seen.has(key))
+    .map(([, item]) => ({
+      session_id: sessionId,
+      vaccine_id: item.vaccineId,
+      lot_id: item.lotId,
+      dose_number: item.doseNumber,
+      active: true,
+    }));
+
+  if (inserts.length) {
+    const insertResult = await supabase
+      .from("vaccination_session_vaccines")
+      .insert(inserts);
+    if (insertResult.error) throw new Error(insertResult.error.message);
+  }
+}
+
+async function syncSessionBatchMappings(
+  supabase: any,
+  sessionId: number,
+  sourceId: number,
+  batchMappings: BatchMappingInput[],
+) {
+  const desired = new Map<string, any>();
+  for (const mapping of batchMappings || []) {
+    const sourceBatchName = clean(mapping.sourceBatchName);
+    const vaccineId = toInt(mapping.vaccineId, 0);
+    const lotId = toInt(mapping.lotId, 0);
+    const doseNumber = Math.max(1, toInt(mapping.doseNumber, 1));
+    if (!sourceBatchName || !vaccineId || !lotId) continue;
+    desired.set(sourceBatchName.toLowerCase(), {
+      sourceBatchName,
+      vaccineId,
+      lotId,
+      doseNumber,
+    });
+  }
+
+  const currentResult = await supabase
+    .from("vaccination_session_batch_mappings")
+    .select("id,session_id,source_id,source_batch_name,vaccine_id,lot_id,dose_number,active")
+    .eq("session_id", sessionId)
+    .eq("active", true);
+  if (currentResult.error) {
+    throw new Error(
+      `${currentResult.error.message}. Jalankan sql_vaccination_v64_manual_batch_mapping.sql di Supabase.`,
+    );
+  }
+
+  const existingByName = new Map<string, any>();
+  for (const row of currentResult.data || []) {
+    existingByName.set(clean(row.source_batch_name).toLowerCase(), row);
+  }
+
+  for (const [key, row] of existingByName) {
+    const next = desired.get(key);
+    if (!next) {
+      // Preserve an existing mapping that is outside the currently visible
+      // BatchName set. V153.3 must never erase old mapping just because a new
+      // product was added.
+      continue;
+    }
+
+    const updateResult = await supabase
+      .from("vaccination_session_batch_mappings")
+      .update({
+        source_id: sourceId || row.source_id || null,
+        source_batch_name: next.sourceBatchName,
+        vaccine_id: next.vaccineId,
+        lot_id: next.lotId,
+        dose_number: next.doseNumber,
+        active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+    if (updateResult.error) throw new Error(updateResult.error.message);
+    desired.delete(key);
+  }
+
+  const inserts = Array.from(desired.values()).map((item) => ({
+    session_id: sessionId,
+    source_id: sourceId || null,
+    source_batch_name: item.sourceBatchName,
+    vaccine_id: item.vaccineId,
+    lot_id: item.lotId,
+    dose_number: item.doseNumber,
+    active: true,
+  }));
+
+  if (inserts.length) {
+    const insertResult = await supabase
+      .from("vaccination_session_batch_mappings")
+      .insert(inserts);
+    if (insertResult.error) {
+      throw new Error(
+        `${insertResult.error.message}. Jalankan sql_vaccination_v64_manual_batch_mapping.sql di Supabase.`,
+      );
+    }
+  }
 }
 
 function normalizeKey(value: any) {
@@ -249,6 +418,94 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const action = clean(body.action);
   const supabase = supabaseAdmin();
+
+  // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
+  if (action === "sync-session-config") {
+    const sessionId = toInt(body.sessionId || body.id, 0);
+    if (!sessionId) return fail("ID session tidak valid.");
+
+    const sessionVaccines = Array.isArray(body.sessionVaccines)
+      ? body.sessionVaccines
+      : [];
+    const batchMappings: BatchMappingInput[] = Array.isArray(body.batchMappings)
+      ? body.batchMappings
+      : [];
+
+    if (!sessionVaccines.length) {
+      return fail("Session existing harus memiliki minimal satu vaksin/lot aktif.");
+    }
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+
+    const session = sessionResult.data;
+    const sourceId = toInt(body.sourceId, 0) || toInt(session.source_id, 0);
+
+    const validSessionKeys = new Set(
+      sessionVaccines
+        .filter(
+          (item: any) =>
+            toInt(item.vaccineId, 0) > 0 && toInt(item.lotId, 0) > 0,
+        )
+        .map((item: any) =>
+          sessionVaccineKey(item.vaccineId, item.lotId, item.doseNumber),
+        ),
+    );
+
+    const invalidMapping = batchMappings.find((mapping) => {
+      const key = sessionVaccineKey(
+        mapping.vaccineId,
+        mapping.lotId,
+        mapping.doseNumber,
+      );
+      return !validSessionKeys.has(key);
+    });
+    if (invalidMapping) {
+      return fail(
+        `Mapping ${clean(invalidMapping.sourceBatchName) || "BatchName"} mengarah ke vaksin/lot yang tidak aktif di session.`,
+      );
+    }
+
+    try {
+      await syncSessionVaccines(supabase, sessionId, sessionVaccines);
+      await syncSessionBatchMappings(
+        supabase,
+        sessionId,
+        sourceId,
+        batchMappings,
+      );
+
+      const first = sessionVaccines.find(
+        (item: any) => toInt(item.vaccineId, 0) && toInt(item.lotId, 0),
+      );
+      const defaultResult = await supabase
+        .from("vaccination_sessions")
+        .update({
+          default_vaccine_id: toInt(first?.vaccineId, 0) || null,
+          default_lot_id: toInt(first?.lotId, 0) || null,
+        })
+        .eq("id", sessionId)
+        .select("*")
+        .single();
+      if (defaultResult.error) throw new Error(defaultResult.error.message);
+
+      const attached = await attachSessionVaccines(supabase, [defaultResult.data]);
+      return ok({
+        message:
+          "Session existing berhasil diperbarui. Vaksin/lot baru ditambahkan dan mapping lama dipertahankan.",
+        session: attached[0] || defaultResult.data,
+      });
+    } catch (error: any) {
+      return fail(
+        `Gagal memperbarui konfigurasi session existing: ${error?.message || ""}`,
+        500,
+      );
+    }
+  }
 
   if (action === "update-session") {
     const id = toInt(body.id || body.sessionId, 0);

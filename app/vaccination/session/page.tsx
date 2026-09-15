@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-// VACCINATION_SESSION_MAPPING_PERSISTENCE_V153_2
-import VaccinationSessionMappingPersistence from "@/components/VaccinationSessionMappingPersistence";
+// VACCINATION_SESSION_EXISTING_CONFIG_V153_3
 type SourceItem = {
   id: number;
   name: string;
@@ -66,6 +65,10 @@ const emptyEditSession: EditSessionDraft = {
 
 const allLocationsKey = "__all__";
 
+function normalizeBatchName(value: any) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 export default function VaccinationSessionPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -106,6 +109,33 @@ export default function VaccinationSessionPage() {
   const selectedLocation = locations.find(
     (item) => item.key === form.locationKey,
   );
+
+  const selectedExistingSession = useMemo(() => {
+    if (!form.sourceId || !form.locationKey || form.locationKey === allLocationsKey) {
+      return null;
+    }
+
+    const sameSourceSessions = sessions.filter(
+      (session) => String(session.source_id || "") === String(form.sourceId),
+    );
+
+    const exact = sameSourceSessions.find(
+      (session) =>
+        String(session.import_location_key || "") === String(form.locationKey),
+    );
+    if (exact) return exact;
+
+    if (!selectedLocation) return null;
+    return (
+      sameSourceSessions.find(
+        (session) =>
+          String(session.location || "").trim().toLowerCase() ===
+            String(selectedLocation.locationName || "").trim().toLowerCase() &&
+          String(session.session_date || "") ===
+            String(selectedLocation.sessionDate || ""),
+      ) || null
+    );
+  }, [form.locationKey, form.sourceId, selectedLocation, sessions]);
 
   const availableBatchNames = useMemo(() => {
     const selectedLocations =
@@ -500,6 +530,36 @@ export default function VaccinationSessionPage() {
       return;
     }
 
+    if (selectedExistingSession) {
+      const res = await fetch("/api/vaccination/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sync-session-config",
+          sessionId: selectedExistingSession.id,
+          sourceId: form.sourceId,
+          sessionVaccines,
+          batchMappings: batchMappings.filter(
+            (item) => item.sourceBatchName && item.vaccineId && item.lotId,
+          ),
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setError(json.message || "Gagal memperbarui vaksin dan mapping session existing.");
+        return;
+      }
+
+      setMessage(
+        json.message ||
+          "Daftar vaksin/lot dan mapping session existing berhasil diperbarui.",
+      );
+      setDraft(emptyDraft);
+      await loadSessions();
+      return;
+    }
+
     const res = await fetch("/api/vaccination/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -549,18 +609,59 @@ export default function VaccinationSessionPage() {
   }, []);
 
   useEffect(() => {
-    setBatchMappings((prev) => {
-      const byName = new Map(prev.map((item) => [item.sourceBatchName, item]));
-      return availableBatchNames.map((name) =>
-        byName.get(name) || {
-          sourceBatchName: name,
-          vaccineId: "",
-          lotId: "",
-          doseNumber: 1,
-        },
+    if (selectedExistingSession) {
+      const loadedVaccines: SessionVaccineDraft[] = (
+        selectedExistingSession.session_vaccines || []
+      ).map((item: any) => ({
+        vaccineId: String(item.vaccine_id || ""),
+        lotId: String(item.lot_id || ""),
+        doseNumber: Math.max(1, Number(item.dose_number || 1)),
+      }));
+
+      const mappingByName = new Map(
+        (selectedExistingSession.batch_mappings || []).map((item: any) => [
+          normalizeBatchName(item.source_batch_name),
+          item,
+        ]),
       );
-    });
-  }, [availableBatchNames.join("|")]);
+
+      setSessionVaccines(loadedVaccines);
+      setDraft(emptyDraft);
+      setBatchMappings(
+        availableBatchNames.map((name) => {
+          const existing: any = mappingByName.get(normalizeBatchName(name));
+          return {
+            sourceBatchName: name,
+            vaccineId: existing ? String(existing.vaccine_id || "") : "",
+            lotId: existing ? String(existing.lot_id || "") : "",
+            doseNumber: existing
+              ? Math.max(1, Number(existing.dose_number || 1))
+              : 1,
+          };
+        }),
+      );
+      setForm((prev) => ({
+        ...prev,
+        sessionName: String(selectedExistingSession.session_name || prev.sessionName),
+        companyName: String(selectedExistingSession.company_name || prev.companyName),
+      }));
+      setMessage(
+        `Session existing ditemukan. ${loadedVaccines.length} vaksin/lot dan mapping sebelumnya dimuat untuk dilanjutkan.`,
+      );
+      return;
+    }
+
+    setSessionVaccines([]);
+    setDraft(emptyDraft);
+    setBatchMappings(
+      availableBatchNames.map((name) => ({
+        sourceBatchName: name,
+        vaccineId: "",
+        lotId: "",
+        doseNumber: 1,
+      })),
+    );
+  }, [selectedExistingSession, availableBatchNames.join("|")]);
 
   useEffect(() => {
     if (selectedSource && !form.companyName) {
@@ -586,7 +687,6 @@ export default function VaccinationSessionPage() {
 
   return (
     <main className="p-6">
-        <VaccinationSessionMappingPersistence />
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:justify-between">
           <div>
@@ -852,7 +952,7 @@ export default function VaccinationSessionPage() {
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div className="font-black text-amber-900">3. Mapping Manual Vaksin dari Database</div>
               <p className="mt-1 text-sm text-amber-800">
-                Sistem tidak auto-detect vaksin. Map setiap nilai BatchName dari Excel ke vaksin/lot yang sudah ditambahkan di session.
+                Mapping existing tetap dipertahankan. Produk/lot baru otomatis ditambahkan sebagai opsi mapping tanpa mengubah pilihan lama.
               </p>
               {!sessionVaccines.length ? (
                 <div className="mt-3 rounded-xl bg-white p-3 text-sm font-bold text-red-700">
@@ -900,7 +1000,9 @@ export default function VaccinationSessionPage() {
           >
             {form.locationKey === allLocationsKey
               ? "Generate Semua Session"
-              : "Simpan Session"}
+              : selectedExistingSession
+                ? "Update Session Existing"
+                : "Simpan Session"}
           </button>
         </section>
 
