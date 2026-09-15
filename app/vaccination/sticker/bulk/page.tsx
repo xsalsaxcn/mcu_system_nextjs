@@ -276,6 +276,9 @@ export default function VaccinationBulkStickerPage() {
             max-height: 30mm !important;
             margin: 0 !important;
             padding: 0 !important;
+            /* V153.6: keep each bulk sticker atomic inside one physical print page. */
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
             break-after: auto !important;
             page-break-after: auto !important;
           }
