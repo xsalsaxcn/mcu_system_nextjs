@@ -5,6 +5,8 @@ import VaccinationParticipantHistoryModal from "@/components/VaccinationParticip
 
 // VACCINATION_REGISTER_MASTER_SEARCH_V153_0_1
 import VaccinationParticipantMasterSearch from "@/components/VaccinationParticipantMasterSearch";
+// VACCINATION_REGISTER_PRODUCT_QUEUE_PRINT_V153_1_1
+import VaccinationManualWalkInController from "@/components/VaccinationManualWalkInController";
 type ProductItem = {
   id?: string;
   vaccineId: string;
@@ -681,6 +683,7 @@ export default function VaccinationRegisterPage() {
           <p className="mt-1 text-sm text-slate-500">NIK, harga pribadi, metode payment, dan catatan payment dapat diisi saat registrasi.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <VaccinationParticipantMasterSearch form={form} setForm={setForm} />
+            <VaccinationManualWalkInController form={form} setForm={setForm} />
 
             <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
             <input className="rounded-xl border px-3 py-2.5" placeholder="Employee ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
@@ -704,7 +707,7 @@ export default function VaccinationRegisterPage() {
               ))}
             </div>
           ) : null}
-          <button onClick={submit} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700">Registrasi Ulang + Rilis Nomor Antrian</button>
+          {/* V153.1.1: submit manual digantikan controller produk + auto print */}
         </section>
 
         {edit ? (
@@ -811,6 +814,30 @@ export default function VaccinationRegisterPage() {
                         <div className="flex flex-wrap gap-2">
                           {!registration.queue_number ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
+                    {String(registration?.queue_number || "").trim() ? (
+                      <button
+                        type="button"
+                        title="Print ulang nomor antrian"
+                        aria-label="Print ulang nomor antrian"
+                        onClick={() => {
+                          const registrationId = Number(registration?.id || 0);
+                          const queueSessionId = Number(registration?.session_id || 0);
+                          if (!registrationId) return;
+                          const ticketUrl =
+                            `/vaccination/queue-ticket/${registrationId}` +
+                            `?session_id=${encodeURIComponent(String(queueSessionId))}&autoprint=1`;
+                          const printWindow = window.open(
+                            ticketUrl,
+                            `vaccination_queue_ticket_reprint_${registrationId}`,
+                            "popup=yes,width=520,height=720",
+                          );
+                          if (printWindow) printWindow.focus();
+                        }}
+                        className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 hover:bg-blue-100"
+                      >
+                        🖨 Print Antrian
+                      </button>
+                    ) : null}
                         </div>
                       </td>
                     </tr>
