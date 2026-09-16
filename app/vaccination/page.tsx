@@ -1,6 +1,7 @@
 "use client";
 
 import VaccinationWorkspaceMenu from "@/components/VaccinationWorkspaceMenu";
+import VaccinationStageMirror from "@/components/VaccinationStageMirror";
 
 // VACCINATION_PORTAL_ENTRY_V150
 
@@ -42,7 +43,6 @@ const stageColors: Record<MenuItem["stage"], string> = {
 
 export default function VaccinationPage() {
   // VACCINATION_WORKSPACE_DRAWER_V151_3
-  const stages = ["Persiapan", "Pelaksanaan", "Pelaporan", "Reminder"] as const;
   const totalMenu = menuItems.length;
 
   return (
@@ -68,7 +68,7 @@ export default function VaccinationPage() {
                 <div className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Operational Overview</div>
                 <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Vaksinasi Perusahaan</h1>
                 <p className="mt-1 text-sm font-medium text-slate-500">
-                  Navigasi modul dipusatkan di tombol hamburger Menu Vaksinasi. Workflow dan fungsi existing tetap sama.
+                  Klik Stage di bawah atau gunakan hamburger Menu Vaksinasi. Keduanya membuka menu existing yang sama; workflow dan fungsi tetap sama.
                 </p>
               </div>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-700">
@@ -77,30 +77,14 @@ export default function VaccinationPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 p-6 sm:grid-cols-2 xl:grid-cols-4 lg:p-8">
-            {stages.map((stage) => {
-              const count = menuItems.filter((item) => item.stage === stage).length;
-              return (
-                <div key={stage} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Stage</div>
-                      <div className="mt-1 text-lg font-black text-slate-900">{stage}</div>
-                    </div>
-                    <div className="grid h-10 min-w-10 place-items-center rounded-xl bg-slate-100 px-3 text-base font-black text-slate-700">{count}</div>
-                  </div>
-                  <div className="mt-4 text-sm font-medium leading-6 text-slate-500">{stageNotes[stage]}</div>
-                </div>
-              );
-            })}
-          </div>
+          <VaccinationStageMirror stageNotes={stageNotes} />
 
           <div className="border-t border-slate-200 bg-slate-50 px-6 py-6 lg:px-8">
             <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <div className="rounded-2xl border border-slate-200 bg-white p-5">
                 <div className="text-sm font-black text-slate-900">Navigasi lebih ringkas</div>
                 <div className="mt-2 text-sm font-medium leading-6 text-slate-500">
-                  Klik <span className="font-black text-slate-800">☰ Menu Vaksinasi</span>. Drawer dari kiri akan menampilkan dropdown Persiapan, Pelaksanaan, Pelaporan, dan Reminder seperti dashboard enterprise.
+                  Klik card Stage untuk melihat submenu yang sama persis dengan <span className="font-black text-slate-800">☰ Menu Vaksinasi</span>. Tidak ada route atau fungsi baru.
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-5">

@@ -31,7 +31,7 @@ type NavGroup = {
   items: NavItem[];
 };
 
-const groups: NavGroup[] = [
+export const groups: NavGroup[] = [
   {
     title: "Persiapan",
     icon: Package2,
