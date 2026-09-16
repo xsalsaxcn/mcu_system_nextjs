@@ -584,7 +584,27 @@ export default function VaccinationHistoryPortalPage() {
                   ) : null}
                 </div>
 
-                <div className="mt-5 flex gap-3 rounded-2xl bg-[#F0F7FF] p-4 text-[#18456F]">
+
+{/* V153_8_PORTAL_WHATSAPP_BOOKING_CTA */}
+<div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+  <div className="text-sm font-black text-[#042E66]">
+    Booking Layanan Mandiri
+  </div>
+  <p className="mt-2 text-[12px] font-semibold leading-5 text-slate-600">
+    Untuk Booking Layanan di luar event perusahaan (Mandiri), silahkan hubungi
+    Kontak tim inHARMONY Clinic:
+  </p>
+  <a
+    href="https://wa.me/6285691066306?text=Halo%20inHARMONY%20Clinic%2C%20saya%20ingin%20melakukan%20booking%20layanan%20mandiri."
+    target="_blank"
+    rel="noreferrer"
+    className="mt-3 inline-flex rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white"
+  >
+    +62 856-9106-6306
+  </a>
+</div>
+
+<div className="mt-5 flex gap-3 rounded-2xl bg-[#F0F7FF] p-4 text-[#18456F]">
                   <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-cyan-200 bg-white text-cyan-700">
                     <span className="text-sm font-black">i</span>
                   </span>
