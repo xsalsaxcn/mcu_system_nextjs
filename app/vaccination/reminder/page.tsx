@@ -1,5 +1,12 @@
 "use client";
 
+
+// V153_11_REMINDER_INTERACTION_SAFE
+// UI interaction layer marker.
+// Summary cards, row actions, pagination/detail UI enhancement only.
+// Reminder calculation, scheduler, SMTP and database flow are unchanged.
+const REMINDER_INTERACTION_VERSION = "V153.11";
+
 // V153_10_REMINDER_DASHBOARD_SAFE UI marker
 // VACCINATION_REMINDER_MANUAL_SEND_V152_1
 
