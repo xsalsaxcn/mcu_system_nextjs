@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     const result = await supabase
       .from("vaccination_reminders")
       .select(
-        "id,source_type,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_type,company_name,attempt_count,superseded_at",
+        "id,source_type,source_key,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_type,company_name,attempt_count,superseded_at",
       )
       .gte("reminder_date", from)
       .lte("reminder_date", until)
@@ -55,6 +55,31 @@ export async function GET(req: NextRequest) {
 
     if (result.error) throw new Error(result.error.message);
     const rows = result.data || [];
+
+    // Track the latest successful reminder for the same vaccination source + Next Dose.
+    // This lets future H-3/H-1/Hari-H rows show that an earlier reminder was already sent,
+    // without changing the existing reminder schedule or database schema.
+    const lastSentBySchedule = new Map<string, string>();
+    for (const row of rows as any[]) {
+      if (clean(row.status).toUpperCase() !== "SENT" || !clean(row.sent_at)) continue;
+      const sourceKey = clean(row.source_key);
+      const nextDueDate = clean(row.next_due_date);
+      if (!sourceKey || !nextDueDate) continue;
+      const key = `${sourceKey}|${nextDueDate}`;
+      const sentAt = clean(row.sent_at);
+      const previous = lastSentBySchedule.get(key);
+      if (!previous || sentAt > previous) lastSentBySchedule.set(key, sentAt);
+    }
+
+    const withLastReminder = (row: any) => {
+      const sourceKey = clean(row.source_key);
+      const nextDueDate = clean(row.next_due_date);
+      const key = sourceKey && nextDueDate ? `${sourceKey}|${nextDueDate}` : "";
+      return {
+        ...row,
+        last_reminder_at: (key ? lastSentBySchedule.get(key) : "") || clean(row.sent_at) || null,
+      };
+    };
 
     const sent = rows.filter((row: any) => clean(row.status).toUpperCase() === "SENT").length;
     const failed = rows.filter((row: any) => clean(row.status).toUpperCase() === "FAILED").length;
@@ -100,7 +125,7 @@ export async function GET(req: NextRequest) {
         timezone: clean(process.env.VACCINATION_REMINDER_TIMEZONE) || "Asia/Jakarta",
       },
       summary: { sent, failed, skipped, incoming, dueToday },
-      items: items.slice(0, 1000),
+      items: items.slice(0, 1000).map(withLastReminder),
     });
   } catch (error: any) {
     return fail(String(error?.message || error || "Gagal memuat Reminder Vaksinasi."), 500);

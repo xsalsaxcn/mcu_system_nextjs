@@ -1,10 +1,10 @@
 "use client";
 
-// V153_12_REMINDER_CARD_ROW_ACTIONS_SAFE
-// Rebased on the user's CURRENT V153.11 Reminder source.
-// Scope: clickable summary cards + per-row Send/Cancel actions only.
+// V153_13_REMINDER_LAST_SENT_INFO_SAFE
+// Based exactly on V153.12 LKG Reminder UI.
+// Scope: show Last reminder timestamp in Keterangan without changing send/cancel behavior.
 // Sticker V153.7 LKG, CAPASKA, MCU, Wellness, and non-Reminder modules are untouched.
-const REMINDER_INTERACTION_VERSION = "V153.12";
+const REMINDER_INTERACTION_VERSION = "V153.13";
 
 // V153_11_REMINDER_INTERACTION_SAFE
 // V153_10_REMINDER_DASHBOARD_SAFE UI marker
@@ -58,6 +58,23 @@ function fmtDate(value: any) {
     year: "numeric",
     timeZone: "UTC",
   }).format(date);
+}
+
+function fmtDateTime(value: any) {
+  const text = clean(value);
+  if (!text) return "-";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  const formatted = new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Jakarta",
+  }).format(date);
+  return `${formatted.replace(/\./g, ":")} WIB`;
 }
 
 function stageLabel(value: any) {
@@ -400,7 +417,20 @@ export default function VaccinationReminderPage() {
                           {status || "-"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{row.error_message || "-"}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {row.last_reminder_at ? (
+                          <div className="font-semibold text-slate-700">
+                            Last reminder {fmtDateTime(row.last_reminder_at)}
+                          </div>
+                        ) : null}
+                        {row.error_message ? (
+                          <div className={row.last_reminder_at ? "mt-1 text-slate-500" : ""}>
+                            {row.error_message}
+                          </div>
+                        ) : !row.last_reminder_at ? (
+                          "-"
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex min-w-[260px] flex-wrap gap-2">
                           <button
