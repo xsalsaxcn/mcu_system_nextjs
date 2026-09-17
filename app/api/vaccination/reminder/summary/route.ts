@@ -56,18 +56,18 @@ export async function GET(req: NextRequest) {
     if (result.error) throw new Error(result.error.message);
     const rows = result.data || [];
 
-    // V153.14:
-    // Link the latest successful reminder by business identity instead of source_key.
-    // The same vaccination can exist twice in Reminder as CURRENT_RECORD and HISTORY_SERVICE;
-    // those rows have different source_key values even though participant, vaccine and Next Dose
-    // are the same. Using participant + vaccine + Next Dose allows the remaining PENDING row
-    // to show the manual reminder that was just successfully sent from its sibling source.
+    // V153.15:
+    // Keep Last reminder scoped to ONE reminder schedule date.
+    // CURRENT_RECORD and HISTORY_SERVICE duplicates may have different source_key values,
+    // so source_key is intentionally not used. However, reminder_date MUST be part of
+    // the identity so a manual send for H-3 does not overwrite H-1 / Hari-H history.
     const scheduleIdentity = (row: any) => {
       const participant = clean(row.participant_name).toLowerCase().replace(/\s+/g, " ");
       const vaccine = clean(row.vaccine_name).toLowerCase().replace(/\s+/g, " ");
       const nextDueDate = clean(row.next_due_date);
-      if (!participant || !vaccine || !nextDueDate) return "";
-      return `${participant}|${vaccine}|${nextDueDate}`;
+      const reminderDate = clean(row.reminder_date);
+      if (!participant || !vaccine || !nextDueDate || !reminderDate) return "";
+      return `${participant}|${vaccine}|${nextDueDate}|${reminderDate}`;
     };
 
     const lastSentBySchedule = new Map<string, string>();
