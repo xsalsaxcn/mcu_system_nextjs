@@ -315,6 +315,7 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
     if (existing) {
       const existingStatus = clean(existing.status).toUpperCase();
       if (existingStatus === "SENT") status = "SENT";
+      else if (existingStatus === "CANCELLED") status = "CANCELLED";
       else if (existingStatus === "FAILED" && hasEmail) status = "FAILED";
       else if (existingStatus === "SENDING" && hasEmail) status = "SENDING";
     }
@@ -339,13 +340,15 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
       company_name: candidate.companyName || null,
       status,
       sent_at: status === "SENT" ? existing?.sent_at || null : null,
-      error_message: hasEmail
-        ? status === "FAILED"
-          ? existing?.error_message || null
-          : null
-        : candidate.recipientType === "PARENT"
-          ? "Email parent belum tersedia atau tidak valid."
-          : "Email peserta belum tersedia atau tidak valid.",
+      error_message: status === "CANCELLED"
+        ? existing?.error_message || "Reminder dibatalkan manual oleh admin."
+        : hasEmail
+          ? status === "FAILED"
+            ? existing?.error_message || null
+            : null
+          : candidate.recipientType === "PARENT"
+            ? "Email parent belum tersedia atau tidak valid."
+            : "Email peserta belum tersedia atau tidak valid.",
       attempt_count: Number(existing?.attempt_count || 0),
       superseded_at: null,
       updated_at: new Date().toISOString(),

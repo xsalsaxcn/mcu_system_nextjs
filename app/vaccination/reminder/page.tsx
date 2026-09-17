@@ -1,12 +1,12 @@
 "use client";
 
+// V153_12_REMINDER_CARD_ROW_ACTIONS_SAFE
+// Rebased on the user's CURRENT V153.11 Reminder source.
+// Scope: clickable summary cards + per-row Send/Cancel actions only.
+// Sticker V153.7 LKG, CAPASKA, MCU, Wellness, and non-Reminder modules are untouched.
+const REMINDER_INTERACTION_VERSION = "V153.12";
 
 // V153_11_REMINDER_INTERACTION_SAFE
-// UI interaction layer marker.
-// Summary cards, row actions, pagination/detail UI enhancement only.
-// Reminder calculation, scheduler, SMTP and database flow are unchanged.
-const REMINDER_INTERACTION_VERSION = "V153.11";
-
 // V153_10_REMINDER_DASHBOARD_SAFE UI marker
 // VACCINATION_REMINDER_MANUAL_SEND_V152_1
 
@@ -19,6 +19,28 @@ const STATUS_STYLE: Record<string, string> = {
   SENDING: "bg-cyan-50 text-cyan-700 border-cyan-200",
   FAILED: "bg-rose-50 text-rose-700 border-rose-200",
   SKIPPED: "bg-amber-50 text-amber-800 border-amber-200",
+  CANCELLED: "bg-slate-100 text-slate-600 border-slate-300",
+};
+
+type ViewKey = "INCOMING" | "SENT" | "FAILED" | "DUE_TODAY";
+
+const VIEW_META: Record<ViewKey, { title: string; note: string }> = {
+  INCOMING: {
+    title: "Reminder Akan Datang",
+    note: "Reminder aktif dari vaksinasi saat ini + History Service.",
+  },
+  SENT: {
+    title: "Reminder Terkirim",
+    note: "Daftar reminder yang sudah berhasil dikirim.",
+  },
+  FAILED: {
+    title: "Failed / Skipped",
+    note: "Reminder gagal dikirim atau belum siap karena data email belum lengkap.",
+  },
+  DUE_TODAY: {
+    title: "Due Today",
+    note: "Reminder yang dijadwalkan untuk diproses hari ini.",
+  },
 };
 
 function clean(value: any) {
@@ -52,39 +74,57 @@ function StatCard({
   value,
   note,
   tone,
+  active,
+  onClick,
 }: {
   label: string;
   value: number | string;
   note: string;
   tone: "green" | "red" | "blue" | "purple";
+  active: boolean;
+  onClick: () => void;
 }) {
   const tones = {
-    green: "bg-emerald-50 border-emerald-100 text-emerald-700",
-    red: "bg-rose-50 border-rose-100 text-rose-700",
-    blue: "bg-sky-50 border-sky-100 text-sky-700",
-    purple: "bg-violet-50 border-violet-100 text-violet-700",
+    green: "bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100/70",
+    red: "bg-rose-50 border-rose-100 text-rose-700 hover:bg-rose-100/70",
+    blue: "bg-sky-50 border-sky-100 text-sky-700 hover:bg-sky-100/70",
+    purple: "bg-violet-50 border-violet-100 text-violet-700 hover:bg-violet-100/70",
   };
   return (
-    <div className={`rounded-2xl border p-5 ${tones[tone]}`}>
-      <div className="text-xs font-black tracking-wide">{label}</div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-2xl border p-5 text-left transition ${tones[tone]} ${
+        active ? "ring-2 ring-slate-900/70 ring-offset-2" : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-xs font-black tracking-wide">{label}</div>
+        <span className="text-xs font-black opacity-60">Lihat data →</span>
+      </div>
       <div className="mt-2 text-3xl font-black text-slate-950">{value}</div>
       <div className="mt-1 text-xs font-medium text-slate-500">{note}</div>
-    </div>
+    </button>
   );
 }
 
 export default function VaccinationReminderPage() {
+  void REMINDER_INTERACTION_VERSION;
   const [data, setData] = useState<any>(null);
+  const [selectedView, setSelectedView] = useState<ViewKey>("INCOMING");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [manualSending, setManualSending] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
+  const [rowActionId, setRowActionId] = useState<number | null>(null);
 
-  async function load() {
+  async function load(view: ViewKey = selectedView) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/vaccination/reminder/summary", { cache: "no-store" });
+      const response = await fetch(`/api/vaccination/reminder/summary?view=${encodeURIComponent(view)}`, {
+        cache: "no-store",
+      });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.message || `HTTP ${response.status}`);
@@ -95,6 +135,10 @@ export default function VaccinationReminderPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function changeView(view: ViewKey) {
+    setSelectedView(view);
   }
 
   async function sendManualReminder() {
@@ -131,7 +175,7 @@ export default function VaccinationReminderPage() {
       setManualMessage(
         `Manual reminder selesai · diproses ${claimed} · sent ${sent} · failed ${failed} · skipped ${skipped} · schedule aktif ${schedules}.`,
       );
-      await load();
+      await load(selectedView);
     } catch (e: any) {
       setError(String(e?.message || e || "Gagal menjalankan reminder manual."));
     } finally {
@@ -139,13 +183,58 @@ export default function VaccinationReminderPage() {
     }
   }
 
-  useEffect(() => {
-    load();
-    const timer = window.setInterval(load, 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  async function runRowAction(row: any, action: "send" | "cancel") {
+    const id = Number(row?.id || 0);
+    if (!id || rowActionId) return;
 
-  const upcoming = useMemo(() => data?.upcoming || [], [data]);
+    const participant = clean(row?.participant_name) || "Peserta";
+    const service = clean(row?.vaccine_name) || "Vaksinasi";
+    const stage = stageLabel(row?.reminder_stage);
+    const date = fmtDate(row?.reminder_date);
+
+    const confirmed = window.confirm(
+      action === "send"
+        ? `Kirim reminder sekarang?\n\nPeserta: ${participant}\nLayanan: ${service}\nReminder: ${stage} · ${date}`
+        : `Batalkan reminder ini?\n\nPeserta: ${participant}\nLayanan: ${service}\nReminder: ${stage} · ${date}\n\nReminder yang dibatalkan tidak akan ikut pengiriman otomatis.`,
+    );
+    if (!confirmed) return;
+
+    setRowActionId(id);
+    setManualMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/reminder/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || `HTTP ${response.status}`);
+      }
+      setManualMessage(
+        action === "send"
+          ? `Reminder ${participant} berhasil dikirim.`
+          : `Reminder ${participant} berhasil dibatalkan.`,
+      );
+      await load(selectedView);
+    } catch (e: any) {
+      setError(String(e?.message || e || "Aksi reminder gagal."));
+    } finally {
+      setRowActionId(null);
+    }
+  }
+
+  useEffect(() => {
+    load(selectedView);
+    const timer = window.setInterval(() => load(selectedView), 60_000);
+    return () => window.clearInterval(timer);
+    // load is intentionally scoped to the active view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedView]);
+
+  const rows = useMemo(() => data?.items || [], [data]);
+  const viewMeta = VIEW_META[selectedView];
 
   return (
     <main className="min-h-screen bg-[#f4f8fb] p-4 text-slate-900 md:p-6">
@@ -156,21 +245,20 @@ export default function VaccinationReminderPage() {
               <div className="text-xs font-black tracking-[0.12em] text-emerald-700">AUTOMATIC EMAIL REMINDER</div>
               <h1 className="mt-1 text-2xl font-black tracking-tight md:text-3xl">Reminder Vaksinasi</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                Sistem otomatis membaca Next Dose dari vaksinasi saat ini dan History Service,
-                lalu mengirim email H-7, H-3, H-1, dan Hari H. Admin tidak perlu membuka aplikasi agar reminder berjalan.
+                Klik salah satu card untuk mengambil daftar datanya. Setiap reminder juga dapat dikirim atau dibatalkan langsung dari baris terkait.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={sendManualReminder}
-                disabled={manualSending}
+                disabled={manualSending || Boolean(rowActionId)}
                 className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {manualSending ? "Mengirim Reminder..." : "Kirim Reminder Manual"}
               </button>
               <button
-                onClick={load}
-                disabled={loading || manualSending}
+                onClick={() => load(selectedView)}
+                disabled={loading || manualSending || Boolean(rowActionId)}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Refresh
@@ -185,24 +273,37 @@ export default function VaccinationReminderPage() {
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="SENT" value={data?.summary?.sent ?? 0} note="Email berhasil dikirim" tone="green" />
+            <StatCard
+              label="SENT"
+              value={data?.summary?.sent ?? 0}
+              note="Email berhasil dikirim"
+              tone="green"
+              active={selectedView === "SENT"}
+              onClick={() => changeView("SENT")}
+            />
             <StatCard
               label="FAILED / SKIPPED"
               value={(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)}
               note={`${data?.summary?.failed ?? 0} failed · ${data?.summary?.skipped ?? 0} data belum siap`}
               tone="red"
+              active={selectedView === "FAILED"}
+              onClick={() => changeView("FAILED")}
             />
             <StatCard
               label="INCOMING REMINDER"
               value={data?.summary?.incoming ?? 0}
               note="Reminder akan datang dalam 60 hari"
               tone="blue"
+              active={selectedView === "INCOMING"}
+              onClick={() => changeView("INCOMING")}
             />
             <StatCard
               label="DUE TODAY"
               value={data?.summary?.dueToday ?? 0}
               note="Reminder yang perlu diproses hari ini"
               tone="purple"
+              active={selectedView === "DUE_TODAY"}
+              onClick={() => changeView("DUE_TODAY")}
             />
           </div>
 
@@ -243,16 +344,16 @@ export default function VaccinationReminderPage() {
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-black">Reminder Akan Datang</h2>
-              <p className="text-sm text-slate-500">
-                Sumber: vaksinasi saat ini + History Service. Anak/tanggungan menggunakan email parent yang terhubung.
-              </p>
+              <h2 className="text-lg font-black">{viewMeta.title}</h2>
+              <p className="text-sm text-slate-500">{viewMeta.note}</p>
             </div>
-            <div className="text-xs font-bold text-slate-400">{loading ? "Memuat..." : `${upcoming.length} schedule ditampilkan`}</div>
+            <div className="text-xs font-bold text-slate-400">
+              {loading ? "Memuat..." : `${rows.length} data ditampilkan`}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-[1050px] w-full text-left text-sm">
+            <table className="min-w-[1280px] w-full text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Peserta</th>
@@ -263,11 +364,15 @@ export default function VaccinationReminderPage() {
                   <th className="px-4 py-3">Penerima Email</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Keterangan</th>
+                  <th className="px-4 py-3">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {upcoming.map((row: any) => {
+                {rows.map((row: any) => {
                   const status = clean(row.status).toUpperCase();
+                  const busy = rowActionId === Number(row.id);
+                  const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING"].includes(status);
+                  const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status);
                   return (
                     <tr key={row.id} className="align-top hover:bg-slate-50/70">
                       <td className="px-4 py-3 font-bold">{row.participant_name || "-"}</td>
@@ -296,13 +401,35 @@ export default function VaccinationReminderPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{row.error_message || "-"}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex min-w-[260px] flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => runRowAction(row, "send")}
+                            disabled={sendDisabled}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={status === "CANCELLED" ? "Reminder sudah dibatalkan" : "Kirim reminder ini sekarang"}
+                          >
+                            {busy ? "Memproses..." : "Kirim Reminder"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => runRowAction(row, "cancel")}
+                            disabled={cancelDisabled}
+                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={status === "SENT" ? "Reminder yang sudah terkirim tidak dapat dibatalkan" : "Batalkan reminder ini"}
+                          >
+                            Cancel Reminder
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
-                {!loading && !upcoming.length ? (
+                {!loading && !rows.length ? (
                   <tr>
-                    <td colSpan={8} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
-                      Belum ada reminder akan datang.
+                    <td colSpan={9} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
+                      Tidak ada data pada kategori ini.
                     </td>
                   </tr>
                 ) : null}
@@ -318,7 +445,7 @@ export default function VaccinationReminderPage() {
               ["1", "Baca Next Dose", "Current vaccination dan History Service dibaca otomatis setiap hari."],
               ["2", "Buat Jadwal", "Sistem membuat H-7, H-3, H-1, dan Hari H tanpa input admin."],
               ["3", "Kirim Email", "Scheduler server berjalan walaupun tidak ada admin yang membuka aplikasi."],
-              ["4", "Audit Status", "SENT, FAILED, SKIPPED, waktu kirim, dan alasan gagal tetap tercatat."],
+              ["4", "Audit Status", "SENT, FAILED, SKIPPED, CANCELLED, waktu kirim, dan alasan gagal tetap tercatat."],
             ].map(([number, title, desc]) => (
               <div key={number} className="rounded-2xl border border-slate-200 p-4">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#042E66] text-xs font-black text-white">{number}</div>

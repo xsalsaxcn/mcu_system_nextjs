@@ -9,6 +9,14 @@ function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+type ViewKey = "INCOMING" | "SENT" | "FAILED" | "DUE_TODAY";
+
+function normalizeView(value: any): ViewKey {
+  const view = clean(value).toUpperCase();
+  if (["SENT", "FAILED", "DUE_TODAY"].includes(view)) return view as ViewKey;
+  return "INCOMING";
+}
+
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -31,6 +39,7 @@ export async function GET(req: NextRequest) {
     const today = todayInVaccinationTimezone();
     const from = shiftYmd(today, -30);
     const until = shiftYmd(today, 60);
+    const view = normalizeView(req.nextUrl.searchParams.get("view"));
 
     const result = await supabase
       .from("vaccination_reminders")
@@ -50,27 +59,39 @@ export async function GET(req: NextRequest) {
     const sent = rows.filter((row: any) => clean(row.status).toUpperCase() === "SENT").length;
     const failed = rows.filter((row: any) => clean(row.status).toUpperCase() === "FAILED").length;
     const skipped = rows.filter((row: any) => clean(row.status).toUpperCase() === "SKIPPED").length;
-    const dueToday = rows.filter(
-      (row: any) =>
-        clean(row.reminder_date) === today &&
-        !["SENT", "SUPERSEDED"].includes(clean(row.status).toUpperCase()),
-    ).length;
+    const dueToday = rows.filter((row: any) => {
+      const status = clean(row.status).toUpperCase();
+      return clean(row.reminder_date) === today && !["SENT", "SUPERSEDED", "CANCELLED"].includes(status);
+    }).length;
     const incoming = rows.filter((row: any) => {
       const status = clean(row.status).toUpperCase();
       return clean(row.reminder_date) >= today && ["PENDING", "FAILED", "SKIPPED", "SENDING"].includes(status);
     }).length;
 
-    const upcoming = rows
-      .filter((row: any) => clean(row.reminder_date) >= today)
-      .slice(0, 250);
-
-    const recent = rows
-      .filter((row: any) => ["SENT", "FAILED", "SKIPPED"].includes(clean(row.status).toUpperCase()))
-      .sort((a: any, b: any) => String(b.sent_at || b.reminder_date).localeCompare(String(a.sent_at || a.reminder_date)))
-      .slice(0, 100);
+    let items: any[] = [];
+    if (view === "SENT") {
+      items = rows
+        .filter((row: any) => clean(row.status).toUpperCase() === "SENT")
+        .sort((a: any, b: any) => String(b.sent_at || b.reminder_date).localeCompare(String(a.sent_at || a.reminder_date)));
+    } else if (view === "FAILED") {
+      items = rows
+        .filter((row: any) => ["FAILED", "SKIPPED"].includes(clean(row.status).toUpperCase()))
+        .sort((a: any, b: any) => String(a.reminder_date).localeCompare(String(b.reminder_date)));
+    } else if (view === "DUE_TODAY") {
+      items = rows.filter((row: any) => {
+        const status = clean(row.status).toUpperCase();
+        return clean(row.reminder_date) === today && !["SENT", "SUPERSEDED", "CANCELLED"].includes(status);
+      });
+    } else {
+      items = rows.filter((row: any) => {
+        const status = clean(row.status).toUpperCase();
+        return clean(row.reminder_date) >= today && ["PENDING", "FAILED", "SKIPPED", "SENDING"].includes(status);
+      });
+    }
 
     return ok({
       today,
+      view,
       automation: {
         schedule: ["H7", "H3", "H1", "H0"],
         cron: "08:00 WIB setiap hari",
@@ -79,8 +100,7 @@ export async function GET(req: NextRequest) {
         timezone: clean(process.env.VACCINATION_REMINDER_TIMEZONE) || "Asia/Jakarta",
       },
       summary: { sent, failed, skipped, incoming, dueToday },
-      upcoming,
-      recent,
+      items: items.slice(0, 1000),
     });
   } catch (error: any) {
     return fail(String(error?.message || error || "Gagal memuat Reminder Vaksinasi."), 500);
