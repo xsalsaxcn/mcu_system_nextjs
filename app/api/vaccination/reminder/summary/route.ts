@@ -56,25 +56,32 @@ export async function GET(req: NextRequest) {
     if (result.error) throw new Error(result.error.message);
     const rows = result.data || [];
 
-    // Track the latest successful reminder for the same vaccination source + Next Dose.
-    // This lets future H-3/H-1/Hari-H rows show that an earlier reminder was already sent,
-    // without changing the existing reminder schedule or database schema.
+    // V153.14:
+    // Link the latest successful reminder by business identity instead of source_key.
+    // The same vaccination can exist twice in Reminder as CURRENT_RECORD and HISTORY_SERVICE;
+    // those rows have different source_key values even though participant, vaccine and Next Dose
+    // are the same. Using participant + vaccine + Next Dose allows the remaining PENDING row
+    // to show the manual reminder that was just successfully sent from its sibling source.
+    const scheduleIdentity = (row: any) => {
+      const participant = clean(row.participant_name).toLowerCase().replace(/\s+/g, " ");
+      const vaccine = clean(row.vaccine_name).toLowerCase().replace(/\s+/g, " ");
+      const nextDueDate = clean(row.next_due_date);
+      if (!participant || !vaccine || !nextDueDate) return "";
+      return `${participant}|${vaccine}|${nextDueDate}`;
+    };
+
     const lastSentBySchedule = new Map<string, string>();
     for (const row of rows as any[]) {
       if (clean(row.status).toUpperCase() !== "SENT" || !clean(row.sent_at)) continue;
-      const sourceKey = clean(row.source_key);
-      const nextDueDate = clean(row.next_due_date);
-      if (!sourceKey || !nextDueDate) continue;
-      const key = `${sourceKey}|${nextDueDate}`;
+      const key = scheduleIdentity(row);
+      if (!key) continue;
       const sentAt = clean(row.sent_at);
       const previous = lastSentBySchedule.get(key);
       if (!previous || sentAt > previous) lastSentBySchedule.set(key, sentAt);
     }
 
     const withLastReminder = (row: any) => {
-      const sourceKey = clean(row.source_key);
-      const nextDueDate = clean(row.next_due_date);
-      const key = sourceKey && nextDueDate ? `${sourceKey}|${nextDueDate}` : "";
+      const key = scheduleIdentity(row);
       return {
         ...row,
         last_reminder_at: (key ? lastSentBySchedule.get(key) : "") || clean(row.sent_at) || null,
