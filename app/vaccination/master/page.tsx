@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
+// V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 type StockImportRow = {
   externalProductKey: string;
@@ -57,6 +58,8 @@ export default function VaccinationMasterPage() {
   const [importing, setImporting] = useState(false);
   const [selectedImportProductKey, setSelectedImportProductKey] = useState("");
   const [selectedMasterVaccineId, setSelectedMasterVaccineId] = useState("");
+  const [editingMappingId, setEditingMappingId] = useState("");
+  const [editingMappingVaccineId, setEditingMappingVaccineId] = useState("");
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -235,6 +238,139 @@ export default function VaccinationMasterPage() {
       await loadData();
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan produk & lot.");
+    }
+  }
+
+  function editProduct(vaccine: any) {
+    setError("");
+    setSelectedImportProductKey("");
+    setSelectedMasterVaccineId(String(vaccine.id || ""));
+    setVaccineForm({
+      name: cleanText(vaccine.name),
+      brand: cleanText(vaccine.brand),
+      description: cleanText(vaccine.description),
+      priceCategory: cleanText(vaccine.price_category) || "Harga Perusahaan",
+      price: vaccine.price == null ? "" : String(vaccine.price),
+      doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
+      defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
+    });
+    setLotForm({
+      vaccineId: String(vaccine.id || ""),
+      lotNumber: "",
+      expiryDate: "",
+      stockInitial: 0,
+      stockAdded: 0,
+      stockPhysicalCount: "",
+      inventoryNotes: "",
+    });
+    setMessage(`Edit produk ${vaccine.name}. Ubah field yang diperlukan lalu klik Simpan Perubahan Produk & Lot.`);
+    window.setTimeout(() => {
+      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+  }
+
+  function editLot(lot: any) {
+    setError("");
+    const vaccineId = String(lot.vaccine_id || lot.vaccine?.id || "");
+    const vaccine = vaccines.find((item) => String(item.id) === vaccineId) || lot.vaccine || {};
+    setSelectedImportProductKey("");
+    setSelectedMasterVaccineId(vaccineId);
+    setVaccineForm({
+      name: cleanText(vaccine.name),
+      brand: cleanText(vaccine.brand),
+      description: cleanText(vaccine.description),
+      priceCategory: cleanText(vaccine.price_category) || "Harga Perusahaan",
+      price: vaccine.price == null ? "" : String(vaccine.price),
+      doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
+      defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
+    });
+    setLotForm({
+      vaccineId,
+      lotNumber: cleanText(lot.lot_number),
+      expiryDate: cleanText(lot.expiry_date),
+      stockInitial: Number(lot.stock_initial || 0),
+      stockAdded: Number(lot.stock_added || 0),
+      stockPhysicalCount: lot.stock_physical_count == null ? "" : String(lot.stock_physical_count),
+      inventoryNotes: cleanText(lot.inventory_notes),
+    });
+    setMessage(`Edit lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Ubah field lalu simpan.`);
+    window.setTimeout(() => {
+      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+  }
+
+  async function deleteVaccine(vaccine: any) {
+    setError("");
+    if (!window.confirm(`Hapus produk ${vaccine.name}? Produk hanya bisa dihapus jika belum pernah dipakai pada registrasi/session/administrasi.`)) return;
+    try {
+      const json = await postMaster({ action: "delete-vaccine", id: vaccine.id });
+      setMessage(json.message || `Produk ${vaccine.name} dihapus.`);
+      if (String(selectedMasterVaccineId) === String(vaccine.id)) {
+        setSelectedMasterVaccineId("");
+        setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
+        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" });
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menghapus produk.");
+    }
+  }
+
+  async function deleteLot(lot: any) {
+    setError("");
+    if (!window.confirm(`Hapus lot ${lot.lot_number} dari ${lot.vaccine?.name || "produk"}? Lot hanya bisa dihapus jika belum pernah dipakai.`)) return;
+    try {
+      const json = await postMaster({ action: "delete-lot", id: lot.id });
+      setMessage(json.message || `Lot ${lot.lot_number} dihapus.`);
+      if (cleanText(lotForm.lotNumber) === cleanText(lot.lot_number) && String(lotForm.vaccineId) === String(lot.vaccine_id || lot.vaccine?.id || "")) {
+        setLotForm((current) => ({ ...current, lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" }));
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menghapus lot.");
+    }
+  }
+
+  function startEditMapping(mapping: any) {
+    setEditingMappingId(String(mapping.id || ""));
+    setEditingMappingVaccineId(String(mapping.vaccine_id || mapping.vaccine?.id || ""));
+  }
+
+  async function saveMapping(mapping: any) {
+    setError("");
+    if (!editingMappingVaccineId) {
+      setError("Pilih Master Vaksin untuk mapping.");
+      return;
+    }
+    try {
+      const json = await postMaster({
+        action: "update-product-mapping",
+        id: mapping.id,
+        vaccineId: editingMappingVaccineId,
+      });
+      setMessage(json.message || "Mapping produk berhasil diperbarui.");
+      setEditingMappingId("");
+      setEditingMappingVaccineId("");
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Gagal memperbarui mapping.");
+    }
+  }
+
+  async function deleteMapping(mapping: any) {
+    setError("");
+    const label = mapping.external_product_label || mapping.external_product_name || "produk import";
+    if (!window.confirm(`Hapus mapping ${label}? Data master vaksin dan lot tidak ikut dihapus.`)) return;
+    try {
+      const json = await postMaster({ action: "delete-product-mapping", id: mapping.id });
+      setMessage(json.message || "Mapping produk dihapus.");
+      if (String(editingMappingId) === String(mapping.id)) {
+        setEditingMappingId("");
+        setEditingMappingVaccineId("");
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menghapus mapping.");
     }
   }
 
@@ -694,20 +830,54 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Master Vaksin</th>
                   <th className="p-3 text-left">Lokasi Terakhir</th>
                   <th className="p-3 text-left">Last Import</th>
+                  <th className="p-3 text-left">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {productMappings.map((mapping) => (
-                  <tr key={mapping.id}>
-                    <td className="p-3 font-bold">{mapping.external_product_label || mapping.external_product_name || "-"}</td>
-                    <td className="p-3">{mapping.external_product_code || "-"}</td>
-                    <td className="p-3">{mapping.vaccine?.name || "-"}</td>
-                    <td className="p-3">{mapping.source_location || "-"}</td>
-                    <td className="p-3">{mapping.last_imported_at ? new Date(mapping.last_imported_at).toLocaleString("id-ID") : "-"}</td>
-                  </tr>
-                ))}
+                {productMappings.map((mapping) => {
+                  const editing = String(editingMappingId) === String(mapping.id);
+                  return (
+                    <tr key={mapping.id}>
+                      <td className="p-3 font-bold">{mapping.external_product_label || mapping.external_product_name || "-"}</td>
+                      <td className="p-3">{mapping.external_product_code || "-"}</td>
+                      <td className="p-3">
+                        {editing ? (
+                          <select
+                            className="min-w-[220px] rounded-lg border px-2 py-1.5"
+                            value={editingMappingVaccineId}
+                            onChange={(e) => setEditingMappingVaccineId(e.target.value)}
+                          >
+                            <option value="">Pilih Master Vaksin</option>
+                            {activeVaccines.map((vaccine) => (
+                              <option key={vaccine.id} value={String(vaccine.id)}>
+                                {vaccine.name}{vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          mapping.vaccine?.name || "-"
+                        )}
+                      </td>
+                      <td className="p-3">{mapping.source_location || "-"}</td>
+                      <td className="p-3">{mapping.last_imported_at ? new Date(mapping.last_imported_at).toLocaleString("id-ID") : "-"}</td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-2">
+                          {editing ? (
+                            <>
+                              <button type="button" onClick={() => saveMapping(mapping)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Simpan</button>
+                              <button type="button" onClick={() => { setEditingMappingId(""); setEditingMappingVaccineId(""); }} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Batal</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => startEditMapping(mapping)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                          )}
+                          <button type="button" onClick={() => deleteMapping(mapping)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus mapping">🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {!productMappings.length ? (
-                  <tr><td colSpan={5} className="p-5 text-center text-slate-500">Belum ada mapping produk import.</td></tr>
+                  <tr><td colSpan={6} className="p-5 text-center text-slate-500">Belum ada mapping produk import.</td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -718,8 +888,33 @@ export default function VaccinationMasterPage() {
           <div className="border-b bg-slate-50 p-4 font-bold">Daftar Produk</div>
           <div className="max-h-[260px] overflow-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">Produk</th><th className="p-3 text-left">Brand</th><th className="p-3 text-left">Kategori Harga</th><th className="p-3 text-left">Harga</th><th className="p-3 text-left">Status</th></tr></thead>
-              <tbody className="divide-y">{vaccines.map((v) => <tr key={v.id}><td className="p-3 font-bold">{v.name}</td><td className="p-3">{v.brand || "-"}</td><td className="p-3">{v.price_category || "-"}</td><td className="p-3 font-bold">{money(v.price)}</td><td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td></tr>)}</tbody>
+              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <tr>
+                  <th className="p-3 text-left">Produk</th>
+                  <th className="p-3 text-left">Brand</th>
+                  <th className="p-3 text-left">Kategori Harga</th>
+                  <th className="p-3 text-left">Harga</th>
+                  <th className="p-3 text-left">Status</th>
+                  <th className="p-3 text-left">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {vaccines.map((v) => (
+                  <tr key={v.id}>
+                    <td className="p-3 font-bold">{v.name}</td>
+                    <td className="p-3">{v.brand || "-"}</td>
+                    <td className="p-3">{v.price_category || "-"}</td>
+                    <td className="p-3 font-bold">{money(v.price)}</td>
+                    <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
+                    <td className="p-3">
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => editProduct(v)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                        <button type="button" onClick={() => deleteVaccine(v)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus produk">🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </section>
@@ -728,14 +923,47 @@ export default function VaccinationMasterPage() {
           <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif</div>
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">Vaksin</th><th className="p-3 text-left">Lot</th><th className="p-3 text-left">Expired</th><th className="p-3 text-left">Awal</th><th className="p-3 text-left">Tambahan</th><th className="p-3 text-left">Terpakai</th><th className="p-3 text-left">Stok Import</th><th className="p-3 text-left">Sisa Sistem</th><th className="p-3 text-left">Status</th></tr></thead>
-              <tbody className="divide-y">{lots.map((lot) => {
-                const awal = Number(lot.stock_initial || 0);
-                const tambah = Number(lot.stock_added || 0);
-                const used = Number(lot.stock_used || 0);
-                const physical = lot.stock_physical_count == null ? "-" : Number(lot.stock_physical_count);
-                return <tr key={lot.id}><td className="p-3">{lot.vaccine?.name || "-"}</td><td className="p-3 font-bold">{lot.lot_number}</td><td className="p-3">{lot.expiry_date || "-"}</td><td className="p-3">{awal}</td><td className="p-3">{tambah}</td><td className="p-3">{used}</td><td className="p-3 font-bold">{physical}</td><td className="p-3 font-bold">{awal + tambah - used}</td><td className="p-3">{lot.active ? "Aktif" : "Nonaktif"}</td></tr>;
-              })}</tbody>
+              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <tr>
+                  <th className="p-3 text-left">Vaksin</th>
+                  <th className="p-3 text-left">Lot</th>
+                  <th className="p-3 text-left">Expired</th>
+                  <th className="p-3 text-left">Awal</th>
+                  <th className="p-3 text-left">Tambahan</th>
+                  <th className="p-3 text-left">Terpakai</th>
+                  <th className="p-3 text-left">Stok Import</th>
+                  <th className="p-3 text-left">Sisa Sistem</th>
+                  <th className="p-3 text-left">Status</th>
+                  <th className="p-3 text-left">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {lots.map((lot) => {
+                  const awal = Number(lot.stock_initial || 0);
+                  const tambah = Number(lot.stock_added || 0);
+                  const used = Number(lot.stock_used || 0);
+                  const physical = lot.stock_physical_count == null ? "-" : Number(lot.stock_physical_count);
+                  return (
+                    <tr key={lot.id}>
+                      <td className="p-3">{lot.vaccine?.name || "-"}</td>
+                      <td className="p-3 font-bold">{lot.lot_number}</td>
+                      <td className="p-3">{lot.expiry_date || "-"}</td>
+                      <td className="p-3">{awal}</td>
+                      <td className="p-3">{tambah}</td>
+                      <td className="p-3">{used}</td>
+                      <td className="p-3 font-bold">{physical}</td>
+                      <td className="p-3 font-bold">{awal + tambah - used}</td>
+                      <td className="p-3">{lot.active ? "Aktif" : "Nonaktif"}</td>
+                      <td className="p-3">
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => editLot(lot)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                          <button type="button" onClick={() => deleteLot(lot)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus lot">🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
             </table>
           </div>
         </section>

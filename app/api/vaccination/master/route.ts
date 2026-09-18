@@ -3,6 +3,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // VACCINATION_ROLE_GUARD_V150
+// V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 export const dynamic = "force-dynamic";
 
@@ -367,6 +368,145 @@ export async function POST(req: NextRequest) {
         updatedLots,
       },
     });
+  }
+
+  if (action === "update-product-mapping") {
+    const id = toInt(body.id, 0);
+    const vaccineId = toInt(body.vaccineId, 0);
+    if (!id) return fail("Mapping produk wajib dipilih.");
+    if (!vaccineId) return fail("Master vaksin wajib dipilih.");
+
+    const vaccineResult = await supabase
+      .from("vaccination_vaccines")
+      .select("id,name,active")
+      .eq("id", vaccineId)
+      .maybeSingle();
+    if (vaccineResult.error) return fail(vaccineResult.error.message, 500);
+    if (!vaccineResult.data) return fail("Master vaksin tidak ditemukan.", 404);
+    if (vaccineResult.data.active === false) return fail("Master vaksin nonaktif tidak dapat dipakai untuk mapping.");
+
+    const currentResult = await supabase
+      .from("vaccination_product_mappings")
+      .select("id,source_system,external_product_key")
+      .eq("id", id)
+      .maybeSingle();
+    if (currentResult.error) return fail(currentResult.error.message, 500);
+    if (!currentResult.data) return fail("Mapping produk tidak ditemukan.", 404);
+
+    const conflictResult = await supabase
+      .from("vaccination_product_mappings")
+      .select("id,external_product_label,external_product_name")
+      .eq("source_system", currentResult.data.source_system || PRODUCT_SOURCE)
+      .eq("vaccine_id", vaccineId)
+      .neq("id", id)
+      .eq("active", true)
+      .limit(1);
+    if (conflictResult.error) return fail(conflictResult.error.message, 500);
+    if ((conflictResult.data || []).length) {
+      const other = conflictResult.data?.[0];
+      return fail(`Master vaksin ini sudah dimapping ke ${other?.external_product_label || other?.external_product_name || "produk import lain"}.`);
+    }
+
+    const result = await supabase
+      .from("vaccination_product_mappings")
+      .update({
+        vaccine_id: vaccineId,
+        active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+    return ok({ message: "Mapping produk berhasil diperbarui.", mapping: result.data });
+  }
+
+  if (action === "delete-product-mapping") {
+    const id = toInt(body.id, 0);
+    if (!id) return fail("Mapping produk wajib dipilih.");
+
+    const result = await supabase
+      .from("vaccination_product_mappings")
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+
+    if (result.error) return fail(result.error.message, 500);
+    if (!result.data) return fail("Mapping produk tidak ditemukan.", 404);
+    return ok({ message: "Mapping produk berhasil dihapus. Master vaksin dan lot tetap aman." });
+  }
+
+  if (action === "delete-lot") {
+    const id = toInt(body.id || body.lotId, 0);
+    if (!id) return fail("Lot wajib dipilih.");
+
+    const lotResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,lot_number")
+      .eq("id", id)
+      .maybeSingle();
+    if (lotResult.error) return fail(lotResult.error.message, 500);
+    if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+
+    const references = [
+      await supabase.from("vaccination_records").select("id").eq("lot_id", id).limit(1),
+      await supabase.from("vaccination_registration_items").select("id").eq("lot_id", id).limit(1),
+      await supabase.from("vaccination_session_vaccines").select("id").eq("lot_id", id).limit(1),
+    ];
+    const referenceError = references.find((item) => item.error)?.error;
+    if (referenceError) return fail(referenceError.message, 500);
+    if (references.some((item) => (item.data || []).length > 0)) {
+      return fail(`Lot ${lotResult.data.lot_number} sudah pernah dipakai pada data operasional, sehingga tidak aman untuk dihapus.`);
+    }
+
+    const deleteResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (deleteResult.error) return fail(deleteResult.error.message, 500);
+    if (!deleteResult.data) return fail("Lot tidak ditemukan saat proses hapus.", 404);
+
+    return ok({ message: `Lot ${lotResult.data.lot_number} berhasil dihapus.` });
+  }
+
+  if (action === "delete-vaccine") {
+    const id = toInt(body.id || body.vaccineId, 0);
+    if (!id) return fail("Master vaksin wajib dipilih.");
+
+    const vaccineResult = await supabase
+      .from("vaccination_vaccines")
+      .select("id,name")
+      .eq("id", id)
+      .maybeSingle();
+    if (vaccineResult.error) return fail(vaccineResult.error.message, 500);
+    if (!vaccineResult.data) return fail("Master vaksin tidak ditemukan.", 404);
+
+    const references = [
+      await supabase.from("vaccination_records").select("id").eq("vaccine_id", id).limit(1),
+      await supabase.from("vaccination_registrations").select("id").eq("vaccine_id", id).limit(1),
+      await supabase.from("vaccination_registration_items").select("id").eq("vaccine_id", id).limit(1),
+      await supabase.from("vaccination_session_vaccines").select("id").eq("vaccine_id", id).limit(1),
+    ];
+    const referenceError = references.find((item) => item.error)?.error;
+    if (referenceError) return fail(referenceError.message, 500);
+    if (references.some((item) => (item.data || []).length > 0)) {
+      return fail(`Produk ${vaccineResult.data.name} sudah pernah dipakai pada registrasi/session/administrasi, sehingga tidak aman untuk dihapus.`);
+    }
+
+    const deleteResult = await supabase
+      .from("vaccination_vaccines")
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (deleteResult.error) return fail(deleteResult.error.message, 500);
+    if (!deleteResult.data) return fail("Master vaksin tidak ditemukan saat proses hapus.", 404);
+
+    return ok({ message: `Produk ${vaccineResult.data.name} beserta lot/mapping yang belum terpakai berhasil dihapus.` });
   }
 
   if (action === "update-vaccine") {
