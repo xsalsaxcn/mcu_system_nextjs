@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
 // V153_18_IMPORTED_PRODUCT_LOT_SESSION_SAFE
+// V153_23_SESSION_ALL_ACTIVE_MASTER_LOTS_SAFE
 type SourceItem = {
   id: number;
   name: string;
@@ -76,8 +77,6 @@ export default function VaccinationSessionPage() {
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
   const [productMappings, setProductMappings] = useState<any[]>([]);
-  const [mappingReady, setMappingReady] = useState(true);
-  const [mappingMessage, setMappingMessage] = useState("");
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [editingSession, setEditingSession] = useState<any | null>(null);
@@ -172,41 +171,41 @@ export default function VaccinationSessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionVaccines, vaccines, lots]);
 
-  const importedVaccineIds = useMemo(() => {
+  // V153.23: Session eligibility follows active Master Lots, NOT import mappings.
+  // Every active vaccine that owns at least one active lot in Master must be selectable.
+  const activeLotVaccineIds = useMemo(() => {
     return new Set(
-      productMappings
-        .filter((mapping) => mapping.active !== false)
-        .map((mapping) => String(mapping.vaccine_id || ""))
+      lots
+        .filter((lot) => lot.active !== false)
+        .map((lot) => String(lot.vaccine_id || ""))
         .filter(Boolean),
     );
-  }, [productMappings]);
+  }, [lots]);
 
   const selectableVaccines = useMemo(() => {
-    if (!mappingReady) return vaccines;
-
     const grandfatheredIds = new Set(
       sessionVaccines.map((item) => String(item.vaccineId || "")).filter(Boolean),
     );
 
     return vaccines.filter(
       (vaccine) =>
-        importedVaccineIds.has(String(vaccine.id)) ||
+        activeLotVaccineIds.has(String(vaccine.id)) ||
         grandfatheredIds.has(String(vaccine.id)),
     );
-  }, [vaccines, importedVaccineIds, mappingReady, sessionVaccines]);
+  }, [vaccines, activeLotVaccineIds, sessionVaccines]);
 
   const filteredLots = useMemo(() => {
     return lots.filter(
       (lot) =>
-        !draft.vaccineId || String(lot.vaccine_id) === String(draft.vaccineId),
+        lot.active !== false &&
+        (!draft.vaccineId || String(lot.vaccine_id) === String(draft.vaccineId)),
     );
   }, [lots, draft.vaccineId]);
 
-  const selectedImportedProductHasNoLot = useMemo(() => {
-    if (!draft.vaccineId || !mappingReady) return false;
-    if (!importedVaccineIds.has(String(draft.vaccineId))) return false;
+  const selectedVaccineHasNoActiveLot = useMemo(() => {
+    if (!draft.vaccineId) return false;
     return filteredLots.length === 0;
-  }, [draft.vaccineId, mappingReady, importedVaccineIds, filteredLots]);
+  }, [draft.vaccineId, filteredLots]);
 
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
@@ -268,11 +267,6 @@ export default function VaccinationSessionPage() {
 
     if (!draft.lotId) {
       setError("Pilih lot number terlebih dahulu.");
-      return;
-    }
-
-    if (mappingReady && !importedVaccineIds.has(String(draft.vaccineId))) {
-      setError("Produk baru untuk session harus berasal dari hasil Import Produk & Lot di Master Vaksin.");
       return;
     }
 
@@ -473,8 +467,6 @@ export default function VaccinationSessionPage() {
       setVaccines((json.vaccines || []).filter((v: any) => v.active !== false));
       setLots((json.lots || []).filter((lot: any) => lot.active !== false));
       setProductMappings((json.productMappings || []).filter((mapping: any) => mapping.active !== false));
-      setMappingReady(json.mappingReady !== false);
-      setMappingMessage(json.mappingMessage || "");
     }
   }
 
@@ -904,15 +896,9 @@ export default function VaccinationSessionPage() {
             lokasi yang dibuat.
           </p>
 
-          {mappingReady ? (
-            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-              Produk yang dapat ditambahkan ke session dibatasi ke produk aktif hasil Import Produk & Lot di Master Vaksin. Lot akan otomatis difilter sesuai produk yang dipilih.
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-              {mappingMessage || "Mapping produk import belum aktif. Jalankan SQL V153.18. Daftar lama sementara tetap ditampilkan agar session existing tidak rusak."}
-            </div>
-          )}
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+            Semua vaksin yang memiliki Lot Aktif di Master Vaksin dapat dipilih untuk session. Setelah vaksin dipilih, dropdown Lot Number otomatis hanya menampilkan lot aktif milik vaksin tersebut.
+          </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">
             <select
@@ -956,10 +942,9 @@ export default function VaccinationSessionPage() {
               })}
             </select>
 
-            {selectedImportedProductHasNoLot ? (
+            {selectedVaccineHasNoActiveLot ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 md:col-span-2">
-                Produk ini sudah ada di Mapping Master, tetapi lot aktif belum terhubung ke Master Vaksin yang sama.
-                Buka <a href="/vaccination/master" className="font-bold underline">Master Vaksin</a>, upload ulang file stock.quant terbaru, lalu klik Import Produk, Lot & Mapping untuk sinkronisasi aman.
+                Vaksin ini belum memiliki Lot Aktif di Master Vaksin. Tambahkan atau aktifkan lot di <a href="/vaccination/master" className="font-bold underline">Master Vaksin</a>.
               </div>
             ) : null}
 
