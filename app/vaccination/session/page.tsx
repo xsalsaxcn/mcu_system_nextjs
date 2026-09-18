@@ -202,6 +202,12 @@ export default function VaccinationSessionPage() {
     );
   }, [lots, draft.vaccineId]);
 
+  const selectedImportedProductHasNoLot = useMemo(() => {
+    if (!draft.vaccineId || !mappingReady) return false;
+    if (!importedVaccineIds.has(String(draft.vaccineId))) return false;
+    return filteredLots.length === 0;
+  }, [draft.vaccineId, mappingReady, importedVaccineIds, filteredLots]);
+
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
       (item) =>
@@ -949,6 +955,13 @@ export default function VaccinationSessionPage() {
                 );
               })}
             </select>
+
+            {selectedImportedProductHasNoLot ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 md:col-span-2">
+                Produk ini sudah ada di Mapping Master, tetapi lot aktif belum terhubung ke Master Vaksin yang sama.
+                Buka <a href="/vaccination/master" className="font-bold underline">Master Vaksin</a>, upload ulang file stock.quant terbaru, lalu klik Import Produk, Lot & Mapping untuk sinkronisasi aman.
+              </div>
+            ) : null}
 
             <input
               type="number"

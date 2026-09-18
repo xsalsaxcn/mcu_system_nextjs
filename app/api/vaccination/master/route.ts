@@ -3,6 +3,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // VACCINATION_ROLE_GUARD_V150
+// V153_22_SESSION_LOT_RECONCILE_SAFE
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 export const dynamic = "force-dynamic";
@@ -20,6 +21,26 @@ function normalizeName(value: any) {
 function importQty(value: any) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function isStockQuantImportedLot(lot: any) {
+  const note = clean(lot?.inventory_notes).toLowerCase();
+  return note.includes("import odoo_stock_quant") || note.includes("import stock.quant");
+}
+
+async function lotHasOperationalReferences(supabase: any, lotId: number) {
+  const [records, items, sessionVaccines] = await Promise.all([
+    supabase.from("vaccination_records").select("id").eq("lot_id", lotId).limit(1),
+    supabase.from("vaccination_registration_items").select("id").eq("lot_id", lotId).limit(1),
+    supabase.from("vaccination_session_vaccines").select("id").eq("lot_id", lotId).limit(1),
+  ]);
+
+  const failed = [records, items, sessionVaccines].find((result: any) => result.error);
+  if (failed?.error) throw new Error(failed.error.message);
+
+  return [records, items, sessionVaccines].some(
+    (result: any) => (result.data || []).length > 0,
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -177,9 +198,15 @@ export async function POST(req: NextRequest) {
     }
 
     const grouped = new Map<string, any[]>();
+    const expectedLotsByExternalKey = new Map<string, Set<string>>();
     for (const row of normalizedRows) {
       if (!grouped.has(row.externalProductKey)) grouped.set(row.externalProductKey, []);
       grouped.get(row.externalProductKey)!.push(row);
+
+      if (!expectedLotsByExternalKey.has(row.externalProductKey)) {
+        expectedLotsByExternalKey.set(row.externalProductKey, new Set<string>());
+      }
+      expectedLotsByExternalKey.get(row.externalProductKey)!.add(row.lotNumber);
     }
 
     const importedAt = new Date().toISOString();
@@ -189,6 +216,7 @@ export async function POST(req: NextRequest) {
     let mappedProducts = 0;
     let createdLots = 0;
     let updatedLots = 0;
+    let repairedLotLinks = 0;
 
     for (const [externalKey, groupRows] of grouped.entries()) {
       const first = groupRows[0];
@@ -304,14 +332,74 @@ export async function POST(req: NextRequest) {
 
       for (const item of lotGroups.values()) {
         const lotKey = `${vaccineId}|${item.lotNumber}`;
-        const existingLot = lotsByKey.get(lotKey);
+        let existingLot = lotsByKey.get(lotKey);
         const physicalCount = Math.max(0, Number(item.availableQuantity || 0));
+        const importNote = `Import ${PRODUCT_SOURCE} · product=${externalKey} · ${Array.from(item.locations).join(", ")}`;
+
+        // V153.22: mapping dapat diedit setelah import. Build lama mengubah mapping
+        // tanpa memindahkan lot import dari vaccine_id lama, sehingga Session tidak
+        // menemukan lot karena filter Session memang harus memakai vaccine_id yang sama.
+        // Saat stock.quant di-import ulang, repair hanya lot import yang belum pernah
+        // dipakai dan jelas tidak lagi termasuk lot yang diharapkan mapping lamanya.
+        if (!existingLot) {
+          const staleCandidates = lots.filter((lot: any) => {
+            if (lot.active === false || !isStockQuantImportedLot(lot)) return false;
+            if (clean(lot.lot_number) !== item.lotNumber) return false;
+
+            const currentVaccineId = Number(lot.vaccine_id || 0);
+            if (!currentVaccineId || currentVaccineId === vaccineId) return false;
+
+            const currentExternalKey = mappingKeyByVaccineId.get(currentVaccineId);
+            if (!currentExternalKey || currentExternalKey === externalKey) return false;
+
+            const currentExpectedLots = expectedLotsByExternalKey.get(currentExternalKey);
+            return Boolean(currentExpectedLots && !currentExpectedLots.has(item.lotNumber));
+          });
+
+          for (const candidate of staleCandidates) {
+            const candidateId = Number(candidate.id || 0);
+            if (!candidateId) continue;
+
+            let referenced = false;
+            try {
+              referenced = await lotHasOperationalReferences(supabase, candidateId);
+            } catch (error: any) {
+              return fail(error?.message || "Gagal memvalidasi histori lot import.", 500);
+            }
+            if (referenced) continue;
+
+            const previousKey = `${Number(candidate.vaccine_id || 0)}|${clean(candidate.lot_number)}`;
+            const repairResult = await supabase
+              .from("vaccination_vaccine_lots")
+              .update({
+                vaccine_id: vaccineId,
+                stock_physical_count: physicalCount,
+                inventory_notes: importNote,
+                active: true,
+                updated_at: importedAt,
+              })
+              .eq("id", candidateId)
+              .select("*")
+              .single();
+
+            if (repairResult.error) return fail(repairResult.error.message, 500);
+
+            lotsByKey.delete(previousKey);
+            lotsByKey.set(lotKey, repairResult.data);
+            const index = lots.findIndex((lot: any) => Number(lot.id) === candidateId);
+            if (index >= 0) lots[index] = repairResult.data;
+            existingLot = repairResult.data;
+            repairedLotLinks += 1;
+            break;
+          }
+        }
 
         if (existingLot) {
           const updateResult = await supabase
             .from("vaccination_vaccine_lots")
             .update({
               stock_physical_count: physicalCount,
+              inventory_notes: importNote,
               active: true,
               updated_at: importedAt,
             })
@@ -321,6 +409,8 @@ export async function POST(req: NextRequest) {
 
           if (updateResult.error) return fail(updateResult.error.message, 500);
           lotsByKey.set(lotKey, updateResult.data);
+          const index = lots.findIndex((lot: any) => Number(lot.id) === Number(existingLot.id));
+          if (index >= 0) lots[index] = updateResult.data;
           updatedLots += 1;
         } else {
           const insertResult = await supabase
@@ -332,7 +422,7 @@ export async function POST(req: NextRequest) {
               stock_initial: physicalCount,
               stock_added: 0,
               stock_physical_count: physicalCount,
-              inventory_notes: `Import ${PRODUCT_SOURCE} · ${Array.from(item.locations).join(", ")}`,
+              inventory_notes: importNote,
               stock_used: 0,
               active: true,
             })
@@ -341,6 +431,7 @@ export async function POST(req: NextRequest) {
 
           if (insertResult.error) return fail(insertResult.error.message, 500);
           lotsByKey.set(lotKey, insertResult.data);
+          lots.push(insertResult.data);
           createdLots += 1;
 
           if (physicalCount > 0) {
@@ -360,12 +451,13 @@ export async function POST(req: NextRequest) {
     }
 
     return ok({
-      message: `Import produk & lot selesai. Mapping: ${mappedProducts}, master vaksin baru: ${createdVaccines}, lot baru: ${createdLots}, lot diperbarui: ${updatedLots}.`,
+      message: `Import produk & lot selesai. Mapping: ${mappedProducts}, master vaksin baru: ${createdVaccines}, lot baru: ${createdLots}, lot diperbarui: ${updatedLots}, link lot diperbaiki: ${repairedLotLinks}.`,
       imported: {
         mappedProducts,
         createdVaccines,
         createdLots,
         updatedLots,
+        repairedLotLinks,
       },
     });
   }
