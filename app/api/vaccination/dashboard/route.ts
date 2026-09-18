@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
+import * as XLSX from "xlsx";
 
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
@@ -57,6 +58,117 @@ function toCsv(rows: any[]) {
   return lines.join("\r\n");
 }
 
+const ISERVE_HEADERS = [
+  "name",
+  "street",
+  "nik",
+  "passport_number",
+  "patient_mobile",
+  "vaccination/product",
+  "vaccination lot",
+  "vaccination dose",
+  "vaccination quantity",
+];
+
+const ISERVE_NOTES = [
+  ["Column", "Description"],
+  ["name", "Nama pasien (WAJIB)"],
+  ["street", "Alamat pasien"],
+  ["nik", "NIK pasien (wajib jika passport kosong)"],
+  ["passport_number", "Passport pasien (wajib jika NIK kosong)"],
+  ["patient_mobile", "Nomor HP pasien (WAJIB)"],
+  ["vaccination/product", "HARUS sama dengan vaccination di wizard"],
+  ["vaccination lot", "HARUS salah satu lot yang dipilih di wizard"],
+  ["vaccination dose", "Dose vaksin (WAJIB, angka)"],
+  ["vaccination quantity", "Quantity vaksin (WAJIB, angka)"],
+];
+
+function firstValue(...values: any[]) {
+  for (const value of values) {
+    const text = clean(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function jakartaDateKey(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    const match = text.match(/^\d{4}-\d{2}-\d{2}/);
+    return match ? match[0] : "";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value || "";
+  const month = parts.find((part) => part.type === "month")?.value || "";
+  const day = parts.find((part) => part.type === "day")?.value || "";
+  return year && month && day ? `${year}-${month}-${day}` : "";
+}
+
+function inDateRange(value: any, dateFrom: string, dateTo: string) {
+  if (!dateFrom && !dateTo) return true;
+  const key = jakartaDateKey(value);
+  if (!key) return false;
+  if (dateFrom && key < dateFrom) return false;
+  if (dateTo && key > dateTo) return false;
+  return true;
+}
+
+function filterRowsForExport(rows: any[], dateFrom: string, dateTo: string) {
+  if (!dateFrom && !dateTo) return rows;
+  return rows.filter((row) =>
+    inDateRange(row.administered_at || row.registered_at, dateFrom, dateTo)
+  );
+}
+
+function buildIserveWorkbook(rows: any[]) {
+  const appointmentRows = [
+    ISERVE_HEADERS,
+    ...rows.map((row) => [
+      row.name || "",
+      row.street || "",
+      row.nik || "",
+      row.passport_number || "",
+      row.patient_mobile || "",
+      row["vaccination/product"] || "",
+      row["vaccination lot"] || "",
+      Number(row["vaccination dose"] || 1),
+      Number(row["vaccination quantity"] || 1),
+    ]),
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  const appointmentSheet = XLSX.utils.aoa_to_sheet(appointmentRows);
+  appointmentSheet["!cols"] = [
+    { wch: 26 },
+    { wch: 44 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 20 },
+    { wch: 34 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 22 },
+  ];
+
+  const notesSheet = XLSX.utils.aoa_to_sheet(ISERVE_NOTES);
+  notesSheet["!cols"] = [{ wch: 24 }, { wch: 52 }];
+
+  XLSX.utils.book_append_sheet(workbook, appointmentSheet, "Import Appointment");
+  XLSX.utils.book_append_sheet(workbook, notesSheet, "Notes");
+
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+
 function applyStatus(rows: any[], status: string) {
   if (status === "done") return rows.filter((row) => row.is_done);
   if (status === "not_done") return rows.filter((row) => !row.is_done);
@@ -74,7 +186,13 @@ export async function GET(req: NextRequest) {
   const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
   const sourceId = toInt(req.nextUrl.searchParams.get("source_id"), 0);
   const status = clean(req.nextUrl.searchParams.get("status")) || "all";
-  const format = clean(req.nextUrl.searchParams.get("format"));
+  const format = clean(req.nextUrl.searchParams.get("format")).toLowerCase();
+  const dateFrom = clean(req.nextUrl.searchParams.get("date_from"));
+  const dateTo = clean(req.nextUrl.searchParams.get("date_to"));
+
+  const validDate = (value: string) => !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (!validDate(dateFrom) || !validDate(dateTo)) return fail("Format rentang tanggal export tidak valid.", 400);
+  if (dateFrom && dateTo && dateFrom > dateTo) return fail("Tanggal awal export tidak boleh lebih besar dari tanggal akhir.", 400);
 
   const supabase = supabaseAdmin();
 
@@ -152,14 +270,111 @@ export async function GET(req: NextRequest) {
   };
 
   if (format === "csv") {
-    const csv = toCsv(filteredRows);
-    const filename = `vaccination_${status}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const exportRows = filterRowsForExport(filteredRows, dateFrom, dateTo);
+    const csv = toCsv(exportRows);
+    const rangeLabel = dateFrom || dateTo
+      ? `_${dateFrom || "awal"}_sd_${dateTo || "akhir"}`
+      : "";
+    const filename = `vaccination_${status}${rangeLabel}_${new Date().toISOString().slice(0, 10)}.csv`;
 
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  }
+
+  if (format === "iserve") {
+    const allowedRegistrationIds = new Set(
+      filteredRows.map((row: any) => Number(row.id)).filter(Boolean)
+    );
+
+    const participantIds = Array.from(
+      new Set(
+        registrations
+          .map((row: any) => Number(row.participant_id || 0))
+          .filter(Boolean)
+      )
+    );
+
+    const participantById = new Map<number, any>();
+    if (participantIds.length) {
+      const participantResult = await supabase
+        .from("participants")
+        .select("*")
+        .in("id", participantIds);
+
+      if (!participantResult.error) {
+        for (const participant of participantResult.data || []) {
+          participantById.set(Number(participant.id), participant);
+        }
+      }
+    }
+
+    const registrationById = new Map<number, any>(
+      registrations.map((registration: any) => [Number(registration.id), registration])
+    );
+
+    const iserveRows = records
+      .filter((record: any) => allowedRegistrationIds.has(Number(record.registration_id)))
+      .filter((record: any) => !["CANCELLED", "VOID"].includes(clean(record.status).toUpperCase()))
+      .filter((record: any) => inDateRange(record.administered_at, dateFrom, dateTo))
+      .map((record: any) => {
+        const registration = registrationById.get(Number(record.registration_id)) || {};
+        const participant = participantById.get(Number(registration.participant_id || 0)) || {};
+
+        return {
+          name: firstValue(registration.participant_name, participant.name, participant.participant_name),
+          street: firstValue(
+            registration.street,
+            registration.address,
+            registration.alamat,
+            participant.street,
+            participant.address,
+            participant.alamat
+          ),
+          nik: firstValue(
+            registration.nik,
+            participant.nik,
+            participant.ktp,
+            participant.nik_ktp
+          ),
+          passport_number: firstValue(
+            registration.passport_number,
+            registration.passport,
+            participant.passport_number,
+            participant.passport
+          ),
+          patient_mobile: firstValue(
+            registration.phone,
+            registration.patient_mobile,
+            registration.mobile,
+            participant.phone,
+            participant.no_hp,
+            participant.mobile,
+            participant.phone_number
+          ),
+          "vaccination/product": firstValue(record.vaccine_name),
+          "vaccination lot": firstValue(record.lot_number),
+          "vaccination dose": Math.max(1, Number(record.dose_number || 1)),
+          "vaccination quantity": 1,
+        };
+      });
+
+    const output = buildIserveWorkbook(iserveRows);
+    const rangeLabel = dateFrom || dateTo
+      ? `_${dateFrom || "awal"}_sd_${dateTo || "akhir"}`
+      : "";
+    const filename = `iserve_vaccination${rangeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    return new NextResponse(new Uint8Array(output), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
       },
     });
   }

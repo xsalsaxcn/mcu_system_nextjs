@@ -24,6 +24,8 @@ export default function VaccinationDashboardPage() {
   const [sourceId, setSourceId] = useState("");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
+  const [exportDateFrom, setExportDateFrom] = useState("");
+  const [exportDateTo, setExportDateTo] = useState("");
   const [summary, setSummary] = useState<any>({ total: 0, done: 0, not_done: 0, no_queue: 0, waiting: 0 });
   const [rows, setRows] = useState<any[]>([]);
   const [message, setMessage] = useState("Dashboard vaksinasi: filter sudah/belum dan export masing-masing.");
@@ -58,13 +60,32 @@ export default function VaccinationDashboardPage() {
     setRows(json.rows || []);
   }
 
-  function exportCsv(exportStatus = status) {
+  function buildExportParams(exportStatus: string, format: "csv" | "iserve") {
+    if (exportDateFrom && exportDateTo && exportDateFrom > exportDateTo) {
+      setError("Rentang tanggal export tidak valid: tanggal awal lebih besar dari tanggal akhir.");
+      return null;
+    }
+
+    setError("");
     const params = new URLSearchParams();
     params.set("status", exportStatus);
-    params.set("format", "csv");
+    params.set("format", format);
     if (sessionId) params.set("session_id", sessionId);
     if (sourceId) params.set("source_id", sourceId);
+    if (exportDateFrom) params.set("date_from", exportDateFrom);
+    if (exportDateTo) params.set("date_to", exportDateTo);
+    return params;
+  }
 
+  function exportCsv(exportStatus = status) {
+    const params = buildExportParams(exportStatus, "csv");
+    if (!params) return;
+    window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
+  }
+
+  function exportIserve() {
+    const params = buildExportParams("done", "iserve");
+    if (!params) return;
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
@@ -181,14 +202,54 @@ export default function VaccinationDashboardPage() {
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-bold">Data Peserta · {filteredRows.length} baris</h2>
-              <p className="text-sm text-slate-500">Export mengikuti filter session/database/status yang aktif.</p>
+              <p className="text-sm text-slate-500">Export mengikuti filter session/database/status aktif. Rentang tanggal hanya diterapkan saat export.</p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => exportCsv("all")} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold">Export Semua</button>
-              <button onClick={() => exportCsv("done")} className="rounded-xl border bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">Export Sudah</button>
-              <button onClick={() => exportCsv("not_done")} className="rounded-xl border bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">Export Belum</button>
-              <button onClick={() => exportCsv(status)} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white">Export Filter Aktif</button>
+            <div className="flex flex-col gap-2 lg:items-end">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid gap-1 text-xs font-bold text-slate-600">
+                  Dari tanggal
+                  <input
+                    type="date"
+                    value={exportDateFrom}
+                    onChange={(e) => setExportDateFrom(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-bold text-slate-600">
+                  Sampai tanggal
+                  <input
+                    type="date"
+                    value={exportDateTo}
+                    onChange={(e) => setExportDateTo(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportDateFrom("");
+                    setExportDateTo("");
+                  }}
+                  className="rounded-xl border bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Reset Tanggal
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => exportCsv("all")} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold">Export Semua</button>
+                <button onClick={() => exportCsv("done")} className="rounded-xl border bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">Export Sudah</button>
+                <button onClick={() => exportCsv("not_done")} className="rounded-xl border bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">Export Belum</button>
+                <button onClick={() => exportCsv(status)} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white">Export Filter Aktif</button>
+                <button
+                  onClick={exportIserve}
+                  className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-100"
+                  title="Export XLSX sesuai template Import Appointment iServe"
+                >
+                  Export untuk iServe
+                </button>
+              </div>
             </div>
           </div>
 

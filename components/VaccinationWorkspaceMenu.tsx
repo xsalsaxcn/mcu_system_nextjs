@@ -11,6 +11,8 @@ import {
   Database,
   FileClock,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Menu,
   Package2,
   ShieldCheck,
@@ -77,6 +79,15 @@ export default function VaccinationWorkspaceMenu() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<string>(() => currentGroup(pathname || ""));
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Tetap arahkan ke login agar user tidak terjebak di drawer.
+    }
+    window.location.href = "/vaccination/login";
+  }
 
   useEffect(() => {
     if (open) setExpanded(currentGroup(pathname || ""));
@@ -211,6 +222,24 @@ export default function VaccinationWorkspaceMenu() {
                 <a href="/dashboard" className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-black text-slate-700 transition hover:bg-slate-100">
                   Dashboard Operasional
                 </a>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <a
+                    href="/vaccination/login"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 transition hover:bg-emerald-100"
+                  >
+                    <LogIn className="h-4 w-4" />
+                    Login
+                  </a>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700 transition hover:bg-red-100"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </div>
               </div>
             </div>
           </aside>
