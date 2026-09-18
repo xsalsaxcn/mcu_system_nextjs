@@ -1,5 +1,7 @@
 "use client";
 
+// V153_25_ISERVE_BENEFIT_COMBINATION_EXPORT_SAFE
+
 import { useEffect, useMemo, useState } from "react";
 
 const STATUS_OPTIONS = [
@@ -17,6 +19,12 @@ function fmtDate(value: any) {
   return d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
 }
 
+function sameBenefitKeys(left: string[], right: string[]) {
+  const a = Array.from(new Set(left)).sort();
+  const b = Array.from(new Set(right)).sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export default function VaccinationDashboardPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
@@ -28,6 +36,10 @@ export default function VaccinationDashboardPage() {
   const [exportDateTo, setExportDateTo] = useState("");
   const [summary, setSummary] = useState<any>({ total: 0, done: 0, not_done: 0, no_queue: 0, waiting: 0 });
   const [rows, setRows] = useState<any[]>([]);
+  const [iserveProducts, setIserveProducts] = useState<any[]>([]);
+  const [iserveCombinations, setIserveCombinations] = useState<any[]>([]);
+  const [selectedBenefitKeys, setSelectedBenefitKeys] = useState<string[]>([]);
+  const [iserveMetaLoading, setIserveMetaLoading] = useState(false);
   const [message, setMessage] = useState("Dashboard vaksinasi: filter sudah/belum dan export masing-masing.");
   const [error, setError] = useState("");
 
@@ -60,7 +72,51 @@ export default function VaccinationDashboardPage() {
     setRows(json.rows || []);
   }
 
-  function buildExportParams(exportStatus: string, format: "csv" | "iserve") {
+  async function loadIserveMeta() {
+    if (exportDateFrom && exportDateTo && exportDateFrom > exportDateTo) {
+      setIserveProducts([]);
+      setIserveCombinations([]);
+      return;
+    }
+
+    setIserveMetaLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("status", "done");
+      params.set("format", "iserve_meta");
+      if (sessionId) params.set("session_id", sessionId);
+      if (sourceId) params.set("source_id", sourceId);
+      if (exportDateFrom) params.set("date_from", exportDateFrom);
+      if (exportDateTo) params.set("date_to", exportDateTo);
+
+      const json = await fetch(`/api/vaccination/dashboard?${params.toString()}`, {
+        cache: "no-store",
+      }).then((r) => r.json());
+
+      if (!json.ok) {
+        setIserveProducts([]);
+        setIserveCombinations([]);
+        setError(json.message || "Gagal membaca kombinasi benefit iServe.");
+        return;
+      }
+
+      const products = json.products || [];
+      const combinations = json.combinations || [];
+      setIserveProducts(products);
+      setIserveCombinations(combinations);
+
+      const validKeys = new Set(products.map((item: any) => String(item.key || "")).filter(Boolean));
+      setSelectedBenefitKeys((current) => current.filter((key) => validKeys.has(key)));
+    } catch (err: any) {
+      setIserveProducts([]);
+      setIserveCombinations([]);
+      setError(err?.message || "Gagal membaca kombinasi benefit iServe.");
+    } finally {
+      setIserveMetaLoading(false);
+    }
+  }
+
+  function buildExportParams(exportStatus: string, format: "csv" | "iserve" | "iserve_meta") {
     if (exportDateFrom && exportDateTo && exportDateFrom > exportDateTo) {
       setError("Rentang tanggal export tidak valid: tanggal awal lebih besar dari tanggal akhir.");
       return null;
@@ -84,8 +140,23 @@ export default function VaccinationDashboardPage() {
   }
 
   function exportIserve() {
+    if (!selectedBenefitKeys.length) {
+      setError("Pilih minimal 1 benefit iServe atau klik salah satu kombinasi yang terdeteksi.");
+      return;
+    }
+
+    const selectedCombination = iserveCombinations.find((combo: any) =>
+      sameBenefitKeys(combo.benefit_keys || [], selectedBenefitKeys)
+    );
+
+    if (!selectedCombination) {
+      setError("Kombinasi benefit yang dipilih tidak ditemukan pada filter/session/rentang tanggal ini.");
+      return;
+    }
+
     const params = buildExportParams("done", "iserve");
     if (!params) return;
+    selectedBenefitKeys.forEach((key) => params.append("benefit", key));
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
@@ -96,6 +167,10 @@ export default function VaccinationDashboardPage() {
   useEffect(() => {
     loadDashboard(status);
   }, [sessionId, sourceId, status]);
+
+  useEffect(() => {
+    loadIserveMeta();
+  }, [sessionId, sourceId, exportDateFrom, exportDateTo]);
 
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -118,6 +193,21 @@ export default function VaccinationDashboardPage() {
       return haystack.includes(keyword);
     });
   }, [rows, search]);
+
+  const selectedIserveCombination = useMemo(() => {
+    if (!selectedBenefitKeys.length) return null;
+    return iserveCombinations.find((combo: any) =>
+      sameBenefitKeys(combo.benefit_keys || [], selectedBenefitKeys)
+    ) || null;
+  }, [iserveCombinations, selectedBenefitKeys]);
+
+  function toggleBenefit(key: string) {
+    setSelectedBenefitKeys((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    );
+  }
 
   return (
     <main className="p-6">
@@ -244,12 +334,127 @@ export default function VaccinationDashboardPage() {
                 <button onClick={() => exportCsv(status)} className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white">Export Filter Aktif</button>
                 <button
                   onClick={exportIserve}
-                  className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-100"
-                  title="Export XLSX sesuai template Import Appointment iServe"
+                  disabled={!selectedIserveCombination}
+                  className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-black text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Export XLSX iServe per kombinasi benefit yang dipilih"
                 >
-                  Export untuk iServe
+                  {selectedIserveCombination
+                    ? `Export iServe · ${selectedIserveCombination.participant_count} peserta`
+                    : "Export untuk iServe"}
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div className="border-b bg-violet-50/40 p-4">
+            <div className="rounded-2xl border border-violet-200 bg-white p-4">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="font-black text-violet-900">Export iServe per Layanan / Benefit</h3>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Satu peserta dapat memiliki lebih dari 1 benefit. Pilih beberapa produk atau klik kombinasi yang sudah terdeteksi.
+                    Export membuat 1 row per peserta; Product, Lot, Dose, dan Quantity ditulis per layanan dalam baris yang sejajar.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBenefitKeys([])}
+                  className="rounded-lg border bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  Reset Benefit
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-xs font-black uppercase tracking-wide text-slate-500">Pilih Produk / Benefit</div>
+                {iserveMetaLoading ? (
+                  <div className="mt-2 text-sm text-slate-500">Membaca benefit dan kombinasi...</div>
+                ) : iserveProducts.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {iserveProducts.map((product: any) => (
+                      <label
+                        key={product.key}
+                        className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                          selectedBenefitKeys.includes(product.key)
+                            ? "border-violet-400 bg-violet-100 text-violet-900"
+                            : "bg-white text-slate-700"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedBenefitKeys.includes(product.key)}
+                          onChange={() => toggleBenefit(product.key)}
+                        />
+                        <span>{product.label}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">
+                          {product.participant_count}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-sm text-slate-500">Belum ada layanan vaksin selesai pada filter/rentang tanggal ini.</div>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <div className="text-xs font-black uppercase tracking-wide text-slate-500">Kombinasi Benefit yang Terdeteksi</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {iserveCombinations.map((combo: any) => {
+                    const active = sameBenefitKeys(combo.benefit_keys || [], selectedBenefitKeys);
+                    return (
+                      <button
+                        type="button"
+                        key={combo.key}
+                        onClick={() => setSelectedBenefitKeys(combo.benefit_keys || [])}
+                        className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${
+                          active
+                            ? "border-violet-500 bg-violet-600 text-white"
+                            : combo.benefit_count > 1
+                              ? "border-violet-200 bg-violet-50 text-violet-800"
+                              : "bg-white text-slate-700"
+                        }`}
+                        title={(combo.participant_names || []).join(", ")}
+                      >
+                        <span>{combo.label}</span>
+                        <span className={`ml-2 rounded-full px-2 py-0.5 ${
+                          active ? "bg-white/20" : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {combo.participant_count} peserta
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {selectedBenefitKeys.length ? (
+                <div className={`mt-4 rounded-xl border p-3 text-sm ${
+                  selectedIserveCombination
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                }`}>
+                  {selectedIserveCombination ? (
+                    <>
+                      <div className="font-black">
+                        Siap export: {selectedIserveCombination.label} · {selectedIserveCombination.participant_count} peserta
+                      </div>
+                      {selectedIserveCombination.participant_names?.length ? (
+                        <div className="mt-1 text-xs">
+                          {selectedIserveCombination.participant_names.join(", ")}
+                          {selectedIserveCombination.participant_count > selectedIserveCombination.participant_names.length
+                            ? ` +${selectedIserveCombination.participant_count - selectedIserveCombination.participant_names.length} lainnya`
+                            : ""}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="font-bold">
+                      Kombinasi checkbox ini tidak ada pada data saat ini. Pilih salah satu kombinasi yang terdeteksi.
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
 

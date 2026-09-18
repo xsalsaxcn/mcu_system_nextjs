@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 // VACCINATION_ROLE_GUARD_V150
 // V153_18_ISERVE_PHONE_AND_PRODUCT_MAPPING_SAFE
 // V153_24_ISERVE_PHONE_8XXX_EMPLOYEE_ID_AS_PASSPORT_SAFE
+// V153_25_ISERVE_BENEFIT_COMBINATION_EXPORT_SAFE
 export const dynamic = "force-dynamic";
 
 function csvEscape(value: any) {
@@ -79,10 +80,10 @@ const ISERVE_NOTES = [
   ["nik", "NIK pasien (wajib jika passport kosong)"],
   ["passport_number", "BINUSIAN ID / NIK Karyawan (dipakai sebagai passport_number untuk import iServe)"],
   ["patient_mobile", "Nomor HP pasien (WAJIB)"],
-  ["vaccination/product", "HARUS sama dengan vaccination di wizard"],
-  ["vaccination lot", "HARUS salah satu lot yang dipilih di wizard"],
-  ["vaccination dose", "Dose vaksin (WAJIB, angka)"],
-  ["vaccination quantity", "Quantity vaksin (WAJIB, angka)"],
+  ["vaccination/product", "HARUS sama dengan vaccination di wizard. Multi-benefit ditulis per baris dalam 1 cell."],
+  ["vaccination lot", "Lot sejajar urutannya dengan vaccination/product."],
+  ["vaccination dose", "Dose sejajar urutannya dengan vaccination/product."],
+  ["vaccination quantity", "Quantity sejajar urutannya dengan vaccination/product."],
 ];
 
 function firstValue(...values: any[]) {
@@ -91,6 +92,20 @@ function firstValue(...values: any[]) {
     if (text) return text;
   }
   return "";
+}
+
+function benefitKey(record: any) {
+  const vaccineId = Number(record?.vaccine_id || 0);
+  if (vaccineId) return `v:${vaccineId}`;
+
+  const name = clean(record?.vaccine_name).toLowerCase().replace(/\s+/g, " ");
+  return name ? `n:${name}` : "";
+}
+
+function sameBenefitSet(left: string[], right: string[]) {
+  const a = Array.from(new Set(left)).sort();
+  const b = Array.from(new Set(right)).sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 function normalizeIservePhone(value: any) {
@@ -159,8 +174,8 @@ function buildIserveWorkbook(rows: any[]) {
       row.patient_mobile || "",
       row["vaccination/product"] || "",
       row["vaccination lot"] || "",
-      Number(row["vaccination dose"] || 1),
-      Number(row["vaccination quantity"] || 1),
+      row["vaccination dose"] ?? 1,
+      row["vaccination quantity"] ?? 1,
     ]),
   ];
 
@@ -207,6 +222,10 @@ export async function GET(req: NextRequest) {
   const format = clean(req.nextUrl.searchParams.get("format")).toLowerCase();
   const dateFrom = clean(req.nextUrl.searchParams.get("date_from"));
   const dateTo = clean(req.nextUrl.searchParams.get("date_to"));
+  const selectedBenefitKeys = req.nextUrl.searchParams
+    .getAll("benefit")
+    .map((value) => clean(value))
+    .filter(Boolean);
 
   const validDate = (value: string) => !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
   if (!validDate(dateFrom) || !validDate(dateTo)) return fail("Format rentang tanggal export tidak valid.", 400);
@@ -304,9 +323,19 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (format === "iserve") {
+  if (format === "iserve" || format === "iserve_meta") {
+    const doneRows = applyStatus(rows, "done");
     const allowedRegistrationIds = new Set(
-      filteredRows.map((row: any) => Number(row.id)).filter(Boolean)
+      doneRows.map((row: any) => Number(row.id)).filter(Boolean)
+    );
+
+    const eligibleRecords = records
+      .filter((record: any) => allowedRegistrationIds.has(Number(record.registration_id)))
+      .filter((record: any) => !["CANCELLED", "VOID"].includes(clean(record.status).toUpperCase()))
+      .filter((record: any) => inDateRange(record.administered_at, dateFrom, dateTo));
+
+    const registrationById = new Map<number, any>(
+      registrations.map((registration: any) => [Number(registration.id), registration])
     );
 
     const participantIds = Array.from(
@@ -331,13 +360,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const registrationById = new Map<number, any>(
-      registrations.map((registration: any) => [Number(registration.id), registration])
-    );
-
     const mappedProductByVaccineId = new Map<number, string>();
     const recordVaccineIds = Array.from(
-      new Set(records.map((record: any) => Number(record.vaccine_id || 0)).filter(Boolean))
+      new Set(
+        eligibleRecords
+          .map((record: any) => Number(record.vaccine_id || 0))
+          .filter(Boolean)
+      )
     );
 
     if (recordVaccineIds.length) {
@@ -359,64 +388,196 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const iserveRows = records
-      .filter((record: any) => allowedRegistrationIds.has(Number(record.registration_id)))
-      .filter((record: any) => !["CANCELLED", "VOID"].includes(clean(record.status).toUpperCase()))
-      .filter((record: any) => inDateRange(record.administered_at, dateFrom, dateTo))
-      .map((record: any) => {
-        const registration = registrationById.get(Number(record.registration_id)) || {};
-        const participant = participantById.get(Number(registration.participant_id || 0)) || {};
+    const recordsByRegistration = new Map<number, any[]>();
+    for (const record of eligibleRecords) {
+      const registrationId = Number(record.registration_id || 0);
+      if (!registrationId) continue;
+      if (!recordsByRegistration.has(registrationId)) {
+        recordsByRegistration.set(registrationId, []);
+      }
+      recordsByRegistration.get(registrationId)!.push(record);
+    }
 
-        return {
-          name: firstValue(registration.participant_name, participant.name, participant.participant_name),
-          street: firstValue(
-            registration.street,
-            registration.address,
-            registration.alamat,
-            participant.street,
-            participant.address,
-            participant.alamat
-          ),
-          nik: firstValue(
-            registration.nik,
-            participant.nik,
-            participant.ktp,
-            participant.nik_ktp
-          ),
-          // iServe import: use BINUSIAN ID / NIK Karyawan as passport_number.
-          // Do not use patient passport and do not fall back to KTP NIK here.
-          passport_number: firstValue(
-            registration.employee_id,
-            registration.binusian_id,
-            registration.nik_karyawan,
-            participant.employee_id,
-            participant.binusian_id,
-            participant.nik_karyawan
-          ),
-          patient_mobile: normalizeIservePhone(firstValue(
-            registration.phone,
-            registration.patient_mobile,
-            registration.mobile,
-            participant.phone,
-            participant.no_hp,
-            participant.mobile,
-            participant.phone_number
-          )),
-          "vaccination/product": firstValue(
+    const iserveGroups: any[] = [];
+
+    for (const [registrationId, groupRecords] of recordsByRegistration.entries()) {
+      const registration = registrationById.get(registrationId) || {};
+      const participant = participantById.get(Number(registration.participant_id || 0)) || {};
+
+      const serviceByBenefit = new Map<string, any>();
+      for (const record of groupRecords) {
+        const key = benefitKey(record);
+        if (!key || serviceByBenefit.has(key)) continue;
+
+        serviceByBenefit.set(key, {
+          key,
+          label: firstValue(
             mappedProductByVaccineId.get(Number(record.vaccine_id || 0)),
             record.vaccine_name
           ),
-          "vaccination lot": firstValue(record.lot_number),
-          "vaccination dose": Math.max(1, Number(record.dose_number || 1)),
-          "vaccination quantity": 1,
-        };
+          lot: firstValue(record.lot_number),
+          dose: Math.max(1, Number(record.dose_number || 1)),
+          quantity: 1,
+          administered_at: record.administered_at || "",
+        });
+      }
+
+      const services = Array.from(serviceByBenefit.values()).sort((left: any, right: any) =>
+        String(left.label || "").localeCompare(String(right.label || ""), "id")
+      );
+
+      if (!services.length) continue;
+
+      const benefitKeys = services.map((service: any) => service.key).sort();
+      const comboKey = benefitKeys.join("||");
+
+      iserveGroups.push({
+        registration_id: registrationId,
+        registration,
+        participant,
+        services,
+        benefit_keys: benefitKeys,
+        combo_key: comboKey,
+        participant_name: firstValue(
+          registration.participant_name,
+          participant.name,
+          participant.participant_name
+        ),
       });
+    }
+
+    const productStats = new Map<string, { key: string; label: string; participant_count: number }>();
+    for (const group of iserveGroups) {
+      const uniqueKeys = new Set<string>();
+      for (const service of group.services) {
+        if (uniqueKeys.has(service.key)) continue;
+        uniqueKeys.add(service.key);
+
+        const current = productStats.get(service.key);
+        if (current) {
+          current.participant_count += 1;
+        } else {
+          productStats.set(service.key, {
+            key: service.key,
+            label: service.label,
+            participant_count: 1,
+          });
+        }
+      }
+    }
+
+    const comboStats = new Map<string, any>();
+    for (const group of iserveGroups) {
+      const current = comboStats.get(group.combo_key);
+      if (current) {
+        current.participant_count += 1;
+        if (
+          group.participant_name &&
+          current.participant_names.length < 12 &&
+          !current.participant_names.includes(group.participant_name)
+        ) {
+          current.participant_names.push(group.participant_name);
+        }
+      } else {
+        comboStats.set(group.combo_key, {
+          key: group.combo_key,
+          benefit_keys: group.benefit_keys,
+          benefit_count: group.benefit_keys.length,
+          label: group.services.map((service: any) => service.label).join(" + "),
+          participant_count: 1,
+          participant_names: group.participant_name ? [group.participant_name] : [],
+        });
+      }
+    }
+
+    const products = Array.from(productStats.values()).sort((left, right) =>
+      left.label.localeCompare(right.label, "id")
+    );
+
+    const combinations = Array.from(comboStats.values()).sort((left: any, right: any) => {
+      if (right.benefit_count !== left.benefit_count) {
+        return right.benefit_count - left.benefit_count;
+      }
+      if (right.participant_count !== left.participant_count) {
+        return right.participant_count - left.participant_count;
+      }
+      return left.label.localeCompare(right.label, "id");
+    });
+
+    if (format === "iserve_meta") {
+      return ok({
+        products,
+        combinations,
+        totalAppointments: iserveGroups.length,
+      });
+    }
+
+    const selectedKeys: string[] = Array.from(new Set<string>(selectedBenefitKeys)).sort();
+
+    const exportGroups = selectedKeys.length
+      ? iserveGroups.filter((group: any) =>
+          sameBenefitSet(group.benefit_keys, selectedKeys)
+        )
+      : iserveGroups;
+
+    if (selectedKeys.length && !exportGroups.length) {
+      return fail(
+        "Kombinasi benefit yang dipilih tidak ditemukan pada filter/session/rentang tanggal ini.",
+        400
+      );
+    }
+
+    const iserveRows = exportGroups.map((group: any) => {
+      const registration = group.registration || {};
+      const participant = group.participant || {};
+      const services = group.services || [];
+
+      return {
+        name: firstValue(registration.participant_name, participant.name, participant.participant_name),
+        street: firstValue(
+          registration.street,
+          registration.address,
+          registration.alamat,
+          participant.street,
+          participant.address,
+          participant.alamat
+        ),
+        nik: firstValue(
+          registration.nik,
+          participant.nik,
+          participant.ktp,
+          participant.nik_ktp
+        ),
+        passport_number: firstValue(
+          registration.employee_id,
+          registration.binusian_id,
+          registration.nik_karyawan,
+          participant.employee_id,
+          participant.binusian_id,
+          participant.nik_karyawan
+        ),
+        patient_mobile: normalizeIservePhone(firstValue(
+          registration.phone,
+          registration.patient_mobile,
+          registration.mobile,
+          participant.phone,
+          participant.no_hp,
+          participant.mobile,
+          participant.phone_number
+        )),
+        "vaccination/product": services.map((service: any) => service.label || "").join("\n"),
+        "vaccination lot": services.map((service: any) => service.lot || "").join("\n"),
+        "vaccination dose": services.map((service: any) => String(service.dose || 1)).join("\n"),
+        "vaccination quantity": services.map((service: any) => String(service.quantity || 1)).join("\n"),
+      };
+    });
 
     const output = buildIserveWorkbook(iserveRows);
     const rangeLabel = dateFrom || dateTo
       ? `_${dateFrom || "awal"}_sd_${dateTo || "akhir"}`
       : "";
-    const filename = `iserve_vaccination${rangeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const comboLabel = selectedKeys.length ? `_${selectedKeys.length}benefit` : "_all";
+    const filename = `iserve_vaccination${comboLabel}${rangeLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     return new NextResponse(new Uint8Array(output), {
       status: 200,
