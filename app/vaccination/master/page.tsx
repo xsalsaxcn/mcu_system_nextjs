@@ -55,6 +55,7 @@ export default function VaccinationMasterPage() {
   const [importFileName, setImportFileName] = useState("");
   const [importMappingSelections, setImportMappingSelections] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [selectedImportProductKey, setSelectedImportProductKey] = useState("");
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -81,7 +82,32 @@ export default function VaccinationMasterPage() {
     setError("");
     const json = await fetch("/api/vaccination/master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create-vaccine", ...vaccineForm }) }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Gagal menyimpan vaksin."); return; }
-    setMessage(json.message); setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" }); loadData();
+
+    if (selectedImportProductKey && json.vaccine?.id) {
+      setImportMappingSelections((prev) => ({
+        ...prev,
+        [selectedImportProductKey]: String(json.vaccine.id),
+      }));
+      setMessage("Master vaksin berhasil dibuat dan otomatis dipilih untuk mapping produk import.");
+      setSelectedImportProductKey("");
+    } else {
+      setMessage(json.message);
+    }
+
+    setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
+    await loadData();
+  }
+
+  function chooseImportProductForMaster(product: { key: string; name: string; label: string }) {
+    setSelectedImportProductKey(product.key);
+    setVaccineForm((current) => ({
+      ...current,
+      name: product.name,
+    }));
+    setMessage(`Produk ${product.label} dipilih. Lengkapi produsen, harga, dosis, dan next dose lalu Simpan Vaksin.`);
+    window.setTimeout(() => {
+      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
   }
 
   async function submitLot() {
@@ -265,7 +291,11 @@ export default function VaccinationMasterPage() {
 
           {importProducts.length ? (
             <>
-              <div className="mt-4 overflow-hidden rounded-xl border bg-white">
+              <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+                Klik nama produk import untuk otomatis mengisi field <b>Nama vaksin / produk</b> di form Master Vaksin.
+              </div>
+
+              <div className="mt-3 overflow-hidden rounded-xl border bg-white">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                     <tr>
@@ -279,7 +309,19 @@ export default function VaccinationMasterPage() {
                   <tbody className="divide-y">
                     {importProducts.map((product) => (
                       <tr key={product.key}>
-                        <td className="p-3 font-bold">{product.label}</td>
+                        <td className="p-3 font-bold">
+                          <button
+                            type="button"
+                            onClick={() => chooseImportProductForMaster(product)}
+                            className={`text-left font-bold underline-offset-4 hover:text-blue-700 hover:underline ${selectedImportProductKey === product.key ? "text-blue-700 underline" : "text-slate-900"}`}
+                            title="Klik untuk isi Nama vaksin / produk"
+                          >
+                            {product.label}
+                          </button>
+                          {selectedImportProductKey === product.key ? (
+                            <div className="mt-1 text-xs font-semibold text-blue-600">Dipilih untuk dibuat / dilengkapi di Master Vaksin</div>
+                          ) : null}
+                        </td>
                         <td className="p-3">{product.code || "-"}</td>
                         <td className="p-3">{Array.from(product.lots).join(", ")}</td>
                         <td className="p-3">{Array.from(product.locations).join(", ")}</td>
@@ -342,8 +384,13 @@ export default function VaccinationMasterPage() {
         </section>
 
         <div className="mt-6 grid gap-5 xl:grid-cols-2">
-          <section className="rounded-2xl border bg-slate-50 p-5">
+          <section id="vaccination-master-product-form" className="rounded-2xl border bg-slate-50 p-5">
             <h2 className="text-lg font-bold">Tambah Vaksin / Produk</h2>
+            {selectedImportProductKey ? (
+              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                Nama produk sudah diambil dari file import. Lanjutkan isi Produsen, Harga Perusahaan, Jumlah Dosis, dan Next Dose.
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-3">
               <input className="rounded-xl border px-3 py-2" placeholder="Nama vaksin / produk" value={vaccineForm.name} onChange={(e) => setVaccineForm({ ...vaccineForm, name: e.target.value })} />
               <input className="rounded-xl border px-3 py-2" placeholder="Brand / Produsen" value={vaccineForm.brand} onChange={(e) => setVaccineForm({ ...vaccineForm, brand: e.target.value })} />
@@ -360,8 +407,13 @@ export default function VaccinationMasterPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border bg-slate-50 p-5">
-            <h2 className="text-lg font-bold">Tambah Lot Number & Stok</h2>
+          <details className="rounded-2xl border bg-slate-50 p-5">
+            <summary className="cursor-pointer select-none text-lg font-bold">
+              Tambah Lot Number & Stok <span className="text-sm font-semibold text-slate-500">(Opsional)</span>
+            </summary>
+            <p className="mt-2 text-sm text-slate-500">
+              Buka hanya jika perlu menambah atau menyesuaikan lot/stok secara manual. Lot hasil import stock.quant tetap dikelola dari proses Import Produk & Lot di atas.
+            </p>
             <div className="mt-4 grid gap-3">
               <select className="rounded-xl border px-3 py-2" value={lotForm.vaccineId} onChange={(e) => setLotForm({ ...lotForm, vaccineId: e.target.value })}>
                 <option value="">Pilih vaksin</option>
@@ -376,7 +428,7 @@ export default function VaccinationMasterPage() {
               <textarea className="rounded-xl border px-3 py-2" placeholder="Keterangan inventory / stok" value={lotForm.inventoryNotes} onChange={(e) => setLotForm({ ...lotForm, inventoryNotes: e.target.value })} />
               <button onClick={submitLot} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">Simpan Lot Number</button>
             </div>
-          </section>
+          </details>
         </div>
 
         <section className="mt-6 rounded-2xl border">
