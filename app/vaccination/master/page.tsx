@@ -56,6 +56,7 @@ export default function VaccinationMasterPage() {
   const [importMappingSelections, setImportMappingSelections] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const [selectedImportProductKey, setSelectedImportProductKey] = useState("");
+  const [selectedMasterVaccineId, setSelectedMasterVaccineId] = useState("");
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -78,43 +79,163 @@ export default function VaccinationMasterPage() {
     if (!lotForm.vaccineId && json.vaccines?.[0]?.id) setLotForm((s) => ({ ...s, vaccineId: String(json.vaccines[0].id) }));
   }
 
-  async function submitVaccine() {
-    setError("");
-    const json = await fetch("/api/vaccination/master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create-vaccine", ...vaccineForm }) }).then((r) => r.json());
-    if (!json.ok) { setError(json.message || "Gagal menyimpan vaksin."); return; }
+  function findMappedVaccineId(productKey: string, productName: string) {
+    const mapped = importMappingSelections[productKey];
+    if (mapped) return String(mapped);
+    const existingMapping = productMappings.find(
+      (item) => cleanText(item.external_product_key).toLowerCase() === productKey.toLowerCase() && item.active !== false,
+    );
+    if (existingMapping?.vaccine_id) return String(existingMapping.vaccine_id);
+    const exact = vaccines.find((v) => normalizeName(v.name) === normalizeName(productName));
+    return exact?.id ? String(exact.id) : "";
+  }
 
-    if (selectedImportProductKey && json.vaccine?.id) {
-      setImportMappingSelections((prev) => ({
-        ...prev,
-        [selectedImportProductKey]: String(json.vaccine.id),
-      }));
-      setMessage("Master vaksin berhasil dibuat dan otomatis dipilih untuk mapping produk import.");
-      setSelectedImportProductKey("");
-    } else {
-      setMessage(json.message);
-    }
+  function applyImportLot(productKey: string, lotNumber: string, vaccineId?: string) {
+    const matchingRows = importRows.filter(
+      (item) => item.externalProductKey === productKey && item.lotNumber === lotNumber,
+    );
+    const row = matchingRows[0];
+    if (!row) return;
 
-    setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
-    await loadData();
+    const importedAvailable = matchingRows.reduce(
+      (sum, item) => sum + Number(item.availableQuantity || 0),
+      0,
+    );
+    const importedLocations = Array.from(
+      new Set(matchingRows.map((item) => item.sourceLocation).filter(Boolean)),
+    );
+
+    const masterId = vaccineId || selectedMasterVaccineId || findMappedVaccineId(productKey, row.externalProductName);
+    const existingLot = lots.find(
+      (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(masterId || "") && cleanText(lot.lot_number) === row.lotNumber,
+    );
+
+    setLotForm({
+      vaccineId: masterId || "",
+      lotNumber: row.lotNumber,
+      expiryDate: cleanText(existingLot?.expiry_date),
+      stockInitial: existingLot ? Number(existingLot.stock_initial || 0) : importedAvailable,
+      stockAdded: existingLot ? Number(existingLot.stock_added || 0) : 0,
+      stockPhysicalCount: String(importedAvailable),
+      inventoryNotes: cleanText(existingLot?.inventory_notes) || `Import stock.quant · ${importedLocations.join(", ")}`,
+    });
   }
 
   function chooseImportProductForMaster(product: { key: string; name: string; label: string }) {
+    const masterId = findMappedVaccineId(product.key, product.name);
+    const existingVaccine = vaccines.find((v) => String(v.id) === masterId);
+    const rows = importRows.filter((row) => row.externalProductKey === product.key);
+    const firstRow = rows[0];
+
     setSelectedImportProductKey(product.key);
-    setVaccineForm((current) => ({
-      ...current,
-      name: product.name,
-    }));
-    setMessage(`Produk ${product.label} dipilih. Lengkapi produsen, harga, dosis, dan next dose lalu Simpan Vaksin.`);
+    setSelectedMasterVaccineId(masterId);
+
+    setVaccineForm({
+      name: cleanText(existingVaccine?.name) || product.name,
+      brand: cleanText(existingVaccine?.brand),
+      description: cleanText(existingVaccine?.description),
+      priceCategory: cleanText(existingVaccine?.price_category) || "Harga Perusahaan",
+      price: existingVaccine?.price == null ? "" : String(existingVaccine.price),
+      doseCount: Math.max(1, Number(existingVaccine?.dose_count || 1)),
+      defaultNextDoseDays: existingVaccine?.default_next_dose_days == null ? "" : String(existingVaccine.default_next_dose_days),
+    });
+
+    if (firstRow) applyImportLot(product.key, firstRow.lotNumber, masterId);
+
+    setMessage(
+      `${product.label} dipilih. Nama produk dan lot dari file import sudah diambil. Lengkapi produsen, harga, dosis/next dose lalu simpan dalam satu form.`,
+    );
     window.setTimeout(() => {
       document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 0);
   }
 
-  async function submitLot() {
+  async function postMaster(payload: Record<string, any>) {
+    const res = await fetch("/api/vaccination/master", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.message || "Proses Master Vaksin gagal.");
+    return json;
+  }
+
+  async function submitProductAndLot() {
     setError("");
-    const json = await fetch("/api/vaccination/master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create-lot", ...lotForm }) }).then((r) => r.json());
-    if (!json.ok) { setError(json.message || "Gagal menyimpan lot."); return; }
-    setMessage(json.message); setLotForm((s) => ({ ...s, lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" })); loadData();
+    const name = cleanText(vaccineForm.name);
+    if (!name) {
+      setError("Nama vaksin / produk wajib diisi.");
+      return;
+    }
+
+    try {
+      let vaccineId = selectedMasterVaccineId;
+
+      if (vaccineId) {
+        const json = await postMaster({
+          action: "update-vaccine",
+          id: vaccineId,
+          ...vaccineForm,
+        });
+        vaccineId = String(json.vaccine?.id || vaccineId);
+      } else {
+        const json = await postMaster({
+          action: "create-vaccine",
+          ...vaccineForm,
+        });
+        vaccineId = String(json.vaccine?.id || "");
+      }
+
+      if (!vaccineId) throw new Error("Master vaksin tersimpan tetapi ID vaksin tidak ditemukan.");
+
+      if (selectedImportProductKey) {
+        setImportMappingSelections((prev) => ({
+          ...prev,
+          [selectedImportProductKey]: vaccineId,
+        }));
+      }
+
+      const lotNumber = cleanText(lotForm.lotNumber);
+      let lotSaved = false;
+
+      if (lotNumber) {
+        const existingLot = lots.find(
+          (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineId && cleanText(lot.lot_number) === lotNumber,
+        );
+
+        if (existingLot?.id) {
+          await postMaster({
+            action: "update-lot-details",
+            lotId: existingLot.id,
+            lotNumber,
+            expiryDate: lotForm.expiryDate,
+            stockAdded: lotForm.stockAdded,
+            stockPhysicalCount: lotForm.stockPhysicalCount,
+            inventoryNotes: lotForm.inventoryNotes,
+          });
+        } else {
+          await postMaster({
+            action: "create-lot",
+            ...lotForm,
+            vaccineId,
+            lotNumber,
+          });
+        }
+        lotSaved = true;
+      }
+
+      setSelectedMasterVaccineId(vaccineId);
+      setLotForm((current) => ({ ...current, vaccineId }));
+      setMessage(
+        lotSaved
+          ? "Master vaksin/produk dan lot berhasil disimpan dalam satu form."
+          : "Master vaksin/produk berhasil disimpan. Lot belum diisi.",
+      );
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menyimpan produk & lot.");
+    }
   }
 
   async function readStockQuantFile(file: File | null) {
@@ -250,6 +371,25 @@ export default function VaccinationMasterPage() {
     return Array.from(grouped.values());
   }, [importRows]);
 
+  const selectedImportLots = useMemo(() => {
+    if (!selectedImportProductKey) return [];
+    const grouped = new Map<string, { lotNumber: string; availableQuantity: number; locations: Set<string> }>();
+    for (const row of importRows) {
+      if (row.externalProductKey !== selectedImportProductKey) continue;
+      if (!grouped.has(row.lotNumber)) {
+        grouped.set(row.lotNumber, {
+          lotNumber: row.lotNumber,
+          availableQuantity: 0,
+          locations: new Set<string>(),
+        });
+      }
+      const item = grouped.get(row.lotNumber)!;
+      item.availableQuantity += Number(row.availableQuantity || 0);
+      if (row.sourceLocation) item.locations.add(row.sourceLocation);
+    }
+    return Array.from(grouped.values());
+  }, [importRows, selectedImportProductKey]);
+
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -292,7 +432,7 @@ export default function VaccinationMasterPage() {
           {importProducts.length ? (
             <>
               <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
-                Klik nama produk import untuk otomatis mengisi field <b>Nama vaksin / produk</b> di form Master Vaksin.
+                Klik nama produk import untuk otomatis mengambil <b>Nama Produk + Lot + Stok Import</b> ke satu form Master Vaksin.
               </div>
 
               <div className="mt-3 overflow-hidden rounded-xl border bg-white">
@@ -383,53 +523,165 @@ export default function VaccinationMasterPage() {
           ) : null}
         </section>
 
-        <div className="mt-6 grid gap-5 xl:grid-cols-2">
-          <section id="vaccination-master-product-form" className="rounded-2xl border bg-slate-50 p-5">
-            <h2 className="text-lg font-bold">Tambah Vaksin / Produk</h2>
+        <section id="vaccination-master-product-form" className="mt-6 rounded-2xl border bg-slate-50 p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-bold">Master Vaksin / Produk & Lot</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Produk dan lot dikelola dalam satu form. Klik produk dari hasil import agar Nama Produk, Lot Number, dan stok import otomatis terisi.
+              </p>
+            </div>
             {selectedImportProductKey ? (
-              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
-                Nama produk sudah diambil dari file import. Lanjutkan isi Produsen, Harga Perusahaan, Jumlah Dosis, dan Next Dose.
-              </div>
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                Produk import dipilih
+              </span>
             ) : null}
-            <div className="mt-4 grid gap-3">
-              <input className="rounded-xl border px-3 py-2" placeholder="Nama vaksin / produk" value={vaccineForm.name} onChange={(e) => setVaccineForm({ ...vaccineForm, name: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2" placeholder="Brand / Produsen" value={vaccineForm.brand} onChange={(e) => setVaccineForm({ ...vaccineForm, brand: e.target.value })} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <input className="rounded-xl border px-3 py-2" placeholder="Kategori harga, contoh: Harga Perusahaan" value={vaccineForm.priceCategory} onChange={(e) => setVaccineForm({ ...vaccineForm, priceCategory: e.target.value })} />
-                <input type="number" className="rounded-xl border px-3 py-2" placeholder="Harga produk" value={vaccineForm.price} onChange={(e) => setVaccineForm({ ...vaccineForm, price: e.target.value })} />
-              </div>
-              <textarea className="rounded-xl border px-3 py-2" placeholder="Deskripsi / keterangan produk" value={vaccineForm.description} onChange={(e) => setVaccineForm({ ...vaccineForm, description: e.target.value })} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <input type="number" className="rounded-xl border px-3 py-2" placeholder="Jumlah dosis" value={vaccineForm.doseCount} onChange={(e) => setVaccineForm({ ...vaccineForm, doseCount: Number(e.target.value || 1) })} />
-                <input type="number" className="rounded-xl border px-3 py-2" placeholder="Next dose hari" value={vaccineForm.defaultNextDoseDays} onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })} />
-              </div>
-              <button onClick={submitVaccine} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700">Simpan Vaksin</button>
-            </div>
-          </section>
+          </div>
 
-          <details className="rounded-2xl border bg-slate-50 p-5">
-            <summary className="cursor-pointer select-none text-lg font-bold">
-              Tambah Lot Number & Stok <span className="text-sm font-semibold text-slate-500">(Opsional)</span>
-            </summary>
-            <p className="mt-2 text-sm text-slate-500">
-              Buka hanya jika perlu menambah atau menyesuaikan lot/stok secara manual. Lot hasil import stock.quant tetap dikelola dari proses Import Produk & Lot di atas.
-            </p>
-            <div className="mt-4 grid gap-3">
-              <select className="rounded-xl border px-3 py-2" value={lotForm.vaccineId} onChange={(e) => setLotForm({ ...lotForm, vaccineId: e.target.value })}>
-                <option value="">Pilih vaksin</option>
-                {activeVaccines.map((v) => <option key={v.id} value={v.id}>{v.name}{v.brand ? ` · ${v.brand}` : ""}</option>)}
-              </select>
-              <input className="rounded-xl border px-3 py-2" placeholder="Lot Number / Batch" value={lotForm.lotNumber} onChange={(e) => setLotForm({ ...lotForm, lotNumber: e.target.value })} />
-              <div className="grid gap-3 md:grid-cols-3">
-                <input type="date" className="rounded-xl border px-3 py-2" value={lotForm.expiryDate} onChange={(e) => setLotForm({ ...lotForm, expiryDate: e.target.value })} />
-                <input type="number" className="rounded-xl border px-3 py-2" placeholder="Jumlah awal" value={lotForm.stockInitial} onChange={(e) => setLotForm({ ...lotForm, stockInitial: Number(e.target.value || 0) })} />
-                <input type="number" className="rounded-xl border px-3 py-2" placeholder="Tambahan stok" value={lotForm.stockAdded} onChange={(e) => setLotForm({ ...lotForm, stockAdded: Number(e.target.value || 0) })} />
-              </div>
-              <textarea className="rounded-xl border px-3 py-2" placeholder="Keterangan inventory / stok" value={lotForm.inventoryNotes} onChange={(e) => setLotForm({ ...lotForm, inventoryNotes: e.target.value })} />
-              <button onClick={submitLot} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">Simpan Lot Number</button>
+          {selectedImportProductKey ? (
+            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+              Data produk + lot sudah diambil dari file import. Lanjutkan isi Produsen, Harga Perusahaan, Jumlah Dosis, Next Dose, lalu simpan.
             </div>
-          </details>
-        </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-5 xl:grid-cols-2">
+            <div className="grid content-start gap-3">
+              <div className="text-sm font-bold text-slate-700">Data Produk</div>
+              <input
+                className="rounded-xl border px-3 py-2"
+                placeholder="Nama vaksin / produk"
+                value={vaccineForm.name}
+                onChange={(e) => setVaccineForm({ ...vaccineForm, name: e.target.value })}
+              />
+              <input
+                className="rounded-xl border px-3 py-2"
+                placeholder="Brand / Produsen"
+                value={vaccineForm.brand}
+                onChange={(e) => setVaccineForm({ ...vaccineForm, brand: e.target.value })}
+              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Kategori harga, contoh: Harga Perusahaan"
+                  value={vaccineForm.priceCategory}
+                  onChange={(e) => setVaccineForm({ ...vaccineForm, priceCategory: e.target.value })}
+                />
+                <input
+                  type="number"
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Harga produk"
+                  value={vaccineForm.price}
+                  onChange={(e) => setVaccineForm({ ...vaccineForm, price: e.target.value })}
+                />
+              </div>
+              <textarea
+                className="rounded-xl border px-3 py-2"
+                placeholder="Deskripsi / keterangan produk"
+                value={vaccineForm.description}
+                onChange={(e) => setVaccineForm({ ...vaccineForm, description: e.target.value })}
+              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  type="number"
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Jumlah dosis"
+                  value={vaccineForm.doseCount}
+                  onChange={(e) => setVaccineForm({ ...vaccineForm, doseCount: Number(e.target.value || 1) })}
+                />
+                <input
+                  type="number"
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Next dose hari"
+                  value={vaccineForm.defaultNextDoseDays}
+                  onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid content-start gap-3">
+              <div className="text-sm font-bold text-slate-700">Lot & Stok</div>
+
+              {selectedImportLots.length > 1 ? (
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={lotForm.lotNumber}
+                  onChange={(e) => applyImportLot(selectedImportProductKey, e.target.value)}
+                >
+                  {selectedImportLots.map((row) => (
+                    <option key={row.lotNumber} value={row.lotNumber}>
+                      {row.lotNumber} · {Array.from(row.locations).join(", ")} · stok {row.availableQuantity}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+
+              <input
+                className="rounded-xl border px-3 py-2"
+                placeholder="Lot Number / Batch"
+                value={lotForm.lotNumber}
+                onChange={(e) => setLotForm({ ...lotForm, lotNumber: e.target.value })}
+              />
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Expired
+                  <input
+                    type="date"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    value={lotForm.expiryDate}
+                    onChange={(e) => setLotForm({ ...lotForm, expiryDate: e.target.value })}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Stok fisik / hasil import
+                  <input
+                    type="number"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    placeholder="Stok fisik"
+                    value={lotForm.stockPhysicalCount}
+                    onChange={(e) => setLotForm({ ...lotForm, stockPhysicalCount: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Jumlah awal
+                  <input
+                    type="number"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    value={lotForm.stockInitial}
+                    onChange={(e) => setLotForm({ ...lotForm, stockInitial: Number(e.target.value || 0) })}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Tambahan stok
+                  <input
+                    type="number"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    value={lotForm.stockAdded}
+                    onChange={(e) => setLotForm({ ...lotForm, stockAdded: Number(e.target.value || 0) })}
+                  />
+                </label>
+              </div>
+
+              <textarea
+                className="rounded-xl border px-3 py-2"
+                placeholder="Keterangan inventory / stok"
+                value={lotForm.inventoryNotes}
+                onChange={(e) => setLotForm({ ...lotForm, inventoryNotes: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={submitProductAndLot}
+            className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700"
+          >
+            {selectedMasterVaccineId ? "Simpan Perubahan Produk & Lot" : "Simpan Produk & Lot"}
+          </button>
+        </section>
 
         <section className="mt-6 rounded-2xl border">
           <div className="border-b bg-slate-50 p-4 font-bold">Mapping Produk Import → Master Vaksin</div>

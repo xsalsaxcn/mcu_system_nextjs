@@ -369,6 +369,33 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (action === "update-vaccine") {
+    const id = toInt(body.id || body.vaccineId, 0);
+    const name = clean(body.name);
+    if (!id) return fail("Master vaksin wajib dipilih.");
+    if (!name) return fail("Nama vaksin wajib diisi.");
+
+    const result = await supabase
+      .from("vaccination_vaccines")
+      .update({
+        name,
+        brand: clean(body.brand) || null,
+        description: clean(body.description) || null,
+        price: body.price === "" || body.price == null ? null : Number(body.price),
+        price_category: clean(body.priceCategory) || clean(body.price_category) || null,
+        dose_count: Math.max(1, toInt(body.doseCount, 1)),
+        default_next_dose_days: body.defaultNextDoseDays === "" || body.defaultNextDoseDays == null ? null : toInt(body.defaultNextDoseDays, 0),
+        active: body.active !== false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+    return ok({ message: "Master vaksin berhasil diperbarui.", vaccine: result.data });
+  }
+
   if (action === "create-vaccine") {
     const name = clean(body.name);
     if (!name) return fail("Nama vaksin wajib diisi.");
@@ -425,6 +452,59 @@ export async function POST(req: NextRequest) {
     if (movements.length) await supabase.from("vaccination_inventory_movements").insert(movements);
 
     return ok({ message: "Lot number berhasil dibuat.", lot: result.data });
+  }
+
+  if (action === "update-lot-details") {
+    const lotId = toInt(body.lotId || body.id, 0);
+    const lotNumber = clean(body.lotNumber);
+    if (!lotId) return fail("Lot wajib dipilih.");
+    if (!lotNumber) return fail("Lot Number wajib diisi.");
+
+    const beforeResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,stock_added")
+      .eq("id", lotId)
+      .maybeSingle();
+
+    if (beforeResult.error) return fail(beforeResult.error.message, 500);
+    if (!beforeResult.data) return fail("Lot tidak ditemukan.", 404);
+
+    const beforeAdded = Number(beforeResult.data.stock_added || 0);
+    const nextAdded = Math.max(0, toInt(body.stockAdded, beforeAdded));
+
+    const result = await supabase
+      .from("vaccination_vaccine_lots")
+      .update({
+        lot_number: lotNumber,
+        expiry_date: clean(body.expiryDate) || null,
+        stock_added: nextAdded,
+        stock_physical_count: body.stockPhysicalCount === "" || body.stockPhysicalCount == null
+          ? null
+          : Math.max(0, toInt(body.stockPhysicalCount, 0)),
+        inventory_notes: clean(body.inventoryNotes) || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lotId)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    const delta = nextAdded - beforeAdded;
+    if (delta !== 0) {
+      await supabase.from("vaccination_inventory_movements").insert({
+        vaccine_id: beforeResult.data.vaccine_id || result.data.vaccine_id,
+        lot_id: lotId,
+        movement_type: delta > 0 ? "stock_in" : "adjustment_minus",
+        qty: delta,
+        reference_type: "vaccine_lot",
+        reference_id: lotId,
+        notes: clean(body.inventoryNotes) || "Update detail lot",
+        created_by: (user as any).email || (user as any).name || (user as any).id || "system",
+      });
+    }
+
+    return ok({ message: "Produk & detail lot berhasil diperbarui.", lot: result.data });
   }
 
   if (action === "update-lot-inventory") {
