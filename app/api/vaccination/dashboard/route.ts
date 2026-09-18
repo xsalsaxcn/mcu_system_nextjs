@@ -4,6 +4,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 import * as XLSX from "xlsx";
 
 // VACCINATION_ROLE_GUARD_V150
+// V153_18_ISERVE_PHONE_AND_PRODUCT_MAPPING_SAFE
 export const dynamic = "force-dynamic";
 
 function csvEscape(value: any) {
@@ -89,6 +90,20 @@ function firstValue(...values: any[]) {
     if (text) return text;
   }
   return "";
+}
+
+function normalizeIndonesianPhone(value: any) {
+  let digits = clean(value).replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (digits.startsWith("62")) {
+    digits = digits.slice(2).replace(/^0+/, "");
+    return digits ? `0${digits}` : "";
+  }
+
+  if (digits.startsWith("0")) return digits;
+  if (digits.startsWith("8")) return `0${digits}`;
+  return digits;
 }
 
 function jakartaDateKey(value: any) {
@@ -317,6 +332,30 @@ export async function GET(req: NextRequest) {
       registrations.map((registration: any) => [Number(registration.id), registration])
     );
 
+    const mappedProductByVaccineId = new Map<number, string>();
+    const recordVaccineIds = Array.from(
+      new Set(records.map((record: any) => Number(record.vaccine_id || 0)).filter(Boolean))
+    );
+
+    if (recordVaccineIds.length) {
+      const productMappingResult = await supabase
+        .from("vaccination_product_mappings")
+        .select("vaccine_id,external_product_label,external_product_name,active,updated_at")
+        .eq("source_system", "ODOO_STOCK_QUANT")
+        .eq("active", true)
+        .in("vaccine_id", recordVaccineIds)
+        .order("updated_at", { ascending: false });
+
+      if (!productMappingResult.error) {
+        for (const mapping of productMappingResult.data || []) {
+          const vaccineId = Number(mapping.vaccine_id || 0);
+          if (!vaccineId || mappedProductByVaccineId.has(vaccineId)) continue;
+          const label = firstValue(mapping.external_product_label, mapping.external_product_name);
+          if (label) mappedProductByVaccineId.set(vaccineId, label);
+        }
+      }
+    }
+
     const iserveRows = records
       .filter((record: any) => allowedRegistrationIds.has(Number(record.registration_id)))
       .filter((record: any) => !["CANCELLED", "VOID"].includes(clean(record.status).toUpperCase()))
@@ -347,7 +386,7 @@ export async function GET(req: NextRequest) {
             participant.passport_number,
             participant.passport
           ),
-          patient_mobile: firstValue(
+          patient_mobile: normalizeIndonesianPhone(firstValue(
             registration.phone,
             registration.patient_mobile,
             registration.mobile,
@@ -355,8 +394,11 @@ export async function GET(req: NextRequest) {
             participant.no_hp,
             participant.mobile,
             participant.phone_number
+          )),
+          "vaccination/product": firstValue(
+            mappedProductByVaccineId.get(Number(record.vaccine_id || 0)),
+            record.vaccine_name
           ),
-          "vaccination/product": firstValue(record.vaccine_name),
           "vaccination lot": firstValue(record.lot_number),
           "vaccination dose": Math.max(1, Number(record.dose_number || 1)),
           "vaccination quantity": 1,

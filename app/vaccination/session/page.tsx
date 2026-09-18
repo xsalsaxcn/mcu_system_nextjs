@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
+// V153_18_IMPORTED_PRODUCT_LOT_SESSION_SAFE
 type SourceItem = {
   id: number;
   name: string;
@@ -74,6 +75,9 @@ export default function VaccinationSessionPage() {
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
+  const [productMappings, setProductMappings] = useState<any[]>([]);
+  const [mappingReady, setMappingReady] = useState(true);
+  const [mappingMessage, setMappingMessage] = useState("");
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [editingSession, setEditingSession] = useState<any | null>(null);
@@ -168,6 +172,29 @@ export default function VaccinationSessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionVaccines, vaccines, lots]);
 
+  const importedVaccineIds = useMemo(() => {
+    return new Set(
+      productMappings
+        .filter((mapping) => mapping.active !== false)
+        .map((mapping) => String(mapping.vaccine_id || ""))
+        .filter(Boolean),
+    );
+  }, [productMappings]);
+
+  const selectableVaccines = useMemo(() => {
+    if (!mappingReady) return vaccines;
+
+    const grandfatheredIds = new Set(
+      sessionVaccines.map((item) => String(item.vaccineId || "")).filter(Boolean),
+    );
+
+    return vaccines.filter(
+      (vaccine) =>
+        importedVaccineIds.has(String(vaccine.id)) ||
+        grandfatheredIds.has(String(vaccine.id)),
+    );
+  }, [vaccines, importedVaccineIds, mappingReady, sessionVaccines]);
+
   const filteredLots = useMemo(() => {
     return lots.filter(
       (lot) =>
@@ -175,11 +202,26 @@ export default function VaccinationSessionPage() {
     );
   }, [lots, draft.vaccineId]);
 
+  function importedProductLabel(vaccineId: string) {
+    const mapping = productMappings.find(
+      (item) =>
+        item.active !== false &&
+        String(item.vaccine_id) === String(vaccineId),
+    );
+    return String(
+      mapping?.external_product_label ||
+        mapping?.external_product_name ||
+        "",
+    ).trim();
+  }
+
   function vaccineName(vaccineId: string) {
     const vaccine = vaccines.find(
       (item) => String(item.id) === String(vaccineId),
     );
     if (!vaccine) return "Vaksin";
+    const importedLabel = importedProductLabel(vaccineId);
+    if (importedLabel) return importedLabel;
     return `${vaccine.name}${vaccine.brand ? ` · ${vaccine.brand}` : ""}`;
   }
 
@@ -220,6 +262,11 @@ export default function VaccinationSessionPage() {
 
     if (!draft.lotId) {
       setError("Pilih lot number terlebih dahulu.");
+      return;
+    }
+
+    if (mappingReady && !importedVaccineIds.has(String(draft.vaccineId))) {
+      setError("Produk baru untuk session harus berasal dari hasil Import Produk & Lot di Master Vaksin.");
       return;
     }
 
@@ -419,6 +466,9 @@ export default function VaccinationSessionPage() {
     if (json.ok) {
       setVaccines((json.vaccines || []).filter((v: any) => v.active !== false));
       setLots((json.lots || []).filter((lot: any) => lot.active !== false));
+      setProductMappings((json.productMappings || []).filter((mapping: any) => mapping.active !== false));
+      setMappingReady(json.mappingReady !== false);
+      setMappingMessage(json.mappingMessage || "");
     }
   }
 
@@ -848,6 +898,16 @@ export default function VaccinationSessionPage() {
             lokasi yang dibuat.
           </p>
 
+          {mappingReady ? (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+              Produk yang dapat ditambahkan ke session dibatasi ke produk aktif hasil Import Produk & Lot di Master Vaksin. Lot akan otomatis difilter sesuai produk yang dipilih.
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              {mappingMessage || "Mapping produk import belum aktif. Jalankan SQL V153.18. Daftar lama sementara tetap ditampilkan agar session existing tidak rusak."}
+            </div>
+          )}
+
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">
             <select
               className="rounded-xl border px-3 py-2.5"
@@ -857,12 +917,15 @@ export default function VaccinationSessionPage() {
               }
             >
               <option value="">Pilih vaksin</option>
-              {vaccines.map((vaccine) => (
-                <option key={vaccine.id} value={vaccine.id}>
-                  {vaccine.name}
-                  {vaccine.brand ? ` · ${vaccine.brand}` : ""}
-                </option>
-              ))}
+              {selectableVaccines.map((vaccine) => {
+                const importedLabel = importedProductLabel(String(vaccine.id));
+                return (
+                  <option key={vaccine.id} value={vaccine.id}>
+                    {importedLabel || vaccine.name}
+                    {!importedLabel && vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                  </option>
+                );
+              })}
             </select>
 
             <select
@@ -873,9 +936,11 @@ export default function VaccinationSessionPage() {
               <option value="">Pilih lot number</option>
               {filteredLots.map((lot) => {
                 const remaining =
-                  Number(lot.stock_initial || 0) +
-                  Number(lot.stock_added || 0) -
-                  Number(lot.stock_used || 0);
+                  lot.stock_physical_count == null
+                    ? Number(lot.stock_initial || 0) +
+                      Number(lot.stock_added || 0) -
+                      Number(lot.stock_used || 0)
+                    : Number(lot.stock_physical_count || 0);
                 return (
                   <option key={lot.id} value={lot.id}>
                     {lot.vaccine?.name || "Vaksin"} · Lot {lot.lot_number} ·
