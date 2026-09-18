@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 
 // VACCINATION_ROLE_GUARD_V150
 // V153_18_ISERVE_PHONE_AND_PRODUCT_MAPPING_SAFE
+// V153_24_ISERVE_PHONE_8XXX_EMPLOYEE_ID_AS_PASSPORT_SAFE
 export const dynamic = "force-dynamic";
 
 function csvEscape(value: any) {
@@ -76,7 +77,7 @@ const ISERVE_NOTES = [
   ["name", "Nama pasien (WAJIB)"],
   ["street", "Alamat pasien"],
   ["nik", "NIK pasien (wajib jika passport kosong)"],
-  ["passport_number", "Passport pasien (wajib jika NIK kosong)"],
+  ["passport_number", "BINUSIAN ID / NIK Karyawan (dipakai sebagai passport_number untuk import iServe)"],
   ["patient_mobile", "Nomor HP pasien (WAJIB)"],
   ["vaccination/product", "HARUS sama dengan vaccination di wizard"],
   ["vaccination lot", "HARUS salah satu lot yang dipilih di wizard"],
@@ -92,17 +93,19 @@ function firstValue(...values: any[]) {
   return "";
 }
 
-function normalizeIndonesianPhone(value: any) {
+function normalizeIservePhone(value: any) {
   let digits = clean(value).replace(/\D/g, "");
   if (!digits) return "";
 
-  if (digits.startsWith("62")) {
-    digits = digits.slice(2).replace(/^0+/, "");
-    return digits ? `0${digits}` : "";
-  }
+  // iServe requires Indonesian mobile without +62 and without the leading 0.
+  // Examples:
+  // +62 (856) 7015757 -> 8567015757
+  // 085137908391      -> 85137908391
+  // 82213702347       -> 82213702347
+  if (digits.startsWith("0062")) digits = digits.slice(4);
+  else if (digits.startsWith("62")) digits = digits.slice(2);
 
-  if (digits.startsWith("0")) return digits;
-  if (digits.startsWith("8")) return `0${digits}`;
+  digits = digits.replace(/^0+/, "");
   return digits;
 }
 
@@ -380,13 +383,17 @@ export async function GET(req: NextRequest) {
             participant.ktp,
             participant.nik_ktp
           ),
+          // iServe import: use BINUSIAN ID / NIK Karyawan as passport_number.
+          // Do not use patient passport and do not fall back to KTP NIK here.
           passport_number: firstValue(
-            registration.passport_number,
-            registration.passport,
-            participant.passport_number,
-            participant.passport
+            registration.employee_id,
+            registration.binusian_id,
+            registration.nik_karyawan,
+            participant.employee_id,
+            participant.binusian_id,
+            participant.nik_karyawan
           ),
-          patient_mobile: normalizeIndonesianPhone(firstValue(
+          patient_mobile: normalizeIservePhone(firstValue(
             registration.phone,
             registration.patient_mobile,
             registration.mobile,
