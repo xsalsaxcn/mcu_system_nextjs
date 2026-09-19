@@ -1,6 +1,7 @@
 "use client";
 
 // V153_25_ISERVE_BENEFIT_COMBINATION_EXPORT_SAFE
+// V153_26_ISERVE_COMBINATION_DROPDOWN_SAFE
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -201,14 +202,6 @@ export default function VaccinationDashboardPage() {
     ) || null;
   }, [iserveCombinations, selectedBenefitKeys]);
 
-  function toggleBenefit(key: string) {
-    setSelectedBenefitKeys((current) =>
-      current.includes(key)
-        ? current.filter((item) => item !== key)
-        : [...current, key]
-    );
-  }
-
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -352,7 +345,7 @@ export default function VaccinationDashboardPage() {
                 <div>
                   <h3 className="font-black text-violet-900">Export iServe per Layanan / Benefit</h3>
                   <p className="mt-1 text-xs text-slate-600">
-                    Satu peserta dapat memiliki lebih dari 1 benefit. Pilih beberapa produk atau klik kombinasi yang sudah terdeteksi.
+                    Satu peserta dapat memiliki lebih dari 1 benefit. Pilih kombinasi layanan dari dropdown yang terdeteksi otomatis.
                     Export membuat 1 row per peserta; Product, Lot, Dose, dan Quantity ditulis per layanan dalam baris yang sejajar.
                   </p>
                 </div>
@@ -366,66 +359,37 @@ export default function VaccinationDashboardPage() {
               </div>
 
               <div className="mt-4">
-                <div className="text-xs font-black uppercase tracking-wide text-slate-500">Pilih Produk / Benefit</div>
-                {iserveMetaLoading ? (
-                  <div className="mt-2 text-sm text-slate-500">Membaca benefit dan kombinasi...</div>
-                ) : iserveProducts.length ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {iserveProducts.map((product: any) => (
-                      <label
-                        key={product.key}
-                        className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
-                          selectedBenefitKeys.includes(product.key)
-                            ? "border-violet-400 bg-violet-100 text-violet-900"
-                            : "bg-white text-slate-700"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedBenefitKeys.includes(product.key)}
-                          onChange={() => toggleBenefit(product.key)}
-                        />
-                        <span>{product.label}</span>
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600">
-                          {product.participant_count}
-                        </span>
-                      </label>
-                    ))}
+                <label className="block">
+                  <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+                    Pilih Kombinasi Benefit
                   </div>
-                ) : (
-                  <div className="mt-2 text-sm text-slate-500">Belum ada layanan vaksin selesai pada filter/rentang tanggal ini.</div>
-                )}
-              </div>
 
-              <div className="mt-4">
-                <div className="text-xs font-black uppercase tracking-wide text-slate-500">Kombinasi Benefit yang Terdeteksi</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {iserveCombinations.map((combo: any) => {
-                    const active = sameBenefitKeys(combo.benefit_keys || [], selectedBenefitKeys);
-                    return (
-                      <button
-                        type="button"
-                        key={combo.key}
-                        onClick={() => setSelectedBenefitKeys(combo.benefit_keys || [])}
-                        className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${
-                          active
-                            ? "border-violet-500 bg-violet-600 text-white"
-                            : combo.benefit_count > 1
-                              ? "border-violet-200 bg-violet-50 text-violet-800"
-                              : "bg-white text-slate-700"
-                        }`}
-                        title={(combo.participant_names || []).join(", ")}
-                      >
-                        <span>{combo.label}</span>
-                        <span className={`ml-2 rounded-full px-2 py-0.5 ${
-                          active ? "bg-white/20" : "bg-slate-100 text-slate-600"
-                        }`}>
-                          {combo.participant_count} peserta
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                  {iserveMetaLoading ? (
+                    <div className="mt-2 text-sm text-slate-500">Membaca kombinasi benefit...</div>
+                  ) : iserveProducts.length && iserveCombinations.length ? (
+                    <select
+                      value={selectedIserveCombination?.key || ""}
+                      onChange={(e) => {
+                        const combo = iserveCombinations.find(
+                          (item: any) => String(item.key || "") === e.target.value
+                        );
+                        setSelectedBenefitKeys(combo?.benefit_keys || []);
+                      }}
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400 md:max-w-3xl"
+                    >
+                      <option value="">Pilih kombinasi layanan / benefit</option>
+                      {iserveCombinations.map((combo: any) => (
+                        <option key={combo.key} value={combo.key}>
+                          {combo.label} — {combo.participant_count} peserta
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="mt-2 text-sm text-slate-500">
+                      Belum ada kombinasi layanan vaksin selesai pada filter/rentang tanggal ini.
+                    </div>
+                  )}
+                </label>
               </div>
 
               {selectedBenefitKeys.length ? (
