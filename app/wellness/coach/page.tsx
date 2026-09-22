@@ -303,10 +303,15 @@ export default function WellnessCoachPortalPage() {
   async function loadDashboard(options?: {
     keepSelection?: boolean;
     silent?: boolean;
+    forceFresh?: boolean;
+    skipSnapshotRefresh?: boolean;
   }) {
     if (!options?.silent) setLoading(true);
 
-    const result = await fetch("/api/wellness/coach/dashboard", {
+    const dashboardUrl = options?.forceFresh
+      ? "/api/wellness/coach/dashboard?fresh=1"
+      : "/api/wellness/coach/dashboard";
+    const result = await fetch(dashboardUrl, {
       cache: "no-store",
     })
       .then((response) => response.json())
@@ -318,6 +323,14 @@ export default function WellnessCoachPortalPage() {
     if (result.ok) {
       setDashboard(result);
       if (!options?.silent) setMessage("Portal Coach aktif.");
+
+      // WELLNESS_COACH_SNAPSHOT_PERFORMANCE_V1
+      // Initial/login paint uses the stored canonical snapshot first. Then refresh
+      // the same canonical engine in the background and silently reconcile only if
+      // a newer snapshot was actually written. No visual component/rule is changed.
+      if (!options?.skipSnapshotRefresh && !options?.forceFresh) {
+        void refreshCoachSnapshotAfterPaint();
+      }
 
       if (options?.keepSelection && selectedParticipant?.id) {
         const fresh = (result.participants || []).find(
@@ -332,6 +345,23 @@ export default function WellnessCoachPortalPage() {
 
     if (!options?.silent) setLoading(false);
     return result;
+  }
+
+  async function refreshCoachSnapshotAfterPaint() {
+    const refresh = await fetch("/api/wellness/coach/snapshot-refresh", {
+      method: "POST",
+      cache: "no-store",
+    })
+      .then((response) => response.json())
+      .catch(() => null);
+
+    if (Number(refresh?.snapshot?.updated || 0) > 0) {
+      await loadDashboard({
+        keepSelection: true,
+        silent: true,
+        skipSnapshotRefresh: true,
+      });
+    }
   }
 
   async function submitLogin() {
@@ -711,6 +741,8 @@ export default function WellnessCoachPortalPage() {
       const refreshed = await loadDashboard({
         keepSelection: false,
         silent: true,
+        forceFresh: true,
+        skipSnapshotRefresh: true,
       });
       const freshParticipant = (refreshed?.participants || []).find(
         (item: any) => Number(item.id) === Number(selectedParticipant.id),
@@ -1740,7 +1772,13 @@ export default function WellnessCoachPortalPage() {
                           icon="refresh"
                           label="Refresh Data"
                           tone="slate"
-                          onClick={() => loadDashboard({ keepSelection: true })}
+                          onClick={() =>
+                            loadDashboard({
+                              keepSelection: true,
+                              forceFresh: true,
+                              skipSnapshotRefresh: true,
+                            })
+                          }
                         />
                       </div>
                     </section>
@@ -1772,7 +1810,11 @@ export default function WellnessCoachPortalPage() {
                       <button
                         type="button"
                         onClick={() =>
-                          loadDashboard({ keepSelection: true })
+                          loadDashboard({
+                            keepSelection: true,
+                            forceFresh: true,
+                            skipSnapshotRefresh: true,
+                          })
                         }
                         className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-black text-slate-700 shadow-sm"
                         aria-label="Refresh peserta"

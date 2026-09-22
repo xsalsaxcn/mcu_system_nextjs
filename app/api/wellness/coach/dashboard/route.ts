@@ -5,6 +5,10 @@ import { createClient } from "@supabase/supabase-js";
 import { postSupportWebhook } from "@/lib/wellness/supportServer";
 import { filterActivityRowsByFitnessSource, loadParticipantControlMap } from "@/lib/wellness/participantControls";
 import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreakServer";
+import {
+  loadCoachSnapshotMap,
+  upsertCoachSnapshots,
+} from "@/lib/wellness/coachSnapshotServer";
 import { loadCanonicalNutritionHistories } from "@/lib/wellness/nutritionHistory";
 import {
   buildCoachGroupUnitMap,
@@ -579,6 +583,11 @@ export async function GET(request: NextRequest) {
     );
     const today = jakartaDate();
     const fromDate = jakartaDate(-6);
+    // WELLNESS_COACH_SNAPSHOT_PERFORMANCE_V1
+    // fresh=1 is reserved for explicit/manual reconciliation. Normal login prefers
+    // the precomputed canonical payload and refreshes it after first paint.
+    const forceFreshSnapshotV1 =
+      request.nextUrl.searchParams.get("fresh") === "1";
 
     let activityRows: any[] = [];
     let activityHistoryRows: any[] = [];
@@ -709,13 +718,33 @@ export async function GET(request: NextRequest) {
     });
 
     // WELLNESS_COACH_DASHBOARD_CANONICAL_WORKOUT_STATUS_V126M92_2
-    // Read the same canonical streak source used by Participant Portal / detail.
-    // Failure is isolated per participant and falls back to the existing dashboard
-    // flow, so previously working status/data is never removed.
+    // WELLNESS_COACH_SNAPSHOT_PERFORMANCE_V1
+    // The canonical engine is unchanged. We only reuse a same-day payload that was
+    // previously produced by loadParticipantCanonicalStreak(). If snapshot storage
+    // is unavailable/missing, this falls back to the exact previous live path.
+    const snapshotReadV1 = forceFreshSnapshotV1
+      ? { map: new Map<number, any>(), available: true, error: null }
+      : await loadCoachSnapshotMap({
+          supabase,
+          participantIds,
+          requireToday: true,
+        });
+    const liveSnapshotEntriesV1: Array<{
+      participantId: number;
+      canonicalPayload: any;
+    }> = [];
+    let snapshotHitsV1 = 0;
+
     const canonicalStreakEntriesV126M92_2 = await Promise.all(
       participants.map(async (participantRow: any) => {
         const participantId = getParticipantId(participantRow);
         if (!participantId) return [0, null] as const;
+
+        const cachedV1 = snapshotReadV1.map.get(Number(participantId));
+        if (cachedV1?.canonical_payload) {
+          snapshotHitsV1 += 1;
+          return [Number(participantId), cachedV1.canonical_payload] as const;
+        }
 
         try {
           const payload = await loadParticipantCanonicalStreak({
@@ -727,12 +756,26 @@ export async function GET(request: NextRequest) {
                 participantRow?.wellness_control,
             },
           });
+          liveSnapshotEntriesV1.push({
+            participantId: Number(participantId),
+            canonicalPayload: payload,
+          });
           return [Number(participantId), payload] as const;
         } catch {
           return [Number(participantId), null] as const;
         }
       }),
     );
+
+    // Warm the additive Wellness-only cache after a live fallback/explicit refresh.
+    // A cache-write failure never changes the dashboard response.
+    if (liveSnapshotEntriesV1.length > 0) {
+      await upsertCoachSnapshots({
+        supabase,
+        entries: liveSnapshotEntriesV1,
+      }).catch(() => null);
+    }
+
     const canonicalStreakByParticipantV126M92_2 = new Map<number, any>(
       canonicalStreakEntriesV126M92_2.filter(([participantId]) => participantId > 0),
     );
@@ -1207,6 +1250,13 @@ export async function GET(request: NextRequest) {
       notes: noteRows.filter((note) => !isChatNote(note)),
       today,
       monitoring_period: { from: fromDate, to: today, days: 7 },
+      // Non-visual diagnostics for rollout verification only.
+      performance_snapshot: {
+        enabled: snapshotReadV1.available !== false,
+        hits: snapshotHitsV1,
+        live_fallbacks: liveSnapshotEntriesV1.length,
+        forced_fresh: forceFreshSnapshotV1,
+      },
     });
   } catch (error: any) {
     return NextResponse.json(
