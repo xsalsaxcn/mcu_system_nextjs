@@ -6,10 +6,8 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function clampInterval(value: any) {
-  const n = Math.trunc(Number(value || 45));
-  if (!Number.isFinite(n)) return 45;
-  return Math.min(60, Math.max(30, n));
+function clampInterval(_value: any) {
+  return 60;
 }
 
 function rollingPayload(event: any) {
@@ -119,7 +117,7 @@ export async function POST(req: NextRequest) {
           session_id: sessionId,
           public_token: randomBytes(18).toString("hex"),
           qr_secret: randomBytes(32).toString("hex"),
-          qr_interval_seconds: clampInterval(body.intervalSeconds),
+          qr_interval_seconds: 60,
           queue_prefix: clean(body.queuePrefix) || "Q",
           status: "OPEN",
         })
@@ -136,10 +134,19 @@ export async function POST(req: NextRequest) {
       } else {
         existing = { data: insertResult.data, error: null } as any;
       }
+    } else if (Number(existing.data.qr_interval_seconds) !== 60) {
+      const updateInterval = await supabase
+        .from("vaccination_onsite_queue_events")
+        .update({ qr_interval_seconds: 60, updated_at: new Date().toISOString() })
+        .eq("id", existing.data.id)
+        .select("*")
+        .single();
+      if (updateInterval.error) return fail(updateInterval.error.message, 500);
+      existing = { data: updateInterval.data, error: null } as any;
     }
 
     return ok({
-      message: "Mode Onsite Rolling QR aktif.",
+      message: "Mode Onsite Rolling QR 60 detik aktif. Satu QR dapat dipakai banyak peserta selama masih berlaku.",
       event: existing.data,
       rolling: rollingPayload(existing.data),
     });
@@ -166,13 +173,14 @@ export async function POST(req: NextRequest) {
     if (result.error) return fail(result.error.message, 500);
     const payload = result.data || {};
     if (payload?.ok === false) {
-      if (payload?.code === "ACTIVE_CURRENT") {
-        return fail("Masih ada nomor yang sedang dipanggil/diproses. Selesaikan atau skip lebih dulu.", 409, payload);
-      }
-      if (payload?.code === "EMPTY") return fail("Tidak ada antrean menunggu.", 404, payload);
+      if (payload?.code === "EMPTY") return fail("Tidak ada antrean aktif maupun menunggu.", 404, payload);
       return fail(payload?.message || "Gagal memanggil antrean berikutnya.", 400, payload);
     }
-    return ok({ message: `Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.`, ...payload });
+    if (payload?.code === "COMPLETED_ONLY") {
+      return ok({ message: `${payload?.completed_entry?.queue_number || "Antrean aktif"} otomatis DONE. Tidak ada antrean berikutnya.`, ...payload });
+    }
+    const completed = payload?.completed_entry?.queue_number ? `${payload.completed_entry.queue_number} otomatis DONE. ` : "";
+    return ok({ message: `${completed}Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.`, ...payload });
   }
 
   if (!eventId || !entryId) return fail("eventId dan entryId wajib diisi.");
@@ -202,12 +210,11 @@ export async function POST(req: NextRequest) {
 
   const nextStatus =
     action === "call" ? "CALLED" :
-    action === "start" ? "IN_PROGRESS" :
     action === "skip" ? "SKIPPED" :
     action === "done" ? "DONE" : "";
   if (!nextStatus) return fail("Action tidak dikenali.");
 
-  if (["call", "start"].includes(action)) {
+  if (action === "call") {
     const activeResult = await supabase
       .from("vaccination_onsite_queue_entries")
       .select("id,queue_number,queue_status")
@@ -227,7 +234,6 @@ export async function POST(req: NextRequest) {
     updated_at: now,
   };
   if (nextStatus === "CALLED") updatePayload.called_at = now;
-  if (nextStatus === "IN_PROGRESS") updatePayload.started_at = now;
   if (nextStatus === "SKIPPED") updatePayload.skipped_at = now;
   if (nextStatus === "DONE") updatePayload.finished_at = now;
 

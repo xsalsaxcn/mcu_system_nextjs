@@ -29,8 +29,8 @@ function safeEqual(a: string, b: string) {
 }
 
 function clampInterval(value: any) {
-  const n = Math.trunc(Number(value || 45));
-  return Number.isFinite(n) ? Math.min(60, Math.max(30, n)) : 45;
+  const n = Math.trunc(Number(value || 60));
+  return Number.isFinite(n) ? Math.min(60, Math.max(60, n)) : 60;
 }
 
 function rollingSignature(event: any, slot: number) {
@@ -43,8 +43,10 @@ function rollingSignature(event: any, slot: number) {
 function validateRolling(event: any, slot: number, sig: string) {
   if (!Number.isFinite(slot) || slot < 1 || !sig) return false;
   const interval = clampInterval(event.qr_interval_seconds);
-  const currentSlot = Math.floor(Math.floor(Date.now() / 1000) / interval);
-  if (slot < currentSlot - 1 || slot > currentSlot) return false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const currentSlot = Math.floor(nowSec / interval);
+  const inBoundaryGrace = slot === currentSlot - 1 && nowSec % interval <= 10;
+  if (slot !== currentSlot && !inBoundaryGrace) return false;
   return safeEqual(rollingSignature(event, slot), sig);
 }
 
@@ -72,6 +74,14 @@ function validateJoinToken(event: any, token: string) {
 
 function employeeKey(value: any) {
   return clean(value).toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizePhone(value: any) {
+  let digits = clean(value).replace(/\D/g, "");
+  if (digits.startsWith("0062")) digits = digits.slice(4);
+  else if (digits.startsWith("62")) digits = digits.slice(2);
+  digits = digits.replace(/^0+/, "");
+  return digits ? `0${digits}` : "";
 }
 
 function publicEvent(event: any, session: any) {
@@ -169,12 +179,12 @@ export async function POST(req: NextRequest) {
   const joinToken = clean(body.joinToken || body.join_token);
   const participantName = clean(body.participantName || body.participant_name);
   const employeeId = clean(body.employeeId || body.employee_id);
-  const email = clean(body.email).toLowerCase();
+  const phone = normalizePhone(body.phone || body.mobile || body.patient_mobile);
 
   if (!eventToken || !joinToken) return fail("Akses QR onsite tidak valid.");
   if (!participantName) return fail("Nama lengkap wajib diisi.");
   if (!employeeId) return fail("NIK Karyawan wajib diisi.");
-  if (!email || !email.includes("@")) return fail("Email wajib diisi dengan format yang valid.");
+  if (!/^08\d{7,13}$/.test(phone)) return fail("No HP wajib diisi dengan format Indonesia yang valid, contoh 081234567890.");
 
   const supabase = supabaseAdmin();
   const eventResult = await supabase
@@ -187,12 +197,12 @@ export async function POST(req: NextRequest) {
   if (clean(eventResult.data.status).toUpperCase() !== "OPEN") return fail("Onsite queue sedang ditutup.", 403);
   if (!validateJoinToken(eventResult.data, joinToken)) return fail("Sesi pengisian sudah kedaluwarsa. Scan ulang QR onsite.", 410);
 
-  const result = await supabase.rpc("vaccination_onsite_claim_queue", {
+  const result = await supabase.rpc("vaccination_onsite_claim_queue_v2", {
     p_event_id: eventResult.data.id,
     p_participant_name: participantName,
     p_employee_id: employeeId,
     p_employee_id_key: employeeKey(employeeId),
-    p_email: email,
+    p_phone: phone,
   });
   if (result.error) return fail(result.error.message, 500);
 

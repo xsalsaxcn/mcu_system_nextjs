@@ -6,7 +6,7 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
   const [joinToken, setJoinToken] = useState("");
   const [name, setName] = useState("");
   const [employeeId, setEmployeeId] = useState("");
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -36,7 +36,7 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
       const json = await fetch("/api/vaccination/onsite-queue/public", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventToken: params.token, joinToken, participantName: name, employeeId, email }),
+        body: JSON.stringify({ eventToken: params.token, joinToken, participantName: name, employeeId, phone }),
       }).then((r) => r.json());
       if (!json.ok) {
         setError(json.message || "Gagal membuat antrean.");
@@ -85,8 +85,9 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
               <div className="mt-1 text-xs text-slate-500">1 NIK Karyawan hanya mendapat 1 nomor antrean pada event ini.</div>
             </div>
             <div>
-              <label className="text-xs font-black uppercase tracking-wide text-slate-500">Email</label>
-              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold" placeholder="nama@perusahaan.com" />
+              <label className="text-xs font-black uppercase tracking-wide text-slate-500">No HP</label>
+              <input required type="tel" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 15))} className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold" placeholder="08xxxxxxxxxx" />
+              <div className="mt-1 text-xs text-slate-500">Nomor HP dipakai sebagai kontak peserta onsite.</div>
             </div>
             <button disabled={submitting} className="w-full rounded-xl bg-violet-600 px-4 py-3 font-black text-white disabled:opacity-50">{submitting ? "Membuat antrean..." : "Ambil Nomor Antrean"}</button>
           </form>
