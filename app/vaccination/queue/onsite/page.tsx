@@ -1,5 +1,7 @@
 "use client";
 
+// V153.29_SAFE_EXPORT_DONE
+
 import { useEffect, useMemo, useState } from "react";
 import QRCodeImage from "@/components/QRCodeImage";
 
@@ -107,6 +109,38 @@ export default function VaccinationOnsiteQueuePage() {
     const safeSession = String(data?.session?.session_name || "onsite-queue").replace(/[^a-z0-9_-]+/gi, "_");
     link.href = url;
     link.download = `waiting_${safeSession}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportDone() {
+    if (!done.length) return;
+    const header = ["No Antrean", "Nama Lengkap", "NIK Karyawan", "No HP", "Status", "Selesai"];
+    const rows = done.map((entry: any) => [
+      entry.queue_number,
+      entry.participant_name,
+      entry.employee_id,
+      entry.phone || "",
+      entry.queue_status,
+      entry.finished_at
+        ? new Date(entry.finished_at).toLocaleString("id-ID", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "",
+    ]);
+    const csv = "\uFEFF" + [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeSession = String(data?.session?.session_name || "onsite-queue").replace(/[^a-z0-9_-]+/gi, "_");
+    link.href = url;
+    link.download = `done_${safeSession}_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -242,16 +276,22 @@ export default function VaccinationOnsiteQueuePage() {
               </div>
             </section>
 
-            <details className="mt-6 overflow-hidden rounded-2xl border bg-white">
-              <summary className="cursor-pointer border-b bg-emerald-50 px-4 py-3 font-black text-emerald-900">Peserta Selesai / Done ({done.length}) — klik untuk buka tabel</summary>
-              <div className="max-h-[520px] overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th></tr></thead>
-                  <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td></tr>)}</tbody>
-                </table>
-                {!done.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div> : null}
+            <section className="mt-6 overflow-hidden rounded-2xl border bg-white">
+              <div className="flex flex-col gap-3 border-b bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="font-black text-emerald-900">Peserta Selesai / Done <span className="text-emerald-700">({done.length})</span></div>
+                <button disabled={!done.length} onClick={exportDone} className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-40">Export Done</button>
               </div>
-            </details>
+              <details>
+                <summary className="cursor-pointer border-b px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Buka / tutup tabel peserta Done</summary>
+                <div className="max-h-[520px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th></tr></thead>
+                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td></tr>)}</tbody>
+                  </table>
+                  {!done.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div> : null}
+                </div>
+              </details>
+            </section>
           </>
         ) : null}
       </div>
