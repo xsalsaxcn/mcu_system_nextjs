@@ -198,6 +198,7 @@ async function sendOne(subscription: SubscriptionRow, payload: Record<string, un
 export async function sendOnsiteQueueCalledPush(
   supabase: any,
   entry: any,
+  mode: "called" | "test" = "called",
 ): Promise<OnsitePushSummary> {
   const config = getOnsitePushConfig();
   if (!config) {
@@ -233,15 +234,20 @@ export async function sendOnsiteQueueCalledPush(
     return { configured: true, subscriptions: 0, sent: 0, failed: 0, disabled: 0 };
   }
 
+  const isTest = mode === "test";
   const payload = {
-    title: `Giliran Anda — ${queueNumber}`,
-    body: `${queueNumber} dipanggil. Silakan menuju area vaksinasi sekarang.`,
-    tag: `vaccination-onsite-called-${entryId}`,
+    title: isTest ? `Test Notifikasi — ${queueNumber}` : `Giliran Anda — ${queueNumber}`,
+    body: isTest
+      ? "Test background push berhasil dikirim. Notifikasi antrean device ini aktif."
+      : `${queueNumber} dipanggil. Silakan menuju area vaksinasi sekarang.`,
+    tag: isTest
+      ? `vaccination-onsite-test-${entryId}-${Date.now()}`
+      : `vaccination-onsite-called-${entryId}`,
     url: ticketToken
       ? `/vaccination/public/onsite-ticket/${encodeURIComponent(ticketToken)}`
       : "/vaccination",
     queueNumber,
-    status: "CALLED",
+    status: isTest ? "TEST" : "CALLED",
   };
 
   const results = await Promise.all(

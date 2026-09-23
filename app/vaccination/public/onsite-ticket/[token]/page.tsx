@@ -24,6 +24,8 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
   const [pushBusy, setPushBusy] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [calledModalOpen, setCalledModalOpen] = useState(false);
+  const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushMessage, setTestPushMessage] = useState("");
   const lastStatusRef = useRef("");
   const audioRef = useRef<AudioContext | null>(null);
 
@@ -200,6 +202,31 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
     await ensureBackgroundPush(true);
   }
 
+  async function testBackgroundPush() {
+    setTestPushBusy(true);
+    setTestPushMessage("Mengirim test background notification...");
+    try {
+      const json = await fetch("/api/vaccination/onsite-queue/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test", ticketToken: params.token }),
+      }).then((r) => r.json());
+
+      if (!json.ok) {
+        setTestPushMessage(json.message || "Test background push gagal.");
+        return;
+      }
+
+      setTestPushMessage(
+        `${json.message || "Test background push terkirim."} Jika tidak muncul sebagai banner/notifikasi OS, cek pengaturan notifikasi browser/HP.`
+      );
+    } catch (testError: any) {
+      setTestPushMessage(testError?.message || "Test background push gagal.");
+    } finally {
+      setTestPushBusy(false);
+    }
+  }
+
   const status = String(data?.entry?.queue_status || "WAITING").toUpperCase();
   const isCalled = ["CALLED", "IN_PROGRESS"].includes(status);
   const isSkipped = status === "SKIPPED";
@@ -248,6 +275,21 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
               {pushBusy ? "Mengaktifkan Notifikasi..." : pushEnabled ? "Notifikasi Background Aktif ✓" : "Aktifkan Notifikasi Background & Getar"}
             </button>
             <div className="mt-2 text-center text-xs font-semibold text-slate-500">{notificationState}</div>
+
+            <button
+              disabled={testPushBusy || !pushEnabled}
+              onClick={testBackgroundPush}
+              className="mt-3 w-full rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-black text-violet-700 disabled:opacity-40"
+            >
+              {testPushBusy ? "Mengirim Test..." : "Test Notifikasi Background"}
+            </button>
+
+            {testPushMessage ? (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-center text-xs font-semibold text-slate-600">
+                {testPushMessage}
+              </div>
+            ) : null}
+
             <p className="mt-4 text-center text-xs text-slate-500">
               Saat nomor Anda dipanggil, sistem akan mencoba menampilkan notifikasi HP, suara, getar, dan pop-up peringatan di halaman ini sesuai dukungan perangkat/browser.
             </p>

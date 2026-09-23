@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clean, supabaseAdmin } from "../../_utils";
-import { getOnsitePushConfig } from "@/lib/vaccination/onsiteWebPush";
+import { getOnsitePushConfig, sendOnsiteQueueCalledPush } from "@/lib/vaccination/onsiteWebPush";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +47,34 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
+  const action = clean(body.action).toLowerCase();
   const ticketToken = clean(body.ticketToken || body.ticket_token);
+
+  if (action === "test") {
+    if (!ticketToken) return fail("ticketToken wajib diisi.");
+
+    const supabase = supabaseAdmin();
+    const entryResult = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .select("id,event_id,queue_number,queue_status,public_token")
+      .eq("public_token", ticketToken)
+      .maybeSingle();
+
+    if (entryResult.error) return fail(entryResult.error.message, 500);
+    if (!entryResult.data) return fail("Tiket antrean tidak ditemukan.", 404);
+
+    const summary = await sendOnsiteQueueCalledPush(supabase, entryResult.data, "test");
+    if (!summary.configured) return fail("Web Push belum dikonfigurasi di server.", 503, { push: summary });
+    if (!summary.subscriptions) return fail("Belum ada push subscription aktif untuk tiket ini.", 409, { push: summary });
+    if (!summary.sent) return fail("Test background push gagal terkirim.", 502, { push: summary });
+
+    return response({
+      ok: true,
+      message: `Test background push terkirim ke ${summary.sent} device.`,
+      push: summary,
+    });
+  }
+
   const subscription = body.subscription || {};
   const endpoint = clean(subscription.endpoint);
   const p256dh = clean(subscription?.keys?.p256dh);

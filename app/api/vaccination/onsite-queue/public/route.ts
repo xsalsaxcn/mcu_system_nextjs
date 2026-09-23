@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { clean, supabaseAdmin } from "../../_utils";
+import { getOnsitePushConfig } from "@/lib/vaccination/onsiteWebPush";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,6 +17,26 @@ function response(payload: any, status = 200) {
 
 function fail(message: string, status = 400, extra: any = {}) {
   return response({ ok: false, message, ...extra }, status);
+}
+
+function validPushEndpoint(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function parsePushSubscription(value: any) {
+  const endpoint = clean(value?.endpoint);
+  const p256dh = clean(value?.keys?.p256dh);
+  const auth = clean(value?.keys?.auth);
+
+  if (!validPushEndpoint(endpoint) || !p256dh || !auth) return null;
+  if (endpoint.length > 2048 || p256dh.length > 512 || auth.length > 512) return null;
+
+  return { endpoint, p256dh, auth };
 }
 
 function safeEqual(a: string, b: string) {
@@ -180,11 +201,14 @@ export async function POST(req: NextRequest) {
   const participantName = clean(body.participantName || body.participant_name);
   const employeeId = clean(body.employeeId || body.employee_id);
   const phone = normalizePhone(body.phone || body.mobile || body.patient_mobile);
+  const pushSubscription = parsePushSubscription(body.pushSubscription || body.push_subscription);
 
   if (!eventToken || !joinToken) return fail("Akses QR onsite tidak valid.");
   if (!participantName) return fail("Nama lengkap wajib diisi.");
   if (!employeeId) return fail("NIK Karyawan wajib diisi.");
   if (!/^08\d{7,13}$/.test(phone)) return fail("No HP wajib diisi dengan format Indonesia yang valid, contoh 081234567890.");
+  if (!getOnsitePushConfig()) return fail("Background Web Push belum dikonfigurasi di server.", 503);
+  if (!pushSubscription) return fail("Approval notifikasi background belum lengkap. Scan ulang QR dan aktifkan notifikasi terlebih dahulu.", 400);
 
   const supabase = supabaseAdmin();
   const eventResult = await supabase
@@ -208,12 +232,48 @@ export async function POST(req: NextRequest) {
 
   const payload = result.data || {};
   if (payload?.ok === false) return fail(payload?.message || "Gagal membuat antrean.", 400, payload);
+
+  const entry = payload?.entry;
+  const entryId = Number(entry?.id || 0);
+  if (!entryId) return fail("Entry antrean tidak valid.", 500);
+
+  const now = new Date().toISOString();
+  const pushUpsert = await supabase
+    .from("vaccination_onsite_push_subscriptions")
+    .upsert(
+      {
+        entry_id: entryId,
+        endpoint: pushSubscription.endpoint,
+        p256dh: pushSubscription.p256dh,
+        auth: pushSubscription.auth,
+        user_agent: clean(req.headers.get("user-agent")).slice(0, 1000),
+        enabled: true,
+        last_error: null,
+        last_error_at: null,
+        updated_at: now,
+      },
+      { onConflict: "endpoint" }
+    )
+    .select("id,entry_id,enabled")
+    .single();
+
+  if (pushUpsert.error) {
+    const migrationHint = /vaccination_onsite_push_subscriptions/i.test(pushUpsert.error.message)
+      ? " Jalankan SQL V153.30 di Supabase."
+      : "";
+    return fail(`Nomor antrean sudah dibuat, tetapi background push belum terikat: ${pushUpsert.error.message}${migrationHint}`, 500, {
+      entry,
+      code: "PUSH_BIND_FAILED",
+    });
+  }
+
   return response({
     ok: true,
     created: Boolean(payload?.created),
-    entry: payload?.entry,
+    entry,
+    push_bound: true,
     message: payload?.created
-      ? `Nomor antrean ${payload?.entry?.queue_number || ""} berhasil dibuat.`
-      : `NIK Karyawan ini sudah memiliki nomor antrean ${payload?.entry?.queue_number || ""}.`,
+      ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat dan notifikasi background aktif.`
+      : `NIK Karyawan ini sudah memiliki nomor antrean ${entry?.queue_number || ""}; notifikasi background device ini sudah diaktifkan.`,
   });
 }
