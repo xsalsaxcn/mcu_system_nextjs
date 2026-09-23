@@ -43,9 +43,6 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
         return;
       }
 
-      if (typeof Notification !== "undefined" && Notification.permission === "default") {
-        try { await Notification.requestPermission(); } catch {}
-      }
       if (typeof navigator !== "undefined" && "vibrate" in navigator) {
         try { navigator.vibrate(120); } catch {}
       }
@@ -93,7 +90,7 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
           </form>
         ) : null}
 
-        <p className="mt-5 text-center text-xs text-slate-400">Tidak ada scan kedua. Setelah submit, simpan halaman antrean sampai giliran Anda dipanggil.</p>
+        <p className="mt-5 text-center text-xs text-slate-400">Tidak ada scan kedua. Setelah mendapat nomor, aktifkan Notifikasi Background di halaman tiket agar tetap mendapat panggilan walau Anda pindah aplikasi.</p>
       </div>
     </main>
   );

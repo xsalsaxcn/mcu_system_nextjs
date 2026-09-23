@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from "crypto";
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { onsitePushMessageSuffix, sendOnsiteQueueCalledPush } from "@/lib/vaccination/onsiteWebPush";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -179,8 +180,16 @@ export async function POST(req: NextRequest) {
     if (payload?.code === "COMPLETED_ONLY") {
       return ok({ message: `${payload?.completed_entry?.queue_number || "Antrean aktif"} otomatis DONE. Tidak ada antrean berikutnya.`, ...payload });
     }
+
+    const push = payload?.entry?.id
+      ? await sendOnsiteQueueCalledPush(supabase, payload.entry)
+      : null;
     const completed = payload?.completed_entry?.queue_number ? `${payload.completed_entry.queue_number} otomatis DONE. ` : "";
-    return ok({ message: `${completed}Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.`, ...payload });
+    return ok({
+      message: `${completed}Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.${onsitePushMessageSuffix(push)}`,
+      push,
+      ...payload,
+    });
   }
 
   if (!eventId || !entryId) return fail("eventId dan entryId wajib diisi.");
@@ -258,5 +267,13 @@ export async function POST(req: NextRequest) {
       .eq("current_entry_id", entryId);
   }
 
-  return ok({ message: `Status ${entry.queue_number} menjadi ${nextStatus}.`, entry: updateResult.data });
+  const push = nextStatus === "CALLED"
+    ? await sendOnsiteQueueCalledPush(supabase, updateResult.data)
+    : null;
+
+  return ok({
+    message: `Status ${entry.queue_number} menjadi ${nextStatus}.${onsitePushMessageSuffix(push)}`,
+    entry: updateResult.data,
+    push,
+  });
 }
