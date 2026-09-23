@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+
 export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { token: string } }) {
   const [event, setEvent] = useState<any>(null);
   const [joinToken, setJoinToken] = useState("");
@@ -10,6 +11,9 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [permissionState, setPermissionState] = useState<"checking" | "granted" | "required" | "blocked" | "unsupported">("checking");
+  const [permissionMessage, setPermissionMessage] = useState("Sebelum mengisi form, izinkan notifikasi agar panggilan antrean bisa muncul di HP Anda.");
+  const [permissionBusy, setPermissionBusy] = useState(false);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -28,8 +32,72 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
       .finally(() => setLoading(false));
   }, [params.token]);
 
+  useEffect(() => {
+    if (typeof Notification === "undefined") {
+      setPermissionState("unsupported");
+      setPermissionMessage("Browser ini tidak mendukung Notification API. Gunakan browser lain agar panggilan antrean bisa muncul di notifikasi HP.");
+      return;
+    }
+    if (Notification.permission === "granted") {
+      setPermissionState("granted");
+      setPermissionMessage("Notifikasi sudah diizinkan. Silakan isi form antrean.");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setPermissionState("blocked");
+      setPermissionMessage("Notifikasi diblokir. Aktifkan kembali dari pengaturan browser lalu klik Cek Ulang.");
+      return;
+    }
+    setPermissionState("required");
+  }, []);
+
+  async function requestPermission() {
+    if (typeof Notification === "undefined") return;
+    setPermissionBusy(true);
+    setError("");
+    try {
+      const result = await Notification.requestPermission();
+      if (result === "granted") {
+        setPermissionState("granted");
+        setPermissionMessage("Notifikasi sudah diizinkan. Silakan isi form antrean.");
+        if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+          try { navigator.vibrate([100, 60, 100]); } catch {}
+        }
+      } else if (result === "denied") {
+        setPermissionState("blocked");
+        setPermissionMessage("Notifikasi diblokir. Aktifkan kembali dari pengaturan browser lalu klik Cek Ulang.");
+      } else {
+        setPermissionState("required");
+        setPermissionMessage("Anda belum mengizinkan notifikasi. Klik tombol izinkan notifikasi untuk melanjutkan.");
+      }
+    } finally {
+      setPermissionBusy(false);
+    }
+  }
+
+  function checkPermissionAgain() {
+    if (typeof Notification === "undefined") {
+      setPermissionState("unsupported");
+      return;
+    }
+    if (Notification.permission === "granted") {
+      setPermissionState("granted");
+      setPermissionMessage("Notifikasi sudah diizinkan. Silakan isi form antrean.");
+    } else if (Notification.permission === "denied") {
+      setPermissionState("blocked");
+      setPermissionMessage("Notifikasi diblokir. Aktifkan kembali dari pengaturan browser lalu klik Cek Ulang.");
+    } else {
+      setPermissionState("required");
+      setPermissionMessage("Klik izinkan notifikasi terlebih dahulu untuk membuka form antrean.");
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (permissionState !== "granted") {
+      setError("Izinkan notifikasi terlebih dahulu sebelum mengisi antrean.");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -70,8 +138,23 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
         {loading ? <div className="mt-6 rounded-2xl bg-white/10 p-5 text-center font-bold">Memvalidasi QR onsite...</div> : null}
         {error ? <div className="mt-6 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm font-bold text-red-200">{error}</div> : null}
 
-        {!loading && joinToken ? (
+        {!loading && joinToken && permissionState !== "granted" ? (
+          <div className="mt-6 rounded-3xl bg-white p-5 text-slate-950">
+            <div className="text-lg font-black text-slate-950">Aktifkan notifikasi terlebih dahulu</div>
+            <p className="mt-2 text-sm font-semibold text-slate-600">{permissionMessage}</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <button disabled={permissionBusy || permissionState === "unsupported"} onClick={requestPermission} className="rounded-xl bg-violet-600 px-4 py-3 font-black text-white disabled:opacity-50">
+                {permissionBusy ? "Meminta izin..." : "Izinkan Notifikasi"}
+              </button>
+              <button onClick={checkPermissionAgain} className="rounded-xl border border-slate-300 px-4 py-3 font-black text-slate-700">Cek Ulang</button>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Form antrean dibuka setelah notifikasi diizinkan. Setelah submit, halaman tiket akan otomatis melanjutkan aktivasi notifikasi background.</p>
+          </div>
+        ) : null}
+
+        {!loading && joinToken && permissionState === "granted" ? (
           <form onSubmit={submit} className="mt-6 space-y-4 rounded-3xl bg-white p-5 text-slate-950">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-700">Notifikasi sudah diizinkan. Silakan isi form antrean.</div>
             <div>
               <label className="text-xs font-black uppercase tracking-wide text-slate-500">Nama Lengkap</label>
               <input required value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold" placeholder="Nama lengkap" />
@@ -90,7 +173,7 @@ export default function VaccinationOnsiteQueueJoinPage({ params }: { params: { t
           </form>
         ) : null}
 
-        <p className="mt-5 text-center text-xs text-slate-400">Tidak ada scan kedua. Setelah mendapat nomor, aktifkan Notifikasi Background di halaman tiket agar tetap mendapat panggilan walau Anda pindah aplikasi.</p>
+        <p className="mt-5 text-center text-xs text-slate-400">Tidak ada scan kedua. Setelah mendapat nomor, sistem akan menyiapkan notifikasi background di halaman tiket agar panggilan tetap bisa masuk ke HP Anda.</p>
       </div>
     </main>
   );

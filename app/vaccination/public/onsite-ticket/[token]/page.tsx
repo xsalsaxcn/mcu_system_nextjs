@@ -22,9 +22,10 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
   const [error, setError] = useState("");
   const [notificationState, setNotificationState] = useState("Belum diaktifkan");
   const [pushBusy, setPushBusy] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [calledModalOpen, setCalledModalOpen] = useState(false);
   const lastStatusRef = useRef("");
   const audioRef = useRef<AudioContext | null>(null);
-  const pushActiveRef = useRef(false);
 
   function playAlert() {
     try {
@@ -45,18 +46,29 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
     } catch {}
   }
 
+  function openPopupAlert(queueNumber: string) {
+    setCalledModalOpen(true);
+    if (typeof window !== "undefined") {
+      try {
+        window.focus();
+      } catch {}
+      try {
+        window.alert(`Antrean Anda sudah dipanggil: ${queueNumber}. Silakan menuju area vaksinasi sekarang.`);
+      } catch {}
+    }
+  }
+
   function fireCalledAlert(queueNumber: string) {
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       try { navigator.vibrate([500, 180, 500, 180, 900]); } catch {}
     }
     playAlert();
+    openPopupAlert(queueNumber);
 
-    // When background Web Push is active, the service worker owns the system
-    // notification. This local fallback is only used if background push is not active.
-    if (!pushActiveRef.current && typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       try {
-        new Notification("Giliran Anda!", {
-          body: `${queueNumber} dipanggil. Silakan menuju area vaksinasi.`,
+        new Notification("Antrean Anda Sudah Dipanggil", {
+          body: `${queueNumber} dipanggil. Silakan menuju area vaksinasi sekarang.`,
           tag: `vaccination-onsite-${queueNumber}`,
           requireInteraction: true,
         });
@@ -94,12 +106,14 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
         permission = await Notification.requestPermission();
       }
       if (permission !== "granted") {
+        setPushEnabled(false);
         setNotificationState(permission === "denied" ? "Izin notifikasi ditolak di browser" : "Tekan tombol untuk mengizinkan notifikasi");
         return false;
       }
 
       const config = await fetch(`/api/vaccination/onsite-queue/push?t=${Date.now()}`, { cache: "no-store" }).then((r) => r.json());
       if (!config.ok || !config.configured || !config.publicKey) {
+        setPushEnabled(false);
         setNotificationState("Web Push server belum dikonfigurasi");
         return false;
       }
@@ -124,18 +138,20 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
       }).then((r) => r.json());
 
       if (!save.ok) {
+        setPushEnabled(false);
         setNotificationState(save.message || "Gagal menyimpan Web Push subscription");
         return false;
       }
 
-      pushActiveRef.current = true;
-      setNotificationState("Notifikasi background aktif — halaman boleh ditinggalkan");
+      setPushEnabled(true);
+      setNotificationState("Notifikasi background aktif — panggilan akan muncul di HP Anda");
 
       if (promptPermission && "vibrate" in navigator) {
         try { navigator.vibrate([120, 80, 120]); } catch {}
       }
       return true;
     } catch (pushError: any) {
+      setPushEnabled(false);
       setNotificationState(pushError?.message || "Notifikasi background tidak dapat diaktifkan");
       return false;
     } finally {
@@ -204,7 +220,7 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
 
             {isCalled ? (
               <div className="mt-6 rounded-3xl bg-emerald-600 p-6 text-center text-white shadow-xl">
-                <div className="text-3xl font-black">IT IS YOUR TURN!</div>
+                <div className="text-3xl font-black">ANTREAN ANDA SUDAH DIPANGGIL</div>
                 <div className="mt-2 text-lg font-bold">Silakan menuju area vaksinasi sekarang.</div>
               </div>
             ) : null}
@@ -229,15 +245,27 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
             </div>
 
             <button disabled={pushBusy} onClick={enableNotification} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white disabled:opacity-50">
-              {pushBusy ? "Mengaktifkan Notifikasi..." : pushActiveRef.current ? "Notifikasi Background Aktif ✓" : "Aktifkan Notifikasi Background & Getar"}
+              {pushBusy ? "Mengaktifkan Notifikasi..." : pushEnabled ? "Notifikasi Background Aktif ✓" : "Aktifkan Notifikasi Background & Getar"}
             </button>
             <div className="mt-2 text-center text-xs font-semibold text-slate-500">{notificationState}</div>
             <p className="mt-4 text-center text-xs text-slate-500">
-              Setelah status menunjukkan notifikasi background aktif, Anda boleh pindah aplikasi atau keluar dari halaman browser. Saat nomor dipanggil, server akan mengirim Web Push. Getar tetap mengikuti dukungan dan pengaturan notifikasi perangkat.
+              Saat nomor Anda dipanggil, sistem akan mencoba menampilkan notifikasi HP, suara, getar, dan pop-up peringatan di halaman ini sesuai dukungan perangkat/browser.
             </p>
           </>
         ) : null}
       </div>
+
+      {calledModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 text-center shadow-2xl">
+            <div className="text-sm font-black uppercase tracking-[0.25em] text-emerald-600">Peringatan</div>
+            <div className="mt-3 text-3xl font-black text-slate-950">Antrean Anda Sudah Dipanggil</div>
+            <div className="mt-4 text-6xl font-black text-emerald-700">{data?.entry?.queue_number || "-"}</div>
+            <p className="mt-4 text-sm font-semibold text-slate-600">Silakan segera menuju area vaksinasi sekarang.</p>
+            <button onClick={() => setCalledModalOpen(false)} className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 font-black text-white">Tutup</button>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

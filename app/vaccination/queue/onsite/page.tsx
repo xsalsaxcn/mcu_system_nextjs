@@ -1,6 +1,6 @@
 "use client";
 
-// V153.29_SAFE_EXPORT_DONE
+// V153.31_SAFE_NOTIFICATION_MODAL_DONE_SPLIT
 
 import { useEffect, useMemo, useState } from "react";
 import QRCodeImage from "@/components/QRCodeImage";
@@ -91,6 +91,12 @@ export default function VaccinationOnsiteQueuePage() {
   const done = useMemo(() => entries.filter((x: any) => x.queue_status === "DONE"), [entries]);
 
   const scanUrl = data?.rolling?.scan_path && origin ? `${origin}${data.rolling.scan_path}` : "";
+  const canCallNext = waiting.length > 0 && active.length === 0;
+  const nextButtonLabel = !waiting.length
+    ? "Tidak Ada Antrean Menunggu"
+    : active.length
+      ? "Selesaikan Antrean Aktif Dulu"
+      : "Panggil Nomor Berikutnya";
 
   function exportWaiting() {
     if (!waiting.length) return;
@@ -146,14 +152,6 @@ export default function VaccinationOnsiteQueuePage() {
     link.remove();
     URL.revokeObjectURL(url);
   }
-
-  const nextButtonLabel = waiting.length
-    ? active.length
-      ? "Selesaikan Nomor Aktif & Panggil Berikutnya"
-      : "Panggil Nomor Berikutnya"
-    : active.length
-      ? "Selesaikan Antrean Aktif"
-      : "Tidak Ada Antrean Menunggu";
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 md:p-6">
@@ -219,7 +217,8 @@ export default function VaccinationOnsiteQueuePage() {
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">Skipped</div><div className="mt-2 text-4xl font-black text-amber-700">{skipped.length}</div></div>
                   <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Done</div><div className="mt-2 text-4xl font-black text-emerald-700">{done.length}</div></div>
                 </div>
-                <button disabled={busy || (!waiting.length && !active.length)} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
+                <button disabled={busy || !canCallNext} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
+                {active.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Masih ada antrean aktif. Selesaikan dulu dengan tombol <span className="font-black">Done</span> di card antrean aktif, baru panggil nomor berikutnya.</p> : null}
 
                 <section className="mt-4 rounded-2xl border bg-white p-4">
                   <h2 className="font-black text-slate-950">Antrean Aktif</h2>
@@ -234,12 +233,15 @@ export default function VaccinationOnsiteQueuePage() {
                           </div>
                           <span className={`rounded-full px-3 py-1 text-xs font-black ${statusBadge(entry.queue_status)}`}>DIPANGGIL</span>
                         </div>
-                        <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="mt-3 rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
+                          <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
+                        </div>
                       </div>
                     ))}
                     {!active.length ? <div className="text-sm text-slate-500">Belum ada nomor aktif.</div> : null}
                   </div>
-                  <p className="mt-3 text-xs font-semibold text-slate-500">Tidak ada tahap Process. Saat tombol Panggil Nomor Berikutnya ditekan, nomor yang sedang aktif otomatis menjadi DONE lalu nomor berikutnya dipanggil.</p>
+                  <p className="mt-3 text-xs font-semibold text-slate-500">Status selesai antrean aktif sekarang dikontrol dari card aktif. Tombol <span className="font-black">Panggil Nomor Berikutnya</span> hanya dipakai untuk memanggil waiting berikutnya.</p>
                 </section>
               </div>
             </section>
