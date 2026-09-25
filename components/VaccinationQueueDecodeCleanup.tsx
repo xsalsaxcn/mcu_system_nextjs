@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect } from "react";
 
@@ -9,24 +9,45 @@ function isVaccinationQueuePage() {
   return path.includes("/vaccination/queue") && !path.includes("/vaccination/public");
 }
 
+const VACCINATION_QUEUE_MOJIBAKE_REPLACEMENTS: Array<[string, string]> = [
+  ["\u00C3\u0192\u00E2\u20AC\u0161\u00C3\u201A\u00C2\u00B7", " · "],
+  ["\u00C3\u201A\u00C2\u00B7", " · "],
+  ["\u00C2\u00B7", " · "],
+  ["\u00C3\u0192\u00E2\u20AC\u0161", ""],
+  ["\u00C3\u201A", ""],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00C2\u00A2", " - "],
+  ["\u00E2\u20AC\u00A2", " - "],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u20AC\u0153", "-"],
+  ["\u00E2\u20AC\u201C", "-"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u20AC\u009D", "-"],
+  ["\u00E2\u20AC\u201D", "-"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00CB\u0153", "'"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u201E\u00A2", "'"],
+  ["\u00E2\u20AC\u2122", "'"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00C5\u201C", "\""],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00EF\u00BF\u00BD", "\""],
+  ["\u00E2\u20AC\u0153", "\""],
+  ["\u00E2\u20AC\u009D", "\""],
+  ["\u00C3\u00A2\u00E2\u20AC\u017E\u00C2\u00A2", ""],
+  ["\u00C3\u00A2\u00CB\u0153\u00C2\u00B0", "☰"],
+  ["\u00E2\u02DC\u00B0", "☰"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00E2\u20AC\u009D\u00E2\u20AC\u2122", "🔒"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00E2\u20AC\u009D", "🔒"],
+  ["\u00F0\u0178\u201D\u2019", "🔒"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00C5\u00A1", ""],
+  ["\u00E2\u201D\u00AC\u00E2\u2022\u2013", " - "],
+];
+
 function cleanDecodeText(value: string) {
-  return String(value ?? "")
-    .replace(/Ãƒâ€šÃ‚Â·/g, " - ")
-    .replace(/Ãƒâ€š/g, "")
-    .replace(/Ã‚Â·/g, " - ")
-    .replace(/Ã‚/g, "")
-    .replace(/Ã¢â‚¬Â¢/g, " - ")
-    .replace(/Ã¢â‚¬â€œ/g, "-")
-    .replace(/Ã¢â‚¬â€/g, "-")
-    .replace(/Ã¢â‚¬Ëœ|Ã¢â‚¬â„¢/g, "'")
-    .replace(/Ã¢â‚¬Å“|Ã¢â‚¬ï¿½/g, '"')
-    .replace(/Ã¢â€žÂ¢/g, "")
-    .replace(/Ã¢ËœÂ°/g, "â˜°")
-    .replace(/Ã°Å¸â€â€™/g, "ðŸ”’")
-    .replace(/Ã°Å¸â€/g, "ðŸ”’")
-    .replace(/Ã°Å¸Å¡/g, "")
-    .replace(/â”¬â•–/g, " - ")
-    .replace(/\s+[-Â·]\s+/g, " - ")
+  let text = String(value ?? "");
+
+  for (const [bad, replacement] of VACCINATION_QUEUE_MOJIBAKE_REPLACEMENTS) {
+    if (text.includes(bad)) text = text.split(bad).join(replacement);
+  }
+
+  return text
+    .replace(/\s+·\s+/g, " · ")
+    .replace(/\s+-\s+/g, " - ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

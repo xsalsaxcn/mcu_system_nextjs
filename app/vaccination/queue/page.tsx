@@ -23,8 +23,8 @@ function queueNote(registration: any) {
   const notDone = items.filter((item: any) => !["ADMINISTERED", "DONE"].includes(String(item?.status || "").toUpperCase()));
   const productText = notDone.map((item: any) => {
     const product = item?.vaccine?.name || "Produk";
-    const category = item?.price_category ? ` Â· ${item.price_category}` : "";
-    const pay = item?.payment_note || item?.payment_method ? ` Â· ${item.payment_note || item.payment_method}` : "";
+    const category = item?.price_category ? ` · ${item.price_category}` : "";
+    const pay = item?.payment_note || item?.payment_method ? ` · ${item.payment_note || item.payment_method}` : "";
     return `${product}${category}${pay}`;
   }).filter(Boolean).join("; ");
   return [base, productText ? `Produk Not Done: ${productText}` : ""].filter(Boolean).join(" | ") || "-";
@@ -34,7 +34,7 @@ function sessionLabel(session: any) {
   const eventName = session?.source_name || String(session?.session_name || "").split(" - ")[0] || "Session";
   return [eventName, session?.location, session?.session_date]
     .filter(Boolean)
-    .join(" Â· ");
+    .join(" · ");
 }
 
 function label(status: string) {
@@ -49,19 +49,45 @@ function label(status: string) {
   return status || "-";
 }
 
+const VACCINATION_QUEUE_MOJIBAKE_REPLACEMENTS: Array<[string, string]> = [
+  ["\u00C3\u0192\u00E2\u20AC\u0161\u00C3\u201A\u00C2\u00B7", " · "],
+  ["\u00C3\u201A\u00C2\u00B7", " · "],
+  ["\u00C2\u00B7", " · "],
+  ["\u00C3\u0192\u00E2\u20AC\u0161", ""],
+  ["\u00C3\u201A", ""],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00C2\u00A2", " - "],
+  ["\u00E2\u20AC\u00A2", " - "],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u20AC\u0153", "-"],
+  ["\u00E2\u20AC\u201C", "-"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u20AC\u009D", "-"],
+  ["\u00E2\u20AC\u201D", "-"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00CB\u0153", "'"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00E2\u201E\u00A2", "'"],
+  ["\u00E2\u20AC\u2122", "'"],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00C5\u201C", "\""],
+  ["\u00C3\u00A2\u00E2\u201A\u00AC\u00EF\u00BF\u00BD", "\""],
+  ["\u00E2\u20AC\u0153", "\""],
+  ["\u00E2\u20AC\u009D", "\""],
+  ["\u00C3\u00A2\u00E2\u20AC\u017E\u00C2\u00A2", ""],
+  ["\u00C3\u00A2\u00CB\u0153\u00C2\u00B0", "☰"],
+  ["\u00E2\u02DC\u00B0", "☰"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00E2\u20AC\u009D\u00E2\u20AC\u2122", "🔒"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00E2\u20AC\u009D", "🔒"],
+  ["\u00F0\u0178\u201D\u2019", "🔒"],
+  ["\u00C3\u00B0\u00C5\u00B8\u00C5\u00A1", ""],
+  ["\u00E2\u201D\u00AC\u00E2\u2022\u2013", " - "],
+];
+
 function cleanVaccinationQueueText(value: any) {
-  return String(value ?? "")
-    .replace(/Ãƒâ€šÃ‚Â·/g, " - ")
-    .replace(/Ã‚Â·/g, " - ")
-    .replace(/Ãƒâ€š/g, "")
-    .replace(/Ã‚/g, "")
-    .replace(/Ã¢â‚¬Â¢/g, " - ")
-    .replace(/Ã¢â‚¬â€œ/g, "-")
-    .replace(/Ã¢â‚¬â€/g, "-")
-    .replace(/Ã¢â‚¬Ëœ|Ã¢â‚¬â„¢/g, "'")
-    .replace(/Ã¢â‚¬Å“|Ã¢â‚¬ï¿½/g, '"')
-    .replace(/â”¬â•–/g, " - ")
-    .replace(/\s+[-Â·]\s+/g, " - ")
+  let text = String(value ?? "");
+
+  for (const [bad, replacement] of VACCINATION_QUEUE_MOJIBAKE_REPLACEMENTS) {
+    if (text.includes(bad)) text = text.split(bad).join(replacement);
+  }
+
+  return text
+    .replace(/\s+·\s+/g, " · ")
+    .replace(/\s+-\s+/g, " - ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -143,14 +169,14 @@ export default function VaccinationQueuePage() {
 
   return (
     <main className="p-6"><div className="rounded-2xl border bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Vaksin</h1><p className="mt-2 text-sm text-slate-600">Mode Existing tetap aktif. Skipped dipisahkan agar tidak ikut Call Next sampai diaktifkan kembali.</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white">Mode Existing</span><a href="/vaccination/queue/onsite" className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-100">Mode Onsite Rolling QR</a></div></div><a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">â˜° Menu Vaksinasi</a></div>
+      <div className="flex flex-col gap-3 md:flex-row md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Vaksin</h1><p className="mt-2 text-sm text-slate-600">Mode Existing tetap aktif. Skipped dipisahkan agar tidak ikut Call Next sampai diaktifkan kembali.</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white">Mode Existing</span><a href="/vaccination/queue/onsite" className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-100">Mode Onsite Rolling QR</a></div></div><a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div>
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
       <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-center">
           <div>
             <select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}><option value="">Pilih session</option>{sessions.map((s) => <option key={s.id} value={s.id}>{sessionLabel(s)}</option>)}</select>
-            {contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">ðŸ”’ Session terkunci dari Registrasi</div> : null}
+            {contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">🔒 Session terkunci dari Registrasi</div> : null}
           </div>
           <button onClick={() => action("call-next")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700">Panggil Nomor Berikutnya</button>
           {session?.public_queue_token ? <a target="_blank" className="rounded-xl border bg-white px-5 py-3 text-sm font-bold text-blue-700" href={`/vaccination/public/queue/${session.public_queue_token}`}>Public Queue</a> : null}
