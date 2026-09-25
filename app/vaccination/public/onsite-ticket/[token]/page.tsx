@@ -1,6 +1,6 @@
 "use client";
 
-// V153.33_SAFE_PUSH_DIAGNOSTICS
+// V153.34_SAFE_TICKET_NOTIFICATION_RECOVERY
 
 import { useEffect, useRef, useState } from "react";
 
@@ -267,6 +267,25 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
     }
   }
 
+  async function unlockAudioFromGesture() {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = audioRef.current || new AudioCtx();
+      audioRef.current = ctx;
+      if (ctx.state === "suspended") await ctx.resume();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.value = 0.06;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.12);
+    } catch {}
+  }
+
   async function ensureBackgroundPush(promptPermission = false) {
     if (typeof window === "undefined") return false;
 
@@ -375,6 +394,57 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
     }
   }
 
+  async function activateTicketNotificationRecovery() {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      setNotificationState("Browser tidak mendukung Notification API");
+      patchDiagnostics({ permission: "UNSUPPORTED" });
+      return;
+    }
+
+    setTestPushMessage("");
+    await unlockAudioFromGesture();
+
+    const activated = await ensureBackgroundPush(true);
+    patchDiagnostics({ permission: Notification.permission.toUpperCase() });
+
+    if (!activated) {
+      if (Notification.permission === "denied") {
+        setNotificationState(
+          "Notifikasi diblokir browser. Aktifkan Notifications untuk situs ini dari Site settings lalu kembali ke halaman ini."
+        );
+      }
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const tag = `vaccination-onsite-recovery-${Date.now()}`;
+      await registration.showNotification("Panggilan Antrean Aktif", {
+        body: "Notifikasi antrean sudah aktif. Anda akan mendapat pemberitahuan saat nomor dipanggil.",
+        tag,
+        requireInteraction: false,
+        silent: false,
+        vibrate: [180, 80, 180],
+        data: { status: "RECOVERY", ticketToken: params.token },
+      } as any);
+
+      if ("vibrate" in navigator) {
+        try { navigator.vibrate([120, 70, 120]); } catch {}
+      }
+
+      setNotificationState("Panggilan background aktif ✓");
+      setTestPushMessage(
+        "Approval berhasil. Sekarang klik Test Jalur Notifikasi Background untuk menguji push dari server."
+      );
+      await collectDiagnostics();
+    } catch (recoveryError: any) {
+      setTestPushMessage(
+        `Background push aktif, tetapi test notifikasi lokal gagal: ${String(recoveryError?.message || recoveryError).slice(0, 120)}`
+      );
+      await collectDiagnostics();
+    }
+  }
+
   useEffect(() => {
     void load();
 
@@ -416,6 +486,29 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
     ) {
       void ensureBackgroundPush(false);
     }
+  }, [params.token]);
+
+  useEffect(() => {
+    const refreshPermission = () => {
+      if (typeof Notification === "undefined") return;
+      patchDiagnostics({ permission: Notification.permission.toUpperCase() });
+      if (Notification.permission === "granted") {
+        void ensureBackgroundPush(false);
+      } else {
+        setPushEnabled(false);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshPermission();
+    };
+
+    window.addEventListener("focus", refreshPermission);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", refreshPermission);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [params.token]);
 
   async function testBackgroundPush() {
@@ -537,6 +630,10 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
   const isSkipped = status === "SKIPPED";
   const isDone = status === "DONE";
 
+  const notificationPermission = String(diagnostics.permission || "CHECKING").toUpperCase();
+  const notificationNeedsApproval = notificationPermission !== "GRANTED";
+  const notificationDenied = notificationPermission === "DENIED";
+
   const diagnosticRows = [
     ["Notification permission", diagnostics.permission],
     ["Service Worker", diagnostics.serviceWorker],
@@ -646,6 +743,41 @@ export default function VaccinationOnsiteTicketPage({ params }: { params: { toke
                   .join(" · ")}
               </div>
             </div>
+
+            {notificationNeedsApproval ? (
+              <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                <div className="text-center">
+                  <div className="text-sm font-black text-violet-900">
+                    Aktifkan Panggilan Antrean
+                  </div>
+                  <p className="mt-1 text-xs font-semibold text-violet-700">
+                    {notificationDenied
+                      ? "Notifikasi saat ini diblokir browser. Ubah izin Notifications situs ini menjadi Allow, lalu kembali dan klik Cek Ulang."
+                      : "Notifikasi belum diizinkan. Klik satu kali di bawah agar browser menampilkan approval Notification."}
+                  </p>
+                </div>
+
+                {!notificationDenied ? (
+                  <button
+                    disabled={pushBusy}
+                    onClick={activateTicketNotificationRecovery}
+                    className="mt-3 w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+                  >
+                    {pushBusy ? "Mengaktifkan..." : "Aktifkan Panggilan Antrean"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      patchDiagnostics({ permission: Notification.permission.toUpperCase() });
+                      void collectDiagnostics();
+                    }}
+                    className="mt-3 w-full rounded-xl border border-violet-300 bg-white px-4 py-3 text-sm font-black text-violet-700"
+                  >
+                    Cek Ulang Izin Notifikasi
+                  </button>
+                )}
+              </div>
+            ) : null}
 
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-bold text-emerald-700">
               {pushBusy
