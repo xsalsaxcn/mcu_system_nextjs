@@ -13,6 +13,7 @@ export type OnsitePushSummary = {
   sent: number;
   failed: number;
   disabled: number;
+  delivery_statuses?: number[];
   error?: string;
 };
 
@@ -296,6 +297,7 @@ export async function sendOnsiteQueueCalledPush(
     sent,
     failed,
     disabled,
+    delivery_statuses: results.map(({ result }) => Number(result.status || 0)),
   };
 }
 

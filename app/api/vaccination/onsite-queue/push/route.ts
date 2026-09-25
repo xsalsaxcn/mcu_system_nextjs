@@ -33,6 +33,7 @@ export async function GET() {
     ok: true,
     configured: Boolean(config),
     publicKey: config?.publicKey || "",
+    diagnostics_version: "V153.33",
   });
 }
 
