@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { clean, supabaseAdmin } from "../../_utils";
-import { getOnsitePushConfig } from "@/lib/vaccination/onsiteWebPush";
+import { notifyOnsiteNextWaitingPrepare } from "@/lib/vaccination/onsiteWhatsApp";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -207,8 +207,6 @@ export async function POST(req: NextRequest) {
   if (!participantName) return fail("Nama lengkap wajib diisi.");
   if (!employeeId) return fail("NIK Karyawan wajib diisi.");
   if (!/^08\d{7,13}$/.test(phone)) return fail("No HP wajib diisi dengan format Indonesia yang valid, contoh 081234567890.");
-  if (!getOnsitePushConfig()) return fail("Background Web Push belum dikonfigurasi di server.", 503);
-  if (!pushSubscription) return fail("Approval notifikasi background belum lengkap. Scan ulang QR dan aktifkan notifikasi terlebih dahulu.", 400);
 
   const supabase = supabaseAdmin();
   const eventResult = await supabase
@@ -237,43 +235,55 @@ export async function POST(req: NextRequest) {
   const entryId = Number(entry?.id || 0);
   if (!entryId) return fail("Entry antrean tidak valid.", 500);
 
-  const now = new Date().toISOString();
-  const pushUpsert = await supabase
-    .from("vaccination_onsite_push_subscriptions")
-    .upsert(
-      {
-        entry_id: entryId,
-        endpoint: pushSubscription.endpoint,
-        p256dh: pushSubscription.p256dh,
-        auth: pushSubscription.auth,
-        user_agent: clean(req.headers.get("user-agent")).slice(0, 1000),
-        enabled: true,
-        last_error: null,
-        last_error_at: null,
-        updated_at: now,
-      },
-      { onConflict: "endpoint" }
-    )
-    .select("id,entry_id,enabled")
-    .single();
+  let pushBound = false;
+  let pushWarning = "";
 
-  if (pushUpsert.error) {
-    const migrationHint = /vaccination_onsite_push_subscriptions/i.test(pushUpsert.error.message)
-      ? " Jalankan SQL V153.30 di Supabase."
-      : "";
-    return fail(`Nomor antrean sudah dibuat, tetapi background push belum terikat: ${pushUpsert.error.message}${migrationHint}`, 500, {
-      entry,
-      code: "PUSH_BIND_FAILED",
-    });
+  // Browser push is optional from V153.35 onward. Existing devices that already
+  // submit a valid subscription can still use it, but registration never depends on it.
+  if (pushSubscription) {
+    const now = new Date().toISOString();
+    const pushUpsert = await supabase
+      .from("vaccination_onsite_push_subscriptions")
+      .upsert(
+        {
+          entry_id: entryId,
+          endpoint: pushSubscription.endpoint,
+          p256dh: pushSubscription.p256dh,
+          auth: pushSubscription.auth,
+          user_agent: clean(req.headers.get("user-agent")).slice(0, 1000),
+          enabled: true,
+          last_error: null,
+          last_error_at: null,
+          updated_at: now,
+        },
+        { onConflict: "endpoint" }
+      )
+      .select("id,entry_id,enabled")
+      .single();
+
+    if (pushUpsert.error) {
+      pushWarning = pushUpsert.error.message || "Background push tidak terikat.";
+    } else {
+      pushBound = true;
+    }
   }
+
+  // Covers the edge case where a participant joins while another queue number
+  // is already active and this participant immediately becomes first WAITING.
+  const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(
+    supabase,
+    Number(eventResult.data.id)
+  );
 
   return response({
     ok: true,
     created: Boolean(payload?.created),
     entry,
-    push_bound: true,
+    push_bound: pushBound,
+    push_warning: pushWarning || null,
+    whatsapp_prepare: whatsappPrepare,
     message: payload?.created
-      ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat dan notifikasi background aktif.`
-      : `NIK Karyawan ini sudah memiliki nomor antrean ${entry?.queue_number || ""}; notifikasi background device ini sudah diaktifkan.`,
+      ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Pengingat WhatsApp akan dikirim otomatis saat tersisa 1 antrean sebelum giliran Anda.`
+      : `NIK Karyawan ini sudah memiliki nomor antrean ${entry?.queue_number || ""}. Pengingat WhatsApp tetap mengikuti antrean aktif.`,
   });
 }

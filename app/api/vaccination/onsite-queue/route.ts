@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { onsitePushMessageSuffix, sendOnsiteQueueCalledPush } from "@/lib/vaccination/onsiteWebPush";
+import { getOnsiteWhatsAppPrepareConfig, notifyOnsiteNextWaitingPrepare, onsiteWhatsAppPrepareSuffix } from "@/lib/vaccination/onsiteWhatsApp";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -57,11 +58,17 @@ async function loadEventData(supabase: any, sessionId: number) {
     entries = entriesResult.data || [];
   }
 
+  const whatsappConfig = getOnsiteWhatsAppPrepareConfig();
+
   return {
     session: sessionResult.data,
     event: eventResult.data,
     entries,
     rolling: rollingPayload(eventResult.data),
+    whatsapp_prepare: {
+      configured: whatsappConfig.configured,
+      trigger_ahead: whatsappConfig.trigger_ahead,
+    },
   };
 }
 
@@ -184,10 +191,16 @@ export async function POST(req: NextRequest) {
     const push = payload?.entry?.id
       ? await sendOnsiteQueueCalledPush(supabase, payload.entry)
       : null;
+
+    // After one participant becomes active, the first WAITING participant is
+    // exactly 1 queue position behind and receives the PREPARE WhatsApp.
+    const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
     const completed = payload?.completed_entry?.queue_number ? `${payload.completed_entry.queue_number} otomatis DONE. ` : "";
     return ok({
-      message: `${completed}Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.${onsitePushMessageSuffix(push)}`,
+      message: `${completed}Memanggil ${payload?.entry?.queue_number || "nomor berikutnya"}.${onsitePushMessageSuffix(push)}${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
       push,
+      whatsapp_prepare: whatsappPrepare,
       ...payload,
     });
   }
@@ -214,7 +227,14 @@ export async function POST(req: NextRequest) {
       .select("*")
       .single();
     if (result.error) return fail(result.error.message, 500);
-    return ok({ message: `${entry.queue_number} kembali ke Waiting dan akan diproses sesuai nomor lamanya.`, entry: result.data });
+
+    const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
+    return ok({
+      message: `${entry.queue_number} kembali ke Waiting dan akan diproses sesuai nomor lamanya.${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
+      entry: result.data,
+      whatsapp_prepare: whatsappPrepare,
+    });
   }
 
   const nextStatus =
@@ -271,9 +291,12 @@ export async function POST(req: NextRequest) {
     ? await sendOnsiteQueueCalledPush(supabase, updateResult.data)
     : null;
 
+  const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
   return ok({
-    message: `Status ${entry.queue_number} menjadi ${nextStatus}.${onsitePushMessageSuffix(push)}`,
+    message: `Status ${entry.queue_number} menjadi ${nextStatus}.${onsitePushMessageSuffix(push)}${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
     entry: updateResult.data,
     push,
+    whatsapp_prepare: whatsappPrepare,
   });
 }
