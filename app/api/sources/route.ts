@@ -26,5 +26,30 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
   if (error) return fail(error.message, 500);
 
-  return ok({ sources: data || [] });
+  let companies: any[] = [];
+  let company_warning = "";
+
+  if (program === "vaccination") {
+    const companyResult = await supabase
+      .from("companies")
+      .select("id,name")
+      .order("name", { ascending: true });
+
+    if (companyResult.error) {
+      company_warning = companyResult.error.message || "Daftar perusahaan existing tidak dapat dimuat.";
+    } else {
+      companies = (companyResult.data || [])
+        .map((row: any) => ({
+          id: Number(row.id),
+          name: String(row.name || "").trim(),
+        }))
+        .filter((row: any) => row.id && row.name);
+    }
+  }
+
+  return ok({
+    sources: data || [],
+    companies,
+    company_warning: company_warning || null,
+  });
 }

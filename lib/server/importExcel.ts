@@ -67,6 +67,9 @@ function chooseHeaderRow(rows: any[][]) {
     "nama",
     "nama peserta",
     "nama lengkap",
+    "child name",
+    "time area name",
+    "time name",
     "peserta",
     "putra",
     "putri",
@@ -694,6 +697,16 @@ export async function importParticipantsFromExcel(
       "JK",
       "L/P",
     ]);
+    const vaccinationNameCol = findColumn(headers, [
+      "Child Name",
+      "Nama Anak",
+      "Nama Child",
+    ]);
+    const vaccinationGenderCol = findColumn(headers, [
+      "Child Gender",
+      "Gender Anak",
+      "Jenis Kelamin Anak",
+    ]);
     const provinceCol = findColumn(headers, [
       "Provinsi",
       "Asal Provinsi",
@@ -755,6 +768,8 @@ export async function importParticipantsFromExcel(
     const vaccinationBinusianIdCol = findColumn(headers, [
       "BinusianID",
       "Binusian ID",
+      "Parent Binusian ID",
+      "Parent ID",
       "External ID",
       "Employee ID",
       "ID Peserta",
@@ -763,6 +778,7 @@ export async function importParticipantsFromExcel(
       "Email",
       "Email Address",
       "Alamat Email",
+      "Parent Email",
     ]);
     const vaccinationPhoneCol = findColumn(headers, [
       "PhoneNumber",
@@ -770,6 +786,8 @@ export async function importParticipantsFromExcel(
       "No HP",
       "Nomor HP",
       "Telepon",
+      "Parent HP",
+      "Parent Phone",
     ]);
     const vaccinationMaritalCol = findColumn(headers, [
       "MaritalStatus",
@@ -794,6 +812,8 @@ export async function importParticipantsFromExcel(
       header_row: headerRowIndex + 1,
       headers,
       nameCol,
+      vaccinationNameCol,
+      vaccinationGenderCol,
       putraCol,
       putriCol,
       provinceCol,
@@ -802,7 +822,12 @@ export async function importParticipantsFromExcel(
       vaccinationTimeNameCol,
     });
 
-    if (nameCol < 0 && putraCol < 0 && putriCol < 0) {
+    if (
+      nameCol < 0 &&
+      putraCol < 0 &&
+      putriCol < 0 &&
+      !(programType === PROGRAM_VACCINATION && vaccinationNameCol >= 0)
+    ) {
       stats.skipped_sheets.push({
         sheet: sheetName,
         reason: "Tidak ada kolom nama peserta / putra / putri",
@@ -906,8 +931,16 @@ export async function importParticipantsFromExcel(
       const candidates: { name: string; gender: string; province: string }[] =
         [];
 
+      const vaccinationPrimaryName =
+        programType === PROGRAM_VACCINATION &&
+        vaccinationNameCol >= 0 &&
+        clean(row[vaccinationNameCol])
+          ? clean(row[vaccinationNameCol])
+          : "";
+
       const primaryName =
-        nameCol >= 0 && clean(row[nameCol]) ? clean(row[nameCol]) : "";
+        vaccinationPrimaryName ||
+        (nameCol >= 0 && clean(row[nameCol]) ? clean(row[nameCol]) : "");
 
       // v168:
       // Prefer a real name column when it exists.
@@ -918,7 +951,13 @@ export async function importParticipantsFromExcel(
           name: primaryName,
           gender:
             programType === PROGRAM_VACCINATION
-              ? normalizeVaccinationGender(genderCol >= 0 ? row[genderCol] : "")
+              ? normalizeVaccinationGender(
+                  vaccinationGenderCol >= 0
+                    ? row[vaccinationGenderCol]
+                    : genderCol >= 0
+                      ? row[genderCol]
+                      : "",
+                )
               : genderCol >= 0
                 ? clean(row[genderCol])
                 : "",

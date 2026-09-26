@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -83,12 +83,21 @@ type ImportSourceOptionV237 = {
   program_type?: string | null;
 };
 
+type ImportCompanyOptionV238 = {
+  id: number;
+  name: string;
+};
+
+const NEW_VACCINATION_COMPANY_V238 = "__new_company__";
+
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
   const [databaseName, setDatabaseName] = useState("");
   const [selectedSourceIdV237, setSelectedSourceIdV237] = useState("");
   const [sourceOptionsV237, setSourceOptionsV237] = useState<ImportSourceOptionV237[]>([]);
   const [loadingSourcesV237, setLoadingSourcesV237] = useState(false);
+  const [companyOptionsV238, setCompanyOptionsV238] = useState<ImportCompanyOptionV238[]>([]);
+  const [vaccinationCompanyChoiceV238, setVaccinationCompanyChoiceV238] = useState("");
   const [institutionName, setInstitutionName] = useState("BPIP / CAPASKA");
   const [companyName, setCompanyName] = useState("BPIP / CAPASKA");
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
@@ -117,8 +126,20 @@ function ImportForm({ user }: { user: any }) {
           description: row.description || "",
           program_type: row.program_type || "",
         })).filter((row: ImportSourceOptionV237) => row.id && row.name));
+        const companies = Array.isArray(json?.companies) ? json.companies : [];
+        setCompanyOptionsV238(
+          companies
+            .map((row: any) => ({
+              id: Number(row.id),
+              name: String(row.name || "").trim(),
+            }))
+            .filter((row: ImportCompanyOptionV238) => row.id && row.name),
+        );
       } catch {
-        if (!cancelled) setSourceOptionsV237([]);
+        if (!cancelled) {
+          setSourceOptionsV237([]);
+          setCompanyOptionsV238([]);
+        }
       } finally {
         if (!cancelled) setLoadingSourcesV237(false);
       }
@@ -141,8 +162,9 @@ function ImportForm({ user }: { user: any }) {
     setProgramType(target.value);
     setSelectedSourceIdV237("");
     setDatabaseName("");
-    setInstitutionName(target.institution);
-    setCompanyName(target.company);
+    setVaccinationCompanyChoiceV238("");
+    setInstitutionName(target.value === "vaccination" ? "" : target.institution);
+    setCompanyName(target.value === "vaccination" ? "" : target.company);
     setPackageName(target.packageName);
   }
 
@@ -160,8 +182,44 @@ function ImportForm({ user }: { user: any }) {
     if (selected.institution_name) {
       setInstitutionName(selected.institution_name);
       setCompanyName(selected.institution_name);
+
+      if (programType === "vaccination") {
+        const matchedCompany = companyOptionsV238.find(
+          (company) =>
+            company.name.toLowerCase() ===
+            String(selected.institution_name || "").trim().toLowerCase(),
+        );
+        setVaccinationCompanyChoiceV238(
+          matchedCompany
+            ? String(matchedCompany.id)
+            : NEW_VACCINATION_COMPANY_V238,
+        );
+      }
     }
     if (selected.description && !description) setDescription(selected.description);
+  }
+
+  function changeVaccinationCompanyV238(value: string) {
+    setVaccinationCompanyChoiceV238(value);
+
+    if (!value) {
+      setInstitutionName("");
+      setCompanyName("");
+      return;
+    }
+
+    if (value === NEW_VACCINATION_COMPANY_V238) {
+      setInstitutionName("");
+      setCompanyName("");
+      return;
+    }
+
+    const selected = companyOptionsV238.find(
+      (company) => String(company.id) === value,
+    );
+    const name = String(selected?.name || "").trim();
+    setInstitutionName(name);
+    setCompanyName(name);
   }
 
   function updateStageStaffNameV165(stageName: string, index: number, value: string) {
@@ -258,6 +316,21 @@ function ImportForm({ user }: { user: any }) {
           <div className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
             {selectedTarget.helper}
           </div>
+
+          {programType === "vaccination" && (
+            <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-cyan-100 bg-cyan-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs font-semibold text-cyan-900">
+                Template sudah menyiapkan <b>TimeAreaName</b> untuk lokasi + tanggal dan <b>TimeName</b> untuk jam/slot agar Session bisa membaca lokasi otomatis.
+              </div>
+              <a
+                href="/templates/template_database_vaksinasi.xlsx"
+                download
+                className="shrink-0 rounded-2xl bg-cyan-600 px-4 py-2 text-center text-sm font-black text-white hover:bg-cyan-700"
+              >
+                Download Template Database Vaksinasi
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -301,16 +374,62 @@ function ImportForm({ user }: { user: any }) {
           </div>
           <div>
             <label className="label">Nama Instansi / Source</label>
-            <input className="input" value={institutionName} onChange={(e) => setInstitutionName(e.target.value)} />
+
+            {programType === "vaccination" ? (
+              <div className="space-y-2">
+                <select
+                  className="input"
+                  value={vaccinationCompanyChoiceV238}
+                  onChange={(e) => changeVaccinationCompanyV238(e.target.value)}
+                  required
+                >
+                  <option value="">
+                    {loadingSourcesV237 ? "Memuat daftar perusahaan..." : "Pilih perusahaan existing"}
+                  </option>
+                  {companyOptionsV238.map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}
+                    </option>
+                  ))}
+                  <option value={NEW_VACCINATION_COMPANY_V238}>+ Perusahaan baru</option>
+                </select>
+
+                {vaccinationCompanyChoiceV238 === NEW_VACCINATION_COMPANY_V238 && (
+                  <input
+                    className="input"
+                    value={institutionName}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setInstitutionName(value);
+                      setCompanyName(value);
+                    }}
+                    placeholder="Ketik nama perusahaan / instansi baru"
+                    required
+                  />
+                )}
+              </div>
+            ) : (
+              <input
+                className="input"
+                value={institutionName}
+                onChange={(e) => setInstitutionName(e.target.value)}
+              />
+            )}
           </div>
-          <div>
-            <label className="label">Perusahaan/Instansi</label>
-            <input className="input" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Paket Pemeriksaan</label>
-            <input className="input" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
-          </div>
+
+          {programType !== "vaccination" && (
+            <div>
+              <label className="label">Perusahaan/Instansi</label>
+              <input className="input" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            </div>
+          )}
+
+          {programType !== "vaccination" && (
+            <div>
+              <label className="label">Paket Pemeriksaan</label>
+              <input className="input" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+            </div>
+          )}
         </div>
         {showMcuStageStaffV165 && (
           <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -369,7 +488,9 @@ function ImportForm({ user }: { user: any }) {
           <label className="label">Upload Excel</label>
           <input className="input" type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
           <div className="mt-2 text-xs text-slate-500">
-            Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP, Departemen.
+            {programType === "vaccination"
+              ? "Header vaksinasi: Nama Peserta, ID Peserta/NIK, Jenis Kelamin, Email, No HP, BatchName, TimeAreaName, TimeName. File BINUS dengan Child Name, Child Gender, Parent Binusian ID, Parent Email, Parent HP juga didukung."
+              : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
           </div>
         </div>
 
