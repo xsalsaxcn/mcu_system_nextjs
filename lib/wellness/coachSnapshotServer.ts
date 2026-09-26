@@ -7,7 +7,7 @@ import { loadParticipantCanonicalStreak } from "@/lib/wellness/participantStreak
 
 export const COACH_SNAPSHOT_TABLE = "wellness_coach_participant_snapshots";
 export const COACH_SNAPSHOT_ENGINE_KEY =
-  "participantCanonicalStreak:v126m119_51";
+  "participantCanonicalStreak:v126m119_51_lkg_restore_20260926";
 
 function clean(value: any) {
   return String(value ?? "").trim();
