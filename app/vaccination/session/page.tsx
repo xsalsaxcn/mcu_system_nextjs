@@ -84,6 +84,11 @@ export default function VaccinationSessionPage() {
   const [loadingEditPrintMode, setLoadingEditPrintMode] = useState(false);
   const [editPrintModeReady, setEditPrintModeReady] = useState(false);
   const [savingEditSession, setSavingEditSession] = useState(false);
+  const [editSessionVaccines, setEditSessionVaccines] = useState<(SessionVaccineDraft & {
+    vaccineLabel?: string;
+    lotLabel?: string;
+  })[]>([]);
+  const [editVaccineDraft, setEditVaccineDraft] = useState<SessionVaccineDraft>(emptyDraft);
 
   const [draft, setDraft] = useState<SessionVaccineDraft>(emptyDraft);
   const [sessionVaccines, setSessionVaccines] = useState<SessionVaccineDraft[]>(
@@ -207,6 +212,15 @@ export default function VaccinationSessionPage() {
     return filteredLots.length === 0;
   }, [draft.vaccineId, filteredLots]);
 
+  const editFilteredLots = useMemo(() => {
+    return lots.filter(
+      (lot) =>
+        lot.active !== false &&
+        (!editVaccineDraft.vaccineId ||
+          String(lot.vaccine_id) === String(editVaccineDraft.vaccineId)),
+    );
+  }, [lots, editVaccineDraft.vaccineId]);
+
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
       (item) =>
@@ -301,6 +315,71 @@ export default function VaccinationSessionPage() {
     }
   }
 
+  function editVaccineLabel(item: SessionVaccineDraft & { vaccineLabel?: string }) {
+    return item.vaccineLabel || vaccineName(item.vaccineId);
+  }
+
+  function editLotLabel(item: SessionVaccineDraft & { lotLabel?: string }) {
+    return item.lotLabel || lotName(item.lotId);
+  }
+
+  function editLotsForVaccine(vaccineId: string) {
+    return lots.filter(
+      (lot) =>
+        lot.active !== false &&
+        String(lot.vaccine_id || "") === String(vaccineId || ""),
+    );
+  }
+
+  function updateEditSessionVaccine(
+    index: number,
+    patch: Partial<SessionVaccineDraft & { vaccineLabel?: string; lotLabel?: string }>,
+  ) {
+    setEditSessionVaccines((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function addEditSessionVaccine() {
+    setError("");
+
+    if (!editVaccineDraft.vaccineId) {
+      setError("Pilih vaksin terlebih dahulu.");
+      return;
+    }
+
+    if (!editVaccineDraft.lotId) {
+      setError("Pilih lot number terlebih dahulu.");
+      return;
+    }
+
+    const duplicate = editSessionVaccines.some(
+      (item) =>
+        String(item.vaccineId) === String(editVaccineDraft.vaccineId) &&
+        String(item.lotId) === String(editVaccineDraft.lotId) &&
+        Number(item.doseNumber) === Number(editVaccineDraft.doseNumber),
+    );
+
+    if (duplicate) {
+      setError("Kombinasi vaksin, lot, dan dosis ini sudah ada di session.");
+      return;
+    }
+
+    setEditSessionVaccines((prev) => [
+      ...prev,
+      {
+        ...editVaccineDraft,
+        vaccineLabel: vaccineName(editVaccineDraft.vaccineId),
+        lotLabel: lotName(editVaccineDraft.lotId),
+      },
+    ]);
+    setEditVaccineDraft(emptyDraft);
+  }
+
+  function removeEditSessionVaccine(index: number) {
+    setEditSessionVaccines((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
   async function openEditSession(session: any) {
     setError("");
     setMessage("");
@@ -323,6 +402,20 @@ export default function VaccinationSessionPage() {
           ? "VALIDASI"
           : "MEDIS",
     });
+    setEditSessionVaccines(
+      (session.session_vaccines || []).map((item: any) => ({
+        vaccineId: String(item.vaccine_id || item.vaccine?.id || ""),
+        lotId: String(item.lot_id || item.lot?.id || ""),
+        doseNumber: Math.max(1, Number(item.dose_number || 1)),
+        vaccineLabel: item.vaccine
+          ? `${item.vaccine.name || "Vaksin"}${item.vaccine.brand ? ` · ${item.vaccine.brand}` : ""}`
+          : "",
+        lotLabel: item.lot
+          ? `Lot ${item.lot.lot_number || "-"} · exp ${item.lot.expiry_date || "-"}`
+          : "",
+      })),
+    );
+    setEditVaccineDraft(emptyDraft);
 
     try {
       const qs = new URLSearchParams({
@@ -354,6 +447,8 @@ export default function VaccinationSessionPage() {
     if (savingEditSession) return;
     setEditingSession(null);
     setEditSessionForm(emptyEditSession);
+    setEditSessionVaccines([]);
+    setEditVaccineDraft(emptyDraft);
     setLoadingEditPrintMode(false);
     setEditPrintModeReady(false);
   }
@@ -364,6 +459,23 @@ export default function VaccinationSessionPage() {
       setError("Nama session wajib diisi.");
       return;
     }
+
+    const invalidService = editSessionVaccines.find(
+      (item) => !item.vaccineId || !item.lotId || Number(item.doseNumber) < 1,
+    );
+    if (invalidService) {
+      setError("Lengkapi vaksin, lot number, dan dosis pada semua layanan session.");
+      return;
+    }
+
+    const editServiceKeys = editSessionVaccines.map(
+      (item) => `${item.vaccineId}|${item.lotId}|${Math.max(1, Number(item.doseNumber || 1))}`,
+    );
+    if (new Set(editServiceKeys).size !== editServiceKeys.length) {
+      setError("Ada kombinasi vaksin, lot, dan dosis yang duplikat di layanan session.");
+      return;
+    }
+
     if (loadingEditPrintMode || !editPrintModeReady) {
       setError("Setting print session belum berhasil dimuat. Tutup Edit Session lalu buka kembali sebelum menyimpan.");
       return;
@@ -386,6 +498,11 @@ export default function VaccinationSessionPage() {
           sessionDate: editSessionForm.sessionDate,
           timeSlot: editSessionForm.timeSlot,
           participantCountPlanned: editSessionForm.participantCountPlanned,
+          sessionVaccines: editSessionVaccines.map((item) => ({
+            vaccineId: item.vaccineId,
+            lotId: item.lotId,
+            doseNumber: item.doseNumber,
+          })),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -411,9 +528,11 @@ export default function VaccinationSessionPage() {
         );
       }
 
-      setMessage("Session dan pilihan petugas print label berhasil diperbarui.");
+      setMessage("Session, layanan/vaksin, lot, dosis, dan pilihan petugas print label berhasil diperbarui.");
       setEditingSession(null);
       setEditSessionForm(emptyEditSession);
+      setEditSessionVaccines([]);
+      setEditVaccineDraft(emptyDraft);
       await loadSessions();
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan perubahan session.");
@@ -1169,7 +1288,7 @@ export default function VaccinationSessionPage() {
                 <div>
                   <h2 className="text-xl font-black">Edit Session</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Edit informasi session tanpa mengubah source database, daftar vaksin/lot, registrasi, antrian, atau record vaksinasi.
+                    Edit informasi session sekaligus layanan/vaksin, lot, dan dosis. Source database, registrasi, antrean, dan record vaksinasi yang sudah terjadi tidak diubah.
                   </p>
                 </div>
                 <button
@@ -1258,6 +1377,186 @@ export default function VaccinationSessionPage() {
                     <option value="VALIDASI">Tim Validasi</option>
                   </select>
                 </label>
+              </div>
+
+              <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Layanan / Vaksin Session</div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Tambah, ganti, atau hapus layanan aktif untuk session ini. Perubahan tidak menghapus record vaksinasi pasien yang sudah tersimpan.
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-white px-3 py-1 text-xs font-bold text-slate-600">
+                    {editSessionVaccines.length} layanan aktif
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2 md:grid-cols-[1.4fr_1.5fr_110px_auto]">
+                  <select
+                    className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+                    value={editVaccineDraft.vaccineId}
+                    onChange={(e) =>
+                      setEditVaccineDraft({
+                        vaccineId: e.target.value,
+                        lotId: "",
+                        doseNumber: editVaccineDraft.doseNumber || 1,
+                      })
+                    }
+                  >
+                    <option value="">Pilih vaksin</option>
+                    {vaccines.map((vaccine) => (
+                      <option key={vaccine.id} value={String(vaccine.id)}>
+                        {vaccineName(String(vaccine.id))}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100"
+                    value={editVaccineDraft.lotId}
+                    disabled={!editVaccineDraft.vaccineId}
+                    onChange={(e) =>
+                      setEditVaccineDraft((prev) => ({ ...prev, lotId: e.target.value }))
+                    }
+                  >
+                    <option value="">
+                      {editVaccineDraft.vaccineId ? "Pilih lot number" : "Pilih vaksin dulu"}
+                    </option>
+                    {editFilteredLots.map((lot) => (
+                      <option key={lot.id} value={String(lot.id)}>
+                        {lotName(String(lot.id))}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    min={1}
+                    className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+                    value={editVaccineDraft.doseNumber}
+                    onChange={(e) =>
+                      setEditVaccineDraft((prev) => ({
+                        ...prev,
+                        doseNumber: Math.max(1, Number(e.target.value || 1)),
+                      }))
+                    }
+                    aria-label="Dosis"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={addEditSessionVaccine}
+                    className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700"
+                  >
+                    + Tambah
+                  </button>
+                </div>
+
+                <div className="mt-3 overflow-hidden rounded-xl border bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                      <tr>
+                        <th className="p-3 text-left">Vaksin / Layanan</th>
+                        <th className="p-3 text-left">Lot Number</th>
+                        <th className="p-3 text-left">Dosis</th>
+                        <th className="w-24 p-3 text-left">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {editSessionVaccines.map((item, index) => {
+                        const rowVaccineExists = vaccines.some(
+                          (vaccine) => String(vaccine.id) === String(item.vaccineId),
+                        );
+                        const rowLots = editLotsForVaccine(item.vaccineId);
+                        const rowLotExists = rowLots.some(
+                          (lot) => String(lot.id) === String(item.lotId),
+                        );
+
+                        return (
+                          <tr key={`edit-service-${index}`}>
+                            <td className="p-2 align-top">
+                              <select
+                                className="w-full rounded-lg border bg-white px-2 py-2 text-sm font-semibold"
+                                value={item.vaccineId}
+                                onChange={(e) => {
+                                  const vaccineId = e.target.value;
+                                  updateEditSessionVaccine(index, {
+                                    vaccineId,
+                                    lotId: "",
+                                    vaccineLabel: vaccineName(vaccineId),
+                                    lotLabel: "",
+                                  });
+                                }}
+                              >
+                                {!rowVaccineExists && item.vaccineId ? (
+                                  <option value={item.vaccineId}>{editVaccineLabel(item)}</option>
+                                ) : null}
+                                {vaccines.map((vaccine) => (
+                                  <option key={vaccine.id} value={String(vaccine.id)}>
+                                    {vaccineName(String(vaccine.id))}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="p-2 align-top">
+                              <select
+                                className="w-full rounded-lg border bg-white px-2 py-2 text-sm font-semibold"
+                                value={item.lotId}
+                                onChange={(e) => {
+                                  const lotId = e.target.value;
+                                  updateEditSessionVaccine(index, {
+                                    lotId,
+                                    lotLabel: lotName(lotId),
+                                  });
+                                }}
+                              >
+                                <option value="">Pilih lot number</option>
+                                {!rowLotExists && item.lotId ? (
+                                  <option value={item.lotId}>{editLotLabel(item)}</option>
+                                ) : null}
+                                {rowLots.map((lot) => (
+                                  <option key={lot.id} value={String(lot.id)}>
+                                    {lotName(String(lot.id))}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="p-2 align-top">
+                              <input
+                                type="number"
+                                min={1}
+                                className="w-24 rounded-lg border px-2 py-2 text-sm font-semibold"
+                                value={item.doseNumber}
+                                onChange={(e) =>
+                                  updateEditSessionVaccine(index, {
+                                    doseNumber: Math.max(1, Number(e.target.value || 1)),
+                                  })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 align-top">
+                              <button
+                                type="button"
+                                onClick={() => removeEditSessionVaccine(index)}
+                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100"
+                              >
+                                Hapus
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!editSessionVaccines.length ? (
+                        <tr>
+                          <td colSpan={4} className="p-4 text-center text-sm text-slate-500">
+                            Belum ada layanan/vaksin aktif di session ini.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">

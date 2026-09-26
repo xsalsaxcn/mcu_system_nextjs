@@ -515,7 +515,13 @@ export async function POST(req: NextRequest) {
     if (!sessionName) return fail("Nama session wajib diisi.");
 
     const participantCountText = clean(body.participantCountPlanned);
-    const payload = {
+    const shouldSyncSessionVaccines = Array.isArray(body.sessionVaccines);
+    const editSessionVaccines = shouldSyncSessionVaccines ? body.sessionVaccines : [];
+    const firstEditedSessionVaccine = editSessionVaccines.find(
+      (item: any) => toInt(item?.vaccineId, 0) && toInt(item?.lotId, 0),
+    );
+
+    const payload: Record<string, any> = {
       session_name: sessionName,
       company_name: clean(body.companyName) || null,
       location: clean(body.location) || null,
@@ -526,6 +532,15 @@ export async function POST(req: NextRequest) {
         : null,
     };
 
+    if (shouldSyncSessionVaccines) {
+      payload.default_vaccine_id = firstEditedSessionVaccine
+        ? toInt(firstEditedSessionVaccine.vaccineId, 0) || null
+        : null;
+      payload.default_lot_id = firstEditedSessionVaccine
+        ? toInt(firstEditedSessionVaccine.lotId, 0) || null
+        : null;
+    }
+
     const result = await supabase
       .from("vaccination_sessions")
       .update(payload)
@@ -535,8 +550,22 @@ export async function POST(req: NextRequest) {
 
     if (result.error) return fail(result.error.message, 500);
 
+    if (shouldSyncSessionVaccines) {
+      try {
+        await syncSessionVaccines(supabase, id, editSessionVaccines);
+      } catch (error: any) {
+        return fail(
+          `Informasi session tersimpan, tetapi daftar layanan/vaksin gagal diperbarui: ${error?.message || ""}`,
+          500,
+          { session: result.data },
+        );
+      }
+    }
+
     return ok({
-      message: "Session vaksinasi berhasil diperbarui.",
+      message: shouldSyncSessionVaccines
+        ? "Session dan daftar layanan/vaksin berhasil diperbarui."
+        : "Session vaksinasi berhasil diperbarui.",
       session: result.data,
     });
   }
