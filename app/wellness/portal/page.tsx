@@ -31,6 +31,7 @@ import ParticipantPortalMenu from "./_components/ParticipantPortalMenu";
 import AchievementChartsTab from "./_components/AchievementChartsTab";
 import WorkoutLogResponsive from "./_components/WorkoutLogResponsive";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
+import JakvasCard from "@/components/wellness/JakvasCard";
 import WellnessMomentumDashboard, {
   type WellnessMomentumDay,
 } from "@/components/wellness/WellnessMomentumDashboard";
@@ -2987,11 +2988,14 @@ export default function WellnessParticipantPortalPage() {
             ) : null}
 
             {activeTab === "charts" ? (
-              <AchievementChartsTab
-                participant={participant}
-                workoutItems={workoutItems}
-                clinicalHistory={clinicalHistory}
-              />
+              <div className="space-y-6">
+                <AchievementChartsTab
+                  participant={participant}
+                  workoutItems={workoutItems}
+                  clinicalHistory={clinicalHistory}
+                />
+                <JakvasCard portal="participant" editable />
+              </div>
             ) : null}
             {activeTab === "history" ? (
               <HistoryTab

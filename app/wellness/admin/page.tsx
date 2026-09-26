@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
+import JakvasCard from "@/components/wellness/JakvasCard";
 
 // WELLNESS_ADMIN_MOBILE_FOUNDATION_V79B
 // WELLNESS_ADMIN_RANKING_BACKEND_TRUTH_V79C
@@ -3178,6 +3179,8 @@ export default function WellnessAdminMobilePage() {
                 </div>
               </div>
 
+
+              <JakvasCard portal="admin" participantId={selectedParticipant?.id} />
 
               <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4">
                 <div className="flex items-start justify-between gap-3">

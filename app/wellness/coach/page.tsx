@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import SupportChatPanel from "@/components/wellness/SupportChatPanel";
+import JakvasCard from "@/components/wellness/JakvasCard";
 import WellnessMomentumDashboard, {
   type WellnessMomentumDay,
 } from "@/components/wellness/WellnessMomentumDashboard";
@@ -4085,6 +4086,8 @@ function ParticipantDetail({
               mode="coach"
             />
           </section>
+
+          <JakvasCard portal="coach" participantId={participant?.id} />
 
           <section className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
