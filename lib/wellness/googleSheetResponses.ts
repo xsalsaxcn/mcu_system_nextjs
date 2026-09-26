@@ -3,7 +3,7 @@
 // Read-only helper untuk dashboard/admin/portal membaca Form Responses Google Sheet.
 // Fix utama:
 // - semua Date dari Google Sheet dipaksa Asia/Jakarta
-// - nutrition memakai Submission Date sebagai tanggal utama agar input hari ini tidak loncat H-1
+// - nutrition memakai Log Date sebagai tanggal operasional; Submission Date audit timestamp saja
 // - healthtalk tetap memakai Tanggal Healthtalk jika tersedia
 // - nutrition dan healthtalk dipisah jelas supaya tidak saling kebaca
 // - menghindari data tiba-tiba muncul di tanggal lain karena UTC conversion
@@ -396,11 +396,16 @@ export function googleSheetRowsToFoodLogs(rows: any[] = []) {
     .filter(isNutritionSheetRow)
     .map((row: any) => {
       const submissionDate = row["Submission Date"];
-      const explicitLogDate = row["Log Date"] || row["Tanggal"];
+      const explicitLogDate =
+        row["Log Date"] ||
+        row["log_date"] ||
+        row["Tanggal Log"] ||
+        row["Tanggal Aktivitas"];
 
-      // Log Date adalah tanggal operasional yang dipilih peserta.
-      // Submission Date hanya timestamp audit dan menjadi fallback untuk row lama.
-      const logDate = toIsoDate(explicitLogDate || submissionDate);
+      // WELLNESS_NUTRITION_LOG_DATE_ONLY_V1
+      // Log Date adalah satu-satunya tanggal operasional achievement.
+      // Submission Date hanya timestamp audit; tidak boleh menjadi fallback streak.
+      const logDate = toIsoDate(explicitLogDate);
       const logTime = toTime(submissionDate);
 
       const foodDetail =

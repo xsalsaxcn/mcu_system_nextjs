@@ -371,11 +371,12 @@ function normalizeSupabaseFood(row: any) {
     ),
     participant_id: Number(row?.participant_id || 0),
     participant_code: clean(row?.participant_code || raw?.participant_code),
+    // WELLNESS_NUTRITION_LOG_DATE_ONLY_V1
+    // Do not infer operational date from created_at/submission timestamp.
     log_date: firstText(
       row?.log_date,
       raw?.log_date,
       original?.log_date,
-      row?.created_at,
     ).slice(0, 10),
     meal_time: firstText(
       row?.meal_time,
@@ -450,8 +451,9 @@ function normalizeSheetFood(
   ]);
   const submissionDate = findColumn(row, [
     "submission date",
+    "submission timestamp",
     "timestamp",
-    "tanggal",
+    "submitted at",
     "waktu submit",
   ]);
   const mealTime = findColumn(row, [
@@ -493,7 +495,9 @@ function normalizeSheetFood(
     google_sheet_row_number: Number(row.__row_index || 0),
     participant_id: participantId,
     participant_code: clean(participant?.code),
-    log_date: normalizeSheetDate(explicitLogDate || submissionDate),
+    // Log Date is mandatory for achievement history.
+    // Submission Date must never decide the streak day.
+    log_date: normalizeSheetDate(explicitLogDate),
     meal_time: mealTime || "-",
     meal_type: mealTime || "-",
     food_name: mealText || "Food log",

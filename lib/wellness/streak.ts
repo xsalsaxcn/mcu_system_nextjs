@@ -398,9 +398,10 @@ export function buildWellnessStreakSummary(params: {
   };
 
   for (const row of params.nutritionRows || []) {
-    const date = wellnessJakartaDate(
-      row?.log_date || row?.date || row?.created_at || row?.updated_at,
-    );
+    // WELLNESS_NUTRITION_LOG_DATE_ONLY_V1
+    // Operational achievement date MUST come from Log Date.
+    // Submission/created/updated timestamps are audit metadata only.
+    const date = wellnessJakartaDate(row?.log_date);
     if (!date) continue;
     const bucket = ensure(date);
     // Each canonical row represents one submitted nutrition entry.
