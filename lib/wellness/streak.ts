@@ -104,18 +104,13 @@ function dayLabel(date: string) {
 
 function activityDate(row: any) {
   const raw = rawPayload(row);
+  // WELLNESS_STREAK_LOG_DATE_ONLY_ACTIVITY_V1
+  // Workout / Steps achievement follows operational Log Date only.
+  // started_at / created_at / sync timestamps remain audit/provider metadata.
   return wellnessJakartaDate(
     row?.log_date ||
-      row?.date ||
-      row?.tanggal ||
       raw?.log_date ||
-      row?.started_at ||
-      row?.start_date_local ||
-      raw?.start_date_local ||
-      raw?.last_sync_at ||
-      raw?.health_connect_last_sync_at ||
-      row?.updated_at ||
-      row?.created_at,
+      raw?.["Log Date"],
   );
 }
 

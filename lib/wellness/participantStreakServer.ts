@@ -11,8 +11,14 @@ import {
   loadEffectiveTargetTimeline,
   targetTimelineSummary,
 } from "@/lib/wellness/effectiveDatedTargets";
-import { filterOperationalRowsForProgram } from "@/lib/wellness/programWindow";
-import { buildWellnessStreakSummary } from "@/lib/wellness/streak";
+import {
+  filterOperationalRowsForProgram,
+  programWindowDayCount,
+} from "@/lib/wellness/programWindow";
+import {
+  buildWellnessStreakSummary,
+  wellnessJakartaDate,
+} from "@/lib/wellness/streak";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -644,7 +650,9 @@ function historicalProofPointText(row: any) {
 }
 
 function historicalProofDate(row: any) {
-  return clean(row?.log_date || row?.date || row?.created_at).slice(0, 10);
+  // WELLNESS_STREAK_LOG_DATE_ONLY_PROOF_V1
+  // Historical evidence follows its operational Log Date.
+  return clean(row?.log_date).slice(0, 10);
 }
 
 function isHistoricalNutritionInputPoint(row: any) {
@@ -3250,11 +3258,47 @@ async function loadParticipantCanonicalStreakBase(params: {
 
   const nutritionTarget = numberValue(targets?.current?.nutrition);
   const workoutTarget = numberValue(targets?.current?.workout) || 300;
+
+  // WELLNESS_STREAK_FULL_PROGRAM_HISTORY_V1
+  // The builder defaults to 42 days; that rolling window must not make
+  // valid historical August success disappear as calendar time advances.
+  // Build canonical history from program start / earliest operational Log Date.
+  const historyDateCandidates = [
+    clean(params.participant?.program_start_date).slice(0, 10),
+    ...finalStreakNutritionRows.map((row: any) =>
+      clean(row?.log_date).slice(0, 10),
+    ),
+    ...activityRows.map((row: any) =>
+      clean(
+        row?.log_date ||
+          row?.raw_payload?.log_date ||
+          row?.raw_payload?.["Log Date"],
+      ).slice(0, 10),
+    ),
+    ...Array.from(durableProofDatesApplied).map((date) =>
+      clean(date).slice(0, 10),
+    ),
+    ...(AUGUST_HISTORICAL_STREAK_SUCCESS_DATES[String(participantId)] || [])
+      .map((date) => clean(date).slice(0, 10)),
+  ].filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+
+  const historyFromDate = [...historyDateCandidates].sort()[0] || "";
+  const historyToDate = wellnessJakartaDate(new Date().toISOString());
+  const historyDays = historyFromDate
+    ? programWindowDayCount(
+        params.participant,
+        historyFromDate,
+        historyToDate,
+        42,
+      )
+    : 42;
+
   const baseStreak = buildWellnessStreakSummary({
     nutritionRows: finalStreakNutritionRows,
     activityRows,
     workoutTargetCalories: workoutTarget,
     targetTimeline: targets,
+    historyDays,
   });
   const streak = applyDurableStreakSuccessProof(
     baseStreak,
