@@ -968,13 +968,13 @@ export default function VaccinationSessionPage() {
           </div>
 
           <div className="mt-4 overflow-hidden rounded-2xl border bg-white">
-            <table className="min-w-full text-sm">
+            <table className="min-w-[1320px] table-fixed text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
                   <th className="p-3 text-left">Vaksin</th>
                   <th className="p-3 text-left">Lot Number</th>
                   <th className="p-3 text-left">Dose</th>
-                  <th className="p-3 text-left">Aksi</th>
+                  <th className="w-[160px] p-3 text-left">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -1069,37 +1069,37 @@ export default function VaccinationSessionPage() {
           </button>
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-2xl border">
+        <section className="mt-6 overflow-x-auto rounded-2xl border">
           <div className="border-b bg-slate-50 p-4 font-bold">
             Daftar Session
           </div>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-100 text-xs uppercase text-slate-600">
               <tr>
-                <th className="p-3 text-left">Session</th>
-                <th className="p-3 text-left">Database</th>
-                <th className="p-3 text-left">Lokasi</th>
-                <th className="p-3 text-left">Vaksin Session</th>
-                <th className="p-3 text-left">Tanggal</th>
-                <th className="p-3 text-left">Peserta Rencana</th>
-                <th className="p-3 text-left">Public</th>
+                <th className="w-[190px] p-3 text-left">Session</th>
+                <th className="w-[200px] p-3 text-left">Database</th>
+                <th className="w-[200px] p-3 text-left">Lokasi</th>
+                <th className="w-[250px] p-3 text-left">Vaksin Session</th>
+                <th className="w-[130px] p-3 text-left">Tanggal</th>
+                <th className="w-[140px] p-3 text-left">Peserta Rencana</th>
+                <th className="w-[120px] p-3 text-left">Public</th>
                 <th className="p-3 text-left">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {sessions.map((session) => (
                 <tr key={session.id}>
-                  <td className="p-3 font-bold">{session.session_name}</td>
-                  <td className="p-3">
+                  <td className="p-3 align-top font-bold break-words">{session.session_name}</td>
+                  <td className="p-3 align-top break-words">
                     {session.source_name || session.source_id || "-"}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 align-top break-words">
                     <div className="font-semibold">
                       {session.location || "-"}
                     </div>
                     <div className="text-xs text-slate-500">Tanggal: {session.session_date || "-"}</div>
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 align-top">
                     {session.session_vaccines?.length ? (
                       <div className="space-y-1">
                         {session.session_vaccines.map((item: any) => (
@@ -1116,11 +1116,11 @@ export default function VaccinationSessionPage() {
                       "-"
                     )}
                   </td>
-                  <td className="p-3">{session.session_date || "-"}</td>
-                  <td className="p-3">
+                  <td className="p-3 align-top whitespace-nowrap">{session.session_date || "-"}</td>
+                  <td className="p-3 align-top">
                     {session.participant_count_planned ?? "-"}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 align-top whitespace-nowrap">
                     <a
                       className="font-bold text-blue-600"
                       href={`/vaccination/public/queue/${session.public_queue_token}`}
@@ -1129,8 +1129,8 @@ export default function VaccinationSessionPage() {
                       Public Queue
                     </a>
                   </td>
-                  <td className="p-3">
-                    <div className="flex flex-wrap gap-2">
+                  <td className="p-3 align-top">
+                    <div className="flex flex-nowrap gap-2">
                       <button
                         type="button"
                         onClick={() => openEditSession(session)}
@@ -1153,7 +1153,7 @@ export default function VaccinationSessionPage() {
               ))}
               {!sessions.length ? (
                 <tr>
-                  <td colSpan={8} className="p-5 text-center text-slate-500">
+                  <td colSpan={9} className="p-5 text-center text-slate-500">
                     Belum ada session.
                   </td>
                 </tr>
