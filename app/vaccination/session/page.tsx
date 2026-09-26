@@ -851,7 +851,7 @@ export default function VaccinationSessionPage() {
             />
 
             <input
-              className="rounded-xl border px-3 py-2.5"
+              className="rounded-xl border px-3 py-2.5 md:col-span-2 xl:col-span-3"
               placeholder="Jam / slot, contoh: 09.00 - 14.00"
               value={form.timeSlot}
               onChange={(e) =>
