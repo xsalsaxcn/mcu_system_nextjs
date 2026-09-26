@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
   const sourceResult = await supabase
     .from("participant_sources")
-    .select("id,name,institution_name")
+    .select("id,name,institution_name,uploaded_filename")
     .eq("id", sourceId)
     .maybeSingle();
 
@@ -66,6 +66,15 @@ export async function GET(req: NextRequest) {
       locations: [],
       message: "Metadata lokasi vaksinasi belum tersedia. Jalankan SQL v55 dan re-import database vaksinasi agar TimeAreaName/TimeName terbaca.",
       error: result.error.message,
+    });
+  }
+
+  if (!(result.data || []).length && clean(sourceResult.data?.uploaded_filename) === "manual-company-only") {
+    return ok({
+      locations: [],
+      source: sourceResult.data || null,
+      manual_only: true,
+      message: "Perusahaan ini belum memiliki database peserta. Isi lokasi, tanggal, dan jam secara manual di Session.",
     });
   }
 

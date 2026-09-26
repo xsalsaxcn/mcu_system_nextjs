@@ -13,8 +13,7 @@ export async function POST(req: NextRequest) {
 
   const form = await req.formData();
   const file = form.get("file") as File | null;
-
-  if (!file) return fail("File Excel wajib diupload.");
+  const mode = String(form.get("mode") || "").trim();
 
   const rawProgramType = String(form.get("program_type") || PROGRAM_CAPASKA).trim().toLowerCase();
   const programType = [PROGRAM_CAPASKA, PROGRAM_CORPORATE, PROGRAM_VACCINATION].includes(rawProgramType)
@@ -43,10 +42,100 @@ export async function POST(req: NextRequest) {
   const packageName = String(form.get("package_name") || defaultPackage).trim();
   const description = String(form.get("description") || "").trim();
 
+  const supabase = getSupabaseAdmin();
+
+  // V153.39 — Vaccination company-only setup.
+  // Some companies do not provide a participant database. In this mode we only
+  // create/reuse the company + participant source so Session can be configured
+  // manually later (location, date and time) without uploading a fake Excel file.
+  if (mode === "vaccination_company_only") {
+    if (programType !== PROGRAM_VACCINATION) {
+      return fail("Mode perusahaan tanpa database hanya tersedia untuk Vaksinasi.");
+    }
+
+    const manualCompanyName = String(companyName || institutionName || "").trim();
+    if (!manualCompanyName) return fail("Nama perusahaan wajib diisi.");
+
+    const companyLookup = await supabase
+      .from("companies")
+      .select("id,name")
+      .ilike("name", manualCompanyName)
+      .limit(1)
+      .maybeSingle();
+
+    if (companyLookup.error) return fail(companyLookup.error.message, 500);
+
+    let company = companyLookup.data;
+    if (!company) {
+      const companyInsert = await supabase
+        .from("companies")
+        .insert({ name: manualCompanyName, address: "", pic_name: "" })
+        .select("id,name")
+        .single();
+
+      if (companyInsert.error) return fail(companyInsert.error.message, 500);
+      company = companyInsert.data;
+    }
+
+    let sourceLookup = await supabase
+      .from("participant_sources")
+      .select("id,name,institution_name,program_type,uploaded_filename")
+      .eq("program_type", PROGRAM_VACCINATION)
+      .ilike("institution_name", manualCompanyName)
+      .limit(1)
+      .maybeSingle();
+
+    if (sourceLookup.error) return fail(sourceLookup.error.message, 500);
+
+    if (!sourceLookup.data) {
+      sourceLookup = await supabase
+        .from("participant_sources")
+        .select("id,name,institution_name,program_type,uploaded_filename")
+        .eq("program_type", PROGRAM_VACCINATION)
+        .ilike("name", manualCompanyName)
+        .limit(1)
+        .maybeSingle();
+
+      if (sourceLookup.error) return fail(sourceLookup.error.message, 500);
+    }
+
+    if (sourceLookup.data) {
+      return ok({
+        mode,
+        created: false,
+        company,
+        source: sourceLookup.data,
+        message: `${manualCompanyName} sudah tersedia. Silakan pilih perusahaan ini di Session dan isi lokasi, tanggal, serta jam secara manual.`,
+      });
+    }
+
+    const sourceInsert = await supabase
+      .from("participant_sources")
+      .insert({
+        name: manualCompanyName,
+        institution_name: manualCompanyName,
+        program_type: PROGRAM_VACCINATION,
+        description: description || "Perusahaan vaksinasi tanpa database peserta",
+        uploaded_filename: "manual-company-only",
+      })
+      .select("id,name,institution_name,program_type,uploaded_filename")
+      .single();
+
+    if (sourceInsert.error) return fail(sourceInsert.error.message, 500);
+
+    return ok({
+      mode,
+      created: true,
+      company,
+      source: sourceInsert.data,
+      message: `${manualCompanyName} berhasil ditambahkan. Atur lokasi, tanggal, dan jam nanti di Session Vaksinasi.`,
+    });
+  }
+
+  if (!file) return fail("File Excel wajib diupload.");
   if (!databaseName) return fail("Nama Database wajib diisi.");
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const supabase = getSupabaseAdmin();
 
   const stats = await importParticipantsFromExcel(supabase, buffer, {
     ...(Number.isFinite(sourceId) && sourceId > 0 ? { source_id: sourceId } : {}),

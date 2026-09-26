@@ -105,6 +105,8 @@ function ImportForm({ user }: { user: any }) {
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [companyOnlyModeV239, setCompanyOnlyModeV239] = useState(false);
+  const [companyOnlyNameV239, setCompanyOnlyNameV239] = useState("");
   const [stageStaffOptionsV165, setStageStaffOptionsV165] = useState<Record<string, string[]>>(makeStageStaffMapV165());
 
 
@@ -163,6 +165,8 @@ function ImportForm({ user }: { user: any }) {
     setSelectedSourceIdV237("");
     setDatabaseName("");
     setVaccinationCompanyChoiceV238("");
+    setCompanyOnlyModeV239(false);
+    setCompanyOnlyNameV239("");
     setInstitutionName(target.value === "vaccination" ? "" : target.institution);
     setCompanyName(target.value === "vaccination" ? "" : target.company);
     setPackageName(target.packageName);
@@ -263,6 +267,33 @@ function ImportForm({ user }: { user: any }) {
 
     return staffRes.json().catch(() => null);
   }
+  async function saveVaccinationCompanyOnlyV239() {
+    const name = companyOnlyNameV239.trim();
+    if (!name) return alert("Masukkan nama perusahaan dulu.");
+
+    const form = new FormData();
+    form.append("mode", "vaccination_company_only");
+    form.append("program_type", "vaccination");
+    form.append("institution_name", name);
+    form.append("company_name", name);
+    form.append("description", "Perusahaan vaksinasi tanpa database peserta");
+
+    setLoading(true);
+    setResult(null);
+
+    try {
+      const res = await fetch("/api/import", { method: "POST", body: form });
+      const json = await res.json().catch(() => ({}));
+      setResult(json);
+
+      if (res.ok && json?.ok) {
+        setCompanyOnlyNameV239("");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return alert("Upload file Excel dulu.");
@@ -318,21 +349,59 @@ function ImportForm({ user }: { user: any }) {
           </div>
 
           {programType === "vaccination" && (
-            <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-cyan-100 bg-cyan-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs font-semibold text-cyan-900">
-                Template sudah menyiapkan <b>TimeAreaName</b> untuk lokasi + tanggal dan <b>TimeName</b> untuk jam/slot agar Session bisa membaca lokasi otomatis.
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-col gap-2 rounded-2xl border border-cyan-100 bg-cyan-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs font-semibold text-cyan-900">
+                  Template sudah menyiapkan <b>TimeAreaName</b> untuk lokasi + tanggal dan <b>TimeName</b> untuk jam/slot agar Session bisa membaca lokasi otomatis.
+                </div>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <a
+                    href="/templates/template_database_vaksinasi.xlsx"
+                    download
+                    className="rounded-2xl bg-cyan-600 px-4 py-2 text-center text-sm font-black text-white hover:bg-cyan-700"
+                  >
+                    Download Template Database Vaksinasi
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setCompanyOnlyModeV239((value) => !value)}
+                    className="rounded-2xl border border-emerald-200 bg-white px-4 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-50"
+                  >
+                    {companyOnlyModeV239 ? "Kembali ke Import Excel" : "+ Perusahaan Tanpa Database"}
+                  </button>
+                </div>
               </div>
-              <a
-                href="/templates/template_database_vaksinasi.xlsx"
-                download
-                className="shrink-0 rounded-2xl bg-cyan-600 px-4 py-2 text-center text-sm font-black text-white hover:bg-cyan-700"
-              >
-                Download Template Database Vaksinasi
-              </a>
+
+              {companyOnlyModeV239 && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="font-black text-emerald-900">Buat Perusahaan Tanpa Database Peserta</div>
+                  <div className="mt-1 text-xs font-semibold text-emerald-700">
+                    Cukup masukkan nama perusahaan. Lokasi, tanggal, dan jam diatur manual nanti di Session Vaksinasi.
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      className="input flex-1"
+                      value={companyOnlyNameV239}
+                      onChange={(e) => setCompanyOnlyNameV239(e.target.value)}
+                      placeholder="Nama perusahaan, contoh: PT ABC"
+                    />
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={saveVaccinationCompanyOnlyV239}
+                      className="rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {loading ? "Menyimpan..." : "Simpan Perusahaan"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
+        {!(programType === "vaccination" && companyOnlyModeV239) && (
+          <>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-3">
             <div>
@@ -495,11 +564,22 @@ function ImportForm({ user }: { user: any }) {
         </div>
 
         <button className="btn-primary" disabled={loading}>{loading ? "Import berjalan..." : "Import Database Peserta"}</button>
+
+          </>
+        )}
       </form>
 
       {result && (
         <section className={`card p-5 ${result.ok ? "border-emerald-200" : "border-red-200"}`}>
-          <div className="text-lg font-black">{result.ok ? "Import selesai" : "Import gagal"}</div>
+          <div className="text-lg font-black">
+            {result?.mode === "vaccination_company_only"
+              ? result.ok
+                ? "Perusahaan tersimpan"
+                : "Gagal menyimpan perusahaan"
+              : result.ok
+                ? "Import selesai"
+                : "Import gagal"}
+          </div>
           <pre className="mt-3 max-h-96 overflow-auto rounded-xl bg-slate-900 p-4 text-xs text-white">{JSON.stringify(result, null, 2)}</pre>
         </section>
       )}
