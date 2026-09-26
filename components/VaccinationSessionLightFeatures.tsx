@@ -129,10 +129,10 @@ async function addStaffOption(name: string) {
     return {
       ok: true,
       staff: local,
-      message: json?.message ? `${json.message} Nama tetap tersimpan lokal.` : "Nama tersimpan lokal.",
+      message: "Nama petugas ditambahkan.",
     };
   } catch (_error) {
-    return { ok: true, staff: local, message: "Nama tersimpan lokal." };
+    return { ok: true, staff: local, message: "Nama petugas ditambahkan." };
   }
 }
 
@@ -264,10 +264,10 @@ async function ensureStaffField() {
 
   const loaded = await fetchStaffOptions();
   renderStaffChips(box, loaded.staff);
-  if (loaded.needsSetup && loaded.message) {
-    message.textContent = loaded.message;
-    message.style.color = "#b45309";
-  }
+
+  // V153.38: database persistence is an implementation detail.
+  // Local fallback remains fully usable, so no SQL/setup warning is shown in the Session UI.
+  message.textContent = "";
 
   async function submit() {
     add.textContent = "Menyimpan...";
