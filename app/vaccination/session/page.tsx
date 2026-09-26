@@ -1141,7 +1141,7 @@ export default function VaccinationSessionPage() {
                   Tambahkan daftar vaksin & lot terlebih dahulu, baru pilih mapping.
                 </div>
               ) : null}
-              <div className="mt-3 overflow-hidden rounded-xl border bg-white">
+              <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                     <tr>
@@ -1283,7 +1283,7 @@ export default function VaccinationSessionPage() {
 
         {editingSession ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border bg-white p-6 shadow-2xl">
+            <div className="max-h-[90vh] w-full max-w-5xl overflow-x-hidden overflow-y-auto rounded-3xl border bg-white p-6 shadow-2xl">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-black">Edit Session</h2>
@@ -1392,9 +1392,9 @@ export default function VaccinationSessionPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-2 md:grid-cols-[1.4fr_1.5fr_110px_auto]">
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.5fr)_110px_auto]">
                   <select
-                    className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+                    className="min-w-0 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
                     value={editVaccineDraft.vaccineId}
                     onChange={(e) =>
                       setEditVaccineDraft({
@@ -1413,7 +1413,7 @@ export default function VaccinationSessionPage() {
                   </select>
 
                   <select
-                    className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100"
+                    className="min-w-0 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100"
                     value={editVaccineDraft.lotId}
                     disabled={!editVaccineDraft.vaccineId}
                     onChange={(e) =>
