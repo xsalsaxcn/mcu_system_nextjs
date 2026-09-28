@@ -34,13 +34,29 @@ export default function VaccinationOnsiteQueuePage() {
   const [origin, setOrigin] = useState("");
 
   useEffect(() => {
+    const requestedSessionId =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("session_id") || ""
+        : "";
+
     if (typeof window !== "undefined") setOrigin(window.location.origin);
+
     fetch("/api/vaccination/sessions", { cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
         if (json.ok) {
-          setSessions(json.sessions || []);
-          if (json.sessions?.[0]?.id) setSessionId(String(json.sessions[0].id));
+          const nextSessions = Array.isArray(json.sessions) ? json.sessions : [];
+          setSessions(nextSessions);
+
+          const requestedExists =
+            requestedSessionId &&
+            nextSessions.some((session: any) => String(session.id) === requestedSessionId);
+
+          if (requestedExists) {
+            setSessionId(requestedSessionId);
+          } else if (nextSessions?.[0]?.id) {
+            setSessionId(String(nextSessions[0].id));
+          }
         }
       });
   }, []);
@@ -63,6 +79,15 @@ export default function VaccinationOnsiteQueuePage() {
     return () => window.clearInterval(timer);
   }, [sessionId]);
 
+  function setSessionSpecificOperatorUrl(id: string) {
+    if (typeof window === "undefined" || !id) return;
+    const url = new URL(window.location.href);
+    url.pathname = "/vaccination/queue/onsite";
+    url.search = "";
+    url.searchParams.set("session_id", id);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
   async function post(payload: any) {
     setBusy(true);
     setError("");
@@ -76,6 +101,14 @@ export default function VaccinationOnsiteQueuePage() {
         setError(json.message || "Action gagal.");
         return null;
       }
+
+      if (payload?.action === "ensure-event") {
+        const activatedSessionId = String(
+          payload?.sessionId || payload?.session_id || sessionId || ""
+        );
+        setSessionSpecificOperatorUrl(activatedSessionId);
+      }
+
       setMessage(json.message || "Berhasil.");
       await load();
       return json;
@@ -91,6 +124,10 @@ export default function VaccinationOnsiteQueuePage() {
   const done = useMemo(() => entries.filter((x: any) => x.queue_status === "DONE"), [entries]);
 
   const scanUrl = data?.rolling?.scan_path && origin ? `${origin}${data.rolling.scan_path}` : "";
+  const operatorSessionUrl =
+    origin && sessionId
+      ? `${origin}/vaccination/queue/onsite?session_id=${encodeURIComponent(sessionId)}`
+      : "";
   const canCallNext = waiting.length > 0 && active.length === 0;
   const nextButtonLabel = !waiting.length
     ? "Tidak Ada Antrean Menunggu"
@@ -190,6 +227,38 @@ export default function VaccinationOnsiteQueuePage() {
 
         {data?.event ? (
           <>
+            <section className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="text-xs font-black uppercase tracking-wide text-violet-700">
+                Link Khusus Session Onsite
+              </div>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  readOnly
+                  value={operatorSessionUrl}
+                  className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                />
+                <button
+                  type="button"
+                  disabled={!operatorSessionUrl}
+                  onClick={async () => {
+                    if (!operatorSessionUrl) return;
+                    try {
+                      await navigator.clipboard.writeText(operatorSessionUrl);
+                      setMessage("Link khusus session onsite berhasil disalin.");
+                    } catch {
+                      setMessage("Link khusus session sudah tampil dan dapat disalin manual.");
+                    }
+                  }}
+                  className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white disabled:opacity-40"
+                >
+                  Salin Link
+                </button>
+              </div>
+              <div className="mt-2 text-xs font-semibold text-violet-700">
+                Link ini khusus halaman operator untuk session terpilih. QR peserta tetap memakai link publik session yang aman dan berganti setiap 60 detik.
+              </div>
+            </section>
+
             <section className="mt-6 grid gap-5 xl:grid-cols-[380px_1fr]">
               <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
                 <div className="flex items-center justify-between gap-3">
