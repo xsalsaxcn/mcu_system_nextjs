@@ -32,14 +32,22 @@ export default function VaccinationOnsiteQueuePage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [origin, setOrigin] = useState("");
+  const [tvOnly, setTvOnly] = useState(false);
 
   useEffect(() => {
     const requestedSessionId =
       typeof window !== "undefined"
         ? new URLSearchParams(window.location.search).get("session_id") || ""
         : "";
+    const requestedTvMode =
+      typeof window !== "undefined"
+        ? ["1", "true", "yes"].includes(
+            (new URLSearchParams(window.location.search).get("tv") || "").toLowerCase()
+          )
+        : false;
 
     if (typeof window !== "undefined") setOrigin(window.location.origin);
+    setTvOnly(requestedTvMode);
 
     fetch("/api/vaccination/sessions", { cache: "no-store" })
       .then((r) => r.json())
@@ -128,12 +136,81 @@ export default function VaccinationOnsiteQueuePage() {
     origin && sessionId
       ? `${origin}/vaccination/queue/onsite?session_id=${encodeURIComponent(sessionId)}`
       : "";
+  const tvSessionUrl = operatorSessionUrl ? `${operatorSessionUrl}&tv=1` : "";
   const canCallNext = waiting.length > 0 && active.length === 0;
   const nextButtonLabel = !waiting.length
     ? "Tidak Ada Antrean Menunggu"
     : active.length
       ? "Selesaikan Antrean Aktif Dulu"
       : "Panggil Nomor Berikutnya";
+
+
+  const queueDisplayPanel = data?.event ? (
+    <section className={tvOnly ? "grid gap-5 xl:grid-cols-[400px_1fr]" : "mt-6 grid gap-5 xl:grid-cols-[380px_1fr]"}>
+      <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-600">QR Onsite Dinamis</div>
+            <div className="mt-1 text-lg font-black text-slate-950">Scan sekali → langsung dapat antrean</div>
+          </div>
+          <span className={`rounded-full px-3 py-1 text-xs font-black ${data.event.status === "OPEN" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>{data.event.status}</span>
+        </div>
+        <div className="mt-5 flex justify-center rounded-3xl bg-white p-5 shadow-sm">
+          {scanUrl ? <QRCodeImage value={scanUrl} size={300} /> : <div className="flex h-[300px] w-[300px] items-center justify-center text-sm text-slate-400">QR tidak aktif</div>}
+        </div>
+        <div className="mt-4 text-center text-sm font-black text-violet-800">QR berganti dalam ± {data?.rolling?.expires_in ?? "-"} detik</div>
+        <div className="mt-1 text-center text-xs font-semibold text-slate-500">Satu QR aktif dapat dipakai banyak peserta selama window 60 detik. Peserta yang sudah berhasil membuka form mendapat waktu 10 menit untuk submit.</div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button disabled={busy || data.event.status === "OPEN"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "OPEN" })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Buka Queue</button>
+          <button disabled={busy || data.event.status === "CLOSED"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "CLOSED" })} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Tutup Queue</button>
+        </div>
+      </div>
+
+      <div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Dipanggil</div><div className="mt-2 text-4xl font-black text-blue-700">{data.event.current_queue_number || "-"}</div></div>
+          <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Waiting</div><div className="mt-2 text-4xl font-black text-red-700">{waiting.length}</div></div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">Skipped</div><div className="mt-2 text-4xl font-black text-amber-700">{skipped.length}</div></div>
+          <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Done</div><div className="mt-2 text-4xl font-black text-emerald-700">{done.length}</div></div>
+        </div>
+        <button disabled={busy || !canCallNext} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
+        {active.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Masih ada antrean aktif. Selesaikan dulu dengan tombol <span className="font-black">Done</span> di card antrean aktif, baru panggil nomor berikutnya.</p> : null}
+
+        <div className={`mt-3 rounded-2xl border p-4 ${data?.whatsapp_prepare?.configured ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+          <div className={`text-sm font-black ${data?.whatsapp_prepare?.configured ? "text-emerald-800" : "text-amber-800"}`}>
+            WhatsApp Prepare: {data?.whatsapp_prepare?.configured ? "AKTIF" : "BELUM DIKONFIGURASI"}
+          </div>
+          <p className={`mt-1 text-xs font-semibold ${data?.whatsapp_prepare?.configured ? "text-emerald-700" : "text-amber-700"}`}>
+            Otomatis dikirim ke peserta WAITING paling depan saat ada tepat 1 antrean aktif di depannya. Tidak ada WhatsApp kedua saat nomor dipanggil.
+          </p>
+        </div>
+
+        <section className="mt-4 rounded-2xl border bg-white p-4">
+          <h2 className="font-black text-slate-950">Antrean Aktif</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {active.map((entry: any) => (
+              <div key={entry.id} className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-3xl font-black text-blue-700">{entry.queue_number}</div>
+                    <div className="font-bold text-slate-950">{entry.participant_name}</div>
+                    <div className="text-xs text-slate-500">{entry.employee_id}{entry.phone ? ` · ${entry.phone}` : ""}</div>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-black ${statusBadge(entry.queue_status)}`}>DIPANGGIL</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
+                  <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
+                </div>
+              </div>
+            ))}
+            {!active.length ? <div className="text-sm text-slate-500">Belum ada nomor aktif.</div> : null}
+          </div>
+          <p className="mt-3 text-xs font-semibold text-slate-500">Status selesai antrean aktif sekarang dikontrol dari card aktif. Tombol <span className="font-black">Panggil Nomor Berikutnya</span> hanya dipakai untuk memanggil waiting berikutnya.</p>
+        </section>
+      </div>
+    </section>
+  ) : null;
 
   function exportWaiting() {
     if (!waiting.length) return;
@@ -191,140 +268,122 @@ export default function VaccinationOnsiteQueuePage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 p-4 md:p-6">
-      <div className="mx-auto max-w-7xl rounded-3xl border bg-white p-5 shadow-sm md:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-black text-slate-950">Antrian Vaksin — Onsite Rolling QR</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Peserta isi Nama Lengkap + NIK Karyawan + No HP, lalu langsung mendapat nomor antrean. Satu NIK Karyawan hanya mendapat satu nomor per event.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <a href="/vaccination/queue" className="rounded-xl border px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Mode Existing</a>
-              <span className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-black text-white">Mode Onsite Rolling QR</span>
+    <main className={tvOnly ? "min-h-screen bg-white p-3 md:p-5" : "min-h-screen bg-slate-50 p-4 md:p-6"}>
+      <div className={tvOnly ? "mx-auto max-w-[1500px]" : "mx-auto max-w-7xl rounded-3xl border bg-white p-5 shadow-sm md:p-6"}>
+        {!tvOnly ? (
+          <>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h1 className="text-2xl font-black text-slate-950">Antrian Vaksin — Onsite Rolling QR</h1>
+                <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Peserta isi Nama Lengkap + NIK Karyawan + No HP, lalu langsung mendapat nomor antrean. Satu NIK Karyawan hanya mendapat satu nomor per event.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <a href="/vaccination/queue" className="rounded-xl border px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Mode Existing</a>
+                  <span className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-black text-white">Mode Onsite Rolling QR</span>
+                </div>
+              </div>
+              <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
             </div>
-          </div>
-          <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
-        </div>
 
-        {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
-        {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
+            {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
+            {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
 
-        <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
-          <div className="grid gap-3 lg:grid-cols-[1fr_170px_auto] lg:items-end">
-            <label className="block">
-              <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-500">Session / Event</div>
-              <select value={sessionId} onChange={(e) => setSessionId(e.target.value)} className="w-full rounded-xl border bg-white px-3 py-3 text-sm font-bold">
-                <option value="">Pilih session</option>
-                {sessions.map((session) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
-              </select>
-            </label>
-            <div>
-              <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-500">Rolling QR</div>
-              <div className="rounded-xl border bg-white px-3 py-3 text-sm font-black text-violet-700">60 detik</div>
-            </div>
-            <button disabled={!sessionId || busy} onClick={() => post({ action: "ensure-event", sessionId: Number(sessionId), intervalSeconds: 60, queuePrefix: "Q" })} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">Aktifkan Mode Onsite</button>
+            <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
+              <div className="grid gap-3 lg:grid-cols-[1fr_170px_auto] lg:items-end">
+                <label className="block">
+                  <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-500">Session / Event</div>
+                  <select value={sessionId} onChange={(e) => setSessionId(e.target.value)} className="w-full rounded-xl border bg-white px-3 py-3 text-sm font-bold">
+                    <option value="">Pilih session</option>
+                    {sessions.map((session) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
+                  </select>
+                </label>
+                <div>
+                  <div className="mb-1 text-xs font-black uppercase tracking-wide text-slate-500">Rolling QR</div>
+                  <div className="rounded-xl border bg-white px-3 py-3 text-sm font-black text-violet-700">60 detik</div>
+                </div>
+                <button disabled={!sessionId || busy} onClick={() => post({ action: "ensure-event", sessionId: Number(sessionId), intervalSeconds: 60, queuePrefix: "Q" })} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">Aktifkan Mode Onsite</button>
+              </div>
+            </section>
+          </>
+        ) : (
+          <div className="mb-4 rounded-2xl border bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+            Tampilan TV Session Onsite{data?.session ? ` · ${sessionLabel(data.session)}` : ""}
           </div>
-        </section>
+        )}
+
+        {tvOnly && error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
 
         {data?.event ? (
           <>
-            <section className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-              <div className="text-xs font-black uppercase tracking-wide text-violet-700">
-                Link Khusus Session Onsite
-              </div>
-              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                <input
-                  readOnly
-                  value={operatorSessionUrl}
-                  className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
-                />
-                <button
-                  type="button"
-                  disabled={!operatorSessionUrl}
-                  onClick={async () => {
-                    if (!operatorSessionUrl) return;
-                    try {
-                      await navigator.clipboard.writeText(operatorSessionUrl);
-                      setMessage("Link khusus session onsite berhasil disalin.");
-                    } catch {
-                      setMessage("Link khusus session sudah tampil dan dapat disalin manual.");
-                    }
-                  }}
-                  className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white disabled:opacity-40"
-                >
-                  Salin Link
-                </button>
-              </div>
-              <div className="mt-2 text-xs font-semibold text-violet-700">
-                Link ini khusus halaman operator untuk session terpilih. QR peserta tetap memakai link publik session yang aman dan berganti setiap 60 detik.
-              </div>
-            </section>
-
-            <section className="mt-6 grid gap-5 xl:grid-cols-[380px_1fr]">
-              <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
-                <div className="flex items-center justify-between gap-3">
+            {!tvOnly ? (
+              <section className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                <div className="text-xs font-black uppercase tracking-wide text-violet-700">
+                  Link Khusus Session Onsite
+                </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <div>
-                    <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-600">QR Onsite Dinamis</div>
-                    <div className="mt-1 text-lg font-black text-slate-950">Scan sekali → langsung dapat antrean</div>
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-violet-700">Link Operator Session</div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        readOnly
+                        value={operatorSessionUrl}
+                        className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        disabled={!operatorSessionUrl}
+                        onClick={async () => {
+                          if (!operatorSessionUrl) return;
+                          try {
+                            await navigator.clipboard.writeText(operatorSessionUrl);
+                            setMessage("Link operator session onsite berhasil disalin.");
+                          } catch {
+                            setMessage("Link operator session onsite sudah tampil dan dapat disalin manual.");
+                          }
+                        }}
+                        className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white disabled:opacity-40"
+                      >
+                        Salin Link Operator
+                      </button>
+                    </div>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-black ${data.event.status === "OPEN" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>{data.event.status}</span>
-                </div>
-                <div className="mt-5 flex justify-center rounded-3xl bg-white p-5 shadow-sm">
-                  {scanUrl ? <QRCodeImage value={scanUrl} size={300} /> : <div className="flex h-[300px] w-[300px] items-center justify-center text-sm text-slate-400">QR tidak aktif</div>}
-                </div>
-                <div className="mt-4 text-center text-sm font-black text-violet-800">QR berganti dalam ± {data?.rolling?.expires_in ?? "-"} detik</div>
-                <div className="mt-1 text-center text-xs font-semibold text-slate-500">Satu QR aktif dapat dipakai banyak peserta selama window 60 detik. Peserta yang sudah berhasil membuka form mendapat waktu 10 menit untuk submit.</div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button disabled={busy || data.event.status === "OPEN"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "OPEN" })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Buka Queue</button>
-                  <button disabled={busy || data.event.status === "CLOSED"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "CLOSED" })} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Tutup Queue</button>
-                </div>
-              </div>
-
-              <div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Dipanggil</div><div className="mt-2 text-4xl font-black text-blue-700">{data.event.current_queue_number || "-"}</div></div>
-                  <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Waiting</div><div className="mt-2 text-4xl font-black text-red-700">{waiting.length}</div></div>
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">Skipped</div><div className="mt-2 text-4xl font-black text-amber-700">{skipped.length}</div></div>
-                  <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Done</div><div className="mt-2 text-4xl font-black text-emerald-700">{done.length}</div></div>
-                </div>
-                <button disabled={busy || !canCallNext} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
-                {active.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Masih ada antrean aktif. Selesaikan dulu dengan tombol <span className="font-black">Done</span> di card antrean aktif, baru panggil nomor berikutnya.</p> : null}
-
-                <div className={`mt-3 rounded-2xl border p-4 ${data?.whatsapp_prepare?.configured ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-                  <div className={`text-sm font-black ${data?.whatsapp_prepare?.configured ? "text-emerald-800" : "text-amber-800"}`}>
-                    WhatsApp Prepare: {data?.whatsapp_prepare?.configured ? "AKTIF" : "BELUM DIKONFIGURASI"}
+                  <div>
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-violet-700">Link Tampilan TV Session</div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        readOnly
+                        value={tvSessionUrl}
+                        className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        disabled={!tvSessionUrl}
+                        onClick={async () => {
+                          if (!tvSessionUrl) return;
+                          try {
+                            await navigator.clipboard.writeText(tvSessionUrl);
+                            setMessage("Link tampilan TV onsite berhasil disalin.");
+                          } catch {
+                            setMessage("Link tampilan TV onsite sudah tampil dan dapat disalin manual.");
+                          }
+                        }}
+                        className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white disabled:opacity-40"
+                      >
+                        Salin Link TV
+                      </button>
+                    </div>
                   </div>
-                  <p className={`mt-1 text-xs font-semibold ${data?.whatsapp_prepare?.configured ? "text-emerald-700" : "text-amber-700"}`}>
-                    Otomatis dikirim ke peserta WAITING paling depan saat ada tepat 1 antrean aktif di depannya. Tidak ada WhatsApp kedua saat nomor dipanggil.
-                  </p>
                 </div>
+                <div className="mt-2 text-xs font-semibold text-violet-700">
+                  Link operator dipakai untuk kontrol onsite. Link TV menampilkan hanya panel QR + status antrean agar aman dipajang di layar besar.
+                </div>
+              </section>
+            ) : null}
 
-                <section className="mt-4 rounded-2xl border bg-white p-4">
-                  <h2 className="font-black text-slate-950">Antrean Aktif</h2>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {active.map((entry: any) => (
-                      <div key={entry.id} className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-3xl font-black text-blue-700">{entry.queue_number}</div>
-                            <div className="font-bold text-slate-950">{entry.participant_name}</div>
-                            <div className="text-xs text-slate-500">{entry.employee_id}{entry.phone ? ` · ${entry.phone}` : ""}</div>
-                          </div>
-                          <span className={`rounded-full px-3 py-1 text-xs font-black ${statusBadge(entry.queue_status)}`}>DIPANGGIL</span>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
-                          <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
-                        </div>
-                      </div>
-                    ))}
-                    {!active.length ? <div className="text-sm text-slate-500">Belum ada nomor aktif.</div> : null}
-                  </div>
-                  <p className="mt-3 text-xs font-semibold text-slate-500">Status selesai antrean aktif sekarang dikontrol dari card aktif. Tombol <span className="font-black">Panggil Nomor Berikutnya</span> hanya dipakai untuk memanggil waiting berikutnya.</p>
-                </section>
-              </div>
-            </section>
+            {queueDisplayPanel}
 
-            <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            {!tvOnly ? (
+              <>
+                <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-black text-amber-900">Skipped</h2>
@@ -372,6 +431,8 @@ export default function VaccinationOnsiteQueuePage() {
                 </div>
               </details>
             </section>
+              </>
+            ) : null}
           </>
         ) : null}
       </div>
