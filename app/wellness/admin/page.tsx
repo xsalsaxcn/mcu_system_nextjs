@@ -5,6 +5,7 @@
 // WELLNESS_ADMIN_PARTICIPANT_FILTER_PAGINATION_SORT_V126E
 // WELLNESS_ADMIN_STREAK_DIAGNOSTIC_LINK_V126M53_1
 // WELLNESS_ADMIN_FITNESS_REFRESH_PROVIDER_FILTER_V126M80_1
+// WELLNESS_ADMIN_JAKVAS_SCORE_EXPORT_V1
 
 import { useEffect, useMemo, useState } from "react";
 import { WellnessAvatar } from "@/components/wellness/WellnessProfile";
@@ -89,6 +90,26 @@ function flagTone(flag: string) {
   if (flag === "green") return "border-emerald-100 bg-emerald-50 text-emerald-800";
   if (flag === "yellow") return "border-amber-100 bg-amber-50 text-amber-900";
   return "border-rose-100 bg-rose-50 text-rose-800";
+}
+
+function jakvasSummaryTone(report: any) {
+  const category = clean(report?.risk_category).toLowerCase();
+  if (category === "low") {
+    return "border-emerald-100 bg-emerald-50 text-emerald-800";
+  }
+  if (category === "moderate") {
+    return "border-amber-100 bg-amber-50 text-amber-900";
+  }
+  if (category === "high") {
+    return "border-rose-100 bg-rose-50 text-rose-800";
+  }
+  return "border-slate-100 bg-slate-50 text-slate-600";
+}
+
+function jakvasCardLabel(report: any) {
+  if (!report) return "Memuat...";
+  if (report?.error) return "Gagal dimuat";
+  return clean(report?.risk_label) || "Belum dapat dihitung";
 }
 
 function dailyInputLabel(value: any, lastDate?: any) {
@@ -226,6 +247,14 @@ export default function WellnessAdminMobilePage() {
   ] = useState(1);
 
   const participantPageSize = 20;
+
+  // WELLNESS_ADMIN_JAKVAS_SCORE_EXPORT_V1
+  // JAKVAS card summaries are loaded only for the visible participant page.
+  // The calculation itself remains canonical in lib/wellness/jakvasServer.ts.
+  const [jakvasByParticipantId, setJakvasByParticipantId] = useState<
+    Record<string, any>
+  >({});
+  const [jakvasPageLoading, setJakvasPageLoading] = useState(false);
 
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [supportUnread, setSupportUnread] = useState(0);
@@ -1284,6 +1313,60 @@ export default function WellnessAdminMobilePage() {
     ]);
 
   useEffect(() => {
+    if (view !== "participants" || sessionRequired) return;
+
+    const participantIds = paginatedParticipants
+      .map((item: any) =>
+        Number(item?.participant_id || item?.id || 0),
+      )
+      .filter((participantId: number) => participantId > 0);
+
+    const missingIds = participantIds.filter(
+      (participantId: number) =>
+        !Object.prototype.hasOwnProperty.call(
+          jakvasByParticipantId,
+          String(participantId),
+        ),
+    );
+
+    if (!missingIds.length) return;
+
+    let cancelled = false;
+    setJakvasPageLoading(true);
+
+    const params = new URLSearchParams({
+      participant_ids: missingIds.join(","),
+      t: String(Date.now()),
+    });
+
+    void fetch(`/api/wellness/admin/jakvas-bulk?${params.toString()}`, {
+      cache: "no-store",
+      credentials: "include",
+    })
+      .then((response) => response.json())
+      .then((result) => {
+        if (cancelled || !result?.ok) return;
+        setJakvasByParticipantId((previous) => ({
+          ...previous,
+          ...(result.reports || {}),
+        }));
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (!cancelled) setJakvasPageLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    view,
+    sessionRequired,
+    paginatedParticipants,
+    jakvasByParticipantId,
+  ]);
+
+  useEffect(() => {
     setParticipantPage(1);
   }, [
     query,
@@ -1434,6 +1517,7 @@ export default function WellnessAdminMobilePage() {
 
   const canonicalAdminUrl = "/wellness/admin";
   const exportExcelUrl = "/api/wellness/admin/export-excel?days=30";
+  const exportJakvasUrl = "/api/wellness/admin/jakvas-export";
   // WELLNESS_ADMIN_LOGIN_MONITORING_EXPORT_V126N
   const loginMonitoringExcelUrl =
     "/api/wellness/admin/export-login-monitoring";
@@ -1559,6 +1643,14 @@ export default function WellnessAdminMobilePage() {
             >
               ⬇ Export Excel
             </a>
+            {view === "participants" ? (
+              <a
+                href={exportJakvasUrl}
+                className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-black text-white shadow-sm ring-1 ring-slate-800"
+              >
+                ⬇ Export JAKVAS
+              </a>
+            ) : null}
           </div>
         </nav>
 
@@ -1667,6 +1759,16 @@ export default function WellnessAdminMobilePage() {
                 <span>⬇</span>
                 <span className="hidden sm:inline">Excel</span>
               </a>
+              {view === "participants" ? (
+                <a
+                  href={exportJakvasUrl}
+                  className="flex h-10 items-center justify-center gap-1 rounded-full bg-slate-950 px-3 text-[10px] font-black text-white"
+                  aria-label="Export seluruh data JAKVAS"
+                >
+                  <span>⬇</span>
+                  <span className="hidden sm:inline">JAKVAS</span>
+                </a>
+              ) : null}
               <button
                 type="button"
                 onClick={() => openView("home")}
@@ -2178,6 +2280,12 @@ export default function WellnessAdminMobilePage() {
                 ) : null}
               </div>
 
+              {jakvasPageLoading ? (
+                <div className="rounded-2xl bg-sky-50 px-4 py-2.5 text-[10px] font-black text-sky-700">
+                  Memuat skor JAKVAS peserta pada halaman ini...
+                </div>
+              ) : null}
+
               {controlNotice ? (
                 <div
                   className={`rounded-2xl px-4 py-3 text-xs font-bold leading-5 ${
@@ -2205,6 +2313,8 @@ export default function WellnessAdminMobilePage() {
                     item.participant_id || item.id || 0,
                   );
                   const saving = controlSavingId === participantId;
+                  const jakvas =
+                    jakvasByParticipantId[String(participantId)] || null;
                   const connected = Array.isArray(control.connected_providers)
                     ? control.connected_providers
                     : [];
@@ -2249,7 +2359,7 @@ export default function WellnessAdminMobilePage() {
                         </span>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                         <div className="rounded-xl bg-slate-50 p-2">
                           <div className="text-[9px] font-black text-slate-400">POINT</div>
                           <div className="mt-0.5 text-sm font-black">{fmt(item.total_points)}</div>
@@ -2257,6 +2367,21 @@ export default function WellnessAdminMobilePage() {
                         <div className="rounded-xl bg-slate-50 p-2">
                           <div className="text-[9px] font-black text-slate-400">BMI</div>
                           <div className="mt-0.5 text-sm font-black">{fmt(item.bmi, 1)}</div>
+                        </div>
+                        <div
+                          className={`rounded-xl border p-2 ${jakvasSummaryTone(jakvas)}`}
+                          title={jakvas?.recommendation || ""}
+                        >
+                          <div className="text-[9px] font-black opacity-60">JAKVAS</div>
+                          <div className="mt-0.5 text-sm font-black">
+                            {jakvas?.total_score === null ||
+                            jakvas?.total_score === undefined
+                              ? "—"
+                              : fmt(jakvas.total_score)}
+                          </div>
+                          <div className="mt-0.5 break-words text-[9px] font-black leading-3">
+                            {jakvasCardLabel(jakvas)}
+                          </div>
                         </div>
                         <div className="rounded-xl bg-slate-50 p-2">
                           <div className="text-[9px] font-black text-slate-400">STATUS</div>
