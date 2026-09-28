@@ -146,8 +146,8 @@ export default function VaccinationOnsiteQueuePage() {
 
 
   const queueDisplayPanel = data?.event ? (
-    <section className={tvOnly ? "grid gap-5 xl:grid-cols-[400px_1fr]" : "mt-6 grid gap-5 xl:grid-cols-[380px_1fr]"}>
-      <div className="rounded-3xl border border-violet-200 bg-violet-50 p-5">
+    <section className={tvOnly ? "grid gap-6 xl:grid-cols-[560px_1fr]" : "mt-6 grid gap-5 xl:grid-cols-[380px_1fr]"}>
+      <div className={tvOnly ? "rounded-3xl border border-violet-200 bg-violet-50 p-6" : "rounded-3xl border border-violet-200 bg-violet-50 p-5"}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.2em] text-violet-600">QR Onsite Dinamis</div>
@@ -156,10 +156,10 @@ export default function VaccinationOnsiteQueuePage() {
           <span className={`rounded-full px-3 py-1 text-xs font-black ${data.event.status === "OPEN" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>{data.event.status}</span>
         </div>
         <div className="mt-5 flex justify-center rounded-3xl bg-white p-5 shadow-sm">
-          {scanUrl ? <QRCodeImage value={scanUrl} size={300} /> : <div className="flex h-[300px] w-[300px] items-center justify-center text-sm text-slate-400">QR tidak aktif</div>}
+          {scanUrl ? <QRCodeImage value={scanUrl} size={tvOnly ? 460 : 300} /> : <div className={tvOnly ? "flex h-[460px] w-[460px] items-center justify-center text-sm text-slate-400" : "flex h-[300px] w-[300px] items-center justify-center text-sm text-slate-400"}>QR tidak aktif</div>}
         </div>
-        <div className="mt-4 text-center text-sm font-black text-violet-800">QR berganti dalam ± {data?.rolling?.expires_in ?? "-"} detik</div>
-        <div className="mt-1 text-center text-xs font-semibold text-slate-500">Satu QR aktif dapat dipakai banyak peserta selama window 60 detik. Peserta yang sudah berhasil membuka form mendapat waktu 10 menit untuk submit.</div>
+        <div className={tvOnly ? "mt-4 text-center text-xl font-black text-violet-800" : "mt-4 text-center text-sm font-black text-violet-800"}>QR berganti dalam ± {data?.rolling?.expires_in ?? "-"} detik</div>
+        <div className={tvOnly ? "mt-2 text-center text-sm font-semibold text-slate-500" : "mt-1 text-center text-xs font-semibold text-slate-500"}>Satu QR aktif dapat dipakai banyak peserta selama window 60 detik. Peserta yang sudah berhasil membuka form mendapat waktu 10 menit untuk submit.</div>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button disabled={busy || data.event.status === "OPEN"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "OPEN" })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Buka Queue</button>
           <button disabled={busy || data.event.status === "CLOSED"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "CLOSED" })} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Tutup Queue</button>
