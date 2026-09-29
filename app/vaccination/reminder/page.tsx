@@ -158,9 +158,16 @@ export default function VaccinationReminderPage() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/vaccination/reminder/summary?view=${encodeURIComponent(view)}`, {
-        cache: "no-store",
-      });
+      const cacheBuster = Date.now();
+      const response = await fetch(
+        `/api/vaccination/reminder/summary?view=${encodeURIComponent(view)}&cb=${cacheBuster}`,
+        {
+          cache: "no-store",
+          headers: {
+            "Cache-Control": "no-cache",
+          },
+        },
+      );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.message || `HTTP ${response.status}`);

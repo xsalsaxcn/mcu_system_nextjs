@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { fail, ok, requireUser, supabaseAdmin } from "../../_utils";
 import { shiftYmd, todayInVaccinationTimezone } from "@/lib/vaccination/reminderEngine";
 import { vaccinationReminderSmtpConfigured } from "@/lib/vaccination/reminderEmail";
@@ -6,6 +6,8 @@ import { vaccinationReminderWhatsAppConfigured } from "@/lib/vaccination/reminde
 import { resolveReminderPhonesForRows } from "@/lib/vaccination/reminderPhone";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -142,7 +144,9 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return ok({
+    return NextResponse.json(
+      {
+        ok: true,
       today,
       view,
       automation: {
@@ -156,7 +160,17 @@ export async function GET(req: NextRequest) {
       },
       summary: { sent, failed, skipped, incoming, dueToday, waSent, waFailed, waSkipped, waPending },
       items: items.slice(0, 1000).map(withLastReminder),
-    });
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+          Vary: "Cookie",
+        },
+      },
+    );
   } catch (error: any) {
     return fail(String(error?.message || error || "Gagal memuat Reminder Vaksinasi."), 500);
   }
