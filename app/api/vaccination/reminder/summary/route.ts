@@ -90,9 +90,18 @@ export async function GET(req: NextRequest) {
 
     const withLastReminder = (row: any) => {
       const key = scheduleIdentity(row);
+      const emailSentAt = (key ? lastSentBySchedule.get(key) : "") || clean(row.sent_at);
+      const waSentAt = clean(row.wa_sent_at);
+      const lastReminderAt =
+        emailSentAt && waSentAt
+          ? emailSentAt >= waSentAt
+            ? emailSentAt
+            : waSentAt
+          : emailSentAt || waSentAt || "";
+
       return {
         ...row,
-        last_reminder_at: (key ? lastSentBySchedule.get(key) : "") || clean(row.sent_at) || null,
+        last_reminder_at: lastReminderAt || null,
       };
     };
 

@@ -118,10 +118,10 @@ export async function POST(req: NextRequest) {
       reason: waEligible ? "NOT_ATTEMPTED" : "STAGE_NOT_ELIGIBLE",
     };
 
-    if (status === "SENT") {
-      emailResult.skipped = true;
-      emailResult.reason = "ALREADY_SENT";
-    } else if (email && vaccinationReminderSmtpConfigured()) {
+    // Manual row action intentionally sends BOTH channels together.
+    // Even if Email was sent before, clicking "Kirim Reminder" means resend Email now
+    // together with WhatsApp and refresh the latest delivery timestamp.
+    if (email && vaccinationReminderSmtpConfigured()) {
       emailResult.attempted = true;
       const attemptCount = Number(row.attempt_count || 0) + 1;
       const markSending = await supabase
@@ -194,10 +194,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (waEligible) {
-      if (waStatus === "SENT") {
-        whatsappResult.skipped = true;
-        whatsappResult.reason = "ALREADY_SENT";
-      } else if (!phone) {
+      // Manual row action intentionally re-sends WhatsApp together with Email.
+      // Automatic H-3/H-1 anti-double-send remains handled by reminderEngine.
+      if (!phone) {
         const message = "No HP penerima belum tersedia atau tidak valid.";
         whatsappResult.skipped = true;
         whatsappResult.reason = "PHONE_INVALID";

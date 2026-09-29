@@ -80,6 +80,19 @@ function fmtDateTime(value: any) {
   return `${formatted.replace(/\./g, ":")} WIB`;
 }
 
+
+function channelDeliveryLabel(value: any, channel: "EMAIL" | "WHATSAPP") {
+  const status = clean(value).toUpperCase();
+  if (status === "SENT") return "Sukses";
+  if (status === "FAILED") return "Gagal";
+  if (status === "SENDING") return "Sedang diproses";
+  if (status === "CANCELLED") return "Dibatalkan";
+  if (status === "SKIPPED") return "Dilewati";
+  if (status === "PENDING") return "Menunggu";
+  if (status === "NOT_APPLICABLE") return channel === "WHATSAPP" ? "Manual / belum dikirim" : "Tidak berlaku";
+  return "Belum dikirim";
+}
+
 function stageLabel(value: any) {
   const stage = clean(value).toUpperCase();
   if (stage === "H7") return "H-7";
@@ -220,7 +233,7 @@ export default function VaccinationReminderPage() {
 
     const confirmed = window.confirm(
       action === "send"
-        ? `Kirim reminder sekarang?\n\nPeserta: ${participant}\nLayanan: ${service}\nReminder: ${stage} · ${date}`
+        ? `Kirim reminder sekarang melalui Email + WhatsApp?\n\nPeserta: ${participant}\nLayanan: ${service}\nReminder: ${stage} · ${date}`
         : `Batalkan reminder ini?\n\nPeserta: ${participant}\nLayanan: ${service}\nReminder: ${stage} · ${date}\n\nReminder yang dibatalkan tidak akan ikut pengiriman otomatis.`,
     );
     if (!confirmed) return;
@@ -240,10 +253,11 @@ export default function VaccinationReminderPage() {
       }
       const emailSent = Boolean(payload?.email?.sent);
       const waSent = Boolean(payload?.whatsapp?.sent);
-      const channelText = [emailSent ? "Email" : "", waSent ? "WhatsApp" : ""].filter(Boolean).join(" + ");
+      const emailText = emailSent ? "Sukses" : payload?.email?.error ? "Gagal" : "Tidak terkirim";
+      const waText = waSent ? "Sukses" : payload?.whatsapp?.error ? "Gagal" : "Tidak terkirim";
       setManualMessage(
         action === "send"
-          ? `Reminder ${participant} berhasil diproses${channelText ? ` melalui ${channelText}` : ""}.`
+          ? `Reminder ${participant} selesai diproses · Via Email = ${emailText} · WhatsApp = ${waText}.`
           : `Reminder ${participant} berhasil dibatalkan.`,
       );
       await load(selectedView);
@@ -513,16 +527,20 @@ export default function VaccinationReminderPage() {
                           <div className="font-semibold text-slate-700">
                             Last reminder {fmtDateTime(row.last_reminder_at)}
                           </div>
+                        ) : (
+                          <div className="font-semibold text-slate-400">Belum ada reminder terkirim</div>
+                        )}
+                        <div className="mt-1 font-semibold text-slate-700">
+                          Via Email = <span className={status === "SENT" ? "text-emerald-700" : status === "FAILED" ? "text-rose-700" : "text-slate-500"}>{channelDeliveryLabel(status, "EMAIL")}</span>
+                        </div>
+                        <div className="mt-0.5 font-semibold text-slate-700">
+                          WhatsApp = <span className={rowWaStatus === "SENT" ? "text-emerald-700" : rowWaStatus === "FAILED" ? "text-rose-700" : "text-slate-500"}>{channelDeliveryLabel(rowWaStatus, "WHATSAPP")}</span>
+                        </div>
+                        {row.error_message && status !== "SENT" ? (
+                          <div className="mt-1 text-rose-600">Email: {row.error_message}</div>
                         ) : null}
-                        {row.error_message ? (
-                          <div className={row.last_reminder_at ? "mt-1 text-slate-500" : ""}>
-                            Email: {row.error_message}
-                          </div>
-                        ) : !row.last_reminder_at && !row.wa_error_message ? (
-                          "-"
-                        ) : null}
-                        {row.wa_error_message ? (
-                          <div className="mt-1 text-emerald-700">WA: {row.wa_error_message}</div>
+                        {row.wa_error_message && rowWaStatus !== "SENT" ? (
+                          <div className="mt-1 text-rose-600">WA: {row.wa_error_message}</div>
                         ) : null}
                       </td>
                       <td className="px-4 py-3">
