@@ -338,12 +338,21 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
 
     let waStatus = waEligible ? (hasPhone ? "PENDING" : "SKIPPED") : "NOT_APPLICABLE";
     const existingWaStatus = clean(existing?.wa_status).toUpperCase();
-    if (waEligible && existing) {
-      if (existingWaStatus === "SENT") waStatus = "SENT";
-      else if (existingWaStatus === "CANCELLED") waStatus = "CANCELLED";
-      else if (["FAILED", "SENDING"].includes(existingWaStatus) && hasPhone) waStatus = existingWaStatus;
-      else if (existingWaStatus === "SKIPPED" && !hasPhone) waStatus = "SKIPPED";
-      else if (hasPhone) waStatus = "PENDING";
+
+    // Preserve manual WhatsApp delivery state for non-automatic stages (H-7 / Hari H).
+    // Before V153.52, syncVaccinationReminders reset a manually SENT H-7/H0 row back
+    // to NOT_APPLICABLE and also cleared wa_sent_at / wa_meta_message_id.
+    if (existing) {
+      if (existingWaStatus === "SENT") {
+        waStatus = "SENT";
+      } else if (!waEligible && ["FAILED", "SENDING"].includes(existingWaStatus)) {
+        waStatus = existingWaStatus;
+      } else if (waEligible) {
+        if (existingWaStatus === "CANCELLED") waStatus = "CANCELLED";
+        else if (["FAILED", "SENDING"].includes(existingWaStatus) && hasPhone) waStatus = existingWaStatus;
+        else if (existingWaStatus === "SKIPPED" && !hasPhone) waStatus = "SKIPPED";
+        else if (hasPhone) waStatus = "PENDING";
+      }
     }
 
     return {
