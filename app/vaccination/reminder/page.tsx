@@ -137,6 +137,7 @@ export default function VaccinationReminderPage() {
   const [manualSending, setManualSending] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
   const [rowActionId, setRowActionId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function load(view: ViewKey = selectedView) {
     setLoading(true);
@@ -262,6 +263,30 @@ export default function VaccinationReminderPage() {
   }, [selectedView]);
 
   const rows = useMemo(() => data?.items || [], [data]);
+  const filteredRows = useMemo(() => {
+    const query = clean(searchQuery).toLowerCase();
+    if (!query) return rows;
+
+    return rows.filter((row: any) => {
+      const haystack = [
+        row?.participant_name,
+        row?.company_name,
+        row?.vaccine_name,
+        row?.recipient_name,
+        row?.recipient_email,
+        row?.recipient_phone,
+        row?.reminder_stage,
+        stageLabel(row?.reminder_stage),
+        row?.source_type,
+        row?.status,
+        row?.wa_status,
+      ]
+        .map((value) => clean(value).toLowerCase())
+        .join(" ");
+
+      return haystack.includes(query);
+    });
+  }, [rows, searchQuery]);
   const viewMeta = VIEW_META[selectedView];
 
   return (
@@ -374,13 +399,38 @@ export default function VaccinationReminderPage() {
         </section>
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-black">{viewMeta.title}</h2>
               <p className="text-sm text-slate-500">{viewMeta.note}</p>
             </div>
-            <div className="text-xs font-bold text-slate-400">
-              {loading ? "Memuat..." : `${rows.length} data ditampilkan`}
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
+              <div className="relative min-w-0 sm:w-[360px]">
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Cari nama, perusahaan, vaksin, email, no HP..."
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 pr-10 text-sm font-semibold outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Hapus pencarian"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              <div className="whitespace-nowrap text-xs font-bold text-slate-400">
+                {loading
+                  ? "Memuat..."
+                  : searchQuery
+                    ? `${filteredRows.length} dari ${rows.length} data`
+                    : `${rows.length} data ditampilkan`}
+              </div>
             </div>
           </div>
 
@@ -401,7 +451,7 @@ export default function VaccinationReminderPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((row: any) => {
+                {filteredRows.map((row: any) => {
                   const status = clean(row.status).toUpperCase();
                   const rowWaStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
                   const hasRecipientPhone = Boolean(clean(row.recipient_phone));
@@ -500,10 +550,10 @@ export default function VaccinationReminderPage() {
                     </tr>
                   );
                 })}
-                {!loading && !rows.length ? (
+                {!loading && !filteredRows.length ? (
                   <tr>
                     <td colSpan={10} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
-                      Tidak ada data pada kategori ini.
+                      {searchQuery ? `Tidak ada hasil untuk "${searchQuery}".` : "Tidak ada data pada kategori ini."}
                     </td>
                   </tr>
                 ) : null}

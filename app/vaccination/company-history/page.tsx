@@ -647,12 +647,13 @@ export default function VaccinationCompanyHistoryPage() {
                     <div><b>NIP / Employee ID:</b> {detail.person?.employee_id || "-"}</div>
                     <div><b>NIK:</b> {detail.person?.nik ? maskId(detail.person.nik) : "-"}</div>
                     <div><b>Email:</b> {detail.person?.email || "-"}</div>
+                    <div><b>No. HP:</b> {detail.person?.phone || "-"}</div>
                     <div><b>Tanggal Lahir:</b> {date(detail.person?.birth_date)}</div>
                   </div>
                 </div>
                 <div className="rounded-2xl border p-4 text-sm">
                   <div className="text-xs font-black uppercase text-slate-500">Relasi Keluarga</div>
-                  {detail.parent ? <div className="mt-3"><b>Parent:</b> {detail.parent.participant_name}<div className="mt-1 text-xs text-slate-500">{detail.parent.employee_id || detail.parent.email || ""}</div></div> : null}
+                  {detail.parent ? <div className="mt-3"><b>Parent:</b> {detail.parent.participant_name}<div className="mt-1 text-xs text-slate-500">{detail.parent.employee_id || detail.parent.email || ""}</div>{detail.parent.phone ? <div className="mt-1 text-xs font-semibold text-emerald-700">No. HP Parent: {detail.parent.phone}</div> : null}</div> : null}
                   {detail.dependents?.length ? <div className="mt-3"><b>Anak / Tanggungan:</b><div className="mt-2 flex flex-wrap gap-2">{detail.dependents.map((child: any) => <span key={child.id} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">{child.participant_name}</span>)}</div></div> : null}
                   {!detail.parent && !detail.dependents?.length ? <div className="mt-3 text-slate-400">Tidak ada relasi parent-anak yang tercatat.</div> : null}
                 </div>
