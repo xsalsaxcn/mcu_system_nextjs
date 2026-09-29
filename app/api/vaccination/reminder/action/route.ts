@@ -6,6 +6,7 @@ import {
   vaccinationReminderRecipientPhone,
   vaccinationReminderWhatsAppConfigured,
 } from "@/lib/vaccination/reminderWhatsApp";
+import { resolveReminderPhoneForRow } from "@/lib/vaccination/reminderPhone";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,9 +93,17 @@ export async function POST(req: NextRequest) {
     }
 
     const email = validEmail(row.recipient_email || row.participant_email);
-    const phone = vaccinationReminderRecipientPhone(row.recipient_phone);
+    const resolvedPhone = await resolveReminderPhoneForRow(supabase, row);
+    const phone = vaccinationReminderRecipientPhone(resolvedPhone || row.recipient_phone);
     const reminderStage = clean(row.reminder_stage).toUpperCase();
-    const waEligible = ["H3", "H1"].includes(reminderStage);
+    const waEligible = ["H7", "H3", "H1", "H0"].includes(reminderStage);
+
+    if (phone && phone !== vaccinationReminderRecipientPhone(row.recipient_phone)) {
+      await supabase
+        .from("vaccination_reminders")
+        .update({ recipient_phone: phone, updated_at: new Date().toISOString() })
+        .eq("id", id);
+    }
 
     const emailResult: any = {
       attempted: false,
@@ -109,7 +118,10 @@ export async function POST(req: NextRequest) {
       reason: waEligible ? "NOT_ATTEMPTED" : "STAGE_NOT_ELIGIBLE",
     };
 
-    if (email && vaccinationReminderSmtpConfigured()) {
+    if (status === "SENT") {
+      emailResult.skipped = true;
+      emailResult.reason = "ALREADY_SENT";
+    } else if (email && vaccinationReminderSmtpConfigured()) {
       emailResult.attempted = true;
       const attemptCount = Number(row.attempt_count || 0) + 1;
       const markSending = await supabase
@@ -182,7 +194,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (waEligible) {
-      if (!phone) {
+      if (waStatus === "SENT") {
+        whatsappResult.skipped = true;
+        whatsappResult.reason = "ALREADY_SENT";
+      } else if (!phone) {
         const message = "No HP penerima belum tersedia atau tidak valid.";
         whatsappResult.skipped = true;
         whatsappResult.reason = "PHONE_INVALID";

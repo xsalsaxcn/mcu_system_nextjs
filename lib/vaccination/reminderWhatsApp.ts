@@ -81,12 +81,14 @@ export async function sendVaccinationReminderWhatsApp(input: {
   reminderStage: unknown;
 }): Promise<VaccinationReminderWhatsAppResult> {
   const stage = clean(input.reminderStage).toUpperCase();
-  if (!["H3", "H1"].includes(stage)) {
+  // Automatic delivery remains H-3 / H-1 in reminderEngine.
+  // Manual row delivery may intentionally send H-7 / Hari H as well.
+  if (!["H7", "H3", "H1", "H0"].includes(stage)) {
     return {
       attempted: false,
       sent: false,
       skipped: true,
-      reason: "STAGE_NOT_ELIGIBLE",
+      reason: "STAGE_NOT_SUPPORTED",
     };
   }
 

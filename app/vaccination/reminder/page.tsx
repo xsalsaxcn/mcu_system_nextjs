@@ -21,6 +21,8 @@ const STATUS_STYLE: Record<string, string> = {
   SKIPPED: "bg-amber-50 text-amber-800 border-amber-200",
   CANCELLED: "bg-slate-100 text-slate-600 border-slate-300",
   NOT_APPLICABLE: "bg-slate-50 text-slate-500 border-slate-200",
+  MANUAL: "bg-violet-50 text-violet-700 border-violet-200",
+  NO_PHONE: "bg-amber-50 text-amber-800 border-amber-200",
 };
 
 type ViewKey = "INCOMING" | "SENT" | "FAILED" | "DUE_TODAY";
@@ -402,6 +404,13 @@ export default function VaccinationReminderPage() {
                 {rows.map((row: any) => {
                   const status = clean(row.status).toUpperCase();
                   const rowWaStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
+                  const hasRecipientPhone = Boolean(clean(row.recipient_phone));
+                  const waDisplayStatus =
+                    rowWaStatus === "NOT_APPLICABLE"
+                      ? hasRecipientPhone
+                        ? "MANUAL"
+                        : "NO_PHONE"
+                      : rowWaStatus;
                   const busy = rowActionId === Number(row.id);
                   const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING"].includes(status) || rowWaStatus === "SENDING";
                   const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || rowWaStatus === "SENT";
@@ -437,8 +446,12 @@ export default function VaccinationReminderPage() {
                         {(() => {
                           return (
                             <div>
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[rowWaStatus] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                                {rowWaStatus === "NOT_APPLICABLE" ? "N/A" : rowWaStatus}
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[waDisplayStatus] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                                {waDisplayStatus === "MANUAL"
+                                  ? "MANUAL"
+                                  : waDisplayStatus === "NO_PHONE"
+                                    ? "NO HP"
+                                    : waDisplayStatus}
                               </span>
                               {row.wa_sent_at ? <div className="mt-1 text-[11px] font-semibold text-emerald-700">{fmtDateTime(row.wa_sent_at)}</div> : null}
                             </div>

@@ -4,6 +4,7 @@ import {
   vaccinationReminderRecipientPhone,
   vaccinationReminderWhatsAppConfigured,
 } from "@/lib/vaccination/reminderWhatsApp";
+import { resolveRegistrationReminderPhones } from "@/lib/vaccination/reminderPhone";
 
 export const REMINDER_STAGES = [
   { stage: "H7", daysBefore: 7 },
@@ -111,11 +112,12 @@ async function loadCurrentCandidates(supabase: any, today: string): Promise<Cand
   const registrations = await rowsInChunks(
     supabase,
     "vaccination_registrations",
-    "id,participant_name,employee_id,nik,email,phone,company_name",
+    "id,source_id,participant_id,participant_name,employee_id,nik,email,phone,company_name",
     "id",
     records.map((row: any) => row.registration_id),
   );
   const registrationMap = new Map(registrations.map((row: any) => [Number(row.id), row]));
+  const registrationPhoneMap = await resolveRegistrationReminderPhones(supabase, registrations);
 
   return records.map((row: any) => {
     const registration = registrationMap.get(Number(row.registration_id)) || {};
@@ -130,7 +132,9 @@ async function loadCurrentCandidates(supabase: any, today: string): Promise<Cand
       participantName,
       recipientName: participantName,
       recipientEmail: validEmail(registration?.email),
-      recipientPhone: vaccinationReminderRecipientPhone(registration?.phone),
+      recipientPhone:
+        registrationPhoneMap.get(Number(registration?.id || 0)) ||
+        vaccinationReminderRecipientPhone(registration?.phone),
       recipientType: "SELF" as const,
       companyName: clean(registration?.company_name),
       serviceName: clean(row?.vaccine_name) || "Vaksinasi",

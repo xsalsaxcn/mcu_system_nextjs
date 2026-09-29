@@ -3,6 +3,7 @@ import { fail, ok, requireUser, supabaseAdmin } from "../../_utils";
 import { shiftYmd, todayInVaccinationTimezone } from "@/lib/vaccination/reminderEngine";
 import { vaccinationReminderSmtpConfigured } from "@/lib/vaccination/reminderEmail";
 import { vaccinationReminderWhatsAppConfigured } from "@/lib/vaccination/reminderWhatsApp";
+import { resolveReminderPhonesForRows } from "@/lib/vaccination/reminderPhone";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
     const result = await supabase
       .from("vaccination_reminders")
       .select(
-        "id,source_type,source_key,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_phone,recipient_type,company_name,attempt_count,superseded_at,wa_status,wa_attempt_count,wa_last_attempt_at,wa_sent_at,wa_meta_message_id,wa_error_message",
+        "id,source_type,source_key,record_id,registration_id,history_service_id,person_id,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_phone,recipient_type,company_name,attempt_count,superseded_at,wa_status,wa_attempt_count,wa_last_attempt_at,wa_sent_at,wa_meta_message_id,wa_error_message",
       )
       .gte("reminder_date", from)
       .lte("reminder_date", until)
@@ -55,7 +56,13 @@ export async function GET(req: NextRequest) {
       .limit(5000);
 
     if (result.error) throw new Error(result.error.message);
-    const rows = result.data || [];
+    const rawRows = result.data || [];
+    const resolvedPhones = await resolveReminderPhonesForRows(supabase, rawRows);
+    const rows = rawRows.map((row: any) => ({
+      ...row,
+      recipient_phone:
+        resolvedPhones.get(Number(row.id)) || clean(row.recipient_phone) || null,
+    }));
 
     // V153.15:
     // Keep Last reminder scoped to ONE reminder schedule date.
