@@ -151,6 +151,8 @@ export default function VaccinationReminderPage() {
   const [manualMessage, setManualMessage] = useState("");
   const [rowActionId, setRowActionId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
 
   async function load(view: ViewKey = selectedView) {
     setLoading(true);
@@ -301,6 +303,18 @@ export default function VaccinationReminderPage() {
       return haystack.includes(query);
     });
   }, [rows, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [filteredRows, currentPage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedView, searchQuery]);
+
   const viewMeta = VIEW_META[selectedView];
 
   return (
@@ -448,24 +462,24 @@ export default function VaccinationReminderPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-[1520px] w-full text-left text-sm">
+          <div className="overflow-x-hidden">
+            <table className="w-full table-fixed text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Peserta</th>
-                  <th className="px-4 py-3">Perusahaan</th>
-                  <th className="px-4 py-3">Layanan</th>
-                  <th className="px-4 py-3">Next Dose</th>
-                  <th className="px-4 py-3">Reminder</th>
-                  <th className="px-4 py-3">Penerima</th>
-                  <th className="px-4 py-3">Email Status</th>
-                  <th className="px-4 py-3">WhatsApp</th>
-                  <th className="px-4 py-3">Keterangan</th>
-                  <th className="px-4 py-3">Aksi</th>
+                  <th className="w-[14%] px-3 py-3">Peserta</th>
+                  <th className="w-[11%] px-3 py-3">Perusahaan</th>
+                  <th className="w-[12%] px-3 py-3">Layanan</th>
+                  <th className="w-[8%] px-3 py-3">Next Dose</th>
+                  <th className="w-[8%] px-3 py-3">Reminder</th>
+                  <th className="w-[15%] px-3 py-3">Penerima</th>
+                  <th className="w-[7%] px-3 py-3">Email Status</th>
+                  <th className="w-[7%] px-3 py-3">WhatsApp</th>
+                  <th className="w-[10%] px-3 py-3">Keterangan</th>
+                  <th className="w-[8%] px-3 py-3">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRows.map((row: any) => {
+                {pagedRows.map((row: any) => {
                   const status = clean(row.status).toUpperCase();
                   const rowWaStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
                   const hasRecipientPhone = Boolean(clean(row.recipient_phone));
@@ -480,20 +494,20 @@ export default function VaccinationReminderPage() {
                   const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || rowWaStatus === "SENT";
                   return (
                     <tr key={row.id} className="align-top hover:bg-slate-50/70">
-                      <td className="px-4 py-3 font-bold">{row.participant_name || "-"}</td>
-                      <td className="px-4 py-3 text-slate-600">{row.company_name || "-"}</td>
-                      <td className="px-4 py-3">
+                      <td className="break-words px-3 py-3 font-bold">{row.participant_name || "-"}</td>
+                      <td className="break-words px-3 py-3 text-slate-600">{row.company_name || "-"}</td>
+                      <td className="break-words px-3 py-3">
                         <div className="font-bold">{row.vaccine_name || "-"}</div>
                         <div className="mt-1 text-[11px] font-semibold text-slate-400">
                           {row.source_type === "HISTORY_SERVICE" ? "History Service" : "Current Record"}
                         </div>
                       </td>
                       <td className="px-4 py-3 font-semibold">{fmtDate(row.next_due_date)}</td>
-                      <td className="px-4 py-3">
+                      <td className="break-words px-3 py-3">
                         <div className="font-black text-[#042E66]">{stageLabel(row.reminder_stage)}</div>
                         <div className="text-xs text-slate-500">{fmtDate(row.reminder_date)}</div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="break-words px-3 py-3">
                         <div className="font-semibold">{row.recipient_name || row.participant_name || "-"}</div>
                         <div className="max-w-[240px] truncate text-xs text-slate-500">{row.recipient_email || "Email -"}</div>
                         <div className="mt-0.5 text-xs font-semibold text-emerald-700">{row.recipient_phone || "No HP -"}</div>
@@ -501,12 +515,12 @@ export default function VaccinationReminderPage() {
                           <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-violet-600">Via Parent</div>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="break-words px-3 py-3">
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[status] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
                           {status || "-"}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="break-words px-3 py-3">
                         {(() => {
                           return (
                             <div>
@@ -522,7 +536,7 @@ export default function VaccinationReminderPage() {
                           );
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">
+                      <td className="break-words px-3 py-3 text-xs text-slate-500">
                         {row.last_reminder_at ? (
                           <div className="font-semibold text-slate-700">
                             Last reminder {fmtDateTime(row.last_reminder_at)}
@@ -543,13 +557,13 @@ export default function VaccinationReminderPage() {
                           <div className="mt-1 text-rose-600">WA: {row.wa_error_message}</div>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex min-w-[260px] flex-wrap gap-2">
+                      <td className="break-words px-3 py-3">
+                        <div className="flex flex-col items-stretch gap-2">
                           <button
                             type="button"
                             onClick={() => runRowAction(row, "send")}
                             disabled={sendDisabled}
-                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="w-full whitespace-nowrap rounded-lg bg-emerald-600 px-2 py-2 text-[11px] font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
                             title={status === "CANCELLED" ? "Reminder sudah dibatalkan" : "Kirim reminder ini sekarang"}
                           >
                             {busy ? "Memproses..." : "Kirim Reminder"}
@@ -558,7 +572,7 @@ export default function VaccinationReminderPage() {
                             type="button"
                             onClick={() => runRowAction(row, "cancel")}
                             disabled={cancelDisabled}
-                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="w-full whitespace-nowrap rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                             title={status === "SENT" ? "Reminder yang sudah terkirim tidak dapat dibatalkan" : "Batalkan reminder ini"}
                           >
                             Cancel Reminder
@@ -577,6 +591,35 @@ export default function VaccinationReminderPage() {
                 ) : null}
               </tbody>
             </table>
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs font-bold text-slate-500">
+              {filteredRows.length
+                ? `Menampilkan ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, filteredRows.length)} dari ${filteredRows.length} data`
+                : "0 data"}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                disabled={currentPage <= 1}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ← Previous
+              </button>
+              <div className="min-w-[110px] text-center text-xs font-black text-slate-600">
+                Page {currentPage} / {totalPages}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                disabled={currentPage >= totalPages}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
           </div>
         </section>
 
