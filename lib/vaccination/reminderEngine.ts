@@ -402,10 +402,22 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
     };
   });
 
+  // V153.53: delivery state must never be overwritten by reminder synchronization.
+  //
+  // A normal PostgREST upsert sends status / sent_at / wa_status / wa_sent_at
+  // back to PostgreSQL. If a sync request began before a manual delivery completed,
+  // that stale snapshot could overwrite a freshly successful SENT state.
+  //
+  // The RPC performs an atomic INSERT ... ON CONFLICT where:
+  // - new reminder rows receive their initial delivery state;
+  // - existing reminder rows only refresh metadata/recipient fields;
+  // - Email/WhatsApp delivery state is never touched on conflict.
   for (let index = 0; index < upsertRows.length; index += 300) {
     const chunk = upsertRows.slice(index, index + 300);
     if (!chunk.length) continue;
-    const result = await supabase.from("vaccination_reminders").upsert(chunk, { onConflict: "reminder_key" });
+    const result = await supabase.rpc("upsert_vaccination_reminders_preserve_delivery", {
+      p_rows: chunk,
+    });
     if (result.error) throw new Error(result.error.message);
   }
 
