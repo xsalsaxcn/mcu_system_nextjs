@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { fail, ok, requireUser, supabaseAdmin } from "../../_utils";
 import { runAutomaticVaccinationReminder } from "@/lib/vaccination/reminderEngine";
-import { vaccinationReminderSmtpConfigured } from "@/lib/vaccination/reminderEmail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,16 +17,13 @@ function cronAuthorized(req: NextRequest) {
 }
 
 async function execute() {
-  if (!vaccinationReminderSmtpConfigured()) {
-    return fail("SMTP email belum dikonfigurasi lengkap.", 503);
-  }
-
   try {
     const supabase = supabaseAdmin();
     const result = await runAutomaticVaccinationReminder(supabase);
     return ok({
       automatic: true,
-      schedule: "H-7, H-3, H-1, Hari H",
+      emailSchedule: "H-7, H-3, H-1, Hari H",
+      whatsappSchedule: "H-3, H-1",
       ...result,
     });
   } catch (error: any) {

@@ -1,4 +1,9 @@
-import { sendVaccinationReminderEmail } from "@/lib/vaccination/reminderEmail";
+import { sendVaccinationReminderEmail, vaccinationReminderSmtpConfigured } from "@/lib/vaccination/reminderEmail";
+import {
+  sendVaccinationReminderWhatsApp,
+  vaccinationReminderRecipientPhone,
+  vaccinationReminderWhatsAppConfigured,
+} from "@/lib/vaccination/reminderWhatsApp";
 
 export const REMINDER_STAGES = [
   { stage: "H7", daysBefore: 7 },
@@ -80,6 +85,7 @@ type Candidate = {
   participantName: string;
   recipientName: string;
   recipientEmail: string;
+  recipientPhone: string;
   recipientType: "SELF" | "PARENT";
   companyName: string;
   serviceName: string;
@@ -105,7 +111,7 @@ async function loadCurrentCandidates(supabase: any, today: string): Promise<Cand
   const registrations = await rowsInChunks(
     supabase,
     "vaccination_registrations",
-    "id,participant_name,employee_id,nik,email,company_name",
+    "id,participant_name,employee_id,nik,email,phone,company_name",
     "id",
     records.map((row: any) => row.registration_id),
   );
@@ -124,6 +130,7 @@ async function loadCurrentCandidates(supabase: any, today: string): Promise<Cand
       participantName,
       recipientName: participantName,
       recipientEmail: validEmail(registration?.email),
+      recipientPhone: vaccinationReminderRecipientPhone(registration?.phone),
       recipientType: "SELF" as const,
       companyName: clean(registration?.company_name),
       serviceName: clean(row?.vaccine_name) || "Vaksinasi",
@@ -147,7 +154,7 @@ async function loadHistoryCandidates(supabase: any, today: string): Promise<Cand
   const persons = await rowsInChunks(
     supabase,
     "vaccination_persons",
-    "id,company_id,participant_type,participant_name,employee_id,nik,email,active",
+    "id,company_id,participant_type,participant_name,employee_id,nik,email,phone,active",
     "id",
     services.map((row: any) => row.person_id),
   );
@@ -177,7 +184,7 @@ async function loadHistoryCandidates(supabase: any, today: string): Promise<Cand
   const parents = await rowsInChunks(
     supabase,
     "vaccination_persons",
-    "id,company_id,participant_type,participant_name,employee_id,nik,email,active",
+    "id,company_id,participant_type,participant_name,employee_id,nik,email,phone,active",
     "id",
     activeRelationships.map((row: any) => row.parent_person_id),
   );
@@ -205,6 +212,7 @@ async function loadHistoryCandidates(supabase: any, today: string): Promise<Cand
 
     let recipientName = participantName;
     let recipientEmail = validEmail(person.email);
+    let recipientPhone = vaccinationReminderRecipientPhone(person.phone);
     let recipientType: "SELF" | "PARENT" = "SELF";
 
     if (participantType === "DEPENDENT") {
@@ -212,6 +220,7 @@ async function loadHistoryCandidates(supabase: any, today: string): Promise<Cand
       const parent = relationship ? parentMap.get(Number(relationship.parent_person_id)) : null;
       recipientName = clean(parent?.participant_name) || "";
       recipientEmail = validEmail(parent?.email);
+      recipientPhone = vaccinationReminderRecipientPhone(parent?.phone);
       recipientType = "PARENT";
     }
 
@@ -230,6 +239,7 @@ async function loadHistoryCandidates(supabase: any, today: string): Promise<Cand
       participantName,
       recipientName,
       recipientEmail,
+      recipientPhone,
       recipientType,
       companyName,
       serviceName: serviceLabel || "Vaksinasi",
@@ -244,7 +254,7 @@ async function loadExistingByReminderKeys(supabase: any, keys: string[]) {
   const rows = await rowsInChunks(
     supabase,
     "vaccination_reminders",
-    "id,reminder_key,source_key,next_due_date,reminder_stage,status,attempt_count,error_message,recipient_email,sent_at,superseded_at",
+    "id,reminder_key,source_key,next_due_date,reminder_stage,status,attempt_count,error_message,recipient_email,sent_at,superseded_at,recipient_phone,wa_status,wa_attempt_count,wa_last_attempt_at,wa_sent_at,wa_meta_message_id,wa_error_message",
     "reminder_key",
     keys,
   );
@@ -310,6 +320,8 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
     const candidate: Candidate = row.candidate;
     const existing: any = existingMap.get(row.reminderKey);
     const hasEmail = Boolean(candidate.recipientEmail);
+    const waEligible = ["H3", "H1"].includes(row.stage);
+    const hasPhone = Boolean(candidate.recipientPhone);
 
     let status = hasEmail ? "PENDING" : "SKIPPED";
     if (existing) {
@@ -318,6 +330,16 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
       else if (existingStatus === "CANCELLED") status = "CANCELLED";
       else if (existingStatus === "FAILED" && hasEmail) status = "FAILED";
       else if (existingStatus === "SENDING" && hasEmail) status = "SENDING";
+    }
+
+    let waStatus = waEligible ? (hasPhone ? "PENDING" : "SKIPPED") : "NOT_APPLICABLE";
+    const existingWaStatus = clean(existing?.wa_status).toUpperCase();
+    if (waEligible && existing) {
+      if (existingWaStatus === "SENT") waStatus = "SENT";
+      else if (existingWaStatus === "CANCELLED") waStatus = "CANCELLED";
+      else if (["FAILED", "SENDING"].includes(existingWaStatus) && hasPhone) waStatus = existingWaStatus;
+      else if (existingWaStatus === "SKIPPED" && !hasPhone) waStatus = "SKIPPED";
+      else if (hasPhone) waStatus = "PENDING";
     }
 
     return {
@@ -336,9 +358,21 @@ export async function syncVaccinationReminders(supabase: any, today = todayInVac
       reminder_stage: row.stage,
       recipient_name: candidate.recipientName || null,
       recipient_email: candidate.recipientEmail || null,
+      recipient_phone: candidate.recipientPhone || null,
       recipient_type: candidate.recipientType,
       company_name: candidate.companyName || null,
       status,
+      wa_status: waStatus,
+      wa_attempt_count: Number(existing?.wa_attempt_count || 0),
+      wa_last_attempt_at: existing?.wa_last_attempt_at || null,
+      wa_sent_at: waStatus === "SENT" ? existing?.wa_sent_at || null : null,
+      wa_meta_message_id: waStatus === "SENT" ? existing?.wa_meta_message_id || null : null,
+      wa_error_message:
+        waStatus === "FAILED"
+          ? existing?.wa_error_message || null
+          : waStatus === "SKIPPED"
+            ? "No HP penerima belum tersedia atau tidak valid."
+            : null,
       sent_at: status === "SENT" ? existing?.sent_at || null : null,
       error_message: status === "CANCELLED"
         ? existing?.error_message || "Reminder dibatalkan manual oleh admin."
@@ -463,9 +497,170 @@ export async function sendDueVaccinationReminders(
   return { today, claimed: rows.length, sent, failed, skipped, results };
 }
 
+export async function sendDueVaccinationReminderWhatsApp(
+  supabase: any,
+  today = todayInVaccinationTimezone(),
+  limit = 200,
+) {
+  const configured = vaccinationReminderWhatsAppConfigured();
+  if (!configured) {
+    return {
+      configured: false,
+      today,
+      claimed: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      results: [],
+    };
+  }
+
+  const staleAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await supabase
+    .from("vaccination_reminders")
+    .update({
+      wa_status: "FAILED",
+      wa_error_message: "Recovered from stale WhatsApp SENDING state.",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("wa_status", "SENDING")
+    .lt("wa_last_attempt_at", staleAt)
+    .is("superseded_at", null);
+
+  const dueResult = await supabase
+    .from("vaccination_reminders")
+    .select(
+      "id,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,recipient_name,recipient_phone,recipient_type,company_name,status,wa_status,wa_attempt_count,wa_sent_at",
+    )
+    .lte("reminder_date", today)
+    .in("reminder_stage", ["H3", "H1"])
+    .in("wa_status", ["PENDING", "FAILED"])
+    .is("superseded_at", null)
+    .neq("status", "CANCELLED")
+    .order("reminder_date", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(Math.min(Math.max(Number(limit || 200), 1), 500));
+
+  if (dueResult.error) throw new Error(dueResult.error.message);
+
+  let claimed = 0;
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const results: any[] = [];
+
+  for (const row of dueResult.data || []) {
+    const phone = vaccinationReminderRecipientPhone(row.recipient_phone);
+    if (!phone) {
+      skipped += 1;
+      const message = "No HP penerima belum tersedia atau tidak valid.";
+      await supabase
+        .from("vaccination_reminders")
+        .update({
+          wa_status: "SKIPPED",
+          wa_error_message: message,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id)
+        .neq("wa_status", "SENT");
+      results.push({ id: row.id, status: "SKIPPED", error: message });
+      continue;
+    }
+
+    const attemptAt = new Date().toISOString();
+    const attemptCount = Number(row.wa_attempt_count || 0) + 1;
+    const claim = await supabase
+      .from("vaccination_reminders")
+      .update({
+        wa_status: "SENDING",
+        wa_attempt_count: attemptCount,
+        wa_last_attempt_at: attemptAt,
+        wa_error_message: null,
+        updated_at: attemptAt,
+      })
+      .eq("id", row.id)
+      .in("wa_status", ["PENDING", "FAILED"])
+      .is("superseded_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (claim.error) {
+      failed += 1;
+      results.push({ id: row.id, status: "CLAIM_FAILED", error: claim.error.message });
+      continue;
+    }
+    if (!claim.data) continue;
+    claimed += 1;
+
+    const result = await sendVaccinationReminderWhatsApp({
+      phone,
+      recipientName: clean(row.recipient_name),
+      participantName: clean(row.participant_name) || "Peserta",
+      serviceName: clean(row.vaccine_name) || "Vaksinasi",
+      nextDueDate: clean(row.next_due_date),
+      reminderStage: clean(row.reminder_stage),
+    });
+
+    if (result.sent) {
+      sent += 1;
+      const sentAt = result.sent_at || new Date().toISOString();
+      await supabase
+        .from("vaccination_reminders")
+        .update({
+          wa_status: "SENT",
+          wa_sent_at: sentAt,
+          wa_meta_message_id: result.meta_message_id || null,
+          wa_error_message: null,
+          updated_at: sentAt,
+        })
+        .eq("id", row.id);
+      results.push({ id: row.id, status: "SENT", meta_message_id: result.meta_message_id || null });
+    } else if (result.skipped) {
+      skipped += 1;
+      const message = result.error || result.reason || "WhatsApp reminder dilewati.";
+      await supabase
+        .from("vaccination_reminders")
+        .update({
+          wa_status: "SKIPPED",
+          wa_error_message: message.slice(0, 1000),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      results.push({ id: row.id, status: "SKIPPED", error: message });
+    } else {
+      failed += 1;
+      const message = result.error || "Gagal mengirim WhatsApp reminder.";
+      await supabase
+        .from("vaccination_reminders")
+        .update({
+          wa_status: "FAILED",
+          wa_error_message: message.slice(0, 1000),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      results.push({ id: row.id, status: "FAILED", error: message });
+    }
+  }
+
+  return { configured: true, today, claimed, sent, failed, skipped, results };
+}
+
 export async function runAutomaticVaccinationReminder(supabase: any) {
   const today = todayInVaccinationTimezone();
   const sync = await syncVaccinationReminders(supabase, today);
-  const delivery = await sendDueVaccinationReminders(supabase, today, 200);
-  return { today, sync, delivery };
+
+  const delivery = vaccinationReminderSmtpConfigured()
+    ? await sendDueVaccinationReminders(supabase, today, 200)
+    : {
+        configured: false,
+        today,
+        claimed: 0,
+        sent: 0,
+        failed: 0,
+        skipped: 0,
+        results: [],
+      };
+
+  const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 200);
+  return { today, sync, delivery, whatsappDelivery };
 }

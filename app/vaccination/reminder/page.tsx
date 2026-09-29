@@ -20,6 +20,7 @@ const STATUS_STYLE: Record<string, string> = {
   FAILED: "bg-rose-50 text-rose-700 border-rose-200",
   SKIPPED: "bg-amber-50 text-amber-800 border-amber-200",
   CANCELLED: "bg-slate-100 text-slate-600 border-slate-300",
+  NOT_APPLICABLE: "bg-slate-50 text-slate-500 border-slate-200",
 };
 
 type ViewKey = "INCOMING" | "SENT" | "FAILED" | "DUE_TODAY";
@@ -35,7 +36,7 @@ const VIEW_META: Record<ViewKey, { title: string; note: string }> = {
   },
   FAILED: {
     title: "Failed / Skipped",
-    note: "Reminder gagal dikirim atau belum siap karena data email belum lengkap.",
+    note: "Reminder gagal atau data penerima belum lengkap.",
   },
   DUE_TODAY: {
     title: "Due Today",
@@ -182,15 +183,20 @@ export default function VaccinationReminderPage() {
       }
 
       const delivery = payload?.delivery || payload?.data?.delivery || {};
+      const whatsappDelivery = payload?.whatsappDelivery || payload?.data?.whatsappDelivery || {};
       const sync = payload?.sync || payload?.data?.sync || {};
       const sent = Number(delivery?.sent || 0);
       const failed = Number(delivery?.failed || 0);
       const skipped = Number(delivery?.skipped || 0);
       const claimed = Number(delivery?.claimed || 0);
+      const waSent = Number(whatsappDelivery?.sent || 0);
+      const waFailed = Number(whatsappDelivery?.failed || 0);
+      const waSkipped = Number(whatsappDelivery?.skipped || 0);
+      const waClaimed = Number(whatsappDelivery?.claimed || 0);
       const schedules = Number(sync?.schedules || 0);
 
       setManualMessage(
-        `Manual reminder selesai · diproses ${claimed} · sent ${sent} · failed ${failed} · skipped ${skipped} · schedule aktif ${schedules}.`,
+        `Manual reminder selesai · Email: diproses ${claimed}, sent ${sent}, failed ${failed}, skipped ${skipped} · WhatsApp H-3/H-1: diproses ${waClaimed}, sent ${waSent}, failed ${waFailed}, skipped ${waSkipped} · schedule aktif ${schedules}.`,
       );
       await load(selectedView);
     } catch (e: any) {
@@ -229,9 +235,12 @@ export default function VaccinationReminderPage() {
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.message || `HTTP ${response.status}`);
       }
+      const emailSent = Boolean(payload?.email?.sent);
+      const waSent = Boolean(payload?.whatsapp?.sent);
+      const channelText = [emailSent ? "Email" : "", waSent ? "WhatsApp" : ""].filter(Boolean).join(" + ");
       setManualMessage(
         action === "send"
-          ? `Reminder ${participant} berhasil dikirim.`
+          ? `Reminder ${participant} berhasil diproses${channelText ? ` melalui ${channelText}` : ""}.`
           : `Reminder ${participant} berhasil dibatalkan.`,
       );
       await load(selectedView);
@@ -259,7 +268,7 @@ export default function VaccinationReminderPage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="text-xs font-black tracking-[0.12em] text-emerald-700">AUTOMATIC EMAIL REMINDER</div>
+              <div className="text-xs font-black tracking-[0.12em] text-emerald-700">AUTOMATIC EMAIL + WHATSAPP REMINDER</div>
               <h1 className="mt-1 text-2xl font-black tracking-tight md:text-3xl">Reminder Vaksinasi</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600">
                 Klik salah satu card untuk mengambil daftar datanya. Setiap reminder juga dapat dikirim atau dibatalkan langsung dari baris terkait.
@@ -293,7 +302,7 @@ export default function VaccinationReminderPage() {
             <StatCard
               label="SENT"
               value={data?.summary?.sent ?? 0}
-              note="Email berhasil dikirim"
+              note={`Email ${data?.summary?.sent ?? 0} · WA ${data?.summary?.waSent ?? 0}`}
               tone="green"
               active={selectedView === "SENT"}
               onClick={() => changeView("SENT")}
@@ -301,7 +310,7 @@ export default function VaccinationReminderPage() {
             <StatCard
               label="FAILED / SKIPPED"
               value={(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)}
-              note={`${data?.summary?.failed ?? 0} failed · ${data?.summary?.skipped ?? 0} data belum siap`}
+              note={`Email ${(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)} · WA ${(data?.summary?.waFailed ?? 0) + (data?.summary?.waSkipped ?? 0)}`}
               tone="red"
               active={selectedView === "FAILED"}
               onClick={() => changeView("FAILED")}
@@ -324,10 +333,14 @@ export default function VaccinationReminderPage() {
             />
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-xs font-bold text-slate-500">AUTOMATION</div>
+              <div className="text-xs font-bold text-slate-500">EMAIL AUTOMATION</div>
               <div className="mt-1 text-sm font-black">H-7 · H-3 · H-1 · Hari H</div>
+            </div>
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="text-xs font-bold text-emerald-700">WHATSAPP AUTOMATION</div>
+              <div className="mt-1 text-sm font-black text-emerald-900">H-3 · H-1</div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-bold text-slate-500">SCHEDULER</div>
@@ -337,10 +350,10 @@ export default function VaccinationReminderPage() {
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-xs font-bold text-slate-500">EMAIL SMTP</div>
-              <div className="mt-1 flex items-center gap-2 text-sm font-black">
-                <span className={`h-2.5 w-2.5 rounded-full ${data?.automation?.smtpConfigured ? "bg-emerald-500" : "bg-rose-500"}`} />
-                {data?.automation?.smtpConfigured ? "Siap mengirim email" : "SMTP belum lengkap"}
+              <div className="text-xs font-bold text-slate-500">CHANNEL STATUS</div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm font-black">
+                <span className={data?.automation?.smtpConfigured ? "text-emerald-700" : "text-rose-700"}>Email {data?.automation?.smtpConfigured ? "READY" : "OFF"}</span>
+                <span className={data?.automation?.whatsappConfigured ? "text-emerald-700" : "text-rose-700"}>WA {data?.automation?.whatsappConfigured ? "READY" : "OFF"}</span>
               </div>
             </div>
           </div>
@@ -370,7 +383,7 @@ export default function VaccinationReminderPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="min-w-[1280px] w-full text-left text-sm">
+            <table className="min-w-[1520px] w-full text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Peserta</th>
@@ -378,8 +391,9 @@ export default function VaccinationReminderPage() {
                   <th className="px-4 py-3">Layanan</th>
                   <th className="px-4 py-3">Next Dose</th>
                   <th className="px-4 py-3">Reminder</th>
-                  <th className="px-4 py-3">Penerima Email</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Penerima</th>
+                  <th className="px-4 py-3">Email Status</th>
+                  <th className="px-4 py-3">WhatsApp</th>
                   <th className="px-4 py-3">Keterangan</th>
                   <th className="px-4 py-3">Aksi</th>
                 </tr>
@@ -387,9 +401,10 @@ export default function VaccinationReminderPage() {
               <tbody className="divide-y divide-slate-100">
                 {rows.map((row: any) => {
                   const status = clean(row.status).toUpperCase();
+                  const rowWaStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
                   const busy = rowActionId === Number(row.id);
-                  const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING"].includes(status);
-                  const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status);
+                  const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING"].includes(status) || rowWaStatus === "SENDING";
+                  const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || rowWaStatus === "SENT";
                   return (
                     <tr key={row.id} className="align-top hover:bg-slate-50/70">
                       <td className="px-4 py-3 font-bold">{row.participant_name || "-"}</td>
@@ -407,7 +422,8 @@ export default function VaccinationReminderPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-semibold">{row.recipient_name || row.participant_name || "-"}</div>
-                        <div className="max-w-[240px] truncate text-xs text-slate-500">{row.recipient_email || "-"}</div>
+                        <div className="max-w-[240px] truncate text-xs text-slate-500">{row.recipient_email || "Email -"}</div>
+                        <div className="mt-0.5 text-xs font-semibold text-emerald-700">{row.recipient_phone || "No HP -"}</div>
                         {row.recipient_type === "PARENT" ? (
                           <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-violet-600">Via Parent</div>
                         ) : null}
@@ -417,6 +433,18 @@ export default function VaccinationReminderPage() {
                           {status || "-"}
                         </span>
                       </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          return (
+                            <div>
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[rowWaStatus] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                                {rowWaStatus === "NOT_APPLICABLE" ? "N/A" : rowWaStatus}
+                              </span>
+                              {row.wa_sent_at ? <div className="mt-1 text-[11px] font-semibold text-emerald-700">{fmtDateTime(row.wa_sent_at)}</div> : null}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
                         {row.last_reminder_at ? (
                           <div className="font-semibold text-slate-700">
@@ -425,10 +453,13 @@ export default function VaccinationReminderPage() {
                         ) : null}
                         {row.error_message ? (
                           <div className={row.last_reminder_at ? "mt-1 text-slate-500" : ""}>
-                            {row.error_message}
+                            Email: {row.error_message}
                           </div>
-                        ) : !row.last_reminder_at ? (
+                        ) : !row.last_reminder_at && !row.wa_error_message ? (
                           "-"
+                        ) : null}
+                        {row.wa_error_message ? (
+                          <div className="mt-1 text-emerald-700">WA: {row.wa_error_message}</div>
                         ) : null}
                       </td>
                       <td className="px-4 py-3">
@@ -458,7 +489,7 @@ export default function VaccinationReminderPage() {
                 })}
                 {!loading && !rows.length ? (
                   <tr>
-                    <td colSpan={9} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
+                    <td colSpan={10} className="px-5 py-10 text-center text-sm font-semibold text-slate-400">
                       Tidak ada data pada kategori ini.
                     </td>
                   </tr>
@@ -473,9 +504,9 @@ export default function VaccinationReminderPage() {
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             {[
               ["1", "Baca Next Dose", "Current vaccination dan History Service dibaca otomatis setiap hari."],
-              ["2", "Buat Jadwal", "Sistem membuat H-7, H-3, H-1, dan Hari H tanpa input admin."],
-              ["3", "Kirim Email", "Scheduler server berjalan walaupun tidak ada admin yang membuka aplikasi."],
-              ["4", "Audit Status", "SENT, FAILED, SKIPPED, CANCELLED, waktu kirim, dan alasan gagal tetap tercatat."],
+              ["2", "Buat Jadwal", "Email mengikuti H-7, H-3, H-1, Hari H. WhatsApp otomatis khusus H-3 dan H-1."],
+              ["3", "Kirim Otomatis", "Email dan WhatsApp berjalan independen; kegagalan salah satu channel tidak memblokir channel lain."],
+              ["4", "Audit Status", "Status Email dan WhatsApp, waktu kirim, message ID, serta alasan gagal dicatat terpisah."],
             ].map(([number, title, desc]) => (
               <div key={number} className="rounded-2xl border border-slate-200 p-4">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#042E66] text-xs font-black text-white">{number}</div>

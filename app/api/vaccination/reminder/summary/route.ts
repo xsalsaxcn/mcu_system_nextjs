@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { fail, ok, requireUser, supabaseAdmin } from "../../_utils";
 import { shiftYmd, todayInVaccinationTimezone } from "@/lib/vaccination/reminderEngine";
 import { vaccinationReminderSmtpConfigured } from "@/lib/vaccination/reminderEmail";
+import { vaccinationReminderWhatsAppConfigured } from "@/lib/vaccination/reminderWhatsApp";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
     const result = await supabase
       .from("vaccination_reminders")
       .select(
-        "id,source_type,source_key,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_type,company_name,attempt_count,superseded_at",
+        "id,source_type,source_key,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,status,sent_at,error_message,recipient_name,recipient_email,recipient_phone,recipient_type,company_name,attempt_count,superseded_at,wa_status,wa_attempt_count,wa_last_attempt_at,wa_sent_at,wa_meta_message_id,wa_error_message",
       )
       .gte("reminder_date", from)
       .lte("reminder_date", until)
@@ -91,6 +92,10 @@ export async function GET(req: NextRequest) {
     const sent = rows.filter((row: any) => clean(row.status).toUpperCase() === "SENT").length;
     const failed = rows.filter((row: any) => clean(row.status).toUpperCase() === "FAILED").length;
     const skipped = rows.filter((row: any) => clean(row.status).toUpperCase() === "SKIPPED").length;
+    const waSent = rows.filter((row: any) => clean(row.wa_status).toUpperCase() === "SENT").length;
+    const waFailed = rows.filter((row: any) => clean(row.wa_status).toUpperCase() === "FAILED").length;
+    const waSkipped = rows.filter((row: any) => clean(row.wa_status).toUpperCase() === "SKIPPED").length;
+    const waPending = rows.filter((row: any) => ["PENDING", "SENDING"].includes(clean(row.wa_status).toUpperCase())).length;
     const dueToday = rows.filter((row: any) => {
       const status = clean(row.status).toUpperCase();
       return clean(row.reminder_date) === today && !["SENT", "SUPERSEDED", "CANCELLED"].includes(status);
@@ -125,13 +130,15 @@ export async function GET(req: NextRequest) {
       today,
       view,
       automation: {
-        schedule: ["H7", "H3", "H1", "H0"],
+        emailSchedule: ["H7", "H3", "H1", "H0"],
+        whatsappSchedule: ["H3", "H1"],
         cron: "08:00 WIB setiap hari",
         cronConfigured: Boolean(clean(process.env.CRON_SECRET)),
         smtpConfigured: vaccinationReminderSmtpConfigured(),
+        whatsappConfigured: vaccinationReminderWhatsAppConfigured(),
         timezone: clean(process.env.VACCINATION_REMINDER_TIMEZONE) || "Asia/Jakarta",
       },
-      summary: { sent, failed, skipped, incoming, dueToday },
+      summary: { sent, failed, skipped, incoming, dueToday, waSent, waFailed, waSkipped, waPending },
       items: items.slice(0, 1000).map(withLastReminder),
     });
   } catch (error: any) {
