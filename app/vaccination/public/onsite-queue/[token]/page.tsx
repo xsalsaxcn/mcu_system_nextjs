@@ -13,7 +13,6 @@ export default function VaccinationOnsiteQueueJoinPage({
   const [joinToken, setJoinToken] = useState("");
   const [name, setName] = useState("");
   const [employeeId, setEmployeeId] = useState("");
-  const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +56,6 @@ export default function VaccinationOnsiteQueueJoinPage({
           joinToken,
           participantName: name,
           employeeId,
-          phone,
         }),
       }).then((r) => r.json());
 
@@ -119,8 +117,8 @@ export default function VaccinationOnsiteQueueJoinPage({
                 Pengingat antrean via WhatsApp
               </div>
               <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-700">
-                Tidak perlu mengaktifkan notifikasi browser. Sistem akan mengirim
-                WhatsApp otomatis saat tinggal 1 antrean lagi sebelum giliran Anda.
+                No HP tidak perlu diisi. Sistem memakai nomor WhatsApp dari data peserta
+                yang sudah terdaftar dan mengirim pengingat otomatis saat tinggal 1 antrean lagi.
               </p>
             </div>
 
@@ -150,26 +148,6 @@ export default function VaccinationOnsiteQueueJoinPage({
               />
               <div className="mt-1 text-xs text-slate-500">
                 1 NIK Karyawan hanya mendapat 1 nomor antrean pada event ini.
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-                No HP / WhatsApp
-              </label>
-              <input
-                required
-                type="tel"
-                inputMode="numeric"
-                value={phone}
-                onChange={(e) =>
-                  setPhone(e.target.value.replace(/\D/g, "").slice(0, 15))
-                }
-                className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
-                placeholder="08xxxxxxxxxx"
-              />
-              <div className="mt-1 text-xs text-slate-500">
-                Pastikan nomor ini aktif di WhatsApp agar pengingat antrean dapat diterima.
               </div>
             </div>
 

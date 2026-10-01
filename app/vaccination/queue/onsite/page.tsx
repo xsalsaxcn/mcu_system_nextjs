@@ -49,6 +49,17 @@ export default function VaccinationOnsiteQueuePage() {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
     setTvOnly(requestedTvMode);
 
+    // TV mode is intentionally PUBLIC + READ ONLY.
+    // It must work on a client TV/browser without login cookies or device-specific access.
+    if (requestedTvMode) {
+      if (requestedSessionId) {
+        setSessionId(requestedSessionId);
+      } else {
+        setError("Link TV tidak memiliki session_id.");
+      }
+      return;
+    }
+
     fetch("/api/vaccination/sessions", { cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
@@ -69,9 +80,12 @@ export default function VaccinationOnsiteQueuePage() {
       });
   }, []);
 
-  async function load(id = sessionId) {
+  async function load(id = sessionId, publicTv = tvOnly) {
     if (!id) return;
-    const json = await fetch(`/api/vaccination/onsite-queue?session_id=${encodeURIComponent(id)}&t=${Date.now()}`, { cache: "no-store" }).then((r) => r.json());
+    const endpoint = publicTv
+      ? `/api/vaccination/onsite-queue/tv?session_id=${encodeURIComponent(id)}&t=${Date.now()}`
+      : `/api/vaccination/onsite-queue?session_id=${encodeURIComponent(id)}&t=${Date.now()}`;
+    const json = await fetch(endpoint, { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) {
       setError(json.message || "Gagal mengambil onsite queue.");
       return;
@@ -82,10 +96,35 @@ export default function VaccinationOnsiteQueuePage() {
 
   useEffect(() => {
     if (!sessionId) return;
-    void load(sessionId);
-    const timer = window.setInterval(() => void load(sessionId), 2500);
+    void load(sessionId, tvOnly);
+    const timer = window.setInterval(() => void load(sessionId, tvOnly), 2500);
     return () => window.clearInterval(timer);
-  }, [sessionId]);
+  }, [sessionId, tvOnly]);
+
+  useEffect(() => {
+    if (!tvOnly || typeof document === "undefined") return;
+
+    const hideValidationShortcut = () => {
+      const link = document.getElementById("hha-validation-menu-link-v129") as HTMLElement | null;
+      if (link) {
+        link.dataset.hhaOnsiteTvHidden = "1";
+        link.style.display = "none";
+      }
+    };
+
+    hideValidationShortcut();
+    const observer = new MutationObserver(hideValidationShortcut);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      const link = document.getElementById("hha-validation-menu-link-v129") as HTMLElement | null;
+      if (link?.dataset.hhaOnsiteTvHidden === "1") {
+        link.style.display = "";
+        delete link.dataset.hhaOnsiteTvHidden;
+      }
+    };
+  }, [tvOnly]);
 
   function setSessionSpecificOperatorUrl(id: string) {
     if (typeof window === "undefined" || !id) return;
@@ -160,10 +199,12 @@ export default function VaccinationOnsiteQueuePage() {
         </div>
         <div className={tvOnly ? "mt-4 text-center text-xl font-black text-violet-800" : "mt-4 text-center text-sm font-black text-violet-800"}>QR berganti dalam ± {data?.rolling?.expires_in ?? "-"} detik</div>
         <div className={tvOnly ? "mt-2 text-center text-sm font-semibold text-slate-500" : "mt-1 text-center text-xs font-semibold text-slate-500"}>Satu QR aktif dapat dipakai banyak peserta selama window 60 detik. Peserta yang sudah berhasil membuka form mendapat waktu 10 menit untuk submit.</div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button disabled={busy || data.event.status === "OPEN"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "OPEN" })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Buka Queue</button>
-          <button disabled={busy || data.event.status === "CLOSED"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "CLOSED" })} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Tutup Queue</button>
-        </div>
+        {!tvOnly ? (
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button disabled={busy || data.event.status === "OPEN"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "OPEN" })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Buka Queue</button>
+            <button disabled={busy || data.event.status === "CLOSED"} onClick={() => post({ action: "set-event-status", eventId: data.event.id, status: "CLOSED" })} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Tutup Queue</button>
+          </div>
+        ) : null}
       </div>
 
       <div>
@@ -173,8 +214,12 @@ export default function VaccinationOnsiteQueuePage() {
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">Skipped</div><div className="mt-2 text-4xl font-black text-amber-700">{skipped.length}</div></div>
           <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Done</div><div className="mt-2 text-4xl font-black text-emerald-700">{done.length}</div></div>
         </div>
-        <button disabled={busy || !canCallNext} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
-        {active.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Masih ada antrean aktif. Selesaikan dulu dengan tombol <span className="font-black">Done</span> di card antrean aktif, baru panggil nomor berikutnya.</p> : null}
+        {!tvOnly ? (
+          <>
+            <button disabled={busy || !canCallNext} onClick={() => post({ action: "call-next", eventId: data.event.id })} className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-black text-white disabled:opacity-40">{nextButtonLabel}</button>
+            {active.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Masih ada antrean aktif. Selesaikan dulu dengan tombol <span className="font-black">Done</span> di card antrean aktif, baru panggil nomor berikutnya.</p> : null}
+          </>
+        ) : null}
 
         <div className={`mt-3 rounded-2xl border p-4 ${data?.whatsapp_prepare?.configured ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
           <div className={`text-sm font-black ${data?.whatsapp_prepare?.configured ? "text-emerald-800" : "text-amber-800"}`}>
@@ -198,10 +243,12 @@ export default function VaccinationOnsiteQueuePage() {
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs font-black ${statusBadge(entry.queue_status)}`}>DIPANGGIL</span>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
-                  <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
-                </div>
+                {!tvOnly ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
+                    <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
+                  </div>
+                ) : null}
               </div>
             ))}
             {!active.length ? <div className="text-sm text-slate-500">Belum ada nomor aktif.</div> : null}
@@ -275,7 +322,7 @@ export default function VaccinationOnsiteQueuePage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h1 className="text-2xl font-black text-slate-950">Antrian Vaksin — Onsite Rolling QR</h1>
-                <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Peserta isi Nama Lengkap + NIK Karyawan + No HP, lalu langsung mendapat nomor antrean. Satu NIK Karyawan hanya mendapat satu nomor per event.</p>
+                <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Peserta cukup isi Nama Lengkap + NIK Karyawan, lalu langsung mendapat nomor antrean. Nomor WhatsApp diambil otomatis dari data peserta yang sudah terdaftar. Satu NIK Karyawan hanya mendapat satu nomor per event.</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <a href="/vaccination/queue" className="rounded-xl border px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Mode Existing</a>
                   <span className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-black text-white">Mode Onsite Rolling QR</span>
