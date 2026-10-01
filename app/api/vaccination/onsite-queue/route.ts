@@ -4,6 +4,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { onsitePushMessageSuffix, sendOnsiteQueueCalledPush } from "@/lib/vaccination/onsiteWebPush";
 import { getOnsiteWhatsAppPrepareConfig, notifyOnsiteNextWaitingPrepare, onsiteWhatsAppPrepareSuffix } from "@/lib/vaccination/onsiteWhatsApp";
+import { onsiteQueueFormHasWhatsApp } from "@/lib/vaccination/onsiteQueueForm";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,7 +35,7 @@ function rollingPayload(event: any) {
 async function loadEventData(supabase: any, sessionId: number) {
   const sessionResult = await supabase
     .from("vaccination_sessions")
-    .select("id,session_name,company_name,location,session_date,status")
+    .select("id,session_name,company_name,location,session_date,status,onsite_queue_form_config")
     .eq("id", sessionId)
     .maybeSingle();
   if (sessionResult.error) throw new Error(sessionResult.error.message);
@@ -67,6 +68,9 @@ async function loadEventData(supabase: any, sessionId: number) {
     rolling: rollingPayload(eventResult.data),
     whatsapp_prepare: {
       configured: whatsappConfig.configured,
+      enabled_for_session: onsiteQueueFormHasWhatsApp(
+        sessionResult.data?.onsite_queue_form_config,
+      ),
       trigger_ahead: whatsappConfig.trigger_ahead,
     },
   };

@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_ONSITE_QUEUE_FORM_CONFIG,
+  defaultOnsiteQueueField,
+  onsiteQueueFieldKindLabel,
+  sanitizeOnsiteQueueFormConfig,
+  type OnsiteQueueFormField,
+  type OnsiteQueueFormFieldKind,
+} from "@/lib/vaccination/onsiteQueueForm";
 
 // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
 // V153_18_IMPORTED_PRODUCT_LOT_SESSION_SAFE
@@ -65,6 +73,23 @@ const emptyEditSession: EditSessionDraft = {
   printLabelHandler: "MEDIS",
 };
 
+const queueFieldKinds: OnsiteQueueFormFieldKind[] = [
+  "participant_name",
+  "employee_id",
+  "whatsapp",
+  "email",
+  "custom_text",
+  "custom_number",
+  "custom_date",
+];
+
+const uniqueQueueFieldKinds = new Set<OnsiteQueueFormFieldKind>([
+  "participant_name",
+  "employee_id",
+  "whatsapp",
+  "email",
+]);
+
 const allLocationsKey = "__all__";
 
 function normalizeBatchName(value: any) {
@@ -89,6 +114,11 @@ export default function VaccinationSessionPage() {
     lotLabel?: string;
   })[]>([]);
   const [editVaccineDraft, setEditVaccineDraft] = useState<SessionVaccineDraft>(emptyDraft);
+  const [editQueueFormFields, setEditQueueFormFields] = useState<OnsiteQueueFormField[]>(
+    DEFAULT_ONSITE_QUEUE_FORM_CONFIG.map((item) => ({ ...item })),
+  );
+  const [queueFieldKindToAdd, setQueueFieldKindToAdd] =
+    useState<OnsiteQueueFormFieldKind>("whatsapp");
 
   const [draft, setDraft] = useState<SessionVaccineDraft>(emptyDraft);
   const [sessionVaccines, setSessionVaccines] = useState<SessionVaccineDraft[]>(
@@ -380,6 +410,46 @@ export default function VaccinationSessionPage() {
     setEditSessionVaccines((prev) => prev.filter((_, idx) => idx !== index));
   }
 
+  function addEditQueueField() {
+    if (
+      uniqueQueueFieldKinds.has(queueFieldKindToAdd) &&
+      editQueueFormFields.some((item) => item.kind === queueFieldKindToAdd)
+    ) {
+      setError(`${onsiteQueueFieldKindLabel(queueFieldKindToAdd)} sudah ada di form antrean.`);
+      return;
+    }
+
+    const suffix = `${Date.now()}_${editQueueFormFields.length + 1}`;
+    setEditQueueFormFields((prev) => [
+      ...prev,
+      defaultOnsiteQueueField(queueFieldKindToAdd, suffix),
+    ]);
+    setError("");
+  }
+
+  function updateEditQueueField(
+    index: number,
+    patch: Partial<OnsiteQueueFormField>,
+  ) {
+    setEditQueueFormFields((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)),
+    );
+  }
+
+  function removeEditQueueField(index: number) {
+    setEditQueueFormFields((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function moveEditQueueField(index: number, direction: -1 | 1) {
+    setEditQueueFormFields((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function openEditSession(session: any) {
     setError("");
     setMessage("");
@@ -415,6 +485,9 @@ export default function VaccinationSessionPage() {
           : "",
       })),
     );
+    setEditQueueFormFields(
+      sanitizeOnsiteQueueFormConfig(session.onsite_queue_form_config),
+    );
     setEditVaccineDraft(emptyDraft);
 
     try {
@@ -449,6 +522,9 @@ export default function VaccinationSessionPage() {
     setEditSessionForm(emptyEditSession);
     setEditSessionVaccines([]);
     setEditVaccineDraft(emptyDraft);
+    setEditQueueFormFields(
+      DEFAULT_ONSITE_QUEUE_FORM_CONFIG.map((item) => ({ ...item })),
+    );
     setLoadingEditPrintMode(false);
     setEditPrintModeReady(false);
   }
@@ -498,6 +574,7 @@ export default function VaccinationSessionPage() {
           sessionDate: editSessionForm.sessionDate,
           timeSlot: editSessionForm.timeSlot,
           participantCountPlanned: editSessionForm.participantCountPlanned,
+          onsiteQueueFormConfig: editQueueFormFields,
           sessionVaccines: editSessionVaccines.map((item) => ({
             vaccineId: item.vaccineId,
             lotId: item.lotId,
@@ -533,6 +610,9 @@ export default function VaccinationSessionPage() {
       setEditSessionForm(emptyEditSession);
       setEditSessionVaccines([]);
       setEditVaccineDraft(emptyDraft);
+      setEditQueueFormFields(
+        DEFAULT_ONSITE_QUEUE_FORM_CONFIG.map((item) => ({ ...item })),
+      );
       await loadSessions();
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan perubahan session.");
@@ -1377,6 +1457,168 @@ export default function VaccinationSessionPage() {
                     <option value="VALIDASI">Tim Validasi</option>
                   </select>
                 </label>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">Form Ambil Nomor Antrean</div>
+                    <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
+                      Atur field yang tampil saat peserta scan QR onsite. Field dapat ditambah,
+                      dihapus, diurutkan, diubah labelnya, dan dibuat wajib/opsional per session.
+                    </p>
+                  </div>
+                  <div
+                    className={`rounded-full px-3 py-1 text-xs font-black ${
+                      editQueueFormFields.some((item) => item.kind === "whatsapp")
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    WA Reminder{" "}
+                    {editQueueFormFields.some((item) => item.kind === "whatsapp")
+                      ? "AKTIF"
+                      : "NONAKTIF"}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <select
+                    value={queueFieldKindToAdd}
+                    onChange={(e) =>
+                      setQueueFieldKindToAdd(e.target.value as OnsiteQueueFormFieldKind)
+                    }
+                    className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5 text-sm font-bold"
+                  >
+                    {queueFieldKinds.map((kind) => (
+                      <option
+                        key={kind}
+                        value={kind}
+                        disabled={
+                          uniqueQueueFieldKinds.has(kind) &&
+                          editQueueFormFields.some((item) => item.kind === kind)
+                        }
+                      >
+                        {onsiteQueueFieldKindLabel(kind)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addEditQueueField}
+                    className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white"
+                  >
+                    + Tambah Field
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {editQueueFormFields.map((field, index) => (
+                    <div
+                      key={field.id}
+                      className="grid gap-3 rounded-2xl border bg-white p-3 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_110px_auto]"
+                    >
+                      <div className="flex items-center">
+                        <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-black text-slate-700">
+                          {onsiteQueueFieldKindLabel(field.kind)}
+                        </span>
+                      </div>
+
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Label
+                        <input
+                          value={field.label}
+                          onChange={(e) =>
+                            updateEditQueueField(index, { label: e.target.value })
+                          }
+                          className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                          placeholder="Label field"
+                        />
+                      </label>
+
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Placeholder
+                        <input
+                          value={field.placeholder || ""}
+                          onChange={(e) =>
+                            updateEditQueueField(index, { placeholder: e.target.value })
+                          }
+                          className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                          placeholder="Placeholder"
+                        />
+                      </label>
+
+                      <label className="flex items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={field.required}
+                          onChange={(e) =>
+                            updateEditQueueField(index, { required: e.target.checked })
+                          }
+                        />
+                        Wajib
+                      </label>
+
+                      <div className="flex items-end gap-1">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => moveEditQueueField(index, -1)}
+                          className="rounded-lg border px-2.5 py-2 text-xs font-black disabled:opacity-30"
+                          title="Naik"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === editQueueFormFields.length - 1}
+                          onClick={() => moveEditQueueField(index, 1)}
+                          className="rounded-lg border px-2.5 py-2 text-xs font-black disabled:opacity-30"
+                          title="Turun"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeEditQueueField(index)}
+                          className="rounded-lg border border-red-200 px-2.5 py-2 text-xs font-black text-red-700"
+                          title="Hapus field"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {!editQueueFormFields.length ? (
+                    <div className="rounded-xl border border-dashed bg-white p-4 text-center text-sm font-semibold text-slate-500">
+                      Form tanpa field tetap dapat membuat nomor antrean. Sistem menggunakan identitas anonim per scan.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-2 text-xs font-semibold sm:grid-cols-2">
+                  <div className={`rounded-xl border p-3 ${
+                    editQueueFormFields.some((item) => item.kind === "whatsapp")
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-slate-200 bg-slate-100 text-slate-600"
+                  }`}>
+                    <span className="font-black">WhatsApp:</span>{" "}
+                    {editQueueFormFields.some((item) => item.kind === "whatsapp")
+                      ? "field WhatsApp ada → reminder WA session aktif."
+                      : "field WhatsApp tidak ada → reminder WA session nonaktif."}
+                  </div>
+                  <div className={`rounded-xl border p-3 ${
+                    editQueueFormFields.some((item) => item.kind === "employee_id")
+                      ? "border-blue-200 bg-blue-50 text-blue-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}>
+                    <span className="font-black">Duplikasi antrean:</span>{" "}
+                    {editQueueFormFields.some((item) => item.kind === "employee_id")
+                      ? "NIK / ID peserta dipakai untuk menjaga 1 peserta = 1 nomor."
+                      : "tanpa NIK / ID, sistem memakai identitas anonim per scan."}
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 rounded-2xl border bg-slate-50 p-4">

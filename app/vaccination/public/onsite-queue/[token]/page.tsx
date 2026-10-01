@@ -1,8 +1,20 @@
 "use client";
 
-// V153.35_SAFE_WHATSAPP_PRIMARY_JOIN
+// V153.57_SESSION_QUEUE_FORM_CONFIG
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  sanitizeOnsiteQueueFormConfig,
+  type OnsiteQueueFormField,
+} from "@/lib/vaccination/onsiteQueueForm";
+
+function inputType(field: OnsiteQueueFormField) {
+  if (field.kind === "email") return "email";
+  if (field.kind === "whatsapp") return "tel";
+  if (field.kind === "custom_number") return "number";
+  if (field.kind === "custom_date") return "date";
+  return "text";
+}
 
 export default function VaccinationOnsiteQueueJoinPage({
   params,
@@ -11,11 +23,16 @@ export default function VaccinationOnsiteQueueJoinPage({
 }) {
   const [event, setEvent] = useState<any>(null);
   const [joinToken, setJoinToken] = useState("");
-  const [name, setName] = useState("");
-  const [employeeId, setEmployeeId] = useState("");
+  const [fields, setFields] = useState<OnsiteQueueFormField[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const whatsappEnabled = useMemo(
+    () => fields.some((field) => field.kind === "whatsapp"),
+    [fields],
+  );
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -35,12 +52,27 @@ export default function VaccinationOnsiteQueueJoinPage({
           return;
         }
 
+        const nextFields = sanitizeOnsiteQueueFormConfig(
+          json?.event?.queue_form_config,
+        );
         setEvent(json.event);
+        setFields(nextFields);
+        setValues(
+          Object.fromEntries(nextFields.map((field) => [field.id, ""])),
+        );
         setJoinToken(json.join_token || "");
       })
       .catch(() => setError("Gagal memvalidasi QR onsite."))
       .finally(() => setLoading(false));
   }, [params.token]);
+
+  function setFieldValue(field: OnsiteQueueFormField, value: string) {
+    const nextValue =
+      field.kind === "whatsapp"
+        ? value.replace(/\D/g, "").slice(0, 15)
+        : value;
+    setValues((prev) => ({ ...prev, [field.id]: nextValue }));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -54,8 +86,7 @@ export default function VaccinationOnsiteQueueJoinPage({
         body: JSON.stringify({
           eventToken: params.token,
           joinToken,
-          participantName: name,
-          employeeId,
+          formData: values,
         }),
       }).then((r) => r.json());
 
@@ -112,44 +143,46 @@ export default function VaccinationOnsiteQueueJoinPage({
             onSubmit={submit}
             className="mt-6 space-y-4 rounded-3xl bg-white p-5 text-slate-950"
           >
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-              <div className="text-sm font-black text-emerald-800">
-                Pengingat antrean via WhatsApp
+            {whatsappEnabled ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-sm font-black text-emerald-800">
+                  Pengingat antrean via WhatsApp aktif
+                </div>
+                <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-700">
+                  Isi field WhatsApp di bawah. Sistem akan mengirim pengingat otomatis
+                  saat tinggal 1 antrean lagi sebelum giliran Anda.
+                </p>
               </div>
-              <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-700">
-                No HP tidak perlu diisi. Sistem memakai nomor WhatsApp dari data peserta
-                yang sudah terdaftar dan mengirim pengingat otomatis saat tinggal 1 antrean lagi.
-              </p>
-            </div>
+            ) : null}
 
-            <div>
-              <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-                Nama Lengkap
-              </label>
-              <input
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
-                placeholder="Nama lengkap"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-                NIK Karyawan
-              </label>
-              <input
-                required
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
-                placeholder="NIK Karyawan"
-              />
-              <div className="mt-1 text-xs text-slate-500">
-                1 NIK Karyawan hanya mendapat 1 nomor antrean pada event ini.
+            {fields.map((field) => (
+              <div key={field.id}>
+                <label className="text-xs font-black uppercase tracking-wide text-slate-500">
+                  {field.label}
+                  {field.required ? " *" : ""}
+                </label>
+                <input
+                  required={field.required}
+                  type={inputType(field)}
+                  inputMode={field.kind === "whatsapp" || field.kind === "custom_number" ? "numeric" : undefined}
+                  value={values[field.id] || ""}
+                  onChange={(e) => setFieldValue(field, e.target.value)}
+                  className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
+                  placeholder={field.placeholder || undefined}
+                />
+                {field.kind === "employee_id" ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    ID ini dipakai untuk mencegah peserta mengambil nomor antrean ganda pada event yang sama.
+                  </div>
+                ) : null}
               </div>
-            </div>
+            ))}
+
+            {!fields.length ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+                Session ini tidak meminta data tambahan. Klik tombol di bawah untuk mengambil nomor antrean.
+              </div>
+            ) : null}
 
             <button
               disabled={submitting}

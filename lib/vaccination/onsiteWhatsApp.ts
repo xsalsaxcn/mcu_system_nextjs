@@ -1,6 +1,7 @@
 // V153.35_SAFE_ONSITE_WHATSAPP_PREPARE
 // Server-only helper for the Onsite Queue -> Notiva transactional bridge.
 // WhatsApp failure is intentionally non-blocking for queue operations.
+import { onsiteQueueFormHasWhatsApp } from "@/lib/vaccination/onsiteQueueForm";
 
 function clean(value: unknown) {
   const text = String(value ?? "").trim();
@@ -77,6 +78,56 @@ export async function notifyOnsiteNextWaitingPrepare(
   }
 
   try {
+    const eventResult = await supabase
+      .from("vaccination_onsite_queue_events")
+      .select("id,session_id")
+      .eq("id", eventId)
+      .maybeSingle();
+
+    if (eventResult.error) {
+      return {
+        attempted: false,
+        sent: false,
+        skipped: true,
+        reason: "EVENT_LOOKUP_FAILED",
+        error: eventResult.error.message,
+      };
+    }
+
+    if (!eventResult.data?.session_id) {
+      return {
+        attempted: false,
+        sent: false,
+        skipped: true,
+        reason: "EVENT_SESSION_MISSING",
+      };
+    }
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("onsite_queue_form_config")
+      .eq("id", eventResult.data.session_id)
+      .maybeSingle();
+
+    if (sessionResult.error) {
+      return {
+        attempted: false,
+        sent: false,
+        skipped: true,
+        reason: "SESSION_CONFIG_LOOKUP_FAILED",
+        error: sessionResult.error.message,
+      };
+    }
+
+    if (!onsiteQueueFormHasWhatsApp(sessionResult.data?.onsite_queue_form_config)) {
+      return {
+        attempted: false,
+        sent: false,
+        skipped: true,
+        reason: "SESSION_WHATSAPP_DISABLED",
+      };
+    }
+
     const activeResult = await supabase
       .from("vaccination_onsite_queue_entries")
       .select("id,queue_number,queue_sequence")

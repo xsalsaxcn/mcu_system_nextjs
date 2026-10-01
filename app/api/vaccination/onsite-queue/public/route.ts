@@ -1,7 +1,12 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { clean, supabaseAdmin } from "../../_utils";
 import { notifyOnsiteNextWaitingPrepare } from "@/lib/vaccination/onsiteWhatsApp";
+import {
+  onsiteQueueFormHasWhatsApp,
+  sanitizeOnsiteQueueFormConfig,
+  type OnsiteQueueFormField,
+} from "@/lib/vaccination/onsiteQueueForm";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -110,100 +115,10 @@ function validPhone(value: any) {
   return /^08\d{7,13}$/.test(normalized) ? normalized : "";
 }
 
-async function resolveRegisteredPhone(
-  supabase: any,
-  sessionId: number,
-  employeeId: string
-) {
-  const rawEmployeeId = clean(employeeId);
-  const normalizedEmployeeKey = employeeKey(rawEmployeeId);
-  let participantId = 0;
-
-  // 1) Prefer the registration that belongs to THIS vaccination session.
-  for (const field of ["employee_id", "mcu_id"] as const) {
-    const registrationResult = await supabase
-      .from("vaccination_registrations")
-      .select("id,participant_id,phone")
-      .eq("session_id", sessionId)
-      .eq(field, rawEmployeeId)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!registrationResult.error && registrationResult.data) {
-      participantId = Number(registrationResult.data.participant_id || 0);
-      const phone = validPhone(registrationResult.data.phone);
-      if (phone) return { phone, source: "SESSION_REGISTRATION" };
-    }
-  }
-
-  // 2) If the registration is linked to vaccination_persons, use its stored phone.
-  if (participantId) {
-    const personResult = await supabase
-      .from("vaccination_persons")
-      .select("id,phone")
-      .eq("id", participantId)
-      .maybeSingle();
-
-    if (!personResult.error && personResult.data) {
-      const phone = validPhone(personResult.data.phone);
-      if (phone) return { phone, source: "VACCINATION_PERSON" };
-    }
-  }
-
-  // 3) Legacy/import fallback: resolve from the exact source database used by the session.
-  const sessionResult = await supabase
-    .from("vaccination_sessions")
-    .select("id,source_id,import_location_key")
-    .eq("id", sessionId)
-    .maybeSingle();
-
-  const sourceId = Number(sessionResult.data?.source_id || 0);
-  const importLocationKey = clean(sessionResult.data?.import_location_key);
-
-  if (!sessionResult.error && sourceId) {
-    for (const field of ["external_id", "mcu_id"] as const) {
-      let query = supabase
-        .from("vaccination_import_rows")
-        .select("id,phone,import_location_key")
-        .eq("source_id", sourceId)
-        .eq(field, rawEmployeeId)
-        .order("id", { ascending: false })
-        .limit(10);
-
-      if (importLocationKey) {
-        query = query.eq("import_location_key", importLocationKey);
-      }
-
-      const importResult = await query;
-      if (!importResult.error) {
-        for (const row of importResult.data || []) {
-          const phone = validPhone(row.phone);
-          if (phone) return { phone, source: "VACCINATION_IMPORT" };
-        }
-      }
-    }
-  }
-
-  // 4) Final safe fallback: only use vaccination_persons when employee_key is UNIQUE.
-  if (normalizedEmployeeKey) {
-    const peopleResult = await supabase
-      .from("vaccination_persons")
-      .select("id,phone")
-      .eq("employee_key", normalizedEmployeeKey)
-      .eq("active", true)
-      .limit(2);
-
-    if (!peopleResult.error && Array.isArray(peopleResult.data) && peopleResult.data.length === 1) {
-      const phone = validPhone(peopleResult.data[0]?.phone);
-      if (phone) return { phone, source: "UNIQUE_EMPLOYEE_MASTER" };
-    }
-  }
-
-  return { phone: "", source: "NOT_FOUND" };
-}
-
 function publicEvent(event: any, session: any) {
+  const queueFormConfig = sanitizeOnsiteQueueFormConfig(
+    session?.onsite_queue_form_config,
+  );
   return {
     event_token: event.public_token,
     status: event.status,
@@ -211,7 +126,27 @@ function publicEvent(event: any, session: any) {
     company_name: session?.company_name || "",
     location: session?.location || "",
     session_date: session?.session_date || null,
+    queue_form_config: queueFormConfig,
+    whatsapp_enabled: onsiteQueueFormHasWhatsApp(queueFormConfig),
   };
+}
+
+function submittedValue(
+  fields: OnsiteQueueFormField[],
+  formData: Record<string, any>,
+  kind: OnsiteQueueFormField["kind"],
+) {
+  const field = fields.find((item) => item.kind === kind);
+  if (!field) return "";
+  return clean(formData?.[field.id]);
+}
+
+function anonymousEmployeeKey(eventToken: string, joinToken: string) {
+  return `ANON_${createHash("sha256")
+    .update(`${eventToken}.${joinToken}`)
+    .digest("hex")
+    .slice(0, 24)
+    .toUpperCase()}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -236,7 +171,7 @@ export async function GET(req: NextRequest) {
 
     const sessionResult = await supabase
       .from("vaccination_sessions")
-      .select("id,session_name,company_name,location,session_date")
+      .select("id,session_name,company_name,location,session_date,onsite_queue_form_config")
       .eq("id", eventResult.data.session_id)
       .maybeSingle();
 
@@ -280,7 +215,7 @@ export async function GET(req: NextRequest) {
 
   const sessionResult = await supabase
     .from("vaccination_sessions")
-    .select("id,session_name,company_name,location,session_date")
+    .select("id,session_name,company_name,location,session_date,onsite_queue_form_config")
     .eq("id", eventResult.data.session_id)
     .maybeSingle();
 
@@ -296,13 +231,13 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const eventToken = clean(body.eventToken || body.event_token);
   const joinToken = clean(body.joinToken || body.join_token);
-  const participantName = clean(body.participantName || body.participant_name);
-  const employeeId = clean(body.employeeId || body.employee_id);
+  const incomingFormData =
+    body.formData && typeof body.formData === "object" && !Array.isArray(body.formData)
+      ? body.formData
+      : {};
   const pushSubscription = parsePushSubscription(body.pushSubscription || body.push_subscription);
 
   if (!eventToken || !joinToken) return fail("Akses QR onsite tidak valid.");
-  if (!participantName) return fail("Nama lengkap wajib diisi.");
-  if (!employeeId) return fail("NIK Karyawan wajib diisi.");
 
   const supabase = supabaseAdmin();
   const eventResult = await supabase
@@ -315,20 +250,76 @@ export async function POST(req: NextRequest) {
   if (clean(eventResult.data.status).toUpperCase() !== "OPEN") return fail("Onsite queue sedang ditutup.", 403);
   if (!validateJoinToken(eventResult.data, joinToken)) return fail("Sesi pengisian sudah kedaluwarsa. Scan ulang QR onsite.", 410);
 
-  // Client no longer types a phone number. Resolve it server-side from existing
-  // registration/master/import data so the WhatsApp prepare feature stays intact.
-  const phoneResolution = await resolveRegisteredPhone(
-    supabase,
-    Number(eventResult.data.session_id),
-    employeeId
+  const sessionResult = await supabase
+    .from("vaccination_sessions")
+    .select("id,onsite_queue_form_config")
+    .eq("id", eventResult.data.session_id)
+    .maybeSingle();
+  if (sessionResult.error) return fail(sessionResult.error.message, 500);
+  if (!sessionResult.data) return fail("Session vaksinasi tidak ditemukan.", 404);
+
+  const formFields = sanitizeOnsiteQueueFormConfig(
+    sessionResult.data.onsite_queue_form_config,
   );
-  const phone = phoneResolution.phone;
+  const formData: Record<string, string> = {};
+
+  for (const field of formFields) {
+    let value = clean(incomingFormData?.[field.id]);
+
+    // Backward-compatible during rolling deploy: accept the old fixed payload too.
+    if (!value && field.kind === "participant_name") {
+      value = clean(body.participantName || body.participant_name);
+    }
+    if (!value && field.kind === "employee_id") {
+      value = clean(body.employeeId || body.employee_id);
+    }
+    if (!value && field.kind === "whatsapp") {
+      value = clean(body.phone || body.mobile || body.patient_mobile);
+    }
+
+    if (field.required && !value) {
+      return fail(`${field.label} wajib diisi.`);
+    }
+
+    if (field.kind === "whatsapp" && value) {
+      const normalized = validPhone(value);
+      if (!normalized) {
+        return fail(`${field.label} harus berupa nomor WhatsApp Indonesia yang valid, contoh 081234567890.`);
+      }
+      value = normalized;
+    }
+
+    if (field.kind === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return fail(`${field.label} tidak valid.`);
+    }
+
+    formData[field.id] = value;
+  }
+
+  const whatsappEnabled = onsiteQueueFormHasWhatsApp(formFields);
+  const phone = whatsappEnabled
+    ? validPhone(submittedValue(formFields, formData, "whatsapp"))
+    : "";
+  const employeeId = submittedValue(formFields, formData, "employee_id");
+  const participantName =
+    submittedValue(formFields, formData, "participant_name") ||
+    formFields
+      .filter((field) => ["custom_text", "email"].includes(field.kind))
+      .map((field) => clean(formData[field.id]))
+      .find(Boolean) ||
+    employeeId ||
+    phone ||
+    "Peserta Onsite";
+
+  const dedupeKey = employeeId
+    ? employeeKey(employeeId)
+    : anonymousEmployeeKey(eventToken, joinToken);
 
   const result = await supabase.rpc("vaccination_onsite_claim_queue_v2", {
     p_event_id: eventResult.data.id,
     p_participant_name: participantName,
     p_employee_id: employeeId,
-    p_employee_id_key: employeeKey(employeeId),
+    p_employee_id_key: dedupeKey,
     p_phone: phone,
   });
   if (result.error) return fail(result.error.message, 500);
@@ -340,20 +331,33 @@ export async function POST(req: NextRequest) {
   const entryId = Number(entry?.id || 0);
   if (!entryId) return fail("Entry antrean tidak valid.", 500);
 
-  // Existing queue rows created before this change may not have phone stored yet.
-  // Backfill only when we successfully resolved a registered phone.
-  if (phone && !validPhone(entry?.phone)) {
-    const phoneUpdate = await supabase
-      .from("vaccination_onsite_queue_entries")
-      .update({ phone, updated_at: new Date().toISOString() })
-      .eq("id", entryId)
-      .select("*")
-      .single();
+  const formSnapshot = {
+    fields: formFields.map((field) => ({
+      id: field.id,
+      kind: field.kind,
+      label: field.label,
+      value: clean(formData[field.id]),
+    })),
+  };
 
-    if (!phoneUpdate.error && phoneUpdate.data) {
-      entry = phoneUpdate.data;
-    }
+  const entryUpdate = await supabase
+    .from("vaccination_onsite_queue_entries")
+    .update({
+      phone: whatsappEnabled ? phone : "",
+      form_data: formSnapshot,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", entryId)
+    .select("*")
+    .single();
+
+  if (entryUpdate.error) {
+    return fail(
+      `${entryUpdate.error.message}. Jalankan SQL V153.57 di Supabase.`,
+      500,
+    );
   }
+  if (entryUpdate.data) entry = entryUpdate.data;
 
   let pushBound = false;
   let pushWarning = "";
@@ -388,12 +392,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Covers the edge case where a participant joins while another queue number
-  // is already active and this participant immediately becomes first WAITING.
-  const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(
-    supabase,
-    Number(eventResult.data.id)
-  );
+  // WhatsApp is controlled by the SESSION FORM. No WhatsApp field = no reminder.
+  const whatsappPrepare = whatsappEnabled
+    ? await notifyOnsiteNextWaitingPrepare(
+        supabase,
+        Number(eventResult.data.id)
+      )
+    : {
+        attempted: false,
+        sent: false,
+        skipped: true,
+        reason: "SESSION_WHATSAPP_DISABLED",
+      };
 
   return response({
     ok: true,
@@ -401,15 +411,13 @@ export async function POST(req: NextRequest) {
     entry,
     push_bound: pushBound,
     push_warning: pushWarning || null,
+    whatsapp_enabled: whatsappEnabled,
     whatsapp_prepare: whatsappPrepare,
     whatsapp_phone_available: Boolean(phone),
-    whatsapp_phone_source: phoneResolution.source,
-    message: phone
-      ? payload?.created
-        ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Pengingat WhatsApp akan dikirim otomatis saat tersisa 1 antrean sebelum giliran Anda.`
-        : `NIK Karyawan ini sudah memiliki nomor antrean ${entry?.queue_number || ""}. Pengingat WhatsApp tetap mengikuti antrean aktif.`
-      : payload?.created
-        ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Data No HP peserta belum tersedia, sehingga pengingat WhatsApp tidak dapat dikirim untuk antrean ini.`
-        : `NIK Karyawan ini sudah memiliki nomor antrean ${entry?.queue_number || ""}. Data No HP peserta belum tersedia untuk pengingat WhatsApp.`,
+    message: whatsappEnabled
+      ? phone
+        ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Pengingat WhatsApp aktif untuk session ini.`
+        : `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Field WhatsApp aktif, tetapi nomor tidak diisi.`
+      : `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Reminder WhatsApp tidak digunakan pada session ini.`,
   });
 }

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { sanitizeOnsiteQueueFormConfig } from "@/lib/vaccination/onsiteQueueForm";
 
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
@@ -531,6 +532,12 @@ export async function POST(req: NextRequest) {
         ? Math.max(0, toInt(participantCountText, 0))
         : null,
     };
+
+    if (Array.isArray(body.onsiteQueueFormConfig)) {
+      payload.onsite_queue_form_config = sanitizeOnsiteQueueFormConfig(
+        body.onsiteQueueFormConfig,
+      );
+    }
 
     if (shouldSyncSessionVaccines) {
       payload.default_vaccine_id = firstEditedSessionVaccine

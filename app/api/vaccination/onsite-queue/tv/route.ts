@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { clean, supabaseAdmin, toInt } from "../../_utils";
 import { getOnsiteWhatsAppPrepareConfig } from "@/lib/vaccination/onsiteWhatsApp";
+import { onsiteQueueFormHasWhatsApp } from "@/lib/vaccination/onsiteQueueForm";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
   try {
     const sessionResult = await supabase
       .from("vaccination_sessions")
-      .select("id,session_name,company_name,location,session_date,status")
+      .select("id,session_name,company_name,location,session_date,status,onsite_queue_form_config")
       .eq("id", sessionId)
       .maybeSingle();
 
@@ -103,6 +104,9 @@ export async function GET(req: NextRequest) {
       rolling: rollingPayload(eventResult.data),
       whatsapp_prepare: {
         configured: whatsappConfig.configured,
+        enabled_for_session: onsiteQueueFormHasWhatsApp(
+          sessionResult.data?.onsite_queue_form_config,
+        ),
         trigger_ahead: whatsappConfig.trigger_ahead,
       },
     });

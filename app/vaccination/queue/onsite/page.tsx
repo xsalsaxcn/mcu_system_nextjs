@@ -221,12 +221,43 @@ export default function VaccinationOnsiteQueuePage() {
           </>
         ) : null}
 
-        <div className={`mt-3 rounded-2xl border p-4 ${data?.whatsapp_prepare?.configured ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-          <div className={`text-sm font-black ${data?.whatsapp_prepare?.configured ? "text-emerald-800" : "text-amber-800"}`}>
-            WhatsApp Prepare: {data?.whatsapp_prepare?.configured ? "AKTIF" : "BELUM DIKONFIGURASI"}
+        <div
+          className={`mt-3 rounded-2xl border p-4 ${
+            !data?.whatsapp_prepare?.enabled_for_session
+              ? "border-slate-200 bg-slate-100"
+              : data?.whatsapp_prepare?.configured
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-amber-200 bg-amber-50"
+          }`}
+        >
+          <div
+            className={`text-sm font-black ${
+              !data?.whatsapp_prepare?.enabled_for_session
+                ? "text-slate-700"
+                : data?.whatsapp_prepare?.configured
+                  ? "text-emerald-800"
+                  : "text-amber-800"
+            }`}
+          >
+            WhatsApp Prepare:{" "}
+            {!data?.whatsapp_prepare?.enabled_for_session
+              ? "NONAKTIF DI SESSION"
+              : data?.whatsapp_prepare?.configured
+                ? "AKTIF"
+                : "BELUM DIKONFIGURASI"}
           </div>
-          <p className={`mt-1 text-xs font-semibold ${data?.whatsapp_prepare?.configured ? "text-emerald-700" : "text-amber-700"}`}>
-            Otomatis dikirim ke peserta WAITING paling depan saat ada tepat 1 antrean aktif di depannya. Tidak ada WhatsApp kedua saat nomor dipanggil.
+          <p
+            className={`mt-1 text-xs font-semibold ${
+              !data?.whatsapp_prepare?.enabled_for_session
+                ? "text-slate-600"
+                : data?.whatsapp_prepare?.configured
+                  ? "text-emerald-700"
+                  : "text-amber-700"
+            }`}
+          >
+            {!data?.whatsapp_prepare?.enabled_for_session
+              ? "Tambahkan field WhatsApp pada Form Ambil Nomor Antrean di Edit Session untuk mengaktifkan reminder WA."
+              : "Otomatis dikirim ke peserta WAITING paling depan saat ada tepat 1 antrean aktif di depannya. Tidak ada WhatsApp kedua saat nomor dipanggil."}
           </p>
         </div>
 
@@ -322,7 +353,7 @@ export default function VaccinationOnsiteQueuePage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h1 className="text-2xl font-black text-slate-950">Antrian Vaksin — Onsite Rolling QR</h1>
-                <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Peserta cukup isi Nama Lengkap + NIK Karyawan, lalu langsung mendapat nomor antrean. Nomor WhatsApp diambil otomatis dari data peserta yang sudah terdaftar. Satu NIK Karyawan hanya mendapat satu nomor per event.</p>
+                <p className="mt-2 max-w-3xl text-sm text-slate-600">Mode walk-in onsite. QR aktif 60 detik dan dapat dipakai banyak peserta selama window yang sama. Field form peserta mengikuti setting pada Session. Jika field WhatsApp dipasang, reminder WhatsApp aktif untuk session tersebut; jika field WhatsApp tidak dipakai, reminder WhatsApp nonaktif.</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <a href="/vaccination/queue" className="rounded-xl border px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Mode Existing</a>
                   <span className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-black text-white">Mode Onsite Rolling QR</span>
@@ -457,7 +488,7 @@ export default function VaccinationOnsiteQueuePage() {
               <div className="max-h-[520px] overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">WA Reminder</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button></td></tr>)}</tbody>
+                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{!data?.whatsapp_prepare?.enabled_for_session ? <span className="text-slate-400">Nonaktif</span> : entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button></td></tr>)}</tbody>
                 </table>
               </div>
             </section>
