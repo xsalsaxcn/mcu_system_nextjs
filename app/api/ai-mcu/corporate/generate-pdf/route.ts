@@ -429,15 +429,21 @@ export async function POST(req: NextRequest) {
     if (!url) return fail("AI_MCU_ENGINE_URL belum dikonfigurasi.", 500);
 
     const mergePdf = Boolean(body.mergePdf) && participants.length > 1;
+    const uploadDrive = Boolean(body.uploadDrive);
+    const requestedBaseFolder = String(body.baseFolder || "").trim();
+    const resolvedBaseFolder = requestedBaseFolder || driveBaseFolder();
+    if (uploadDrive && !resolvedBaseFolder) {
+      return fail("Masukkan URL folder Google Drive tujuan untuk hasil PDF.", 400);
+    }
     const res = await fetch(`${url}/generate-pdf-async`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       body: JSON.stringify({
         mode: participants.length > 1 ? "batch" : "single",
-        uploadDrive: Boolean(body.uploadDrive),
+        uploadDrive,
         mergePdf,
-        baseFolder: driveBaseFolder(),
+        baseFolder: resolvedBaseFolder,
         baseUrl: url,
         names,
         rekapRows,
