@@ -208,6 +208,133 @@ async function fetchImportRows(supabase: any, ids: number[]) {
   return map;
 }
 
+// CORPORATE_REFRACTION_STABLE_IDENTITY_OVERLAY_V422
+// Cari refraksi terbaru dengan prioritas participant_id saat ini. Jika histori import
+// membuat participant_id baru, fallback ke NIK lalu nama dalam database yang sama.
+function normalizeIdentityKey(value: unknown) {
+  return cleanCellValue(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function extractRefractionValue(rowData: unknown) {
+  const row = rowData && typeof rowData === "object"
+    ? rowData as Record<string, unknown>
+    : {};
+
+  let refraction = pickRowValue(row, [
+    "FS:Ref", "FS:REF", "FS:Refraksi", "Refraksi", "Refraksi Mata",
+    "AUTOREF:Ref", "AUTOREF:Refraksi", "Autorefraksi"
+  ]);
+  if (!refraction) {
+    const refractionKey = /^(?:fsref|fsrefraksi|refraksi|refraksimata|autorefref|autorefrefraksi|autorefraksi)\d*$/;
+    for (const [key, value] of Object.entries(row)) {
+      const normalizedKey = String(key).toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (!refractionKey.test(normalizedKey)) continue;
+      const candidate = cleanCellValue(value);
+      if (candidate) {
+        refraction = candidate;
+        break;
+      }
+    }
+  }
+  return refraction;
+}
+
+async function fetchLatestRefractions(supabase: any, participants: any[], importRows: Map<number, any>) {
+  const participantIds = participants.map((p: any) => Number(p.id)).filter(Boolean);
+  const targets = participants.map((participant: any) => {
+    const participantId = Number(participant.id);
+    const imported = importRows.get(participantId);
+    const row = imported?.row_data && typeof imported.row_data === "object"
+      ? imported.row_data as Record<string, unknown>
+      : {};
+    const nik = pick(row.NIK, row["NIK/NRP/ID"], imported?.nik, participant.nik, participant.employee_id, participant.external_id);
+    const name = pick(row.NAMA, row.Nama, imported?.participant_name, participant.name, participant.nama);
+    const databaseName = pick(imported?.database_name);
+    return {
+      participantId,
+      nik,
+      nikKey: normalizeIdentityKey(nik),
+      name,
+      nameKey: normalizeIdentityKey(name),
+      databaseKey: normalizeIdentityKey(databaseName),
+    };
+  });
+
+  const niks = Array.from(new Set(targets.map((x) => x.nik).filter(Boolean)));
+  const names = Array.from(new Set(targets.map((x) => x.name).filter(Boolean)));
+  const pool: any[] = [];
+
+  if (participantIds.length) {
+    const { data, error } = await supabase
+      .from("ai_mcu_import_rows")
+      .select("id,participant_id,row_data,participant_name,nik,database_name")
+      .in("participant_id", participantIds)
+      .order("id", { ascending: false });
+    if (error) throw new Error(error.message);
+    pool.push(...(data || []));
+  }
+
+  if (niks.length) {
+    const { data, error } = await supabase
+      .from("ai_mcu_import_rows")
+      .select("id,participant_id,row_data,participant_name,nik,database_name")
+      .in("nik", niks)
+      .order("id", { ascending: false });
+    if (error) throw new Error(error.message);
+    pool.push(...(data || []));
+  }
+
+  // Nama hanya fallback terakhir. Database name tetap divalidasi bila tersedia.
+  if (names.length) {
+    const { data, error } = await supabase
+      .from("ai_mcu_import_rows")
+      .select("id,participant_id,row_data,participant_name,nik,database_name")
+      .in("participant_name", names)
+      .order("id", { ascending: false });
+    if (error) throw new Error(error.message);
+    pool.push(...(data || []));
+  }
+
+  const unique = new Map<number, any>();
+  for (const item of pool) {
+    const id = Number(item?.id);
+    if (id && !unique.has(id)) unique.set(id, item);
+  }
+  const candidates = Array.from(unique.values()).sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+
+  const sameDatabase = (target: any, candidate: any) => {
+    const candidateDb = normalizeIdentityKey(candidate?.database_name);
+    return !target.databaseKey || !candidateDb || target.databaseKey === candidateDb;
+  };
+
+  const result = new Map<number, string>();
+  for (const target of targets) {
+    let match = candidates.find((item) =>
+      Number(item?.participant_id) === target.participantId && Boolean(extractRefractionValue(item?.row_data))
+    );
+
+    if (!match && target.nikKey) {
+      match = candidates.find((item) =>
+        sameDatabase(target, item) &&
+        normalizeIdentityKey(item?.nik) === target.nikKey &&
+        Boolean(extractRefractionValue(item?.row_data))
+      );
+    }
+
+    if (!match && target.nameKey) {
+      match = candidates.find((item) =>
+        sameDatabase(target, item) &&
+        normalizeIdentityKey(item?.participant_name) === target.nameKey &&
+        Boolean(extractRefractionValue(item?.row_data))
+      );
+    }
+
+    const refraction = match ? extractRefractionValue(match.row_data) : "";
+    if (refraction) result.set(target.participantId, refraction);
+  }
+  return result;
+}
+
 async function loadMaps(supabase: any) {
   const [packages, sources, companies] = await Promise.all([
     supabase.from("packages").select("id,name"),
@@ -353,6 +480,31 @@ rows.push(summary);
       physical["FS:LiPe"] = waistCircumference;
     }
 
+    // CORPORATE_REFRACTION_PHYSICAL_CANONICAL_V420
+    // Refraksi dapat datang sebagai FS:Ref, duplicate-header FS:Ref__2,
+    // atau dari sheet Autorefraksi (mis. AUTOREF:Ref). Normalisasikan hanya
+    // alias refraksi yang eksplisit; jangan pernah menangkap FS:Reflex* neurologis.
+    let refraction = pickRowValue(raw, [
+      "FS:Ref", "FS:REF", "FS:Refraksi", "Refraksi", "Refraksi Mata",
+      "AUTOREF:Ref", "AUTOREF:Refraksi", "Autorefraksi"
+    ]);
+    if (!refraction) {
+      const refractionKey = /^(?:fsref|fsrefraksi|refraksi|refraksimata|autorefref|autorefrefraksi|autorefraksi)\d*$/;
+      for (const [key, value] of Object.entries(raw)) {
+        const normalizedKey = String(key).toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (!refractionKey.test(normalizedKey)) continue;
+        const candidate = cleanCellValue(value);
+        if (candidate) {
+          refraction = candidate;
+          break;
+        }
+      }
+    }
+    if (refraction) {
+      physical["FS:Ref"] = refraction;
+      physical["Refraksi"] = refraction;
+    }
+
     physical["Dokter MCU"] = signatories.physical || "";
     rows.push(physical);
   }
@@ -420,10 +572,46 @@ export async function POST(req: NextRequest) {
     if (participants.length !== participantIds.length) return fail("Sebagian peserta bukan berasal dari database Corporate yang dipilih.", 403);
 
     const importRows = await fetchImportRows(supabase, participantIds);
+
+    // CORPORATE_REFRACTION_STABLE_IDENTITY_OVERLAY_V422
+    // Overlay hanya FS:Ref. Jika participant_id berubah antar import, cocokkan ulang via NIK/nama
+    // agar histori import terbaru tetap terpakai tanpa mengubah field lain.
+    const latestRefractions = await fetchLatestRefractions(supabase, participants, importRows);
+    for (const [participantId, refraction] of latestRefractions.entries()) {
+      const imported = importRows.get(participantId);
+      if (!imported || !refraction) continue;
+      const rowData = imported?.row_data && typeof imported.row_data === "object"
+        ? { ...(imported.row_data as Record<string, unknown>) }
+        : {};
+      rowData["FS:Ref"] = refraction;
+      importRows.set(participantId, { ...imported, row_data: rowData });
+    }
+
     const maps = await loadMaps(supabase);
-    const rekapRows = participants.flatMap((participant: any) =>
-      buildParticipantRows(participant, importRows.get(Number(participant.id)), maps, sections, selectedParameters, signatories)
-    );
+    // CORPORATE_REFRACTION_FINAL_PAYLOAD_V423
+    // Inject Refraksi langsung ke row FISIK FINAL yang dikirim ke Python engine.
+    // Ini sengaja dilakukan setelah buildParticipantRows agar FS:Ref tidak bisa hilang
+    // karena histori import, selectedParameters, atau normalisasi row_data sebelumnya.
+    const rekapRows = participants.flatMap((participant: any) => {
+      const participantId = Number(participant.id);
+      const participantRows = buildParticipantRows(
+        participant,
+        importRows.get(participantId),
+        maps,
+        sections,
+        selectedParameters,
+        signatories
+      );
+      const refraction = latestRefractions.get(participantId) || "";
+      if (refraction) {
+        for (const row of participantRows) {
+          if (String(row?._SheetName || "").toUpperCase() !== "FISIK") continue;
+          row["FS:Ref"] = refraction;
+          row["Refraksi"] = refraction;
+        }
+      }
+      return participantRows;
+    });
     const names = participants.map((participant: any) => pick(participant.name)).filter(Boolean);
     const url = engineUrl();
     if (!url) return fail("AI_MCU_ENGINE_URL belum dikonfigurasi.", 500);
