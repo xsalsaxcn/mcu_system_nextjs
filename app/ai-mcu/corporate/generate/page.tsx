@@ -11,7 +11,9 @@ type SourceItem = { id: number; name: string; institution_name?: string | null; 
 type Participant = { id: number; name: string; mcu_id?: string | null; external_id?: string | null; nik?: string | null; barcode_value?: string | null; package_name?: string | null; company_name?: string | null; source_name?: string | null };
 type SectionOption = { code: string; label: string; group: string; required?: boolean; defaultEnabled?: boolean; available: number; total: number };
 type ParameterOption = { key: string; count: number; category: string };
-type UploadResult = { ok: boolean; status?: string; message?: string; fileName?: string; participant?: { id: number; name: string; mcuId: string }; driveUrl?: string; driveFileId?: string; folderPath?: string; storage?: string };
+type AssetParticipant = { id: number; name: string; mcuId: string };
+type AssetMapping = { index: number; fileName: string; status: string; message?: string; participant?: AssetParticipant | null; detectedIdentity?: { name?: string; mcuId?: string; nik?: string; pageCount?: number }; matchedBy?: string };
+type UploadResult = { ok: boolean; status?: string; message?: string; fileName?: string; participant?: AssetParticipant; driveUrl?: string; driveFileId?: string; folderPath?: string; storage?: string; matchedBy?: string };
 type PdfFileItemV416 = { name?: string; url?: string; size?: number };
 type JobResult = { ok: boolean; status?: string; message?: string; jobId?: string; progress?: number; current?: number; total?: number; currentName?: string; pdfUrl?: string; mergedPdfUrl?: string; pdfFiles?: PdfFileItemV416[]; mergedFiles?: PdfFileItemV416[]; zipFile?: PdfFileItemV416 | null };
 type CorporatePdfHistoryV416 = { sourceId: string; participantIds: number[]; jobId: string; sourceUrl: string; generatedAt: string; selectedSections: string[]; totalPages?: number };
@@ -66,6 +68,9 @@ export default function CorporateGeneratePage() {
   const [setupSavedAt, setSetupSavedAt] = useState("");
   const [assetType, setAssetType] = useState("PROFILE_PHOTO");
   const [assetFiles, setAssetFiles] = useState<File[]>([]);
+  const [assetMappings, setAssetMappings] = useState<AssetMapping[]>([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingProgress, setMappingProgress] = useState(0);
   const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -230,6 +235,16 @@ export default function CorporateGeneratePage() {
     const res = await fetch(`/api/ai-mcu/corporate/generate-pdf/status/${encodeURIComponent(jobId)}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || !json.ok) {
+      const failures = Array.isArray(json?.triedStatusEndpoints) ? json.triedStatusEndpoints : [];
+      const staleJob = failures.length > 0 && failures.every((item: any) => Number(item?.httpStatus) === 404);
+      if (staleJob) {
+        localStorage.removeItem(ACTIVE_JOB_KEY);
+        setJob(null);
+        setLoading(false);
+        setError("");
+        setNotice("Job PDF lama dibersihkan otomatis setelah engine restart. Silakan generate ulang.");
+        return;
+      }
       setError(json.message || "Gagal membaca status job.");
       setLoading(false);
       return;
@@ -364,29 +379,94 @@ export default function CorporateGeneratePage() {
     }
   }
 
-  async function uploadAssets() {
-    if (!sourceId || !assetFiles.length) return;
-    setUploading(true);
+  async function inspectAssetFiles(files: File[]) {
+    setAssetFiles(files);
+    setAssetMappings([]);
     setUploadResults([]);
-    setUploadProgress(0);
-    const results: UploadResult[] = [];
-    for (let index = 0; index < assetFiles.length; index += 1) {
+    setMappingProgress(0);
+    if (!files.length || !sourceId) return;
+
+    setMappingLoading(true);
+    const mappings: AssetMapping[] = [];
+    for (let index = 0; index < files.length; index += 1) {
       const form = new FormData();
       form.append("sourceId", sourceId);
       form.append("assetType", assetType);
-      form.append("file", assetFiles[index]);
+      form.append("inspectOnly", "1");
+      form.append("file", files[index]);
       try {
         const res = await fetch("/api/ai-mcu/corporate/assets/upload", { method: "POST", body: form });
-        const json = await res.json();
-        results.push(json);
+        const json = await res.json().catch(() => ({}));
+        mappings.push({
+          index,
+          fileName: files[index].name,
+          status: String(json.status || (json.participant ? "matched" : "unmatched")),
+          message: String(json.message || (!res.ok ? "Gagal membaca file." : "")),
+          participant: json.participant || null,
+          detectedIdentity: json.detectedIdentity || undefined,
+          matchedBy: String(json.matchedBy || ""),
+        });
       } catch (err: any) {
-        results.push({ ok: false, fileName: assetFiles[index].name, message: err?.message || "Upload gagal." });
+        mappings.push({ index, fileName: files[index].name, status: "error", message: err?.message || "Gagal membaca file.", participant: null });
+      }
+      setAssetMappings([...mappings]);
+      setMappingProgress(Math.round(((index + 1) / files.length) * 100));
+    }
+    setMappingLoading(false);
+  }
+
+  function setAssetMappingParticipant(index: number, participantId: number) {
+    const participant = participants.find((item) => item.id === participantId);
+    setAssetMappings((current) => current.map((item) => {
+      if (item.index !== index) return item;
+      if (!participant) return { ...item, participant: null, status: "needs_review" };
+      return {
+        ...item,
+        status: "matched",
+        matchedBy: "manual_confirmation",
+        message: "Peserta dikonfirmasi manual. Siap di-upload.",
+        participant: {
+          id: participant.id,
+          name: participant.name,
+          mcuId: String(participant.mcu_id || participant.barcode_value || participant.external_id || participant.id),
+        },
+      };
+    }));
+  }
+
+  async function uploadAssets() {
+    if (!sourceId || !assetFiles.length || mappingLoading) return;
+    const queue = assetMappings.filter((item) => item.participant && assetFiles[item.index]);
+    if (!queue.length) {
+      setError("Belum ada file yang sudah memiliki mapping peserta. Konfirmasi mapping terlebih dahulu.");
+      return;
+    }
+    setUploading(true);
+    setUploadResults([]);
+    setUploadProgress(0);
+    setError("");
+    const results: UploadResult[] = [];
+    for (let position = 0; position < queue.length; position += 1) {
+      const mapping = queue[position];
+      const file = assetFiles[mapping.index];
+      const form = new FormData();
+      form.append("sourceId", sourceId);
+      form.append("assetType", assetType);
+      form.append("participantId", String(mapping.participant?.id || ""));
+      form.append("file", file);
+      try {
+        const res = await fetch("/api/ai-mcu/corporate/assets/upload", { method: "POST", body: form });
+        const json = await res.json().catch(() => ({}));
+        results.push({ ...json, fileName: json.fileName || file.name });
+      } catch (err: any) {
+        results.push({ ok: false, fileName: file.name, message: err?.message || "Upload gagal." });
       }
       setUploadResults([...results]);
-      setUploadProgress(Math.round(((index + 1) / assetFiles.length) * 100));
+      setUploadProgress(Math.round(((position + 1) / queue.length) * 100));
     }
     setUploading(false);
     setAssetFiles([]);
+    setAssetMappings([]);
     await loadOptions();
   }
 
@@ -592,10 +672,27 @@ export default function CorporateGeneratePage() {
 
             <div className="rounded-2xl border p-5">
               <h2 className="text-lg font-bold">5. Bulk Upload Foto dan Lampiran ke Google Drive</h2>
-              <p className="mt-1 text-sm text-slate-500">Pilih jenis upload terlebih dahulu. File disimpan langsung ke folder Google Drive MCU yang sudah dikonfigurasi. Sistem hanya memasang file bila <b>No MCU dan nama peserta sama persis</b>. File mismatch tidak akan dikirim ke Drive.</p>
-              <div className="mt-4 grid items-end gap-3 md:grid-cols-[0.6fr_1fr_auto]"><label className="text-sm font-bold text-slate-700">Apa yang mau di-upload?<select value={assetType} onChange={(e) => { setAssetType(e.target.value); setAssetFiles([]); setUploadResults([]); }} className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal">{CORPORATE_ASSET_TYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label><label className="text-sm font-bold text-slate-700">Pilih file untuk {CORPORATE_ASSET_TYPES.find((item) => item.code === assetType)?.label || "dokumen"}<input key={`${assetType}-${assetFiles.length}`} type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(e) => setAssetFiles(Array.from(e.target.files || []))} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm font-normal"/></label><button onClick={uploadAssets} disabled={!sourceId || !assetFiles.length || uploading} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{uploading ? `Uploading ${uploadProgress}%` : `Upload Files (${assetFiles.length})`}</button></div>
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><b>Format aman:</b> kode MCU harus di awal dan nama lengkap harus ada, misalnya <code>019_EDI HARYARDI1.2.156....jpg</code> atau <code>047-AGUS NUGROHO-THORAX.jpg</code>. UID DICOM, tanggal, dan nomor alat setelah nama diperbolehkan. Sistem tetap menolak bila pasangan kode dan nama tidak unik. <b>File tidak disimpan di Supabase Storage</b>; Supabase hanya menyimpan referensi Google Drive yang kecil agar gambar peserta dapat dipanggil saat PDF dibuat.</div>
-              {uploadResults.length ? <div className="mt-4 max-h-72 overflow-auto rounded-xl border"><div className="grid grid-cols-[1.2fr_1fr_0.7fr] bg-slate-100 px-3 py-2 text-xs font-black"><div>File</div><div>Peserta</div><div>Status</div></div>{uploadResults.map((item, index) => <div key={`${item.fileName}-${index}`} className="grid grid-cols-[1.2fr_1fr_0.7fr] border-t px-3 py-2 text-xs"><div className="break-all">{item.fileName || "-"}<div className="text-slate-500">{item.message}</div></div><div>{item.participant ? <><div>{`${item.participant.mcuId} · ${item.participant.name}`}</div>{item.folderPath ? <div className="mt-1 text-[11px] text-slate-500">Drive: {item.folderPath}</div> : null}{item.driveUrl ? <a href={item.driveUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex font-bold text-blue-700 underline">Buka di Google Drive</a> : null}</> : "Tidak dipasang"}</div><div className={item.ok ? "font-bold text-emerald-700" : "font-bold text-red-700"}>{item.ok ? "Cocok & tersimpan di Drive" : "Ditolak"}</div></div>)}</div> : null}
+              <p className="mt-1 text-sm text-slate-500">Tetap bisa pilih banyak file sekaligus. JPG/PNG/WEBP dimapping dari nama file; PDF juga dapat dibaca isinya untuk mendeteksi <b>No MCU, nama, dan NIK/ID</b>. File belum dikirim ke Drive sampai mapping dikonfirmasi.</p>
+              <div className="mt-4 grid items-end gap-3 md:grid-cols-[0.6fr_1fr_auto]">
+                <label className="text-sm font-bold text-slate-700">Apa yang mau di-upload?
+                  <select value={assetType} onChange={(e) => { setAssetType(e.target.value); setAssetFiles([]); setAssetMappings([]); setUploadResults([]); }} className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal">{CORPORATE_ASSET_TYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select>
+                </label>
+                <label className="text-sm font-bold text-slate-700">Pilih file untuk {CORPORATE_ASSET_TYPES.find((item) => item.code === assetType)?.label || "dokumen"}
+                  <input key={`${assetType}-${assetFiles.length}`} type="file" multiple accept={assetType === "PROFILE_PHOTO" ? "image/jpeg,image/png,image/webp" : "image/jpeg,image/png,image/webp,application/pdf"} onChange={(e) => inspectAssetFiles(Array.from(e.target.files || []))} className="mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm font-normal"/>
+                </label>
+                <button onClick={uploadAssets} disabled={!sourceId || !assetFiles.length || mappingLoading || uploading || !assetMappings.some((item) => item.participant)} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{mappingLoading ? `Scanning ${mappingProgress}%` : uploading ? `Uploading ${uploadProgress}%` : `Upload Files (${assetMappings.filter((item) => item.participant).length})`}</button>
+              </div>
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><b>Format:</b> Foto Profile tetap JPG/PNG/WEBP. Lampiran Rontgen, EKG, Treadmill, Spirogram, Audiogram, dan USG menerima JPG/PNG/WEBP/PDF. Nama file format <code>NOMCU-NAMA</code> tetap menjadi jalur tercepat. Untuk PDF dengan nama file tidak standar, sistem membaca isi PDF dan melakukan auto-mapping. Mapping ambigu tidak di-upload sampai peserta dipilih manual. <b>File biner tetap hanya disimpan di Google Drive.</b></div>
+              {assetMappings.length ? <div className="mt-4 max-h-80 overflow-auto rounded-xl border">
+                <div className="grid grid-cols-[1.1fr_1fr_1.15fr_0.65fr] bg-slate-100 px-3 py-2 text-xs font-black"><div>File</div><div>Deteksi PDF</div><div>Mapping Peserta</div><div>Status</div></div>
+                {assetMappings.map((item) => <div key={`${item.fileName}-${item.index}`} className="grid grid-cols-[1.1fr_1fr_1.15fr_0.65fr] items-start border-t px-3 py-2 text-xs">
+                  <div className="break-all font-semibold">{item.fileName}</div>
+                  <div className="pr-2 text-slate-600">{item.detectedIdentity ? <><div>No MCU: {item.detectedIdentity.mcuId || "-"}</div><div>Nama: {item.detectedIdentity.name || "-"}</div><div>NIK/ID: {item.detectedIdentity.nik || "-"}</div></> : <span>{item.matchedBy === "mcu_prefix_and_full_name" ? "Dari nama file" : "-"}</span>}</div>
+                  <div><select value={item.participant?.id || ""} onChange={(e) => setAssetMappingParticipant(item.index, Number(e.target.value))} className="w-full rounded-lg border bg-white px-2 py-2 text-xs"><option value="">-- pilih peserta --</option>{participants.map((participant) => <option key={participant.id} value={participant.id}>{String(participant.mcu_id || participant.barcode_value || participant.external_id || participant.id)} · {participant.name}</option>)}</select><div className="mt-1 text-[11px] text-slate-500">{item.message}</div></div>
+                  <div className={item.participant ? "font-bold text-emerald-700" : item.status === "error" ? "font-bold text-red-700" : "font-bold text-amber-700"}>{item.participant ? "Siap upload" : item.status === "error" ? "Error" : "Review"}</div>
+                </div>)}
+              </div> : null}
+              {uploadResults.length ? <div className="mt-4 max-h-72 overflow-auto rounded-xl border"><div className="grid grid-cols-[1.2fr_1fr_0.7fr] bg-slate-100 px-3 py-2 text-xs font-black"><div>File</div><div>Peserta</div><div>Status</div></div>{uploadResults.map((item, index) => <div key={`${item.fileName}-${index}`} className="grid grid-cols-[1.2fr_1fr_0.7fr] border-t px-3 py-2 text-xs"><div className="break-all">{item.fileName || "-"}<div className="text-slate-500">{item.message}</div></div><div>{item.participant ? <><div>{`${item.participant.mcuId} · ${item.participant.name}`}</div>{item.folderPath ? <div className="mt-1 text-[11px] text-slate-500">Drive: {item.folderPath}</div> : null}{item.driveUrl ? <a href={item.driveUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex font-bold text-blue-700 underline">Buka di Google Drive</a> : null}</> : "Tidak dipasang"}</div><div className={item.ok ? "font-bold text-emerald-700" : "font-bold text-red-700"}>{item.ok ? "Tersimpan di Drive" : "Ditolak"}</div></div>)}</div> : null}
             </div>
 
             <div className="rounded-2xl border bg-slate-50 p-5">
