@@ -13,7 +13,7 @@ type SectionOption = { code: string; label: string; group: string; required?: bo
 type ParameterOption = { key: string; count: number; category: string };
 type UploadResult = { ok: boolean; status?: string; message?: string; fileName?: string; participant?: { id: number; name: string; mcuId: string }; driveUrl?: string; driveFileId?: string; folderPath?: string; storage?: string };
 type PdfFileItemV416 = { name?: string; url?: string; size?: number };
-type JobResult = { ok: boolean; status?: string; message?: string; jobId?: string; progress?: number; current?: number; total?: number; currentName?: string; pdfUrl?: string; mergedPdfUrl?: string; pdfFiles?: PdfFileItemV416[]; mergedFiles?: PdfFileItemV416[] };
+type JobResult = { ok: boolean; status?: string; message?: string; jobId?: string; progress?: number; current?: number; total?: number; currentName?: string; pdfUrl?: string; mergedPdfUrl?: string; pdfFiles?: PdfFileItemV416[]; mergedFiles?: PdfFileItemV416[]; zipFile?: PdfFileItemV416 | null };
 type CorporatePdfHistoryV416 = { sourceId: string; participantIds: number[]; jobId: string; sourceUrl: string; generatedAt: string; selectedSections: string[]; totalPages?: number };
 type QuickPdfResultV416 = { pdfUrl?: string; fileName?: string; selectedPages?: number[]; totalPages?: number };
 
@@ -71,6 +71,8 @@ export default function CorporateGeneratePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [mergePdf, setMergePdf] = useState(false);
   const [uploadDrive, setUploadDrive] = useState(false);
+  const [driveFolderUrl, setDriveFolderUrl] = useState("");
+  const [selectedGeneratedPdfIndexes, setSelectedGeneratedPdfIndexes] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
@@ -225,7 +227,7 @@ export default function CorporateGeneratePage() {
   }
 
   async function pollJob(jobId: string) {
-    const res = await fetch(`/api/ai-mcu/generate-pdf/status/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+    const res = await fetch(`/api/ai-mcu/corporate/generate-pdf/status/${encodeURIComponent(jobId)}`, { cache: "no-store" });
     const json = await res.json();
     if (!res.ok || !json.ok) {
       setError(json.message || "Gagal membaca status job.");
@@ -261,6 +263,14 @@ export default function CorporateGeneratePage() {
     } catch {}
   }, []);
   useEffect(() => { if (selectedIds.size <= 1) setMergePdf(false); }, [selectedIds.size]);
+  useEffect(() => {
+    const count = job?.status === "done" ? Number(job.pdfFiles?.length || 0) : 0;
+    if (!count) {
+      setSelectedGeneratedPdfIndexes(new Set());
+      return;
+    }
+    setSelectedGeneratedPdfIndexes(new Set(Array.from({ length: count }, (_, index) => index)));
+  }, [job?.jobId, job?.status, job?.pdfFiles?.length]);
   useEffect(() => {
     void loadHistoryPdfV416();
   }, [sourceId, selectedParticipantKeyV416, sections.length]);
@@ -382,6 +392,7 @@ export default function CorporateGeneratePage() {
 
   async function generatePdf() {
     if (!sourceId || !selectedIds.size) return setError("Pilih database dan peserta.");
+    if (uploadDrive && !driveFolderUrl.trim()) return setError("Masukkan URL folder Google Drive tujuan untuk hasil PDF.");
     setLoading(true);
     setError("");
     setNotice("");
@@ -398,6 +409,7 @@ export default function CorporateGeneratePage() {
         signatories,
         mergePdf,
         uploadDrive,
+        baseFolder: uploadDrive ? driveFolderUrl.trim() : "",
       }),
     });
     const json = await res.json();
@@ -409,6 +421,40 @@ export default function CorporateGeneratePage() {
     localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId: json.jobId, sourceId, startedAt: new Date().toISOString() }));
     pollRef.current = setTimeout(() => pollJob(json.jobId), 1200);
   }
+  function downloadSelectedGeneratedPdfs() {
+    const files = job?.pdfFiles || [];
+    const selected = Array.from(selectedGeneratedPdfIndexes)
+      .filter((index) => index >= 0 && index < files.length)
+      .sort((a, b) => a - b);
+
+    if (!selected.length) {
+      setError("Pilih minimal satu hasil PDF untuk di-download.");
+      return;
+    }
+
+    if (selected.length === files.length) {
+      const zipUrl = String(job?.zipFile?.url || "").trim();
+      if (!zipUrl) {
+        setError("ZIP hasil PDF belum tersedia dari engine.");
+        return;
+      }
+      window.open(zipUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (selected.length === 1) {
+      const url = String(files[selected[0]]?.url || "").trim();
+      if (!url) {
+        setError("URL PDF terpilih belum tersedia.");
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    setError("Untuk download sekaligus sebagai ZIP, pilih semua PDF. Atau pilih satu PDF untuk download individual.");
+  }
+
   async function createQuickPdfFromHistoryV416() {
     if (!historyPdfV416?.sourceUrl) return setHistoryErrorV416("PDF riwayat tidak tersedia.");
     const pages = Array.from(historyPagesV416).sort((a, b) => a - b);
@@ -556,12 +602,93 @@ export default function CorporateGeneratePage() {
               <h2 className="text-lg font-bold">6. Generate PDF dari Halaman Terpilih</h2>
               <label className="mt-4 flex items-center gap-3 rounded-xl border bg-white p-4 text-sm"><input type="checkbox" checked={mergePdf} disabled={selectedIds.size <= 1} onChange={(e) => setMergePdf(e.target.checked)}/> Merge PDF untuk print</label>
               <label className="mt-3 flex items-center gap-3 rounded-xl border bg-white p-4 text-sm"><input type="checkbox" checked={uploadDrive} onChange={(e) => setUploadDrive(e.target.checked)}/> Upload hasil ke Google Drive</label>
+              {uploadDrive ? (
+                <label className="mt-3 block rounded-xl border bg-white p-4 text-sm font-bold text-slate-700">
+                  URL Folder Google Drive Tujuan
+                  <input
+                    value={driveFolderUrl}
+                    onChange={(e) => setDriveFolderUrl(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    className="mt-2 w-full rounded-xl border px-4 py-3 text-sm font-normal"
+                  />
+                  <span className="mt-2 block text-xs font-normal text-slate-500">Isi dengan URL folder Google Drive tempat hasil PDF Corporate akan di-upload.</span>
+                </label>
+              ) : null}
               <button onClick={generatePdf} disabled={loading || !selectedIds.size || !sections.length || !selectedSections.size} className="mt-4 w-full rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white disabled:opacity-50">{loading ? "Generating PDF..." : `Generate PDF Halaman Terpilih (${selectedIds.size} peserta)`}</button>
             </div>
           </section>
 
           <aside className="space-y-5">
-            <div className="rounded-2xl border p-5"><h2 className="text-lg font-bold">Status & Hasil Generate</h2><div className="mt-4 rounded-xl border bg-amber-50 p-3 text-sm text-amber-800">PDF final tetap dibuat oleh Python MCU Engine. Format Corporate existing dipertahankan.</div>{job ? <div className="mt-4 rounded-xl border p-4 text-sm"><div><b>Status:</b> {job.status || "queued"}</div><div className="mt-1 text-xs text-slate-500">Job ID: {job.jobId}</div><div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress || 0)))}%` }}/></div><div className="mt-2">{job.message || job.currentName || "Memproses..."}</div>{job.status === "done" && downloadUrl ? <a href={downloadUrl} target="_blank" className="mt-4 inline-flex rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white">Download / Buka Hasil PDF</a> : null}</div> : <div className="mt-4 rounded-xl border border-dashed p-8 text-center text-sm text-slate-500">Belum ada job Corporate.</div>}</div>
+            <div className="rounded-2xl border p-5">
+              <h2 className="text-lg font-bold">Status & Hasil Generate</h2>
+              <div className="mt-4 rounded-xl border bg-amber-50 p-3 text-sm text-amber-800">PDF final tetap dibuat oleh Python MCU Engine. Format Corporate existing dipertahankan.</div>
+              {job ? (
+                <div className="mt-4 rounded-xl border p-4 text-sm">
+                  <div><b>Status:</b> {job.status || "queued"}</div>
+                  <div className="mt-1 text-xs text-slate-500">Job ID: {job.jobId}</div>
+                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, Number(job.progress || 0)))}%` }}/></div>
+                  <div className="mt-2">{job.message || job.currentName || "Memproses..."}</div>
+
+                  {job.status === "done" && (job.mergedFiles?.length || job.mergedPdfUrl) && downloadUrl ? (
+                    <div className="mt-4">
+                      <a href={downloadUrl} target="_blank" className="inline-flex rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white">Download / Buka Hasil PDF</a>
+                    </div>
+                  ) : null}
+
+                  {job.status === "done" && !job.mergedFiles?.length && !job.mergedPdfUrl && job.pdfFiles?.length ? (
+                    <div className="mt-4 rounded-xl border bg-slate-50 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-800">Hasil PDF per peserta</div>
+                          <div className="text-xs text-slate-500">{selectedGeneratedPdfIndexes.size}/{job.pdfFiles.length} file dipilih</div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setSelectedGeneratedPdfIndexes(new Set(job.pdfFiles!.map((_, index) => index)))} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">Select All</button>
+                          <button type="button" onClick={() => setSelectedGeneratedPdfIndexes(new Set())} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold">Clear</button>
+                        </div>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {job.pdfFiles.map((file, index) => (
+                          <div key={`${file.name || "pdf"}-${index}`} className="flex items-center gap-3 rounded-lg border bg-white px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedGeneratedPdfIndexes.has(index)}
+                              onChange={(e) => setSelectedGeneratedPdfIndexes((current) => {
+                                const next = new Set(current);
+                                e.target.checked ? next.add(index) : next.delete(index);
+                                return next;
+                              })}
+                            />
+                            <a href={file.url || "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1 break-all font-semibold text-blue-700 hover:underline">
+                              {file.name || `PDF ${index + 1}`}
+                            </a>
+                            <a href={file.url || "#"} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold text-slate-600 hover:underline">Buka</a>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={downloadSelectedGeneratedPdfs}
+                        disabled={!selectedGeneratedPdfIndexes.size || (selectedGeneratedPdfIndexes.size > 1 && selectedGeneratedPdfIndexes.size < job.pdfFiles.length)}
+                        className="mt-3 inline-flex rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {selectedGeneratedPdfIndexes.size === job.pdfFiles.length
+                          ? "Download Semua PDF (ZIP)"
+                          : selectedGeneratedPdfIndexes.size === 1
+                            ? "Download PDF Terpilih"
+                            : selectedGeneratedPdfIndexes.size > 1
+                              ? "Pilih 1 atau Select All"
+                              : "Pilih PDF untuk Download"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {job.status === "done" && !job.pdfFiles?.length && !job.mergedFiles?.length && !job.mergedPdfUrl && downloadUrl ? (
+                    <a href={downloadUrl} target="_blank" className="mt-4 inline-flex rounded-xl bg-emerald-700 px-4 py-3 font-bold text-white">Download / Buka Hasil PDF</a>
+                  ) : null}
+                </div>
+              ) : <div className="mt-4 rounded-xl border border-dashed p-8 text-center text-sm text-slate-500">Belum ada job Corporate.</div>}
+            </div>
             <div className="rounded-2xl border bg-blue-50 p-5 text-sm text-blue-900"><div className="font-black">Pengamanan modul</div><ul className="mt-2 list-disc space-y-1 pl-5"><li>Database dibatasi program Corporate.</li><li>Peserta harus berasal dari database yang sama.</li><li>Foto wajib cocok No MCU + nama.</li><li>File mismatch tidak pernah dipasang otomatis.</li><li>Route CAPASKA tetap terpisah.</li></ul></div>
           </aside>
         </div>
