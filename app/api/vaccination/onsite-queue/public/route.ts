@@ -4,6 +4,7 @@ import { clean, supabaseAdmin } from "../../_utils";
 import { notifyOnsiteNextWaitingPrepare } from "@/lib/vaccination/onsiteWhatsApp";
 import {
   onsiteQueueFormHasWhatsApp,
+  onsiteQueueFormRecoveryField,
   sanitizeOnsiteQueueFormConfig,
   type OnsiteQueueFormField,
 } from "@/lib/vaccination/onsiteQueueForm";
@@ -115,6 +116,54 @@ function validPhone(value: any) {
   return /^08\d{7,13}$/.test(normalized) ? normalized : "";
 }
 
+function normalizeRecoveryValue(field: OnsiteQueueFormField, value: any) {
+  const raw = clean(value);
+  if (!raw) return "";
+
+  if (field.kind === "whatsapp") {
+    return validPhone(raw);
+  }
+  if (field.kind === "email") {
+    return raw.toLowerCase();
+  }
+  if (field.kind === "employee_id") {
+    return employeeKey(raw);
+  }
+  if (field.kind === "custom_number") {
+    return raw.replace(/\s+/g, "");
+  }
+  if (field.kind === "custom_date") {
+    return raw;
+  }
+  return raw.toLowerCase().replace(/\s+/g, " ");
+}
+
+function recoveryHash(event: any, field: OnsiteQueueFormField, value: any) {
+  const normalized = normalizeRecoveryValue(field, value);
+  if (!normalized) return "";
+  return createHmac("sha256", clean(event.qr_secret))
+    .update(`recovery.${field.id}.${normalized}`)
+    .digest("hex");
+}
+
+function publicRecoveryEntry(entry: any) {
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    participant_name: entry.participant_name,
+    queue_number: entry.queue_number,
+    queue_sequence: entry.queue_sequence,
+    queue_status: entry.queue_status,
+    public_token: entry.public_token,
+    joined_at: entry.joined_at,
+    called_at: entry.called_at,
+    started_at: entry.started_at,
+    skipped_at: entry.skipped_at,
+    reactivated_at: entry.reactivated_at,
+    finished_at: entry.finished_at,
+  };
+}
+
 function publicEvent(event: any, session: any) {
   const queueFormConfig = sanitizeOnsiteQueueFormConfig(
     session?.onsite_queue_form_config,
@@ -128,6 +177,7 @@ function publicEvent(event: any, session: any) {
     session_date: session?.session_date || null,
     queue_form_config: queueFormConfig,
     whatsapp_enabled: onsiteQueueFormHasWhatsApp(queueFormConfig),
+    recovery_field: onsiteQueueFormRecoveryField(queueFormConfig),
   };
 }
 
@@ -164,7 +214,7 @@ export async function GET(req: NextRequest) {
 
     const eventResult = await supabase
       .from("vaccination_onsite_queue_events")
-      .select("id,session_id,status,current_queue_number,current_entry_id")
+      .select("id,session_id,public_token,status,current_queue_number,current_entry_id")
       .eq("id", entryResult.data.event_id)
       .single();
     if (eventResult.error) return fail(eventResult.error.message, 500);
@@ -261,6 +311,105 @@ export async function POST(req: NextRequest) {
   const formFields = sanitizeOnsiteQueueFormConfig(
     sessionResult.data.onsite_queue_form_config,
   );
+  const recoveryField = onsiteQueueFormRecoveryField(formFields);
+
+  if (clean(body.action).toLowerCase() === "recover") {
+    if (!recoveryField) {
+      return fail("Session ini belum memiliki Recovery Key antrean.", 400);
+    }
+
+    const recoveryValue = clean(body.recoveryValue || body.recovery_value);
+    if (!recoveryValue) {
+      return fail(`${recoveryField.label} wajib diisi untuk memulihkan antrean.`);
+    }
+
+    const normalizedRecovery = normalizeRecoveryValue(recoveryField, recoveryValue);
+    if (!normalizedRecovery) {
+      return fail(`${recoveryField.label} tidak valid.`);
+    }
+
+    const hash = recoveryHash(eventResult.data, recoveryField, recoveryValue);
+    let recovered: any = null;
+
+    const hashedResult = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .select("id,participant_name,queue_number,queue_sequence,queue_status,public_token,joined_at,called_at,started_at,skipped_at,reactivated_at,finished_at")
+      .eq("event_id", eventResult.data.id)
+      .eq("recovery_key_hash", hash)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (hashedResult.error) {
+      return fail(
+        `${hashedResult.error.message}. Jalankan SQL V153.58 di Supabase.`,
+        500,
+      );
+    }
+    recovered = hashedResult.data || null;
+
+    // Transitional fallback for queue rows created before V153.58.
+    if (!recovered && recoveryField.kind === "employee_id") {
+      const legacyResult = await supabase
+        .from("vaccination_onsite_queue_entries")
+        .select("id,participant_name,queue_number,queue_sequence,queue_status,public_token,joined_at,called_at,started_at,skipped_at,reactivated_at,finished_at")
+        .eq("event_id", eventResult.data.id)
+        .eq("employee_id_key", employeeKey(recoveryValue))
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!legacyResult.error) recovered = legacyResult.data || null;
+    }
+
+    if (!recovered && recoveryField.kind === "whatsapp") {
+      const legacyPhone = validPhone(recoveryValue);
+      if (legacyPhone) {
+        const legacyResult = await supabase
+          .from("vaccination_onsite_queue_entries")
+          .select("id,participant_name,queue_number,queue_sequence,queue_status,public_token,joined_at,called_at,started_at,skipped_at,reactivated_at,finished_at")
+          .eq("event_id", eventResult.data.id)
+          .eq("phone", legacyPhone)
+          .order("id", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!legacyResult.error) recovered = legacyResult.data || null;
+      }
+    }
+
+    if (!recovered?.id || !recovered?.public_token) {
+      return fail(
+        `Antrean dengan ${recoveryField.label} tersebut tidak ditemukan pada session ini.`,
+        404,
+        { code: "QUEUE_NOT_FOUND" },
+      );
+    }
+
+    // Backfill recovery hash for legacy rows once a valid recovery succeeds.
+    await supabase
+      .from("vaccination_onsite_queue_entries")
+      .update({
+        recovery_field_id: recoveryField.id,
+        recovery_key_hash: hash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", recovered.id);
+
+    return response({
+      ok: true,
+      recovered: true,
+      recovery_field: {
+        id: recoveryField.id,
+        label: recoveryField.label,
+        kind: recoveryField.kind,
+      },
+      entry: publicRecoveryEntry(recovered),
+      message:
+        clean(recovered.queue_status).toUpperCase() === "DONE"
+          ? `Antrean ${recovered.queue_number || ""} ditemukan dan sudah selesai.`
+          : `Antrean ${recovered.queue_number || ""} berhasil dipulihkan.`,
+    });
+  }
+
   const formData: Record<string, string> = {};
 
   for (const field of formFields) {
@@ -311,9 +460,18 @@ export async function POST(req: NextRequest) {
     phone ||
     "Peserta Onsite";
 
+  const recoveryValue = recoveryField
+    ? clean(formData[recoveryField.id])
+    : "";
+  const recoveryKeyHash = recoveryField
+    ? recoveryHash(eventResult.data, recoveryField, recoveryValue)
+    : "";
+
   const dedupeKey = employeeId
     ? employeeKey(employeeId)
-    : anonymousEmployeeKey(eventToken, joinToken);
+    : recoveryKeyHash
+      ? `REC_${recoveryKeyHash.slice(0, 48).toUpperCase()}`
+      : anonymousEmployeeKey(eventToken, joinToken);
 
   const result = await supabase.rpc("vaccination_onsite_claim_queue_v2", {
     p_event_id: eventResult.data.id,
@@ -336,6 +494,7 @@ export async function POST(req: NextRequest) {
       id: field.id,
       kind: field.kind,
       label: field.label,
+      recoveryKey: field.recoveryKey,
       value: clean(formData[field.id]),
     })),
   };
@@ -345,6 +504,8 @@ export async function POST(req: NextRequest) {
     .update({
       phone: whatsappEnabled ? phone : "",
       form_data: formSnapshot,
+      recovery_field_id: recoveryField?.id || null,
+      recovery_key_hash: recoveryKeyHash || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", entryId)
@@ -414,6 +575,14 @@ export async function POST(req: NextRequest) {
     whatsapp_enabled: whatsappEnabled,
     whatsapp_prepare: whatsappPrepare,
     whatsapp_phone_available: Boolean(phone),
+    recovery_enabled: Boolean(recoveryField),
+    recovery_field: recoveryField
+      ? {
+          id: recoveryField.id,
+          label: recoveryField.label,
+          kind: recoveryField.kind,
+        }
+      : null,
     message: whatsappEnabled
       ? phone
         ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Pengingat WhatsApp aktif untuk session ini.`

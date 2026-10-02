@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
-import { sanitizeOnsiteQueueFormConfig } from "@/lib/vaccination/onsiteQueueForm";
+import {
+  onsiteQueueFormRecoveryField,
+  sanitizeOnsiteQueueFormConfig,
+} from "@/lib/vaccination/onsiteQueueForm";
 
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
@@ -534,9 +537,13 @@ export async function POST(req: NextRequest) {
     };
 
     if (Array.isArray(body.onsiteQueueFormConfig)) {
-      payload.onsite_queue_form_config = sanitizeOnsiteQueueFormConfig(
+      const queueFormConfig = sanitizeOnsiteQueueFormConfig(
         body.onsiteQueueFormConfig,
       );
+      if (!queueFormConfig.length || !onsiteQueueFormRecoveryField(queueFormConfig)) {
+        return fail("Form antrean harus memiliki tepat 1 Recovery Key.");
+      }
+      payload.onsite_queue_form_config = queueFormConfig;
     }
 
     if (shouldSyncSessionVaccines) {

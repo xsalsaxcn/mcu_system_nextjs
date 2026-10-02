@@ -420,10 +420,14 @@ export default function VaccinationSessionPage() {
     }
 
     const suffix = `${Date.now()}_${editQueueFormFields.length + 1}`;
-    setEditQueueFormFields((prev) => [
-      ...prev,
-      defaultOnsiteQueueField(queueFieldKindToAdd, suffix),
-    ]);
+    setEditQueueFormFields((prev) => {
+      const nextField = defaultOnsiteQueueField(queueFieldKindToAdd, suffix);
+      if (!prev.length) {
+        nextField.recoveryKey = true;
+        nextField.required = true;
+      }
+      return [...prev, nextField];
+    });
     setError("");
   }
 
@@ -432,8 +436,25 @@ export default function VaccinationSessionPage() {
     patch: Partial<OnsiteQueueFormField>,
   ) {
     setEditQueueFormFields((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)),
+      prev.map((item, idx) => {
+        if (idx !== index) return item;
+        if (item.recoveryKey && patch.required === false) {
+          return { ...item, ...patch, required: true };
+        }
+        return { ...item, ...patch };
+      }),
     );
+  }
+
+  function setEditQueueRecoveryField(index: number) {
+    setEditQueueFormFields((prev) =>
+      prev.map((item, idx) => ({
+        ...item,
+        recoveryKey: idx === index,
+        required: idx === index ? true : item.required,
+      })),
+    );
+    setError("");
   }
 
   function removeEditQueueField(index: number) {
@@ -549,6 +570,17 @@ export default function VaccinationSessionPage() {
     );
     if (new Set(editServiceKeys).size !== editServiceKeys.length) {
       setError("Ada kombinasi vaksin, lot, dan dosis yang duplikat di layanan session.");
+      return;
+    }
+
+    if (!editQueueFormFields.length) {
+      setError("Form antrean harus memiliki minimal 1 field agar antrean dapat dipulihkan jika browser tertutup.");
+      return;
+    }
+
+    const recoveryFields = editQueueFormFields.filter((field) => field.recoveryKey);
+    if (recoveryFields.length !== 1) {
+      setError("Pilih tepat 1 field sebagai Recovery Key antrean.");
       return;
     }
 
@@ -1466,6 +1498,7 @@ export default function VaccinationSessionPage() {
                     <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
                       Atur field yang tampil saat peserta scan QR onsite. Field dapat ditambah,
                       dihapus, diurutkan, diubah labelnya, dan dibuat wajib/opsional per session.
+                      Pilih satu Recovery Key agar peserta dapat membuka kembali antrean jika browser tertutup.
                     </p>
                   </div>
                   <div
@@ -1516,7 +1549,7 @@ export default function VaccinationSessionPage() {
                   {editQueueFormFields.map((field, index) => (
                     <div
                       key={field.id}
-                      className="grid gap-3 rounded-2xl border bg-white p-3 lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_110px_auto]"
+                      className="grid gap-3 rounded-2xl border bg-white p-3 lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_110px_150px_auto]"
                     >
                       <div className="flex items-center">
                         <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-black text-slate-700">
@@ -1552,11 +1585,26 @@ export default function VaccinationSessionPage() {
                         <input
                           type="checkbox"
                           checked={field.required}
+                          disabled={field.recoveryKey}
                           onChange={(e) =>
                             updateEditQueueField(index, { required: e.target.checked })
                           }
                         />
                         Wajib
+                      </label>
+
+                      <label className={`flex items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black ${
+                        field.recoveryKey
+                          ? "border-violet-300 bg-violet-50 text-violet-800"
+                          : "border-slate-200 text-slate-700"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="onsite-queue-recovery-key"
+                          checked={field.recoveryKey}
+                          onChange={() => setEditQueueRecoveryField(index)}
+                        />
+                        Recovery Key
                       </label>
 
                       <div className="flex items-end gap-1">
@@ -1591,13 +1639,13 @@ export default function VaccinationSessionPage() {
                   ))}
 
                   {!editQueueFormFields.length ? (
-                    <div className="rounded-xl border border-dashed bg-white p-4 text-center text-sm font-semibold text-slate-500">
-                      Form tanpa field tetap dapat membuat nomor antrean. Sistem menggunakan identitas anonim per scan.
+                    <div className="rounded-xl border border-dashed border-red-200 bg-red-50 p-4 text-center text-sm font-semibold text-red-700">
+                      Tambahkan minimal 1 field dan pilih sebagai Recovery Key sebelum session disimpan.
                     </div>
                   ) : null}
                 </div>
 
-                <div className="mt-4 grid gap-2 text-xs font-semibold sm:grid-cols-2">
+                <div className="mt-4 grid gap-2 text-xs font-semibold sm:grid-cols-3">
                   <div className={`rounded-xl border p-3 ${
                     editQueueFormFields.some((item) => item.kind === "whatsapp")
                       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -1617,6 +1665,16 @@ export default function VaccinationSessionPage() {
                     {editQueueFormFields.some((item) => item.kind === "employee_id")
                       ? "NIK / ID peserta dipakai untuk menjaga 1 peserta = 1 nomor."
                       : "tanpa NIK / ID, sistem memakai identitas anonim per scan."}
+                  </div>
+                  <div className={`rounded-xl border p-3 ${
+                    editQueueFormFields.some((item) => item.recoveryKey)
+                      ? "border-violet-200 bg-violet-50 text-violet-800"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}>
+                    <span className="font-black">Recovery antrean:</span>{" "}
+                    {editQueueFormFields.find((item) => item.recoveryKey)
+                      ? `${editQueueFormFields.find((item) => item.recoveryKey)?.label} dipakai untuk Cek Antrean Saya.`
+                      : "belum ada Recovery Key."}
                   </div>
                 </div>
               </div>
