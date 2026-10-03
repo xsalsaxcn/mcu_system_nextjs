@@ -3,10 +3,6 @@
     {
       "path": "/api/vaccination/reminder/cron",
       "schedule": "0 1 * * *"
-    },
-    {
-      "path": "/api/wellness/cron/google-fit-sync",
-      "schedule": "30 17 * * *"
     }
   ]
 }
