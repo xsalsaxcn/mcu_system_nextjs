@@ -309,9 +309,9 @@ function WeeklyStreak({ days, currentStreak }: { days: WellnessMomentumDay[]; cu
 
 function MonthlyCalendar({ successDates }: { successDates: string[] }) {
   const successSet = new Set(successDates);
-  // WELLNESS_STREAK_CALENDAR_PREV_MONTH_V126M113
-  // Keep the current month as default, while allowing the immediately previous
-  // month to be inspected. This changes presentation only, not streak rules.
+  // WELLNESS_STREAK_CALENDAR_HISTORY_NAV_V1
+  // Presentation-only navigation across canonical historical success dates.
+  // successDates remains server-canonical; streak rules are not changed here.
   const [monthOffset, setMonthOffset] = useState(0);
   const now = new Date();
   const reference = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
@@ -325,8 +325,28 @@ function MonthlyCalendar({ successDates }: { successDates: string[] }) {
     const date = new Date(year, month, day);
     return { day, key: dateKey(date), today: dateKey(date) === dateKey(now) };
   });
-  const viewingPreviousMonth = monthOffset === -1;
 
+  const canonicalHistoryDates = (Array.isArray(successDates) ? successDates : [])
+    .map((value) => String(value || "").trim())
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+    .sort();
+
+  const earliestHistoryDate = canonicalHistoryDates[0] || "";
+  const earliestHistoryMonthOffset = (() => {
+    if (!earliestHistoryDate) return -1;
+    const [historyYear, historyMonth] = earliestHistoryDate
+      .slice(0, 7)
+      .split("-")
+      .map(Number);
+    if (!(historyYear > 0) || !(historyMonth >= 1 && historyMonth <= 12)) return -1;
+    return (
+      (historyYear - now.getFullYear()) * 12 +
+      (historyMonth - 1 - now.getMonth())
+    );
+  })();
+
+  const viewingCurrentMonth = monthOffset === 0;
+  const canViewPreviousMonth = monthOffset > earliestHistoryMonthOffset;
   return (
     <article className="rounded-[1.7rem] border border-slate-100 bg-white p-4 shadow-[0_12px_35px_rgba(15,23,42,0.07)]">
       <div className="flex items-start justify-between gap-3">
@@ -339,8 +359,8 @@ function MonthlyCalendar({ successDates }: { successDates: string[] }) {
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setMonthOffset(-1)}
-            disabled={viewingPreviousMonth}
+            onClick={() => setMonthOffset((current) => current - 1)}
+            disabled={!canViewPreviousMonth}
             aria-label="Lihat bulan sebelumnya"
             className="grid h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
           >
@@ -348,9 +368,9 @@ function MonthlyCalendar({ successDates }: { successDates: string[] }) {
           </button>
           <button
             type="button"
-            onClick={() => setMonthOffset(0)}
-            disabled={!viewingPreviousMonth}
-            aria-label="Kembali ke bulan ini"
+            onClick={() => setMonthOffset((current) => Math.min(0, current + 1))}
+            disabled={viewingCurrentMonth}
+            aria-label="Lihat bulan berikutnya"
             className="grid h-8 w-8 place-items-center rounded-full border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
           >
             ›
