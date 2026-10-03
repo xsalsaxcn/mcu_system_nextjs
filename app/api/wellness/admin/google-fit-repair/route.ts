@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { reconcileWorkoutDailyPoint } from "@/lib/wellness/pointWriter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -368,6 +369,8 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
 
   let inserted = 0;
   let updated = 0;
+  let skippedNative = 0;
+  const pointReconciliation: any[] = [];
   const syncedAt = new Date().toISOString();
   for (const date of [...dates].sort()) {
     const steps = Math.round(Number(stepsResult.rows.get(date) || 0));
@@ -409,12 +412,23 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
 
     const existing = await supabase
       .from("wellness_activity_logs")
-      .select("id")
+      .select("id,raw_payload")
       .eq("participant_id", participantId)
       .eq("source", "google_fit")
       .eq("external_activity_id", externalId)
       .maybeSingle();
     if (existing.error) throw existing.error;
+
+    const existingRaw = existing.data?.raw_payload || {};
+    const nativeProtected =
+      existingRaw?.native_snapshot_persisted === true &&
+      clean(existingRaw?.exact_snapshot?.date || existingRaw?.log_date).slice(0, 10) === date;
+
+    if (nativeProtected) {
+      skippedNative += 1;
+      continue;
+    }
+
     if (existing.data?.id) {
       const saved = await supabase.from("wellness_activity_logs").update(payload).eq("id", existing.data.id);
       if (saved.error) throw saved.error;
@@ -424,6 +438,20 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
       if (saved.error) throw saved.error;
       inserted += 1;
     }
+
+    const pointResult = await reconcileWorkoutDailyPoint({
+      supabase,
+      participant,
+      logDate: date,
+    });
+    pointReconciliation.push({
+      date,
+      ok: pointResult.ok,
+      points: pointResult.points,
+      calories: pointResult.calories,
+      target: pointResult.target,
+      warning: pointResult.warning || "",
+    });
   }
 
   await supabase
@@ -434,6 +462,8 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
   return {
     inserted,
     updated,
+    skipped_native: skippedNative,
+    point_reconciliation: pointReconciliation,
     warnings: [
       stepsResult.ok ? "" : `Steps: ${stepsResult.message}`,
       distanceResult.ok ? "" : `Distance: ${distanceResult.message}`,
