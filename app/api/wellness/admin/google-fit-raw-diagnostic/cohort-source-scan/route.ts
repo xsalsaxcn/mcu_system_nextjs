@@ -4,9 +4,9 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-// WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_V1
+// WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_ALL_V2
 // Admin-only + READ ONLY.
 // Purpose: detect cross-participant Google Fit source divergence.
 // No Supabase write, no Google Fit write, no streak/point recalculation.
@@ -341,17 +341,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const limitRaw = Number(req.nextUrl.searchParams.get("limit") || 10);
-  const offsetRaw = Number(req.nextUrl.searchParams.get("offset") || 0);
-
-  const limit = Math.min(
-    Math.max(Number.isFinite(limitRaw) ? Math.trunc(limitRaw) : 10, 1),
-    10,
-  );
-  const offset = Math.max(
-    Number.isFinite(offsetRaw) ? Math.trunc(offsetRaw) : 0,
-    0,
-  );
+  // V2: scan all active Google Fit integrations in one request.
+  // `limit` and `offset` are intentionally ignored to avoid manual paging.
+  const limit = 500;
+  const offset = 0;
 
   const supabase = getSupabaseAdmin();
   const start = jakartaStart(exact);
@@ -364,7 +357,7 @@ export async function GET(req: NextRequest) {
       .eq("provider", "google_fit")
       .eq("is_active", true)
       .order("participant_id", { ascending: true })
-      .range(offset, offset + limit - 1);
+      .limit(limit);
 
     if (integrationsResult.error) throw integrationsResult.error;
 
@@ -568,7 +561,7 @@ export async function GET(req: NextRequest) {
 
     return json({
       ok: true,
-      marker: "WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_V1",
+      marker: "WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_ALL_V2",
       read_only: true,
       date: exact,
       timezone: TZ,
@@ -577,11 +570,9 @@ export async function GET(req: NextRequest) {
         end: end.toISOString(),
       },
       paging: {
-        offset,
-        limit,
+        mode: "all",
         returned: results.length,
-        next_offset:
-          results.length === limit ? offset + limit : null,
+        next_offset: null,
       },
       summary: {
         successful: successful.length,
@@ -595,13 +586,13 @@ export async function GET(req: NextRequest) {
       },
       results,
       note:
-        "READ ONLY. Tidak ada sync, update DB, write Google Fit, atau perubahan streak/point. Diagnostic cohort dibatasi maksimal 10 integrasi per request untuk menjaga tekanan API.",
+        "READ ONLY. Tidak ada sync, update DB, write Google Fit, atau perubahan streak/point. V2 memindai seluruh integrasi Google Fit aktif dalam satu request.",
     });
   } catch (error: any) {
     return json(
       {
         ok: false,
-        marker: "WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_V1",
+        marker: "WELLNESS_GOOGLE_FIT_COHORT_SOURCE_SCAN_ALL_V2",
         read_only: true,
         message:
           error?.message || "Google Fit cohort source scan gagal.",
