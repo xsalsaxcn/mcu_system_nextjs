@@ -360,6 +360,14 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
     safeAggregate(accessToken, "com.google.active_minutes", start, end),
   ]);
 
+  // WELLNESS_GOOGLE_FIT_ADMIN_REPAIR_SAFE_V2
+  // Canonical Steps must be readable before this repair may write any daily row.
+  if (!stepsResult.ok) {
+    throw new Error(
+      `STEPS_READ_FAILED: ${stepsResult.message || "Google Fit step aggregate gagal."}`,
+    );
+  }
+
   const dates = new Set<string>();
   for (let i = 0; i < safeDays; i += 1) dates.add(addDays(startKey, i));
   for (const result of [stepsResult, distanceResult, caloriesResult, minutesResult]) {
@@ -368,6 +376,8 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
 
   let inserted = 0;
   let updated = 0;
+  let unchanged = 0;
+  let skippedNative = 0;
   const syncedAt = new Date().toISOString();
   for (const date of [...dates].sort()) {
     const steps = Math.round(Number(stepsResult.rows.get(date) || 0));
@@ -409,14 +419,44 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
 
     const existing = await supabase
       .from("wellness_activity_logs")
-      .select("id")
+      .select("id,steps,calories,duration_minutes,distance_km,raw_payload")
       .eq("participant_id", participantId)
       .eq("source", "google_fit")
       .eq("external_activity_id", externalId)
       .maybeSingle();
     if (existing.error) throw existing.error;
+
+    const existingRaw = existing.data?.raw_payload || {};
+    const nativeProtected =
+      existingRaw?.native_snapshot_persisted === true &&
+      clean(existingRaw?.exact_snapshot?.date || existingRaw?.log_date).slice(0, 10) === date;
+
+    if (nativeProtected) {
+      skippedNative += 1;
+      continue;
+    }
+
     if (existing.data?.id) {
-      const saved = await supabase.from("wellness_activity_logs").update(payload).eq("id", existing.data.id);
+      const sameSteps = Math.round(numberValue(existing.data.steps)) === steps;
+      const sameCalories =
+        Math.round(numberValue(existing.data.calories) * 10) / 10 ===
+        Math.round(calories * 10) / 10;
+      const sameMinutes =
+        Math.round(numberValue(existing.data.duration_minutes) * 10) / 10 ===
+        Math.round(durationMinutes * 10) / 10;
+      const sameDistance =
+        Math.round(numberValue(existing.data.distance_km) * 100) / 100 ===
+        Math.round(distanceKm * 100) / 100;
+
+      if (sameSteps && sameCalories && sameMinutes && sameDistance) {
+        unchanged += 1;
+        continue;
+      }
+
+      const saved = await supabase
+        .from("wellness_activity_logs")
+        .update(payload)
+        .eq("id", existing.data.id);
       if (saved.error) throw saved.error;
       updated += 1;
     } else {
@@ -434,6 +474,16 @@ async function forceSync(supabase: any, participantId: number, days = 3) {
   return {
     inserted,
     updated,
+    unchanged,
+    skipped_native: skippedNative,
+    safety: {
+      marker: "WELLNESS_GOOGLE_FIT_ADMIN_REPAIR_SAFE_V2",
+      days_requested: safeDays,
+      steps_read_required: true,
+      native_snapshot_protected: true,
+      point_reconciliation: false,
+      streak_recalculation: false,
+    },
     warnings: [
       stepsResult.ok ? "" : `Steps: ${stepsResult.message}`,
       distanceResult.ok ? "" : `Distance: ${distanceResult.message}`,
