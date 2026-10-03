@@ -16,6 +16,7 @@ function statusBadge(status: any) {
   if (value === "CALLED" || value === "IN_PROGRESS") return "bg-blue-100 text-blue-700";
   if (value === "SKIPPED") return "bg-amber-100 text-amber-800";
   if (value === "DONE") return "bg-emerald-100 text-emerald-700";
+  if (value === "CANCELLED") return "bg-red-100 text-red-700";
   return "bg-red-100 text-red-700";
 }
 
@@ -169,6 +170,15 @@ export default function VaccinationOnsiteQueuePage() {
   const active = useMemo(() => entries.filter((x: any) => ["CALLED", "IN_PROGRESS"].includes(x.queue_status)), [entries]);
   const skipped = useMemo(() => entries.filter((x: any) => x.queue_status === "SKIPPED"), [entries]);
   const done = useMemo(() => entries.filter((x: any) => x.queue_status === "DONE"), [entries]);
+  const cancelled = useMemo(() => entries.filter((x: any) => x.queue_status === "CANCELLED"), [entries]);
+
+  function cancelQueue(entry: any) {
+    const confirmed = window.confirm(
+      `Cancel antrean ${entry?.queue_number || ""} - ${entry?.participant_name || "peserta"}?\n\nSetelah status menjadi Cancel, peserta diperbolehkan mengambil antrean baru di session/lokasi lain.`
+    );
+    if (!confirmed) return;
+    void post({ action: "cancel", eventId: data.event.id, entryId: entry.id });
+  }
 
   const scanUrl = data?.rolling?.scan_path && origin ? `${origin}${data.rolling.scan_path}` : "";
   const operatorSessionUrl =
@@ -208,11 +218,12 @@ export default function VaccinationOnsiteQueuePage() {
       </div>
 
       <div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Dipanggil</div><div className="mt-2 text-4xl font-black text-blue-700">{data.event.current_queue_number || "-"}</div></div>
           <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Waiting</div><div className="mt-2 text-4xl font-black text-red-700">{waiting.length}</div></div>
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">Skipped</div><div className="mt-2 text-4xl font-black text-amber-700">{skipped.length}</div></div>
           <div className="rounded-2xl border bg-white p-4"><div className="text-xs font-bold text-slate-500">Done</div><div className="mt-2 text-4xl font-black text-emerald-700">{done.length}</div></div>
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4"><div className="text-xs font-bold text-red-700">Cancel</div><div className="mt-2 text-4xl font-black text-red-700">{cancelled.length}</div></div>
         </div>
         {!tvOnly ? (
           <>
@@ -278,6 +289,7 @@ export default function VaccinationOnsiteQueuePage() {
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
                     <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
+                    <button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Cancel</button>
                   </div>
                 ) : null}
               </div>
@@ -473,7 +485,10 @@ export default function VaccinationOnsiteQueuePage() {
                 {skipped.map((entry: any) => (
                   <div key={entry.id} className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
                     <div className="flex items-start justify-between gap-3"><div><div className="text-2xl font-black text-amber-800">{entry.queue_number}</div><div className="font-bold text-slate-950">{entry.participant_name}</div><div className="text-xs text-slate-500">{entry.employee_id}{entry.phone ? ` · ${entry.phone}` : ""}</div></div><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">SKIPPED</span></div>
-                    <button disabled={busy} onClick={() => post({ action: "reactivate", eventId: data.event.id, entryId: entry.id })} className="mt-4 w-full rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Aktifkan Kembali</button>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <button disabled={busy} onClick={() => post({ action: "reactivate", eventId: data.event.id, entryId: entry.id })} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Aktifkan Kembali</button>
+                      <button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Cancel</button>
+                    </div>
                   </div>
                 ))}
                 {!skipped.length ? <div className="text-sm font-semibold text-amber-700">Belum ada antrean skipped.</div> : null}
@@ -488,9 +503,28 @@ export default function VaccinationOnsiteQueuePage() {
               <div className="max-h-[520px] overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">WA Reminder</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{!data?.whatsapp_prepare?.enabled_for_session ? <span className="text-slate-400">Nonaktif</span> : entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button></td></tr>)}</tbody>
+                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{!data?.whatsapp_prepare?.enabled_for_session ? <span className="text-slate-400">Nonaktif</span> : entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button><button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-40">Cancel</button></div></td></tr>)}</tbody>
                 </table>
               </div>
+            </section>
+
+            <section className="mt-6 overflow-hidden rounded-2xl border border-red-200 bg-white">
+              <div className="flex items-center justify-between gap-3 border-b bg-red-50 px-4 py-3">
+                <div>
+                  <div className="font-black text-red-900">Peserta Cancel <span className="text-red-700">({cancelled.length})</span></div>
+                  <div className="mt-1 text-xs font-semibold text-red-700">Status Cancel melepas blokir lintas session. Peserta boleh mengambil antrean baru di hari/lokasi berikutnya.</div>
+                </div>
+              </div>
+              <details>
+                <summary className="cursor-pointer border-b px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Buka / tutup tabel peserta Cancel</summary>
+                <div className="max-h-[420px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Cancel</th></tr></thead>
+                    <tbody className="divide-y">{cancelled.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-red-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.cancelled_at ? new Date(entry.cancelled_at).toLocaleString("id-ID") : "-"}</td></tr>)}</tbody>
+                  </table>
+                  {!cancelled.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta Cancel.</div> : null}
+                </div>
+              </details>
             </section>
 
             <section className="mt-6 overflow-hidden rounded-2xl border bg-white">

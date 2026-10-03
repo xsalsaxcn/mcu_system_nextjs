@@ -222,6 +222,49 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const entry = entryResult.data;
 
+  if (action === "cancel") {
+    const currentStatus = clean(entry.queue_status).toUpperCase();
+    if (currentStatus === "DONE") {
+      return fail("Antrean DONE tidak dapat di-Cancel karena sudah dinyatakan selesai.", 409);
+    }
+    if (currentStatus === "CANCELLED") {
+      return ok({
+        message: `${entry.queue_number} sudah berstatus CANCELLED.`,
+        entry,
+      });
+    }
+
+    const result = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .update({
+        queue_status: "CANCELLED",
+        cancelled_at: now,
+        updated_at: now,
+      })
+      .eq("id", entryId)
+      .select("*")
+      .single();
+    if (result.error) return fail(result.error.message, 500);
+
+    await supabase
+      .from("vaccination_onsite_queue_events")
+      .update({
+        current_entry_id: null,
+        current_queue_number: null,
+        updated_at: now,
+      })
+      .eq("id", eventId)
+      .eq("current_entry_id", entryId);
+
+    const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
+    return ok({
+      message: `${entry.queue_number} di-Cancel. Lock lintas session dilepas sehingga peserta boleh mengambil antrean baru di session/lokasi lain.${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
+      entry: result.data,
+      whatsapp_prepare: whatsappPrepare,
+    });
+  }
+
   if (action === "reactivate") {
     if (clean(entry.queue_status).toUpperCase() !== "SKIPPED") return fail("Hanya antrean SKIPPED yang dapat diaktifkan kembali.");
     const result = await supabase

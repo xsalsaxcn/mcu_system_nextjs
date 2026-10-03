@@ -138,6 +138,40 @@ function normalizeRecoveryValue(field: OnsiteQueueFormField, value: any) {
   return raw.toLowerCase().replace(/\s+/g, " ");
 }
 
+function globalIdentityKey(field: OnsiteQueueFormField, value: any) {
+  const normalized = normalizeRecoveryValue(field, value);
+  if (!normalized) return "";
+
+  if (field.kind === "employee_id") return `EMPLOYEE:${normalized}`;
+  if (field.kind === "whatsapp") return `WHATSAPP:${normalized}`;
+  if (field.kind === "email") return `EMAIL:${normalized}`;
+  return `RECOVERY:${field.kind}:${normalized}`;
+}
+
+function collectGlobalIdentityKeys(
+  fields: OnsiteQueueFormField[],
+  formData: Record<string, string>,
+) {
+  const keys = new Set<string>();
+
+  for (const field of fields) {
+    const value = clean(formData[field.id]);
+    if (!value) continue;
+
+    if (
+      field.kind === "employee_id" ||
+      field.kind === "whatsapp" ||
+      field.kind === "email" ||
+      field.recoveryKey
+    ) {
+      const key = globalIdentityKey(field, value);
+      if (key) keys.add(key);
+    }
+  }
+
+  return Array.from(keys).sort();
+}
+
 function recoveryHash(event: any, field: OnsiteQueueFormField, value: any) {
   const normalized = normalizeRecoveryValue(field, value);
   if (!normalized) return "";
@@ -466,6 +500,15 @@ export async function POST(req: NextRequest) {
   const recoveryKeyHash = recoveryField
     ? recoveryHash(eventResult.data, recoveryField, recoveryValue)
     : "";
+  const globalIdentityKeys = collectGlobalIdentityKeys(formFields, formData);
+
+  if (!globalIdentityKeys.length) {
+    return fail(
+      "Identitas peserta untuk validasi lintas session tidak tersedia. Pastikan Recovery Key diisi.",
+      400,
+      { code: "GLOBAL_IDENTITY_REQUIRED" },
+    );
+  }
 
   const dedupeKey = employeeId
     ? employeeKey(employeeId)
@@ -473,17 +516,26 @@ export async function POST(req: NextRequest) {
       ? `REC_${recoveryKeyHash.slice(0, 48).toUpperCase()}`
       : anonymousEmployeeKey(eventToken, joinToken);
 
-  const result = await supabase.rpc("vaccination_onsite_claim_queue_v2", {
+  const result = await supabase.rpc("vaccination_onsite_claim_queue_v3", {
     p_event_id: eventResult.data.id,
     p_participant_name: participantName,
     p_employee_id: employeeId,
     p_employee_id_key: dedupeKey,
     p_phone: phone,
+    p_identity_keys: globalIdentityKeys,
   });
-  if (result.error) return fail(result.error.message, 500);
+  if (result.error) {
+    return fail(
+      `${result.error.message}. Pastikan SQL V153.59 sudah dijalankan di Supabase.`,
+      500,
+    );
+  }
 
   const payload = result.data || {};
-  if (payload?.ok === false) return fail(payload?.message || "Gagal membuat antrean.", 400, payload);
+  if (payload?.ok === false) {
+    const status = payload?.code === "ALREADY_QUEUED_OTHER_SESSION" ? 409 : 400;
+    return fail(payload?.message || "Gagal membuat antrean.", status, payload);
+  }
 
   let entry = payload?.entry;
   const entryId = Number(entry?.id || 0);
@@ -506,6 +558,7 @@ export async function POST(req: NextRequest) {
       form_data: formSnapshot,
       recovery_field_id: recoveryField?.id || null,
       recovery_key_hash: recoveryKeyHash || null,
+      identity_keys: globalIdentityKeys,
       updated_at: new Date().toISOString(),
     })
     .eq("id", entryId)
@@ -566,10 +619,16 @@ export async function POST(req: NextRequest) {
         reason: "SESSION_WHATSAPP_DISABLED",
       };
 
+  const publicEntry = entry
+    ? Object.fromEntries(
+        Object.entries(entry).filter(([key]) => key !== "identity_keys"),
+      )
+    : entry;
+
   return response({
     ok: true,
     created: Boolean(payload?.created),
-    entry,
+    entry: publicEntry,
     push_bound: pushBound,
     push_warning: pushWarning || null,
     whatsapp_enabled: whatsappEnabled,
