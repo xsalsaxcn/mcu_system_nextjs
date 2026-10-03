@@ -180,6 +180,14 @@ export default function VaccinationOnsiteQueuePage() {
     void post({ action: "cancel", eventId: data.event.id, entryId: entry.id });
   }
 
+  function recallQueue(entry: any) {
+    const confirmed = window.confirm(
+      `Recall ${entry?.queue_number || ""} - ${entry?.participant_name || "peserta"}?\n\nPeserta akan kembali ke Waiting dengan nomor antrean yang sama.`
+    );
+    if (!confirmed) return;
+    void post({ action: "recall", eventId: data.event.id, entryId: entry.id });
+  }
+
   const scanUrl = data?.rolling?.scan_path && origin ? `${origin}${data.rolling.scan_path}` : "";
   const operatorSessionUrl =
     origin && sessionId
@@ -536,8 +544,8 @@ export default function VaccinationOnsiteQueuePage() {
                 <summary className="cursor-pointer border-b px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Buka / tutup tabel peserta Done</summary>
                 <div className="max-h-[520px] overflow-auto">
                   <table className="min-w-full text-sm">
-                    <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th></tr></thead>
-                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td></tr>)}</tbody>
+                    <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th><th className="p-3 text-left">Aksi</th></tr></thead>
+                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td><td className="p-3"><button disabled={busy} onClick={() => recallQueue(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-40">Recall</button></td></tr>)}</tbody>
                   </table>
                   {!done.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div> : null}
                 </div>

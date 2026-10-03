@@ -222,6 +222,42 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const entry = entryResult.data;
 
+  if (action === "recall") {
+    const currentStatus = clean(entry.queue_status).toUpperCase();
+    if (currentStatus !== "DONE") {
+      return fail("Recall hanya dapat dilakukan untuk peserta berstatus DONE.", 409);
+    }
+
+    const result = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .update({
+        queue_status: "WAITING",
+        called_at: null,
+        started_at: null,
+        skipped_at: null,
+        finished_at: null,
+        reactivated_at: now,
+        updated_at: now,
+      })
+      .eq("id", entryId)
+      .eq("event_id", eventId)
+      .eq("queue_status", "DONE")
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    // Recall never creates a new queue number and never changes queue_sequence.
+    // The participant returns to WAITING with the original queue number/position.
+    const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
+    return ok({
+      message: `${entry.queue_number} berhasil di-Recall ke Waiting dengan nomor antrean lama.${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
+      entry: result.data,
+      whatsapp_prepare: whatsappPrepare,
+    });
+  }
+
   if (action === "cancel") {
     const currentStatus = clean(entry.queue_status).toUpperCase();
     if (currentStatus === "DONE") {
