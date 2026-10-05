@@ -584,6 +584,17 @@ export default function VaccinationSessionPage() {
       return;
     }
 
+    const employeeIdField = editQueueFormFields.find((field) => field.kind === "employee_id");
+    if (
+      employeeIdField?.exactLength !== undefined &&
+      (!Number.isInteger(employeeIdField.exactLength) ||
+        employeeIdField.exactLength < 1 ||
+        employeeIdField.exactLength > 32)
+    ) {
+      setError("Jumlah karakter No Karyawan harus 1 sampai 32.");
+      return;
+    }
+
     if (loadingEditPrintMode || !editPrintModeReady) {
       setError("Setting print session belum berhasil dimuat. Tutup Edit Session lalu buka kembali sebelum menyimpan.");
       return;
@@ -1549,7 +1560,11 @@ export default function VaccinationSessionPage() {
                   {editQueueFormFields.map((field, index) => (
                     <div
                       key={field.id}
-                      className="grid gap-3 rounded-2xl border bg-white p-3 lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_110px_150px_auto]"
+                      className={`grid gap-3 rounded-2xl border bg-white p-3 ${
+                        field.kind === "employee_id"
+                          ? "lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_130px_110px_150px_auto]"
+                          : "lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_110px_150px_auto]"
+                      }`}
                     >
                       <div className="flex items-center">
                         <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-black text-slate-700">
@@ -1580,6 +1595,30 @@ export default function VaccinationSessionPage() {
                           placeholder="Placeholder"
                         />
                       </label>
+
+                      {field.kind === "employee_id" ? (
+                        <label className="grid gap-1 text-xs font-bold text-slate-600">
+                          Jumlah Karakter
+                          <input
+                            type="number"
+                            min={1}
+                            max={32}
+                            step={1}
+                            value={field.exactLength ?? ""}
+                            onChange={(e) => {
+                              const value = e.target.value.trim();
+                              updateEditQueueField(index, {
+                                exactLength: value ? Number(value) : undefined,
+                              });
+                            }}
+                            className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                            placeholder="8"
+                          />
+                          <span className="text-[10px] font-semibold text-slate-400">
+                            Kosong = tidak dibatasi
+                          </span>
+                        </label>
+                      ) : null}
 
                       <label className="flex items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black text-slate-700">
                         <input
@@ -1663,7 +1702,13 @@ export default function VaccinationSessionPage() {
                   }`}>
                     <span className="font-black">Duplikasi antrean:</span>{" "}
                     {editQueueFormFields.some((item) => item.kind === "employee_id")
-                      ? "NIK / ID peserta dipakai untuk menjaga 1 peserta = 1 nomor."
+                      ? `NIK / ID peserta dipakai untuk menjaga 1 peserta = 1 nomor.${
+                          editQueueFormFields.find((item) => item.kind === "employee_id")?.exactLength
+                            ? ` Wajib ${
+                                editQueueFormFields.find((item) => item.kind === "employee_id")?.exactLength
+                              } karakter.`
+                            : ""
+                        }`
                       : "tanpa NIK / ID, sistem memakai identitas anonim per scan."}
                   </div>
                   <div className={`rounded-xl border p-3 ${

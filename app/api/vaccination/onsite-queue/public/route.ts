@@ -103,6 +103,32 @@ function employeeKey(value: any) {
   return clean(value).toUpperCase().replace(/\s+/g, "");
 }
 
+function validateEmployeeIdField(field: OnsiteQueueFormField, value: any) {
+  const raw = clean(value);
+  if (!raw || field.kind !== "employee_id" || !field.exactLength) {
+    return { ok: true, value: raw };
+  }
+
+  const compact = raw.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9]+$/.test(compact)) {
+    return {
+      ok: false,
+      value: compact,
+      message: `${field.label} hanya boleh berisi huruf dan angka.`,
+    };
+  }
+
+  if (compact.length !== field.exactLength) {
+    return {
+      ok: false,
+      value: compact,
+      message: `${field.label} harus tepat ${field.exactLength} karakter.`,
+    };
+  }
+
+  return { ok: true, value: compact };
+}
+
 function normalizePhone(value: any) {
   let digits = clean(value).replace(/\D/g, "");
   if (digits.startsWith("0062")) digits = digits.slice(4);
@@ -352,9 +378,15 @@ export async function POST(req: NextRequest) {
       return fail("Session ini belum memiliki Recovery Key antrean.", 400);
     }
 
-    const recoveryValue = clean(body.recoveryValue || body.recovery_value);
+    let recoveryValue = clean(body.recoveryValue || body.recovery_value);
     if (!recoveryValue) {
       return fail(`${recoveryField.label} wajib diisi untuk memulihkan antrean.`);
+    }
+
+    if (recoveryField.kind === "employee_id") {
+      const validation = validateEmployeeIdField(recoveryField, recoveryValue);
+      if (!validation.ok) return fail(validation.message || `${recoveryField.label} tidak valid.`);
+      recoveryValue = validation.value;
     }
 
     const normalizedRecovery = normalizeRecoveryValue(recoveryField, recoveryValue);
@@ -464,6 +496,12 @@ export async function POST(req: NextRequest) {
       return fail(`${field.label} wajib diisi.`);
     }
 
+    if (field.kind === "employee_id" && value) {
+      const validation = validateEmployeeIdField(field, value);
+      if (!validation.ok) return fail(validation.message || `${field.label} tidak valid.`);
+      value = validation.value;
+    }
+
     if (field.kind === "whatsapp" && value) {
       const normalized = validPhone(value);
       if (!normalized) {
@@ -547,6 +585,7 @@ export async function POST(req: NextRequest) {
       kind: field.kind,
       label: field.label,
       recoveryKey: field.recoveryKey,
+      ...(field.exactLength ? { exactLength: field.exactLength } : {}),
       value: clean(formData[field.id]),
     })),
   };

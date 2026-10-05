@@ -301,6 +301,75 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (action === "delete") {
+    const existingDeleted = entry?.form_data?.__deleted;
+    if (existingDeleted?.at) {
+      return ok({
+        message: `${entry.queue_number} sudah berada di Data Terhapus.`,
+        entry,
+      });
+    }
+
+    const currentStatus = clean(entry.queue_status).toUpperCase() || "UNKNOWN";
+    const existingFormData =
+      entry?.form_data && typeof entry.form_data === "object" && !Array.isArray(entry.form_data)
+        ? entry.form_data
+        : {};
+    const deletedBy =
+      clean((user as any)?.email) ||
+      clean((user as any)?.username) ||
+      clean((user as any)?.name) ||
+      clean((user as any)?.id) ||
+      "vaccination_operator";
+
+    const tombstoneEmployeeKey = `DELETED_${entryId}_${Date.now()}`;
+    const result = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .update({
+        queue_status: "CANCELLED",
+        cancelled_at: entry.cancelled_at || now,
+        employee_id_key: tombstoneEmployeeKey,
+        phone: "",
+        recovery_key_hash: null,
+        form_data: {
+          ...existingFormData,
+          __deleted: {
+            at: now,
+            by: deletedBy,
+            from_status: currentStatus,
+            original_phone: clean(entry.phone),
+            soft_delete: true,
+          },
+        },
+        updated_at: now,
+      })
+      .eq("id", entryId)
+      .eq("event_id", eventId)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    await supabase
+      .from("vaccination_onsite_queue_events")
+      .update({
+        current_entry_id: null,
+        current_queue_number: null,
+        updated_at: now,
+      })
+      .eq("id", eventId)
+      .eq("current_entry_id", entryId);
+
+    const whatsappPrepare = await notifyOnsiteNextWaitingPrepare(supabase, eventId);
+
+    return ok({
+      message: `${entry.queue_number} dipindahkan ke Data Terhapus. Data tetap tersimpan untuk audit dan peserta dapat mengambil antrean baru.${onsiteWhatsAppPrepareSuffix(whatsappPrepare)}`,
+      entry: result.data,
+      whatsapp_prepare: whatsappPrepare,
+      soft_deleted: true,
+    });
+  }
+
   if (action === "reactivate") {
     if (clean(entry.queue_status).toUpperCase() !== "SKIPPED") return fail("Hanya antrean SKIPPED yang dapat diaktifkan kembali.");
     const result = await supabase

@@ -136,10 +136,14 @@ export default function VaccinationOnsiteQueueJoinPage({
   }, [params.token]);
 
   function setFieldValue(field: OnsiteQueueFormField, value: string) {
-    const nextValue =
-      field.kind === "whatsapp"
-        ? value.replace(/\D/g, "").slice(0, 15)
-        : value;
+    let nextValue = value;
+    if (field.kind === "whatsapp") {
+      nextValue = value.replace(/\D/g, "").slice(0, 15);
+    } else if (field.kind === "employee_id" && field.exactLength) {
+      nextValue = value
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, field.exactLength);
+    }
     setValues((prev) => ({ ...prev, [field.id]: nextValue }));
   }
 
@@ -280,11 +284,25 @@ export default function VaccinationOnsiteQueueJoinPage({
                       : undefined
                   }
                   value={recoveryValue}
+                  minLength={
+                    recoveryField.kind === "employee_id"
+                      ? recoveryField.exactLength
+                      : undefined
+                  }
+                  maxLength={
+                    recoveryField.kind === "employee_id"
+                      ? recoveryField.exactLength
+                      : undefined
+                  }
                   onChange={(e) =>
                     setRecoveryValue(
                       recoveryField.kind === "whatsapp"
                         ? e.target.value.replace(/\D/g, "").slice(0, 15)
-                        : e.target.value
+                        : recoveryField.kind === "employee_id" && recoveryField.exactLength
+                          ? e.target.value
+                              .replace(/[^A-Za-z0-9]/g, "")
+                              .slice(0, recoveryField.exactLength)
+                          : e.target.value
                     )
                   }
                   className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
@@ -333,6 +351,8 @@ export default function VaccinationOnsiteQueueJoinPage({
                   required={field.required}
                   type={inputType(field)}
                   inputMode={field.kind === "whatsapp" || field.kind === "custom_number" ? "numeric" : undefined}
+                  minLength={field.kind === "employee_id" ? field.exactLength : undefined}
+                  maxLength={field.kind === "employee_id" ? field.exactLength : undefined}
                   value={values[field.id] || ""}
                   onChange={(e) => setFieldValue(field, e.target.value)}
                   className="mt-1 w-full rounded-xl border px-3 py-3 font-semibold"
@@ -341,6 +361,7 @@ export default function VaccinationOnsiteQueueJoinPage({
                 {field.kind === "employee_id" ? (
                   <div className="mt-1 text-xs text-slate-500">
                     ID ini dipakai untuk mencegah peserta mengambil nomor antrean ganda pada event yang sama.
+                    {field.exactLength ? ` Wajib tepat ${field.exactLength} karakter huruf/angka.` : ""}
                   </div>
                 ) : null}
                 {field.recoveryKey ? (

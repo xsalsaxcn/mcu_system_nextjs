@@ -18,6 +18,7 @@ export type OnsiteQueueFormField = {
   placeholder?: string;
   required: boolean;
   recoveryKey: boolean;
+  exactLength?: number;
 };
 
 export const DEFAULT_ONSITE_QUEUE_FORM_CONFIG: OnsiteQueueFormField[] = [
@@ -36,6 +37,7 @@ export const DEFAULT_ONSITE_QUEUE_FORM_CONFIG: OnsiteQueueFormField[] = [
     placeholder: "NIK Karyawan",
     required: true,
     recoveryKey: true,
+    exactLength: 8,
   },
 ];
 
@@ -75,7 +77,15 @@ export function defaultOnsiteQueueField(
     return { id: `participant_name${suffix}`, kind, label: "Nama Lengkap", placeholder: "Nama lengkap", required: true, recoveryKey: false };
   }
   if (kind === "employee_id") {
-    return { id: `employee_id${suffix}`, kind, label: "NIK Karyawan", placeholder: "NIK Karyawan", required: true, recoveryKey: false };
+    return {
+      id: `employee_id${suffix}`,
+      kind,
+      label: "NIK Karyawan",
+      placeholder: "NIK Karyawan",
+      required: true,
+      recoveryKey: false,
+      exactLength: 8,
+    };
   }
   if (kind === "whatsapp") {
     return { id: `whatsapp${suffix}`, kind, label: "No. WhatsApp", placeholder: "08xxxxxxxxxx", required: true, recoveryKey: false };
@@ -151,6 +161,16 @@ export function sanitizeOnsiteQueueFormConfig(
     const recoveryKey = requestedRecovery && !recoveryAssigned;
     if (recoveryKey) recoveryAssigned = true;
 
+    const exactLengthRaw = Number(raw.exactLength ?? raw.exact_length);
+    const exactLength =
+      kind === "employee_id" &&
+      Number.isFinite(exactLengthRaw) &&
+      Number.isInteger(exactLengthRaw) &&
+      exactLengthRaw >= 1 &&
+      exactLengthRaw <= 32
+        ? exactLengthRaw
+        : undefined;
+
     result.push({
       id,
       kind,
@@ -158,6 +178,7 @@ export function sanitizeOnsiteQueueFormConfig(
       placeholder: cleanText(raw.placeholder, defaults.placeholder || ""),
       required: recoveryKey ? true : Boolean(raw.required),
       recoveryKey,
+      ...(exactLength ? { exactLength } : {}),
     });
   }
 
