@@ -1562,8 +1562,8 @@ export default function VaccinationSessionPage() {
                       key={field.id}
                       className={`grid gap-3 rounded-2xl border bg-white p-3 ${
                         field.kind === "employee_id"
-                          ? "lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_130px_110px_150px_auto]"
-                          : "lg:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_110px_150px_auto]"
+                          ? "md:grid-cols-2 xl:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_140px_110px_150px_auto]"
+                          : "md:grid-cols-2 xl:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_110px_150px_auto]"
                       }`}
                     >
                       <div className="flex items-center">
@@ -1572,32 +1572,32 @@ export default function VaccinationSessionPage() {
                         </span>
                       </div>
 
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                      <label className="grid min-w-0 gap-1 text-xs font-bold text-slate-600">
                         Label
                         <input
                           value={field.label}
                           onChange={(e) =>
                             updateEditQueueField(index, { label: e.target.value })
                           }
-                          className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                          className="w-full min-w-0 rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
                           placeholder="Label field"
                         />
                       </label>
 
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                      <label className="grid min-w-0 gap-1 text-xs font-bold text-slate-600">
                         Placeholder
                         <input
                           value={field.placeholder || ""}
                           onChange={(e) =>
                             updateEditQueueField(index, { placeholder: e.target.value })
                           }
-                          className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                          className="w-full min-w-0 rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
                           placeholder="Placeholder"
                         />
                       </label>
 
                       {field.kind === "employee_id" ? (
-                        <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        <label className="grid min-w-0 gap-1 text-xs font-bold text-slate-600">
                           Jumlah Karakter
                           <input
                             type="number"
@@ -1611,16 +1611,16 @@ export default function VaccinationSessionPage() {
                                 exactLength: value ? Number(value) : undefined,
                               });
                             }}
-                            className="rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
+                            className="w-full min-w-0 rounded-xl border px-3 py-2 text-sm font-semibold text-slate-900"
                             placeholder="8"
                           />
-                          <span className="text-[10px] font-semibold text-slate-400">
+                          <span className="whitespace-normal text-[10px] font-semibold leading-4 text-slate-400">
                             Kosong = tidak dibatasi
                           </span>
                         </label>
                       ) : null}
 
-                      <label className="flex items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black text-slate-700">
+                      <label className="flex min-h-[44px] items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black text-slate-700">
                         <input
                           type="checkbox"
                           checked={field.required}
@@ -1632,7 +1632,7 @@ export default function VaccinationSessionPage() {
                         Wajib
                       </label>
 
-                      <label className={`flex items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black ${
+                      <label className={`flex min-h-[44px] items-center gap-2 self-end rounded-xl border px-3 py-2.5 text-xs font-black ${
                         field.recoveryKey
                           ? "border-violet-300 bg-violet-50 text-violet-800"
                           : "border-slate-200 text-slate-700"
@@ -1646,7 +1646,7 @@ export default function VaccinationSessionPage() {
                         Recovery Key
                       </label>
 
-                      <div className="flex items-end gap-1">
+                      <div className="flex flex-wrap items-end justify-start gap-1 xl:justify-end">
                         <button
                           type="button"
                           disabled={index === 0}
