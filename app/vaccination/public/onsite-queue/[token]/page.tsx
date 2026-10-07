@@ -44,7 +44,11 @@ export default function VaccinationOnsiteQueueJoinPage({
   );
 
   function ticketStorageKey() {
-    return `vaccination_onsite_ticket_${params.token}`;
+    // One-time namespace bump after the shared-ticket incident.
+    // Existing DB tickets and queue numbers are NOT changed. On rescan, a
+    // participant submits the configured Recovery Key; the compatibility
+    // guard returns the same valid queue number when it already belongs to them.
+    return `vaccination_onsite_ticket_v2_${params.token}`;
   }
 
   function saveTicketToken(ticketToken: string) {
@@ -366,7 +370,7 @@ export default function VaccinationOnsiteQueueJoinPage({
                 ) : null}
                 {field.recoveryKey ? (
                   <div className="mt-1 text-xs font-semibold text-violet-600">
-                    Simpan data ini. Field ini dipakai untuk memulihkan antrean jika browser tertutup.
+                    Simpan data ini. Field ini adalah identitas utama antrean dan dipakai untuk memulihkan tiket jika browser tertutup.
                   </div>
                 ) : null}
               </div>

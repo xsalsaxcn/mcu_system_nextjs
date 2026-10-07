@@ -178,24 +178,21 @@ function collectGlobalIdentityKeys(
   fields: OnsiteQueueFormField[],
   formData: Record<string, string>,
 ) {
-  const keys = new Set<string>();
+  // The Recovery Key configured in Session is the canonical participant
+  // identity for queue ownership. Other fields may be non-unique
+  // (department, role, etc.) and must never merge different participants.
+  const recoveryField = fields.find((field) => field.recoveryKey);
+  if (!recoveryField) return [];
 
-  for (const field of fields) {
-    const value = clean(formData[field.id]);
-    if (!value) continue;
+  const value = clean(formData[recoveryField.id]);
+  if (!value) return [];
 
-    if (
-      field.kind === "employee_id" ||
-      field.kind === "whatsapp" ||
-      field.kind === "email" ||
-      field.recoveryKey
-    ) {
-      const key = globalIdentityKey(field, value);
-      if (key) keys.add(key);
-    }
-  }
+  const key = globalIdentityKey(recoveryField, value);
+  return key ? [key] : [];
+}
 
-  return Array.from(keys).sort();
+function normalizedParticipantName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ");
 }
 
 function recoveryHash(event: any, field: OnsiteQueueFormField, value: any) {
@@ -548,11 +545,97 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const dedupeKey = employeeId
-    ? employeeKey(employeeId)
-    : recoveryKeyHash
-      ? `REC_${recoveryKeyHash.slice(0, 48).toUpperCase()}`
+  const canonicalDedupeKey = recoveryKeyHash
+    ? `REC_${recoveryKeyHash.slice(0, 48).toUpperCase()}`
+    : employeeId
+      ? employeeKey(employeeId)
       : anonymousEmployeeKey(eventToken, joinToken);
+
+  let dedupeKey = canonicalDedupeKey;
+
+  // Compatibility guard: preserve valid queue numbers that already exist.
+  //
+  // A) Exact Recovery Key already owns an entry in this event:
+  //    reuse that entry's existing employee_id_key -> same queue number.
+  //
+  // B) Older row exists under the legacy employee_id key AND participant
+  //    name matches:
+  //    reuse that old key -> same queue number.
+  //
+  // C) Legacy key belongs to a DIFFERENT participant:
+  //    never reuse it. The second participant gets a canonical Recovery-Key
+  //    identity and therefore cannot inherit somebody else's ticket.
+  if (recoveryKeyHash) {
+    const existingRecoveryResult = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .select(
+        "id,participant_name,employee_id_key,queue_number,queue_status,recovery_key_hash",
+      )
+      .eq("event_id", eventResult.data.id)
+      .eq("recovery_key_hash", recoveryKeyHash)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRecoveryResult.error) {
+      return fail(existingRecoveryResult.error.message, 500);
+    }
+
+    const exactRecoveryEntry = existingRecoveryResult.data || null;
+
+    if (exactRecoveryEntry) {
+      const existingName = normalizedParticipantName(
+        exactRecoveryEntry.participant_name,
+      );
+      const submittedName = normalizedParticipantName(participantName);
+
+      if (existingName && submittedName && existingName !== submittedName) {
+        return fail(
+          "Recovery Key / NIK tersebut sudah terhubung ke peserta lain pada session ini. Mohon cek kembali data peserta atau hubungi admin.",
+          409,
+          {
+            code: "QUEUE_IDENTITY_COLLISION",
+            queue_number: exactRecoveryEntry.queue_number || null,
+          },
+        );
+      }
+
+      if (clean(exactRecoveryEntry.employee_id_key)) {
+        dedupeKey = clean(exactRecoveryEntry.employee_id_key);
+      }
+    } else if (employeeId) {
+      const legacyKey = employeeKey(employeeId);
+
+      const legacyResult = await supabase
+        .from("vaccination_onsite_queue_entries")
+        .select("id,participant_name,employee_id_key,queue_number,queue_status")
+        .eq("event_id", eventResult.data.id)
+        .eq("employee_id_key", legacyKey)
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (legacyResult.error) {
+        return fail(legacyResult.error.message, 500);
+      }
+
+      const legacyEntry = legacyResult.data || null;
+
+      if (legacyEntry) {
+        const existingName = normalizedParticipantName(
+          legacyEntry.participant_name,
+        );
+        const submittedName = normalizedParticipantName(participantName);
+
+        if (existingName && submittedName && existingName === submittedName) {
+          // Legitimate pre-hotfix ticket: keep its original queue number.
+          dedupeKey = legacyKey;
+        }
+        // Different participant name: do not reuse the legacy key.
+        // dedupeKey remains canonicalDedupeKey.
+      }
+    }
+  }
 
   const result = await supabase.rpc("vaccination_onsite_claim_queue_v3", {
     p_event_id: eventResult.data.id,
@@ -578,6 +661,24 @@ export async function POST(req: NextRequest) {
   let entry = payload?.entry;
   const entryId = Number(entry?.id || 0);
   if (!entryId) return fail("Entry antrean tidak valid.", 500);
+
+  // Last line of defense: never return an existing ticket to a different
+  // participant. This happens BEFORE form/recovery metadata can update the row.
+  if (!payload?.created) {
+    const existingName = normalizedParticipantName(entry?.participant_name);
+    const submittedName = normalizedParticipantName(participantName);
+
+    if (existingName && submittedName && existingName !== submittedName) {
+      return fail(
+        "Tiket antrean tersebut sudah dimiliki peserta lain. Sistem membatalkan proses agar nomor antrean tidak tertukar.",
+        409,
+        {
+          code: "QUEUE_IDENTITY_COLLISION",
+          queue_number: entry?.queue_number || null,
+        },
+      );
+    }
+  }
 
   const formSnapshot = {
     fields: formFields.map((field) => ({
@@ -681,6 +782,7 @@ export async function POST(req: NextRequest) {
           kind: recoveryField.kind,
         }
       : null,
+    identity_source: recoveryField ? "RECOVERY_KEY_COMPAT" : "FALLBACK",
     message: whatsappEnabled
       ? phone
         ? `Nomor antrean ${entry?.queue_number || ""} berhasil dibuat. Pengingat WhatsApp aktif untuk session ini.`
