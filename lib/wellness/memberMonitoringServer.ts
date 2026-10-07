@@ -203,20 +203,38 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
   const today=dates.at(-1)||jakartaDay();
   if(!ids.length)return{generated_at:new Date().toISOString(),today,dates,summary:{total_participants:0,on_track:0,follow_up:0,not_updated:0,streak_success_today:0},participants:[],source_contract:"participant_coach_canonical"};
 
-  const [controlMap,nutritionHistory,activitiesAll,notesAll]=await Promise.all([
+  const [controlMap,nutritionHistory,activitiesAll,notesAll,pointRowsAll]=await Promise.all([
     loadParticipantControlMap(opts.supabase,ids),
     loadCanonicalNutritionHistories({supabase:opts.supabase,participants}),
     pagedRows(opts.supabase,"wellness_activity_logs",ids,["participant_id","log_date","id"]),
     pagedRows(opts.supabase,"wellness_coach_notes",ids,["participant_id","session_date","created_at","id"]),
+    // WELLNESS_MEMBER_MONITORING_POINTS_V1
+    // Read the persisted canonical point ledger only. Monitoring never awards,
+    // recalculates, reconciles, or mutates points.
+    pagedRows(opts.supabase,"wellness_point_logs",ids,["participant_id","log_date","id"]),
   ]);
   const activities=latest2000(activitiesAll,["log_date","started_at","updated_at","created_at"]);
   const notes=first2000(notesAll,["session_date","created_at","updated_at"]);
+  const pointRows=latest2000(pointRowsAll,["log_date","created_at","updated_at"]);
 
   const result=participants.map(participant=>{
     const id=pid(participant);
     const activityRows=filterOperationalRowsForProgram(participant,filterActivityRowsByFitnessSource(activities.get(id)||[],controlMap),"","",["log_date","started_at","created_at"]);
     const nutrition=nutritionHistory.byParticipantId.get(id);
     const nutritionRows=filterOperationalRowsForProgram(participant,nutrition?.logs||[],"","",["log_date","created_at"]);
+    const participantPointRows=filterOperationalRowsForProgram(
+      participant,
+      pointRows.get(id)||[],
+      "",
+      "",
+      ["log_date","created_at"],
+    );
+    const pointsByDate=new Map<string,number>();
+    for(const row of participantPointRows){
+      const date=wellnessJakartaDate(row?.log_date||row?.created_at||row?.updated_at);
+      if(!date)continue;
+      pointsByDate.set(date,(pointsByDate.get(date)||0)+num(row?.points));
+    }
     const timeline=buildEffectiveTargetTimeline({participant,notes:notes.get(id)||[]});
     const streakBase=buildWellnessStreakSummary({
       nutritionRows,
@@ -255,9 +273,10 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
           num(base?.workout_target_calories)||num(datedTarget?.workout)||300,
         step_target:num(datedTarget?.steps)||8000,
       };
-      return{...d,status:status(d)};
+      return{...d,points:num(pointsByDate.get(date)),status:status(d)};
     });
     const avg=(field:string)=>Math.round(days.reduce((sum:number,d:any)=>sum+num(d?.[field]),0)/Math.max(days.length,1));
+    const totalPoints=days.reduce((sum:number,d:any)=>sum+num(d?.points),0);
     const company=companyId(participant); const control=controlMap.get(id)||participant?.wellness_control||{};
     const accessGroupIds=opts.groupUnitMap?participantScopeIds(participant,opts.groupUnitMap):[];
     const assigned=opts.groupUnitMap&&opts.coachAssignments?matchingCoachAssignment(participant,opts.coachAssignments,opts.groupUnitMap):null;
@@ -271,10 +290,10 @@ export async function loadWellnessMemberMonitoring(opts:{supabase:any;participan
       streak:{current_streak:num(streak.current_streak),longest_streak:num(streak.longest_streak),success_dates:streak.success_dates||[]},
       target:{nutrition:num(timeline.current.nutrition),workout:num(timeline.current.workout)||300,steps:num(timeline.current.steps),timeline:targetTimelineSummary(timeline)},
       today:days.at(-1),days,
-      weekly:{success_days:days.filter((d:any)=>d.success).length,completion_percent:Math.round(days.filter((d:any)=>d.success).length/Math.max(days.length,1)*100),period_days:days.length,average_nutrition_calories:avg("nutrition_calories"),average_workout_calories:avg("workout_calories"),average_steps:avg("steps")},
-      sources:{nutrition:nutrition?.sources||null,nutrition_rows:nutritionRows.length,activity_rows:activityRows.length,fitness_source:clean(control?.fitness_source||"none")},
+      weekly:{success_days:days.filter((d:any)=>d.success).length,completion_percent:Math.round(days.filter((d:any)=>d.success).length/Math.max(days.length,1)*100),period_days:days.length,average_nutrition_calories:avg("nutrition_calories"),average_workout_calories:avg("workout_calories"),average_steps:avg("steps"),total_points:totalPoints,average_points:avg("points")},
+      sources:{nutrition:nutrition?.sources||null,nutrition_rows:nutritionRows.length,activity_rows:activityRows.length,point_rows:participantPointRows.length,fitness_source:clean(control?.fitness_source||"none")},
     };
   });
   const summary=result.reduce((a:any,item:any)=>{const k=clean(item?.today?.status?.key);if(k==="on_track")a.on_track++;else if(k==="not_updated")a.not_updated++;else a.follow_up++;if(item?.today?.success)a.streak_success_today++;return a},{total_participants:result.length,on_track:0,follow_up:0,not_updated:0,streak_success_today:0});
-  return{generated_at:new Date().toISOString(),today,dates,period:{from:dates[0]||today,to:dates.at(-1)||today,days:dates.length},summary,participants:result,source_contract:"participant_coach_canonical",source_markers:{nutrition:"loadCanonicalNutritionHistories",activity:"filterActivityRowsByFitnessSource + filterOperationalRowsForProgram",targets:"buildEffectiveTargetTimeline",streak:"buildWellnessStreakSummary"}};
+  return{generated_at:new Date().toISOString(),today,dates,period:{from:dates[0]||today,to:dates.at(-1)||today,days:dates.length},summary,participants:result,source_contract:"participant_coach_canonical",source_markers:{nutrition:"loadCanonicalNutritionHistories",activity:"filterActivityRowsByFitnessSource + filterOperationalRowsForProgram",targets:"buildEffectiveTargetTimeline",streak:"buildWellnessStreakSummary",points:"wellness_point_logs read-only ledger"}};
 }
