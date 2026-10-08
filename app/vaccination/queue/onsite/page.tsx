@@ -207,6 +207,43 @@ export default function VaccinationOnsiteQueuePage() {
     void post({ action: "delete", eventId: data.event.id, entryId: entry.id });
   }
 
+  function editEmployeeId(entry: any) {
+    const formConfig = Array.isArray(data?.session?.onsite_queue_form_config)
+      ? data.session.onsite_queue_form_config
+      : [];
+    const employeeField = formConfig.find(
+      (field: any) => String(field?.kind || "") === "employee_id",
+    );
+    const exactLength = Number(employeeField?.exactLength || 0);
+
+    const input = window.prompt(
+      `Edit NIK Karyawan untuk ${entry?.participant_name || "peserta"} (${entry?.queue_number || "-"})${exactLength > 0 ? `\nHarus tepat ${exactLength} karakter.` : ""}\n\nNomor dan history antrean TIDAK akan berubah.`,
+      String(entry?.employee_id || ""),
+    );
+    if (input === null) return;
+
+    const nextEmployeeId = input.trim().replace(/\s+/g, "");
+    if (!nextEmployeeId) {
+      window.alert("NIK Karyawan tidak boleh kosong.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Simpan perubahan NIK?\n\n${entry?.employee_id || "-"} → ${nextEmployeeId}\n\nNomor antrean ${entry?.queue_number || "-"} dan history antrean tetap.`
+      )
+    ) {
+      return;
+    }
+
+    void post({
+      action: "edit-employee-id",
+      eventId: data.event.id,
+      entryId: entry.id,
+      employeeId: nextEmployeeId,
+    });
+  }
+
   const scanUrl = data?.rolling?.scan_path && origin ? `${origin}${data.rolling.scan_path}` : "";
   const operatorSessionUrl =
     origin && sessionId
@@ -317,6 +354,7 @@ export default function VaccinationOnsiteQueuePage() {
                     <button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Skip</button>
                     <button onClick={() => post({ action: "done", eventId: data.event.id, entryId: entry.id })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
                     <button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white disabled:opacity-40">Cancel</button>
+                    <button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 disabled:opacity-40">Edit NIK</button>
                     <button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button>
                   </div>
                 ) : null}
@@ -516,7 +554,8 @@ export default function VaccinationOnsiteQueuePage() {
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <button disabled={busy} onClick={() => post({ action: "reactivate", eventId: data.event.id, entryId: entry.id })} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Aktifkan Kembali</button>
                       <button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Cancel</button>
-                      <button disabled={busy} onClick={() => deleteQueue(entry)} className="col-span-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 disabled:opacity-40">Hapus</button>
+                      <button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-40">Edit NIK</button>
+                      <button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 disabled:opacity-40">Hapus</button>
                     </div>
                   </div>
                 ))}
@@ -532,7 +571,7 @@ export default function VaccinationOnsiteQueuePage() {
               <div className="max-h-[520px] overflow-auto">
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">WA Reminder</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{!data?.whatsapp_prepare?.enabled_for_session ? <span className="text-slate-400">Nonaktif</span> : entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button><button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-40">Cancel</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
+                  <tbody className="divide-y">{waiting.map((entry: any, index: number) => <tr key={entry.id}><td className="p-3 text-xl font-black">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs font-bold">{!data?.whatsapp_prepare?.enabled_for_session ? <span className="text-slate-400">Nonaktif</span> : entry.wa_prepare_sent_at ? <span className="text-emerald-700">Terkirim ✓</span> : entry.wa_prepare_last_error ? <span title={entry.wa_prepare_last_error} className="text-red-700">Gagal ⚠</span> : active.length && index === 0 ? <span className="text-violet-700">Target berikutnya</span> : <span className="text-slate-400">Menunggu</span>}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button onClick={() => post({ action: "skip", eventId: data.event.id, entryId: entry.id })} className="rounded-lg border px-3 py-1 text-xs font-bold text-amber-700">Skip</button><button disabled={busy} onClick={() => cancelQueue(entry)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700 disabled:opacity-40">Cancel</button><button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 disabled:opacity-40">Edit NIK</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-bold text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
                 </table>
               </div>
             </section>
@@ -549,7 +588,7 @@ export default function VaccinationOnsiteQueuePage() {
                 <div className="max-h-[420px] overflow-auto">
                   <table className="min-w-full text-sm">
                     <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Cancel</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                    <tbody className="divide-y">{cancelled.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-red-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.cancelled_at ? new Date(entry.cancelled_at).toLocaleString("id-ID") : "-"}</td><td className="p-3"><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></td></tr>)}</tbody>
+                    <tbody className="divide-y">{cancelled.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-red-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.cancelled_at ? new Date(entry.cancelled_at).toLocaleString("id-ID") : "-"}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 disabled:opacity-40">Edit NIK</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
                   </table>
                   {!cancelled.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta Cancel.</div> : null}
                 </div>
@@ -585,7 +624,7 @@ export default function VaccinationOnsiteQueuePage() {
                 <div className="max-h-[520px] overflow-auto">
                   <table className="min-w-full text-sm">
                     <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => recallQueue(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-40">Recall</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
+                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => recallQueue(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-40">Recall</button><button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 hover:bg-violet-100 disabled:opacity-40">Edit NIK</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
                   </table>
                   {!done.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div> : null}
                 </div>

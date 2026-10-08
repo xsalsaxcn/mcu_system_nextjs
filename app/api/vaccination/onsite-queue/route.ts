@@ -222,6 +222,210 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const entry = entryResult.data;
 
+  if (action === "edit-employee-id") {
+    if (entry?.form_data?.__deleted?.at) {
+      return fail("Data Terhapus tidak dapat diedit dari antrean aktif.", 409);
+    }
+
+    const requestedEmployeeId = clean(body.employeeId || body.employee_id).replace(/\s+/g, "");
+    if (!requestedEmployeeId) return fail("NIK Karyawan wajib diisi.");
+    if (!/^[A-Za-z0-9]+$/.test(requestedEmployeeId)) {
+      return fail("NIK Karyawan hanya boleh berisi huruf dan angka.");
+    }
+
+    const eventResult = await supabase
+      .from("vaccination_onsite_queue_events")
+      .select("id,session_id,qr_secret")
+      .eq("id", eventId)
+      .single();
+    if (eventResult.error) return fail(eventResult.error.message, 500);
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,onsite_queue_form_config")
+      .eq("id", eventResult.data.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+
+    const formConfig = Array.isArray(sessionResult.data?.onsite_queue_form_config)
+      ? sessionResult.data.onsite_queue_form_config
+      : [];
+    const employeeField = formConfig.find(
+      (field: any) => clean(field?.kind) === "employee_id",
+    );
+
+    if (!employeeField) {
+      return fail("Field NIK Karyawan tidak ditemukan pada konfigurasi Session.", 409);
+    }
+
+    const exactLengthRaw = Number(employeeField?.exactLength || 0);
+    const exactLength =
+      Number.isFinite(exactLengthRaw) && exactLengthRaw > 0
+        ? Math.trunc(exactLengthRaw)
+        : 0;
+
+    if (exactLength && requestedEmployeeId.length !== exactLength) {
+      return fail(`NIK Karyawan harus tepat ${exactLength} karakter.`);
+    }
+
+    const normalizedEmployeeId = requestedEmployeeId.toUpperCase();
+    const oldEmployeeId = clean(entry.employee_id).replace(/\s+/g, "");
+    const oldEmployeeKey = clean(entry.employee_id_key);
+    const employeeFieldId = clean(employeeField?.id);
+
+    if (!employeeFieldId) {
+      return fail("Konfigurasi field NIK Karyawan tidak valid.", 409);
+    }
+
+    const isRecoveryEmployeeField = Boolean(employeeField?.recoveryKey);
+    let newRecoveryHash = clean(entry.recovery_key_hash);
+    let nextIdentityKeys = Array.isArray(entry.identity_keys)
+      ? entry.identity_keys
+      : [];
+    let nextEmployeeIdKey = oldEmployeeKey;
+
+    if (isRecoveryEmployeeField) {
+      newRecoveryHash = createHmac("sha256", clean(eventResult.data.qr_secret))
+        .update(`recovery.${employeeFieldId}.${normalizedEmployeeId}`)
+        .digest("hex");
+
+      const duplicateRecovery = await supabase
+        .from("vaccination_onsite_queue_entries")
+        .select("id,queue_number,participant_name,queue_status")
+        .eq("event_id", eventId)
+        .eq("recovery_key_hash", newRecoveryHash)
+        .neq("id", entryId)
+        .limit(1)
+        .maybeSingle();
+
+      if (duplicateRecovery.error) {
+        return fail(duplicateRecovery.error.message, 500);
+      }
+      if (duplicateRecovery.data) {
+        return fail(
+          `NIK ${requestedEmployeeId} sudah dipakai oleh ${duplicateRecovery.data.queue_number || "antrean lain"} (${duplicateRecovery.data.participant_name || "peserta lain"}).`,
+          409,
+          { code: "EMPLOYEE_ID_ALREADY_USED" },
+        );
+      }
+
+      nextIdentityKeys = [`EMPLOYEE:${normalizedEmployeeId}`];
+
+      // Legacy rows used raw NIK as employee_id_key. Update only those rows.
+      // Newer REC_* keys remain untouched so the existing queue ownership key
+      // and queue number/history are not rewritten.
+      if (
+        oldEmployeeKey &&
+        oldEmployeeId &&
+        oldEmployeeKey === oldEmployeeId.toUpperCase()
+      ) {
+        const duplicateLegacyKey = await supabase
+          .from("vaccination_onsite_queue_entries")
+          .select("id,queue_number,participant_name")
+          .eq("event_id", eventId)
+          .eq("employee_id_key", normalizedEmployeeId)
+          .neq("id", entryId)
+          .limit(1)
+          .maybeSingle();
+
+        if (duplicateLegacyKey.error) {
+          return fail(duplicateLegacyKey.error.message, 500);
+        }
+        if (duplicateLegacyKey.data) {
+          return fail(
+            `NIK ${requestedEmployeeId} sudah terhubung ke ${duplicateLegacyKey.data.queue_number || "antrean lain"}.`,
+            409,
+            { code: "EMPLOYEE_ID_ALREADY_USED" },
+          );
+        }
+
+        nextEmployeeIdKey = normalizedEmployeeId;
+      }
+    }
+
+    if (
+      normalizedEmployeeId === oldEmployeeId.toUpperCase() &&
+      clean(entry.form_data?.[employeeFieldId]).toUpperCase() === normalizedEmployeeId
+    ) {
+      return ok({
+        message: `${entry.queue_number}: NIK Karyawan tidak berubah.`,
+        entry,
+        queue_unchanged: true,
+      });
+    }
+
+    const existingFormData =
+      entry?.form_data &&
+      typeof entry.form_data === "object" &&
+      !Array.isArray(entry.form_data)
+        ? entry.form_data
+        : {};
+    const previousEdits = Array.isArray(existingFormData.__employee_id_edits)
+      ? existingFormData.__employee_id_edits
+      : [];
+    const editedBy =
+      clean((user as any)?.email) ||
+      clean((user as any)?.username) ||
+      clean((user as any)?.name) ||
+      clean((user as any)?.id) ||
+      "vaccination_operator";
+
+    const updatePayload: Record<string, any> = {
+      employee_id: requestedEmployeeId,
+      form_data: {
+        ...existingFormData,
+        [employeeFieldId]: requestedEmployeeId,
+        __employee_id_edits: [
+          ...previousEdits,
+          {
+            at: now,
+            by: editedBy,
+            from: oldEmployeeId,
+            to: requestedEmployeeId,
+            queue_number: entry.queue_number,
+          },
+        ].slice(-20),
+      },
+    };
+
+    if (isRecoveryEmployeeField) {
+      updatePayload.recovery_field_id = employeeFieldId;
+      updatePayload.recovery_key_hash = newRecoveryHash;
+      updatePayload.identity_keys = nextIdentityKeys;
+      if (nextEmployeeIdKey !== oldEmployeeKey) {
+        updatePayload.employee_id_key = nextEmployeeIdKey;
+      }
+    }
+
+    const result = await supabase
+      .from("vaccination_onsite_queue_entries")
+      .update(updatePayload)
+      .eq("id", entryId)
+      .eq("event_id", eventId)
+      .select("*")
+      .single();
+
+    if (result.error) return fail(result.error.message, 500);
+
+    const updated = result.data;
+    if (
+      clean(updated.queue_number) !== clean(entry.queue_number) ||
+      Number(updated.queue_sequence) !== Number(entry.queue_sequence) ||
+      clean(updated.queue_status) !== clean(entry.queue_status)
+    ) {
+      return fail(
+        "Safety check gagal: nomor/urutan/status antrean berubah. Hubungi admin sistem.",
+        500,
+      );
+    }
+
+    return ok({
+      message: `${entry.queue_number}: NIK Karyawan berhasil diubah dari ${oldEmployeeId || "-"} menjadi ${requestedEmployeeId}. Nomor dan history antrean tetap.`,
+      entry: updated,
+      queue_unchanged: true,
+    });
+  }
+
   if (action === "recall") {
     const currentStatus = clean(entry.queue_status).toUpperCase();
     if (currentStatus !== "DONE") {
