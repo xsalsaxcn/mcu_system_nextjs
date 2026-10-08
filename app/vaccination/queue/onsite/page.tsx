@@ -43,6 +43,7 @@ export default function VaccinationOnsiteQueuePage() {
   const [busy, setBusy] = useState(false);
   const [origin, setOrigin] = useState("");
   const [tvOnly, setTvOnly] = useState(false);
+  const [doneSearch, setDoneSearch] = useState("");
 
   useEffect(() => {
     const requestedSessionId =
@@ -182,6 +183,21 @@ export default function VaccinationOnsiteQueuePage() {
   const skipped = useMemo(() => liveEntries.filter((x: any) => x.queue_status === "SKIPPED"), [liveEntries]);
   const done = useMemo(() => liveEntries.filter((x: any) => x.queue_status === "DONE"), [liveEntries]);
   const cancelled = useMemo(() => liveEntries.filter((x: any) => x.queue_status === "CANCELLED"), [liveEntries]);
+  const filteredDone = useMemo(() => {
+    const keyword = doneSearch.trim().toLowerCase();
+    if (!keyword) return done;
+
+    return done.filter((entry: any) =>
+      [
+        entry?.queue_number,
+        entry?.participant_name,
+        entry?.employee_id,
+        entry?.phone,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .some((value) => value.includes(keyword))
+    );
+  }, [done, doneSearch]);
 
   function cancelQueue(entry: any) {
     const confirmed = window.confirm(
@@ -621,12 +637,42 @@ export default function VaccinationOnsiteQueuePage() {
               </div>
               <details>
                 <summary className="cursor-pointer border-b px-4 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Buka / tutup tabel peserta Done</summary>
+                <div className="border-b bg-white p-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="relative w-full sm:max-w-md">
+                      <input
+                        value={doneSearch}
+                        onChange={(event) => setDoneSearch(event.target.value)}
+                        placeholder="Cari no antrean, nama, NIK, atau No HP..."
+                        className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 pr-20 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                      />
+                      {doneSearch ? (
+                        <button
+                          type="button"
+                          onClick={() => setDoneSearch("")}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-black text-slate-500 hover:bg-slate-100"
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="text-xs font-bold text-slate-500">
+                      {doneSearch.trim()
+                        ? `Menampilkan ${filteredDone.length} dari ${done.length} peserta`
+                        : `${done.length} peserta`}
+                    </div>
+                  </div>
+                </div>
                 <div className="max-h-[520px] overflow-auto">
                   <table className="min-w-full text-sm">
                     <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-3 text-left">No</th><th className="p-3 text-left">Nama</th><th className="p-3 text-left">NIK Karyawan</th><th className="p-3 text-left">No HP</th><th className="p-3 text-left">Selesai</th><th className="p-3 text-left">Aksi</th></tr></thead>
-                    <tbody className="divide-y">{done.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => recallQueue(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-40">Recall</button><button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 hover:bg-violet-100 disabled:opacity-40">Edit NIK</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
+                    <tbody className="divide-y">{filteredDone.map((entry: any) => <tr key={entry.id}><td className="p-3 text-xl font-black text-emerald-700">{entry.queue_number}</td><td className="p-3 font-bold">{entry.participant_name}</td><td className="p-3">{entry.employee_id}</td><td className="p-3 text-xs">{entry.phone || "-"}</td><td className="p-3 text-xs">{entry.finished_at ? new Date(entry.finished_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => recallQueue(entry)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-40">Recall</button><button disabled={busy} onClick={() => editEmployeeId(entry)} className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 hover:bg-violet-100 disabled:opacity-40">Edit NIK</button><button disabled={busy} onClick={() => deleteQueue(entry)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-black text-slate-700 disabled:opacity-40">Hapus</button></div></td></tr>)}</tbody>
                   </table>
-                  {!done.length ? <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div> : null}
+                  {!done.length ? (
+                    <div className="p-4 text-sm text-slate-500">Belum ada peserta selesai.</div>
+                  ) : doneSearch.trim() && !filteredDone.length ? (
+                    <div className="p-4 text-sm font-semibold text-slate-500">Data tidak ditemukan.</div>
+                  ) : null}
                 </div>
               </details>
             </section>
