@@ -218,12 +218,16 @@ export default function VaccinationRegisterPage() {
   }, [registrations, sort]);
 
 
+  const activeQueueView = healthdayBazarEnabled && form.serviceMode === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+
   const queueReadyRegistrations = useMemo(() => {
     if (!healthdayBazarEnabled) return sortedRegistrations;
     return sortedRegistrations.filter((registration: any) =>
-      Boolean(String(registration?.queue_number || "").trim() || String(registration?.bazar_queue_number || "").trim()),
+      activeQueueView === "BAZAR"
+        ? Boolean(String(registration?.bazar_queue_number || "").trim())
+        : Boolean(String(registration?.queue_number || "").trim()),
     );
-  }, [sortedRegistrations, healthdayBazarEnabled]);
+  }, [sortedRegistrations, healthdayBazarEnabled, activeQueueView]);
 
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -878,7 +882,7 @@ export default function VaccinationRegisterPage() {
         <section className="mt-6 overflow-hidden rounded-2xl border">
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <div className="font-bold">{healthdayBazarEnabled ? `Antrean Session Ini · ${queueReadyRegistrations.length} peserta bernomor` : `Registrasi Session Ini · ${registrations.length} peserta`}</div>
+              <div className="font-bold">{healthdayBazarEnabled ? `Antrean ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta` : `Registrasi Session Ini · ${registrations.length} peserta`}</div>
               <input
                 className="mt-3 w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-80"
                 placeholder="Cari nama / Employee ID / NIK..."
@@ -900,10 +904,8 @@ export default function VaccinationRegisterPage() {
               <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
                 {healthdayBazarEnabled ? (
                   <tr>
-                    <th className="p-3 text-left">{sortButton("Antrean Healthday", "queue")}</th>
-                    <th className="p-3 text-left">Aksi Healthday</th>
-                    <th className="p-3 text-left">{sortButton("Antrean Bazar", "bazarQueue")}</th>
-                    <th className="p-3 text-left">Aksi Bazar</th>
+                    <th className="p-3 text-left">{activeQueueView === "BAZAR" ? sortButton("Antrean Bazar", "bazarQueue") : sortButton("Antrean Healthday", "queue")}</th>
+                    <th className="p-3 text-left">{activeQueueView === "BAZAR" ? "Aksi Bazar" : "Aksi Healthday"}</th>
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
@@ -926,7 +928,10 @@ export default function VaccinationRegisterPage() {
                 {visibleRegistrations.map((registration) => {
                   const info = statusInfo(registration.queue_status);
                   const bazarInfo = statusInfo(registration.bazar_queue_status);
-                  const items = Array.isArray(registration.items) ? registration.items : [];
+                  const allItems = Array.isArray(registration.items) ? registration.items : [];
+                  const items = healthdayBazarEnabled
+                    ? allItems.filter((item: any) => String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView)
+                    : allItems;
                   const serviceStatus = String(registration.patient_service_status || "HEALTHDAY").toUpperCase();
                   const hasA = !healthdayBazarEnabled || serviceHasTrack(serviceStatus, "A");
                   const hasB = healthdayBazarEnabled && serviceHasTrack(serviceStatus, "B");
@@ -940,15 +945,33 @@ export default function VaccinationRegisterPage() {
                     return (
                       <tr key={registration.id}>
                         <td className="p-3 align-top">
-                          {hasANumber ? (
+                          {activeQueueView === "BAZAR" ? (
+                            <div className="space-y-1">
+                              <div className="text-lg font-black text-violet-700">{registration.bazar_queue_number}</div>
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${bazarInfo.cls}`}>{bazarInfo.label}</span>
+                            </div>
+                          ) : (
                             <div className="space-y-1">
                               <div className="text-lg font-black text-blue-700">{registration.queue_number}</div>
                               <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${info.cls}`}>{info.label}</span>
                             </div>
-                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                          )}
                         </td>
                         <td className="p-3 align-top">
-                          {hasANumber ? (
+                          {activeQueueView === "BAZAR" ? (
+                            <div className="flex min-w-[125px] flex-col items-start gap-2">
+                              {canCancelRegistrationTrack(registration, "B") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelRegistrationTrack(registration, "B")}
+                                  disabled={cancellingTrackKey === bCancelKey}
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                >
+                                  {cancellingTrackKey === bCancelKey ? "Cancel..." : "Cancel Bazar"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : (
                             <div className="flex min-w-[145px] flex-col items-start gap-2">
                               <button
                                 type="button"
@@ -983,38 +1006,14 @@ export default function VaccinationRegisterPage() {
                                 </button>
                               ) : null}
                             </div>
-                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
-                        </td>
-                        <td className="p-3 align-top">
-                          {hasBNumber ? (
-                            <div className="space-y-1">
-                              <div className="text-lg font-black text-violet-700">{registration.bazar_queue_number}</div>
-                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${bazarInfo.cls}`}>{bazarInfo.label}</span>
-                            </div>
-                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
-                        </td>
-                        <td className="p-3 align-top">
-                          {hasBNumber ? (
-                            <div className="flex min-w-[125px] flex-col items-start gap-2">
-                              {canCancelRegistrationTrack(registration, "B") ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void cancelRegistrationTrack(registration, "B")}
-                                  disabled={cancellingTrackKey === bCancelKey}
-                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
-                                >
-                                  {cancellingTrackKey === bCancelKey ? "Cancel..." : "Cancel Bazar"}
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                          )}
                         </td>
                         <td className="p-3 align-top font-bold">
                           <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
                             {registration.participant_name}
                           </button>
                           <div className="mt-1 w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700">
-                            {serviceStatus === "COMBINATION" ? "Kombinasi" : serviceStatus === "BAZAR" ? "Bazar" : "Healthday"}
+                            {activeQueueView === "BAZAR" ? "Bazar" : "Healthday"}
                           </div>
                         </td>
                         <td className="p-3 align-top">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
