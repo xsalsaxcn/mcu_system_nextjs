@@ -14,6 +14,7 @@ const colors: Record<string, string> = {
   ADMINISTERED: "bg-emerald-100 text-emerald-700",
   DONE: "bg-emerald-100 text-emerald-700",
   SKIPPED: "bg-amber-100 text-amber-800",
+  CANCELLED: "bg-red-100 text-red-700",
 };
 
 
@@ -46,6 +47,7 @@ function label(status: string) {
   if (s === "IN_PROGRESS") return "Dokter";
   if (["ADMINISTERED", "DONE"].includes(s)) return "Selesai";
   if (s === "SKIPPED") return "Skipped";
+  if (s === "CANCELLED") return "Cancel";
   return status || "-";
 }
 
@@ -106,6 +108,19 @@ function cleanVaccinationSession(session: any) {
 function cleanVaccinationSessions(items: any) {
   return Array.isArray(items) ? items.map(cleanVaccinationSession) : [];
 }
+function clampVoiceRepeat(value: any) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(5, Math.max(1, Math.trunc(n)));
+}
+
+function queueVoiceText(registration: any, track: "A" | "B") {
+  const number = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
+  const name = String(registration?.participant_name || "peserta").trim();
+  const destination = track === "B" ? "Bazar" : "Healthday";
+  return `Nomor antrean ${number || ""}. ${name}. Silakan menuju ${destination}.`;
+}
+
 export default function VaccinationQueuePage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState("");
@@ -138,6 +153,28 @@ export default function VaccinationQueuePage() {
     setRegistrations(cleanVaccinationSessions(json.registrations || []));
   }
 
+  function announceQueue(registration: any, track: "A" | "B") {
+    const config = session?.existing_notification_config || {};
+    if (config?.enabled !== true) return;
+    if (String(config?.channel || "VOICE").toUpperCase() !== "VOICE") return;
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setMessage((current) => `${current} · Voice browser tidak didukung pada perangkat ini.`);
+      return;
+    }
+
+    const synth = window.speechSynthesis;
+    const repeat = clampVoiceRepeat(config?.repeat || 1);
+    const text = queueVoiceText(registration, track);
+    synth.cancel();
+    for (let i = 0; i < repeat; i += 1) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "id-ID";
+      utterance.rate = 0.92;
+      utterance.pitch = 1;
+      synth.speak(utterance);
+    }
+  }
+
   async function action(actionName: string, registrationId?: number, track: "A" | "B" = "A") {
     setError("");
     const json = await fetch("/api/vaccination/queue", {
@@ -147,7 +184,29 @@ export default function VaccinationQueuePage() {
     }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Action gagal."); return; }
     setMessage(json.message);
+    if (["call-next", "recall"].includes(actionName) && json.registration) {
+      announceQueue(json.registration, track);
+    }
     loadQueue();
+  }
+
+
+  function openRegistrationEdit(row: any) {
+    const params = new URLSearchParams({
+      session_id: String(row?.session_id || sessionId || ""),
+      edit_registration_id: String(row?.id || ""),
+    });
+    if (row?.source_id) params.set("source_id", String(row.source_id));
+    window.open(`/vaccination/register?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
+  function cancelTrack(row: any, track: "A" | "B") {
+    const number = trackNumber(row, track) || "-";
+    const confirmed = window.confirm(
+      `Cancel antrean ${track} ${number} - ${row?.participant_name || "peserta"}?\n\nHanya antrean ${track} yang dibatalkan. Antrean lain pada peserta Kombinasi tidak ikut berubah.`,
+    );
+    if (!confirmed) return;
+    void action("cancel", Number(row.id), track);
   }
 
   useEffect(() => { loadSessions(); }, []);
@@ -256,7 +315,8 @@ export default function VaccinationQueuePage() {
     const numberKey = track === "A" ? "queue_number" : "bazar_queue_number";
     const stats = trackStats(rows, track);
     const skipped = rows.filter((row) => trackStatus(row, track) === "SKIPPED");
-    const active = rows.filter((row) => trackStatus(row, track) !== "SKIPPED");
+    const history = rows.filter((row) => ["ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(trackStatus(row, track)));
+    const active = rows.filter((row) => !["SKIPPED", "ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(trackStatus(row, track)));
     const current = rows.find((row) => ["CALLED", "IN_PROGRESS"].includes(trackStatus(row, track)));
     const title = track === "A" ? "A · Healthday" : "B · Bazar";
     const accent = track === "A" ? "text-blue-700" : "text-violet-700";
@@ -276,13 +336,28 @@ export default function VaccinationQueuePage() {
         </div>
         <div className="mt-4 overflow-auto rounded-xl border">
           <table className="min-w-full text-sm"><thead className="bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-2 text-left">No</th><th className="p-2 text-left">Nama</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Aksi</th></tr></thead>
-            <tbody className="divide-y">{active.map((row) => { const s = String(row?.[statusKey] || "REGISTERED").toUpperCase(); return <tr key={`${track}-${row.id}`}><td className={`p-2 text-lg font-black ${accent}`}>{row?.[numberKey] || "-"}</td><td className="p-2"><div className="font-bold">{row.participant_name}</div><div className="mt-1 max-w-[260px] truncate text-[11px] font-semibold text-slate-500">{queueNote(row)}</div></td><td className="p-2"><span className={`rounded-full px-2 py-1 text-[11px] font-black ${colors[s] || "bg-slate-100 text-slate-700"}`}>{track === "B" && s === "IN_PROGRESS" ? "Proses Bazar" : label(s)}</span></td><td className="p-2"><div className="flex flex-wrap gap-1"><button onClick={() => action("recall", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Call</button>{track === "B" || doctorEnabled ? <button onClick={() => action("start", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Start</button> : null}{track === "B" ? <button onClick={() => action("finish", row.id, track)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">Selesai</button> : null}<button onClick={() => action("skip", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Skip</button></div></td></tr>; })}</tbody>
+            <tbody className="divide-y">{active.map((row) => { const s = String(row?.[statusKey] || "REGISTERED").toUpperCase(); return <tr key={`${track}-${row.id}`}><td className={`p-2 text-lg font-black ${accent}`}>{row?.[numberKey] || "-"}</td><td className="p-2"><div className="font-bold">{row.participant_name}</div><div className="mt-1 max-w-[260px] truncate text-[11px] font-semibold text-slate-500">{queueNote(row)}</div></td><td className="p-2"><span className={`rounded-full px-2 py-1 text-[11px] font-black ${colors[s] || "bg-slate-100 text-slate-700"}`}>{track === "B" && s === "IN_PROGRESS" ? "Proses Bazar" : label(s)}</span></td><td className="p-2"><div className="flex flex-wrap gap-1"><button onClick={() => action("recall", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Call</button>{track === "B" || doctorEnabled ? <button onClick={() => action("start", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Start</button> : null}{track === "B" ? <button onClick={() => action("finish", row.id, track)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">Selesai</button> : null}<button onClick={() => action("skip", row.id, track)} className="rounded-lg border px-2 py-1 text-[11px] font-bold">Skip</button><button onClick={() => openRegistrationEdit(row)} className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700">Edit</button><button onClick={() => cancelTrack(row, track)} className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700">Cancel</button></div></td></tr>; })}</tbody>
           </table>
         </div>
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
           <div className="flex items-center justify-between"><div className="text-sm font-black text-amber-900">Skipped {track}</div><div className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-black text-amber-900">{skipped.length}</div></div>
           <div className="mt-2 space-y-2">{skipped.map((row) => <div key={`skip-${track}-${row.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-white p-2"><div><div className="font-black text-amber-800">{row?.[numberKey] || "-"} · {row.participant_name}</div></div><button onClick={() => action("waiting", row.id, track)} className="rounded-lg bg-amber-600 px-2 py-1 text-[11px] font-black text-white">Aktifkan</button></div>)}{!skipped.length ? <div className="text-xs font-semibold text-amber-700">Belum ada antrean skipped.</div> : null}</div>
         </div>
+        <details className="mt-4 overflow-hidden rounded-xl border bg-slate-50">
+          <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-100">
+            <span>History {track} · Selesai / Cancel</span>
+            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-black text-slate-700">{history.length}</span>
+          </summary>
+          <div className="max-h-72 overflow-auto border-t bg-white">
+            <table className="min-w-full text-xs">
+              <thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2 text-left">No</th><th className="p-2 text-left">Nama</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Update</th><th className="p-2 text-left">Aksi</th></tr></thead>
+              <tbody className="divide-y">
+                {history.map((row) => { const s = trackStatus(row, track); const time = track === "B" ? (s === "CANCELLED" ? row.bazar_cancelled_at : row.bazar_finished_at) : row.updated_at; return <tr key={`history-${track}-${row.id}`}><td className={`p-2 font-black ${accent}`}>{row?.[numberKey] || "-"}</td><td className="p-2 font-bold">{row.participant_name}</td><td className="p-2"><span className={`rounded-full px-2 py-1 font-black ${colors[s] || "bg-slate-100 text-slate-700"}`}>{label(s)}</span></td><td className="p-2 text-slate-500">{time ? new Date(time).toLocaleString("id-ID") : "-"}</td><td className="p-2"><button onClick={() => openRegistrationEdit(row)} className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 font-bold text-blue-700">Edit</button></td></tr>; })}
+                {!history.length ? <tr><td colSpan={5} className="p-3 text-center font-semibold text-slate-500">Belum ada history {track}.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </section>
     );
   }

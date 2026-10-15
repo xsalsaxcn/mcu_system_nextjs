@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
 // VACCINATION_REGISTER_MASTER_SEARCH_V153_0_1
@@ -98,6 +98,7 @@ export default function VaccinationRegisterPage() {
 
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
   const [error, setError] = useState("");
+  const deepLinkEditHandled = useRef(false);
   const [importing, setImporting] = useState(false);
   const [releasingId, setReleasingId] = useState<number | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -273,25 +274,34 @@ export default function VaccinationRegisterPage() {
       setSessions(loadedSessions);
       if (!form.sessionId && loadedSessions?.[0]?.id) {
         let saved: any = null;
+        let requestedSessionId = "";
+        let requestedSourceId = "";
         if (typeof window !== "undefined") {
           try { saved = JSON.parse(window.localStorage.getItem(LOCK_KEY) || "null"); } catch { saved = null; }
+          const query = new URLSearchParams(window.location.search);
+          requestedSessionId = query.get("session_id") || "";
+          requestedSourceId = query.get("source_id") || "";
         }
+        const requestedSession = requestedSessionId
+          ? loadedSessions.find((session: any) => String(session.id) === String(requestedSessionId))
+          : null;
         const savedSession = saved?.locked ? loadedSessions.find((session: any) => String(session.id) === String(saved.sessionId)) : null;
-        const first = savedSession || loadedSessions[0];
+        const first = requestedSession || savedSession || loadedSessions[0];
+        const usingSavedLock = Boolean(!requestedSession && saved?.locked && savedSession);
         const savedVaccineIds = Array.isArray(saved?.vaccineIds) ? saved.vaccineIds.map(String).filter(Boolean) : [];
-        const defaultVaccineIds = saved?.locked && savedVaccineIds.length
+        const defaultVaccineIds = usingSavedLock && savedVaccineIds.length
           ? savedVaccineIds
           : (first.session_vaccines || []).map((item: any) => String(item.vaccine_id)).filter(Boolean);
         const firstVaccineId = defaultVaccineIds[0] || (first.default_vaccine_id ? String(first.default_vaccine_id) : "");
-        setContextLocked(Boolean(saved?.locked));
+        setContextLocked(usingSavedLock);
         setSelectedVaccineIds(defaultVaccineIds);
         setForm((prev) => ({
           ...prev,
           sessionId: String(first.id),
-          sourceId: saved?.locked && saved.sourceId ? String(saved.sourceId) : (first.source_id ? String(first.source_id) : ""),
+          sourceId: requestedSourceId || (usingSavedLock && saved.sourceId ? String(saved.sourceId) : (first.source_id ? String(first.source_id) : "")),
           vaccineId: firstVaccineId,
-          lotId: saved?.locked && saved.lotId ? String(saved.lotId) : (first.default_lot_id ? String(first.default_lot_id) : ""),
-          companyName: saved?.locked && saved.companyName ? String(saved.companyName) : (first.company_name || ""),
+          lotId: usingSavedLock && saved.lotId ? String(saved.lotId) : (first.default_lot_id ? String(first.default_lot_id) : ""),
+          companyName: usingSavedLock && saved.companyName ? String(saved.companyName) : (first.company_name || ""),
         }));
       }
     }
@@ -614,6 +624,17 @@ export default function VaccinationRegisterPage() {
   }, [contextLocked, form.sessionId, selectedSourceId, selectedVaccineIds, form.vaccineId, form.lotId, form.companyName]);
 
   useEffect(() => { loadRegistrations(form.sessionId, selectedSourceId); }, [form.sessionId, selectedSourceId]);
+
+  useEffect(() => {
+    if (deepLinkEditHandled.current || typeof window === "undefined" || !registrations.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const editRegistrationId = Number(params.get("edit_registration_id") || 0);
+    if (!editRegistrationId) return;
+    const target = registrations.find((row: any) => Number(row.id) === editRegistrationId);
+    if (!target) return;
+    deepLinkEditHandled.current = true;
+    openEditProducts(target);
+  }, [registrations]);
 
   return (
     <main className="p-6">
