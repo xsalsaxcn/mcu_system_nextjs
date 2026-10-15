@@ -32,11 +32,16 @@ function productLabel(item: any) {
 export default function VaccinationManualWalkInController({
   form,
   setForm,
+  session,
 }: {
   form: any;
   setForm: any;
+  session?: any;
 }) {
   const sessionId = Number(form?.sessionId || form?.session_id || 0);
+  const healthdayBazarEnabled = String(session?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
+  const serviceMode = healthdayBazarEnabled && String(form?.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+  const bazarPaymentMethod = clean(form?.paymentMethod || form?.payment_method).toUpperCase();
   const participantIdentity = `${Number(
     form?.participantId || form?.participant_id || 0,
   )}:${Number(form?.historyPersonId || 0)}`;
@@ -98,12 +103,19 @@ export default function VaccinationManualWalkInController({
     setSelectedKeys([]);
     setMessage("");
     setError("");
-  }, [participantIdentity]);
+  }, [participantIdentity, serviceMode]);
 
   const selected = useMemo(() => {
     const keys = new Set(selectedKeys);
     return options.filter((item: any) => keys.has(optionKey(item)));
   }, [options, selectedKeys]);
+
+  const bazarSubtotal = useMemo(() => selected.reduce((total: number, item: any) => {
+    const price = Number(item?.vaccine?.price);
+    return total + (Number.isFinite(price) ? price : 0);
+  }, 0), [selected]);
+  const bazarSurcharge = serviceMode === "BAZAR" && bazarPaymentMethod === "CREDIT_CARD" ? Math.round(bazarSubtotal * 0.03 * 100) / 100 : 0;
+  const bazarTotal = bazarSubtotal + bazarSurcharge;
 
   function toggle(item: any) {
     const key = optionKey(item);
@@ -150,6 +162,14 @@ export default function VaccinationManualWalkInController({
       setError("Pilih minimal 1 produk / vaksin untuk peserta ini.");
       return;
     }
+    if (serviceMode === "BAZAR" && !["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"].includes(bazarPaymentMethod)) {
+      setError("Pilih metode pembayaran Bazar: QRIS, Debit, Credit Card, atau Transfer.");
+      return;
+    }
+    if (serviceMode === "BAZAR" && selected.some((item: any) => !Number.isFinite(Number(item?.vaccine?.price)))) {
+      setError("Ada layanan Bazar yang belum memiliki harga pada master produk.");
+      return;
+    }
 
     setSubmitting(true);
     setMessage("");
@@ -164,6 +184,8 @@ export default function VaccinationManualWalkInController({
         lotId: Number(item?.lot_id || item?.lot?.id || 0) || null,
         doseNumber: Math.max(1, Number(item?.dose_number || 1)),
         priceCategory: clean(item?.vaccine?.price_category) || null,
+        price: serviceMode === "BAZAR" ? Number(item?.vaccine?.price) : undefined,
+        serviceMode,
         paymentMethod:
           clean(form?.paymentMethod || form?.payment_method) || null,
         paymentNote: clean(form?.paymentNote || form?.payment_note) || null,
@@ -184,7 +206,8 @@ export default function VaccinationManualWalkInController({
         phone: clean(form?.phone),
         companyName: clean(form?.companyName || form?.company_name),
         department: clean(form?.department),
-        paymentPrice: form?.paymentPrice ?? form?.payment_price ?? "",
+        serviceMode,
+        paymentPrice: serviceMode === "BAZAR" ? bazarTotal : (form?.paymentPrice ?? form?.payment_price ?? ""),
         paymentMethod: clean(form?.paymentMethod || form?.payment_method),
         paymentNote: clean(form?.paymentNote || form?.payment_note),
         vaccineId: first?.vaccineId || null,
@@ -269,6 +292,34 @@ export default function VaccinationManualWalkInController({
         </div>
       </div>
 
+      {healthdayBazarEnabled ? (
+        <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-3">
+          <div className="text-xs font-black uppercase tracking-wide text-violet-700">Jenis Layanan</div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <button type="button" onClick={() => setForm((prev: any) => ({ ...prev, serviceMode: "HEALTHDAY", paymentMethod: "" }))} className={`rounded-xl border px-4 py-3 text-left text-sm font-black ${serviceMode === "HEALTHDAY" ? "border-blue-500 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>Healthday</button>
+            <button type="button" onClick={() => setForm((prev: any) => ({ ...prev, serviceMode: "BAZAR", paymentMethod: "" }))} className={`rounded-xl border px-4 py-3 text-left text-sm font-black ${serviceMode === "BAZAR" ? "border-violet-500 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>Bazar</button>
+          </div>
+          {serviceMode === "BAZAR" ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <label className="text-xs font-bold text-slate-700">Metode Pembayaran
+                <select value={bazarPaymentMethod} onChange={(e) => setForm((prev: any) => ({ ...prev, paymentMethod: e.target.value }))} className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-bold">
+                  <option value="">Pilih metode pembayaran</option>
+                  <option value="QRIS">QRIS</option>
+                  <option value="DEBIT">Debit</option>
+                  <option value="CREDIT_CARD">Credit Card +3%</option>
+                  <option value="TRANSFER">Transfer</option>
+                </select>
+              </label>
+              <div className="rounded-xl border bg-white px-4 py-2 text-right text-xs font-bold text-slate-600">
+                <div>Subtotal Rp {money(bazarSubtotal)}</div>
+                <div>CC +3% Rp {money(bazarSurcharge)}</div>
+                <div className="mt-1 text-sm font-black text-violet-700">Total Rp {money(bazarTotal)}</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {!sessionId ? (
         <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-xs font-bold text-slate-500">
           Pilih session terlebih dahulu.
@@ -309,7 +360,7 @@ export default function VaccinationManualWalkInController({
                     Lot {lot || "-"}
                     {expiry ? ` · exp ${expiry}` : ""}
                     {Number.isFinite(Number(price))
-                      ? ` · Rp ${money(price)}`
+                      ? ` · Rp ${money(price)}${serviceMode === "BAZAR" ? " (harga master)" : ""}`
                       : ""}
                   </span>
                 </span>

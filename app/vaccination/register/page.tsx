@@ -17,6 +17,7 @@ type ProductItem = {
   paymentMethod: string;
   paymentNote: string;
   itemNote: string;
+  serviceMode: "HEALTHDAY" | "BAZAR";
   status?: string;
 };
 
@@ -67,6 +68,7 @@ function emptyProductItem(): ProductItem {
     paymentMethod: "",
     paymentNote: "",
     itemNote: "",
+    serviceMode: "HEALTHDAY",
     status: "WAITING",
   };
 }
@@ -82,6 +84,7 @@ function itemFromRegistrationItem(item: any): ProductItem {
     paymentMethod: item?.payment_method || "",
     paymentNote: item?.payment_note || "",
     itemNote: item?.item_note || "",
+    serviceMode: String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
     status: item?.status || "WAITING",
   };
 }
@@ -114,6 +117,7 @@ export default function VaccinationRegisterPage() {
     paymentPrice: "",
     paymentMethod: "",
     paymentNote: "",
+    serviceMode: "HEALTHDAY",
   });
 
   const [edit, setEdit] = useState<{ registration: any; items: ProductItem[]; changeNote: string } | null>(null);
@@ -124,6 +128,7 @@ export default function VaccinationRegisterPage() {
   const [historyRegistration, setHistoryRegistration] = useState<any | null>(null);
 
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
+  const healthdayBazarEnabled = String(selectedSession?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
 
   const priceCategoryOptions = useMemo(() => {
@@ -362,6 +367,7 @@ export default function VaccinationRegisterPage() {
         paymentMethod: form.paymentMethod,
         paymentNote: form.paymentNote,
         itemNote: form.paymentNote,
+        serviceMode: healthdayBazarEnabled && form.serviceMode === "BAZAR" ? "BAZAR" : "HEALTHDAY",
         status: "WAITING",
       };
     });
@@ -402,6 +408,10 @@ export default function VaccinationRegisterPage() {
           const vaccine = vaccines.find((v) => String(v.id) === String(next.vaccineId));
           if (vaccine?.price_category === patch.priceCategory && vaccine?.price != null) next.price = String(vaccine.price);
         }
+        if (patch.serviceMode === "BAZAR") {
+          const vaccine = vaccines.find((v) => String(v.id) === String(next.vaccineId));
+          if (vaccine?.price != null) next.price = String(vaccine.price);
+        }
         return next;
       });
       return { ...current, items };
@@ -409,7 +419,14 @@ export default function VaccinationRegisterPage() {
   }
 
   function addEditItem() {
-    setEdit((current) => current ? { ...current, items: [...current.items, emptyProductItem()] } : current);
+    setEdit((current) => {
+      if (!current) return current;
+      const next = emptyProductItem();
+      if (healthdayBazarEnabled && String(current.registration?.patient_service_status || "").toUpperCase() === "HEALTHDAY") {
+        next.serviceMode = "BAZAR";
+      }
+      return { ...current, items: [...current.items, next] };
+    });
   }
 
   function removeEditItem(index: number) {
@@ -570,6 +587,8 @@ export default function VaccinationRegisterPage() {
       vaccineId: nextVaccineId,
       lotId: selectedSession.default_lot_id ? String(selectedSession.default_lot_id) : (selectedSession.session_vaccines?.[0]?.lot_id ? String(selectedSession.session_vaccines[0].lot_id) : prev.lotId),
       companyName: selectedSession.company_name || prev.companyName,
+      serviceMode: "HEALTHDAY",
+      paymentMethod: "",
     }));
   }, [selectedSession?.id, contextLocked]);
 
@@ -683,7 +702,7 @@ export default function VaccinationRegisterPage() {
           <p className="mt-1 text-sm text-slate-500">NIK, harga pribadi, metode payment, dan catatan payment dapat diisi saat registrasi.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <VaccinationParticipantMasterSearch form={form} setForm={setForm} />
-            <VaccinationManualWalkInController form={form} setForm={setForm} />
+            <VaccinationManualWalkInController form={form} setForm={setForm} session={selectedSession} />
 
             <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
             <input className="rounded-xl border px-3 py-2.5" placeholder="Employee ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
@@ -696,8 +715,14 @@ export default function VaccinationRegisterPage() {
               <option value="">Lot utama vaksin pertama</option>
               {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
             </select>
-            <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
+            {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
+              <>
+                <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
+              </>
+            ) : (
+              <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dan total dihitung pada panel produk.</div>
+            )}
             <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
           </div>
           {selectedVaccines.length ? (
@@ -722,7 +747,13 @@ export default function VaccinationRegisterPage() {
 
             <div className="mt-4 space-y-3">
               {edit.items.map((item, index) => (
-                <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-4 xl:grid-cols-[1.2fr_1.1fr_100px_160px_130px_1fr_160px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
+                <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-4 xl:grid-cols-[130px_1.2fr_1.1fr_90px_150px_130px_1fr_150px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
+                  {healthdayBazarEnabled ? (
+                    <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.serviceMode} onChange={(e) => updateEditItem(index, { serviceMode: e.target.value === "BAZAR" ? "BAZAR" : "HEALTHDAY", paymentMethod: e.target.value === "BAZAR" ? item.paymentMethod : item.paymentMethod })}>
+                      <option value="HEALTHDAY">Healthday</option>
+                      <option value="BAZAR">Bazar</option>
+                    </select>
+                  ) : <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-black text-slate-500">Healthday</div>}
                   <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.vaccineId} onChange={(e) => updateEditItem(index, { vaccineId: e.target.value })}>
                     <option value="">Pilih vaksin</option>
                     {availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccineLabel(vaccine)}</option>)}
@@ -735,8 +766,18 @@ export default function VaccinationRegisterPage() {
                   <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.priceCategory} onChange={(e) => updateEditItem(index, { priceCategory: e.target.value })}>
                     {priceCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
                   </select>
-                  <input disabled={isDoneStatus(item.status)} type="number" className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Harga" value={item.price} onChange={(e) => updateEditItem(index, { price: e.target.value })} />
-                  <input disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Payment note / metode" value={item.paymentNote || item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value })} />
+                  <input disabled={isDoneStatus(item.status) || (healthdayBazarEnabled && item.serviceMode === "BAZAR")} type="number" className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder={healthdayBazarEnabled && item.serviceMode === "BAZAR" ? "Harga master" : "Harga"} value={item.price} onChange={(e) => updateEditItem(index, { price: e.target.value })} />
+                  {healthdayBazarEnabled && item.serviceMode === "BAZAR" ? (
+                    <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentMethod: e.target.value })}>
+                      <option value="">Metode bayar</option>
+                      <option value="QRIS">QRIS</option>
+                      <option value="DEBIT">Debit</option>
+                      <option value="CREDIT_CARD">Credit Card +3%</option>
+                      <option value="TRANSFER">Transfer</option>
+                    </select>
+                  ) : (
+                    <input disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Payment note / metode" value={item.paymentNote || item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value })} />
+                  )}
                   <div className="flex items-center gap-2">
                     {isDoneStatus(item.status) ? <span className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700">Done</span> : <span className="rounded-xl bg-orange-100 px-3 py-2 text-xs font-black text-orange-700">Not Done</span>}
                     <button disabled={isDoneStatus(item.status)} type="button" onClick={() => removeEditItem(index)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-40">Hapus</button>
@@ -797,6 +838,11 @@ export default function VaccinationRegisterPage() {
                         <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
                           {registration.participant_name}
                         </button>
+                        {healthdayBazarEnabled ? (
+                          <div className="mt-1 w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700">
+                            {String(registration.patient_service_status || "HEALTHDAY").toUpperCase() === "COMBINATION" ? "Kombinasi" : String(registration.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="p-3">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
                       <td className="p-3">

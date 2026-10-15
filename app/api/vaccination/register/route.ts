@@ -9,6 +9,73 @@ function userLabel(user: any) {
   return user?.email || user?.name || user?.id || "system";
 }
 
+const BAZAR_PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"]);
+
+function isHealthdayBazarSession(session: any) {
+  return String(session?.existing_queue_profile || "LEGACY").trim().toUpperCase() === "HEALTHDAY_BAZAR";
+}
+
+function normalizeServiceMode(value: any, allowBazar: boolean) {
+  return allowBazar && String(value || "").trim().toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+function normalizeBazarPaymentMethod(value: any) {
+  const raw = String(value || "").trim().toUpperCase().replace(/[ -]+/g, "_");
+  const alias = raw === "CC" || raw === "CREDITCARD" || raw === "KARTU_KREDIT" ? "CREDIT_CARD" : raw;
+  return BAZAR_PAYMENT_METHODS.has(alias) ? alias : "";
+}
+
+function moneyNumber(value: any) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
+}
+
+function patientServiceStatus(items: any[]) {
+  const modes = new Set((items || []).map((item: any) => String(item?.service_mode || "HEALTHDAY").toUpperCase()));
+  if (modes.has("HEALTHDAY") && modes.has("BAZAR")) return "COMBINATION";
+  if (modes.has("BAZAR")) return "BAZAR";
+  return "HEALTHDAY";
+}
+
+function bazarBillingSummary(items: any[]) {
+  const bazarItems = (items || []).filter((item: any) => String(item?.service_mode || "").toUpperCase() === "BAZAR");
+  const total = moneyNumber(bazarItems.reduce((sum: number, item: any) => sum + Number(item?.payment_total ?? item?.price ?? 0), 0));
+  return {
+    hasBazar: bazarItems.length > 0,
+    total,
+    paymentMethod: bazarItems.find((item: any) => item?.payment_method)?.payment_method || null,
+  };
+}
+
+async function validateBazarItems(supabase: any, items: any[], allowBazar: boolean) {
+  if (!allowBazar) return "";
+  const bazarItems = (items || []).filter((item: any) => normalizeServiceMode(item?.service_mode, true) === "BAZAR");
+  if (!bazarItems.length) return "";
+
+  for (const item of bazarItems) {
+    if (!normalizeBazarPaymentMethod(item?.payment_method)) {
+      return "Metode pembayaran Bazar wajib QRIS, Debit, Credit Card, atau Transfer.";
+    }
+  }
+
+  const vaccineIds = Array.from(new Set(bazarItems.map((item: any) => Number(item?.vaccine_id)).filter(Boolean)));
+  const priceResult = await supabase
+    .from("vaccination_vaccines")
+    .select("id,price")
+    .in("id", vaccineIds);
+  if (priceResult.error) throw new Error(priceResult.error.message);
+
+  const priceMap = new Map<number, any>((priceResult.data || []).map((row: any) => [Number(row.id), row.price]));
+  for (const item of bazarItems) {
+    const price = priceMap.get(Number(item.vaccine_id));
+    if (price == null || !Number.isFinite(Number(price))) {
+      return "Ada layanan Bazar yang belum memiliki harga pada master produk.";
+    }
+  }
+
+  return "";
+}
+
 async function getNextQueueNumber(supabase: any, sessionId: number) {
   const result = await supabase
     .from("vaccination_registrations")
@@ -30,7 +97,7 @@ async function getNextQueueNumber(supabase: any, sessionId: number) {
   return formatQueueNumber(maxNumber + 1);
 }
 
-function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}) {
+function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}, allowBazar = false) {
   return (Array.isArray(rawItems) ? rawItems : [])
     .map((item: any) => ({
       id: toInt(item.id || item.itemId || item.item_id, 0) || null,
@@ -42,6 +109,7 @@ function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}) {
       payment_method: clean(item.paymentMethod || item.payment_method) || clean(fallback.paymentMethod) || null,
       payment_note: clean(item.paymentNote || item.payment_note) || clean(fallback.paymentNote) || null,
       item_note: clean(item.itemNote || item.item_note) || null,
+      service_mode: normalizeServiceMode(item.serviceMode || item.service_mode || fallback.serviceMode, allowBazar),
     }))
     .filter((item: any) => item.vaccine_id);
 }
@@ -72,7 +140,7 @@ async function attachRegistrationItems(supabase: any, registrations: any[]) {
   }));
 }
 
-async function createItemsForRegistration(supabase: any, registration: any, items: any[], user: any, source = "registration") {
+async function createItemsForRegistration(supabase: any, registration: any, items: any[], user: any, source = "registration", allowBazar = false) {
   if (!items.length) return [];
 
   const vaccineIds = Array.from(new Set(items.map((item) => item.vaccine_id).filter(Boolean)));
@@ -86,6 +154,26 @@ async function createItemsForRegistration(supabase: any, registration: any, item
 
   const rows = items.map((item) => {
     const vaccine = vaccineMap.get(Number(item.vaccine_id)) || {};
+    const serviceMode = normalizeServiceMode(item.service_mode, allowBazar);
+    const masterPrice = vaccine.price == null ? null : moneyNumber(vaccine.price);
+    const basePrice = serviceMode === "BAZAR"
+      ? masterPrice
+      : (item.price == null ? masterPrice : moneyNumber(item.price));
+    const paymentMethod = serviceMode === "BAZAR"
+      ? normalizeBazarPaymentMethod(item.payment_method)
+      : (item.payment_method || null);
+
+    if (serviceMode === "BAZAR" && masterPrice == null) {
+      throw new Error("Harga layanan Bazar belum tersedia di master produk.");
+    }
+    if (serviceMode === "BAZAR" && !paymentMethod) {
+      throw new Error("Metode pembayaran Bazar wajib QRIS, Debit, Credit Card, atau Transfer.");
+    }
+
+    const surchargePercent = serviceMode === "BAZAR" && paymentMethod === "CREDIT_CARD" ? 3 : 0;
+    const surchargeAmount = basePrice == null ? 0 : moneyNumber(basePrice * surchargePercent / 100);
+    const paymentTotal = basePrice == null ? null : moneyNumber(basePrice + surchargeAmount);
+
     return {
       registration_id: registration.id,
       session_id: registration.session_id,
@@ -93,10 +181,14 @@ async function createItemsForRegistration(supabase: any, registration: any, item
       lot_id: item.lot_id || null,
       dose_number: item.dose_number || 1,
       price_category: item.price_category || vaccine.price_category || null,
-      price: item.price == null ? (vaccine.price ?? null) : item.price,
-      payment_method: item.payment_method || null,
+      price: basePrice,
+      payment_method: paymentMethod || null,
       payment_note: item.payment_note || null,
       item_note: item.item_note || null,
+      service_mode: serviceMode,
+      payment_surcharge_percent: surchargePercent,
+      payment_surcharge_amount: surchargeAmount,
+      payment_total: paymentTotal,
       item_source: source,
       status: source === "registration_edit" ? "WAITING" : (String(registration.queue_status || "").toUpperCase() === "ADMINISTERED" ? "ADMINISTERED" : "WAITING"),
       active: true,
@@ -199,10 +291,18 @@ export async function POST(req: NextRequest) {
     if (regResult.error) return fail(regResult.error.message, 500);
     const registration = regResult.data;
 
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,existing_queue_profile")
+      .eq("id", registration.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    const allowBazar = isHealthdayBazarSession(sessionResult.data);
+
     const items = normalizeItems(body.items || [], {
       paymentMethod: body.paymentMethod,
       paymentNote: body.paymentNote,
-    });
+    }, allowBazar);
 
     const oldItems = await supabase
       .from("vaccination_registration_items")
@@ -223,6 +323,13 @@ export async function POST(req: NextRequest) {
 
     if (!editableItems.length && !preservedAdministered.length) return fail("Minimal satu produk/vaksin wajib dipilih.");
 
+    try {
+      const bazarValidation = await validateBazarItems(supabase, editableItems, allowBazar);
+      if (bazarValidation) return fail(bazarValidation);
+    } catch (error: any) {
+      return fail(error?.message || "Gagal memvalidasi harga Bazar.", 500);
+    }
+
     const deleteResult = await supabase
       .from("vaccination_registration_items")
       .delete()
@@ -235,7 +342,7 @@ export async function POST(req: NextRequest) {
     let insertedItems: any[] = [];
     if (editableItems.length) {
       try {
-        insertedItems = await createItemsForRegistration(supabase, registration, editableItems, user, "registration_edit");
+        insertedItems = await createItemsForRegistration(supabase, registration, editableItems, user, "registration_edit", allowBazar);
       } catch (error: any) {
         return fail(error?.message || "Gagal menyimpan produk peserta.", 500);
       }
@@ -249,13 +356,18 @@ export async function POST(req: NextRequest) {
     const firstPreserved: any = preservedAdministered[0] || {};
     const firstItem: any = firstEditable.vaccine_id ? firstEditable : firstPreserved;
 
+    const combinedItems = [...preservedAdministered, ...insertedItems];
+    const serviceStatus = patientServiceStatus(combinedItems);
+    const bazarBilling = bazarBillingSummary(combinedItems);
+
     const updateResult = await supabase
       .from("vaccination_registrations")
       .update({
         vaccine_id: firstItem.vaccine_id || registration.vaccine_id || null,
-        payment_price: firstEditable.price ?? registration.payment_price ?? null,
-        payment_method: firstEditable.payment_method || registration.payment_method || null,
+        payment_price: allowBazar && bazarBilling.hasBazar ? bazarBilling.total : (firstEditable.price ?? registration.payment_price ?? null),
+        payment_method: allowBazar && bazarBilling.hasBazar ? bazarBilling.paymentMethod : (firstEditable.payment_method || registration.payment_method || null),
         payment_note: firstEditable.payment_note || registration.payment_note || null,
+        ...(allowBazar ? { patient_service_status: serviceStatus } : {}),
         queue_status: newStatus,
         status_note: note || null,
         last_product_change_at: editableItems.length ? new Date().toISOString() : registration.last_product_change_at,
@@ -267,8 +379,6 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (updateResult.error) return fail(updateResult.error.message, 500);
-
-    const combinedItems = [...preservedAdministered, ...insertedItems];
 
     return ok({
       message: newStatus === "WAITING_WITH_NOTE" ? "Produk berhasil diubah. Status kembali ke Waiting With Note untuk dipanggil ulang." : "Produk berhasil diubah.",
@@ -286,11 +396,36 @@ export async function POST(req: NextRequest) {
   const sessionResult = await supabase.from("vaccination_sessions").select("*").eq("id", sessionId).single();
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const session = sessionResult.data || {};
+  const allowBazar = isHealthdayBazarSession(session);
+  const requestedServiceMode = normalizeServiceMode(body.serviceMode || body.service_mode, allowBazar);
 
   const vaccineIdInput = toInt(body.vaccineId, 0);
   const vaccineId = vaccineIdInput || toInt(session.default_vaccine_id, 0) || null;
   const lotId = toInt(body.lotId, 0) || toInt(session.default_lot_id, 0) || null;
   const queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
+
+  const items = normalizeItems(body.items || [], { paymentMethod: body.paymentMethod, paymentNote: body.paymentNote, serviceMode: requestedServiceMode }, allowBazar);
+  if (!items.length && vaccineId) {
+    items.push({
+      id: null,
+      vaccine_id: vaccineId,
+      lot_id: lotId,
+      dose_number: 1,
+      price_category: clean(body.priceCategory) || null,
+      price: body.paymentPrice === "" || body.paymentPrice == null ? null : Number(body.paymentPrice),
+      payment_method: clean(body.paymentMethod) || null,
+      payment_note: clean(body.paymentNote) || null,
+      item_note: null,
+      service_mode: requestedServiceMode,
+    });
+  }
+
+  try {
+    const bazarValidation = await validateBazarItems(supabase, items, allowBazar);
+    if (bazarValidation) return fail(bazarValidation);
+  } catch (error: any) {
+    return fail(error?.message || "Gagal memvalidasi harga Bazar.", 500);
+  }
 
   const payload: Record<string, any> = {
     session_id: sessionId,
@@ -311,6 +446,7 @@ export async function POST(req: NextRequest) {
     queue_number: queueNumber,
     queue_status: "WAITING",
     registered_by: userLabel(user),
+    ...(allowBazar ? { patient_service_status: requestedServiceMode } : {}),
   };
 
   const result = await supabase
@@ -322,27 +458,32 @@ export async function POST(req: NextRequest) {
   if (result.error) return fail(result.error.message, 500);
 
   let insertedItems: any[] = [];
-  const items = normalizeItems(body.items || [], { paymentMethod: body.paymentMethod, paymentNote: body.paymentNote });
-  if (!items.length && vaccineId) {
-    items.push({
-      id: null,
-      vaccine_id: vaccineId,
-      lot_id: lotId,
-      dose_number: 1,
-      price_category: clean(body.priceCategory) || null,
-      price: body.paymentPrice === "" || body.paymentPrice == null ? null : Number(body.paymentPrice),
-      payment_method: clean(body.paymentMethod) || null,
-      payment_note: clean(body.paymentNote) || null,
-      item_note: null,
-    });
-  }
 
   if (items.length) {
     try {
-      insertedItems = await createItemsForRegistration(supabase, result.data, items, user, "walk_in");
+      insertedItems = await createItemsForRegistration(supabase, result.data, items, user, "walk_in", allowBazar);
     } catch (error: any) {
       return fail(error?.message || "Registrasi berhasil, tapi gagal membuat item vaksin.", 500);
     }
+  }
+
+  if (allowBazar && insertedItems.length) {
+    const serviceStatus = patientServiceStatus(insertedItems);
+    const bazarBilling = bazarBillingSummary(insertedItems);
+    const canonicalUpdate: Record<string, any> = {
+      patient_service_status: serviceStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (bazarBilling.hasBazar) {
+      canonicalUpdate.payment_price = bazarBilling.total;
+      canonicalUpdate.payment_method = bazarBilling.paymentMethod;
+    }
+    const serviceUpdate = await supabase
+      .from("vaccination_registrations")
+      .update(canonicalUpdate)
+      .eq("id", result.data.id);
+    if (serviceUpdate.error) return fail(serviceUpdate.error.message, 500);
+    Object.assign(result.data, canonicalUpdate);
   }
 
   return ok({
