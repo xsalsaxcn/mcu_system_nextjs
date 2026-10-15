@@ -120,6 +120,11 @@ export default function VaccinationRegisterPage() {
     paymentMethod: "",
     paymentNote: "",
     serviceMode: "HEALTHDAY",
+    participantId: null as number | null,
+    historyPersonId: null as number | null,
+    moveFromRegistrationId: null as number | null,
+    walkInSuggestedVaccineIds: [] as string[],
+    walkInContextLabel: "",
   });
 
   const [edit, setEdit] = useState<{ registration: any; items: ProductItem[]; changeNote: string } | null>(null);
@@ -783,33 +788,53 @@ export default function VaccinationRegisterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
-          <h2 className="font-bold">2. Registrasi Ulang Manual / Walk-in</h2>
-          <p className="mt-1 text-sm text-slate-500">NIK, harga pribadi, metode payment, dan catatan payment dapat diisi saat registrasi.</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <VaccinationParticipantMasterSearch form={form} setForm={setForm} />
-            <VaccinationManualWalkInController form={form} setForm={setForm} session={selectedSession} />
+          <h2 className="text-2xl font-black">2. Registrasi Ulang Manual / Walk-in</h2>
+          <p className="mt-1 text-sm text-slate-500">Pilih peserta dari lokasi saat ini atau cek peserta walk-in dari database / history. Setelah itu lengkapi data dan layanan sampai nomor antrean tercetak.</p>
 
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Employee ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="NIK KTP" value={form.nik} onChange={(e) => setForm({ ...form, nik: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Nomor HP" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Perusahaan" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Departemen" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
-            <select className="rounded-xl border px-3 py-2.5" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-              <option value="">Lot utama vaksin pertama</option>
-              {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
-            </select>
-            {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
-              <>
-                <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
-              </>
-            ) : (
-              <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dan total dihitung pada panel produk.</div>
-            )}
-            <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
+          <div className="mt-4 space-y-4">
+            <VaccinationParticipantMasterSearch
+              form={form}
+              setForm={setForm}
+              session={selectedSession}
+              sessionRegistrations={registrations}
+            />
+
+            <div id="walkin-detail-fields" className="rounded-2xl border bg-white p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-black text-slate-900">Detail Peserta</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">Data dapat terisi otomatis dari peserta lokasi ini, database perusahaan, history, atau dipakai untuk peserta baru.</div>
+                </div>
+                {form.walkInContextLabel ? <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-black text-blue-700">{form.walkInContextLabel}</span> : null}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Employee / BINUSIAN ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="NIK KTP" value={form.nik} onChange={(e) => setForm({ ...form, nik: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Nomor HP" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Perusahaan" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
+                <input className="rounded-xl border px-3 py-2.5" placeholder="Departemen" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+                <select className="rounded-xl border px-3 py-2.5" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
+                  <option value="">Lot utama vaksin pertama</option>
+                  {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
+                </select>
+                {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
+                  <>
+                    <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
+                    <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
+                  </>
+                ) : (
+                  <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dan total dihitung pada panel produk.</div>
+                )}
+                <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
+              </div>
+            </div>
+
+            <VaccinationManualWalkInController form={form} setForm={setForm} session={selectedSession} />
           </div>
+
           {selectedVaccines.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {selectedVaccines.map((vaccine: any) => (

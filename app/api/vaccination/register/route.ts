@@ -111,6 +111,38 @@ function isDoneQueueStatus(value: any) {
   return ["ADMINISTERED", "DONE", "FINISHED"].includes(String(value || "").toUpperCase());
 }
 
+function sameIdentityValue(a: any, b: any) {
+  const left = clean(a).toLowerCase();
+  const right = clean(b).toLowerCase();
+  return Boolean(left && right && left === right);
+}
+
+function sameMovePerson(oldRegistration: any, body: any) {
+  const participantId = toInt(body.participantId || body.participant_id, 0);
+  if (participantId && Number(oldRegistration?.participant_id || 0) === participantId) return true;
+
+  const strongMatches = [
+    sameIdentityValue(oldRegistration?.employee_id, body.employeeId || body.employee_id),
+    sameIdentityValue(oldRegistration?.nik, body.nik),
+    sameIdentityValue(oldRegistration?.email, body.email),
+  ].filter(Boolean).length;
+  if (strongMatches > 0) return true;
+
+  return sameIdentityValue(oldRegistration?.participant_name, body.participantName || body.participant_name)
+    && sameIdentityValue(oldRegistration?.company_name, body.companyName || body.company_name);
+}
+
+async function rollbackInsertedRegistration(supabase: any, registrationId: number) {
+  await supabase
+    .from("vaccination_registration_items")
+    .delete()
+    .eq("registration_id", registrationId);
+  await supabase
+    .from("vaccination_registrations")
+    .delete()
+    .eq("id", registrationId);
+}
+
 async function getNextBazarQueue(supabase: any, sessionId: number) {
   const result = await supabase
     .from("vaccination_registrations")
@@ -513,6 +545,43 @@ export async function POST(req: NextRequest) {
   const allowBazar = isHealthdayBazarSession(session);
   const requestedServiceMode = normalizeServiceMode(body.serviceMode || body.service_mode, allowBazar);
 
+  const moveFromRegistrationId = toInt(body.moveFromRegistrationId || body.move_from_registration_id, 0);
+  let moveSourceRegistration: any = null;
+  if (moveFromRegistrationId) {
+    const moveResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", moveFromRegistrationId)
+      .single();
+    if (moveResult.error) return fail(moveResult.error.message, 404);
+    moveSourceRegistration = moveResult.data;
+
+    if (Number(moveSourceRegistration.session_id) === sessionId) {
+      return fail("Peserta sudah terdaftar di lokasi / session ini.");
+    }
+    if (!sameMovePerson(moveSourceRegistration, body)) {
+      return fail("Identitas peserta tidak cocok dengan pendaftaran lokasi sebelumnya.");
+    }
+
+    const hasA = serviceHasTrack(moveSourceRegistration.patient_service_status, "A");
+    const hasB = serviceHasTrack(moveSourceRegistration.patient_service_status, "B");
+    const aFinal = !hasA || ["ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(String(moveSourceRegistration.queue_status || "").toUpperCase());
+    const bFinal = !hasB || ["ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(String(moveSourceRegistration.bazar_queue_status || "").toUpperCase());
+    if (aFinal && bFinal) {
+      return fail("Pendaftaran lokasi sebelumnya sudah selesai / dibatalkan dan tidak dapat dipindahkan.");
+    }
+
+    const recordCheck = await supabase
+      .from("vaccination_records")
+      .select("id")
+      .eq("registration_id", moveFromRegistrationId)
+      .limit(1);
+    if (recordCheck.error) return fail(recordCheck.error.message, 500);
+    if ((recordCheck.data || []).length) {
+      return fail("Peserta sudah memiliki record tindakan/vaksinasi di lokasi sebelumnya dan tidak dapat dipindahkan.");
+    }
+  }
+
   const vaccineIdInput = toInt(body.vaccineId, 0);
   const vaccineId = vaccineIdInput || toInt(session.default_vaccine_id, 0) || null;
   const lotId = toInt(body.lotId, 0) || toInt(session.default_lot_id, 0) || null;
@@ -595,6 +664,10 @@ export async function POST(req: NextRequest) {
     try {
       insertedItems = await createItemsForRegistration(supabase, result.data, items, user, "walk_in", allowBazar);
     } catch (error: any) {
+      if (moveSourceRegistration) {
+        await rollbackInsertedRegistration(supabase, Number(result.data.id));
+        return fail(error?.message || "Pindah lokasi dibatalkan karena item vaksin gagal dibuat.", 500);
+      }
       return fail(error?.message || "Registrasi berhasil, tapi gagal membuat item vaksin.", 500);
     }
   }
@@ -614,13 +687,57 @@ export async function POST(req: NextRequest) {
       .from("vaccination_registrations")
       .update(canonicalUpdate)
       .eq("id", result.data.id);
-    if (serviceUpdate.error) return fail(serviceUpdate.error.message, 500);
+    if (serviceUpdate.error) {
+      if (moveSourceRegistration) {
+        await rollbackInsertedRegistration(supabase, Number(result.data.id));
+        return fail(`Pindah lokasi dibatalkan: ${serviceUpdate.error.message}`, 500);
+      }
+      return fail(serviceUpdate.error.message, 500);
+    }
     Object.assign(result.data, canonicalUpdate);
+  }
+
+  let movedFrom: any = null;
+  if (moveSourceRegistration) {
+    const now = new Date().toISOString();
+    const sourceHasB = serviceHasTrack(moveSourceRegistration.patient_service_status, "B");
+    const sourceLocation = clean(moveSourceRegistration.company_name) || `registration #${moveSourceRegistration.id}`;
+    const targetLabel = clean(session.location || session.session_name) || `session #${sessionId}`;
+    const moveUpdate: Record<string, any> = {
+      queue_status: "CANCELLED",
+      status_note: `Pindah lokasi ke ${targetLabel} · registrasi baru #${result.data.id}`,
+      updated_at: now,
+    };
+    if (sourceHasB || clean(moveSourceRegistration.bazar_queue_number)) {
+      moveUpdate.bazar_queue_status = "CANCELLED";
+      moveUpdate.bazar_cancelled_at = now;
+    }
+
+    const moveUpdateResult = await supabase
+      .from("vaccination_registrations")
+      .update(moveUpdate)
+      .eq("id", moveSourceRegistration.id)
+      .select("id,session_id,queue_number,bazar_queue_number")
+      .single();
+
+    if (moveUpdateResult.error) {
+      await rollbackInsertedRegistration(supabase, Number(result.data.id));
+      return fail(`Pindah lokasi dibatalkan karena pendaftaran lama gagal ditutup: ${moveUpdateResult.error.message}`, 500);
+    }
+
+    movedFrom = {
+      registrationId: Number(moveSourceRegistration.id),
+      sessionId: Number(moveSourceRegistration.session_id),
+      label: sourceLocation,
+    };
   }
 
   const queueLabels = [queueNumber, bazarQueueNumber].filter(Boolean);
   return ok({
-    message: `Registrasi ulang berhasil. Nomor antrian: ${queueLabels.join(" + ") || "belum dirilis"}`,
+    message: moveSourceRegistration
+      ? `Pindah lokasi berhasil. Nomor antrian baru: ${queueLabels.join(" + ") || "belum dirilis"}`
+      : `Registrasi ulang berhasil. Nomor antrian: ${queueLabels.join(" + ") || "belum dirilis"}`,
     registration: { ...result.data, items: insertedItems },
+    movedFrom,
   });
 }

@@ -45,6 +45,10 @@ export default function VaccinationManualWalkInController({
   const participantIdentity = `${Number(
     form?.participantId || form?.participant_id || 0,
   )}:${Number(form?.historyPersonId || 0)}`;
+  const suggestedVaccineIds = Array.isArray(form?.walkInSuggestedVaccineIds)
+    ? form.walkInSuggestedVaccineIds.map(String).filter(Boolean)
+    : [];
+  const suggestedVaccineKey = suggestedVaccineIds.join(",");
 
   const [options, setOptions] = useState<any[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -104,6 +108,20 @@ export default function VaccinationManualWalkInController({
     setMessage("");
     setError("");
   }, [participantIdentity, serviceMode]);
+
+  useEffect(() => {
+    if (!suggestedVaccineIds.length || !options.length) return;
+    const wanted = new Set(suggestedVaccineIds);
+    const chosen: string[] = [];
+    const seenVaccines = new Set<string>();
+    for (const item of options) {
+      const vaccineId = String(item?.vaccine_id || item?.vaccine?.id || "");
+      if (!vaccineId || !wanted.has(vaccineId) || seenVaccines.has(vaccineId)) continue;
+      chosen.push(optionKey(item));
+      seenVaccines.add(vaccineId);
+    }
+    if (chosen.length) setSelectedKeys(chosen);
+  }, [participantIdentity, suggestedVaccineKey, options]);
 
   const selected = useMemo(() => {
     const keys = new Set(selectedKeys);
@@ -208,6 +226,8 @@ export default function VaccinationManualWalkInController({
         phone: clean(form?.phone),
         companyName: clean(form?.companyName || form?.company_name),
         department: clean(form?.department),
+        moveFromRegistrationId:
+          Number(form?.moveFromRegistrationId || 0) || null,
         serviceMode,
         paymentPrice: serviceMode === "BAZAR" ? bazarTotal : (form?.paymentPrice ?? form?.payment_price ?? ""),
         paymentMethod: clean(form?.paymentMethod || form?.payment_method),
@@ -252,7 +272,7 @@ export default function VaccinationManualWalkInController({
         ? clean(json?.registration?.bazar_queue_number)
         : clean(json?.registration?.queue_number);
       setMessage(
-        `Registrasi berhasil · ${queueLabel || "nomor antrian tersedia"} · ${selected.length} produk.`,
+        `${json?.movedFrom ? "Pindah lokasi berhasil" : "Registrasi berhasil"} · ${queueLabel || "nomor antrian tersedia"} · ${selected.length} produk.`,
       );
       setSelectedKeys([]);
 
