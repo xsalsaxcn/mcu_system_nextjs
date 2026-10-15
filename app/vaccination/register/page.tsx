@@ -170,6 +170,13 @@ export default function VaccinationRegisterPage() {
     return match ? Number(match[1]) : 999999999;
   }
 
+  function serviceHasTrack(status: any, track: "A" | "B") {
+    const value = String(status || "HEALTHDAY").toUpperCase();
+    return track === "A"
+      ? value === "HEALTHDAY" || value === "COMBINATION"
+      : value === "BAZAR" || value === "COMBINATION";
+  }
+
   function setSortKey(key: string) {
     setSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
   }
@@ -520,7 +527,9 @@ export default function VaccinationRegisterPage() {
 
     // VACCINATION_QUEUE_TICKET_POPUP_V147_5
     // Buka blank popup langsung dari click event agar browser tidak menunda/menggabungkan window.
-    const ticketWindow = registrationId
+    const serviceStatus = String(rawRegistration?.patient_service_status || "HEALTHDAY").toUpperCase();
+    const shouldOpenLegacyTicket = !healthdayBazarEnabled || serviceHasTrack(serviceStatus, "A");
+    const ticketWindow = registrationId && shouldOpenLegacyTicket
       ? window.open("about:blank", "_blank", "width=520,height=720")
       : null;
 
@@ -545,7 +554,7 @@ export default function VaccinationRegisterPage() {
       if (ticketWindow && !ticketWindow.closed) {
         ticketWindow.location.replace(ticketUrl);
         ticketWindow.focus();
-      } else {
+      } else if (shouldOpenLegacyTicket) {
         window.open(ticketUrl, "_blank");
       }
     } catch (error) {
@@ -818,7 +827,7 @@ export default function VaccinationRegisterPage() {
             <table className="min-w-full text-sm">
               <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
-                  <th className="p-3 text-left">{sortButton("Antrian", "queue")}</th>
+                  <th className="p-3 text-left">{healthdayBazarEnabled ? "Antrian A / B" : sortButton("Antrian", "queue")}</th>
                   <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                   <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
                   <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
@@ -830,10 +839,24 @@ export default function VaccinationRegisterPage() {
               <tbody className="divide-y">
                 {visibleRegistrations.map((registration) => {
                   const info = statusInfo(registration.queue_status);
+                  const bazarInfo = statusInfo(registration.bazar_queue_status);
                   const items = Array.isArray(registration.items) ? registration.items : [];
+                  const serviceStatus = String(registration.patient_service_status || "HEALTHDAY").toUpperCase();
+                  const hasA = !healthdayBazarEnabled || serviceHasTrack(serviceStatus, "A");
+                  const hasB = healthdayBazarEnabled && serviceHasTrack(serviceStatus, "B");
+                  const needsQueueRelease = (hasA && !String(registration.queue_number || "").trim()) || (hasB && !String(registration.bazar_queue_number || "").trim());
                   return (
                     <tr key={registration.id}>
-                      <td className="p-3 text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</td>
+                      <td className="p-3">
+                        {healthdayBazarEnabled ? (
+                          <div className="space-y-1 text-sm font-black">
+                            {hasA ? <div><span className="text-blue-700">A</span> · {registration.queue_number || <span className="text-amber-700">Belum rilis</span>}</div> : null}
+                            {hasB ? <div><span className="text-violet-700">B</span> · {registration.bazar_queue_number || <span className="text-amber-700">Belum rilis</span>}</div> : null}
+                          </div>
+                        ) : (
+                          <div className="text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</div>
+                        )}
+                      </td>
                       <td className="p-3 font-bold">
                         <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
                           {registration.participant_name}
@@ -854,13 +877,20 @@ export default function VaccinationRegisterPage() {
                           )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                         </div>
                       </td>
-                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>{info.label}</span></td>
+                      <td className="p-3">
+                        {healthdayBazarEnabled ? (
+                          <div className="flex flex-col items-start gap-1">
+                            {hasA ? <span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>A · {info.label}</span> : null}
+                            {hasB ? <span className={`rounded-full px-3 py-1 text-xs font-black ${bazarInfo.cls}`}>B · {bazarInfo.label}</span> : null}
+                          </div>
+                        ) : <span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>{info.label}</span>}
+                      </td>
                       <td className="p-3 text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">
-                          {!registration.queue_number ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
+                          {needsQueueRelease ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
-                    {String(registration?.queue_number || "").trim() ? (
+                    {String(registration?.queue_number || "").trim() && hasA ? (
                       <button
                         type="button"
                         title="Print ulang nomor antrian"

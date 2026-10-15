@@ -97,6 +97,88 @@ async function getNextQueueNumber(supabase: any, sessionId: number) {
   return formatQueueNumber(maxNumber + 1);
 }
 
+function formatBazarQueueNumber(nextNumber: number) {
+  return `B-${String(nextNumber).padStart(3, "0")}`;
+}
+
+function serviceHasTrack(status: any, track: "A" | "B") {
+  const value = String(status || "HEALTHDAY").trim().toUpperCase();
+  if (track === "A") return value === "HEALTHDAY" || value === "COMBINATION";
+  return value === "BAZAR" || value === "COMBINATION";
+}
+
+function isDoneQueueStatus(value: any) {
+  return ["ADMINISTERED", "DONE", "FINISHED"].includes(String(value || "").toUpperCase());
+}
+
+async function getNextBazarQueue(supabase: any, sessionId: number) {
+  const result = await supabase
+    .from("vaccination_registrations")
+    .select("bazar_queue_sequence,bazar_queue_number")
+    .eq("session_id", sessionId)
+    .not("bazar_queue_number", "is", null);
+
+  if (result.error) throw new Error(result.error.message);
+
+  let maxNumber = 0;
+  for (const row of result.data || []) {
+    const seq = Number(row.bazar_queue_sequence || 0);
+    if (Number.isFinite(seq) && seq > maxNumber) maxNumber = seq;
+    const match = String(row.bazar_queue_number || "").match(/(\d+)$/);
+    if (match) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > maxNumber) maxNumber = n;
+    }
+  }
+
+  const sequence = maxNumber + 1;
+  return { sequence, number: formatBazarQueueNumber(sequence) };
+}
+
+async function buildServiceQueueUpdate(
+  supabase: any,
+  registration: any,
+  serviceStatus: string,
+  opts: { waitingWithNote?: boolean } = {},
+) {
+  const update: Record<string, any> = {};
+  const sessionId = Number(registration.session_id);
+  const hasA = serviceHasTrack(serviceStatus, "A");
+  const hasB = serviceHasTrack(serviceStatus, "B");
+
+  if (hasA) {
+    let queueNumber = clean(registration.queue_number);
+    if (!queueNumber) queueNumber = await getNextQueueNumber(supabase, sessionId);
+    update.queue_number = queueNumber;
+    const current = String(registration.queue_status || "").toUpperCase();
+    if (!isDoneQueueStatus(current)) {
+      update.queue_status = opts.waitingWithNote ? "WAITING_WITH_NOTE" : (["WAITING", "WAITING_WITH_NOTE", "CALLED", "IN_PROGRESS", "SKIPPED"].includes(current) ? current : "WAITING");
+    }
+  } else if (clean(registration.queue_number) && !isDoneQueueStatus(registration.queue_status)) {
+    update.queue_status = "CANCELLED";
+  }
+
+  if (hasB) {
+    let bazarNumber = clean(registration.bazar_queue_number);
+    let bazarSequence = Number(registration.bazar_queue_sequence || 0) || null;
+    if (!bazarNumber) {
+      const next = await getNextBazarQueue(supabase, sessionId);
+      bazarNumber = next.number;
+      bazarSequence = next.sequence;
+    }
+    update.bazar_queue_number = bazarNumber;
+    update.bazar_queue_sequence = bazarSequence;
+    const current = String(registration.bazar_queue_status || "").toUpperCase();
+    if (!isDoneQueueStatus(current)) {
+      update.bazar_queue_status = opts.waitingWithNote ? "WAITING_WITH_NOTE" : (["WAITING", "WAITING_WITH_NOTE", "CALLED", "IN_PROGRESS", "SKIPPED"].includes(current) ? current : "WAITING");
+    }
+  } else if (clean(registration.bazar_queue_number) && !isDoneQueueStatus(registration.bazar_queue_status)) {
+    update.bazar_queue_status = "CANCELLED";
+  }
+
+  return update;
+}
+
 function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}, allowBazar = false) {
   return (Array.isArray(rawItems) ? rawItems : [])
     .map((item: any) => ({
@@ -254,28 +336,52 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (regResult.error) return fail(regResult.error.message, 500);
-
     const reg = regResult.data;
-    if (clean(reg.queue_number)) {
-      return ok({ message: `Nomor antrian sudah dirilis: ${reg.queue_number}`, registration: reg });
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,existing_queue_profile")
+      .eq("id", reg.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+
+    const allowBazar = isHealthdayBazarSession(sessionResult.data);
+    if (!allowBazar) {
+      if (clean(reg.queue_number)) {
+        return ok({ message: `Nomor antrian sudah dirilis: ${reg.queue_number}`, registration: reg });
+      }
+      const queueNumber = await getNextQueueNumber(supabase, Number(reg.session_id));
+      const updateResult = await supabase
+        .from("vaccination_registrations")
+        .update({ queue_number: queueNumber, queue_status: "WAITING", updated_at: new Date().toISOString() })
+        .eq("id", registrationId)
+        .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,source_id,source_name,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,price,price_category)")
+        .single();
+      if (updateResult.error) return fail(updateResult.error.message, 500);
+      return ok({ message: `Nomor antrian berhasil dirilis: ${queueNumber}`, registration: updateResult.data });
     }
 
-    const queueNumber = await getNextQueueNumber(supabase, Number(reg.session_id));
+    const serviceStatus = String(reg.patient_service_status || "HEALTHDAY").toUpperCase();
+    let queueUpdate: Record<string, any> = {};
+    try {
+      queueUpdate = await buildServiceQueueUpdate(supabase, reg, serviceStatus);
+    } catch (error: any) {
+      return fail(error?.message || "Gagal membuat nomor antrian A/B.", 500);
+    }
 
     const updateResult = await supabase
       .from("vaccination_registrations")
-      .update({
-        queue_number: queueNumber,
-        queue_status: "WAITING",
-        updated_at: new Date().toISOString(),
-      })
+      .update({ ...queueUpdate, updated_at: new Date().toISOString() })
       .eq("id", registrationId)
       .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,source_id,source_name,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,price,price_category)")
       .single();
-
     if (updateResult.error) return fail(updateResult.error.message, 500);
 
-    return ok({ message: `Nomor antrian berhasil dirilis: ${queueNumber}`, registration: updateResult.data });
+    const parts = [
+      serviceHasTrack(serviceStatus, "A") ? updateResult.data.queue_number : null,
+      serviceHasTrack(serviceStatus, "B") ? updateResult.data.bazar_queue_number : null,
+    ].filter(Boolean);
+    return ok({ message: `Nomor antrian berhasil dirilis: ${parts.join(" + ")}`, registration: updateResult.data });
   }
 
   if (action === "update-products") {
@@ -359,6 +465,14 @@ export async function POST(req: NextRequest) {
     const combinedItems = [...preservedAdministered, ...insertedItems];
     const serviceStatus = patientServiceStatus(combinedItems);
     const bazarBilling = bazarBillingSummary(combinedItems);
+    let serviceQueueUpdate: Record<string, any> = { queue_status: newStatus };
+    if (allowBazar) {
+      try {
+        serviceQueueUpdate = await buildServiceQueueUpdate(supabase, registration, serviceStatus, { waitingWithNote: editableItems.length > 0 });
+      } catch (error: any) {
+        return fail(error?.message || "Gagal menyesuaikan antrian A/B setelah edit produk.", 500);
+      }
+    }
 
     const updateResult = await supabase
       .from("vaccination_registrations")
@@ -368,7 +482,7 @@ export async function POST(req: NextRequest) {
         payment_method: allowBazar && bazarBilling.hasBazar ? bazarBilling.paymentMethod : (firstEditable.payment_method || registration.payment_method || null),
         payment_note: firstEditable.payment_note || registration.payment_note || null,
         ...(allowBazar ? { patient_service_status: serviceStatus } : {}),
-        queue_status: newStatus,
+        ...serviceQueueUpdate,
         status_note: note || null,
         last_product_change_at: editableItems.length ? new Date().toISOString() : registration.last_product_change_at,
         last_product_change_by: editableItems.length ? userLabel(user) : registration.last_product_change_by,
@@ -402,7 +516,6 @@ export async function POST(req: NextRequest) {
   const vaccineIdInput = toInt(body.vaccineId, 0);
   const vaccineId = vaccineIdInput || toInt(session.default_vaccine_id, 0) || null;
   const lotId = toInt(body.lotId, 0) || toInt(session.default_lot_id, 0) || null;
-  const queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
 
   const items = normalizeItems(body.items || [], { paymentMethod: body.paymentMethod, paymentNote: body.paymentNote, serviceMode: requestedServiceMode }, allowBazar);
   if (!items.length && vaccineId) {
@@ -418,6 +531,20 @@ export async function POST(req: NextRequest) {
       item_note: null,
       service_mode: requestedServiceMode,
     });
+  }
+
+  const initialServiceStatus = allowBazar ? patientServiceStatus(items.length ? items : [{ service_mode: requestedServiceMode }]) : "HEALTHDAY";
+  let queueNumber: string | null = null;
+  let bazarQueueNumber: string | null = null;
+  let bazarQueueSequence: number | null = null;
+
+  if (!allowBazar || serviceHasTrack(initialServiceStatus, "A")) {
+    queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
+  }
+  if (allowBazar && serviceHasTrack(initialServiceStatus, "B")) {
+    const nextBazar = await getNextBazarQueue(supabase, sessionId);
+    bazarQueueNumber = nextBazar.number;
+    bazarQueueSequence = nextBazar.sequence;
   }
 
   try {
@@ -444,9 +571,14 @@ export async function POST(req: NextRequest) {
     payment_method: clean(body.paymentMethod) || null,
     payment_note: clean(body.paymentNote) || null,
     queue_number: queueNumber,
-    queue_status: "WAITING",
+    queue_status: queueNumber ? "WAITING" : "REGISTERED",
+    ...(allowBazar ? {
+      bazar_queue_number: bazarQueueNumber,
+      bazar_queue_sequence: bazarQueueSequence,
+      bazar_queue_status: bazarQueueNumber ? "WAITING" : null,
+    } : {}),
     registered_by: userLabel(user),
-    ...(allowBazar ? { patient_service_status: requestedServiceMode } : {}),
+    ...(allowBazar ? { patient_service_status: initialServiceStatus } : {}),
   };
 
   const result = await supabase
@@ -486,8 +618,9 @@ export async function POST(req: NextRequest) {
     Object.assign(result.data, canonicalUpdate);
   }
 
+  const queueLabels = [queueNumber, bazarQueueNumber].filter(Boolean);
   return ok({
-    message: `Registrasi ulang berhasil. Nomor antrian: ${queueNumber}`,
+    message: `Registrasi ulang berhasil. Nomor antrian: ${queueLabels.join(" + ") || "belum dirilis"}`,
     registration: { ...result.data, items: insertedItems },
   });
 }

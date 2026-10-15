@@ -175,8 +175,10 @@ export default function VaccinationManualWalkInController({
     setMessage("");
     setError("");
 
-    // Open synchronously from click so the browser does not block the print popup.
-    const ticketWindow = popupPlaceholder();
+    // Legacy A ticket is only for Healthday. Bazar-only uses B queue and must not
+    // open the protected A queue-ticket/printer layout.
+    const shouldPrintLegacyATicket = serviceMode !== "BAZAR";
+    const ticketWindow = shouldPrintLegacyATicket ? popupPlaceholder() : null;
 
     try {
       const items = selected.map((item: any) => ({
@@ -239,17 +241,20 @@ export default function VaccinationManualWalkInController({
         `/vaccination/queue-ticket/${registrationId}` +
         `?session_id=${encodeURIComponent(String(sessionId))}&autoprint=1`;
 
-      if (ticketWindow && !ticketWindow.closed) {
-        ticketWindow.location.replace(ticketUrl);
-        ticketWindow.focus();
-      } else {
-        window.open(ticketUrl, "_blank");
+      if (shouldPrintLegacyATicket) {
+        if (ticketWindow && !ticketWindow.closed) {
+          ticketWindow.location.replace(ticketUrl);
+          ticketWindow.focus();
+        } else {
+          window.open(ticketUrl, "_blank");
+        }
       }
 
+      const queueLabel = serviceMode === "BAZAR"
+        ? clean(json?.registration?.bazar_queue_number)
+        : clean(json?.registration?.queue_number);
       setMessage(
-        `Registrasi berhasil · ${
-          clean(json?.registration?.queue_number) || "nomor antrian tersedia"
-        } · ${selected.length} produk.`,
+        `Registrasi berhasil · ${queueLabel || "nomor antrian tersedia"} · ${selected.length} produk.`,
       );
       setSelectedKeys([]);
 
