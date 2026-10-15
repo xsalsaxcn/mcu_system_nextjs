@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
+const BANK_VOICE_PREF_KEY = "harmony_vaccination_bank_voice_uri_v15377";
 
 const colors: Record<string, string> = {
   IMPORTED: "bg-slate-900 text-white",
@@ -114,11 +115,35 @@ function clampVoiceRepeat(value: any) {
   return Math.min(5, Math.max(1, Math.trunc(n)));
 }
 
+const BANK_DIGIT_WORDS: Record<string, string> = {
+  "0": "nol",
+  "1": "satu",
+  "2": "dua",
+  "3": "tiga",
+  "4": "empat",
+  "5": "lima",
+  "6": "enam",
+  "7": "tujuh",
+  "8": "delapan",
+  "9": "sembilan",
+};
+
+function spokenQueueNumber(rawValue: any, track: "A" | "B") {
+  const raw = String(rawValue || "").trim().toUpperCase();
+  const digits = raw.replace(/[^0-9]/g, "");
+  const prefix = track === "B" ? "B" : "A";
+  const spokenDigits = digits
+    .split("")
+    .map((digit) => BANK_DIGIT_WORDS[digit] || digit)
+    .join(" ");
+  return `${prefix} ${spokenDigits}`.trim();
+}
+
 function queueVoiceText(registration: any, track: "A" | "B") {
   const rawNumber = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
-  const number = String(rawNumber || "").trim().replace("-", " ");
-  const destination = track === "B" ? "Bazar" : "Healthday";
-  return `Antrian ${number}. ${destination}. Silakan ke tim pemanggil.`;
+  const number = spokenQueueNumber(rawNumber, track);
+  const destination = track === "B" ? "Bazar" : "Health Day";
+  return `Nomor antrean ${number}. ${destination}. Silakan ke tim pemanggil.`;
 }
 
 export default function VaccinationQueuePage() {
@@ -131,6 +156,8 @@ export default function VaccinationQueuePage() {
   const [error, setError] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [voiceStatus, setVoiceStatus] = useState("Voice siap");
+  const [voiceOptions, setVoiceOptions] = useState<any[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
 
   async function loadSessions() {
     const json = await fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json());
@@ -155,26 +182,105 @@ export default function VaccinationQueuePage() {
     setRegistrations(cleanVaccinationSessions(json.registrations || []));
   }
 
+  function allBrowserVoices() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return [];
+    return window.speechSynthesis.getVoices?.() || [];
+  }
+
   function preferredIndonesianVoice() {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
-    const voices = window.speechSynthesis.getVoices?.() || [];
-    return (
-      voices.find((voice) => String(voice.lang || "").toLowerCase() === "id-id") ||
-      voices.find((voice) => String(voice.lang || "").toLowerCase().startsWith("id")) ||
-      voices.find((voice) => /indones/i.test(String(voice.name || ""))) ||
-      null
-    );
+    const voices = allBrowserVoices();
+    const selected = voices.find((voice: any) => String(voice.voiceURI || "") === selectedVoiceURI);
+    if (selected) return selected;
+
+    const indonesia = voices.filter((voice: any) => {
+      const lang = String(voice.lang || "").toLowerCase();
+      const name = String(voice.name || "").toLowerCase();
+      return lang === "id-id" || lang.startsWith("id") || /indones/.test(name);
+    });
+
+    const ranked = [...indonesia].sort((a: any, b: any) => {
+      const score = (voice: any) => {
+        const name = String(voice.name || "").toLowerCase();
+        let value = 0;
+        if (/natural|online/.test(name)) value += 50;
+        if (/google/.test(name)) value += 40;
+        if (/microsoft/.test(name)) value += 30;
+        if (String(voice.lang || "").toLowerCase() === "id-id") value += 20;
+        return value;
+      };
+      return score(b) - score(a);
+    });
+
+    return ranked[0] || voices[0] || null;
+  }
+
+  function ensureBankAudioContext() {
+    if (typeof window === "undefined") return null;
+    const w = window as any;
+    const AudioCtor = w.AudioContext || w.webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!w.__vaccinationBankAudioContext) {
+      w.__vaccinationBankAudioContext = new AudioCtor();
+    }
+    return w.__vaccinationBankAudioContext;
+  }
+
+  function primeBankAudio() {
+    try {
+      const ctx = ensureBankAudioContext();
+      if (ctx?.state === "suspended") void ctx.resume();
+    } catch {
+      // Queue tetap boleh berjalan walau WebAudio diblokir.
+    }
+  }
+
+  function playBankChime() {
+    return new Promise<void>((resolve) => {
+      try {
+        const ctx = ensureBankAudioContext();
+        if (!ctx) {
+          resolve();
+          return;
+        }
+        if (ctx.state === "suspended") void ctx.resume();
+
+        const now = ctx.currentTime;
+        const tones = [
+          { frequency: 880, start: 0, duration: 0.28 },
+          { frequency: 659.25, start: 0.34, duration: 0.34 },
+        ];
+
+        tones.forEach((tone) => {
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(tone.frequency, now + tone.start);
+          gain.gain.setValueAtTime(0.0001, now + tone.start);
+          gain.gain.exponentialRampToValueAtTime(0.20, now + tone.start + 0.035);
+          gain.gain.exponentialRampToValueAtTime(
+            0.0001,
+            now + tone.start + tone.duration,
+          );
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.start(now + tone.start);
+          oscillator.stop(now + tone.start + tone.duration + 0.03);
+        });
+
+        window.setTimeout(resolve, 820);
+      } catch {
+        resolve();
+      }
+    });
   }
 
   function primeVoice() {
     if (!voiceEnabled) return;
+    primeBankAudio();
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     try {
       const synth = window.speechSynthesis;
       synth.resume();
-      // Chrome sometimes keeps speech locked until a SpeechSynthesisUtterance is
-      // created directly from the user's click/pointer gesture. This silent
-      // primer runs before the async queue API call.
       const primer = new SpeechSynthesisUtterance(" ");
       primer.lang = "id-ID";
       primer.volume = 0;
@@ -182,6 +288,26 @@ export default function VaccinationQueuePage() {
     } catch {
       // Queue action must remain usable even if browser voice is unavailable.
     }
+  }
+
+  function speakUtterance(text: string, voice: any) {
+    return new Promise<void>((resolve) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        resolve();
+        return;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "id-ID";
+      // Bank-announcer profile: slightly slower, neutral/lower pitch, clear pauses.
+      utterance.rate = 0.80;
+      utterance.pitch = 0.94;
+      utterance.volume = 1;
+      if (voice) utterance.voice = voice;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    });
   }
 
   function speakQueueText(text: string, repeat: number) {
@@ -192,34 +318,23 @@ export default function VaccinationQueuePage() {
 
     const synth = window.speechSynthesis;
     const voice = preferredIndonesianVoice();
-    let index = 0;
     synth.cancel();
     synth.resume();
 
-    const speakOnce = () => {
-      if (!voiceEnabled || index >= repeat) {
-        setVoiceStatus(voiceEnabled ? "Voice siap" : "Voice OFF");
-        return;
+    void (async () => {
+      for (let index = 1; index <= repeat; index += 1) {
+        if (!voiceEnabled) break;
+        setVoiceStatus(`Ding-dong · panggilan ${index}/${repeat}`);
+        await playBankChime();
+        if (!voiceEnabled) break;
+        setVoiceStatus(`Sedang bicara ${index}/${repeat}`);
+        await speakUtterance(text, voice);
+        if (index < repeat) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 650));
+        }
       }
-      index += 1;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "id-ID";
-      utterance.rate = 0.88;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      if (voice) utterance.voice = voice;
-      utterance.onstart = () => setVoiceStatus(`Sedang bicara ${index}/${repeat}`);
-      utterance.onend = () => {
-        if (index < repeat) window.setTimeout(speakOnce, 180);
-        else setVoiceStatus("Voice siap");
-      };
-      utterance.onerror = (event: any) => {
-        setVoiceStatus(`Voice gagal: ${event?.error || "browser"}`);
-      };
-      synth.speak(utterance);
-    };
-
-    window.setTimeout(speakOnce, 80);
+      setVoiceStatus(voiceEnabled ? "Voice Bank siap" : "Voice OFF");
+    })();
   }
 
   function announceQueue(registration: any, track: "A" | "B") {
@@ -238,9 +353,11 @@ export default function VaccinationQueuePage() {
 
   function testVoice() {
     primeVoice();
-    const repeat = 1;
     window.setTimeout(() => {
-      speakQueueText("Tes suara antrean. Healthday dan Bazar siap dipanggil.", repeat);
+      speakQueueText(
+        "Nomor antrean A nol nol delapan. Health Day. Silakan ke tim pemanggil.",
+        1,
+      );
     }, 120);
   }
 
@@ -279,6 +396,38 @@ export default function VaccinationQueuePage() {
     if (!confirmed) return;
     void action("cancel", Number(row.id), track);
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const refreshVoices = () => {
+      const voices = window.speechSynthesis.getVoices?.() || [];
+      setVoiceOptions(voices);
+
+      const saved = window.localStorage.getItem(BANK_VOICE_PREF_KEY) || "";
+      if (saved && voices.some((voice: any) => String(voice.voiceURI || "") === saved)) {
+        setSelectedVoiceURI(saved);
+        return;
+      }
+
+      const indonesia = voices.filter((voice: any) => {
+        const lang = String(voice.lang || "").toLowerCase();
+        const name = String(voice.name || "").toLowerCase();
+        return lang === "id-id" || lang.startsWith("id") || /indones/.test(name);
+      });
+      const natural = indonesia.find((voice: any) =>
+        /natural|online|google/i.test(String(voice.name || "")),
+      );
+      const fallback = natural || indonesia[0] || voices[0];
+      if (fallback?.voiceURI) setSelectedVoiceURI(String(fallback.voiceURI));
+    };
+
+    refreshVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", refreshVoices);
+    return () => {
+      window.speechSynthesis.removeEventListener?.("voiceschanged", refreshVoices);
+    };
+  }, []);
 
   useEffect(() => { loadSessions(); }, []);
   useEffect(() => { loadQueue(sessionId); const t = setInterval(() => loadQueue(sessionId), 5000); return () => clearInterval(t); }, [sessionId]);
@@ -446,7 +595,7 @@ export default function VaccinationQueuePage() {
 
   return (
     <main className="p-6"><div className="rounded-2xl border bg-slate-50 p-6 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Healthday + Bazar</h1><p className="mt-2 text-sm text-slate-600">A untuk Healthday, B untuk Bazar. Peserta Kombinasi berada di kedua antrean dengan status yang independen.</p><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-xl bg-violet-700 px-3 py-2 text-xs font-black text-white">Dual Queue A/B</span><span className={`rounded-xl px-3 py-2 text-xs font-black ${voiceEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>{voiceEnabled ? `🔊 Voice ON · x${clampVoiceRepeat(session?.existing_notification_config?.repeat || 1)}` : "🔇 Voice OFF"}</span><span className="text-xs font-bold text-slate-500">{voiceStatus}</span></div></div><div className="flex flex-wrap gap-2"><button type="button" onPointerDown={primeVoice} onClick={testVoice} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800 hover:bg-emerald-100">Tes Suara</button><button type="button" onClick={() => { setVoiceEnabled((value) => !value); setVoiceStatus((value) => value === "Voice OFF" ? "Voice siap" : "Voice OFF"); }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button><a href="/vaccination" className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div></div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Healthday + Bazar</h1><p className="mt-2 text-sm text-slate-600">A untuk Healthday, B untuk Bazar. Peserta Kombinasi berada di kedua antrean dengan status yang independen.</p><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-xl bg-violet-700 px-3 py-2 text-xs font-black text-white">Dual Queue A/B</span><span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">🔔 Bank Mode</span><span className={`rounded-xl px-3 py-2 text-xs font-black ${voiceEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>{voiceEnabled ? `🔊 Voice ON · x${clampVoiceRepeat(session?.existing_notification_config?.repeat || 1)}` : "🔇 Voice OFF"}</span><span className="text-xs font-bold text-slate-500">{voiceStatus}</span></div></div><div className="flex flex-wrap items-center gap-2"><select value={selectedVoiceURI} onChange={(event) => { const uri = event.target.value; setSelectedVoiceURI(uri); if (typeof window !== "undefined") window.localStorage.setItem(BANK_VOICE_PREF_KEY, uri); }} className="max-w-[280px] rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-700"><option value="">Suara otomatis</option>{voiceOptions.filter((voice: any) => { const lang = String(voice.lang || "").toLowerCase(); return lang.startsWith("id") || /indones/i.test(String(voice.name || "")); }).map((voice: any) => <option key={String(voice.voiceURI || voice.name)} value={String(voice.voiceURI || "")}>{String(voice.name || "Voice")} · {String(voice.lang || "-")}</option>)}</select><button type="button" onPointerDown={primeVoice} onClick={testVoice} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800 hover:bg-emerald-100">🔔 Tes Suara Bank</button><button type="button" onClick={() => { setVoiceEnabled((value) => !value); setVoiceStatus((value) => value === "Voice OFF" ? "Voice Bank siap" : "Voice OFF"); }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button><a href="/vaccination" className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div></div>
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
       <section className="mt-6 rounded-2xl border bg-white p-4"><div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center"><div><select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}><option value="">Pilih session</option>{sessions.map((s) => <option key={s.id} value={s.id}>{sessionLabel(s)}</option>)}</select>{contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">🔒 Session terkunci dari Registrasi</div> : null}</div>{session?.public_queue_token ? <a target="_blank" className="rounded-xl border bg-white px-5 py-3 text-sm font-bold text-blue-700" href={`/vaccination/public/queue/${session.public_queue_token}`}>Public Queue A/B</a> : null}</div></section>
