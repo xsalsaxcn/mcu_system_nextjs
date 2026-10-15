@@ -175,10 +175,10 @@ export default function VaccinationManualWalkInController({
     setMessage("");
     setError("");
 
-    // Legacy A ticket is only for Healthday. Bazar-only uses B queue and must not
-    // open the protected A queue-ticket/printer layout.
-    const shouldPrintLegacyATicket = serviceMode !== "BAZAR";
-    const ticketWindow = shouldPrintLegacyATicket ? popupPlaceholder() : null;
+    // Healthday dan Bazar memakai layout tiket antrean yang sama.
+    // Track hanya menentukan sumber nomor antreannya (A atau B).
+    const ticketTrack = serviceMode === "BAZAR" ? "B" : "A";
+    const ticketWindow = popupPlaceholder();
 
     try {
       const items = selected.map((item: any) => ({
@@ -239,15 +239,13 @@ export default function VaccinationManualWalkInController({
 
       const ticketUrl =
         `/vaccination/queue-ticket/${registrationId}` +
-        `?session_id=${encodeURIComponent(String(sessionId))}&autoprint=1`;
+        `?track=${ticketTrack}&session_id=${encodeURIComponent(String(sessionId))}&autoprint=1`;
 
-      if (shouldPrintLegacyATicket) {
-        if (ticketWindow && !ticketWindow.closed) {
-          ticketWindow.location.replace(ticketUrl);
-          ticketWindow.focus();
-        } else {
-          window.open(ticketUrl, "_blank");
-        }
+      if (ticketWindow && !ticketWindow.closed) {
+        ticketWindow.location.replace(ticketUrl);
+        ticketWindow.focus();
+      } else {
+        window.open(ticketUrl, "_blank");
       }
 
       const queueLabel = serviceMode === "BAZAR"

@@ -959,7 +959,29 @@ export default function VaccinationRegisterPage() {
                         </td>
                         <td className="p-3 align-top">
                           {activeQueueView === "BAZAR" ? (
-                            <div className="flex min-w-[125px] flex-col items-start gap-2">
+                            <div className="flex min-w-[145px] flex-col items-start gap-2">
+                              <button
+                                type="button"
+                                title="Print ulang nomor antrean Bazar"
+                                aria-label="Print ulang nomor antrean Bazar"
+                                onClick={() => {
+                                  const registrationId = Number(registration?.id || 0);
+                                  const queueSessionId = Number(registration?.session_id || 0);
+                                  if (!registrationId) return;
+                                  const ticketUrl =
+                                    `/vaccination/queue-ticket/${registrationId}` +
+                                    `?track=B&session_id=${encodeURIComponent(String(queueSessionId))}&autoprint=1`;
+                                  const printWindow = window.open(
+                                    ticketUrl,
+                                    `vaccination_queue_ticket_bazar_reprint_${registrationId}`,
+                                    "popup=yes,width=520,height=720",
+                                  );
+                                  if (printWindow) printWindow.focus();
+                                }}
+                                className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-black text-violet-700 hover:bg-violet-100"
+                              >
+                                🖨 Print Antrian
+                              </button>
                               {canCancelRegistrationTrack(registration, "B") ? (
                                 <button
                                   type="button"

@@ -30,6 +30,7 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
   const [session, setSession] = useState<any>(null);
   const [message, setMessage] = useState("Menunggu nomor antrian dirilis...");
   const [readyToPrint, setReadyToPrint] = useState(false);
+  const [ticketTrack, setTicketTrack] = useState<"A" | "B">("A");
 
   useEffect(() => {
     let active = true;
@@ -39,6 +40,13 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         if (active) setMessage("Registration ID tidak valid.");
         return;
       }
+
+      const query = new URLSearchParams(window.location.search);
+      const track: "A" | "B" =
+        String(query.get("track") || "A").toUpperCase() === "B" ? "B" : "A";
+      const queueNumberKey =
+        track === "B" ? "bazar_queue_number" : "queue_number";
+      setTicketTrack(track);
 
       let snapshot: any = null;
       let sessionId = 0;
@@ -52,7 +60,7 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         );
 
         sessionId = Number(snapshot?.session_id || 0);
-        if (snapshot && clean(snapshot?.queue_number) && sessionId) break;
+        if (snapshot && clean(snapshot?.[queueNumberKey]) && sessionId) break;
 
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
@@ -62,9 +70,13 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         setMessage("Data peserta tidak ditemukan. Tutup window ini lalu coba Rilis Antrian lagi.");
         return;
       }
-      if (!clean(snapshot?.queue_number)) {
+      if (!clean(snapshot?.[queueNumberKey])) {
         setRegistration(snapshot);
-        setMessage("Nomor antrian belum tersedia. Jika proses rilis gagal, tutup window ini lalu coba lagi.");
+        setMessage(
+          track === "B"
+            ? "Nomor antrian Bazar belum tersedia. Tutup window ini lalu coba lagi."
+            : "Nomor antrian belum tersedia. Jika proses rilis gagal, tutup window ini lalu coba lagi.",
+        );
         return;
       }
       if (!sessionId) {
@@ -98,9 +110,16 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
   const services = useMemo(() => {
     const items = Array.isArray(registration?.items) ? registration.items : [];
     const activeItems = items.filter((item: any) => item?.active !== false);
-    const names = activeItems.map(serviceName).filter(Boolean);
+    const ticketItems =
+      ticketTrack === "B"
+        ? activeItems.filter(
+            (item: any) =>
+              String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR",
+          )
+        : activeItems;
+    const names = ticketItems.map(serviceName).filter(Boolean);
     return Array.from(new Set(names));
-  }, [registration]);
+  }, [registration, ticketTrack]);
 
   useEffect(() => {
     if (!readyToPrint || !registration) return;
@@ -114,7 +133,10 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
     return () => window.clearTimeout(timer);
   }, [readyToPrint, registration]);
 
-  const queueNumber = clean(registration?.queue_number) || "-";
+  const queueNumber =
+    ticketTrack === "B"
+      ? clean(registration?.bazar_queue_number) || "-"
+      : clean(registration?.queue_number) || "-";
   const participantName = clean(registration?.participant_name) || "-";
   const location = clean(session?.location) || clean(registration?.location) || "-";
   const serviceCount = Math.max(1, services.length);
