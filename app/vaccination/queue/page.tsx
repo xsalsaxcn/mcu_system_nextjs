@@ -115,10 +115,10 @@ function clampVoiceRepeat(value: any) {
 }
 
 function queueVoiceText(registration: any, track: "A" | "B") {
-  const number = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
-  const name = String(registration?.participant_name || "peserta").trim();
+  const rawNumber = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
+  const number = String(rawNumber || "").trim().replace("-", " ");
   const destination = track === "B" ? "Bazar" : "Healthday";
-  return `Nomor antrean ${number || ""}. ${name}. Silakan menuju ${destination}.`;
+  return `Antrian ${number}. ${destination}. Silakan ke tim pemanggil.`;
 }
 
 export default function VaccinationQueuePage() {
@@ -237,7 +237,11 @@ export default function VaccinationQueuePage() {
 
   function rowsForTrack(track: "A" | "B") {
     return registrations
-      .filter((row) => serviceHasTrack(row, track))
+      .filter((row) => {
+        if (!serviceHasTrack(row, track)) return false;
+        const number = String(trackNumber(row, track) || "").trim();
+        return Boolean(number && number !== "-");
+      })
       .sort((a, b) => queueSortValue(trackNumber(a, track)) - queueSortValue(trackNumber(b, track)) || Number(a.id || 0) - Number(b.id || 0));
   }
 
