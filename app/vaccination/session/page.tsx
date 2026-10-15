@@ -42,6 +42,10 @@ type EditSessionDraft = {
   timeSlot: string;
   participantCountPlanned: string;
   printLabelHandler: "MEDIS" | "VALIDASI";
+  existingQueueProfile: "LEGACY" | "HEALTHDAY_BAZAR";
+  existingFlowDoctorEnabled: boolean;
+  existingNotificationEnabled: boolean;
+  existingNotificationRepeat: number;
 };
 
 type LocationOption = {
@@ -71,6 +75,10 @@ const emptyEditSession: EditSessionDraft = {
   timeSlot: "",
   participantCountPlanned: "",
   printLabelHandler: "MEDIS",
+  existingQueueProfile: "LEGACY",
+  existingFlowDoctorEnabled: true,
+  existingNotificationEnabled: false,
+  existingNotificationRepeat: 3,
 };
 
 const queueFieldKinds: OnsiteQueueFormFieldKind[] = [
@@ -492,6 +500,22 @@ export default function VaccinationSessionPage() {
         String(session.print_label_handler || "").toUpperCase() === "VALIDASI"
           ? "VALIDASI"
           : "MEDIS",
+      existingQueueProfile:
+        String(session.existing_queue_profile || "").toUpperCase() ===
+        "HEALTHDAY_BAZAR"
+          ? "HEALTHDAY_BAZAR"
+          : "LEGACY",
+      existingFlowDoctorEnabled:
+        session?.existing_flow_config?.doctor !== false,
+      existingNotificationEnabled:
+        session?.existing_notification_config?.enabled === true,
+      existingNotificationRepeat: Math.min(
+        5,
+        Math.max(
+          1,
+          Number(session?.existing_notification_config?.repeat || 3),
+        ),
+      ),
     });
     setEditSessionVaccines(
       (session.session_vaccines || []).map((item: any) => ({
@@ -617,6 +641,17 @@ export default function VaccinationSessionPage() {
           sessionDate: editSessionForm.sessionDate,
           timeSlot: editSessionForm.timeSlot,
           participantCountPlanned: editSessionForm.participantCountPlanned,
+          existingQueueProfile: editSessionForm.existingQueueProfile,
+          existingFlowConfig: {
+            registration: true,
+            queue: true,
+            doctor: editSessionForm.existingFlowDoctorEnabled,
+          },
+          existingNotificationConfig: {
+            enabled: editSessionForm.existingNotificationEnabled,
+            channel: "VOICE",
+            repeat: editSessionForm.existingNotificationRepeat,
+          },
           onsiteQueueFormConfig: editQueueFormFields,
           sessionVaccines: editSessionVaccines.map((item) => ({
             vaccineId: item.vaccineId,
@@ -1500,6 +1535,136 @@ export default function VaccinationSessionPage() {
                     <option value="VALIDASI">Tim Validasi</option>
                   </select>
                 </label>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-black text-slate-900">
+                      Flow Mode Existing
+                    </div>
+                    <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
+                      Session lama tetap memakai Legacy. Pilih Healthday + Bazar hanya
+                      untuk session yang akan memakai antrean A/B dan alur baru.
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-black ${
+                      editSessionForm.existingQueueProfile === "HEALTHDAY_BAZAR"
+                        ? "bg-sky-600 text-white"
+                        : "bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    {editSessionForm.existingQueueProfile === "HEALTHDAY_BAZAR"
+                      ? "HEALTHDAY + BAZAR"
+                      : "LEGACY"}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-bold text-slate-700">
+                    Tipe Mode Existing
+                    <select
+                      className="rounded-xl border bg-white px-3 py-2.5 font-bold"
+                      value={editSessionForm.existingQueueProfile}
+                      onChange={(e) =>
+                        setEditSessionForm((prev) => ({
+                          ...prev,
+                          existingQueueProfile:
+                            e.target.value === "HEALTHDAY_BAZAR"
+                              ? "HEALTHDAY_BAZAR"
+                              : "LEGACY",
+                        }))
+                      }
+                    >
+                      <option value="LEGACY">Legacy — kondisi lama</option>
+                      <option value="HEALTHDAY_BAZAR">
+                        Healthday + Bazar — antrean A/B
+                      </option>
+                    </select>
+                  </label>
+
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs font-black uppercase tracking-wide text-slate-500">
+                      Flow Session
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+                      <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                        1. Registrasi
+                      </span>
+                      <span>→</span>
+                      <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                        2. Antrian
+                      </span>
+                      <span>→</span>
+                      <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
+                        editSessionForm.existingFlowDoctorEnabled
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-slate-100 text-slate-500"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={editSessionForm.existingFlowDoctorEnabled}
+                          onChange={(e) =>
+                            setEditSessionForm((prev) => ({
+                              ...prev,
+                              existingFlowDoctorEnabled: e.target.checked,
+                            }))
+                          }
+                        />
+                        3. Alur Dokter
+                      </label>
+                    </div>
+                    <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-500">
+                      Jika Alur Dokter dimatikan, pada implementasi antrean A/B
+                      peserta akan selesai setelah dipanggil tim antrean.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border bg-white p-3 md:col-span-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-sm font-black text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={editSessionForm.existingNotificationEnabled}
+                          onChange={(e) =>
+                            setEditSessionForm((prev) => ({
+                              ...prev,
+                              existingNotificationEnabled: e.target.checked,
+                            }))
+                          }
+                        />
+                        Notifikasi panggilan Existing (non-WhatsApp)
+                      </label>
+
+                      <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                        Ulangi
+                        <select
+                          value={editSessionForm.existingNotificationRepeat}
+                          disabled={!editSessionForm.existingNotificationEnabled}
+                          onChange={(e) =>
+                            setEditSessionForm((prev) => ({
+                              ...prev,
+                              existingNotificationRepeat: Number(e.target.value),
+                            }))
+                          }
+                          className="rounded-lg border bg-white px-2 py-1.5 font-black disabled:opacity-50"
+                        >
+                          {[1, 2, 3, 4, 5].map((value) => (
+                            <option key={value} value={value}>
+                              {value}x
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-500">
+                      Channel disiapkan sebagai Voice/Browser per session, terpisah
+                      dari WhatsApp Onsite. Tahap ini hanya menyimpan setting; belum
+                      mengubah perilaku antrean Existing lama.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50/50 p-4">

@@ -28,6 +28,40 @@ type SessionLocationGroup = {
   timeSlots: Set<string>;
 };
 
+function sanitizeExistingQueueProfile(value: any) {
+  return clean(value).toUpperCase() === "HEALTHDAY_BAZAR"
+    ? "HEALTHDAY_BAZAR"
+    : "LEGACY";
+}
+
+function sanitizeExistingFlowConfig(value: any) {
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+
+  return {
+    registration: true,
+    queue: true,
+    doctor: raw.doctor !== false,
+  };
+}
+
+function sanitizeExistingNotificationConfig(value: any) {
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+  const repeatRaw = Number(raw.repeat);
+  const repeat = Number.isFinite(repeatRaw)
+    ? Math.min(5, Math.max(1, Math.trunc(repeatRaw)))
+    : 3;
+
+  return {
+    enabled: raw.enabled === true,
+    channel: "VOICE",
+    repeat,
+  };
+}
+
 async function attachSessionVaccines(supabase: any, sessions: any[]) {
   if (!sessions.length) return sessions;
 
@@ -536,6 +570,23 @@ export async function POST(req: NextRequest) {
         : null,
     };
 
+    if (body.existingQueueProfile !== undefined) {
+      payload.existing_queue_profile = sanitizeExistingQueueProfile(
+        body.existingQueueProfile,
+      );
+    }
+
+    if (body.existingFlowConfig !== undefined) {
+      payload.existing_flow_config = sanitizeExistingFlowConfig(
+        body.existingFlowConfig,
+      );
+    }
+
+    if (body.existingNotificationConfig !== undefined) {
+      payload.existing_notification_config =
+        sanitizeExistingNotificationConfig(body.existingNotificationConfig);
+    }
+
     if (Array.isArray(body.onsiteQueueFormConfig)) {
       const queueFormConfig = sanitizeOnsiteQueueFormConfig(
         body.onsiteQueueFormConfig,
@@ -688,6 +739,17 @@ export async function POST(req: NextRequest) {
         source_name: sourceName || null,
         default_vaccine_id: defaultVaccineId || null,
         default_lot_id: defaultLotId || null,
+        existing_queue_profile: "LEGACY",
+        existing_flow_config: {
+          registration: true,
+          queue: true,
+          doctor: true,
+        },
+        existing_notification_config: {
+          enabled: false,
+          channel: "VOICE",
+          repeat: 3,
+        },
       }));
 
     if (!rows.length) {
@@ -741,6 +803,15 @@ export async function POST(req: NextRequest) {
     source_name: sourceName || null,
     default_vaccine_id: defaultVaccineId || null,
     default_lot_id: defaultLotId || null,
+    existing_queue_profile: sanitizeExistingQueueProfile(
+      body.existingQueueProfile,
+    ),
+    existing_flow_config: sanitizeExistingFlowConfig(
+      body.existingFlowConfig,
+    ),
+    existing_notification_config: sanitizeExistingNotificationConfig(
+      body.existingNotificationConfig,
+    ),
   };
 
   const result = await supabase
