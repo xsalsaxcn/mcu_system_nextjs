@@ -24,6 +24,90 @@ function normalizeEmployeeId(value: any) {
   return clean(value).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
+function identityCandidates(row: any) {
+  return [
+    row?.employee_id,
+    row?.binusian_id,
+    row?.nik,
+    row?.mcu_id,
+    row?.employee_nik,
+    row?.external_id,
+    row?.barcode_value,
+    row?.ktp,
+    row?.nik_ktp,
+  ]
+    .map(normalizeEmployeeId)
+    .filter(Boolean);
+}
+
+function rowMatchesIdentity(row: any, requested: string) {
+  return identityCandidates(row).includes(requested);
+}
+
+async function findRegistrationByIdentity(
+  supabase: any,
+  registrations: any[],
+  requested: string,
+) {
+  // 1) Prefer identity already copied into vaccination_registrations.
+  const direct = registrations.find((row: any) => rowMatchesIdentity(row, requested));
+  if (direct) {
+    return {
+      registration: direct,
+      resolvedIdentity:
+        clean(direct?.employee_id) ||
+        clean(direct?.binusian_id) ||
+        clean(direct?.nik) ||
+        clean(direct?.mcu_id) ||
+        requested,
+    };
+  }
+
+  // 2) Some imported registrations only retain participant_id.
+  // Resolve the Employee/BINUSIAN ID from the operational participant master
+  // without changing or writing to that master.
+  const participantIds = Array.from(
+    new Set(
+      registrations
+        .map((row: any) => Number(row?.participant_id || 0))
+        .filter((id: number) => Number.isFinite(id) && id > 0),
+    ),
+  );
+
+  if (!participantIds.length) return null;
+
+  const masterResult = await supabase
+    .from("participants")
+    .select("*")
+    .in("id", participantIds)
+    .limit(5000);
+
+  // Public queue must still work even if the optional master lookup is unavailable.
+  if (masterResult.error) return null;
+
+  const participant = (masterResult.data || []).find((row: any) =>
+    rowMatchesIdentity(row, requested),
+  );
+  if (!participant) return null;
+
+  const registration = registrations.find(
+    (row: any) => Number(row?.participant_id || 0) === Number(participant?.id || 0),
+  );
+  if (!registration) return null;
+
+  return {
+    registration,
+    resolvedIdentity:
+      clean(participant?.employee_id) ||
+      clean(participant?.employee_nik) ||
+      clean(participant?.external_id) ||
+      clean(participant?.mcu_id) ||
+      clean(participant?.barcode_value) ||
+      clean(participant?.nik) ||
+      requested,
+  };
+}
+
 function normalizeStatus(value: any) {
   const s = clean(value).toUpperCase().replace(/\s+/g, "_");
   if (!s) return "REGISTERED";
@@ -213,14 +297,15 @@ export async function GET(req: NextRequest) {
 
     const requestedEmployeeId = normalizeEmployeeId(req.nextUrl.searchParams.get("employee_id"));
     if (requestedEmployeeId) {
-      const registration = registrations.find((row: any) => {
-        const employeeId = normalizeEmployeeId(row?.employee_id);
-        const binusianId = normalizeEmployeeId(row?.binusian_id);
-        return requestedEmployeeId === employeeId || requestedEmployeeId === binusianId;
-      });
+      const matched = await findRegistrationByIdentity(
+        supabase,
+        registrations,
+        requestedEmployeeId,
+      );
+      const registration = matched?.registration || null;
 
       if (!registration) {
-        return fail("BINUSIAN ID tidak ditemukan pada session ini.", 404);
+        return fail("BINUSIAN / Employee ID tidak ditemukan pada session ini.", 404);
       }
 
       const trackA = buildWatchTrack(registrations, registration, "A");
@@ -239,7 +324,13 @@ export async function GET(req: NextRequest) {
         participant: {
           id: registration?.id,
           participantName: registration?.participant_name || "",
-          employeeId: registration?.employee_id || registration?.binusian_id || "",
+          employeeId:
+            matched?.resolvedIdentity ||
+            registration?.employee_id ||
+            registration?.binusian_id ||
+            registration?.nik ||
+            registration?.mcu_id ||
+            "",
           serviceStatus: registration?.patient_service_status || "HEALTHDAY",
         },
         tracks: {

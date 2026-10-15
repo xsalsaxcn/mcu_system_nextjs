@@ -138,6 +138,11 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
       ? clean(registration?.bazar_queue_number) || "-"
       : clean(registration?.queue_number) || "-";
   const participantName = clean(registration?.participant_name) || "-";
+  const participantIdentity =
+    clean(registration?.employee_id) ||
+    clean(registration?.nik) ||
+    clean(registration?.mcu_id) ||
+    "";
   const location = clean(session?.location) || clean(registration?.location) || "-";
   const serviceCount = Math.max(1, services.length);
 
@@ -160,7 +165,22 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
           </div>
 
           <div className="divider" />
-          <div className="participant-name">{participantName}</div>
+          <div className="participant-name">
+            <div>{participantName}</div>
+            {participantIdentity ? (
+              <div
+                style={{
+                  marginTop: "0.25mm",
+                  fontSize: "5.2pt",
+                  lineHeight: 1,
+                  fontWeight: 800,
+                  letterSpacing: 0,
+                }}
+              >
+                {participantIdentity}
+              </div>
+            ) : null}
+          </div>
 
           <div className="detail-grid">
             <div className="detail-block service-block">
