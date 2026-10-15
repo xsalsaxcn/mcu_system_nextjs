@@ -102,6 +102,7 @@ export default function VaccinationRegisterPage() {
   const [importing, setImporting] = useState(false);
   const [releasingId, setReleasingId] = useState<number | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [cancellingTrackKey, setCancellingTrackKey] = useState("");
 
   const [form, setForm] = useState({
     sessionId: "",
@@ -203,6 +204,7 @@ export default function VaccinationRegisterPage() {
       let av: any;
       let bv: any;
       if (sort.key === "queue") { av = queueNumberValue(a.queue_number); bv = queueNumberValue(b.queue_number); }
+      else if (sort.key === "bazarQueue") { av = queueNumberValue(a.bazar_queue_number); bv = queueNumberValue(b.bazar_queue_number); }
       else if (sort.key === "name") { av = a.participant_name || ""; bv = b.participant_name || ""; }
       else if (sort.key === "identity") { av = a.nik || a.mcu_id || a.employee_id || ""; bv = b.nik || b.mcu_id || b.employee_id || ""; }
       else if (sort.key === "product") { av = (a.items || []).map((i: any) => i?.vaccine?.name || "").join(" ") || a.vaccine?.name || ""; bv = (b.items || []).map((i: any) => i?.vaccine?.name || "").join(" ") || b.vaccine?.name || ""; }
@@ -216,10 +218,17 @@ export default function VaccinationRegisterPage() {
   }, [registrations, sort]);
 
 
+  const queueReadyRegistrations = useMemo(() => {
+    if (!healthdayBazarEnabled) return sortedRegistrations;
+    return sortedRegistrations.filter((registration: any) =>
+      Boolean(String(registration?.queue_number || "").trim() || String(registration?.bazar_queue_number || "").trim()),
+    );
+  }, [sortedRegistrations, healthdayBazarEnabled]);
+
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return sortedRegistrations;
-    return sortedRegistrations.filter((registration: any) => {
+    if (!keyword) return queueReadyRegistrations;
+    return queueReadyRegistrations.filter((registration: any) => {
       const haystack = [
         registration.participant_name,
         registration.employee_id,
@@ -231,7 +240,7 @@ export default function VaccinationRegisterPage() {
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [sortedRegistrations, search]);
+  }, [queueReadyRegistrations, search]);
 
   const productSummary = useMemo(() => {
     const map = new Map<string, { name: string; count: number }>();
@@ -321,6 +330,48 @@ export default function VaccinationRegisterPage() {
     const json = await fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
     if (json.ok) setRegistrations(json.registrations || []);
     else setError(json.message || "Gagal memuat registrasi.");
+  }
+
+  async function cancelRegistrationTrack(registration: any, track: "A" | "B") {
+    const number = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
+    if (!String(number || "").trim()) return;
+    const trackLabel = track === "B" ? "Bazar" : "Healthday";
+    const confirmed = window.confirm(
+      `Cancel antrean ${trackLabel} ${number} - ${registration?.participant_name || "peserta"}?\n\nHanya antrean ${trackLabel} yang dibatalkan. Antrean lainnya pada peserta Kombinasi tidak ikut berubah.`,
+    );
+    if (!confirmed) return;
+
+    const key = `${registration?.id || ""}-${track}`;
+    setCancellingTrackKey(key);
+    setError("");
+    try {
+      const json = await fetch("/api/vaccination/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "cancel",
+          sessionId: Number(registration?.session_id || form.sessionId),
+          registrationId: Number(registration?.id || 0),
+          track,
+        }),
+      }).then((r) => r.json());
+      if (!json.ok) {
+        setError(json.message || `Gagal cancel antrean ${trackLabel}.`);
+        return;
+      }
+      setMessage(`Antrean ${trackLabel} ${number} berhasil dibatalkan.`);
+      await loadRegistrations(form.sessionId, selectedSourceId);
+    } catch (err: any) {
+      setError(err?.message || `Gagal cancel antrean ${trackLabel}.`);
+    } finally {
+      setCancellingTrackKey("");
+    }
+  }
+
+  function canCancelRegistrationTrack(registration: any, track: "A" | "B") {
+    const number = track === "B" ? registration?.bazar_queue_number : registration?.queue_number;
+    const status = String(track === "B" ? registration?.bazar_queue_status : registration?.queue_status || "").toUpperCase();
+    return Boolean(String(number || "").trim()) && !["ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(status);
   }
 
   function lotOptions(vaccineId: string) {
@@ -827,7 +878,7 @@ export default function VaccinationRegisterPage() {
         <section className="mt-6 overflow-hidden rounded-2xl border">
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <div className="font-bold">Registrasi Session Ini · {registrations.length} peserta</div>
+              <div className="font-bold">{healthdayBazarEnabled ? `Antrean Session Ini · ${queueReadyRegistrations.length} peserta bernomor` : `Registrasi Session Ini · ${registrations.length} peserta`}</div>
               <input
                 className="mt-3 w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-80"
                 placeholder="Cari nama / Employee ID / NIK..."
@@ -847,15 +898,29 @@ export default function VaccinationRegisterPage() {
           <div className="max-h-[560px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
-                <tr>
-                  <th className="p-3 text-left">{healthdayBazarEnabled ? "Antrian A / B" : sortButton("Antrian", "queue")}</th>
-                  <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
-                  <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
-                  <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
-                  <th className="p-3 text-left">{sortButton("Status", "status")}</th>
-                  <th className="p-3 text-left">{sortButton("Note", "note")}</th>
-                  <th className="p-3 text-left">Aksi</th>
-                </tr>
+                {healthdayBazarEnabled ? (
+                  <tr>
+                    <th className="p-3 text-left">{sortButton("Antrean Healthday", "queue")}</th>
+                    <th className="p-3 text-left">Aksi Healthday</th>
+                    <th className="p-3 text-left">{sortButton("Antrean Bazar", "bazarQueue")}</th>
+                    <th className="p-3 text-left">Aksi Bazar</th>
+                    <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
+                    <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
+                    <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
+                    <th className="p-3 text-left">{sortButton("Note", "note")}</th>
+                    <th className="p-3 text-left">Aksi Data</th>
+                  </tr>
+                ) : (
+                  <tr>
+                    <th className="p-3 text-left">{sortButton("Antrian", "queue")}</th>
+                    <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
+                    <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
+                    <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
+                    <th className="p-3 text-left">{sortButton("Status", "status")}</th>
+                    <th className="p-3 text-left">{sortButton("Note", "note")}</th>
+                    <th className="p-3 text-left">Aksi</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y">
                 {visibleRegistrations.map((registration) => {
@@ -865,28 +930,120 @@ export default function VaccinationRegisterPage() {
                   const serviceStatus = String(registration.patient_service_status || "HEALTHDAY").toUpperCase();
                   const hasA = !healthdayBazarEnabled || serviceHasTrack(serviceStatus, "A");
                   const hasB = healthdayBazarEnabled && serviceHasTrack(serviceStatus, "B");
-                  const needsQueueRelease = (hasA && !String(registration.queue_number || "").trim()) || (hasB && !String(registration.bazar_queue_number || "").trim());
+                  const hasANumber = hasA && Boolean(String(registration.queue_number || "").trim());
+                  const hasBNumber = hasB && Boolean(String(registration.bazar_queue_number || "").trim());
+                  const needsQueueRelease = !healthdayBazarEnabled && hasA && !hasANumber;
+                  const aCancelKey = `${registration?.id || ""}-A`;
+                  const bCancelKey = `${registration?.id || ""}-B`;
+
+                  if (healthdayBazarEnabled) {
+                    return (
+                      <tr key={registration.id}>
+                        <td className="p-3 align-top">
+                          {hasANumber ? (
+                            <div className="space-y-1">
+                              <div className="text-lg font-black text-blue-700">{registration.queue_number}</div>
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${info.cls}`}>{info.label}</span>
+                            </div>
+                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                        </td>
+                        <td className="p-3 align-top">
+                          {hasANumber ? (
+                            <div className="flex min-w-[145px] flex-col items-start gap-2">
+                              <button
+                                type="button"
+                                title="Print ulang nomor antrean Healthday"
+                                aria-label="Print ulang nomor antrean Healthday"
+                                onClick={() => {
+                                  const registrationId = Number(registration?.id || 0);
+                                  const queueSessionId = Number(registration?.session_id || 0);
+                                  if (!registrationId) return;
+                                  const ticketUrl =
+                                    `/vaccination/queue-ticket/${registrationId}` +
+                                    `?session_id=${encodeURIComponent(String(queueSessionId))}&autoprint=1`;
+                                  const printWindow = window.open(
+                                    ticketUrl,
+                                    `vaccination_queue_ticket_reprint_${registrationId}`,
+                                    "popup=yes,width=520,height=720",
+                                  );
+                                  if (printWindow) printWindow.focus();
+                                }}
+                                className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 hover:bg-blue-100"
+                              >
+                                🖨 Print Antrian
+                              </button>
+                              {canCancelRegistrationTrack(registration, "A") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelRegistrationTrack(registration, "A")}
+                                  disabled={cancellingTrackKey === aCancelKey}
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                >
+                                  {cancellingTrackKey === aCancelKey ? "Cancel..." : "Cancel Healthday"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                        </td>
+                        <td className="p-3 align-top">
+                          {hasBNumber ? (
+                            <div className="space-y-1">
+                              <div className="text-lg font-black text-violet-700">{registration.bazar_queue_number}</div>
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${bazarInfo.cls}`}>{bazarInfo.label}</span>
+                            </div>
+                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                        </td>
+                        <td className="p-3 align-top">
+                          {hasBNumber ? (
+                            <div className="flex min-w-[125px] flex-col items-start gap-2">
+                              {canCancelRegistrationTrack(registration, "B") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelRegistrationTrack(registration, "B")}
+                                  disabled={cancellingTrackKey === bCancelKey}
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
+                                >
+                                  {cancellingTrackKey === bCancelKey ? "Cancel..." : "Cancel Bazar"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : <span className="text-xs font-semibold text-slate-400">—</span>}
+                        </td>
+                        <td className="p-3 align-top font-bold">
+                          <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
+                            {registration.participant_name}
+                          </button>
+                          <div className="mt-1 w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700">
+                            {serviceStatus === "COMBINATION" ? "Kombinasi" : serviceStatus === "BAZAR" ? "Bazar" : "Healthday"}
+                          </div>
+                        </td>
+                        <td className="p-3 align-top">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
+                        <td className="p-3 align-top">
+                          <div className="space-y-1">
+                            {items.length ? items.map((item: any) => (
+                              <div key={item.id} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700">
+                                {item.vaccine?.name || "Produk"} · Lot {item.lot?.lot_number || "-"} · {money(item.price)}
+                              </div>
+                            )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
+                          </div>
+                        </td>
+                        <td className="p-3 align-top text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
+                        <td className="p-3 align-top">
+                          <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
                   return (
                     <tr key={registration.id}>
                       <td className="p-3">
-                        {healthdayBazarEnabled ? (
-                          <div className="space-y-1 text-sm font-black">
-                            {hasA ? <div><span className="text-blue-700">A</span> · {registration.queue_number || <span className="text-amber-700">Belum rilis</span>}</div> : null}
-                            {hasB ? <div><span className="text-violet-700">B</span> · {registration.bazar_queue_number || <span className="text-amber-700">Belum rilis</span>}</div> : null}
-                          </div>
-                        ) : (
-                          <div className="text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</div>
-                        )}
+                        <div className="text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</div>
                       </td>
                       <td className="p-3 font-bold">
                         <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
                           {registration.participant_name}
                         </button>
-                        {healthdayBazarEnabled ? (
-                          <div className="mt-1 w-fit rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700">
-                            {String(registration.patient_service_status || "HEALTHDAY").toUpperCase() === "COMBINATION" ? "Kombinasi" : String(registration.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"}
-                          </div>
-                        ) : null}
                       </td>
                       <td className="p-3">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
                       <td className="p-3">
@@ -898,49 +1055,48 @@ export default function VaccinationRegisterPage() {
                           )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                         </div>
                       </td>
-                      <td className="p-3">
-                        {healthdayBazarEnabled ? (
-                          <div className="flex flex-col items-start gap-1">
-                            {hasA ? <span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>A · {info.label}</span> : null}
-                            {hasB ? <span className={`rounded-full px-3 py-1 text-xs font-black ${bazarInfo.cls}`}>B · {bazarInfo.label}</span> : null}
-                          </div>
-                        ) : <span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>{info.label}</span>}
-                      </td>
+                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>{info.label}</span></td>
                       <td className="p-3 text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">
                           {needsQueueRelease ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
-                    {String(registration?.queue_number || "").trim() && hasA ? (
-                      <button
-                        type="button"
-                        title="Print ulang nomor antrian"
-                        aria-label="Print ulang nomor antrian"
-                        onClick={() => {
-                          const registrationId = Number(registration?.id || 0);
-                          const queueSessionId = Number(registration?.session_id || 0);
-                          if (!registrationId) return;
-                          const ticketUrl =
-                            `/vaccination/queue-ticket/${registrationId}` +
-                            `?session_id=${encodeURIComponent(String(queueSessionId))}&autoprint=1`;
-                          const printWindow = window.open(
-                            ticketUrl,
-                            `vaccination_queue_ticket_reprint_${registrationId}`,
-                            "popup=yes,width=520,height=720",
-                          );
-                          if (printWindow) printWindow.focus();
-                        }}
-                        className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 hover:bg-blue-100"
-                      >
-                        🖨 Print Antrian
-                      </button>
-                    ) : null}
+                          {String(registration?.queue_number || "").trim() && hasA ? (
+                            <button
+                              type="button"
+                              title="Print ulang nomor antrian"
+                              aria-label="Print ulang nomor antrian"
+                              onClick={() => {
+                                const registrationId = Number(registration?.id || 0);
+                                const queueSessionId = Number(registration?.session_id || 0);
+                                if (!registrationId) return;
+                                const ticketUrl =
+                                  `/vaccination/queue-ticket/${registrationId}` +
+                                  `?session_id=${encodeURIComponent(String(queueSessionId))}&autoprint=1`;
+                                const printWindow = window.open(
+                                  ticketUrl,
+                                  `vaccination_queue_ticket_reprint_${registrationId}`,
+                                  "popup=yes,width=520,height=720",
+                                );
+                                if (printWindow) printWindow.focus();
+                              }}
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700 hover:bg-blue-100"
+                            >
+                              🖨 Print Antrian
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
-                {!registrations.length ? <tr><td colSpan={7} className="p-5 text-center text-slate-500">Belum ada peserta untuk session ini.</td></tr> : null}
+                {!visibleRegistrations.length ? (
+                  <tr>
+                    <td colSpan={healthdayBazarEnabled ? 9 : 7} className="p-5 text-center text-slate-500">
+                      {healthdayBazarEnabled ? "Belum ada peserta yang sudah memiliki nomor antrean." : "Belum ada peserta untuk session ini."}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
