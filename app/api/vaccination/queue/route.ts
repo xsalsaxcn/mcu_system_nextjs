@@ -266,6 +266,7 @@ export async function POST(req: NextRequest) {
   const nextStatus =
     action === "recall" ? "CALLED" :
     action === "start" ? "IN_PROGRESS" :
+    action === "finish" ? "DONE" :
     action === "skip" ? "SKIPPED" :
     action === "cancel" ? "CANCELLED" :
     action === "waiting" ? "WAITING" : "";

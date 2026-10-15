@@ -133,6 +133,13 @@ export default function VaccinationRegisterPage() {
   const [sort, setSort] = useState<SortState>({ key: "queue", direction: "asc" });
   const [search, setSearch] = useState("");
   const [historyRegistration, setHistoryRegistration] = useState<any | null>(null);
+  const [walkinModalOpen, setWalkinModalOpen] = useState(false);
+  const [walkinModalStep, setWalkinModalStep] = useState<1 | 2>(1);
+
+  function openWalkinModal() {
+    setWalkinModalStep(1);
+    setWalkinModalOpen(true);
+  }
 
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
   const healthdayBazarEnabled = String(selectedSession?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
@@ -797,53 +804,137 @@ export default function VaccinationRegisterPage() {
               setForm={setForm}
               session={selectedSession}
               sessionRegistrations={registrations}
+              onParticipantReady={openWalkinModal}
             />
 
-            <div id="walkin-detail-fields" className="rounded-2xl border bg-white p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-black text-slate-900">Detail Peserta</div>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">Data dapat terisi otomatis dari peserta lokasi ini, database perusahaan, history, atau dipakai untuk peserta baru.</div>
-                </div>
-                {form.walkInContextLabel ? <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-black text-blue-700">{form.walkInContextLabel}</span> : null}
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Employee / BINUSIAN ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="NIK KTP" value={form.nik} onChange={(e) => setForm({ ...form, nik: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Nomor HP" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Perusahaan" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
-                <input className="rounded-xl border px-3 py-2.5" placeholder="Departemen" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
-                <select className="rounded-xl border px-3 py-2.5" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-                  <option value="">Lot utama vaksin pertama</option>
-                  {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
-                </select>
-                {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
-                  <>
-                    <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
-                    <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
-                  </>
-                ) : (
-                  <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dan total dihitung pada panel produk.</div>
-                )}
-                <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
-              </div>
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+              Setelah peserta dipilih, seluruh proses Detail Peserta → Layanan → Rilis Nomor Antrian berjalan di pop-up. Halaman ini tetap di posisi yang sama.
             </div>
-
-            <VaccinationManualWalkInController form={form} setForm={setForm} session={selectedSession} />
           </div>
 
-          {selectedVaccines.length ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedVaccines.map((vaccine: any) => (
-                <span key={vaccine.id} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{vaccineLabel(vaccine)}</span>
-              ))}
-            </div>
-          ) : null}
           {/* V153.1.1: submit manual digantikan controller produk + auto print */}
         </section>
+
+
+        {walkinModalOpen ? (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setWalkinModalOpen(false);
+            }}
+          >
+            <div className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b bg-slate-50 px-6 py-4">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wide text-blue-700">Registrasi Ulang / Walk-in</div>
+                  <h3 className="mt-1 text-2xl font-black text-slate-900">{form.participantName || "Peserta"}</h3>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
+                    {form.employeeId ? <span>ID {form.employeeId}</span> : null}
+                    {form.walkInContextLabel ? <span>· {form.walkInContextLabel}</span> : null}
+                    <span>· {selectedSession?.location || selectedSession?.session_name || "Session"}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWalkinModalStep(1)}
+                    className={`rounded-xl px-3 py-2 text-xs font-black ${walkinModalStep === 1 ? "bg-blue-600 text-white" : "border bg-white text-slate-700"}`}
+                  >
+                    1 · Data Peserta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWalkinModalStep(2)}
+                    className={`rounded-xl px-3 py-2 text-xs font-black ${walkinModalStep === 2 ? "bg-emerald-600 text-white" : "border bg-white text-slate-700"}`}
+                  >
+                    2 · Layanan & Rilis
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWalkinModalOpen(false)}
+                    className="rounded-xl border bg-white px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-100"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-6">
+                {walkinModalStep === 1 ? (
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-black text-slate-900">Konfirmasi / Lengkapi Data Peserta</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">
+                            Data terisi dari session, database, history, atau peserta baru. Lengkapi yang diperlukan tanpa meninggalkan pop-up.
+                          </div>
+                        </div>
+                        {form.walkInContextLabel ? (
+                          <span className="rounded-full bg-blue-100 px-3 py-1 text-[11px] font-black text-blue-700">
+                            {form.walkInContextLabel}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Employee / BINUSIAN ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="NIK KTP" value={form.nik} onChange={(e) => setForm({ ...form, nik: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Nomor HP" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Perusahaan" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
+                        <input className="rounded-xl border px-3 py-2.5" placeholder="Departemen" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+                        <select className="rounded-xl border px-3 py-2.5" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
+                          <option value="">Lot utama vaksin pertama</option>
+                          {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
+                        </select>
+                        {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
+                          <>
+                            <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
+                            <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
+                          </>
+                        ) : (
+                          <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">
+                            Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dipilih pada langkah berikutnya.
+                          </div>
+                        )}
+                        <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setWalkinModalStep(2)}
+                        disabled={!String(form.participantName || "").trim()}
+                        className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Lanjut Pilih Layanan →
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-black text-emerald-900">Layanan & Rilis Nomor Antrian</div>
+                        <div className="mt-1 text-xs font-semibold text-emerald-700">
+                          Pilih Healthday/Bazar dan layanan. Tombol rilis ada di bagian bawah panel ini.
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => setWalkinModalStep(1)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">
+                        ← Data Peserta
+                      </button>
+                    </div>
+
+                    <VaccinationManualWalkInController form={form} setForm={setForm} session={selectedSession} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {edit ? (
           <section id="edit-produk-vaksin" className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-5">

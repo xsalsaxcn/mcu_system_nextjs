@@ -53,11 +53,13 @@ export default function VaccinationParticipantMasterSearch({
   setForm,
   session,
   sessionRegistrations = [],
+  onParticipantReady,
 }: {
   form: any;
   setForm: any;
   session?: any;
   sessionRegistrations?: any[];
+  onParticipantReady?: () => void;
 }) {
   const [companies, setCompanies] = useState<any[]>([]);
   const [companyKey, setCompanyKey] = useState("");
@@ -247,6 +249,7 @@ export default function VaccinationParticipantMasterSearch({
     });
     setCurrentQuery(clean(row?.participant_name));
     setCurrentOpen(false);
+    window.setTimeout(() => onParticipantReady?.(), 0);
   }
 
   async function loadParticipantContext(row: any) {
@@ -357,12 +360,7 @@ export default function VaccinationParticipantMasterSearch({
     }
 
     setPending(null);
-    window.setTimeout(() => {
-      document.getElementById("walkin-detail-fields")?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 80);
+    window.setTimeout(() => onParticipantReady?.(), 0);
   }
 
   function startNewParticipant() {
@@ -553,26 +551,35 @@ export default function VaccinationParticipantMasterSearch({
                 .join(" · ") || "Siap lanjut registrasi"}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelected(null);
-              setQuery("");
-              setCurrentQuery("");
-              setForm((previous: any) => ({
-                ...(previous || {}),
-                participantId: null,
-                participant_id: null,
-                historyPersonId: null,
-                moveFromRegistrationId: null,
-                walkInSuggestedVaccineIds: [],
-                walkInContextLabel: "",
-              }));
-            }}
-            className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-black text-emerald-800"
-          >
-            Ganti Peserta
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onParticipantReady?.()}
+              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-black text-white hover:bg-emerald-800"
+            >
+              Lanjutkan Registrasi
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(null);
+                setQuery("");
+                setCurrentQuery("");
+                setForm((previous: any) => ({
+                  ...(previous || {}),
+                  participantId: null,
+                  participant_id: null,
+                  historyPersonId: null,
+                  moveFromRegistrationId: null,
+                  walkInSuggestedVaccineIds: [],
+                  walkInContextLabel: "",
+                }));
+              }}
+              className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-black text-emerald-800"
+            >
+              Ganti Peserta
+            </button>
+          </div>
         </div>
       ) : null}
 
