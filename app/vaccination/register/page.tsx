@@ -703,6 +703,15 @@ export default function VaccinationRegisterPage() {
     openEditProducts(target);
   }, [registrations]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const previousOverflow = document.body.style.overflow;
+    if (edit) document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [edit]);
+
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -986,62 +995,68 @@ export default function VaccinationRegisterPage() {
         ) : null}
 
         {edit ? (
-          <section id="edit-produk-vaksin" className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-5">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-              <div>
-                <h2 className="font-black text-orange-900">Edit Produk / Tindakan</h2>
-                <p className="mt-1 text-sm font-semibold text-orange-800">{edit.registration.queue_number || "Belum rilis"} · {edit.registration.participant_name}</p>
-              </div>
-              <button type="button" onClick={() => setEdit(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">Tutup</button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {edit.items.map((item, index) => (
-                <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-4 xl:grid-cols-[130px_1.2fr_1.1fr_90px_150px_130px_1fr_150px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
-                  {healthdayBazarEnabled ? (
-                    <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.serviceMode} onChange={(e) => updateEditItem(index, { serviceMode: e.target.value === "BAZAR" ? "BAZAR" : "HEALTHDAY", paymentMethod: e.target.value === "BAZAR" ? item.paymentMethod : item.paymentMethod })}>
-                      <option value="HEALTHDAY">Healthday</option>
-                      <option value="BAZAR">Bazar</option>
-                    </select>
-                  ) : <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-black text-slate-500">Healthday</div>}
-                  <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.vaccineId} onChange={(e) => updateEditItem(index, { vaccineId: e.target.value })}>
-                    <option value="">Pilih vaksin</option>
-                    {availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccineLabel(vaccine)}</option>)}
-                  </select>
-                  <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.lotId} onChange={(e) => updateEditItem(index, { lotId: e.target.value })}>
-                    <option value="">Pilih lot</option>
-                    {lotOptions(item.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
-                  </select>
-                  <input disabled={isDoneStatus(item.status)} type="number" min={1} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.doseNumber} onChange={(e) => updateEditItem(index, { doseNumber: Number(e.target.value || 1) })} />
-                  <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.priceCategory} onChange={(e) => updateEditItem(index, { priceCategory: e.target.value })}>
-                    {priceCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-                  </select>
-                  <input disabled={isDoneStatus(item.status) || (healthdayBazarEnabled && item.serviceMode === "BAZAR")} type="number" className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder={healthdayBazarEnabled && item.serviceMode === "BAZAR" ? "Harga master" : "Harga"} value={item.price} onChange={(e) => updateEditItem(index, { price: e.target.value })} />
-                  {healthdayBazarEnabled && item.serviceMode === "BAZAR" ? (
-                    <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentMethod: e.target.value })}>
-                      <option value="">Metode bayar</option>
-                      <option value="QRIS">QRIS</option>
-                      <option value="DEBIT">Debit</option>
-                      <option value="CREDIT_CARD">Credit Card +3%</option>
-                      <option value="TRANSFER">Transfer</option>
-                    </select>
-                  ) : (
-                    <input disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Payment note / metode" value={item.paymentNote || item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value })} />
-                  )}
-                  <div className="flex items-center gap-2">
-                    {isDoneStatus(item.status) ? <span className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700">Done</span> : <span className="rounded-xl bg-orange-100 px-3 py-2 text-xs font-black text-orange-700">Not Done</span>}
-                    <button disabled={isDoneStatus(item.status)} type="button" onClick={() => removeEditItem(index)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-40">Hapus</button>
-                  </div>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4">
+            <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] border border-orange-200 bg-orange-50 shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-orange-200 bg-orange-50 px-5 py-5 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-2xl font-black text-orange-900">Edit Produk / Tindakan</h2>
+                  <p className="mt-1 text-sm font-semibold text-orange-800">{edit.registration.queue_number || "Belum rilis"} · {edit.registration.participant_name}</p>
                 </div>
-              ))}
-            </div>
+                <button type="button" onClick={() => setEdit(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">Tutup</button>
+              </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]">
-              <input className="rounded-xl border px-3 py-2.5" placeholder="Catatan perubahan untuk dokter, contoh: Tambahan vaksin pribadi QRIS" value={edit.changeNote} onChange={(e) => setEdit({ ...edit, changeNote: e.target.value })} />
-              <button type="button" onClick={addEditItem} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">+ Tambah Produk</button>
-              <button type="button" onClick={saveEditProducts} disabled={savingEdit} className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-60">{savingEdit ? "Menyimpan..." : "Simpan Perubahan"}</button>
+              <div className="overflow-y-auto px-5 py-5">
+                <div className="space-y-3">
+                  {edit.items.map((item, index) => (
+                    <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-4 xl:grid-cols-[130px_1.2fr_1.1fr_90px_150px_130px_1fr_150px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
+                      {healthdayBazarEnabled ? (
+                        <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.serviceMode} onChange={(e) => updateEditItem(index, { serviceMode: e.target.value === "BAZAR" ? "BAZAR" : "HEALTHDAY", paymentMethod: e.target.value === "BAZAR" ? item.paymentMethod : item.paymentMethod })}>
+                          <option value="HEALTHDAY">Healthday</option>
+                          <option value="BAZAR">Bazar</option>
+                        </select>
+                      ) : <div className="rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-black text-slate-500">Healthday</div>}
+                      <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.vaccineId} onChange={(e) => updateEditItem(index, { vaccineId: e.target.value })}>
+                        <option value="">Pilih vaksin</option>
+                        {availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccineLabel(vaccine)}</option>)}
+                      </select>
+                      <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.lotId} onChange={(e) => updateEditItem(index, { lotId: e.target.value })}>
+                        <option value="">Pilih lot</option>
+                        {lotOptions(item.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
+                      </select>
+                      <input disabled={isDoneStatus(item.status)} type="number" min={1} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.doseNumber} onChange={(e) => updateEditItem(index, { doseNumber: Number(e.target.value || 1) })} />
+                      <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.priceCategory} onChange={(e) => updateEditItem(index, { priceCategory: e.target.value })}>
+                        {priceCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+                      </select>
+                      <input disabled={isDoneStatus(item.status) || (healthdayBazarEnabled && item.serviceMode === "BAZAR")} type="number" className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder={healthdayBazarEnabled && item.serviceMode === "BAZAR" ? "Harga master" : "Harga"} value={item.price} onChange={(e) => updateEditItem(index, { price: e.target.value })} />
+                      {healthdayBazarEnabled && item.serviceMode === "BAZAR" ? (
+                        <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentMethod: e.target.value })}>
+                          <option value="">Metode bayar</option>
+                          <option value="QRIS">QRIS</option>
+                          <option value="DEBIT">Debit</option>
+                          <option value="CREDIT_CARD">Credit Card +3%</option>
+                          <option value="TRANSFER">Transfer</option>
+                        </select>
+                      ) : (
+                        <input disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder="Payment note / metode" value={item.paymentNote || item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentNote: e.target.value })} />
+                      )}
+                      <div className="flex items-center gap-2">
+                        {isDoneStatus(item.status) ? <span className="rounded-xl bg-emerald-100 px-3 py-2 text-xs font-black text-emerald-700">Done</span> : <span className="rounded-xl bg-orange-100 px-3 py-2 text-xs font-black text-orange-700">Not Done</span>}
+                        <button disabled={isDoneStatus(item.status)} type="button" onClick={() => removeEditItem(index)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-40">Hapus</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-orange-200 bg-orange-50 px-5 py-4">
+                <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+                  <input className="rounded-xl border px-3 py-2.5" placeholder="Catatan perubahan untuk dokter, contoh: Tambahan vaksin pribadi QRIS" value={edit.changeNote} onChange={(e) => setEdit({ ...edit, changeNote: e.target.value })} />
+                  <button type="button" onClick={addEditItem} className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">+ Tambah Produk</button>
+                  <button type="button" onClick={saveEditProducts} disabled={savingEdit} className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-60">{savingEdit ? "Menyimpan..." : "Simpan Perubahan"}</button>
+                </div>
+              </div>
             </div>
-          </section>
+          </div>
         ) : null}
 
         <section className="mt-6 overflow-hidden rounded-2xl border">
