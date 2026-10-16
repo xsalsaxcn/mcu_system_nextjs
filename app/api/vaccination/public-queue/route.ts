@@ -179,20 +179,27 @@ function buildWatchTrack(registrations: any[], registration: any, track: "A" | "
   if (!queueNumber) return null;
 
   const status = trackStatus(registration, track);
-  const rows = registrations
-    .filter((row) => serviceHasTrack(row, track) && trackNumber(row, track))
-    .filter((row) =>
-      ["CALLED", "IN_PROGRESS", "WAITING", "WAITING_WITH_NOTE", "REGISTERED"].includes(
-        trackStatus(row, track),
-      ),
-    );
 
-  const called = rows
+  const allTrackRows = registrations
+    .filter((row) => serviceHasTrack(row, track) && trackNumber(row, track));
+
+  const activeRows = allTrackRows.filter((row) =>
+    ["CALLED", "IN_PROGRESS", "WAITING", "WAITING_WITH_NOTE", "REGISTERED"].includes(
+      trackStatus(row, track),
+    ),
+  );
+
+  const called = activeRows
     .filter((row) => ["CALLED", "IN_PROGRESS"].includes(trackStatus(row, track)))
     .sort(sortByTrack(track));
-  const waiting = rows
+
+  const waiting = activeRows
     .filter((row) => ["WAITING", "WAITING_WITH_NOTE", "REGISTERED"].includes(trackStatus(row, track)))
     .sort(sortByTrack(track));
+
+  const done = allTrackRows
+    .filter((row) => ["DONE", "ADMINISTERED", "FINISHED"].includes(trackStatus(row, track)));
+
   const ordered = [...called, ...waiting];
   const index = ordered.findIndex((row) => String(row?.id) === String(registration?.id));
   const aheadCount = index >= 0 ? index : 0;
@@ -203,8 +210,19 @@ function buildWatchTrack(registrations: any[], registration: any, track: "A" | "
     status,
     aheadCount,
     oneAhead: aheadCount === 1,
+
     currentQueueNumber: called[0] ? trackNumber(called[0], track) : null,
+    currentParticipantName: called[0]?.participant_name || null,
+
     nextQueueNumber: waiting[0] ? trackNumber(waiting[0], track) : null,
+    nextParticipantName: waiting[0]?.participant_name || null,
+
+    summary: {
+      waiting: waiting.length,
+      called: called.length,
+      done: done.length,
+      total: allTrackRows.length,
+    },
   };
 }
 

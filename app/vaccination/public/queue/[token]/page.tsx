@@ -452,6 +452,10 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                 <div className="text-xs font-black uppercase tracking-wide text-slate-500">Nama Lengkap</div>
                 <div className="mt-1 text-2xl font-black">{watchData.participant.participantName}</div>
                 <div className="mt-1 text-sm font-bold text-slate-500">BINUSIAN ID: {watchData.participant.employeeId || employeeId}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {a ? <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">A · Healthday</span> : null}
+                  {b ? <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">B · Bazar</span> : null}
+                </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -463,12 +467,34 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                         ? "bg-amber-100 ring-2 ring-amber-400"
                         : "bg-white"
                   }`}>
-                    <div className="text-xs font-black uppercase tracking-wide text-blue-700">Healthday</div>
+                    <div className="text-xs font-black uppercase tracking-wide text-blue-700">A · Healthday</div>
                     <div className="mt-2 text-4xl font-black text-blue-700">{a.queueNumber}</div>
-                    <div className="mt-3 text-sm font-bold text-slate-600">Antrean di depan: <span className="text-xl text-slate-950">{a.aheadCount}</span></div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="rounded-2xl bg-blue-50 p-3">
+                        <div className="text-[10px] font-black uppercase text-blue-700">Sedang Dipanggil</div>
+                        <div className="mt-1 text-xl font-black text-blue-800">{a.currentQueueNumber || "-"}</div>
+                        <div className="mt-1 truncate text-[11px] font-bold text-slate-600">{a.currentParticipantName || "-"}</div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-100 p-3">
+                        <div className="text-[10px] font-black uppercase text-slate-500">Berikutnya</div>
+                        <div className="mt-1 text-xl font-black text-slate-900">{a.nextQueueNumber || "-"}</div>
+                        <div className="mt-1 truncate text-[11px] font-bold text-slate-600">{a.nextParticipantName || "-"}</div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-100 p-3 text-center">
+                        <div className="text-[10px] font-black uppercase text-slate-500">Menunggu</div>
+                        <div className="mt-1 text-2xl font-black text-slate-900">{a.summary?.waiting ?? 0}</div>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-50 p-3 text-center">
+                        <div className="text-[10px] font-black uppercase text-emerald-700">Selesai</div>
+                        <div className="mt-1 text-2xl font-black text-emerald-700">{a.summary?.done ?? 0}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 text-sm font-bold text-slate-600">Antrean di depan Anda: <span className="text-xl text-slate-950">{a.aheadCount}</span></div>
                     {aState?.oneAhead ? <div className="mt-2 text-sm font-black text-amber-800">Tinggal 1 peserta lagi — mohon bersiap.</div> : null}
                     {aState?.isCalled ? <div className="mt-3 rounded-xl bg-emerald-600 px-3 py-2 text-center text-sm font-black text-white">🔔 GILIRAN ANDA DIPANGGIL</div> : null}
-                    {aState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Selesai.</div> : null}
+                    {aState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Status Anda: Selesai.</div> : null}
                   </div>
                 ) : null}
                 {b ? (
@@ -479,12 +505,34 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                         ? "bg-amber-100 ring-2 ring-amber-400"
                         : "bg-white"
                   }`}>
-                    <div className="text-xs font-black uppercase tracking-wide text-violet-700">Bazar</div>
+                    <div className="text-xs font-black uppercase tracking-wide text-violet-700">B · Bazar</div>
                     <div className="mt-2 text-4xl font-black text-violet-700">{b.queueNumber}</div>
-                    <div className="mt-3 text-sm font-bold text-slate-600">Antrean di depan: <span className="text-xl text-slate-950">{b.aheadCount}</span></div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="rounded-2xl bg-violet-50 p-3">
+                        <div className="text-[10px] font-black uppercase text-violet-700">Sedang Dipanggil</div>
+                        <div className="mt-1 text-xl font-black text-violet-800">{b.currentQueueNumber || "-"}</div>
+                        <div className="mt-1 truncate text-[11px] font-bold text-slate-600">{b.currentParticipantName || "-"}</div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-100 p-3">
+                        <div className="text-[10px] font-black uppercase text-slate-500">Berikutnya</div>
+                        <div className="mt-1 text-xl font-black text-slate-900">{b.nextQueueNumber || "-"}</div>
+                        <div className="mt-1 truncate text-[11px] font-bold text-slate-600">{b.nextParticipantName || "-"}</div>
+                      </div>
+                      <div className="rounded-2xl bg-slate-100 p-3 text-center">
+                        <div className="text-[10px] font-black uppercase text-slate-500">Menunggu</div>
+                        <div className="mt-1 text-2xl font-black text-slate-900">{b.summary?.waiting ?? 0}</div>
+                      </div>
+                      <div className="rounded-2xl bg-emerald-50 p-3 text-center">
+                        <div className="text-[10px] font-black uppercase text-emerald-700">Selesai</div>
+                        <div className="mt-1 text-2xl font-black text-emerald-700">{b.summary?.done ?? 0}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 text-sm font-bold text-slate-600">Antrean di depan Anda: <span className="text-xl text-slate-950">{b.aheadCount}</span></div>
                     {bState?.oneAhead ? <div className="mt-2 text-sm font-black text-amber-800">Tinggal 1 peserta lagi — mohon bersiap.</div> : null}
                     {bState?.isCalled ? <div className="mt-3 rounded-xl bg-violet-600 px-3 py-2 text-center text-sm font-black text-white">🔔 GILIRAN ANDA DIPANGGIL</div> : null}
-                    {bState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Selesai.</div> : null}
+                    {bState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Status Anda: Selesai.</div> : null}
                   </div>
                 ) : null}
               </div>
