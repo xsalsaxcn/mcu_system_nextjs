@@ -17,6 +17,14 @@ function notifiedStorageKey(token: string, track: string, queueNumber: string) {
   return `vaccination_existing_queue_one_ahead_v1_${token}_${track}_${queueNumber}`;
 }
 
+function calledStorageKey(token: string, track: string, queueNumber: string) {
+  return `vaccination_existing_queue_called_v1_${token}_${track}_${queueNumber}`;
+}
+
+function calledAlertKey(track: "A" | "B", queueNumber: string) {
+  return `${track}:${queueNumber}`;
+}
+
 function trackLabel(track: "A" | "B") {
   return track === "A" ? "Healthday" : "Bazar";
 }
@@ -52,6 +60,8 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   const [notificationState, setNotificationState] = useState<"idle" | "granted" | "denied" | "unsupported">("idle");
   const [watchError, setWatchError] = useState("");
   const [oneAheadMessage, setOneAheadMessage] = useState("");
+  const [calledAlert, setCalledAlert] = useState<any>(null);
+  const [dismissedCalledKey, setDismissedCalledKey] = useState("");
 
   async function load() {
     const json = await fetch(`/api/vaccination/public-queue?token=${params.token}`, { cache: "no-store" }).then((r) => r.json());
@@ -91,6 +101,141 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       setNotificationState("unsupported");
       return "unsupported" as const;
     }
+  }
+
+  function ensureParticipantAlertAudio() {
+    if (typeof window === "undefined") return null;
+    const w = window as any;
+    const AudioCtor = w.AudioContext || w.webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!w.__vaccinationParticipantAlertAudio) {
+      w.__vaccinationParticipantAlertAudio = new AudioCtor();
+    }
+    return w.__vaccinationParticipantAlertAudio;
+  }
+
+  function primeParticipantAlertAudio() {
+    try {
+      const ctx = ensureParticipantAlertAudio();
+      if (ctx?.state === "suspended") void ctx.resume();
+      if (!ctx) return;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.00001;
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.02);
+    } catch {
+      // Notification flow must continue even if audio is blocked.
+    }
+  }
+
+  function playParticipantCalledTone() {
+    return new Promise<void>((resolve) => {
+      try {
+        const ctx = ensureParticipantAlertAudio();
+        if (!ctx) {
+          resolve();
+          return;
+        }
+        if (ctx.state === "suspended") void ctx.resume();
+
+        const start = ctx.currentTime;
+        const tones = [
+          { hz: 880, at: 0.00, duration: 0.20 },
+          { hz: 1174.66, at: 0.27, duration: 0.24 },
+          { hz: 1567.98, at: 0.58, duration: 0.38 },
+        ];
+
+        tones.forEach((tone) => {
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(tone.hz, start + tone.at);
+          gain.gain.setValueAtTime(0.0001, start + tone.at);
+          gain.gain.exponentialRampToValueAtTime(0.24, start + tone.at + 0.025);
+          gain.gain.exponentialRampToValueAtTime(
+            0.0001,
+            start + tone.at + tone.duration,
+          );
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.start(start + tone.at);
+          oscillator.stop(start + tone.at + tone.duration + 0.03);
+        });
+
+        window.setTimeout(resolve, 1150);
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  function clearCalledNotificationKey(track: "A" | "B", trackData: any) {
+    const queueNumber = String(trackData?.queueNumber || "").trim();
+    if (!queueNumber) return;
+    try {
+      window.localStorage.removeItem(calledStorageKey(params.token, track, queueNumber));
+    } catch {}
+  }
+
+  async function sendCalledNotification(track: "A" | "B", trackData: any) {
+    const queueNumber = String(trackData?.queueNumber || "").trim();
+    if (!queueNumber) return;
+
+    const alertKey = calledAlertKey(track, queueNumber);
+    const storageKey = calledStorageKey(params.token, track, queueNumber);
+    let alreadyNotified = false;
+    try {
+      alreadyNotified = window.localStorage.getItem(storageKey) === "1";
+      if (!alreadyNotified) window.localStorage.setItem(storageKey, "1");
+    } catch {}
+
+    setCalledAlert({
+      key: alertKey,
+      track,
+      queueNumber,
+      label: trackLabel(track),
+    });
+    if (dismissedCalledKey !== alertKey) setDismissedCalledKey("");
+
+    if (alreadyNotified) return;
+
+    if ("vibrate" in navigator) {
+      try {
+        navigator.vibrate([700, 180, 700, 180, 1100]);
+      } catch {}
+    }
+
+    void playParticipantCalledTone();
+
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      Notification.permission !== "granted"
+    ) {
+      return;
+    }
+
+    const body = `${queueNumber} ${trackLabel(track)} sedang dipanggil. Silakan menuju tim pemanggil.`;
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification("Nomor antrean Anda dipanggil!", {
+        body,
+        tag: `vaccination-existing-called-${params.token}-${track}-${queueNumber}`,
+        requireInteraction: true,
+        renotify: true,
+        vibrate: [700, 180, 700, 180, 1100],
+        data: {
+          url: window.location.href,
+          queueNumber,
+          track,
+          status: "CALLED",
+        },
+      } as any);
+    } catch {}
   }
 
   async function sendOneAheadNotification(track: "A" | "B", trackData: any) {
@@ -142,6 +287,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
 
   async function confirmParticipant() {
     if (!previewWatch?.participant) return;
+    primeParticipantAlertAudio();
     const value = employeeId.trim();
     try {
       window.localStorage.setItem(
@@ -225,8 +371,26 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
     if (!watchData?.tracks) return;
     const a = queueTrackCard("A", watchData.tracks.A);
     const b = queueTrackCard("B", watchData.tracks.B);
+
     if (a?.oneAhead) void sendOneAheadNotification("A", watchData.tracks.A);
     if (b?.oneAhead) void sendOneAheadNotification("B", watchData.tracks.B);
+
+    if (a?.isCalled) {
+      void sendCalledNotification("A", watchData.tracks.A);
+    } else if (watchData.tracks.A) {
+      clearCalledNotificationKey("A", watchData.tracks.A);
+    }
+
+    if (b?.isCalled) {
+      void sendCalledNotification("B", watchData.tracks.B);
+    } else if (watchData.tracks.B) {
+      clearCalledNotificationKey("B", watchData.tracks.B);
+    }
+
+    if (!a?.isCalled && !b?.isCalled) {
+      setCalledAlert(null);
+      setDismissedCalledKey("");
+    }
   }, [watchData]);
 
   const waitingList = useMemo(() => {
@@ -292,22 +456,34 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
 
               <div className="grid gap-3 sm:grid-cols-2">
                 {a ? (
-                  <div className={`rounded-3xl p-5 text-slate-950 ${aState?.oneAhead ? "bg-amber-100 ring-2 ring-amber-400" : "bg-white"}`}>
+                  <div className={`rounded-3xl p-5 text-slate-950 transition-all ${
+                    aState?.isCalled
+                      ? "animate-pulse bg-emerald-100 ring-4 ring-emerald-400 shadow-[0_0_38px_rgba(52,211,153,0.75)]"
+                      : aState?.oneAhead
+                        ? "bg-amber-100 ring-2 ring-amber-400"
+                        : "bg-white"
+                  }`}>
                     <div className="text-xs font-black uppercase tracking-wide text-blue-700">Healthday</div>
                     <div className="mt-2 text-4xl font-black text-blue-700">{a.queueNumber}</div>
                     <div className="mt-3 text-sm font-bold text-slate-600">Antrean di depan: <span className="text-xl text-slate-950">{a.aheadCount}</span></div>
                     {aState?.oneAhead ? <div className="mt-2 text-sm font-black text-amber-800">Tinggal 1 peserta lagi — mohon bersiap.</div> : null}
-                    {aState?.isCalled ? <div className="mt-2 text-sm font-black text-emerald-700">Giliran Anda sedang dipanggil.</div> : null}
+                    {aState?.isCalled ? <div className="mt-3 rounded-xl bg-emerald-600 px-3 py-2 text-center text-sm font-black text-white">🔔 GILIRAN ANDA DIPANGGIL</div> : null}
                     {aState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Selesai.</div> : null}
                   </div>
                 ) : null}
                 {b ? (
-                  <div className={`rounded-3xl p-5 text-slate-950 ${bState?.oneAhead ? "bg-amber-100 ring-2 ring-amber-400" : "bg-white"}`}>
+                  <div className={`rounded-3xl p-5 text-slate-950 transition-all ${
+                    bState?.isCalled
+                      ? "animate-pulse bg-violet-100 ring-4 ring-violet-400 shadow-[0_0_38px_rgba(167,139,250,0.75)]"
+                      : bState?.oneAhead
+                        ? "bg-amber-100 ring-2 ring-amber-400"
+                        : "bg-white"
+                  }`}>
                     <div className="text-xs font-black uppercase tracking-wide text-violet-700">Bazar</div>
                     <div className="mt-2 text-4xl font-black text-violet-700">{b.queueNumber}</div>
                     <div className="mt-3 text-sm font-bold text-slate-600">Antrean di depan: <span className="text-xl text-slate-950">{b.aheadCount}</span></div>
                     {bState?.oneAhead ? <div className="mt-2 text-sm font-black text-amber-800">Tinggal 1 peserta lagi — mohon bersiap.</div> : null}
-                    {bState?.isCalled ? <div className="mt-2 text-sm font-black text-emerald-700">Giliran Anda sedang dipanggil.</div> : null}
+                    {bState?.isCalled ? <div className="mt-3 rounded-xl bg-violet-600 px-3 py-2 text-center text-sm font-black text-white">🔔 GILIRAN ANDA DIPANGGIL</div> : null}
                     {bState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Selesai.</div> : null}
                   </div>
                 ) : null}
@@ -315,7 +491,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
 
               <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-sm font-semibold text-slate-200">
                 {notificationState === "granted"
-                  ? "Notifikasi browser aktif. Sistem akan memberi peringatan saat tinggal 1 peserta di depan Anda."
+                  ? "Notifikasi browser aktif. Sistem memberi peringatan saat -1 peserta dan alert utama saat nomor Anda dipanggil."
                   : notificationState === "denied"
                     ? "Izin notifikasi browser tidak diberikan. Posisi antrean tetap dapat dipantau dari halaman ini."
                     : notificationState === "unsupported"
@@ -329,6 +505,39 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
             </div>
           ) : null}
         </div>
+
+        {calledAlert && dismissedCalledKey !== calledAlert.key ? (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-slate-950/95 px-4">
+            <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.25),transparent_60%)]" />
+            <div className="relative w-full max-w-lg animate-pulse rounded-[2rem] border-4 border-emerald-300 bg-white p-7 text-center text-slate-950 shadow-[0_0_80px_rgba(52,211,153,0.8)]">
+              <div className="text-sm font-black uppercase tracking-[0.28em] text-emerald-700">
+                🔔 Giliran Anda
+              </div>
+              <div className="mt-3 text-2xl font-black text-slate-900">
+                NOMOR ANTREAN DIPANGGIL
+              </div>
+              <div className="mt-6 text-7xl font-black leading-none text-emerald-600 sm:text-8xl">
+                {calledAlert.queueNumber}
+              </div>
+              <div className="mt-4 text-xl font-black text-slate-700">
+                {calledAlert.label}
+              </div>
+              <div className="mt-6 rounded-2xl bg-emerald-600 px-4 py-4 text-lg font-black text-white">
+                Silakan menuju tim pemanggil
+              </div>
+              <div className="mt-4 text-sm font-semibold text-slate-500">
+                Perangkat akan tetap menampilkan status dipanggil sampai operator melanjutkan antrean.
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedCalledKey(calledAlert.key)}
+                className="mt-6 w-full rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 font-black text-slate-800"
+              >
+                OK · Saya Menuju Tim Pemanggil
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {previewWatch?.participant ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
