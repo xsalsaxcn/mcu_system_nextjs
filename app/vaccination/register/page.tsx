@@ -799,6 +799,55 @@ export default function VaccinationRegisterPage() {
           <p className="mt-1 text-sm text-slate-500">Pilih peserta dari lokasi saat ini atau cek peserta walk-in dari database / history. Setelah itu lengkapi data dan layanan sampai nomor antrean tercetak.</p>
 
           <div className="mt-4 space-y-4">
+            {healthdayBazarEnabled ? (
+              <div className="rounded-2xl border border-violet-200 bg-white p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-wide text-violet-700">Jenis Layanan / Tampilan Antrean</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-600">
+                      Pilihan ini mengatur registrasi berikutnya sekaligus tabel antrean yang tampil di bawah.
+                    </div>
+                  </div>
+                  <div className="grid min-w-[320px] grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((prev: any) => ({
+                          ...(prev || {}),
+                          serviceMode: "HEALTHDAY",
+                          paymentMethod: "",
+                        }))
+                      }
+                      className={`rounded-xl border px-4 py-3 text-sm font-black ${
+                        activeQueueView === "HEALTHDAY"
+                          ? "border-blue-500 bg-blue-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-blue-50"
+                      }`}
+                    >
+                      Healthday
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((prev: any) => ({
+                          ...(prev || {}),
+                          serviceMode: "BAZAR",
+                          paymentMethod: "",
+                        }))
+                      }
+                      className={`rounded-xl border px-4 py-3 text-sm font-black ${
+                        activeQueueView === "BAZAR"
+                          ? "border-violet-500 bg-violet-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-violet-50"
+                      }`}
+                    >
+                      Bazar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <VaccinationParticipantMasterSearch
               form={form}
               setForm={setForm}
