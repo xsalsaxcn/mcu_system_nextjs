@@ -99,7 +99,7 @@ function value(row: any[], headers: Map<string, number>, aliases: string[]) {
 
 const MAPPING_ALIASES: Record<keyof VaccinationHistoryColumnMapping, string[]> = {
   participantType: ["Kategori", "Participant Type", "Jenis Peserta", "Category", "Type"],
-  participantName: ["Nama", "NAMA", "Name", "Title", "ChildName", "Participant Name", "Nama Peserta", "Employee Name", "Patient Name"],
+  participantName: ["Nama", "NAMA", "Name", "Title", "ChildName", "Participant Name", "Nama Peserta", "Nama Peserta iServe", "Employee Name", "Patient Name"],
   employeeId: ["NIP", "Employee ID", "EmployeeId", "BINUSIAN ID", "BinusianID", "Staff ID", "ID Karyawan"],
   nik: ["NIK", "No NIK", "Nomor NIK", "KTP", "NIK/KTP"],
   email: ["Email", "EMAIL", "Email Peserta", "Email Address", "E-mail"],
@@ -111,12 +111,12 @@ const MAPPING_ALIASES: Record<keyof VaccinationHistoryColumnMapping, string[]> =
   parentNik: ["Parent NIK", "NIK Parent", "NIK Orang Tua", "NIK Wali"],
   parentEmail: ["ParentEmail", "Parent Email", "Email Parent", "Email Orang Tua", "Email Wali"],
   parentPhone: ["ParentHP", "Parent Phone", "No HP Parent", "HP Orang Tua", "Phone Parent"],
-  serviceDate: ["Tanggal Suntik", "TANGGAL SUNTIK", "Tanggal Vaksin", "Tanggalvaksin", "Tanggal Layanan", "Service Date", "Date", "TimeAreaName"],
-  serviceName: ["Jenis Layanan", "JENIS LAYANAN", "Jenis Vaksin", "Jenis vaksin", "Layanan", "Service", "Service Name", "BatchName", "Benefit"],
+  serviceDate: ["Tanggal Suntik", "TANGGAL SUNTIK", "Tanggal Vaksin", "Tanggalvaksin", "Tanggal Layanan", "Tanggal Transaksi", "Service Date", "Date", "TimeAreaName"],
+  serviceName: ["Jenis Layanan", "JENIS LAYANAN", "Jenis Vaksin", "Jenis vaksin", "Vaksin/Layanan", "Layanan", "Service", "Service Name", "BatchName", "Benefit"],
   productBrand: ["Merk Layanan", "MERK LAYANAN", "Merk", "Brand", "Product Brand", "Vaccine Brand"],
-  location: ["Lokasi Vaksin", "LOKASI VAKSIN", "Lokasi", "Location", "TimeAreaName", "Site", "Venue"],
+  location: ["Lokasi Vaksin", "LOKASI VAKSIN", "Lokasi", "Klinik", "Location", "TimeAreaName", "Site", "Venue"],
   nextDueDate: ["Jadwal Selanjutnya", "JADWAL SELANJUTNYA", "Next Schedule", "Next Due Date", "Next Dose", "Next Date"],
-  notes: ["Keterangan", "KETERANGAN", "Notes", "Note", "Remark", "Remarks", "Keterangan pembayaran", "Employee Type", "ChildAge"],
+  notes: ["Keterangan", "KETERANGAN", "Kesimpulan Peserta", "Notes", "Note", "Remark", "Remarks", "Keterangan pembayaran", "Employee Type", "ChildAge"],
 };
 
 function mappedValue(
@@ -165,6 +165,7 @@ function detect(headers: string[]) {
   if (has("Title", "NIP", "Tanggalvaksin", "Jenis vaksin", "Email")) return "BINUS_DENGUE_2023";
   if (has("Name", "Jenis vaksin", "TimeAreaName", "NIP", "Email")) return "BINUS_2022";
   if (has("Name", "Gender", "Email", "PhoneNumber", "Invoice")) return "BINUS_ADULT_2024_IDENTITY";
+  if (has("Status Peserta", "Patient Code", "Nama Peserta iServe", "NIK", "No HP", "Tanggal Lahir", "Tanggal Transaksi", "Klinik", "Vaksin/Layanan")) return "BINUS_ISERVE_HISTORY_GAP";
   return "GENERIC";
 }
 
@@ -321,7 +322,76 @@ function rowMapped(
   };
 }
 
+function iServeGapDecision(row: any[], h: Map<string, number>) {
+  const status = historyText(value(row, h, ["Status Peserta"])).toUpperCase();
+  const serviceDate = historyDateOnly(value(row, h, ["Tanggal Transaksi"]));
+  const latestDbDate = historyDateOnly(value(row, h, ["Tanggal Layanan Terakhir DB"]));
+
+  if (status === "PERLU CEK MANUAL") return { action: "MANUAL" as const, status, serviceDate, latestDbDate };
+  if (status === "BELUM DITEMUKAN") return { action: "IMPORT" as const, status, serviceDate, latestDbDate };
+  if (status === "SUDAH MASUK") {
+    if (serviceDate && latestDbDate && serviceDate > latestDbDate) {
+      return { action: "IMPORT" as const, status, serviceDate, latestDbDate };
+    }
+    return { action: "COVERED" as const, status, serviceDate, latestDbDate };
+  }
+  return { action: "SKIP" as const, status, serviceDate, latestDbDate };
+}
+
+function normalizeIServeGapRow(
+  row: any[],
+  h: Map<string, number>,
+  rowNo: number,
+  fallbackYear?: number | null,
+): VaccinationHistoryRow | null {
+  const decision = iServeGapDecision(row, h);
+  if (decision.action !== "IMPORT") return null;
+
+  const participantName = historyText(value(row, h, ["Nama Peserta iServe"]));
+  if (!participantName) return null;
+
+  const patientCode = historyText(value(row, h, ["Patient Code"]));
+  const consumable = historyText(value(row, h, ["Consumable/Produk"]));
+  const oldNew = historyText(value(row, h, ["Pasien Lama/Baru"]));
+  const noteParts = [
+    patientCode ? `iServe Patient Code: ${patientCode}` : "",
+    consumable ? `Consumable/Produk: ${consumable}` : "",
+    oldNew ? oldNew : "",
+  ].filter(Boolean);
+
+  const serviceName = historyText(value(row, h, ["Vaksin/Layanan"]));
+  const serviceDate = decision.serviceDate;
+
+  return {
+    sourceRow: rowNo,
+    participantType: "EMPLOYEE",
+    participantName,
+    employeeId: "",
+    nik: historyText(value(row, h, ["NIK"])),
+    email: "",
+    phone: historyPhone(value(row, h, ["No HP"])),
+    birthDate: historyDateOnly(value(row, h, ["Tanggal Lahir"])),
+    gender: "",
+    parentName: "",
+    parentEmployeeId: "",
+    parentNik: "",
+    parentEmail: "",
+    parentPhone: "",
+    serviceDate,
+    serviceName,
+    productBrand: "",
+    location: historyText(value(row, h, ["Klinik"])),
+    nextDueDate: null,
+    notes: noteParts.join(" | "),
+    serviceCategory: historyServiceCategory(serviceName, ""),
+    sourceYear: sourceYearFromDate(serviceDate, fallbackYear),
+    identityOnly: !serviceName,
+    raw: {},
+  };
+}
+
 function normalizeRow(template: string, row: any[], h: Map<string, number>, rowNo: number, fallbackYear?: number | null): VaccinationHistoryRow | null {
+  if (template === "BINUS_ISERVE_HISTORY_GAP") return normalizeIServeGapRow(row, h, rowNo, fallbackYear);
   if (template === "BINUS_2022") {
     const name = historyText(value(row, h, ["Name"]));
     if (!name || /masukan nama/i.test(name)) return null;
@@ -448,6 +518,23 @@ export function parseVaccinationHistoryWorkbook(
   const warnings: string[] = [];
   if (template === "GENERIC") warnings.push("Template tidak dikenali. Gunakan Menu Mapping Header bila nama kolom berbeda, lalu cek Preview sebelum Import.");
   if (template === "BINUS_ADULT_2024_IDENTITY") warnings.push("File 2024 Dewasa tidak memiliki tanggal/jenis layanan yang memadai. File ini dipakai sebagai identity enrichment, bukan service history.");
+  if (template === "BINUS_ISERVE_HISTORY_GAP") {
+    let importRows = 0;
+    let coveredRows = 0;
+    let manualRows = 0;
+    for (let index = 1; index < rows.length; index += 1) {
+      const rawRow = rows[index];
+      if (!rawRow || !rawRow.some((item: any) => historyText(item))) continue;
+      const decision = iServeGapDecision(rawRow, headerMap);
+      if (decision.action === "IMPORT") importRows += 1;
+      if (decision.action === "COVERED") coveredRows += 1;
+      if (decision.action === "MANUAL") manualRows += 1;
+    }
+    warnings.push(`Template iServe terdeteksi. Kandidat import: ${importRows} baris. Sudah ter-cover database: ${coveredRows} baris. Perlu cek manual: ${manualRows} baris.`);
+    warnings.push("iServe tidak memiliki BINUSIAN ID. Matching memakai NIK exact bila ada; No HP dan Tanggal Lahir disimpan sebagai identity enrichment. Patient Code iServe tetap tersimpan di raw history/notes.");
+    warnings.push("Hanya BELUM DITEMUKAN dan transaksi SUDAH MASUK yang lebih baru dari Tanggal Layanan Terakhir DB yang diimport. PERLU CEK MANUAL tidak diimport otomatis.");
+    warnings.push("File iServe memiliki tanggal transaksi per baris; Tahun Sumber boleh dikosongkan agar tahun mengikuti Tanggal Transaksi.");
+  }
   if (hasManualMapping(mapping)) warnings.push("Manual Header Mapping aktif. Preview menggunakan mapping yang dipilih user.");
 
   const parsed: VaccinationHistoryRow[] = [];

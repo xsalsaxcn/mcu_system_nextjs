@@ -342,7 +342,10 @@ export default function VaccinationHistoryPage() {
                     <th className="p-3 text-left">Tipe</th>
                     <th className="p-3 text-left">Nama</th>
                     <th className="p-3 text-left">NIP / Parent ID</th>
+                    <th className="p-3 text-left">NIK</th>
                     <th className="p-3 text-left">Email</th>
+                    <th className="p-3 text-left">No HP</th>
+                    <th className="p-3 text-left">Tgl Lahir</th>
                     <th className="p-3 text-left">Tanggal</th>
                     <th className="p-3 text-left">Layanan</th>
                     <th className="p-3 text-left">Lokasi</th>
@@ -355,7 +358,10 @@ export default function VaccinationHistoryPage() {
                       <td className="p-3"><span className={`rounded-full px-2 py-1 text-xs font-black ${row.type === "DEPENDENT" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}`}>{row.type === "DEPENDENT" ? "ANAK" : "KARYAWAN"}</span></td>
                       <td className="p-3 font-bold">{row.name}</td>
                       <td className="p-3">{row.employeeId || "-"}</td>
+                      <td className="p-3">{row.nik || "-"}</td>
                       <td className="p-3">{row.email || "-"}</td>
+                      <td className="p-3">{row.phone || "-"}</td>
+                      <td className="p-3">{row.birthDate || "-"}</td>
                       <td className="p-3">{row.serviceDate || "-"}</td>
                       <td className="p-3">{[row.service, row.brand].filter(Boolean).join(" · ")}</td>
                       <td className="p-3">{row.location || "-"}</td>
