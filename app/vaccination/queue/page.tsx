@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const LOCK_KEY = "harmony_vaccination_locked_register_context_v65";
 const BANK_VOICE_PREF_KEY = "harmony_vaccination_bank_voice_uri_v15377";
+const AIRPORT_TONE_URL = "/vaccination-airport-call.mp3";
 
 const colors: Record<string, string> = {
   IMPORTED: "bg-slate-900 text-white",
@@ -234,7 +235,7 @@ export default function VaccinationQueuePage() {
     }
   }
 
-  function playBankChime() {
+  function playFallbackBankChime() {
     return new Promise<void>((resolve) => {
       try {
         const ctx = ensureBankAudioContext();
@@ -274,9 +275,107 @@ export default function VaccinationQueuePage() {
     });
   }
 
+  function getAirportTone() {
+    if (typeof window === "undefined") return null;
+    const w = window as any;
+    if (!w.__vaccinationAirportTone) {
+      const audio = new Audio(AIRPORT_TONE_URL);
+      audio.preload = "auto";
+      audio.volume = 1;
+      w.__vaccinationAirportTone = audio;
+    }
+    return w.__vaccinationAirportTone as HTMLAudioElement;
+  }
+
+  function primeAirportTone() {
+    try {
+      const audio = getAirportTone();
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = true;
+      const promise = audio.play();
+      if (promise && typeof promise.then === "function") {
+        void promise
+          .then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+          })
+          .catch(() => {
+            audio.muted = false;
+          });
+      } else {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+      }
+    } catch {
+      // Voice tetap bisa memakai fallback chime.
+    }
+  }
+
+  function playAirportTone() {
+    return new Promise<void>((resolve) => {
+      try {
+        const audio = getAirportTone();
+        if (!audio) {
+          void playFallbackBankChime().then(resolve);
+          return;
+        }
+
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          window.clearTimeout(timeoutId);
+          audio.onended = null;
+          audio.onerror = null;
+          try {
+            audio.pause();
+            audio.currentTime = 0;
+          } catch {}
+          resolve();
+        };
+
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+        audio.volume = 1;
+        audio.onended = finish;
+        audio.onerror = () => {
+          if (finished) return;
+          finished = true;
+          window.clearTimeout(timeoutId);
+          audio.onended = null;
+          audio.onerror = null;
+          void playFallbackBankChime().then(resolve);
+        };
+
+        // File user ±4.8 detik, tetapi tone aktif selesai sekitar 2.8 detik.
+        // Stop di 3.2 detik agar trailing silence tidak menunda announcement.
+        const timeoutId = window.setTimeout(finish, 3200);
+        const promise = audio.play();
+        if (promise && typeof promise.catch === "function") {
+          void promise.catch(() => {
+            if (finished) return;
+            finished = true;
+            window.clearTimeout(timeoutId);
+            audio.onended = null;
+            audio.onerror = null;
+            void playFallbackBankChime().then(resolve);
+          });
+        }
+      } catch {
+        void playFallbackBankChime().then(resolve);
+      }
+    });
+  }
+
   function primeVoice() {
     if (!voiceEnabled) return;
     primeBankAudio();
+    primeAirportTone();
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     try {
       const synth = window.speechSynthesis;
@@ -324,8 +423,8 @@ export default function VaccinationQueuePage() {
     void (async () => {
       for (let index = 1; index <= repeat; index += 1) {
         if (!voiceEnabled) break;
-        setVoiceStatus(`Ding-dong · panggilan ${index}/${repeat}`);
-        await playBankChime();
+        setVoiceStatus(`Airport tone · panggilan ${index}/${repeat}`);
+        await playAirportTone();
         if (!voiceEnabled) break;
         setVoiceStatus(`Sedang bicara ${index}/${repeat}`);
         await speakUtterance(text, voice);
@@ -595,7 +694,7 @@ export default function VaccinationQueuePage() {
 
   return (
     <main className="p-6"><div className="rounded-2xl border bg-slate-50 p-6 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Healthday + Bazar</h1><p className="mt-2 text-sm text-slate-600">A untuk Healthday, B untuk Bazar. Peserta Kombinasi berada di kedua antrean dengan status yang independen.</p><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-xl bg-violet-700 px-3 py-2 text-xs font-black text-white">Dual Queue A/B</span><span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">🔔 Bank Mode</span><span className={`rounded-xl px-3 py-2 text-xs font-black ${voiceEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>{voiceEnabled ? `🔊 Voice ON · x${clampVoiceRepeat(session?.existing_notification_config?.repeat || 1)}` : "🔇 Voice OFF"}</span><span className="text-xs font-bold text-slate-500">{voiceStatus}</span></div></div><div className="flex flex-wrap items-center gap-2"><select value={selectedVoiceURI} onChange={(event) => { const uri = event.target.value; setSelectedVoiceURI(uri); if (typeof window !== "undefined") window.localStorage.setItem(BANK_VOICE_PREF_KEY, uri); }} className="max-w-[280px] rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-700"><option value="">Suara otomatis</option>{voiceOptions.filter((voice: any) => { const lang = String(voice.lang || "").toLowerCase(); return lang.startsWith("id") || /indones/i.test(String(voice.name || "")); }).map((voice: any) => <option key={String(voice.voiceURI || voice.name)} value={String(voice.voiceURI || "")}>{String(voice.name || "Voice")} · {String(voice.lang || "-")}</option>)}</select><button type="button" onPointerDown={primeVoice} onClick={testVoice} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800 hover:bg-emerald-100">🔔 Tes Suara Bank</button><button type="button" onClick={() => { setVoiceEnabled((value) => !value); setVoiceStatus((value) => value === "Voice OFF" ? "Voice Bank siap" : "Voice OFF"); }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button><a href="/vaccination" className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div></div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><h1 className="text-2xl font-bold">Antrian Healthday + Bazar</h1><p className="mt-2 text-sm text-slate-600">A untuk Healthday, B untuk Bazar. Peserta Kombinasi berada di kedua antrean dengan status yang independen.</p><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-xl bg-violet-700 px-3 py-2 text-xs font-black text-white">Dual Queue A/B</span><span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">✈️ Airport Tone</span><span className={`rounded-xl px-3 py-2 text-xs font-black ${voiceEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"}`}>{voiceEnabled ? `🔊 Voice ON · x${clampVoiceRepeat(session?.existing_notification_config?.repeat || 1)}` : "🔇 Voice OFF"}</span><span className="text-xs font-bold text-slate-500">{voiceStatus}</span></div></div><div className="flex flex-wrap items-center gap-2"><select value={selectedVoiceURI} onChange={(event) => { const uri = event.target.value; setSelectedVoiceURI(uri); if (typeof window !== "undefined") window.localStorage.setItem(BANK_VOICE_PREF_KEY, uri); }} className="max-w-[280px] rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-700"><option value="">Suara otomatis</option>{voiceOptions.filter((voice: any) => { const lang = String(voice.lang || "").toLowerCase(); return lang.startsWith("id") || /indones/i.test(String(voice.name || "")); }).map((voice: any) => <option key={String(voice.voiceURI || voice.name)} value={String(voice.voiceURI || "")}>{String(voice.name || "Voice")} · {String(voice.lang || "-")}</option>)}</select><button type="button" onPointerDown={primeVoice} onClick={testVoice} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800 hover:bg-emerald-100">✈️ Tes Airport Voice</button><button type="button" onClick={() => { setVoiceEnabled((value) => !value); setVoiceStatus((value) => value === "Voice OFF" ? "Voice Bank siap" : "Voice OFF"); }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button><a href="/vaccination" className="rounded-xl border bg-white px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a></div></div>
       {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
       {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
       <section className="mt-6 rounded-2xl border bg-white p-4"><div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center"><div><select disabled={contextLocked} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-100" value={sessionId} onChange={(e) => setSessionId(e.target.value)}><option value="">Pilih session</option>{sessions.map((s) => <option key={s.id} value={s.id}>{sessionLabel(s)}</option>)}</select>{contextLocked ? <div className="mt-1 text-xs font-bold text-amber-700">🔒 Session terkunci dari Registrasi</div> : null}</div>{session?.public_queue_token ? <a target="_blank" className="rounded-xl border bg-white px-5 py-3 text-sm font-bold text-blue-700" href={`/vaccination/public/queue/${session.public_queue_token}`}>Public Queue A/B</a> : null}</div></section>
