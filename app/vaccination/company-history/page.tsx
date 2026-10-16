@@ -405,7 +405,7 @@ export default function VaccinationCompanyHistoryPage() {
                 <div className="text-xs font-black uppercase text-emerald-700">Perusahaan Terpilih</div>
                 <h2 className="mt-1 text-2xl font-black text-slate-900">{selectedCompany.company_name}</h2>
               </div>
-              <div className="grid flex-1 gap-2 md:grid-cols-[1fr_180px_auto] xl:max-w-3xl">
+              <div className="grid flex-1 gap-2 md:grid-cols-[1fr_180px_auto_auto] xl:max-w-4xl">
                 <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") applyFilter(); }} className="rounded-xl border px-3 py-2.5 text-sm" placeholder="Cari nama / NIP / NIK / email" />
                 <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-bold">
                   <option value="ALL">Semua Peserta</option>
@@ -413,6 +413,12 @@ export default function VaccinationCompanyHistoryPage() {
                   <option value="DEPENDENT">Anak / Tanggungan</option>
                 </select>
                 <button type="button" onClick={applyFilter} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-700">Terapkan</button>
+                <a
+                  href={`/api/vaccination/history/company-service/export?company_id=${encodeURIComponent(companyId)}`}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-center text-sm font-black text-emerald-800 hover:bg-emerald-100"
+                >
+                  Export Lengkap
+                </a>
               </div>
             </div>
 
