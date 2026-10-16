@@ -417,7 +417,7 @@ export default function VaccinationCompanyHistoryPage() {
                   href={`/api/vaccination/history/company-service/export?company_id=${encodeURIComponent(companyId)}`}
                   className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-center text-sm font-black text-emerald-800 hover:bg-emerald-100"
                 >
-                  Export Lengkap
+                  Export Excel
                 </a>
               </div>
             </div>
