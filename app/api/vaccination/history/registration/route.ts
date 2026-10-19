@@ -155,6 +155,33 @@ function isSafeGlobalMatch(candidates: Candidate[]) {
   return ((ownStrong >= 2 && best.score >= 200) || (hasName && ownStrong >= 1 && best.score >= 150)) ? best : null;
 }
 
+
+function explicitFamilyRole(registration: any) {
+  const value = String(registration?.family_role || "").trim().toUpperCase();
+  return value === "PARENT" || value === "DEPENDENT" ? value : "";
+}
+
+function candidateAllowedByFamilyRole(
+  candidate: Candidate,
+  registration: any,
+) {
+  const role = explicitFamilyRole(registration);
+  if (!role) return true;
+
+  const participantType = String(
+    candidate?.person?.participant_type || "",
+  ).toUpperCase();
+
+  if (role === "PARENT") return participantType === "EMPLOYEE";
+  if (participantType !== "DEPENDENT") return false;
+
+  const requestedParentId = Number(
+    registration?.parent_history_person_id || 0,
+  );
+  if (!requestedParentId) return true;
+  return Number(candidate?.parent?.id || 0) === requestedParentId;
+}
+
 function companyHintMatches(companyKey: string, hint: string) {
   if (!companyKey || companyKey === "unknown-company" || !hint) return false;
   const hintKey = historyCompanyKey(hint);
@@ -271,16 +298,92 @@ export async function GET(req: NextRequest) {
 
     const resolvedCompany = await resolveHistoryCompany(supabase, registration, session);
     let company = resolvedCompany.company;
-    let candidates: Candidate[] = company ? await findCandidates(supabase, Number(company.id), registration) : [];
-    let best = candidates[0] || null;
-    let matched = best && best.score >= 100 ? best : null;
+    let matched: Candidate | null = null;
+    let best: Candidate | null = null;
     let matchScope = company ? resolvedCompany.reason : "company-not-found";
 
-    // V151.1 safe fallback: if operational company naming differs from the imported
-    // history company, allow a cross-company lookup ONLY when strong identity is
-    // unambiguous. This is especially important for legacy sessions/source names.
+    const explicitHistoryPersonId = Number(registration?.history_person_id || 0);
+    if (explicitHistoryPersonId) {
+      const directResult = await supabase
+        .from("vaccination_persons")
+        .select("*")
+        .eq("id", explicitHistoryPersonId)
+        .eq("active", true)
+        .maybeSingle();
+      if (directResult.error) throw new Error(directResult.error.message);
+
+      if (directResult.data) {
+        const directCandidate: Candidate = {
+          person: directResult.data,
+          score: 1000,
+          reasons: ["relasi registrasi"],
+        };
+
+        if (
+          String(directResult.data.participant_type || "").toUpperCase() ===
+          "DEPENDENT"
+        ) {
+          const relResult = await supabase
+            .from("vaccination_person_relationships")
+            .select(
+              "parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(*)",
+            )
+            .eq("dependent_person_id", directResult.data.id)
+            .eq("active", true)
+            .limit(1)
+            .maybeSingle();
+          if (relResult.error) throw new Error(relResult.error.message);
+          const parent = Array.isArray(relResult.data?.parent)
+            ? relResult.data.parent[0]
+            : relResult.data?.parent;
+          directCandidate.parent = parent || null;
+        }
+
+        if (candidateAllowedByFamilyRole(directCandidate, registration)) {
+          matched = directCandidate;
+          best = directCandidate;
+          matchScope = "explicit-registration-link";
+
+          if (
+            !company ||
+            Number(company.id) !== Number(directResult.data.company_id)
+          ) {
+            const matchedCompany = await supabase
+              .from("vaccination_history_companies")
+              .select("id,company_name,company_key,public_token")
+              .eq("id", Number(directResult.data.company_id))
+              .maybeSingle();
+            if (matchedCompany.error) {
+              throw new Error(matchedCompany.error.message);
+            }
+            company = matchedCompany.data || company;
+          }
+        }
+      }
+    }
+
+    let candidates: Candidate[] = [];
+    if (!matched && company) {
+      candidates = (await findCandidates(
+        supabase,
+        Number(company.id),
+        registration,
+      )).filter((candidate) =>
+        candidateAllowedByFamilyRole(candidate, registration),
+      );
+      best = candidates[0] || null;
+      matched = best && best.score >= 100 ? best : null;
+    }
+
+    // Legacy rows without an explicit role keep the old safe fallback.
+    // New registrations with Parent / Child-Family are filtered by that explicit role,
+    // so a shared NIP cannot silently bind a Parent row to somebody else's dependent.
     if (!matched) {
-      const globalCandidates = await findGlobalCandidates(supabase, registration);
+      const globalCandidates = (
+        await findGlobalCandidates(supabase, registration)
+      ).filter((candidate) =>
+        candidateAllowedByFamilyRole(candidate, registration),
+      );
       const globalMatched = isSafeGlobalMatch(globalCandidates);
       if (globalMatched) {
         matched = globalMatched;

@@ -46,6 +46,24 @@ function queueTrackCard(track: "A" | "B", trackData: any) {
   };
 }
 
+function isActiveFamilyTrack(trackData: any) {
+  if (!trackData?.queueNumber) return false;
+  const status = String(trackData?.status || "").toUpperCase();
+  return [
+    "REGISTERED",
+    "WAITING",
+    "WAITING_WITH_NOTE",
+    "CALLED",
+    "IN_PROGRESS",
+  ].includes(status);
+}
+
+function familyRoleLabel(role: any) {
+  return String(role || "").toUpperCase() === "DEPENDENT"
+    ? "Child / Family"
+    : "Parent";
+}
+
 export default function PublicVaccinationQueuePage({ params }: { params: { token: string } }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -62,6 +80,8 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   const [oneAheadMessage, setOneAheadMessage] = useState("");
   const [calledAlert, setCalledAlert] = useState<any>(null);
   const [dismissedCalledKey, setDismissedCalledKey] = useState("");
+  const [selectedFamilyRegistrationId, setSelectedFamilyRegistrationId] =
+    useState<number | null>(null);
 
   async function load() {
     const json = await fetch(`/api/vaccination/public-queue?token=${params.token}`, { cache: "no-store" }).then((r) => r.json());
@@ -180,7 +200,11 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
     } catch {}
   }
 
-  async function sendCalledNotification(track: "A" | "B", trackData: any) {
+  async function sendCalledNotification(
+    track: "A" | "B",
+    trackData: any,
+    participantName = "",
+  ) {
     const queueNumber = String(trackData?.queueNumber || "").trim();
     if (!queueNumber) return;
 
@@ -197,6 +221,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       track,
       queueNumber,
       label: trackLabel(track),
+      participantName,
     });
     if (dismissedCalledKey !== alertKey) setDismissedCalledKey("");
 
@@ -218,7 +243,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       return;
     }
 
-    const body = `${queueNumber} ${trackLabel(track)} sedang dipanggil. Silakan menuju tim pemanggil.`;
+    const body = `${participantName ? `${participantName} · ` : ""}${queueNumber} ${trackLabel(track)} sedang dipanggil. Silakan menuju tim pemanggil.`;
 
     try {
       const registration = await navigator.serviceWorker.ready;
@@ -238,7 +263,11 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
     } catch {}
   }
 
-  async function sendOneAheadNotification(track: "A" | "B", trackData: any) {
+  async function sendOneAheadNotification(
+    track: "A" | "B",
+    trackData: any,
+    participantName = "",
+  ) {
     const queueNumber = String(trackData?.queueNumber || "").trim();
     if (!queueNumber) return;
     const key = notifiedStorageKey(params.token, track, queueNumber);
@@ -247,7 +276,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       window.localStorage.setItem(key, "1");
     } catch {}
 
-    const text = `Tinggal 1 peserta lagi sebelum ${queueNumber}. Mohon bersiap untuk ${trackLabel(track)}.`;
+    const text = `${participantName ? `${participantName}: ` : ""}tinggal 1 peserta lagi sebelum ${queueNumber}. Mohon bersiap untuk ${trackLabel(track)}.`;
     setOneAheadMessage(text);
     if ("vibrate" in navigator) {
       try { navigator.vibrate([300, 120, 300]); } catch {}
@@ -352,6 +381,25 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
         const json = await loadWatch(employeeId);
         if (!cancelled) {
           setWatchData(json);
+          const members = Array.isArray(json?.familyMembers)
+            ? json.familyMembers
+            : [];
+          setSelectedFamilyRegistrationId((current) => {
+            if (
+              current &&
+              members.some(
+                (member: any) =>
+                  Number(member?.registrationId) === Number(current),
+              )
+            ) {
+              return current;
+            }
+            return Number(
+              members?.[0]?.registrationId ||
+                json?.participant?.id ||
+                0,
+            ) || null;
+          });
           setWatchError("");
         }
       } catch (err: any) {
@@ -368,26 +416,51 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   }, [notifyMode, deviceLocked, employeeId, params.token]);
 
   useEffect(() => {
-    if (!watchData?.tracks) return;
-    const a = queueTrackCard("A", watchData.tracks.A);
-    const b = queueTrackCard("B", watchData.tracks.B);
+    if (!watchData) return;
 
-    if (a?.oneAhead) void sendOneAheadNotification("A", watchData.tracks.A);
-    if (b?.oneAhead) void sendOneAheadNotification("B", watchData.tracks.B);
+    const members =
+      Array.isArray(watchData?.familyMembers) && watchData.familyMembers.length
+        ? watchData.familyMembers
+        : [
+            {
+              registrationId: watchData?.participant?.id,
+              participantName: watchData?.participant?.participantName || "",
+              tracks: watchData?.tracks || {},
+            },
+          ];
 
-    if (a?.isCalled) {
-      void sendCalledNotification("A", watchData.tracks.A);
-    } else if (watchData.tracks.A) {
-      clearCalledNotificationKey("A", watchData.tracks.A);
+    let anyCalled = false;
+
+    for (const member of members) {
+      const participantName = String(member?.participantName || "").trim();
+      const aTrack = member?.tracks?.A || null;
+      const bTrack = member?.tracks?.B || null;
+      const a = queueTrackCard("A", aTrack);
+      const b = queueTrackCard("B", bTrack);
+
+      if (a?.oneAhead) {
+        void sendOneAheadNotification("A", aTrack, participantName);
+      }
+      if (b?.oneAhead) {
+        void sendOneAheadNotification("B", bTrack, participantName);
+      }
+
+      if (a?.isCalled) {
+        anyCalled = true;
+        void sendCalledNotification("A", aTrack, participantName);
+      } else if (aTrack) {
+        clearCalledNotificationKey("A", aTrack);
+      }
+
+      if (b?.isCalled) {
+        anyCalled = true;
+        void sendCalledNotification("B", bTrack, participantName);
+      } else if (bTrack) {
+        clearCalledNotificationKey("B", bTrack);
+      }
     }
 
-    if (b?.isCalled) {
-      void sendCalledNotification("B", watchData.tracks.B);
-    } else if (watchData.tracks.B) {
-      clearCalledNotificationKey("B", watchData.tracks.B);
-    }
-
-    if (!a?.isCalled && !b?.isCalled) {
+    if (!anyCalled) {
       setCalledAlert(null);
       setDismissedCalledKey("");
     }
@@ -407,8 +480,26 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   }
 
   if (notifyMode) {
-    const a = watchData?.tracks?.A || null;
-    const b = watchData?.tracks?.B || null;
+    const familyMembers = Array.isArray(watchData?.familyMembers)
+      ? watchData.familyMembers
+      : [];
+    const selectedFamilyMember =
+      familyMembers.find(
+        (member: any) =>
+          Number(member?.registrationId) ===
+          Number(selectedFamilyRegistrationId),
+      ) ||
+      familyMembers[0] ||
+      null;
+
+    const a =
+      selectedFamilyMember?.tracks?.A ||
+      (!familyMembers.length ? watchData?.tracks?.A : null) ||
+      null;
+    const b =
+      selectedFamilyMember?.tracks?.B ||
+      (!familyMembers.length ? watchData?.tracks?.B : null) ||
+      null;
     const aState = queueTrackCard("A", a);
     const bState = queueTrackCard("B", b);
     return (
@@ -442,7 +533,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
             </form>
           ) : (
             <div className="mt-6 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
-              Perangkat ini sudah terhubung ke antrean <b>{watchData?.participant?.participantName || employeeId}</b>. Biarkan halaman ini tetap terbuka atau di background agar notifikasi -1 peserta dapat dipicu.
+              Perangkat ini sudah terhubung ke antrean keluarga <b>{watchData?.participant?.participantName || employeeId}</b>. Biarkan halaman ini tetap terbuka atau di background agar notifikasi seluruh anggota keluarga dapat dipicu.
             </div>
           )}
 
@@ -457,6 +548,93 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                   {b ? <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">B · Bazar</span> : null}
                 </div>
               </div>
+
+              {familyMembers.length ? (
+                <div className="rounded-3xl border border-white/15 bg-white/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide text-violet-200">
+                        Antrean Aktif Keluarga
+                      </div>
+                      <div className="mt-1 text-xs font-semibold text-slate-300">
+                        Klik anggota keluarga untuk melihat detail antreannya.
+                      </div>
+                    </div>
+                    <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white">
+                      {familyMembers.length} aktif
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2">
+                    {familyMembers.map((member: any) => {
+                      const activeA = isActiveFamilyTrack(member?.tracks?.A);
+                      const activeB = isActiveFamilyTrack(member?.tracks?.B);
+                      const selected =
+                        Number(member?.registrationId) ===
+                        Number(
+                          selectedFamilyMember?.registrationId ||
+                            selectedFamilyRegistrationId,
+                        );
+
+                      return (
+                        <button
+                          type="button"
+                          key={`family-${member.registrationId}`}
+                          onClick={() =>
+                            setSelectedFamilyRegistrationId(
+                              Number(member.registrationId),
+                            )
+                          }
+                          className={`w-full rounded-2xl border p-4 text-left transition ${
+                            selected
+                              ? "border-violet-300 bg-white text-slate-950 ring-2 ring-violet-400"
+                              : "border-white/15 bg-slate-900/70 text-white hover:bg-slate-800"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-base font-black">
+                                {member.participantName || "-"}
+                              </div>
+                              <div
+                                className={`mt-1 text-xs font-bold ${
+                                  selected ? "text-slate-500" : "text-slate-300"
+                                }`}
+                              >
+                                {familyRoleLabel(member.familyRole)}
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                              {activeA ? (
+                                <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
+                                  {member.tracks.A.queueNumber}
+                                </span>
+                              ) : null}
+                              {activeB ? (
+                                <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-black text-violet-700">
+                                  {member.tracks.B.queueNumber}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedFamilyMember ? (
+                <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                  <div className="text-[10px] font-black uppercase tracking-wide text-slate-300">
+                    Detail antrean dipilih
+                  </div>
+                  <div className="mt-1 text-lg font-black text-white">
+                    {selectedFamilyMember.participantName}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 {a ? (
@@ -567,6 +745,11 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
               <div className="mt-6 text-7xl font-black leading-none text-emerald-600 sm:text-8xl">
                 {calledAlert.queueNumber}
               </div>
+              {calledAlert.participantName ? (
+                <div className="mt-3 text-2xl font-black text-slate-950">
+                  {calledAlert.participantName}
+                </div>
+              ) : null}
               <div className="mt-4 text-xl font-black text-slate-700">
                 {calledAlert.label}
               </div>
@@ -598,7 +781,44 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                 {previewWatch?.tracks?.A?.queueNumber ? <span className="rounded-full bg-blue-100 px-4 py-2 text-xl font-black text-blue-700">{previewWatch.tracks.A.queueNumber}</span> : null}
                 {previewWatch?.tracks?.B?.queueNumber ? <span className="rounded-full bg-violet-100 px-4 py-2 text-xl font-black text-violet-700">{previewWatch.tracks.B.queueNumber}</span> : null}
               </div>
-              <p className="mt-5 text-sm font-semibold text-slate-600">Pastikan nama dan nomor antrean sudah benar. Setelah klik OK, perangkat ini akan dikunci ke antrean tersebut.</p>
+              {Array.isArray(previewWatch?.familyMembers) &&
+              previewWatch.familyMembers.length > 1 ? (
+                <div className="mt-5 rounded-2xl bg-violet-50 p-4 text-left">
+                  <div className="text-xs font-black uppercase text-violet-700">
+                    Antrean Aktif Keluarga
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {previewWatch.familyMembers.map((member: any) => (
+                      <div
+                        key={`preview-family-${member.registrationId}`}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"
+                      >
+                        <div>
+                          <div className="text-sm font-black text-slate-900">
+                            {member.participantName}
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-500">
+                            {familyRoleLabel(member.familyRole)}
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          {isActiveFamilyTrack(member?.tracks?.A) ? (
+                            <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-black text-blue-700">
+                              {member.tracks.A.queueNumber}
+                            </span>
+                          ) : null}
+                          {isActiveFamilyTrack(member?.tracks?.B) ? (
+                            <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-black text-violet-700">
+                              {member.tracks.B.queueNumber}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <p className="mt-5 text-sm font-semibold text-slate-600">Pastikan data sudah benar. Setelah klik OK, perangkat ini akan dikunci ke keluarga tersebut dan memantau seluruh antrean aktifnya.</p>
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <button onClick={() => setPreviewWatch(null)} className="rounded-xl border px-4 py-3 font-black text-slate-700">Kembali</button>
                 <button onClick={confirmParticipant} className="rounded-xl bg-violet-600 px-4 py-3 font-black text-white">OK</button>

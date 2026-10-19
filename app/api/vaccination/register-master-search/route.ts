@@ -77,6 +77,14 @@ function mergePerson(existing: any, incoming: any) {
     department: first(primary.department, secondary.department),
     companyName: first(primary.companyName, secondary.companyName),
     participantType: first(primary.participantType, secondary.participantType),
+    parentHistoryPersonId:
+      primary.parentHistoryPersonId ||
+      secondary.parentHistoryPersonId ||
+      null,
+    parentName: first(primary.parentName, secondary.parentName),
+    parentEmployeeId: first(primary.parentEmployeeId, secondary.parentEmployeeId),
+    parentNik: first(primary.parentNik, secondary.parentNik),
+    parentEmail: first(primary.parentEmail, secondary.parentEmail),
     sourceLabel: [clean(primary.sourceLabel), clean(secondary.sourceLabel)]
       .filter(Boolean)
       .filter((value, index, array) => array.indexOf(value) === index)
@@ -234,6 +242,36 @@ export async function GET(req: NextRequest) {
     if (operationalResult.error) throw new Error(operationalResult.error.message);
     if (historyResult.error) throw new Error(historyResult.error.message);
 
+    const dependentHistoryIds = (historyResult.data || [])
+      .filter((row: any) => String(row?.participant_type || "").toUpperCase() === "DEPENDENT")
+      .map((row: any) => Number(row?.id || 0))
+      .filter(Boolean);
+    const parentByDependent = new Map<number, any>();
+
+    if (dependentHistoryIds.length) {
+      const relationshipResult = await supabase
+        .from("vaccination_person_relationships")
+        .select(
+          "dependent_person_id,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)",
+        )
+        .in("dependent_person_id", dependentHistoryIds)
+        .eq("active", true);
+      if (relationshipResult.error) throw new Error(relationshipResult.error.message);
+
+      for (const relation of relationshipResult.data || []) {
+        const parent = Array.isArray(relation.parent)
+          ? relation.parent[0]
+          : relation.parent;
+        if (
+          parent?.id &&
+          parent?.active !== false &&
+          String(parent?.participant_type || "").toUpperCase() === "EMPLOYEE"
+        ) {
+          parentByDependent.set(Number(relation.dependent_person_id), parent);
+        }
+      }
+    }
+
     const sourceResult = group.sourceIds.length
       ? await supabase
           .from("participant_sources")
@@ -267,25 +305,38 @@ export async function GET(req: NextRequest) {
         department: first(row.department, row.departement, row.division, row.unit),
         companyName: group.name,
         participantType: first(row.participant_type, row.employee_type, "EMPLOYEE"),
+        parentHistoryPersonId: null,
+        parentName: "",
+        parentEmployeeId: "",
+        parentNik: "",
+        parentEmail: "",
         sourceLabel: first(source?.name, source?.institution_name, "Database Utama"),
       };
     });
 
-    const mappedHistory = (historyResult.data || []).map((row: any) => ({
-      sourceType: "HISTORY_COMPANY",
-      sourceId: null,
-      participantId: null,
-      historyPersonId: Number(row.id || 0) || null,
-      name: clean(row.participant_name),
-      employeeId: clean(row.employee_id),
-      nik: clean(row.nik),
-      email: clean(row.email),
-      phone: clean(row.phone),
-      department: "",
-      companyName: group.name,
-      participantType: clean(row.participant_type) || "EMPLOYEE",
-      sourceLabel: "History Company",
-    }));
+    const mappedHistory = (historyResult.data || []).map((row: any) => {
+      const parent = parentByDependent.get(Number(row.id || 0)) || null;
+      return {
+        sourceType: "HISTORY_COMPANY",
+        sourceId: null,
+        participantId: null,
+        historyPersonId: Number(row.id || 0) || null,
+        name: clean(row.participant_name),
+        employeeId: clean(row.employee_id),
+        nik: clean(row.nik),
+        email: clean(row.email),
+        phone: clean(row.phone),
+        department: "",
+        companyName: group.name,
+        participantType: clean(row.participant_type) || "EMPLOYEE",
+        parentHistoryPersonId: Number(parent?.id || 0) || null,
+        parentName: clean(parent?.participant_name),
+        parentEmployeeId: clean(parent?.employee_id),
+        parentNik: clean(parent?.nik),
+        parentEmail: clean(parent?.email),
+        sourceLabel: "History Company",
+      };
+    });
 
     const merged = new Map<string, any>();
     for (const row of [...mappedOperational, ...mappedHistory]) {

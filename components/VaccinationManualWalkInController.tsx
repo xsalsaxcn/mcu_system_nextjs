@@ -339,6 +339,26 @@ export default function VaccinationManualWalkInController({
         sourceId: Number(form?.sourceId || form?.source_id || 0) || null,
         participantId:
           Number(form?.participantId || form?.participant_id || 0) || null,
+        historyPersonId:
+          Number(form?.historyPersonId || form?.history_person_id || 0) || null,
+        familyRole:
+          String(form?.familyRole || form?.family_role || "PARENT")
+            .trim()
+            .toUpperCase() === "DEPENDENT"
+            ? "DEPENDENT"
+            : "PARENT",
+        parentHistoryPersonId:
+          Number(
+            form?.parentHistoryPersonId ||
+            form?.parent_history_person_id ||
+            0,
+          ) || null,
+        parentName: clean(form?.parentName || form?.parent_name),
+        parentEmployeeId: clean(
+          form?.parentEmployeeId || form?.parent_employee_id,
+        ),
+        parentNik: clean(form?.parentNik || form?.parent_nik),
+        parentEmail: clean(form?.parentEmail || form?.parent_email),
         participantName,
         employeeId: clean(form?.employeeId || form?.employee_id),
         nik: clean(form?.nik),

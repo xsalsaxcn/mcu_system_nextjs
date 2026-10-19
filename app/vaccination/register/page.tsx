@@ -122,6 +122,13 @@ export default function VaccinationRegisterPage() {
     serviceMode: "HEALTHDAY",
     participantId: null as number | null,
     historyPersonId: null as number | null,
+    masterCompanyKey: "",
+    familyRole: "PARENT" as "PARENT" | "DEPENDENT",
+    parentHistoryPersonId: null as number | null,
+    parentName: "",
+    parentEmployeeId: "",
+    parentNik: "",
+    parentEmail: "",
     moveFromRegistrationId: null as number | null,
     walkInSuggestedVaccineIds: [] as string[],
     walkInContextLabel: "",
@@ -135,6 +142,9 @@ export default function VaccinationRegisterPage() {
   const [historyRegistration, setHistoryRegistration] = useState<any | null>(null);
   const [walkinModalOpen, setWalkinModalOpen] = useState(false);
   const [walkinModalStep, setWalkinModalStep] = useState<1 | 2>(1);
+  const [parentQuery, setParentQuery] = useState("");
+  const [parentResults, setParentResults] = useState<any[]>([]);
+  const [parentSearching, setParentSearching] = useState(false);
 
   function openWalkinModal() {
     setWalkinModalStep(1);
@@ -144,6 +154,69 @@ export default function VaccinationRegisterPage() {
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
   const healthdayBazarEnabled = String(selectedSession?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
+
+  useEffect(() => {
+    if (
+      !walkinModalOpen ||
+      walkinModalStep !== 1 ||
+      form.familyRole !== "DEPENDENT" ||
+      !String(form.masterCompanyKey || "").trim()
+    ) {
+      setParentResults([]);
+      setParentSearching(false);
+      return;
+    }
+
+    const keyword = parentQuery.trim();
+    if (keyword.length < 2) {
+      setParentResults([]);
+      setParentSearching(false);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setParentSearching(true);
+      try {
+        const params = new URLSearchParams({
+          company_key: String(form.masterCompanyKey),
+          q: keyword,
+        });
+        const response = await fetch(
+          `/api/vaccination/register-master-search?${params.toString()}`,
+          { cache: "no-store" },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!active) return;
+        if (!response.ok || payload?.ok === false) {
+          setParentResults([]);
+          return;
+        }
+
+        const rows = (Array.isArray(payload?.results) ? payload.results : [])
+          .filter(
+            (row: any) =>
+              String(row?.participantType || "EMPLOYEE").toUpperCase() !== "DEPENDENT" &&
+              Number(row?.historyPersonId || 0) > 0,
+          )
+          .slice(0, 20);
+        setParentResults(rows);
+      } finally {
+        if (active) setParentSearching(false);
+      }
+    }, 280);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [
+    walkinModalOpen,
+    walkinModalStep,
+    form.familyRole,
+    form.masterCompanyKey,
+    parentQuery,
+  ]);
 
   const priceCategoryOptions = useMemo(() => {
     const values = new Set<string>(["Harga Perusahaan", "Harga Pribadi"]);
@@ -656,7 +729,25 @@ export default function VaccinationRegisterPage() {
     }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Registrasi ulang gagal."); return; }
     setMessage(json.message);
-    setForm((prev) => ({ ...prev, participantName: "", employeeId: "", nik: "", email: "", phone: "", department: "", paymentPrice: "", paymentMethod: "", paymentNote: "" }));
+    setForm((prev) => ({
+      ...prev,
+      participantName: "",
+      employeeId: "",
+      nik: "",
+      email: "",
+      phone: "",
+      department: "",
+      paymentPrice: "",
+      paymentMethod: "",
+      paymentNote: "",
+      familyRole: "PARENT",
+      historyPersonId: null,
+      parentHistoryPersonId: null,
+      parentName: "",
+      parentEmployeeId: "",
+      parentNik: "",
+      parentEmail: "",
+    }));
     await loadRegistrations(form.sessionId, selectedSourceId);
   }
 
@@ -935,6 +1026,157 @@ export default function VaccinationRegisterPage() {
                         ) : null}
                       </div>
 
+                      <div className="mb-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                        <div className="text-xs font-black uppercase tracking-wide text-violet-700">
+                          Tipe Peserta
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                familyRole: "PARENT",
+                                parentHistoryPersonId: null,
+                                parentName: "",
+                                parentEmployeeId: "",
+                                parentNik: "",
+                                parentEmail: "",
+                              }));
+                              setParentQuery("");
+                              setParentResults([]);
+                            }}
+                            className={`rounded-xl px-4 py-3 text-sm font-black ${
+                              form.familyRole === "PARENT"
+                                ? "bg-violet-600 text-white"
+                                : "border border-violet-200 bg-white text-violet-800"
+                            }`}
+                          >
+                            Parent
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setForm((prev) => ({ ...prev, familyRole: "DEPENDENT" }))
+                            }
+                            className={`rounded-xl px-4 py-3 text-sm font-black ${
+                              form.familyRole === "DEPENDENT"
+                                ? "bg-violet-600 text-white"
+                                : "border border-violet-200 bg-white text-violet-800"
+                            }`}
+                          >
+                            Child / Family
+                          </button>
+                        </div>
+                        <div className="mt-2 text-[11px] font-semibold leading-5 text-violet-800">
+                          NIP yang sama tidak otomatis dianggap satu keluarga. Untuk Child / Family, pilih parent existing agar relasinya terkunci dengan benar.
+                        </div>
+
+                        {form.familyRole === "DEPENDENT" ? (
+                          <div className="mt-4">
+                            {form.parentHistoryPersonId ? (
+                              <div className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <div className="text-xs font-black uppercase text-emerald-700">
+                                    Parent Terpilih
+                                  </div>
+                                  <div className="mt-1 text-sm font-black text-emerald-950">
+                                    {form.parentName || "-"}
+                                  </div>
+                                  <div className="mt-1 text-xs font-semibold text-emerald-800">
+                                    {[form.parentEmployeeId, form.parentNik, form.parentEmail]
+                                      .filter(Boolean)
+                                      .join(" · ") || "Identitas parent tersimpan di History"}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      parentHistoryPersonId: null,
+                                      parentName: "",
+                                      parentEmployeeId: "",
+                                      parentNik: "",
+                                      parentEmail: "",
+                                    }));
+                                    setParentQuery("");
+                                  }}
+                                  className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800"
+                                >
+                                  Ganti Parent
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <label className="block text-xs font-black text-violet-900">
+                                  Cari Parent Existing
+                                  <input
+                                    value={parentQuery}
+                                    onChange={(e) => setParentQuery(e.target.value)}
+                                    placeholder="Cari nama / BINUSIAN ID / NIK / email parent..."
+                                    className="mt-1 block w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+                                  />
+                                </label>
+
+                                {parentSearching ? (
+                                  <div className="mt-2 rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-500">
+                                    Mencari parent...
+                                  </div>
+                                ) : null}
+
+                                {!parentSearching && parentResults.length ? (
+                                  <div className="mt-2 max-h-52 overflow-auto rounded-xl border border-violet-200 bg-white">
+                                    {parentResults.map((row: any) => (
+                                      <button
+                                        type="button"
+                                        key={`parent-${row.historyPersonId}`}
+                                        onClick={() => {
+                                          setForm((prev) => ({
+                                            ...prev,
+                                            parentHistoryPersonId:
+                                              Number(row.historyPersonId || 0) || null,
+                                            parentName: String(row.name || "").trim(),
+                                            parentEmployeeId: String(row.employeeId || "").trim(),
+                                            parentNik: String(row.nik || "").trim(),
+                                            parentEmail: String(row.email || "").trim(),
+                                          }));
+                                          setParentQuery("");
+                                          setParentResults([]);
+                                        }}
+                                        className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-b-0 hover:bg-violet-50"
+                                      >
+                                        <div>
+                                          <div className="text-sm font-black text-slate-900">
+                                            {row.name || "-"}
+                                          </div>
+                                          <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                                            {[row.employeeId, row.nik, row.email]
+                                              .filter(Boolean)
+                                              .join(" · ") || "History Company"}
+                                          </div>
+                                        </div>
+                                        <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">
+                                          Parent
+                                        </span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+
+                                {!parentSearching &&
+                                parentQuery.trim().length >= 2 &&
+                                !parentResults.length ? (
+                                  <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                                    Parent existing belum ditemukan di History Company. Pilih parent yang sudah terdaftar agar relasi tidak salah.
+                                  </div>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         <input className="rounded-xl border px-3 py-2.5" placeholder="Nama peserta *" value={form.participantName} onChange={(e) => setForm({ ...form, participantName: e.target.value })} />
                         <input className="rounded-xl border px-3 py-2.5" placeholder="Employee / BINUSIAN ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
@@ -950,7 +1192,10 @@ export default function VaccinationRegisterPage() {
                       <button
                         type="button"
                         onClick={() => setWalkinModalStep(2)}
-                        disabled={!String(form.participantName || "").trim()}
+                        disabled={
+                          !String(form.participantName || "").trim() ||
+                          (form.familyRole === "DEPENDENT" && !form.parentHistoryPersonId)
+                        }
                         className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white hover:bg-blue-700 disabled:opacity-50"
                       >
                         Lanjut Pilih Layanan →

@@ -212,6 +212,15 @@ export default function VaccinationParticipantMasterSearch({
       clean(row?.companyName || row?.company_name) ||
       clean(company?.name) ||
       clean(session?.company_name);
+    const rowParticipantType = clean(
+      row?.participantType || row?.participant_type || row?.family_role,
+    ).toUpperCase();
+    const familyRole =
+      rowParticipantType === "DEPENDENT" ||
+      rowParticipantType === "CHILD" ||
+      rowParticipantType === "FAMILY"
+        ? "DEPENDENT"
+        : "PARENT";
 
     setSelected({ ...row, name });
     setForm((previous: any) => ({
@@ -229,8 +238,25 @@ export default function VaccinationParticipantMasterSearch({
       department,
       companyName,
       company_name: companyName,
+      masterCompanyKey: clean(companyKey),
+      familyRole: clean(extra?.familyRole || familyRole) || "PARENT",
       historyPersonId:
         Number(row?.historyPersonId || row?.history_person_id || extra?.historyPersonId || 0) || null,
+      parentHistoryPersonId:
+        Number(
+          row?.parentHistoryPersonId ||
+          row?.parent_history_person_id ||
+          extra?.parentHistoryPersonId ||
+          0,
+        ) || null,
+      parentName: clean(row?.parentName || row?.parent_name || extra?.parentName),
+      parentEmployeeId: clean(
+        row?.parentEmployeeId ||
+        row?.parent_employee_id ||
+        extra?.parentEmployeeId,
+      ),
+      parentNik: clean(row?.parentNik || row?.parent_nik || extra?.parentNik),
+      parentEmail: clean(row?.parentEmail || row?.parent_email || extra?.parentEmail),
       masterSearchSource: clean(row?.sourceType || extra?.sourceType),
       moveFromRegistrationId: Number(extra?.moveFromRegistrationId || 0) || null,
       walkInSuggestedVaccineIds: Array.isArray(extra?.suggestedVaccineIds)
@@ -424,7 +450,14 @@ export default function VaccinationParticipantMasterSearch({
       department: "",
       companyName: resolvedCompanyName,
       company_name: resolvedCompanyName,
+      masterCompanyKey: clean(companyKey),
+      familyRole: "PARENT",
       historyPersonId: null,
+      parentHistoryPersonId: null,
+      parentName: "",
+      parentEmployeeId: "",
+      parentNik: "",
+      parentEmail: "",
       masterSearchSource: "NEW_MANUAL",
       moveFromRegistrationId: null,
       walkInSuggestedVaccineIds: [],
