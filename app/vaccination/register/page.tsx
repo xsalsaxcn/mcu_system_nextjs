@@ -925,7 +925,7 @@ export default function VaccinationRegisterPage() {
                         <div>
                           <div className="text-sm font-black text-slate-900">Konfirmasi / Lengkapi Data Peserta</div>
                           <div className="mt-1 text-xs font-semibold text-slate-500">
-                            Data terisi dari session, database, history, atau peserta baru. Lengkapi yang diperlukan tanpa meninggalkan pop-up.
+                            Step ini khusus identitas peserta. Lot, harga, payment, dan detail layanan diisi pada Step 2.
                           </div>
                         </div>
                         {form.walkInContextLabel ? (
@@ -943,21 +943,6 @@ export default function VaccinationRegisterPage() {
                         <input className="rounded-xl border px-3 py-2.5" placeholder="Nomor HP" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                         <input className="rounded-xl border px-3 py-2.5" placeholder="Perusahaan" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
                         <input className="rounded-xl border px-3 py-2.5" placeholder="Departemen" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
-                        <select className="rounded-xl border px-3 py-2.5" value={form.lotId} onChange={(e) => setForm({ ...form, lotId: e.target.value })}>
-                          <option value="">Lot utama vaksin pertama</option>
-                          {lotOptions(form.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
-                        </select>
-                        {!healthdayBazarEnabled || form.serviceMode !== "BAZAR" ? (
-                          <>
-                            <input type="number" className="rounded-xl border px-3 py-2.5" placeholder="Harga pribadi / tambahan" value={form.paymentPrice} onChange={(e) => setForm({ ...form, paymentPrice: e.target.value })} />
-                            <input className="rounded-xl border px-3 py-2.5" placeholder="Metode payment, contoh: QRIS/Cash/Transfer" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} />
-                          </>
-                        ) : (
-                          <div className="md:col-span-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">
-                            Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dipilih pada langkah berikutnya.
-                          </div>
-                        )}
-                        <input className="rounded-xl border px-3 py-2.5 md:col-span-2" placeholder="Catatan payment / tambahan vaksin" value={form.paymentNote} onChange={(e) => setForm({ ...form, paymentNote: e.target.value })} />
                       </div>
                     </div>
 
@@ -978,7 +963,7 @@ export default function VaccinationRegisterPage() {
                       <div>
                         <div className="text-sm font-black text-emerald-900">Layanan & Rilis Nomor Antrian</div>
                         <div className="mt-1 text-xs font-semibold text-emerald-700">
-                          Pilih Healthday/Bazar dan layanan. Tombol rilis ada di bagian bawah panel ini.
+                          Pilih Healthday/Bazar, produk + lot, harga/payment, lalu rilis nomor antrean.
                         </div>
                       </div>
                       <button type="button" onClick={() => setWalkinModalStep(1)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">

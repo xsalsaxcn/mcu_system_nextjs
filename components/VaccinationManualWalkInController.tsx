@@ -302,12 +302,11 @@ export default function VaccinationManualWalkInController({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="text-sm font-black text-slate-900">
-            Pilih Produk / Vaksin Peserta
+            Pilih Produk / Vaksin & Lot Peserta
           </div>
           <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
-            Produk default session di atas tidak otomatis dipilih untuk
-            registrasi manual. Centang hanya produk yang akan diberikan kepada
-            peserta ini.
+            Setiap pilihan mewakili produk beserta lot-nya. Centang hanya produk/lot
+            yang akan diberikan kepada peserta ini.
           </p>
         </div>
         <div className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-[11px] font-black text-emerald-700">
@@ -342,6 +341,59 @@ export default function VaccinationManualWalkInController({
           ) : null}
         </div>
       ) : null}
+
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="text-xs font-black uppercase tracking-wide text-slate-700">
+          Harga / Payment
+        </div>
+        <div className="mt-1 text-[11px] font-semibold text-slate-500">
+          Detail pembayaran berada di Step 2 karena mengikuti layanan yang dipilih.
+        </div>
+
+        {!healthdayBazarEnabled || serviceMode !== "BAZAR" ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-bold text-slate-700">
+              Harga pribadi / tambahan
+              <input
+                type="number"
+                value={form?.paymentPrice ?? form?.payment_price ?? ""}
+                onChange={(e) =>
+                  setForm((prev: any) => ({ ...prev, paymentPrice: e.target.value }))
+                }
+                placeholder="Harga pribadi / tambahan"
+                className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+              />
+            </label>
+            <label className="text-xs font-bold text-slate-700">
+              Metode Payment
+              <input
+                value={form?.paymentMethod ?? form?.payment_method ?? ""}
+                onChange={(e) =>
+                  setForm((prev: any) => ({ ...prev, paymentMethod: e.target.value }))
+                }
+                placeholder="Contoh: QRIS / Cash / Transfer"
+                className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">
+            Harga Bazar otomatis mengikuti master layanan. Metode pembayaran dipilih pada panel Bazar di atas.
+          </div>
+        )}
+
+        <label className="mt-3 block text-xs font-bold text-slate-700">
+          Catatan Payment / Tambahan Vaksin
+          <input
+            value={form?.paymentNote ?? form?.payment_note ?? ""}
+            onChange={(e) =>
+              setForm((prev: any) => ({ ...prev, paymentNote: e.target.value }))
+            }
+            placeholder="Catatan payment / tambahan vaksin"
+            className="mt-1 block w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+          />
+        </label>
+      </div>
 
       {!sessionId ? (
         <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-xs font-bold text-slate-500">
