@@ -64,6 +64,27 @@ function familyRoleLabel(role: any) {
     : "Parent";
 }
 
+function familyTrackSummary(track: "A" | "B", trackData: any) {
+  if (!trackData?.queueNumber) return "";
+  const state = queueTrackCard(track, trackData);
+  const label = `${trackData.queueNumber}`;
+
+  if (state?.isDone) return `${label} · Selesai`;
+  if (state?.isCalled) return `${label} · Dipanggil`;
+
+  const ahead = Number(trackData?.aheadCount ?? 0);
+  return `${label} · ${ahead} di depan`;
+}
+
+function familyMemberOptionLabel(member: any) {
+  const parts = [
+    familyTrackSummary("A", member?.tracks?.A),
+    familyTrackSummary("B", member?.tracks?.B),
+  ].filter(Boolean);
+
+  return `${member?.participantName || "-"} — ${parts.join(" | ") || "Belum ada antrean aktif"}`;
+}
+
 export default function PublicVaccinationQueuePage({ params }: { params: { token: string } }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -543,100 +564,70 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                 <div className="text-xs font-black uppercase tracking-wide text-slate-500">Nama Lengkap</div>
                 <div className="mt-1 text-2xl font-black">{watchData.participant.participantName}</div>
                 <div className="mt-1 text-sm font-bold text-slate-500">BINUSIAN ID: {watchData.participant.employeeId || employeeId}</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {a ? <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">A · Healthday</span> : null}
-                  {b ? <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">B · Bazar</span> : null}
-                </div>
               </div>
 
               {familyMembers.length ? (
-                <div className="rounded-3xl border border-white/15 bg-white/10 p-4">
+                <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-black uppercase tracking-wide text-violet-200">
-                        Antrean Aktif Keluarga
+                        Anggota Keluarga
                       </div>
                       <div className="mt-1 text-xs font-semibold text-slate-300">
-                        Klik anggota keluarga untuk melihat detail antreannya.
+                        Pilih anggota untuk melihat detail antreannya.
                       </div>
                     </div>
                     <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white">
-                      {familyMembers.length} aktif
+                      {familyMembers.length} antrean
                     </div>
                   </div>
 
-                  <div className="mt-3 grid gap-2">
-                    {familyMembers.map((member: any) => {
-                      const activeA = isActiveFamilyTrack(member?.tracks?.A);
-                      const activeB = isActiveFamilyTrack(member?.tracks?.B);
-                      const selected =
-                        Number(member?.registrationId) ===
-                        Number(
-                          selectedFamilyMember?.registrationId ||
-                            selectedFamilyRegistrationId,
-                        );
+                  <select
+                    value={
+                      Number(
+                        selectedFamilyMember?.registrationId ||
+                          selectedFamilyRegistrationId ||
+                          familyMembers?.[0]?.registrationId ||
+                          0,
+                      ) || ""
+                    }
+                    onChange={(e) =>
+                      setSelectedFamilyRegistrationId(Number(e.target.value))
+                    }
+                    className="mt-3 w-full rounded-xl border border-white/20 bg-white px-3 py-3 text-sm font-black text-slate-950 outline-none focus:border-violet-400"
+                  >
+                    {familyMembers.map((member: any) => (
+                      <option
+                        key={`family-option-${member.registrationId}`}
+                        value={Number(member.registrationId)}
+                      >
+                        {familyMemberOptionLabel(member)}
+                      </option>
+                    ))}
+                  </select>
 
-                      return (
-                        <button
-                          type="button"
-                          key={`family-${member.registrationId}`}
-                          onClick={() =>
-                            setSelectedFamilyRegistrationId(
-                              Number(member.registrationId),
-                            )
-                          }
-                          className={`w-full rounded-2xl border p-4 text-left transition ${
-                            selected
-                              ? "border-violet-300 bg-white text-slate-950 ring-2 ring-violet-400"
-                              : "border-white/15 bg-slate-900/70 text-white hover:bg-slate-800"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-base font-black">
-                                {member.participantName || "-"}
-                              </div>
-                              <div
-                                className={`mt-1 text-xs font-bold ${
-                                  selected ? "text-slate-500" : "text-slate-300"
-                                }`}
-                              >
-                                {familyRoleLabel(member.familyRole)}
-                              </div>
-                            </div>
-
-                            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                              {activeA ? (
-                                <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
-                                  {member.tracks.A.queueNumber}
-                                </span>
-                              ) : null}
-                              {activeB ? (
-                                <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-black text-violet-700">
-                                  {member.tracks.B.queueNumber}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {selectedFamilyMember ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedFamilyMember?.tracks?.A?.queueNumber ? (
+                        <div className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-800">
+                          A · {familyTrackSummary("A", selectedFamilyMember.tracks.A)}
+                        </div>
+                      ) : null}
+                      {selectedFamilyMember?.tracks?.B?.queueNumber ? (
+                        <div className="rounded-xl bg-violet-50 px-3 py-2 text-xs font-black text-violet-800">
+                          B · {familyTrackSummary("B", selectedFamilyMember.tracks.B)}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
-              {selectedFamilyMember ? (
-                <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
-                  <div className="text-[10px] font-black uppercase tracking-wide text-slate-300">
-                    Detail antrean dipilih
-                  </div>
-                  <div className="mt-1 text-lg font-black text-white">
-                    {selectedFamilyMember.participantName}
-                  </div>
+              <div>
+                <div className="mb-2 text-xs font-black uppercase tracking-wide text-slate-300">
+                  Status Antrean Dipilih
                 </div>
-              ) : null}
-
-              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                 {a ? (
                   <div className={`rounded-3xl p-5 text-slate-950 transition-all ${
                     aState?.isCalled
@@ -713,6 +704,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                     {bState?.isDone ? <div className="mt-2 text-sm font-black text-slate-700">Status Anda: Selesai.</div> : null}
                   </div>
                 ) : null}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-white/15 bg-white/10 p-4 text-sm font-semibold text-slate-200">
@@ -785,37 +777,26 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
               previewWatch.familyMembers.length > 1 ? (
                 <div className="mt-5 rounded-2xl bg-violet-50 p-4 text-left">
                   <div className="text-xs font-black uppercase text-violet-700">
-                    Antrean Aktif Keluarga
+                    Antrean Keluarga Ditemukan
                   </div>
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-1 text-xs font-semibold text-violet-800">
+                    {previewWatch.familyMembers.length} anggota memiliki antrean pada session ini.
+                  </div>
+                  <select
+                    className="mt-3 w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900"
+                    defaultValue={String(
+                      previewWatch?.familyMembers?.[0]?.registrationId || "",
+                    )}
+                  >
                     {previewWatch.familyMembers.map((member: any) => (
-                      <div
+                      <option
                         key={`preview-family-${member.registrationId}`}
-                        className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2"
+                        value={String(member.registrationId)}
                       >
-                        <div>
-                          <div className="text-sm font-black text-slate-900">
-                            {member.participantName}
-                          </div>
-                          <div className="text-[11px] font-bold text-slate-500">
-                            {familyRoleLabel(member.familyRole)}
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          {isActiveFamilyTrack(member?.tracks?.A) ? (
-                            <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-black text-blue-700">
-                              {member.tracks.A.queueNumber}
-                            </span>
-                          ) : null}
-                          {isActiveFamilyTrack(member?.tracks?.B) ? (
-                            <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-black text-violet-700">
-                              {member.tracks.B.queueNumber}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
+                        {familyMemberOptionLabel(member)}
+                      </option>
                     ))}
-                  </div>
+                  </select>
                 </div>
               ) : null}
               <p className="mt-5 text-sm font-semibold text-slate-600">Pastikan data sudah benar. Setelah klik OK, perangkat ini akan dikunci ke keluarga tersebut dan memantau seluruh antrean aktifnya.</p>
