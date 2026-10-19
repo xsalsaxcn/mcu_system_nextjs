@@ -30,7 +30,7 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
   const [session, setSession] = useState<any>(null);
   const [message, setMessage] = useState("Menunggu nomor antrian dirilis...");
   const [readyToPrint, setReadyToPrint] = useState(false);
-  const [ticketTrack, setTicketTrack] = useState<"A" | "B">("A");
+  const [ticketTrack, setTicketTrack] = useState<"A" | "B" | "AB">("A");
 
   useEffect(() => {
     let active = true;
@@ -42,11 +42,20 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
       }
 
       const query = new URLSearchParams(window.location.search);
-      const track: "A" | "B" =
-        String(query.get("track") || "A").toUpperCase() === "B" ? "B" : "A";
-      const queueNumberKey =
-        track === "B" ? "bazar_queue_number" : "queue_number";
+      const requestedTrack = String(query.get("track") || "A").toUpperCase();
+      const track: "A" | "B" | "AB" =
+        requestedTrack === "AB" ? "AB" : requestedTrack === "B" ? "B" : "A";
       setTicketTrack(track);
+
+      const hasRequiredQueueNumbers = (row: any) => {
+        if (!row) return false;
+        if (track === "AB") {
+          return Boolean(clean(row?.queue_number) && clean(row?.bazar_queue_number));
+        }
+        return track === "B"
+          ? Boolean(clean(row?.bazar_queue_number))
+          : Boolean(clean(row?.queue_number));
+      };
 
       let snapshot: any = null;
       let sessionId = 0;
@@ -60,7 +69,7 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         );
 
         sessionId = Number(snapshot?.session_id || 0);
-        if (snapshot && clean(snapshot?.[queueNumberKey]) && sessionId) break;
+        if (snapshot && hasRequiredQueueNumbers(snapshot) && sessionId) break;
 
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
@@ -70,12 +79,14 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         setMessage("Data peserta tidak ditemukan. Tutup window ini lalu coba Rilis Antrian lagi.");
         return;
       }
-      if (!clean(snapshot?.[queueNumberKey])) {
+      if (!hasRequiredQueueNumbers(snapshot)) {
         setRegistration(snapshot);
         setMessage(
-          track === "B"
-            ? "Nomor antrian Bazar belum tersedia. Tutup window ini lalu coba lagi."
-            : "Nomor antrian belum tersedia. Jika proses rilis gagal, tutup window ini lalu coba lagi.",
+          track === "AB"
+            ? "Nomor antrean A + B belum lengkap. Tutup window ini lalu cek registrasi Combination."
+            : track === "B"
+              ? "Nomor antrian Bazar belum tersedia. Tutup window ini lalu coba lagi."
+              : "Nomor antrian belum tersedia. Jika proses rilis gagal, tutup window ini lalu coba lagi.",
         );
         return;
       }
@@ -107,19 +118,24 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
     };
   }, [registrationId]);
 
-  const services = useMemo(() => {
+  const servicesByTrack = useMemo(() => {
     const items = Array.isArray(registration?.items) ? registration.items : [];
     const activeItems = items.filter((item: any) => item?.active !== false);
-    const ticketItems =
-      ticketTrack === "B"
-        ? activeItems.filter(
-            (item: any) =>
-              String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR",
-          )
-        : activeItems;
-    const names = ticketItems.map(serviceName).filter(Boolean);
-    return Array.from(new Set(names));
-  }, [registration, ticketTrack]);
+
+    const healthdayItems = activeItems.filter(
+      (item: any) =>
+        String(item?.service_mode || "HEALTHDAY").toUpperCase() !== "BAZAR",
+    );
+    const bazarItems = activeItems.filter(
+      (item: any) =>
+        String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR",
+    );
+
+    return {
+      A: Array.from(new Set(healthdayItems.map(serviceName).filter(Boolean))),
+      B: Array.from(new Set(bazarItems.map(serviceName).filter(Boolean))),
+    };
+  }, [registration]);
 
   useEffect(() => {
     if (!readyToPrint || !registration) return;
@@ -133,10 +149,6 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
     return () => window.clearTimeout(timer);
   }, [readyToPrint, registration]);
 
-  const queueNumber =
-    ticketTrack === "B"
-      ? clean(registration?.bazar_queue_number) || "-"
-      : clean(registration?.queue_number) || "-";
   const participantName = clean(registration?.participant_name) || "-";
   const participantIdentity =
     clean(registration?.employee_id) ||
@@ -144,7 +156,19 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
     clean(registration?.mcu_id) ||
     "";
   const location = clean(session?.location) || clean(registration?.location) || "-";
-  const serviceCount = Math.max(1, services.length);
+
+  const tracksToRender: Array<"A" | "B"> =
+    ticketTrack === "AB" ? ["A", "B"] : [ticketTrack];
+
+  function queueNumberFor(track: "A" | "B") {
+    return track === "B"
+      ? clean(registration?.bazar_queue_number) || "-"
+      : clean(registration?.queue_number) || "-";
+  }
+
+  function servicesFor(track: "A" | "B") {
+    return servicesByTrack[track] || [];
+  }
 
   return (
     <main className="ticket-page">
@@ -155,55 +179,66 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
       {message ? <div className="ticket-message">{message}</div> : null}
 
       {registration ? (
-        <section className={`ticket-card services-${Math.min(serviceCount, 4)}`}>
-          <div className="ticket-head">
-            <div>
-              <div className="brand">HARMONY HEALTH · VACCINATION</div>
-              <div className="ticket-label">NOMOR ANTRIAN</div>
-            </div>
-            <div className="queue-number">{queueNumber}</div>
-          </div>
+        tracksToRender.map((track) => {
+          const trackServices = servicesFor(track);
+          const serviceCount = Math.max(1, trackServices.length);
 
-          <div className="divider" />
-          <div className="participant-name">
-            <div>{participantName}</div>
-            {participantIdentity ? (
-              <div
-                style={{
-                  marginTop: "0.25mm",
-                  fontSize: "5.2pt",
-                  lineHeight: 1,
-                  fontWeight: 800,
-                  letterSpacing: 0,
-                }}
-              >
-                {participantIdentity}
+          return (
+            <section
+              key={track}
+              className={`ticket-card services-${Math.min(serviceCount, 4)}`}
+            >
+              <div className="ticket-head">
+                <div>
+                  <div className="brand">HARMONY HEALTH · VACCINATION</div>
+                  <div className="ticket-label">NOMOR ANTRIAN</div>
+                </div>
+                <div className="queue-number">{queueNumberFor(track)}</div>
               </div>
-            ) : null}
-          </div>
 
-          <div className="detail-grid">
-            <div className="detail-block service-block">
-              <div className="caption">LAYANAN</div>
-              <div className="services">
-                {services.length ? (
-                  services.map((name, index) => (
-                    <div className="service-line" key={`${name}-${index}`}>
-                      {services.length > 1 ? `${index + 1}. ` : ""}{String(name)}
-                    </div>
-                  ))
-                ) : (
-                  <div className="service-line">-</div>
-                )}
+              <div className="divider" />
+              <div className="participant-name">
+                <div>{participantName}</div>
+                {participantIdentity ? (
+                  <div
+                    style={{
+                      marginTop: "0.25mm",
+                      fontSize: "5.2pt",
+                      lineHeight: 1,
+                      fontWeight: 800,
+                      letterSpacing: 0,
+                    }}
+                  >
+                    {participantIdentity}
+                  </div>
+                ) : null}
               </div>
-            </div>
 
-            <div className="detail-block location-block">
-              <div className="caption">LOKASI</div>
-              <div className="location">{location}</div>
-            </div>
-          </div>
-        </section>
+              <div className="detail-grid">
+                <div className="detail-block service-block">
+                  <div className="caption">LAYANAN</div>
+                  <div className="services">
+                    {trackServices.length ? (
+                      trackServices.map((name, index) => (
+                        <div className="service-line" key={`${track}-${name}-${index}`}>
+                          {trackServices.length > 1 ? `${index + 1}. ` : ""}
+                          {String(name)}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="service-line">-</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="detail-block location-block">
+                  <div className="caption">LOKASI</div>
+                  <div className="location">{location}</div>
+                </div>
+              </div>
+            </section>
+          );
+        })
       ) : null}
 
       <style jsx global>{`
@@ -232,7 +267,8 @@ export default function VaccinationQueueTicketPage({ params }: { params: { regis
         @media print {
           html, body, .ticket-page { width: 50.8mm !important; height: 30mm !important; min-height: 30mm !important; overflow: hidden !important; }
           .no-print, .ticket-message { display: none !important; }
-          .ticket-card { width: 50.8mm !important; height: 30mm !important; page-break-after: avoid !important; break-after: avoid-page !important; }
+          .ticket-card { width: 50.8mm !important; height: 30mm !important; page-break-after: always !important; break-after: page !important; }
+          .ticket-card:last-child { page-break-after: auto !important; break-after: auto !important; }
         }
       `}</style>
     

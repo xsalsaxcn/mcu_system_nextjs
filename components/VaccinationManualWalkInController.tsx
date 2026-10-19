@@ -216,7 +216,7 @@ export default function VaccinationManualWalkInController({
     });
   }
 
-  function popupPlaceholder(track: "A" | "B") {
+  function popupPlaceholder(track: "A" | "B" | "AB") {
     const ticketWindow = window.open(
       "about:blank",
       "_blank",
@@ -289,12 +289,14 @@ export default function VaccinationManualWalkInController({
     setMessage("");
     setError("");
 
-    // Open all required print windows synchronously from the user's click.
-    // Combination participants get TWO queue tickets: A (Healthday) + B (Bazar).
+    // Use ONE print window. For a Combination participant the queue-ticket page
+    // renders TWO sheets (A Healthday + B Bazar) in one print job.
+    // This avoids browser popup blocking on the second ticket.
     const needATicket = healthdaySelected.length > 0;
     const needBTicket = bazarSelected.length > 0;
-    const ticketWindowA = needATicket ? popupPlaceholder("A") : null;
-    const ticketWindowB = needBTicket ? popupPlaceholder("B") : null;
+    const requestedTicketTrack: "A" | "B" | "AB" =
+      needATicket && needBTicket ? "AB" : needATicket ? "A" : "B";
+    const ticketWindow = popupPlaceholder(requestedTicketTrack);
 
     try {
       const healthdayItems = healthdaySelected.map((item: any) => ({
@@ -391,44 +393,27 @@ export default function VaccinationManualWalkInController({
       const queueNumberA = clean(json?.registration?.queue_number);
       const queueNumberB = clean(json?.registration?.bazar_queue_number);
 
-      const ticketUrlA =
-        `/vaccination/queue-ticket/${registrationId}` +
-        `?track=A&session_id=${encodeURIComponent(
-          String(sessionId),
-        )}&autoprint=1`;
-      const ticketUrlB =
-        `/vaccination/queue-ticket/${registrationId}` +
-        `?track=B&session_id=${encodeURIComponent(
-          String(sessionId),
-        )}&autoprint=1`;
+      const missingTracks = [
+        needATicket && !queueNumberA ? "A / Healthday" : "",
+        needBTicket && !queueNumberB ? "B / Bazar" : "",
+      ].filter(Boolean);
 
-      if (needATicket) {
-        if (queueNumberA) {
-          if (ticketWindowA && !ticketWindowA.closed) {
-            ticketWindowA.location.replace(ticketUrlA);
-          } else {
-            window.open(ticketUrlA, "_blank");
-          }
-        } else {
-          showTicketWindowError(
-            ticketWindowA,
-            "Nomor antrean Healthday/A tidak terbentuk. Registrasi tersimpan, tetapi tiket A perlu dicek dari daftar registrasi.",
-          );
-        }
-      }
+      if (missingTracks.length) {
+        showTicketWindowError(
+          ticketWindow,
+          `Nomor antrean ${missingTracks.join(" + ")} tidak terbentuk. Registrasi tersimpan, tetapi nomor tersebut perlu dicek dari daftar registrasi.`,
+        );
+      } else {
+        const ticketUrl =
+          `/vaccination/queue-ticket/${registrationId}` +
+          `?track=${requestedTicketTrack}&session_id=${encodeURIComponent(
+            String(sessionId),
+          )}&autoprint=1`;
 
-      if (needBTicket) {
-        if (queueNumberB) {
-          if (ticketWindowB && !ticketWindowB.closed) {
-            ticketWindowB.location.replace(ticketUrlB);
-          } else {
-            window.open(ticketUrlB, "_blank");
-          }
+        if (ticketWindow && !ticketWindow.closed) {
+          ticketWindow.location.replace(ticketUrl);
         } else {
-          showTicketWindowError(
-            ticketWindowB,
-            "Nomor antrean Bazar/B tidak terbentuk. Registrasi tersimpan, tetapi tiket B perlu dicek dari daftar registrasi.",
-          );
+          window.open(ticketUrl, "_blank");
         }
       }
 
@@ -451,8 +436,7 @@ export default function VaccinationManualWalkInController({
       const text = String(e?.message || e || "Registrasi ulang gagal.");
       setError(text);
 
-      showTicketWindowError(ticketWindowA, text);
-      showTicketWindowError(ticketWindowB, text);
+      showTicketWindowError(ticketWindow, text);
     } finally {
       setSubmitting(false);
     }
