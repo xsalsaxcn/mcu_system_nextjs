@@ -216,7 +216,7 @@ export default function VaccinationManualWalkInController({
     });
   }
 
-  function popupPlaceholder() {
+  function popupPlaceholder(track: "A" | "B") {
     const ticketWindow = window.open(
       "about:blank",
       "_blank",
@@ -225,12 +225,21 @@ export default function VaccinationManualWalkInController({
     if (ticketWindow) {
       ticketWindow.document.open();
       ticketWindow.document.write(
-        "<!doctype html><html><head><title>Menyiapkan Tiket Antrian</title></head><body style='font-family:Arial,sans-serif;padding:20px'><b>Menyiapkan tiket antrian...</b><br><span style='font-size:12px'>Registrasi sedang diproses.</span></body></html>",
+        `<!doctype html><html><head><title>Menyiapkan Tiket Antrian ${track}</title></head><body style='font-family:Arial,sans-serif;padding:20px'><b>Menyiapkan tiket antrian ${track}...</b><br><span style='font-size:12px'>Registrasi sedang diproses.</span></body></html>`,
       );
       ticketWindow.document.close();
-      ticketWindow.focus();
     }
     return ticketWindow;
+  }
+
+  function showTicketWindowError(ticketWindow: Window | null, message: string) {
+    if (!ticketWindow || ticketWindow.closed) return;
+    const safeText = message.replace(/[<>&"]/g, "");
+    ticketWindow.document.open();
+    ticketWindow.document.write(
+      `<!doctype html><html><head><title>Tiket Antrian</title></head><body style="font-family:Arial,sans-serif;padding:20px;color:#b91c1c"><b>Tiket tidak dapat dibuka.</b><br><span style="font-size:12px">${safeText}</span></body></html>`,
+    );
+    ticketWindow.document.close();
   }
 
   async function submitManualRegistration() {
@@ -280,10 +289,12 @@ export default function VaccinationManualWalkInController({
     setMessage("");
     setError("");
 
-    // For combination A+B we open the Healthday/A ticket first.
-    // B can still be printed from the registration list; both queue numbers are created.
-    const ticketTrack = healthdaySelected.length ? "A" : "B";
-    const ticketWindow = popupPlaceholder();
+    // Open all required print windows synchronously from the user's click.
+    // Combination participants get TWO queue tickets: A (Healthday) + B (Bazar).
+    const needATicket = healthdaySelected.length > 0;
+    const needBTicket = bazarSelected.length > 0;
+    const ticketWindowA = needATicket ? popupPlaceholder("A") : null;
+    const ticketWindowB = needBTicket ? popupPlaceholder("B") : null;
 
     try {
       const healthdayItems = healthdaySelected.map((item: any) => ({
@@ -377,17 +388,48 @@ export default function VaccinationManualWalkInController({
         );
       }
 
-      const ticketUrl =
+      const queueNumberA = clean(json?.registration?.queue_number);
+      const queueNumberB = clean(json?.registration?.bazar_queue_number);
+
+      const ticketUrlA =
         `/vaccination/queue-ticket/${registrationId}` +
-        `?track=${ticketTrack}&session_id=${encodeURIComponent(
+        `?track=A&session_id=${encodeURIComponent(
+          String(sessionId),
+        )}&autoprint=1`;
+      const ticketUrlB =
+        `/vaccination/queue-ticket/${registrationId}` +
+        `?track=B&session_id=${encodeURIComponent(
           String(sessionId),
         )}&autoprint=1`;
 
-      if (ticketWindow && !ticketWindow.closed) {
-        ticketWindow.location.replace(ticketUrl);
-        ticketWindow.focus();
-      } else {
-        window.open(ticketUrl, "_blank");
+      if (needATicket) {
+        if (queueNumberA) {
+          if (ticketWindowA && !ticketWindowA.closed) {
+            ticketWindowA.location.replace(ticketUrlA);
+          } else {
+            window.open(ticketUrlA, "_blank");
+          }
+        } else {
+          showTicketWindowError(
+            ticketWindowA,
+            "Nomor antrean Healthday/A tidak terbentuk. Registrasi tersimpan, tetapi tiket A perlu dicek dari daftar registrasi.",
+          );
+        }
+      }
+
+      if (needBTicket) {
+        if (queueNumberB) {
+          if (ticketWindowB && !ticketWindowB.closed) {
+            ticketWindowB.location.replace(ticketUrlB);
+          } else {
+            window.open(ticketUrlB, "_blank");
+          }
+        } else {
+          showTicketWindowError(
+            ticketWindowB,
+            "Nomor antrean Bazar/B tidak terbentuk. Registrasi tersimpan, tetapi tiket B perlu dicek dari daftar registrasi.",
+          );
+        }
       }
 
       const queueLabels = [
@@ -409,14 +451,8 @@ export default function VaccinationManualWalkInController({
       const text = String(e?.message || e || "Registrasi ulang gagal.");
       setError(text);
 
-      if (ticketWindow && !ticketWindow.closed) {
-        const safeText = text.replace(/[<>&"]/g, "");
-        ticketWindow.document.open();
-        ticketWindow.document.write(
-          `<!doctype html><html><head><title>Registrasi Gagal</title></head><body style="font-family:Arial,sans-serif;padding:20px;color:#b91c1c"><b>Registrasi gagal.</b><br><span style="font-size:12px">${safeText}</span></body></html>`,
-        );
-        ticketWindow.document.close();
-      }
+      showTicketWindowError(ticketWindowA, text);
+      showTicketWindowError(ticketWindowB, text);
     } finally {
       setSubmitting(false);
     }
