@@ -223,7 +223,9 @@ async function resolveHistoryCompany(supabase: any, registration: any, session: 
 
 async function familyForPerson(supabase: any, person: any) {
   if (!person?.id) return { parent: null, dependents: [] };
+
   if (person.participant_type === "DEPENDENT") {
+    // Primary source: canonical History relationship table.
     const rel = await supabase
       .from("vaccination_person_relationships")
       .select("relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_name,employee_id,nik,email,phone)")
@@ -232,10 +234,53 @@ async function familyForPerson(supabase: any, person: any) {
       .limit(1)
       .maybeSingle();
     if (rel.error) throw new Error(rel.error.message);
-    const parent = Array.isArray(rel.data?.parent) ? rel.data.parent[0] : rel.data?.parent;
-    return { parent: parent || null, dependents: [] };
+
+    const relationParent = Array.isArray(rel.data?.parent)
+      ? rel.data.parent[0]
+      : rel.data?.parent;
+
+    if (relationParent) {
+      return { parent: relationParent, dependents: [] };
+    }
+
+    // Safe read-through fallback:
+    // V153.92+ registrations store an EXPLICIT Child/Family -> Parent binding.
+    // This is not inferred from NIP. It is only used when canonical relationship
+    // data is absent, so existing History mappings are never reset or overwritten.
+    const registrationBinding = await supabase
+      .from("vaccination_registrations")
+      .select("parent_history_person_id")
+      .eq("history_person_id", Number(person.id))
+      .eq("family_role", "DEPENDENT")
+      .not("parent_history_person_id", "is", null)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (registrationBinding.error) throw new Error(registrationBinding.error.message);
+
+    const parentId = Number(
+      registrationBinding.data?.parent_history_person_id || 0,
+    );
+
+    if (!parentId) {
+      return { parent: null, dependents: [] };
+    }
+
+    const parentResult = await supabase
+      .from("vaccination_persons")
+      .select("id,participant_name,employee_id,nik,email,phone")
+      .eq("id", parentId)
+      .eq("active", true)
+      .maybeSingle();
+    if (parentResult.error) throw new Error(parentResult.error.message);
+
+    return {
+      parent: parentResult.data || null,
+      dependents: [],
+    };
   }
 
+  // Existing canonical History relationships remain the primary source.
   const rels = await supabase
     .from("vaccination_person_relationships")
     .select("relationship_type,dependent:vaccination_persons!vaccination_person_relationships_dependent_person_id_fkey(id,participant_name,birth_date,gender)")
@@ -243,9 +288,57 @@ async function familyForPerson(supabase: any, person: any) {
     .eq("active", true)
     .order("id", { ascending: true });
   if (rels.error) throw new Error(rels.error.message);
+
+  const dependentsById = new Map<number, any>();
+
+  for (const rel of rels.data || []) {
+    const dependent = Array.isArray(rel.dependent)
+      ? rel.dependent[0]
+      : rel.dependent;
+    if (dependent?.id) {
+      dependentsById.set(Number(dependent.id), dependent);
+    }
+  }
+
+  // Add registrations that were EXPLICITLY bound as Child/Family to this Parent.
+  // This covers V153.92/V153.93 operational bindings without disturbing historical
+  // imported relationships. Shared Employee ID / NIP is never used here.
+  const explicitBindings = await supabase
+    .from("vaccination_registrations")
+    .select("history_person_id")
+    .eq("parent_history_person_id", Number(person.id))
+    .eq("family_role", "DEPENDENT")
+    .not("history_person_id", "is", null)
+    .order("id", { ascending: true });
+  if (explicitBindings.error) throw new Error(explicitBindings.error.message);
+
+  const explicitDependentIds: number[] = Array.from(
+    new Set<number>(
+      (explicitBindings.data || [])
+        .map((row: any) => Number(row.history_person_id || 0))
+        .filter((id: number) => Number.isFinite(id) && id > 0),
+    ),
+  ).filter((id: number) => !dependentsById.has(id));
+
+  if (explicitDependentIds.length) {
+    const explicitPeople = await supabase
+      .from("vaccination_persons")
+      .select("id,participant_name,birth_date,gender")
+      .in("id", explicitDependentIds)
+      .eq("active", true)
+      .eq("participant_type", "DEPENDENT");
+    if (explicitPeople.error) throw new Error(explicitPeople.error.message);
+
+    for (const dependent of explicitPeople.data || []) {
+      if (dependent?.id) {
+        dependentsById.set(Number(dependent.id), dependent);
+      }
+    }
+  }
+
   return {
     parent: null,
-    dependents: (rels.data || []).map((rel: any) => Array.isArray(rel.dependent) ? rel.dependent[0] : rel.dependent).filter(Boolean),
+    dependents: Array.from(dependentsById.values()),
   };
 }
 
