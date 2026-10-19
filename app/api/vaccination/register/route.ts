@@ -388,13 +388,31 @@ async function syncRegistrationFamily(
       .eq("active", true);
     if (activeLinks.error) throw new Error(activeLinks.error.message);
 
-    const conflictingParent = (activeLinks.data || []).find(
+    const conflictingParents = (activeLinks.data || []).filter(
       (row: any) => Number(row.parent_person_id) !== Number(parent.id),
     );
-    if (conflictingParent) {
-      throw new Error(
-        "Child / Family ini sudah terikat ke parent lain. Review relasi sebelum melanjutkan.",
-      );
+    if (conflictingParents.length) {
+      if (body?.allowFamilyReassignment === true) {
+        const conflictingIds = conflictingParents
+          .map((row: any) => Number(row.id || 0))
+          .filter(Boolean);
+
+        if (conflictingIds.length) {
+          const deactivate = await supabase
+            .from("vaccination_person_relationships")
+            .update({
+              active: false,
+              updated_at: new Date().toISOString(),
+            })
+            .in("id", conflictingIds);
+
+          if (deactivate.error) throw new Error(deactivate.error.message);
+        }
+      } else {
+        throw new Error(
+          "Child / Family ini sudah terikat ke parent lain. Review relasi sebelum melanjutkan.",
+        );
+      }
     }
 
     const relation = await supabase
@@ -790,6 +808,258 @@ export async function POST(req: NextRequest) {
       serviceHasTrack(serviceStatus, "B") ? updateResult.data.bazar_queue_number : null,
     ].filter(Boolean);
     return ok({ message: `Nomor antrian berhasil dirilis: ${parts.join(" + ")}`, registration: updateResult.data });
+  }
+
+  if (action === "family-context") {
+    const registrationId = toInt(
+      body.registrationId || body.registration_id,
+      0,
+    );
+    if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
+
+    const regResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", registrationId)
+      .single();
+    if (regResult.error) return fail(regResult.error.message, 500);
+
+    const registration = regResult.data;
+    const company = await resolveRegistrationHistoryCompany(
+      supabase,
+      {
+        company_name: registration.company_name,
+        session_name: "",
+        source_name: "",
+      },
+      registration,
+    );
+
+    let person: any = null;
+    let parent: any = null;
+
+    if (company && Number(registration.history_person_id || 0)) {
+      person = await historyPersonById(
+        supabase,
+        Number(company.id),
+        Number(registration.history_person_id),
+      );
+    }
+
+    if (company && Number(registration.parent_history_person_id || 0)) {
+      parent = await historyPersonById(
+        supabase,
+        Number(company.id),
+        Number(registration.parent_history_person_id),
+      );
+    }
+
+    return ok({
+      familyRole:
+        normalizeFamilyRole(registration.family_role || "") ||
+        "",
+      person: person
+        ? {
+            id: Number(person.id),
+            name: person.participant_name || "",
+            employeeId: person.employee_id || "",
+            nik: person.nik || "",
+            email: person.email || "",
+          }
+        : null,
+      parent: parent
+        ? {
+            id: Number(parent.id),
+            name: parent.participant_name || "",
+            employeeId: parent.employee_id || "",
+            nik: parent.nik || "",
+            email: parent.email || "",
+          }
+        : null,
+    });
+  }
+
+  if (action === "family-search") {
+    const registrationId = toInt(
+      body.registrationId || body.registration_id,
+      0,
+    );
+    const q = clean(body.q || body.query);
+    if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
+    if (q.length < 2) return ok({ results: [] });
+
+    const regResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", registrationId)
+      .single();
+    if (regResult.error) return fail(regResult.error.message, 500);
+
+    const registration = regResult.data;
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("*")
+      .eq("id", registration.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+
+    const company = await resolveRegistrationHistoryCompany(
+      supabase,
+      sessionResult.data || {},
+      registration,
+    );
+    if (!company) {
+      return fail(
+        "History Company untuk peserta ini belum dapat ditentukan.",
+        404,
+      );
+    }
+
+    const like = `%${q.replace(/[(),]/g, " ").replace(/\s+/g, " ").slice(0, 100)}%`;
+    const result = await supabase
+      .from("vaccination_persons")
+      .select("id,participant_name,employee_id,nik,email,phone,participant_type")
+      .eq("company_id", Number(company.id))
+      .eq("active", true)
+      .eq("participant_type", "EMPLOYEE")
+      .or(
+        [
+          `participant_name.ilike.${like}`,
+          `employee_id.ilike.${like}`,
+          `nik.ilike.${like}`,
+          `email.ilike.${like}`,
+        ].join(","),
+      )
+      .order("participant_name", { ascending: true })
+      .limit(30);
+
+    if (result.error) return fail(result.error.message, 500);
+
+    return ok({
+      company: {
+        id: Number(company.id),
+        name: company.company_name,
+      },
+      results: (result.data || []).map((row: any) => ({
+        id: Number(row.id),
+        name: row.participant_name || "",
+        employeeId: row.employee_id || "",
+        nik: row.nik || "",
+        email: row.email || "",
+        phone: row.phone || "",
+      })),
+    });
+  }
+
+  if (action === "update-family") {
+    const registrationId = toInt(
+      body.registrationId || body.registration_id,
+      0,
+    );
+    if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
+
+    const regResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", registrationId)
+      .single();
+    if (regResult.error) return fail(regResult.error.message, 500);
+
+    const registration = regResult.data;
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("*")
+      .eq("id", registration.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+
+    const familyRole = normalizeFamilyRole(
+      body.familyRole || body.family_role,
+    );
+
+    if (familyRole === "DEPENDENT") {
+      const parentId = toInt(
+        body.parentHistoryPersonId ||
+          body.parent_history_person_id,
+        0,
+      );
+      if (!parentId) {
+        return fail(
+          "Untuk Child / Family, Parent existing wajib dipilih.",
+        );
+      }
+    }
+
+    try {
+      const binding = await syncRegistrationFamily(
+        supabase,
+        registration,
+        sessionResult.data || {},
+        {
+          ...registration,
+          ...body,
+          participantName: registration.participant_name,
+          employeeId: registration.employee_id,
+          nik: registration.nik,
+          email: registration.email,
+          phone: registration.phone,
+          companyName: registration.company_name,
+          allowFamilyReassignment: true,
+        },
+      );
+
+      const updatedResult = await supabase
+        .from("vaccination_registrations")
+        .select("*")
+        .eq("id", registrationId)
+        .single();
+
+      if (updatedResult.error) {
+        return fail(updatedResult.error.message, 500);
+      }
+
+      let parent: any = null;
+      if (binding.parentHistoryPersonId) {
+        const company = await resolveRegistrationHistoryCompany(
+          supabase,
+          sessionResult.data || {},
+          registration,
+        );
+        if (company) {
+          const parentRow = await historyPersonById(
+            supabase,
+            Number(company.id),
+            Number(binding.parentHistoryPersonId),
+          );
+          if (parentRow) {
+            parent = {
+              id: Number(parentRow.id),
+              name: parentRow.participant_name || "",
+              employeeId: parentRow.employee_id || "",
+              nik: parentRow.nik || "",
+              email: parentRow.email || "",
+            };
+          }
+        }
+      }
+
+      return ok({
+        message:
+          familyRole === "DEPENDENT"
+            ? "Relasi Child / Family berhasil disimpan."
+            : "Relasi Parent berhasil disimpan.",
+        registration: updatedResult.data,
+        parent,
+      });
+    } catch (error: any) {
+      return fail(
+        error?.message ||
+          "Gagal menyimpan relasi Parent / Child-Family.",
+        400,
+      );
+    }
   }
 
   if (action === "update-products") {

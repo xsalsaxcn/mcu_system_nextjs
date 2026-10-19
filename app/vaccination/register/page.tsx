@@ -134,7 +134,23 @@ export default function VaccinationRegisterPage() {
     walkInContextLabel: "",
   });
 
-  const [edit, setEdit] = useState<{ registration: any; items: ProductItem[]; changeNote: string } | null>(null);
+  const [edit, setEdit] = useState<{
+    registration: any;
+    items: ProductItem[];
+    changeNote: string;
+    familyRole: "" | "PARENT" | "DEPENDENT";
+    historyPersonId: number | null;
+    historyPersonName: string;
+    parentHistoryPersonId: number | null;
+    parentName: string;
+    parentEmployeeId: string;
+    parentNik: string;
+    parentEmail: string;
+  } | null>(null);
+  const [editFamilyQuery, setEditFamilyQuery] = useState("");
+  const [editFamilyResults, setEditFamilyResults] = useState<any[]>([]);
+  const [editFamilySearching, setEditFamilySearching] = useState(false);
+  const [savingEditFamily, setSavingEditFamily] = useState(false);
   const [selectedVaccineIds, setSelectedVaccineIds] = useState<string[]>([]);
   const [contextLocked, setContextLocked] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: "queue", direction: "asc" });
@@ -216,6 +232,59 @@ export default function VaccinationRegisterPage() {
     form.familyRole,
     form.masterCompanyKey,
     parentQuery,
+  ]);
+
+  useEffect(() => {
+    if (!edit || !edit.familyRole) {
+      setEditFamilyResults([]);
+      setEditFamilySearching(false);
+      return;
+    }
+
+    const keyword = editFamilyQuery.trim();
+    if (keyword.length < 2) {
+      setEditFamilyResults([]);
+      setEditFamilySearching(false);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setEditFamilySearching(true);
+      try {
+        const response = await fetch("/api/vaccination/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "family-search",
+            registrationId: edit.registration.id,
+            q: keyword,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!active) return;
+
+        if (!response.ok || payload?.ok === false) {
+          setEditFamilyResults([]);
+          return;
+        }
+
+        setEditFamilyResults(
+          (Array.isArray(payload?.results) ? payload.results : []).slice(0, 20),
+        );
+      } finally {
+        if (active) setEditFamilySearching(false);
+      }
+    }, 260);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [
+    edit?.registration?.id,
+    edit?.familyRole,
+    editFamilyQuery,
   ]);
 
   const priceCategoryOptions = useMemo(() => {
@@ -599,8 +668,156 @@ export default function VaccinationRegisterPage() {
     const items = Array.isArray(registration.items) && registration.items.length
       ? registration.items.map(itemFromRegistrationItem)
       : [{ ...emptyProductItem(), vaccineId: registration.vaccine_id ? String(registration.vaccine_id) : "", price: registration.payment_price == null ? "" : String(registration.payment_price), paymentMethod: registration.payment_method || "", paymentNote: registration.payment_note || "" }];
-    setEdit({ registration, items, changeNote: registration.status_note || "" });
+
+    setEditFamilyQuery("");
+    setEditFamilyResults([]);
+    setEdit({
+      registration,
+      items,
+      changeNote: registration.status_note || "",
+      familyRole:
+        String(registration.family_role || "").toUpperCase() === "DEPENDENT"
+          ? "DEPENDENT"
+          : String(registration.family_role || "").toUpperCase() === "PARENT"
+            ? "PARENT"
+            : "",
+      historyPersonId:
+        Number(registration.history_person_id || 0) || null,
+      historyPersonName: "",
+      parentHistoryPersonId:
+        Number(registration.parent_history_person_id || 0) || null,
+      parentName: "",
+      parentEmployeeId: "",
+      parentNik: "",
+      parentEmail: "",
+    });
+
+    void loadEditFamilyContext(registration.id);
     setTimeout(() => document.getElementById("edit-produk-vaksin")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
+  async function loadEditFamilyContext(registrationId: number) {
+    try {
+      const response = await fetch("/api/vaccination/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "family-context",
+          registrationId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) return;
+
+      setEdit((current) => {
+        if (!current || Number(current.registration?.id) !== Number(registrationId)) {
+          return current;
+        }
+
+        return {
+          ...current,
+          familyRole:
+            payload.familyRole === "DEPENDENT"
+              ? "DEPENDENT"
+              : payload.familyRole === "PARENT"
+                ? "PARENT"
+                : current.familyRole,
+          historyPersonId:
+            Number(payload?.person?.id || current.historyPersonId || 0) || null,
+          historyPersonName:
+            String(payload?.person?.name || current.historyPersonName || "").trim(),
+          parentHistoryPersonId:
+            Number(payload?.parent?.id || current.parentHistoryPersonId || 0) || null,
+          parentName:
+            String(payload?.parent?.name || current.parentName || "").trim(),
+          parentEmployeeId:
+            String(payload?.parent?.employeeId || current.parentEmployeeId || "").trim(),
+          parentNik:
+            String(payload?.parent?.nik || current.parentNik || "").trim(),
+          parentEmail:
+            String(payload?.parent?.email || current.parentEmail || "").trim(),
+        };
+      });
+    } catch {
+      // Context enhancement is best-effort; edit modal still works from registration data.
+    }
+  }
+
+  async function saveEditFamily() {
+    if (!edit?.familyRole) {
+      setError("Pilih Parent atau Child / Family terlebih dahulu.");
+      return;
+    }
+
+    if (edit.familyRole === "DEPENDENT" && !edit.parentHistoryPersonId) {
+      setError("Untuk Child / Family, pilih Parent existing terlebih dahulu.");
+      return;
+    }
+
+    setSavingEditFamily(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-family",
+          registrationId: edit.registration.id,
+          familyRole: edit.familyRole,
+          historyPersonId: edit.historyPersonId,
+          parentHistoryPersonId:
+            edit.familyRole === "DEPENDENT"
+              ? edit.parentHistoryPersonId
+              : null,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+
+      if (!response.ok || !json.ok) {
+        setError(json.message || "Gagal menyimpan relasi Parent / Child-Family.");
+        return;
+      }
+
+      setMessage(json.message || "Relasi peserta berhasil diperbarui.");
+      setEdit((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          registration: {
+            ...current.registration,
+            family_role: json?.registration?.family_role ?? current.familyRole,
+            history_person_id:
+              json?.registration?.history_person_id ?? current.historyPersonId,
+            parent_history_person_id:
+              json?.registration?.parent_history_person_id ??
+              (current.familyRole === "DEPENDENT"
+                ? current.parentHistoryPersonId
+                : null),
+          },
+          historyPersonId:
+            Number(json?.registration?.history_person_id || current.historyPersonId || 0) ||
+            null,
+          parentHistoryPersonId:
+            Number(
+              json?.registration?.parent_history_person_id ||
+                (current.familyRole === "DEPENDENT"
+                  ? current.parentHistoryPersonId
+                  : 0),
+            ) || null,
+          parentName:
+            String(json?.parent?.name || current.parentName || "").trim(),
+          parentEmployeeId:
+            String(json?.parent?.employeeId || current.parentEmployeeId || "").trim(),
+          parentNik:
+            String(json?.parent?.nik || current.parentNik || "").trim(),
+          parentEmail:
+            String(json?.parent?.email || current.parentEmail || "").trim(),
+        };
+      });
+      await loadRegistrations(form.sessionId, selectedSourceId);
+    } finally {
+      setSavingEditFamily(false);
+    }
   }
 
   async function saveEditProducts() {
@@ -1236,6 +1453,266 @@ export default function VaccinationRegisterPage() {
               </div>
 
               <div className="overflow-y-auto px-5 py-5">
+                <div className="mb-5 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide text-violet-700">
+                        Relasi Peserta
+                      </div>
+                      <div className="mt-1 text-sm font-black text-violet-950">
+                        Parent / Child-Family
+                      </div>
+                      <div className="mt-1 text-xs font-semibold leading-5 text-violet-800">
+                        Relasi keluarga disimpan eksplisit. NIP yang sama tidak otomatis dianggap satu keluarga.
+                      </div>
+                    </div>
+                    <div className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-800">
+                      Status saat ini:{" "}
+                      {edit.familyRole === "PARENT"
+                        ? "Parent"
+                        : edit.familyRole === "DEPENDENT"
+                          ? "Child / Family"
+                          : "Belum ditentukan"}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEdit((current) =>
+                          current
+                            ? {
+                                ...current,
+                                familyRole: "PARENT",
+                                parentHistoryPersonId: null,
+                                parentName: "",
+                                parentEmployeeId: "",
+                                parentNik: "",
+                                parentEmail: "",
+                              }
+                            : current,
+                        );
+                        setEditFamilyQuery("");
+                        setEditFamilyResults([]);
+                      }}
+                      className={`rounded-xl px-4 py-3 text-sm font-black ${
+                        edit.familyRole === "PARENT"
+                          ? "bg-violet-600 text-white"
+                          : "border border-violet-200 bg-white text-violet-800"
+                      }`}
+                    >
+                      Parent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEdit((current) =>
+                          current
+                            ? {
+                                ...current,
+                                familyRole: "DEPENDENT",
+                              }
+                            : current,
+                        );
+                        setEditFamilyQuery("");
+                        setEditFamilyResults([]);
+                      }}
+                      className={`rounded-xl px-4 py-3 text-sm font-black ${
+                        edit.familyRole === "DEPENDENT"
+                          ? "bg-violet-600 text-white"
+                          : "border border-violet-200 bg-white text-violet-800"
+                      }`}
+                    >
+                      Child / Family
+                    </button>
+                  </div>
+
+                  {edit.familyRole === "PARENT" ? (
+                    <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3">
+                      <div className="text-xs font-black text-slate-800">
+                        Hubungkan Parent ke data History existing
+                      </div>
+                      <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                        Disarankan untuk Parent agar Family Queue bisa menemukan semua anggota keluarga.
+                      </div>
+
+                      {edit.historyPersonId ? (
+                        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-black text-emerald-950">
+                              {edit.historyPersonName || edit.registration.participant_name || "Parent existing"}
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-emerald-800">
+                              History Person #{edit.historyPersonId}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEdit((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      historyPersonId: null,
+                                      historyPersonName: "",
+                                    }
+                                  : current,
+                              );
+                              setEditFamilyQuery("");
+                            }}
+                            className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800"
+                          >
+                            Ganti
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            value={editFamilyQuery}
+                            onChange={(e) => setEditFamilyQuery(e.target.value)}
+                            placeholder="Cari nama / BINUSIAN ID / NIK / email Parent..."
+                            className="mt-3 w-full rounded-xl border border-violet-200 px-3 py-2.5 text-sm font-semibold outline-none focus:border-violet-400"
+                          />
+                          {!editFamilyQuery.trim() ? (
+                            <div className="mt-2 text-[11px] font-semibold text-amber-700">
+                              Parent tetap bisa disimpan tanpa History Person, tetapi Family Queue baru bisa mengelompokkan keluarga setelah Parent terhubung ke History existing.
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {edit.familyRole === "DEPENDENT" ? (
+                    <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3">
+                      <div className="text-xs font-black text-slate-800">
+                        Parent Existing
+                      </div>
+
+                      {edit.parentHistoryPersonId ? (
+                        <div className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-black text-emerald-950">
+                              {edit.parentName || "Parent existing"}
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-emerald-800">
+                              {[edit.parentEmployeeId, edit.parentNik, edit.parentEmail]
+                                .filter(Boolean)
+                                .join(" · ") || `History Person #${edit.parentHistoryPersonId}`}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEdit((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      parentHistoryPersonId: null,
+                                      parentName: "",
+                                      parentEmployeeId: "",
+                                      parentNik: "",
+                                      parentEmail: "",
+                                    }
+                                  : current,
+                              );
+                              setEditFamilyQuery("");
+                            }}
+                            className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-800"
+                          >
+                            Ganti Parent
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          value={editFamilyQuery}
+                          onChange={(e) => setEditFamilyQuery(e.target.value)}
+                          placeholder="Cari nama / BINUSIAN ID / NIK / email Parent..."
+                          className="mt-3 w-full rounded-xl border border-violet-200 px-3 py-2.5 text-sm font-semibold outline-none focus:border-violet-400"
+                        />
+                      )}
+                    </div>
+                  ) : null}
+
+                  {editFamilySearching ? (
+                    <div className="mt-3 rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-500">
+                      Mencari data History...
+                    </div>
+                  ) : null}
+
+                  {!editFamilySearching &&
+                  editFamilyQuery.trim().length >= 2 &&
+                  editFamilyResults.length ? (
+                    <div className="mt-3 max-h-52 overflow-auto rounded-xl border border-violet-200 bg-white">
+                      {editFamilyResults.map((row: any) => (
+                        <button
+                          type="button"
+                          key={`edit-family-${row.id}`}
+                          onClick={() => {
+                            setEdit((current) => {
+                              if (!current) return current;
+
+                              if (current.familyRole === "PARENT") {
+                                return {
+                                  ...current,
+                                  historyPersonId: Number(row.id || 0) || null,
+                                  historyPersonName: String(row.name || "").trim(),
+                                };
+                              }
+
+                              return {
+                                ...current,
+                                parentHistoryPersonId:
+                                  Number(row.id || 0) || null,
+                                parentName: String(row.name || "").trim(),
+                                parentEmployeeId: String(row.employeeId || "").trim(),
+                                parentNik: String(row.nik || "").trim(),
+                                parentEmail: String(row.email || "").trim(),
+                              };
+                            });
+                            setEditFamilyQuery("");
+                            setEditFamilyResults([]);
+                          }}
+                          className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-b-0 hover:bg-violet-50"
+                        >
+                          <div>
+                            <div className="text-sm font-black text-slate-900">
+                              {row.name || "-"}
+                            </div>
+                            <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                              {[row.employeeId, row.nik, row.email]
+                                .filter(Boolean)
+                                .join(" · ") || "History Company"}
+                            </div>
+                          </div>
+                          <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">
+                            Parent
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={saveEditFamily}
+                      disabled={
+                        savingEditFamily ||
+                        !edit.familyRole ||
+                        (edit.familyRole === "DEPENDENT" &&
+                          !edit.parentHistoryPersonId)
+                      }
+                      className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-black text-white hover:bg-violet-700 disabled:opacity-50"
+                    >
+                      {savingEditFamily
+                        ? "Menyimpan Relasi..."
+                        : "Simpan Relasi Peserta"}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-3">
                   {edit.items.map((item, index) => (
                     <div key={index} className={`grid gap-3 rounded-2xl border bg-white p-4 xl:grid-cols-[130px_1.2fr_1.1fr_90px_150px_130px_1fr_150px] ${isDoneStatus(item.status) ? "opacity-80" : ""}`}>
