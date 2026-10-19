@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 
   const sessionResult = await supabase
     .from("vaccination_sessions")
-    .select("id,session_name,default_vaccine_id,default_lot_id")
+    .select("id,session_name,default_vaccine_id,default_lot_id,existing_queue_profile")
     .eq("id", sessionId)
     .single();
 
@@ -86,8 +86,61 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const healthdayOptions = options;
+
+  let bazarOptions: any[] = [];
+  const healthdayBazarEnabled =
+    String(sessionResult.data?.existing_queue_profile || "LEGACY")
+      .trim()
+      .toUpperCase() === "HEALTHDAY_BAZAR";
+
+  if (healthdayBazarEnabled) {
+    const [vaccinesResult, lotsResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccines")
+        .select("id,name,brand,price,price_category,active")
+        .eq("active", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active")
+        .eq("active", true)
+        .order("expiry_date", { ascending: true, nullsFirst: false })
+        .order("id", { ascending: true }),
+    ]);
+
+    if (vaccinesResult.error) return fail(vaccinesResult.error.message, 500);
+    if (lotsResult.error) return fail(lotsResult.error.message, 500);
+
+    const pricedVaccines = new Map<number, any>(
+      (vaccinesResult.data || [])
+        .filter((vaccine: any) => Number.isFinite(Number(vaccine?.price)) && Number(vaccine?.price) > 0)
+        .map((vaccine: any) => [Number(vaccine.id), vaccine]),
+    );
+
+    bazarOptions = (lotsResult.data || [])
+      .map((lot: any) => {
+        const vaccine = pricedVaccines.get(Number(lot?.vaccine_id));
+        if (!vaccine) return null;
+        return {
+          id: `bazar-${sessionId}-${Number(vaccine.id)}-${Number(lot.id)}`,
+          session_id: sessionId,
+          vaccine_id: Number(vaccine.id),
+          lot_id: Number(lot.id),
+          dose_number: 1,
+          active: true,
+          option_source: "BAZAR_MASTER",
+          vaccine,
+          lot,
+        };
+      })
+      .filter(Boolean);
+  }
+
   return ok({
     session: sessionResult.data,
-    options,
+    options: healthdayOptions,
+    healthdayOptions,
+    bazarOptions,
   });
 }

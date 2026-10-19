@@ -68,8 +68,8 @@ async function validateBazarItems(supabase: any, items: any[], allowBazar: boole
   const priceMap = new Map<number, any>((priceResult.data || []).map((row: any) => [Number(row.id), row.price]));
   for (const item of bazarItems) {
     const price = priceMap.get(Number(item.vaccine_id));
-    if (price == null || !Number.isFinite(Number(price))) {
-      return "Ada layanan Bazar yang belum memiliki harga pada master produk.";
+    if (price == null || !Number.isFinite(Number(price)) || Number(price) <= 0) {
+      return "Ada layanan Bazar yang belum memiliki harga jual > 0 pada master produk.";
     }
   }
 
@@ -270,12 +270,17 @@ async function createItemsForRegistration(supabase: any, registration: any, item
     const vaccine = vaccineMap.get(Number(item.vaccine_id)) || {};
     const serviceMode = normalizeServiceMode(item.service_mode, allowBazar);
     const masterPrice = vaccine.price == null ? null : moneyNumber(vaccine.price);
-    const basePrice = serviceMode === "BAZAR"
-      ? masterPrice
-      : (item.price == null ? masterPrice : moneyNumber(item.price));
-    const paymentMethod = serviceMode === "BAZAR"
-      ? normalizeBazarPaymentMethod(item.payment_method)
-      : (item.payment_method || null);
+    const isFreeHealthday = allowBazar && serviceMode === "HEALTHDAY";
+    const basePrice = isFreeHealthday
+      ? 0
+      : serviceMode === "BAZAR"
+        ? masterPrice
+        : (item.price == null ? masterPrice : moneyNumber(item.price));
+    const paymentMethod = isFreeHealthday
+      ? null
+      : serviceMode === "BAZAR"
+        ? normalizeBazarPaymentMethod(item.payment_method)
+        : (item.payment_method || null);
 
     if (serviceMode === "BAZAR" && masterPrice == null) {
       throw new Error("Harga layanan Bazar belum tersedia di master produk.");
@@ -297,7 +302,7 @@ async function createItemsForRegistration(supabase: any, registration: any, item
       price_category: item.price_category || vaccine.price_category || null,
       price: basePrice,
       payment_method: paymentMethod || null,
-      payment_note: item.payment_note || null,
+      payment_note: isFreeHealthday ? null : (item.payment_note || null),
       item_note: item.item_note || null,
       service_mode: serviceMode,
       payment_surcharge_percent: surchargePercent,
