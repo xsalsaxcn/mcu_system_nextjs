@@ -73,6 +73,7 @@ export default function VaccinationParticipantMasterSearch({
   const [loadingContext, setLoadingContext] = useState(false);
   const [pending, setPending] = useState<any>(null);
   const [error, setError] = useState("");
+  const [walkInMode, setWalkInMode] = useState<"EXISTING" | "NEW">("EXISTING");
 
   const sessionId = Number(form?.sessionId || form?.session_id || session?.id || 0);
 
@@ -130,6 +131,7 @@ export default function VaccinationParticipantMasterSearch({
     setCurrentQuery("");
     setCurrentOpen(false);
     setPending(null);
+    setWalkInMode("EXISTING");
   }, [sessionId]);
 
   useEffect(() => {
@@ -389,6 +391,49 @@ export default function VaccinationParticipantMasterSearch({
     });
   }
 
+
+  function startManualParticipant() {
+    if (!sessionId) {
+      setError("Pilih session / lokasi terlebih dahulu.");
+      return;
+    }
+
+    const resolvedCompanyName =
+      clean(company?.name) ||
+      clean(session?.company_name) ||
+      clean(session?.source_name);
+
+    setError("");
+    setSelected(null);
+    setPending(null);
+    setResults([]);
+    setQuery("");
+
+    setForm((previous: any) => ({
+      ...(previous || {}),
+      participantId: null,
+      participant_id: null,
+      participantName: "",
+      participant_name: "",
+      name: "",
+      employeeId: "",
+      employee_id: "",
+      nik: "",
+      email: "",
+      phone: "",
+      department: "",
+      companyName: resolvedCompanyName,
+      company_name: resolvedCompanyName,
+      historyPersonId: null,
+      masterSearchSource: "NEW_MANUAL",
+      moveFromRegistrationId: null,
+      walkInSuggestedVaccineIds: [],
+      walkInContextLabel: "Peserta baru / Registrasi manual",
+    }));
+
+    window.setTimeout(() => onParticipantReady?.(), 0);
+  }
+
   const context = pending?.context || null;
   const other = context?.otherRegistration || null;
   const current = context?.currentRegistration || null;
@@ -461,77 +506,171 @@ export default function VaccinationParticipantMasterSearch({
             Walk-in / Peserta Lain
           </div>
           <div className="mt-1 text-xs font-semibold text-slate-500">
-            Cari peserta yang belum ada di lokasi ini. Sistem akan cek pendaftaran lokasi lain dan history sebelum lanjut.
+            Pilih apakah peserta sudah pernah ada di database/history atau benar-benar peserta baru.
           </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-[0.85fr_1.15fr]">
-            <select
-              value={companyKey}
-              onChange={(e) => setCompanyKey(e.target.value)}
-              disabled={loadingCompanies}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400"
+
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setWalkInMode("EXISTING");
+                setError("");
+              }}
+              className={`rounded-lg px-3 py-2.5 text-xs font-black transition ${
+                walkInMode === "EXISTING"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-transparent text-slate-600 hover:bg-white"
+              }`}
             >
-              <option value="">
-                {loadingCompanies ? "Memuat perusahaan..." : "Pilih perusahaan / instansi"}
-              </option>
-              {companies.map((item: any) => (
-                <option key={item.key} value={item.key}>{item.name}</option>
-              ))}
-            </select>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={!companyKey || !sessionId}
-              placeholder={sessionId ? "Cari nama / NIP / NIK / email..." : "Pilih session terlebih dahulu"}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none placeholder:font-medium placeholder:text-slate-400 focus:border-blue-400 disabled:bg-slate-100"
-            />
+              Cari Peserta Existing
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setWalkInMode("NEW");
+                setError("");
+                setResults([]);
+                setQuery("");
+              }}
+              className={`rounded-lg px-3 py-2.5 text-xs font-black transition ${
+                walkInMode === "NEW"
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "bg-transparent text-slate-600 hover:bg-white"
+              }`}
+            >
+              Peserta Baru / Manual
+            </button>
           </div>
 
-          {searching || loadingContext ? (
-            <div className="mt-3 rounded-xl border bg-slate-50 px-3 py-3 text-xs font-bold text-slate-500">
-              {loadingContext ? "Memeriksa lokasi & history peserta..." : "Mencari peserta..."}
-            </div>
-          ) : null}
+          {walkInMode === "EXISTING" ? (
+            <>
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-800">
+                Gunakan ini bila peserta pernah terdaftar, pernah punya history, atau mungkin terdaftar di lokasi lain.
+              </div>
 
-          {!searching && companyKey && query.trim().length >= 2 && results.length ? (
-            <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-              {results.map((row: any) => {
-                const isHistory = row.sourceType === "HISTORY_COMPANY";
-                return (
-                  <button
-                    type="button"
-                    key={resultIdentity(row)}
-                    onClick={() => chooseParticipant(row)}
-                    className="flex w-full items-start justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-black text-slate-900">{row.name || "-"}</div>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-500">
-                        {row.employeeId ? <span>ID: {row.employeeId}</span> : null}
-                        {row.nik ? <span>NIK: {row.nik}</span> : null}
-                        {row.email ? <span>{row.email}</span> : null}
-                      </div>
-                    </div>
-                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${isHistory ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
-                      {isHistory ? "History" : "Database"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+              <div className="mt-3 grid gap-3 md:grid-cols-[0.85fr_1.15fr]">
+                <select
+                  value={companyKey}
+                  onChange={(e) => setCompanyKey(e.target.value)}
+                  disabled={loadingCompanies}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400"
+                >
+                  <option value="">
+                    {loadingCompanies ? "Memuat perusahaan..." : "Pilih perusahaan / instansi"}
+                  </option>
+                  {companies.map((item: any) => (
+                    <option key={item.key} value={item.key}>{item.name}</option>
+                  ))}
+                </select>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  disabled={!companyKey || !sessionId}
+                  placeholder={sessionId ? "Cari nama / NIP / NIK / email..." : "Pilih session terlebih dahulu"}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none placeholder:font-medium placeholder:text-slate-400 focus:border-blue-400 disabled:bg-slate-100"
+                />
+              </div>
 
-          {!searching && companyKey && query.trim().length >= 2 && !results.length && !error ? (
-            <div className="mt-3 rounded-xl border border-dashed bg-slate-50 p-3">
-              <div className="text-xs font-semibold text-slate-600">Peserta tidak ditemukan di database perusahaan.</div>
+              {searching || loadingContext ? (
+                <div className="mt-3 rounded-xl border bg-slate-50 px-3 py-3 text-xs font-bold text-slate-500">
+                  {loadingContext ? "Memeriksa lokasi & history peserta..." : "Mencari peserta..."}
+                </div>
+              ) : null}
+
+              {!searching && companyKey && query.trim().length >= 2 && results.length ? (
+                <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                  {results.map((row: any) => {
+                    const isHistory = row.sourceType === "HISTORY_COMPANY";
+                    return (
+                      <button
+                        type="button"
+                        key={resultIdentity(row)}
+                        onClick={() => chooseParticipant(row)}
+                        className="flex w-full items-start justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-black text-slate-900">{row.name || "-"}</div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-500">
+                            {row.employeeId ? <span>ID: {row.employeeId}</span> : null}
+                            {row.nik ? <span>NIK: {row.nik}</span> : null}
+                            {row.email ? <span>{row.email}</span> : null}
+                          </div>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${isHistory ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
+                          {isHistory ? "History" : "Database"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {!searching && companyKey && query.trim().length >= 2 && !results.length && !error ? (
+                <div className="mt-3 rounded-xl border border-dashed bg-slate-50 p-3">
+                  <div className="text-xs font-semibold text-slate-600">
+                    Peserta tidak ditemukan di database perusahaan.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={startNewParticipant}
+                      className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700"
+                    >
+                      Lanjut sebagai peserta baru: {query.trim()}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWalkInMode("NEW");
+                        setResults([]);
+                      }}
+                      className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-100"
+                    >
+                      Buka Registrasi Manual
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="text-sm font-black text-violet-950">Peserta Baru / Belum Pernah Terdaftar</div>
+              <div className="mt-1 text-xs font-semibold leading-5 text-violet-800">
+                Gunakan jalur ini untuk peserta yang benar-benar belum pernah ada di database maupun history.
+                Data peserta akan diisi manual di pop-up, lalu lanjut pilih layanan sampai nomor antrean dirilis.
+              </div>
+
+              <div className="mt-3">
+                <label className="text-[11px] font-black uppercase text-violet-700">Perusahaan / Instansi</label>
+                <select
+                  value={companyKey}
+                  onChange={(e) => setCompanyKey(e.target.value)}
+                  disabled={loadingCompanies}
+                  className="mt-1 w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+                >
+                  <option value="">
+                    {loadingCompanies ? "Memuat perusahaan..." : (session?.company_name || session?.source_name || "Pilih perusahaan / instansi")}
+                  </option>
+                  {companies.map((item: any) => (
+                    <option key={item.key} value={item.key}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                Jika ragu peserta sudah pernah terdaftar atau belum, gunakan <b>Cari Peserta Existing</b> dulu untuk mencegah data ganda.
+              </div>
+
               <button
                 type="button"
-                onClick={startNewParticipant}
-                className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700"
+                onClick={startManualParticipant}
+                disabled={!sessionId}
+                className="mt-3 w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-black text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Lanjut sebagai peserta baru: {query.trim()}
+                + Registrasi Manual Peserta Baru
               </button>
             </div>
-          ) : null}
+          )}
         </section>
       </div>
 
