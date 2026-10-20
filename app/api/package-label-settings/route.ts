@@ -199,12 +199,13 @@ async function loadCorporateBarcodePlan(supabase: any, packageId: number) {
       barcode_category: isNonPackage ? "Non Paket" : "Paket",
       post_id: Number(parameter.post_id || 0) || null,
       post_name: postName || null,
-      ignored_system_registration: registrationLike
+      ignored_system_registration: !isNonPackage && registrationLike
     });
 
-    // Registrasi Ulang hanya boleh berasal dari station sistem di atas.
-    if (registrationLike) continue;
-
+    // IMPORTANT: kategori Non Paket menang atas nama Post Pemeriksaan.
+    // Contoh Informed Consent berada di post Registrasi Corporate, tetapi karena
+    // kategorinya Non Paket maka label harus bernama "Informed Consent", bukan
+    // dipetakan menjadi station sistem REGISTRASI ULANG.
     if (isNonPackage) {
       const normalizedLabel = normalizeText(parameterName);
       if (!parameterName || !normalizedLabel || seenNonPackageLabels.has(normalizedLabel)) continue;
@@ -220,6 +221,10 @@ async function loadCorporateBarcodePlan(supabase: any, packageId: number) {
       });
       continue;
     }
+
+    // Hanya parameter kategori Paket yang boleh dipetakan ke station sistem.
+    // REGISTRASI ULANG tetap satu kali dari station sistem bawaan.
+    if (registrationLike) continue;
 
     // Kategori Paket tetap memakai station/post pemeriksaan.
     for (const station of stationOptionsForPaketParameter(parameter, postName)) {
