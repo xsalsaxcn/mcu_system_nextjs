@@ -25,6 +25,9 @@ type Parameter = {
 type Post = {
   id: number;
   name: string;
+  description?: string;
+  is_active?: number;
+  program_type?: string;
 };
 
 type Package = {
@@ -46,6 +49,12 @@ type ScoringOptionForm = {
   is_normal: boolean;
   is_note: boolean;
   is_redflag: boolean;
+};
+
+const emptyCorporatePostForm = {
+  id: "",
+  name: "",
+  description: ""
 };
 
 const emptyForm = {
@@ -496,6 +505,7 @@ function SetupParameters({ user }: { user: any }) {
     package_name: "CAPASKA 2025/2026",
     description: ""
   });
+  const [corporatePostForm, setCorporatePostForm] = useState(emptyCorporatePostForm);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [draggedParamIdV237, setDraggedParamIdV237] = useState<number | null>(null);
@@ -585,6 +595,7 @@ function SetupParameters({ user }: { user: any }) {
     setSelectedPackageId("");
     setSelectedParamIds({});
     setForm(next === "corporate" ? { ...emptyForm, category: "Paket" } : emptyForm);
+    setCorporatePostForm(emptyCorporatePostForm);
 
     if (next === "corporate") {
       setPackageForm({
@@ -733,6 +744,115 @@ function SetupParameters({ user }: { user: any }) {
       setSelectedPackageId(String(json.package_id));
     } catch (error: any) {
       setMessage(error?.message || "Gagal membuat paket.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function isProtectedCorporatePost(post: Post) {
+    const name = String(post.name || "").trim().toLowerCase();
+    return name === "registrasi corporate" || name === "registrasi ulang" || name === "admin";
+  }
+
+  function editCorporatePost(post: Post) {
+    if (isProtectedCorporatePost(post)) {
+      setMessage(`Section sistem "${post.name}" tidak dapat diubah dari menu ini.`);
+      return;
+    }
+
+    setCorporatePostForm({
+      id: String(post.id),
+      name: post.name || "",
+      description: post.description || ""
+    });
+  }
+
+  async function saveCorporatePost(e: React.FormEvent) {
+    e.preventDefault();
+    if (programType !== "corporate") return;
+
+    const name = String(corporatePostForm.name || "").trim();
+    if (!name) {
+      setMessage("Nama Section / Post Pemeriksaan wajib diisi.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/setup/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: corporatePostForm.id ? Number(corporatePostForm.id) : null,
+          name,
+          description: corporatePostForm.description || ""
+        })
+      });
+      const json = await res.json();
+
+      if (!json.ok) {
+        setMessage(json.message || "Gagal menyimpan Section / Post Pemeriksaan.");
+        return;
+      }
+
+      setCorporatePostForm(emptyCorporatePostForm);
+      setMessage(json.mode === "updated" ? "Section pemeriksaan berhasil diupdate." : "Section pemeriksaan berhasil ditambahkan.");
+      await loadData("corporate");
+
+      if (json.post_id && !form.post_id) {
+        setForm((prev: any) => ({ ...prev, post_id: String(json.post_id) }));
+      }
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal menyimpan Section / Post Pemeriksaan.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deactivateCorporatePost(post: Post) {
+    if (programType !== "corporate") return;
+    if (isProtectedCorporatePost(post)) {
+      setMessage(`Section sistem "${post.name}" tidak dapat dinonaktifkan.`);
+      return;
+    }
+
+    const yes = window.confirm(`Nonaktifkan section "${post.name}"? Section hanya bisa dinonaktifkan jika tidak memiliki parameter aktif.`);
+    if (!yes) return;
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/setup/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: Number(post.id),
+          name: post.name,
+          description: post.description || "",
+          is_active: false
+        })
+      });
+      const json = await res.json();
+
+      if (!json.ok) {
+        setMessage(json.message || "Gagal menonaktifkan section pemeriksaan.");
+        return;
+      }
+
+      if (String(corporatePostForm.id) === String(post.id)) {
+        setCorporatePostForm(emptyCorporatePostForm);
+      }
+      if (String(form.post_id) === String(post.id)) {
+        setForm((prev: any) => ({ ...prev, post_id: "" }));
+      }
+
+      setMessage(`Section "${post.name}" berhasil dinonaktifkan.`);
+      await loadData("corporate");
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal menonaktifkan section pemeriksaan.");
     } finally {
       setLoading(false);
     }
@@ -952,6 +1072,90 @@ function SetupParameters({ user }: { user: any }) {
         )}
       </section>
 
+      {programType === "corporate" && (
+        <section className="card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-xl font-black">2. Setup Section / Post Pemeriksaan</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Tambahkan kelompok pemeriksaan seperti Rontgen, Audiometri, Mata, THT, atau section Corporate lain. Setelah disimpan, section langsung tersedia di dropdown Post Pemeriksaan.
+              </div>
+            </div>
+            <div className="rounded-xl bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">Corporate MCU saja</div>
+          </div>
+
+          <form onSubmit={saveCorporatePost} className="mt-4 grid gap-3 lg:grid-cols-[1fr_1.4fr_auto]">
+            <div>
+              <label className="label">Nama Section / Post</label>
+              <input
+                className="input"
+                value={corporatePostForm.name}
+                onChange={(e) => setCorporatePostForm({ ...corporatePostForm, name: e.target.value })}
+                placeholder="Contoh: Rontgen atau Audiometri"
+                required
+              />
+            </div>
+            <div>
+              <label className="label">Deskripsi</label>
+              <input
+                className="input"
+                value={corporatePostForm.description}
+                onChange={(e) => setCorporatePostForm({ ...corporatePostForm, description: e.target.value })}
+                placeholder="Opsional"
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <button className="btn-primary" disabled={loading}>
+                {corporatePostForm.id ? "Update Section" : "+ Tambah Section"}
+              </button>
+              {corporatePostForm.id && (
+                <button type="button" className="btn-secondary" onClick={() => setCorporatePostForm(emptyCorporatePostForm)}>
+                  Batal
+                </button>
+              )}
+            </div>
+          </form>
+
+          <div className="mt-5">
+            <div className="mb-2 text-sm font-black text-slate-700">Section Corporate aktif</div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {posts.map((post) => {
+                const protectedPost = isProtectedCorporatePost(post);
+                return (
+                  <div key={post.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-black">{post.name}</div>
+                        <div className="mt-1 text-xs text-slate-500">{post.description || (protectedPost ? "Section sistem" : "Tanpa deskripsi")}</div>
+                      </div>
+                      {protectedPost && <span className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600">SISTEM</span>}
+                    </div>
+                    {!protectedPost && (
+                      <div className="mt-3 flex gap-2">
+                        <button type="button" className="btn-secondary" onClick={() => editCorporatePost(post)}>Edit</button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600"
+                          onClick={() => deactivateCorporatePost(post)}
+                        >
+                          Nonaktifkan
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!posts.length && (
+                <div className="text-sm text-slate-500">Belum ada section Corporate aktif.</div>
+              )}
+            </div>
+            <div className="mt-3 text-xs text-slate-500">
+              Safety: Registrasi Corporate dan Registrasi Ulang dianggap section sistem dan tidak dapat diubah dari menu ini. Section yang masih memiliki parameter aktif juga tidak dapat dinonaktifkan.
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-5 lg:grid-cols-2">
         <form onSubmit={createPackage} className="card space-y-4 p-5">
           <div>
@@ -997,7 +1201,7 @@ function SetupParameters({ user }: { user: any }) {
 
         <form onSubmit={saveParameter} className="card space-y-4 p-5">
           <div>
-            <div className="text-xl font-black">2. Tambah / Edit Parameter</div>
+            <div className="text-xl font-black">{programType === "corporate" ? "3. Tambah / Edit Parameter" : "2. Tambah / Edit Parameter"}</div>
             <div className="mt-1 text-sm text-slate-500">
               Parameter akan tampil di form operator sesuai post pemeriksaan.
             </div>
@@ -1340,7 +1544,7 @@ function SetupParameters({ user }: { user: any }) {
 
       <section className="card p-5">
         <div className="mb-4">
-          <div className="text-xl font-black">3. Pilih Parameter untuk Paket / Instansi</div>
+          <div className="text-xl font-black">{programType === "corporate" ? "4. Pilih Parameter untuk Paket / Instansi" : "3. Pilih Parameter untuk Paket / Instansi"}</div>
           <div className="mt-1 text-sm text-slate-500">
             Checklist parameter yang digunakan untuk paket ini. Saat peserta diimport memakai paket tersebut, operator hanya melihat parameter yang dichecklist.
           </div>
