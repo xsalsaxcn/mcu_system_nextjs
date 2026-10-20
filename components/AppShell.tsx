@@ -19,6 +19,7 @@ const adminMenuGroups = [
   {
     title: "MCU",
     items: [
+      { label: "Session MCU", href: "/mcu/session" },
       { label: "Setup Parameter", href: "/setup-parameters" },
       { label: "Setup Label Paket", href: "/setup-label-paket" },
       { label: "Parameter Kelulusan", href: "/parameter-kelulusan" },
