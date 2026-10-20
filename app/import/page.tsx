@@ -89,6 +89,8 @@ type ImportCompanyOptionV238 = {
 };
 
 const NEW_VACCINATION_COMPANY_V238 = "__new_company__";
+// MCU_CORPORATE_IMPORT_COMPANY_DROPDOWN_V431
+const NEW_CORPORATE_COMPANY_V431 = "__new_corporate_company__";
 
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
@@ -98,6 +100,7 @@ function ImportForm({ user }: { user: any }) {
   const [loadingSourcesV237, setLoadingSourcesV237] = useState(false);
   const [companyOptionsV238, setCompanyOptionsV238] = useState<ImportCompanyOptionV238[]>([]);
   const [vaccinationCompanyChoiceV238, setVaccinationCompanyChoiceV238] = useState("");
+  const [corporateCompanyChoiceV431, setCorporateCompanyChoiceV431] = useState("");
   const [institutionName, setInstitutionName] = useState("BPIP / CAPASKA");
   const [companyName, setCompanyName] = useState("BPIP / CAPASKA");
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
@@ -165,6 +168,7 @@ function ImportForm({ user }: { user: any }) {
     setSelectedSourceIdV237("");
     setDatabaseName("");
     setVaccinationCompanyChoiceV238("");
+    setCorporateCompanyChoiceV431("");
     setCompanyOnlyModeV239(false);
     setCompanyOnlyNameV239("");
     setInstitutionName(target.value === "vaccination" ? "" : target.institution);
@@ -199,6 +203,19 @@ function ImportForm({ user }: { user: any }) {
             : NEW_VACCINATION_COMPANY_V238,
         );
       }
+
+      if (programType === "corporate") {
+        const matchedCompany = companyOptionsV238.find(
+          (company) =>
+            company.name.toLowerCase() ===
+            String(selected.institution_name || "").trim().toLowerCase(),
+        );
+        setCorporateCompanyChoiceV431(
+          matchedCompany
+            ? String(matchedCompany.id)
+            : NEW_CORPORATE_COMPANY_V431,
+        );
+      }
     }
     if (selected.description && !description) setDescription(selected.description);
   }
@@ -213,6 +230,29 @@ function ImportForm({ user }: { user: any }) {
     }
 
     if (value === NEW_VACCINATION_COMPANY_V238) {
+      setInstitutionName("");
+      setCompanyName("");
+      return;
+    }
+
+    const selected = companyOptionsV238.find(
+      (company) => String(company.id) === value,
+    );
+    const name = String(selected?.name || "").trim();
+    setInstitutionName(name);
+    setCompanyName(name);
+  }
+
+  function changeCorporateCompanyV431(value: string) {
+    setCorporateCompanyChoiceV431(value);
+
+    if (!value) {
+      setInstitutionName("");
+      setCompanyName("");
+      return;
+    }
+
+    if (value === NEW_CORPORATE_COMPANY_V431) {
       setInstitutionName("");
       setCompanyName("");
       return;
@@ -476,6 +516,43 @@ function ImportForm({ user }: { user: any }) {
                     required
                   />
                 )}
+              </div>
+            ) : programType === "corporate" ? (
+              <div className="space-y-2">
+                <select
+                  className="input"
+                  value={corporateCompanyChoiceV431}
+                  onChange={(e) => changeCorporateCompanyV431(e.target.value)}
+                  required
+                >
+                  <option value="">
+                    {loadingSourcesV237 ? "Memuat perusahaan MCU Corporate..." : "Pilih perusahaan MCU Corporate"}
+                  </option>
+                  {companyOptionsV238.map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}
+                    </option>
+                  ))}
+                  <option value={NEW_CORPORATE_COMPANY_V431}>+ Perusahaan / instansi baru</option>
+                </select>
+
+                {corporateCompanyChoiceV431 === NEW_CORPORATE_COMPANY_V431 && (
+                  <input
+                    className="input"
+                    value={institutionName}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setInstitutionName(value);
+                      setCompanyName(value);
+                    }}
+                    placeholder="Ketik nama perusahaan / instansi baru"
+                    required
+                  />
+                )}
+
+                <div className="text-xs font-semibold text-slate-500">
+                  Daftar diambil dari perusahaan yang sudah terhubung ke modul MCU Corporate, termasuk perusahaan yang belum pernah punya Database Existing.
+                </div>
               </div>
             ) : (
               <input

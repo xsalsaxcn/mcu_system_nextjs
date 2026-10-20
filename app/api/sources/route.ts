@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
   let companies: any[] = [];
   let company_warning = "";
 
+  // MCU_CORPORATE_IMPORT_COMPANY_DROPDOWN_V431
   if (program === "vaccination") {
     const companyResult = await supabase
       .from("companies")
@@ -44,6 +45,59 @@ export async function GET(req: NextRequest) {
           name: String(row.name || "").trim(),
         }))
         .filter((row: any) => row.id && row.name);
+    }
+  } else if (program === "corporate") {
+    const [participantCompanyResult, packageCompanyResult] = await Promise.all([
+      supabase
+        .from("participants")
+        .select("company_id")
+        .eq("program_type", "corporate")
+        .not("company_id", "is", null),
+      supabase
+        .from("packages")
+        .select("company_id")
+        .eq("program_type", "corporate")
+        .eq("is_active", 1)
+        .not("company_id", "is", null),
+    ]);
+
+    const companyIds = new Set<number>();
+
+    if (participantCompanyResult.error) {
+      company_warning = participantCompanyResult.error.message || "Relasi perusahaan peserta MCU Corporate tidak dapat dimuat.";
+    } else {
+      for (const row of participantCompanyResult.data || []) {
+        const id = Number((row as any)?.company_id || 0);
+        if (id > 0) companyIds.add(id);
+      }
+    }
+
+    if (packageCompanyResult.error) {
+      company_warning = company_warning || packageCompanyResult.error.message || "Relasi perusahaan paket MCU Corporate tidak dapat dimuat.";
+    } else {
+      for (const row of packageCompanyResult.data || []) {
+        const id = Number((row as any)?.company_id || 0);
+        if (id > 0) companyIds.add(id);
+      }
+    }
+
+    if (companyIds.size) {
+      const companyResult = await supabase
+        .from("companies")
+        .select("id,name")
+        .in("id", Array.from(companyIds))
+        .order("name", { ascending: true });
+
+      if (companyResult.error) {
+        company_warning = company_warning || companyResult.error.message || "Daftar perusahaan MCU Corporate tidak dapat dimuat.";
+      } else {
+        companies = (companyResult.data || [])
+          .map((row: any) => ({
+            id: Number(row.id),
+            name: String(row.name || "").trim(),
+          }))
+          .filter((row: any) => row.id && row.name);
+      }
     }
   }
 
