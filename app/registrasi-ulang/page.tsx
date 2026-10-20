@@ -1,5 +1,7 @@
 "use client";
 
+// MCU_REG_AUTOLOCK_QUEUE_STICKER_V449
+
 // MCU_REG_UI_COMPACT_V436
 // MCU_REG_ONSPOT_SESSION_V440
 // MCU_REG_LIST_QUEUE_LABEL_V447
@@ -306,6 +308,9 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [sources, setSources] = useState<any[]>([]);
   const [mcuSessionOptions, setMcuSessionOptions] = useState<{ companies: any[]; packages: any[]; session: any | null }>({ companies: [], packages: [], session: null });
   const [sourceId, setSourceId] = useState("all");
+  const [sessionLocked, setSessionLocked] = useState(false);
+  const autoRetrieveKeyRef = useRef("");
+  const restoredLockRef = useRef(false);
   const [keyword, setKeyword] = useState("");
   const [resultFilter, setResultFilter] = useState("");
   const [results, setResults] = useState<Participant[]>([]);
@@ -392,6 +397,55 @@ function RegistrasiUlang({ user }: { user: any }) {
     return rows.sort((a, b) => `${a.company_name} ${a.package_name}`.localeCompare(`${b.company_name} ${b.package_name}`));
   }, [mcuSessionOptions]);
 
+  useEffect(() => {
+    if (program !== "corporate" || typeof window === "undefined") return;
+
+    if (!restoredLockRef.current) {
+      restoredLockRef.current = true;
+      const locked = window.localStorage.getItem("mcu_reg_session_locked") === "1";
+      const lockedSource = String(window.localStorage.getItem("mcu_reg_locked_source") || "").trim();
+      if (locked && lockedSource) {
+        setSourceId(lockedSource);
+        setSessionLocked(true);
+        return;
+      }
+    }
+
+    if (sessionLocked || sourceId !== "all") return;
+    const active = mcuSessionOptions.session;
+    if (!active?.company_id || !active?.package_id) return;
+    const value = `session:${Number(active.company_id)}:${Number(active.package_id)}`;
+    if (sessionSourceOptions.some((item) => item.value === value)) {
+      setSourceId(value);
+    }
+  }, [program, sessionLocked, sourceId, mcuSessionOptions.session, sessionSourceOptions]);
+
+  function toggleRegistrationSessionLock() {
+    if (program !== "corporate") {
+      setMessage("Kunci Session hanya digunakan untuk MCU Corporate.");
+      return;
+    }
+    if (sessionLocked) {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("mcu_reg_session_locked");
+        window.localStorage.removeItem("mcu_reg_locked_source");
+      }
+      setSessionLocked(false);
+      setMessage("Session Registrasi dibuka. Perusahaan/paket dapat dipilih kembali.");
+      return;
+    }
+    if (!sourceId || sourceId === "all") {
+      setMessage("Pilih Database / Session Instansi terlebih dahulu, lalu klik Kunci Session.");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("mcu_reg_session_locked", "1");
+      window.localStorage.setItem("mcu_reg_locked_source", sourceId);
+    }
+    setSessionLocked(true);
+    setMessage("Session Registrasi dikunci di browser ini.");
+  }
+
   function getSelectedSessionContext() {
     const selectedOption = sessionSourceOptions.find((item) => item.value === sourceId);
     if (selectedOption) return selectedOption;
@@ -465,6 +519,22 @@ function RegistrasiUlang({ user }: { user: any }) {
 
     return jobs;
   }, [form, stationCopies, activeStationPrintOptions]);
+
+  useEffect(() => {
+    if (!canUse || program !== "corporate") return;
+    if (!sourceId || sourceId === "all") {
+      setResults([]);
+      autoRetrieveKeyRef.current = "";
+      return;
+    }
+    const key = `${program}|${sourceId}`;
+    if (autoRetrieveKeyRef.current === key) return;
+    autoRetrieveKeyRef.current = key;
+    const timer = window.setTimeout(() => {
+      void search();
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [program, sourceId, canUse]);
 
   if (!canUse) {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat mengakses Registrasi Ulang.</div>;
@@ -897,17 +967,17 @@ function RegistrasiUlang({ user }: { user: any }) {
           <div>
             <div className="text-2xl font-black text-slate-900">Registrasi Ulang</div>
             <div className="mt-1 text-sm text-slate-500">
-              Retrieve peserta, edit identitas, simpan registrasi, lalu cetak barcode tanpa harus scroll daftar panjang.
+              Pilih perusahaan/session untuk memuat peserta otomatis, edit identitas, simpan registrasi, lalu cetak barcode.
             </div>
           </div>
         </div>
       </section>
 
       <section className="card p-5 no-print">
-        <form onSubmit={search} className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_1fr_auto_auto]">
+        <form onSubmit={search} className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-[170px_minmax(320px,1.35fr)_auto_minmax(260px,1fr)_auto_auto]">
           <div>
             <label className="label">Program</label>
-            <select className="input" value={program} onChange={(e) => setProgram(e.target.value)}>
+            <select className="input" value={program} disabled={sessionLocked} onChange={(e) => { autoRetrieveKeyRef.current = ""; setProgram(e.target.value); }}>
               <option value="capaska">CAPASKA</option>
               <option value="corporate">Corporate</option>
               <option value="all">Semua Program</option>
@@ -916,7 +986,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
           <div>
             <label className="label">Database / Session Instansi</label>
-            <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+            <select className="input" value={sourceId} disabled={sessionLocked} onChange={(e) => { autoRetrieveKeyRef.current = ""; setSourceId(e.target.value); }}>
               <option value="all">Semua Database</option>
               {!!sources.length && (
                 <optgroup label="Database Existing">
@@ -935,6 +1005,14 @@ function RegistrasiUlang({ user }: { user: any }) {
             </select>
           </div>
 
+          <button
+            type="button"
+            className={`btn-secondary whitespace-nowrap ${sessionLocked ? "border-emerald-300 bg-emerald-50 text-emerald-700" : ""}`}
+            onClick={toggleRegistrationSessionLock}
+          >
+            {sessionLocked ? "🔒 Session Terkunci" : "🔓 Kunci Session"}
+          </button>
+
           <div>
             <label className="label">Cari Peserta</label>
             <input
@@ -946,7 +1024,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <button className="btn-primary" disabled={loading}>
-            {loading ? "Retrieve..." : "Retrieve Data"}
+            {loading ? "Memuat..." : "Refresh Data"}
           </button>
 
           {program === "corporate" && (
@@ -989,7 +1067,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                 <div className="flex min-h-[500px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center">
                   <div>
                     <div className="text-base font-black text-slate-700">Belum ada data peserta</div>
-                    <div className="mt-1 text-xs font-semibold leading-5 text-slate-400">Retrieve peserta dari database/session, atau gunakan + On The Spot untuk peserta tambahan.</div>
+                    <div className="mt-1 text-xs font-semibold leading-5 text-slate-400">Pilih perusahaan/session di atas untuk memuat data otomatis, atau gunakan + On The Spot untuk peserta tambahan.</div>
                   </div>
                 </div>
               )}
@@ -1333,7 +1411,12 @@ function StationPrintLabel({
   const legacyMcuId = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
   const employeeNik = String(form?.employee_nik || form?.nik || "").trim();
   const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
-  const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
+  const isCorporate = String(form?.program_type || "").toLowerCase() === "corporate" || Number(form?.company_id || 0) > 0;
+  const institution = String(
+    isCorporate
+      ? (form?.company_name || form?.institution_name || form?.company || form?.source_name || "-")
+      : (form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA")
+  ).trim();
   const birthDate = String(form?.date_of_birth || form?.birth_date || form?.tanggal_lahir || form?.dob || "").trim();
   const provinceText = String(form?.province || form?.provinsi || form?.location || form?.lokasi || "").trim();
   const stationText =
@@ -1351,10 +1434,10 @@ function StationPrintLabel({
 
   const queueA = String(queueInfo?.a_queue_number || "").trim();
   const queueB = String(queueInfo?.b_queue_number || "").trim();
-  const queueText =
-    station.key === "darah" ? queueA :
-    (station.key === "rontgen" || station.key === "radiologi") ? queueB :
-    [queueA, queueB].filter(Boolean).join(" / ");
+  const stageUpper = `${station.key} ${stationText}`.toUpperCase();
+  const isLabStage = /(DARAH|LAB|HBSAG|ANTI[ _-]?HBS|HIV|HEMATO|URIC|GLUCO|CHOLESTEROL)/.test(stageUpper);
+  const isRadiologyStage = /(RONTGEN|RADIOLOGI|THORAX|XRAY|X-RAY)/.test(stageUpper);
+  const queueText = isLabStage ? queueA : isRadiologyStage ? queueB : [queueA, queueB].filter(Boolean).join(" / ");
 
   const qrPx = 54;
   const qrValue = employeeNik || legacyMcuId || nameText;
@@ -1376,7 +1459,7 @@ function StationPrintLabel({
           position: "absolute",
           left: "8%",
           top: "7%",
-          right: "8%",
+          right: queueText ? "38%" : "8%",
           zIndex: 2
         }}
       >
@@ -1398,6 +1481,44 @@ function StationPrintLabel({
         </div>
       </div>
 
+      {/* MCU_QUEUE_STICKER_TOP_RIGHT_V449 */}
+      <div
+        style={{
+          position: "absolute",
+          right: "6%",
+          top: "7%",
+          width: "28%",
+          zIndex: 3,
+          textAlign: "right",
+          color: "#000000"
+        }}
+      >
+        <div
+          style={{
+            fontSize: `${Math.max(16, safeFont + 7)}px`,
+            lineHeight: 1,
+            fontWeight: 900,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis"
+          }}
+        >
+          {queueText || "-"}
+        </div>
+        <div
+          style={{
+            marginTop: "5px",
+            fontSize: `${Math.max(9, safeFont)}px`,
+            lineHeight: 1.05,
+            fontWeight: 900,
+            whiteSpace: "normal",
+            wordBreak: "break-word"
+          }}
+        >
+          {stationText}
+        </div>
+      </div>
+
       <div
         style={{
           position: "absolute",
@@ -1415,11 +1536,9 @@ function StationPrintLabel({
         }}
       >
         <div>NIK Karyawan: {employeeNik || "-"}</div>
-        <div style={{ marginTop: "4px" }}>Stage: {stationText}</div>
-        {queueText ? <div>Antrian: {queueText}</div> : null}
-        {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
-        {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
-        <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
+        {!isCorporate && birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
+        {!isCorporate && provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
+        <div style={{ marginTop: "7px", fontWeight: 900 }}>{institution || "-"}</div>
       </div>
 
       {showQr && (
