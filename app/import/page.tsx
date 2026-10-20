@@ -88,9 +88,17 @@ type ImportCompanyOptionV238 = {
   name: string;
 };
 
+// MCU_CORPORATE_IMPORT_PACKAGE_DROPDOWN_V432
+type ImportCorporatePackageOptionV432 = {
+  id: number;
+  name: string;
+  company_ids: number[];
+};
+
 const NEW_VACCINATION_COMPANY_V238 = "__new_company__";
 // MCU_CORPORATE_IMPORT_COMPANY_DROPDOWN_V431
 const NEW_CORPORATE_COMPANY_V431 = "__new_corporate_company__";
+const NEW_CORPORATE_PACKAGE_V432 = "__new_corporate_package__";
 
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
@@ -101,6 +109,8 @@ function ImportForm({ user }: { user: any }) {
   const [companyOptionsV238, setCompanyOptionsV238] = useState<ImportCompanyOptionV238[]>([]);
   const [vaccinationCompanyChoiceV238, setVaccinationCompanyChoiceV238] = useState("");
   const [corporateCompanyChoiceV431, setCorporateCompanyChoiceV431] = useState("");
+  const [corporatePackageOptionsV432, setCorporatePackageOptionsV432] = useState<ImportCorporatePackageOptionV432[]>([]);
+  const [corporatePackageChoiceV432, setCorporatePackageChoiceV432] = useState("");
   const [institutionName, setInstitutionName] = useState("BPIP / CAPASKA");
   const [companyName, setCompanyName] = useState("BPIP / CAPASKA");
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
@@ -140,10 +150,26 @@ function ImportForm({ user }: { user: any }) {
             }))
             .filter((row: ImportCompanyOptionV238) => row.id && row.name),
         );
+
+        const corporatePackages = Array.isArray(json?.corporate_packages) ? json.corporate_packages : [];
+        setCorporatePackageOptionsV432(
+          corporatePackages
+            .map((row: any) => ({
+              id: Number(row.id),
+              name: String(row.name || "").trim(),
+              company_ids: Array.isArray(row.company_ids)
+                ? row.company_ids.map((id: any) => Number(id)).filter((id: number) => id > 0)
+                : Number(row.company_id || 0) > 0
+                  ? [Number(row.company_id)]
+                  : [],
+            }))
+            .filter((row: ImportCorporatePackageOptionV432) => row.id && row.name),
+        );
       } catch {
         if (!cancelled) {
           setSourceOptionsV237([]);
           setCompanyOptionsV238([]);
+          setCorporatePackageOptionsV432([]);
         }
       } finally {
         if (!cancelled) setLoadingSourcesV237(false);
@@ -169,6 +195,7 @@ function ImportForm({ user }: { user: any }) {
     setDatabaseName("");
     setVaccinationCompanyChoiceV238("");
     setCorporateCompanyChoiceV431("");
+    setCorporatePackageChoiceV432("");
     setCompanyOnlyModeV239(false);
     setCompanyOnlyNameV239("");
     setInstitutionName(target.value === "vaccination" ? "" : target.institution);
@@ -177,6 +204,26 @@ function ImportForm({ user }: { user: any }) {
   }
 
 
+
+  function packagesForCorporateCompanyV432(companyIdValue: string | number) {
+    const companyId = Number(companyIdValue || 0);
+    if (!companyId) return [] as ImportCorporatePackageOptionV432[];
+
+    return corporatePackageOptionsV432.filter((pkg) =>
+      (pkg.company_ids || []).some((id) => Number(id) === companyId),
+    );
+  }
+
+  function selectCorporatePackageForCompanyV432(companyIdValue: string | number) {
+    const matches = packagesForCorporateCompanyV432(companyIdValue);
+    if (matches.length > 0) {
+      setCorporatePackageChoiceV432(String(matches[0].id));
+      setPackageName(matches[0].name);
+    } else {
+      setCorporatePackageChoiceV432("");
+      setPackageName("");
+    }
+  }
 
   function chooseExistingDatabaseV237(sourceId: string) {
     setSelectedSourceIdV237(sourceId);
@@ -210,11 +257,16 @@ function ImportForm({ user }: { user: any }) {
             company.name.toLowerCase() ===
             String(selected.institution_name || "").trim().toLowerCase(),
         );
-        setCorporateCompanyChoiceV431(
-          matchedCompany
-            ? String(matchedCompany.id)
-            : NEW_CORPORATE_COMPANY_V431,
-        );
+        const companyChoice = matchedCompany
+          ? String(matchedCompany.id)
+          : NEW_CORPORATE_COMPANY_V431;
+        setCorporateCompanyChoiceV431(companyChoice);
+        if (matchedCompany) {
+          selectCorporatePackageForCompanyV432(matchedCompany.id);
+        } else {
+          setCorporatePackageChoiceV432(NEW_CORPORATE_PACKAGE_V432);
+          setPackageName("");
+        }
       }
     }
     if (selected.description && !description) setDescription(selected.description);
@@ -249,12 +301,16 @@ function ImportForm({ user }: { user: any }) {
     if (!value) {
       setInstitutionName("");
       setCompanyName("");
+      setCorporatePackageChoiceV432("");
+      setPackageName("");
       return;
     }
 
     if (value === NEW_CORPORATE_COMPANY_V431) {
       setInstitutionName("");
       setCompanyName("");
+      setCorporatePackageChoiceV432(NEW_CORPORATE_PACKAGE_V432);
+      setPackageName("");
       return;
     }
 
@@ -264,6 +320,26 @@ function ImportForm({ user }: { user: any }) {
     const name = String(selected?.name || "").trim();
     setInstitutionName(name);
     setCompanyName(name);
+    selectCorporatePackageForCompanyV432(value);
+  }
+
+  function changeCorporatePackageV432(value: string) {
+    setCorporatePackageChoiceV432(value);
+
+    if (!value) {
+      setPackageName("");
+      return;
+    }
+
+    if (value === NEW_CORPORATE_PACKAGE_V432) {
+      setPackageName("");
+      return;
+    }
+
+    const selected = corporatePackageOptionsV432.find(
+      (pkg) => String(pkg.id) === value,
+    );
+    setPackageName(String(selected?.name || "").trim());
   }
 
   function updateStageStaffNameV165(stageName: string, index: number, value: string) {
@@ -573,7 +649,50 @@ function ImportForm({ user }: { user: any }) {
           {programType !== "vaccination" && (
             <div>
               <label className="label">Paket Pemeriksaan</label>
-              <input className="input" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+              {programType === "corporate" ? (
+                <div className="space-y-2">
+                  <select
+                    className="input"
+                    value={corporatePackageChoiceV432}
+                    onChange={(e) => changeCorporatePackageV432(e.target.value)}
+                    required
+                    disabled={!corporateCompanyChoiceV431}
+                  >
+                    <option value="">
+                      {!corporateCompanyChoiceV431
+                        ? "Pilih perusahaan dulu"
+                        : corporateCompanyChoiceV431 === NEW_CORPORATE_COMPANY_V431
+                          ? "Paket baru / isi manual"
+                          : packagesForCorporateCompanyV432(corporateCompanyChoiceV431).length
+                            ? "Pilih paket pemeriksaan"
+                            : "Belum ada paket untuk perusahaan ini"}
+                    </option>
+                    {corporateCompanyChoiceV431 !== NEW_CORPORATE_COMPANY_V431 &&
+                      packagesForCorporateCompanyV432(corporateCompanyChoiceV431).map((pkg) => (
+                        <option key={pkg.id} value={pkg.id}>
+                          {pkg.name}
+                        </option>
+                      ))}
+                    <option value={NEW_CORPORATE_PACKAGE_V432}>+ Paket baru / isi manual</option>
+                  </select>
+
+                  {corporatePackageChoiceV432 === NEW_CORPORATE_PACKAGE_V432 && (
+                    <input
+                      className="input"
+                      value={packageName}
+                      onChange={(e) => setPackageName(e.target.value)}
+                      placeholder="Ketik nama paket pemeriksaan"
+                      required
+                    />
+                  )}
+
+                  <div className="text-xs font-semibold text-slate-500">
+                    Paket difilter dari paket MCU Corporate yang sudah dibuat/terhubung ke perusahaan terpilih.
+                  </div>
+                </div>
+              ) : (
+                <input className="input" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+              )}
             </div>
           )}
         </div>
