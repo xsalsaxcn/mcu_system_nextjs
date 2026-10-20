@@ -1,5 +1,7 @@
 "use client";
 
+// MCU_STICKER_LAYOUT_ROLLBACK_ONLY_V450
+
 // MCU_REG_AUTOLOCK_QUEUE_STICKER_V449
 
 // MCU_REG_UI_COMPACT_V436
@@ -1459,7 +1461,7 @@ function StationPrintLabel({
           position: "absolute",
           left: "8%",
           top: "7%",
-          right: queueText ? "38%" : "8%",
+          right: "8%",
           zIndex: 2
         }}
       >
@@ -1481,44 +1483,6 @@ function StationPrintLabel({
         </div>
       </div>
 
-      {/* MCU_QUEUE_STICKER_TOP_RIGHT_V449 */}
-      <div
-        style={{
-          position: "absolute",
-          right: "6%",
-          top: "7%",
-          width: "28%",
-          zIndex: 3,
-          textAlign: "right",
-          color: "#000000"
-        }}
-      >
-        <div
-          style={{
-            fontSize: `${Math.max(16, safeFont + 7)}px`,
-            lineHeight: 1,
-            fontWeight: 900,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis"
-          }}
-        >
-          {queueText || "-"}
-        </div>
-        <div
-          style={{
-            marginTop: "5px",
-            fontSize: `${Math.max(9, safeFont)}px`,
-            lineHeight: 1.05,
-            fontWeight: 900,
-            whiteSpace: "normal",
-            wordBreak: "break-word"
-          }}
-        >
-          {stationText}
-        </div>
-      </div>
-
       <div
         style={{
           position: "absolute",
@@ -1536,9 +1500,11 @@ function StationPrintLabel({
         }}
       >
         <div>NIK Karyawan: {employeeNik || "-"}</div>
+        <div style={{ marginTop: "4px" }}>Stage: {stationText}</div>
+        {queueText ? <div>Antrian: {queueText}</div> : null}
         {!isCorporate && birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
         {!isCorporate && provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
-        <div style={{ marginTop: "7px", fontWeight: 900 }}>{institution || "-"}</div>
+        <div style={{ marginTop: "4px", fontWeight: 900 }}>{institution || "-"}</div>
       </div>
 
       {showQr && (
