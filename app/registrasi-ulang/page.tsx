@@ -2,6 +2,7 @@
 
 // MCU_REG_UI_COMPACT_V436
 // MCU_REG_ONSPOT_SESSION_V440
+// MCU_REG_LIST_QUEUE_LABEL_V447
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -322,6 +323,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [showLabelBorder, setShowLabelBorder] = useState(false);
   const [showLabelQr, setShowLabelQr] = useState(true);
   const [showLabelBarcodeText, setShowLabelBarcodeText] = useState(false);
+  const [queueInfo, setQueueInfo] = useState<any | null>(null);
   const [labelStylePackage, setLabelStylePackage] = useState({
     font_size: 9,
     show_border: 0,
@@ -410,6 +412,38 @@ function RegistrasiUlang({ user }: { user: any }) {
   const ageValue = useMemo(() => {
     return form?.age ? String(form.age) : calcAge(form?.birth_date || form?.date_of_birth);
   }, [form?.age, form?.birth_date, form?.date_of_birth]);
+
+  const filteredResults = useMemo(() => {
+    const q = resultFilter.trim().toLowerCase();
+    if (!q) return results;
+    return results.filter((p) =>
+      [p.name, p.mcu_id, p.external_id, p.employee_nik, p.nik, p.source_name, p.company_name, p.package_name]
+        .some((value) => String(value || "").toLowerCase().includes(q))
+    );
+  }, [results, resultFilter]);
+
+  async function loadQueueInfo(participantId?: number) {
+    const id = Number(participantId || 0);
+    if (!id || program !== "corporate") {
+      setQueueInfo(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/mcu/queue/participant?participant_id=${encodeURIComponent(String(id))}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!json?.ok) {
+        setQueueInfo(null);
+        return;
+      }
+      setQueueInfo({
+        ...(json.queue_entry || {}),
+        track_a_name: json.queue_session?.track_a_name || "Lab Darah",
+        track_b_name: json.queue_session?.track_b_name || "Rontgen",
+      });
+    } catch {
+      setQueueInfo(null);
+    }
+  }
 
 
   const activeStationPrintOptions = useMemo<StationPrintOption[]>(() => {
@@ -503,9 +537,9 @@ function RegistrasiUlang({ user }: { user: any }) {
       registrasi_ulang_done: false
     };
 
-    setResults([]);
     setSelected(null);
     setKeyword("");
+    setQueueInfo(null);
     setForm(draft);
     setPrintReady(false);
     await loadPackageLabelSettings(context.package_id, "corporate");
@@ -534,10 +568,11 @@ function RegistrasiUlang({ user }: { user: any }) {
       };
 
       setForm(nextParticipant);
-      setResults([]);
-      setKeyword(nextParticipant.name || "");
-      await loadPackageLabelSettings(nextParticipant.package_id, nextParticipant.program_type || program);
-      setMessage("Data peserta dipilih. Hasil retrieve ditutup otomatis. Silakan lengkapi registrasi ulang lalu klik Save.");
+      await Promise.all([
+        loadPackageLabelSettings(nextParticipant.package_id, nextParticipant.program_type || program),
+        loadQueueInfo(nextParticipant.id),
+      ]);
+      setMessage("Data peserta dipilih. Daftar peserta tetap tersedia di sebelah kiri. Silakan lengkapi registrasi ulang lalu klik Save.");
     } catch (err: any) {
       setMessage(err?.message || "Gagal memuat detail.");
     }
@@ -688,8 +723,13 @@ function RegistrasiUlang({ user }: { user: any }) {
       const savedParticipant = { ...form, ...(json.participant || {}) };
       setForm(savedParticipant);
       setSelected(savedParticipant);
+      setResults((prev) => {
+        const next = prev.filter((item) => Number(item.id) !== Number(savedParticipant.id));
+        return [savedParticipant, ...next];
+      });
+      await loadQueueInfo(savedParticipant.id);
       setPrintReady(true);
-      setMessage("Registrasi ulang berhasil disimpan. Silakan print barcode/label.");
+      setMessage("Registrasi ulang berhasil disimpan dan nomor antrian dirilis. Silakan print barcode/label.");
     } catch (err: any) {
       setMessage(err?.message || "Gagal menyimpan.");
     } finally {
@@ -730,10 +770,11 @@ function RegistrasiUlang({ user }: { user: any }) {
         return;
       }
 
+      const deletedId = Number(form.id);
       setForm(null);
       setSelected(null);
-      setResults([]);
-      setKeyword('');
+      setResults((prev) => prev.filter((item) => Number(item.id) !== deletedId));
+      setQueueInfo(null);
       setPrintReady(false);
       setMessage(json.message || 'Peserta berhasil dihapus.');
     } catch (err: any) {
@@ -922,9 +963,9 @@ function RegistrasiUlang({ user }: { user: any }) {
         )}
       </section>
 
-      {(results.length > 0 || form) && (
-        <section className="grid gap-4 no-print xl:grid-cols-[390px_minmax(0,1fr)]">
-          <aside className="card min-w-0 p-4 xl:sticky xl:top-4 xl:self-start">
+      {true && (
+        <section className="grid items-start gap-4 no-print xl:grid-cols-[390px_minmax(0,1fr)]">
+          <aside className="card flex min-h-[690px] min-w-0 flex-col p-4 xl:sticky xl:top-4 xl:self-start">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-lg font-black text-slate-900">Hasil Retrieve Data</div>
@@ -943,15 +984,16 @@ function RegistrasiUlang({ user }: { user: any }) {
               />
             </div>
 
-            <div className="mt-3 max-h-[690px] space-y-2 overflow-y-auto pr-1">
-              {results
-                .filter((p) => {
-                  const q = resultFilter.trim().toLowerCase();
-                  if (!q) return true;
-                  return [p.name, p.mcu_id, p.external_id, p.employee_nik, p.nik, p.source_name]
-                    .some((value) => String(value || "").toLowerCase().includes(q));
-                })
-                .map((p) => {
+            <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              {!filteredResults.length && (
+                <div className="flex min-h-[500px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center">
+                  <div>
+                    <div className="text-base font-black text-slate-700">Belum ada data peserta</div>
+                    <div className="mt-1 text-xs font-semibold leading-5 text-slate-400">Retrieve peserta dari database/session, atau gunakan + On The Spot untuk peserta tambahan.</div>
+                  </div>
+                </div>
+              )}
+              {filteredResults.map((p) => {
                   const active = selected?.id === p.id;
                   const registered = Boolean(p.registrasi_ulang_done);
                   const initials = String(p.name || "?")
@@ -1099,6 +1141,16 @@ function RegistrasiUlang({ user }: { user: any }) {
                       <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Paket Pemeriksaan</div>
                       <div className="mt-1 truncate font-black text-slate-700">{form.package_name || "-"}</div>
                     </div>
+                    {queueInfo?.a_queue_number || queueInfo?.b_queue_number ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 md:col-span-2 xl:col-span-3">
+                        <div className="text-xs font-bold uppercase tracking-wide text-emerald-600">Nomor Antrian Dirilis</div>
+                        <div className="mt-1 font-black text-emerald-800">
+                          {queueInfo?.a_queue_number ? `${queueInfo.track_a_name || "Antrian A"}: ${queueInfo.a_queue_number}` : ""}
+                          {queueInfo?.a_queue_number && queueInfo?.b_queue_number ? " · " : ""}
+                          {queueInfo?.b_queue_number ? `${queueInfo.track_b_name || "Antrian B"}: ${queueInfo.b_queue_number}` : ""}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1123,11 +1175,11 @@ function RegistrasiUlang({ user }: { user: any }) {
                 </div>
               </section>
             ) : (
-              <section className="card flex min-h-[420px] items-center justify-center p-8 text-center">
-                <div>
+              <section className="card flex min-h-[690px] items-center justify-center p-8 text-center">
+                <div className="max-w-md">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">👤</div>
-                  <div className="mt-4 text-lg font-black text-slate-800">Pilih peserta</div>
-                  <div className="mt-1 max-w-sm text-sm text-slate-500">Klik salah satu peserta di panel kiri untuk membuka detail Registrasi Ulang.</div>
+                  <div className="mt-4 text-xl font-black text-slate-800">Belum ada peserta dipilih</div>
+                  <div className="mt-2 text-sm font-semibold leading-6 text-slate-500">Pilih peserta dari daftar di kiri, lakukan Retrieve Data, atau klik + On The Spot untuk registrasi peserta tambahan.</div>
                 </div>
               </section>
             )}
@@ -1195,7 +1247,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                 checked={showLabelBarcodeText}
                 onChange={(e) => setShowLabelBarcodeText(e.target.checked)}
               />
-              Tampilkan No MCU Footer
+              Tampilkan NIK Karyawan Footer
             </label>
           </div>
 
@@ -1250,6 +1302,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               showBorder={showLabelBorder}
               showQr={showLabelQr}
               showBarcodeText={showLabelBarcodeText}
+              queueInfo={queueInfo}
             />
           ))}
         </section>
@@ -1266,7 +1319,8 @@ function StationPrintLabel({
   fontSize,
   showBorder,
   showQr,
-  showBarcodeText
+  showBarcodeText,
+  queueInfo
 }: {
   station: StationPrintOption;
   form: any;
@@ -1274,8 +1328,10 @@ function StationPrintLabel({
   showBorder: boolean;
   showQr: boolean;
   showBarcodeText: boolean;
+  queueInfo?: any;
 }) {
-  const idText = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
+  const legacyMcuId = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
+  const employeeNik = String(form?.employee_nik || form?.nik || "").trim();
   const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
   const institution = String(form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA").trim();
   const birthDate = String(form?.date_of_birth || form?.birth_date || form?.tanggal_lahir || form?.dob || "").trim();
@@ -1293,8 +1349,15 @@ function StationPrintLabel({
     nameText.length > 24 ? Math.max(14, safeFont + 4) :
     Math.max(16, safeFont + 6);
 
+  const queueA = String(queueInfo?.a_queue_number || "").trim();
+  const queueB = String(queueInfo?.b_queue_number || "").trim();
+  const queueText =
+    station.key === "darah" ? queueA :
+    (station.key === "rontgen" || station.key === "radiologi") ? queueB :
+    [queueA, queueB].filter(Boolean).join(" / ");
+
   const qrPx = 54;
-  const qrValue = idText || nameText;
+  const qrValue = employeeNik || legacyMcuId || nameText;
 
   return (
     <section
@@ -1351,8 +1414,9 @@ function StationPrintLabel({
           overflowWrap: "anywhere"
         }}
       >
-        <div>MCU: {idText || "-"}</div>
+        <div>NIK Karyawan: {employeeNik || "-"}</div>
         <div style={{ marginTop: "4px" }}>Stage: {stationText}</div>
+        {queueText ? <div>Antrian: {queueText}</div> : null}
         {birthDate ? <div style={{ marginTop: "4px" }}>TTL: {birthDate}</div> : null}
         {provinceText ? <div style={{ marginTop: "4px", color: "#4b5563" }}>Provinsi: {provinceText}</div> : null}
         <div style={{ marginTop: "4px" }}>{institution || "-"}</div>
@@ -1394,7 +1458,7 @@ function StationPrintLabel({
             textOverflow: "ellipsis"
           }}
         >
-          {idText || "-"}
+          {employeeNik || "-"}
         </div>
       )}
     </section>
