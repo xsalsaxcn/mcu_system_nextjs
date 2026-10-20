@@ -34,6 +34,50 @@ function defaultSettings(packageId: number, programType: string) {
   }));
 }
 
+function isCorporateNonPackageCategory(value: any) {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  return text === "non paket" || text === "nonpackage";
+}
+
+async function loadCorporateNonPackageParameters(supabase: any, packageId: number) {
+  const { data: mappings, error: mappingError } = await supabase
+    .from("package_parameters")
+    .select("parameter_id,sort_order")
+    .eq("package_id", packageId)
+    .order("sort_order", { ascending: true });
+
+  if (mappingError) throw mappingError;
+  const parameterIds = (mappings || []).map((row: any) => Number(row.parameter_id)).filter(Boolean);
+  if (!parameterIds.length) return [];
+
+  const { data: parameters, error: parameterError } = await supabase
+    .from("parameters")
+    .select("id,name,category,post_id,sort_order")
+    .in("id", parameterIds)
+    .eq("program_type", "corporate")
+    .eq("is_active", 1);
+
+  if (parameterError) throw parameterError;
+
+  const orderMap = new Map((mappings || []).map((row: any, index: number) => [Number(row.parameter_id), Number(row.sort_order || index + 1)]));
+
+  return (parameters || [])
+    .filter((parameter: any) => isCorporateNonPackageCategory(parameter.category))
+    .sort((a: any, b: any) => Number(orderMap.get(Number(a.id)) || 999999) - Number(orderMap.get(Number(b.id)) || 999999))
+    .map((parameter: any) => ({
+      parameter_id: Number(parameter.id),
+      station_key: `non_paket_param_${Number(parameter.id)}`,
+      station_label: String(parameter.name || "").trim(),
+      short_code: "NP",
+      default_copies: 1
+    }))
+    .filter((row: any) => row.station_label);
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user || user.role !== "admin") return fail("Unauthorized", 401);
@@ -64,16 +108,27 @@ export async function GET(req: NextRequest) {
 
   if (error) return fail(error.message, 500);
 
+  let nonPackageParameters: any[] = [];
+  if (program === "corporate") {
+    try {
+      nonPackageParameters = await loadCorporateNonPackageParameters(supabase, packageId);
+    } catch (nonPackageError: any) {
+      return fail(nonPackageError?.message || "Gagal memuat parameter barcode Non Paket.", 500);
+    }
+  }
+
   if (!data?.length) {
     return ok({
       settings: defaultSettings(packageId, program),
-      source: "default"
+      source: "default",
+      non_package_parameters: nonPackageParameters
     });
   }
 
   return ok({
     settings: data,
-    source: "database"
+    source: "database",
+    non_package_parameters: nonPackageParameters
   });
 }
 

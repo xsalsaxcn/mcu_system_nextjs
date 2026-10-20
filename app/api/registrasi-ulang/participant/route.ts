@@ -46,12 +46,36 @@ export async function GET(req: NextRequest) {
 
   if (error) return fail(error.message, 500);
 
+  let packageName = "-";
+  let companyId = Number(data?.company_id || 0);
+
+  if (data?.package_id) {
+    const { data: pkg } = await supabase
+      .from("packages")
+      .select("name,company_id")
+      .eq("id", Number(data.package_id))
+      .maybeSingle();
+
+    if (pkg?.name) packageName = String(pkg.name);
+    if (!companyId && pkg?.company_id) companyId = Number(pkg.company_id);
+  }
+
+  let companyName = "";
+  if (companyId) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("name")
+      .eq("id", companyId)
+      .maybeSingle();
+    companyName = String(company?.name || "").trim();
+  }
+
   return ok({
     participant: {
       ...data,
       source_name: "-",
-      package_name: "-",
-      company_name: ""
+      package_name: packageName,
+      company_name: companyName
     }
   });
 }

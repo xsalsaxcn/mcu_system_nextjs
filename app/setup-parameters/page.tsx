@@ -153,6 +153,15 @@ function parsePlainOptions(configJson?: string) {
   }
 }
 
+function normalizeCorporateBarcodeCategory(value: any) {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+  return text === "non paket" || text === "nonpackage" ? "Non Paket" : "Paket";
+}
+
 function createBlankOption(): ScoringOptionForm {
   return {
     label: "",
@@ -575,7 +584,7 @@ function SetupParameters({ user }: { user: any }) {
     setProgramType(next);
     setSelectedPackageId("");
     setSelectedParamIds({});
-    setForm(emptyForm);
+    setForm(next === "corporate" ? { ...emptyForm, category: "Paket" } : emptyForm);
 
     if (next === "corporate") {
       setPackageForm({
@@ -597,7 +606,7 @@ function SetupParameters({ user }: { user: any }) {
       id: String(param.id),
       post_id: String(param.post_id),
       name: param.name || "",
-      category: param.category || "",
+      category: programType === "corporate" ? normalizeCorporateBarcodeCategory(param.category) : (param.category || ""),
       unit: param.unit || "",
       input_type: param.input_type || "text",
       normal_value: param.normal_value || "",
@@ -643,6 +652,7 @@ function SetupParameters({ user }: { user: any }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
+          category: programType === "corporate" ? normalizeCorporateBarcodeCategory(form.category) : form.category,
           program_type: programType,
           post_id: Number(form.post_id),
           id: form.id ? Number(form.id) : null,
@@ -662,7 +672,7 @@ function SetupParameters({ user }: { user: any }) {
       }
 
       setMessage(form.id ? "Parameter berhasil diupdate." : "Parameter berhasil dibuat.");
-      setForm(emptyForm);
+      setForm(programType === "corporate" ? { ...emptyForm, category: "Paket" } : emptyForm);
       await loadData(programType);
     } catch (error: any) {
       setMessage(error?.message || "Gagal menyimpan parameter.");
@@ -1051,8 +1061,24 @@ function SetupParameters({ user }: { user: any }) {
             </div>
 
             <div>
-              <label className="label">Kategori</label>
-              <input className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Opsional" />
+              <label className="label">{programType === "corporate" ? "Kategori Barcode" : "Kategori"}</label>
+              {programType === "corporate" ? (
+                <>
+                  <select
+                    className="input"
+                    value={normalizeCorporateBarcodeCategory(form.category)}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  >
+                    <option value="Paket">Paket</option>
+                    <option value="Non Paket">Non Paket</option>
+                  </select>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Paket memakai label station pemeriksaan. Non Paket membuat label sesuai nama parameter yang dichecklist pada paket.
+                  </div>
+                </>
+              ) : (
+                <input className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Opsional" />
+              )}
             </div>
 
             <div>

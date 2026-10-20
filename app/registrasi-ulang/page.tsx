@@ -24,6 +24,7 @@ type Participant = {
   source_name?: string;
   package_id?: number;
   package_name?: string;
+  company_id?: number;
   company_name?: string;
   photo_data_url?: string;
   photo_url?: string;
@@ -300,6 +301,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [printReady, setPrintReady] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [stationCopies, setStationCopies] = useState<Record<string, number>>(() => createDefaultStationCopies());
+  const [nonPackageStations, setNonPackageStations] = useState<StationPrintOption[]>([]);
   const [labelFontSize, setLabelFontSize] = useState(9);
   const [showLabelBorder, setShowLabelBorder] = useState(false);
   const [showLabelQr, setShowLabelQr] = useState(true);
@@ -325,12 +327,16 @@ function RegistrasiUlang({ user }: { user: any }) {
   }, [form?.age, form?.birth_date, form?.date_of_birth]);
 
 
+  const activeStationPrintOptions = useMemo<StationPrintOption[]>(() => {
+    return [...STATION_PRINT_OPTIONS, ...nonPackageStations];
+  }, [nonPackageStations]);
+
   const printJobs = useMemo<PrintJob[]>(() => {
     if (!form) return [];
 
     const jobs: PrintJob[] = [];
 
-    STATION_PRINT_OPTIONS.forEach((station) => {
+    activeStationPrintOptions.forEach((station) => {
       const count = Math.max(0, Math.min(20, Number(stationCopies[station.key] || 0)));
 
       for (let i = 0; i < count; i += 1) {
@@ -339,7 +345,7 @@ function RegistrasiUlang({ user }: { user: any }) {
     });
 
     return jobs;
-  }, [form, stationCopies]);
+  }, [form, stationCopies, activeStationPrintOptions]);
 
   if (!canUse) {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat mengakses Registrasi Ulang.</div>;
@@ -439,6 +445,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   async function loadPackageLabelSettings(packageId?: number | null, programType?: string) {
     if (!packageId) {
+      setNonPackageStations([]);
       setStationCopies(createDefaultStationCopies());
       return;
     }
@@ -452,12 +459,31 @@ function RegistrasiUlang({ user }: { user: any }) {
       const res = await fetch(`/api/package-label-settings?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
+      const extraStations: StationPrintOption[] = programType === "corporate" && Array.isArray(json.non_package_parameters)
+        ? json.non_package_parameters
+            .map((row: any) => ({
+              key: String(row.station_key || `non_paket_param_${Number(row.parameter_id || 0)}`),
+              label: String(row.station_label || "").trim(),
+              shortCode: String(row.short_code || "NP"),
+              defaultCopies: Math.max(0, Math.min(20, Number(row.default_copies ?? 1)))
+            }))
+            .filter((station: StationPrintOption) => station.key && station.label)
+        : [];
+
+      setNonPackageStations(extraStations);
+
       if (!json.ok || !json.settings?.length) {
-        setStationCopies(createDefaultStationCopies());
+        setStationCopies({
+          ...createDefaultStationCopies(),
+          ...Object.fromEntries(extraStations.map((station) => [station.key, station.defaultCopies]))
+        });
         return;
       }
 
-      const next = createDefaultStationCopies();
+      const next = {
+        ...createDefaultStationCopies(),
+        ...Object.fromEntries(extraStations.map((station) => [station.key, station.defaultCopies]))
+      } as Record<string, number>;
 
       json.settings.forEach((setting: any) => {
         if (setting.station_key in next) {
@@ -485,6 +511,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       setShowLabelQr(nextQr);
       setShowLabelBarcodeText(nextFooter);
     } catch {
+      setNonPackageStations([]);
       setStationCopies(createDefaultStationCopies());
     }
   }
@@ -529,8 +556,9 @@ function RegistrasiUlang({ user }: { user: any }) {
         return;
       }
 
-      setForm(json.participant || form);
-      setSelected(json.participant || form);
+      const savedParticipant = { ...form, ...(json.participant || {}) };
+      setForm(savedParticipant);
+      setSelected(savedParticipant);
       setPrintReady(true);
       setMessage("Registrasi ulang berhasil disimpan. Silakan print barcode/label.");
     } catch (err: any) {
@@ -606,7 +634,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   function setAllStationCopies(value: number) {
     const safeValue = Math.max(0, Math.min(20, Number(value || 0)));
     const next = Object.fromEntries(
-      STATION_PRINT_OPTIONS.map((station) => [station.key, safeValue])
+      activeStationPrintOptions.map((station) => [station.key, safeValue])
     ) as Record<string, number>;
 
     setStationCopies(next);
@@ -623,7 +651,10 @@ function RegistrasiUlang({ user }: { user: any }) {
   }
 
   function resetStationCopies() {
-    setStationCopies(createDefaultStationCopies());
+    setStationCopies({
+      ...createDefaultStationCopies(),
+      ...Object.fromEntries(nonPackageStations.map((station) => [station.key, station.defaultCopies]))
+    });
     setPrintReady(false);
   }
 
@@ -955,7 +986,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {STATION_PRINT_OPTIONS.map((station) => (
+            {activeStationPrintOptions.map((station) => (
               <div key={station.key} className="rounded-2xl border border-slate-200 bg-white p-3">
                 <label className="mb-2 block text-sm font-black text-slate-800">{station.label}</label>
                 <div className="flex items-center gap-2">
