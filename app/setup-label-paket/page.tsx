@@ -15,6 +15,7 @@ type StationPrintOption = {
   label: string;
   shortCode: string;
   defaultCopies: number;
+  kind?: string;
 };
 
 const STATION_PRINT_OPTIONS: StationPrintOption[] = [
@@ -36,10 +37,22 @@ const STATION_PRINT_OPTIONS: StationPrintOption[] = [
   { key: "ortopedi", label: "ORTOPEDI", shortCode: "ORT", defaultCopies: 1 }
 ];
 
-function defaultCopies() {
+function copiesForStations(stations: StationPrintOption[]) {
   return Object.fromEntries(
-    STATION_PRINT_OPTIONS.map((station) => [station.key, station.defaultCopies])
+    stations.map((station) => [station.key, station.defaultCopies])
   ) as Record<string, number>;
+}
+
+function apiStationsToOptions(rows: any[]): StationPrintOption[] {
+  return (rows || [])
+    .map((row: any) => ({
+      key: String(row.station_key || row.key || ""),
+      label: String(row.station_label || row.label || "").trim(),
+      shortCode: String(row.short_code || row.shortCode || ""),
+      defaultCopies: Math.max(0, Math.min(20, Number(row.default_copies ?? row.defaultCopies ?? 1))),
+      kind: String(row.kind || "")
+    }))
+    .filter((station: StationPrintOption) => station.key && station.label);
 }
 
 export default function SetupLabelPaketPage() {
@@ -54,7 +67,9 @@ function SetupLabelPaket({ user }: { user: any }) {
   const [program, setProgram] = useState(user.program_type === "all" ? "capaska" : user.program_type || "capaska");
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [packageId, setPackageId] = useState("");
-  const [copies, setCopies] = useState<Record<string, number>>(() => defaultCopies());
+  const [activeStations, setActiveStations] = useState<StationPrintOption[]>(STATION_PRINT_OPTIONS);
+  const [copies, setCopies] = useState<Record<string, number>>(() => copiesForStations(STATION_PRINT_OPTIONS));
+  const [packageParameterNames, setPackageParameterNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -98,7 +113,10 @@ function SetupLabelPaket({ user }: { user: any }) {
         setPackageId(String(rows[0].id));
       } else {
         setPackageId("");
-        setCopies(defaultCopies());
+        const fallbackStations = program === "corporate" ? [] : STATION_PRINT_OPTIONS;
+        setActiveStations(fallbackStations);
+        setCopies(copiesForStations(fallbackStations));
+        setPackageParameterNames([]);
       }
 
       setMessage(rows.length ? "Pilih paket, lalu atur jumlah label per station." : "Belum ada paket untuk program ini.");
@@ -124,23 +142,41 @@ function SetupLabelPaket({ user }: { user: any }) {
       const json = await res.json();
 
       if (!json.ok) {
-        setCopies(defaultCopies());
+        const fallbackStations = program === "corporate" ? [] : STATION_PRINT_OPTIONS;
+        setActiveStations(fallbackStations);
+        setCopies(copiesForStations(fallbackStations));
+        setPackageParameterNames([]);
         setMessage(json.message || "Gagal memuat setting.");
         return;
       }
 
-      const next = defaultCopies();
+      const apiStations = program === "corporate" && Array.isArray(json.available_stations)
+        ? apiStationsToOptions(json.available_stations)
+        : STATION_PRINT_OPTIONS;
+
+      const nextStations = apiStations.length ? apiStations : (program === "corporate" ? [] : STATION_PRINT_OPTIONS);
+      const next = copiesForStations(nextStations);
 
       (json.settings || []).forEach((setting: any) => {
-        if (setting.station_key in next) {
-          next[setting.station_key] = Math.max(0, Math.min(20, Number(setting.default_copies || 0)));
+        const key = String(setting.station_key || "");
+        if (key in next) {
+          next[key] = Math.max(0, Math.min(20, Number(setting.default_copies ?? 0)));
         }
       });
 
+      setActiveStations(nextStations);
       setCopies(next);
-      setMessage("Setting siap diedit.");
+      setPackageParameterNames(
+        Array.isArray(json.package_parameters)
+          ? json.package_parameters.map((row: any) => String(row.parameter_name || "").trim()).filter(Boolean)
+          : []
+      );
+      setMessage("Setting siap diedit sesuai isi paket.");
     } catch (err: any) {
-      setCopies(defaultCopies());
+      const fallbackStations = program === "corporate" ? [] : STATION_PRINT_OPTIONS;
+      setActiveStations(fallbackStations);
+      setCopies(copiesForStations(fallbackStations));
+      setPackageParameterNames([]);
       setMessage(err?.message || "Gagal memuat setting.");
     } finally {
       setLoading(false);
@@ -161,13 +197,13 @@ function SetupLabelPaket({ user }: { user: any }) {
 
     setCopies(
       Object.fromEntries(
-        STATION_PRINT_OPTIONS.map((station) => [station.key, safeValue])
+        activeStations.map((station) => [station.key, safeValue])
       ) as Record<string, number>
     );
   }
 
   function setDefault() {
-    setCopies(defaultCopies());
+    setCopies(copiesForStations(activeStations));
   }
 
   async function save() {
@@ -176,11 +212,16 @@ function SetupLabelPaket({ user }: { user: any }) {
       return;
     }
 
+    if (!activeStations.length) {
+      setMessage("Tidak ada station barcode untuk paket ini. Cek checklist parameter paket.");
+      return;
+    }
+
     setSaving(true);
     setMessage("Menyimpan setting label paket...");
 
     try {
-      const settings = STATION_PRINT_OPTIONS.map((station) => ({
+      const settings = activeStations.map((station) => ({
         station_key: station.key,
         station_label: station.label,
         short_code: station.shortCode,
@@ -212,7 +253,12 @@ function SetupLabelPaket({ user }: { user: any }) {
     }
   }
 
-  const total = Object.values(copies).reduce((sum, value) => sum + Number(value || 0), 0);
+  const total = activeStations.reduce((sum, station) => sum + Number(copies[station.key] || 0), 0);
+  const hasEkg = activeStations.some((station) => station.key === "ekg_hasil" || station.key === "ekg_nakes");
+  const packageLabelPreview = activeStations
+    .filter((station) => station.key !== "registrasi_ulang")
+    .map((station) => station.label)
+    .join(", ");
 
   return (
     <div className="space-y-5">
@@ -222,7 +268,7 @@ function SetupLabelPaket({ user }: { user: any }) {
           Atur default jumlah print label per station berdasarkan paket pemeriksaan. Setting ini dipakai otomatis di Registrasi Ulang.
         </div>
         <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Setup Label Paket v29 · package-based print count
+          Setup Label Paket v424 · Corporate follows selected package items
         </div>
       </section>
 
@@ -245,14 +291,22 @@ function SetupLabelPaket({ user }: { user: any }) {
             </select>
           </div>
 
-          <button type="button" className="btn-primary" onClick={save} disabled={saving || !packageId}>
+          <button type="button" className="btn-primary" onClick={save} disabled={saving || !packageId || !activeStations.length}>
             {saving ? "Menyimpan..." : "Save Setting"}
           </button>
         </div>
 
         {selectedPackage && (
           <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-            Paket aktif: <b>{selectedPackage.name}</b>. Total default label: <b>{total}</b>.
+            <div>Paket aktif: <b>{selectedPackage.name}</b>. Total default label: <b>{total}</b>.</div>
+            {program === "corporate" && (
+              <>
+                <div className="mt-1">Label dari paket: <b>{packageLabelPreview || "-"}</b>.</div>
+                {packageParameterNames.length > 0 && (
+                  <div className="mt-1 text-xs text-slate-500">Parameter ter-checklist: {packageParameterNames.join(", ")}</div>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -267,59 +321,71 @@ function SetupLabelPaket({ user }: { user: any }) {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xl font-black">Jumlah Print per Station</div>
-            <div className="text-sm text-slate-500">Isi 0 jika station tidak perlu dicetak untuk paket ini.</div>
+            <div className="text-sm text-slate-500">
+              {program === "corporate"
+                ? "Hanya station/parameter yang memang ada di paket terpilih yang ditampilkan."
+                : "Isi 0 jika station tidak perlu dicetak untuk paket ini."}
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secondary" onClick={() => setAll(1)}>Semua 1x</button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                setCopy("ekg_hasil", 1);
-                setCopy("ekg_nakes", 1);
-              }}
-            >
-              EKG 2 Label
-            </button>
-            <button type="button" className="btn-secondary" onClick={setDefault}>Default</button>
-            <button type="button" className="btn-secondary" onClick={() => setAll(0)}>Kosongkan</button>
+            <button type="button" className="btn-secondary" onClick={() => setAll(1)} disabled={!activeStations.length}>Semua 1x</button>
+            {hasEkg && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setCopy("ekg_hasil", 1);
+                  setCopy("ekg_nakes", 1);
+                }}
+              >
+                EKG 2 Label
+              </button>
+            )}
+            <button type="button" className="btn-secondary" onClick={setDefault} disabled={!activeStations.length}>Default</button>
+            <button type="button" className="btn-secondary" onClick={() => setAll(0)} disabled={!activeStations.length}>Kosongkan</button>
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {STATION_PRINT_OPTIONS.map((station) => (
-            <div key={station.key} className="rounded-2xl border border-slate-200 bg-white p-3">
-              <label className="mb-2 block text-sm font-black text-slate-800">{station.label}</label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 px-3 py-2 font-black"
-                  onClick={() => setCopy(station.key, Number(copies[station.key] || 0) - 1)}
-                >
-                  -
-                </button>
+        {activeStations.length ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {activeStations.map((station) => (
+              <div key={station.key} className="rounded-2xl border border-slate-200 bg-white p-3">
+                <label className="mb-2 block text-sm font-black text-slate-800">{station.label}</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-300 px-3 py-2 font-black"
+                    onClick={() => setCopy(station.key, Number(copies[station.key] || 0) - 1)}
+                  >
+                    -
+                  </button>
 
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  className="input text-center"
-                  value={copies[station.key] ?? 0}
-                  onChange={(e) => setCopy(station.key, Number(e.target.value || 0))}
-                />
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    className="input text-center"
+                    value={copies[station.key] ?? 0}
+                    onChange={(e) => setCopy(station.key, Number(e.target.value || 0))}
+                  />
 
-                <button
-                  type="button"
-                  className="rounded-xl border border-slate-300 px-3 py-2 font-black"
-                  onClick={() => setCopy(station.key, Number(copies[station.key] || 0) + 1)}
-                >
-                  +
-                </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-300 px-3 py-2 font-black"
+                    onClick={() => setCopy(station.key, Number(copies[station.key] || 0) + 1)}
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+            Belum ada station barcode dari paket ini. Cek kembali parameter yang dichecklist di Setup Parameter.
+          </div>
+        )}
       </section>
     </div>
   );

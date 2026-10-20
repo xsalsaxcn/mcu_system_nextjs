@@ -80,6 +80,17 @@ function createRecommendedStationCopies() {
   ) as Record<string, number>;
 }
 
+function apiStationsToOptions(rows: any[]): StationPrintOption[] {
+  return (rows || [])
+    .map((row: any) => ({
+      key: String(row.station_key || row.key || ""),
+      label: String(row.station_label || row.label || "").trim(),
+      shortCode: String(row.short_code || row.shortCode || ""),
+      defaultCopies: Math.max(0, Math.min(20, Number(row.default_copies ?? row.defaultCopies ?? 1)))
+    }))
+    .filter((station: StationPrintOption) => station.key && station.label);
+}
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -301,7 +312,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [printReady, setPrintReady] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [stationCopies, setStationCopies] = useState<Record<string, number>>(() => createDefaultStationCopies());
-  const [nonPackageStations, setNonPackageStations] = useState<StationPrintOption[]>([]);
+  const [packageStationOptions, setPackageStationOptions] = useState<StationPrintOption[]>(STATION_PRINT_OPTIONS);
   const [labelFontSize, setLabelFontSize] = useState(9);
   const [showLabelBorder, setShowLabelBorder] = useState(false);
   const [showLabelQr, setShowLabelQr] = useState(true);
@@ -328,8 +339,8 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 
   const activeStationPrintOptions = useMemo<StationPrintOption[]>(() => {
-    return [...STATION_PRINT_OPTIONS, ...nonPackageStations];
-  }, [nonPackageStations]);
+    return packageStationOptions;
+  }, [packageStationOptions]);
 
   const printJobs = useMemo<PrintJob[]>(() => {
     if (!form) return [];
@@ -445,7 +456,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   async function loadPackageLabelSettings(packageId?: number | null, programType?: string) {
     if (!packageId) {
-      setNonPackageStations([]);
+      setPackageStationOptions(STATION_PRINT_OPTIONS);
       setStationCopies(createDefaultStationCopies());
       return;
     }
@@ -459,35 +470,27 @@ function RegistrasiUlang({ user }: { user: any }) {
       const res = await fetch(`/api/package-label-settings?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
-      const extraStations: StationPrintOption[] = programType === "corporate" && Array.isArray(json.non_package_parameters)
-        ? json.non_package_parameters
-            .map((row: any) => ({
-              key: String(row.station_key || `non_paket_param_${Number(row.parameter_id || 0)}`),
-              label: String(row.station_label || "").trim(),
-              shortCode: String(row.short_code || "NP"),
-              defaultCopies: Math.max(0, Math.min(20, Number(row.default_copies ?? 1)))
-            }))
-            .filter((station: StationPrintOption) => station.key && station.label)
-        : [];
+      const apiStations = programType === "corporate" && Array.isArray(json.available_stations)
+        ? apiStationsToOptions(json.available_stations)
+        : STATION_PRINT_OPTIONS;
+      const nextStations = apiStations.length ? apiStations : STATION_PRINT_OPTIONS;
 
-      setNonPackageStations(extraStations);
+      setPackageStationOptions(nextStations);
 
       if (!json.ok || !json.settings?.length) {
-        setStationCopies({
-          ...createDefaultStationCopies(),
-          ...Object.fromEntries(extraStations.map((station) => [station.key, station.defaultCopies]))
-        });
+        setStationCopies(
+          Object.fromEntries(nextStations.map((station) => [station.key, station.defaultCopies])) as Record<string, number>
+        );
         return;
       }
 
-      const next = {
-        ...createDefaultStationCopies(),
-        ...Object.fromEntries(extraStations.map((station) => [station.key, station.defaultCopies]))
-      } as Record<string, number>;
+      const next = Object.fromEntries(
+        nextStations.map((station) => [station.key, station.defaultCopies])
+      ) as Record<string, number>;
 
       json.settings.forEach((setting: any) => {
         if (setting.station_key in next) {
-          next[setting.station_key] = Math.max(0, Math.min(20, Number(setting.default_copies || 0)));
+          next[setting.station_key] = Math.max(0, Math.min(20, Number(setting.default_copies ?? 0)));
         }
       });
 
@@ -511,7 +514,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       setShowLabelQr(nextQr);
       setShowLabelBarcodeText(nextFooter);
     } catch {
-      setNonPackageStations([]);
+      setPackageStationOptions(STATION_PRINT_OPTIONS);
       setStationCopies(createDefaultStationCopies());
     }
   }
@@ -651,10 +654,9 @@ function RegistrasiUlang({ user }: { user: any }) {
   }
 
   function resetStationCopies() {
-    setStationCopies({
-      ...createDefaultStationCopies(),
-      ...Object.fromEntries(nonPackageStations.map((station) => [station.key, station.defaultCopies]))
-    });
+    setStationCopies(
+      Object.fromEntries(activeStationPrintOptions.map((station) => [station.key, station.defaultCopies])) as Record<string, number>
+    );
     setPrintReady(false);
   }
 
