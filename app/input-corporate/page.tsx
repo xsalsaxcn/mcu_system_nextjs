@@ -11,6 +11,12 @@ import {
 } from "@/lib/shared/capaskaScoring2026";
 
 function parseOptions(config: any) {
+  try {
+    const parsed = typeof config === "string" ? JSON.parse(config || "[]") : config;
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item ?? "")).filter(Boolean);
+    if (Array.isArray(parsed?.options)) return parsed.options.map((item: any) => String(item ?? "")).filter(Boolean);
+  } catch {}
+
   return parseCapaskaOptions(config);
 }
 

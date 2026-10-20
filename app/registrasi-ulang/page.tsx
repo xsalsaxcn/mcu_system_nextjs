@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -300,6 +300,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [printReady, setPrintReady] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [stationCopies, setStationCopies] = useState<Record<string, number>>(() => createDefaultStationCopies());
+  const [nonPackageStationOptions, setNonPackageStationOptions] = useState<StationPrintOption[]>([]);
   const [labelFontSize, setLabelFontSize] = useState(9);
   const [showLabelBorder, setShowLabelBorder] = useState(false);
   const [showLabelQr, setShowLabelQr] = useState(true);
@@ -324,13 +325,17 @@ function RegistrasiUlang({ user }: { user: any }) {
     return form?.age ? String(form.age) : calcAge(form?.birth_date || form?.date_of_birth);
   }, [form?.age, form?.birth_date, form?.date_of_birth]);
 
+  const stationPrintOptions = useMemo<StationPrintOption[]>(() => {
+    return [...STATION_PRINT_OPTIONS, ...nonPackageStationOptions];
+  }, [nonPackageStationOptions]);
+
 
   const printJobs = useMemo<PrintJob[]>(() => {
     if (!form) return [];
 
     const jobs: PrintJob[] = [];
 
-    STATION_PRINT_OPTIONS.forEach((station) => {
+    stationPrintOptions.forEach((station) => {
       const count = Math.max(0, Math.min(20, Number(stationCopies[station.key] || 0)));
 
       for (let i = 0; i < count; i += 1) {
@@ -339,7 +344,7 @@ function RegistrasiUlang({ user }: { user: any }) {
     });
 
     return jobs;
-  }, [form, stationCopies]);
+  }, [form, stationCopies, stationPrintOptions]);
 
   if (!canUse) {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat mengakses Registrasi Ulang.</div>;
@@ -439,6 +444,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   async function loadPackageLabelSettings(packageId?: number | null, programType?: string) {
     if (!packageId) {
+      setNonPackageStationOptions([]);
       setStationCopies(createDefaultStationCopies());
       return;
     }
@@ -452,14 +458,31 @@ function RegistrasiUlang({ user }: { user: any }) {
       const res = await fetch(`/api/package-label-settings?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
 
-      if (!json.ok || !json.settings?.length) {
+      if (!json.ok) {
+        setNonPackageStationOptions([]);
         setStationCopies(createDefaultStationCopies());
         return;
       }
 
-      const next = createDefaultStationCopies();
+      const dynamicStations: StationPrintOption[] = Array.isArray(json.non_package_stations)
+        ? json.non_package_stations
+            .map((station: any) => ({
+              key: String(station.key || "").trim(),
+              label: String(station.label || "").trim(),
+              shortCode: String(station.shortCode || station.short_code || "NP").trim() || "NP",
+              defaultCopies: Math.max(0, Math.min(20, Number(station.defaultCopies ?? station.default_copies ?? 1)))
+            }))
+            .filter((station: StationPrintOption) => station.key && station.label)
+        : [];
 
-      json.settings.forEach((setting: any) => {
+      setNonPackageStationOptions(dynamicStations);
+
+      const next = createDefaultStationCopies();
+      dynamicStations.forEach((station) => {
+        next[station.key] = station.defaultCopies;
+      });
+
+      (json.settings || []).forEach((setting: any) => {
         if (setting.station_key in next) {
           next[setting.station_key] = Math.max(0, Math.min(20, Number(setting.default_copies || 0)));
         }
@@ -485,6 +508,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       setShowLabelQr(nextQr);
       setShowLabelBarcodeText(nextFooter);
     } catch {
+      setNonPackageStationOptions([]);
       setStationCopies(createDefaultStationCopies());
     }
   }
@@ -606,7 +630,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   function setAllStationCopies(value: number) {
     const safeValue = Math.max(0, Math.min(20, Number(value || 0)));
     const next = Object.fromEntries(
-      STATION_PRINT_OPTIONS.map((station) => [station.key, safeValue])
+      stationPrintOptions.map((station) => [station.key, safeValue])
     ) as Record<string, number>;
 
     setStationCopies(next);
@@ -623,7 +647,11 @@ function RegistrasiUlang({ user }: { user: any }) {
   }
 
   function resetStationCopies() {
-    setStationCopies(createDefaultStationCopies());
+    const next = createDefaultStationCopies();
+    nonPackageStationOptions.forEach((station) => {
+      next[station.key] = station.defaultCopies;
+    });
+    setStationCopies(next);
     setPrintReady(false);
   }
 
@@ -955,7 +983,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {STATION_PRINT_OPTIONS.map((station) => (
+            {stationPrintOptions.map((station) => (
               <div key={station.key} className="rounded-2xl border border-slate-200 bg-white p-3">
                 <label className="mb-2 block text-sm font-black text-slate-800">{station.label}</label>
                 <div className="flex items-center gap-2">

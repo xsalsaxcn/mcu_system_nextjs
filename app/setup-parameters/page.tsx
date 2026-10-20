@@ -55,6 +55,7 @@ const emptyForm = {
   // CAPASKA_SETUP_RULE_METADATA_V326
   parameter_key: "",
   category: "",
+  barcode_category: "paket",
   unit: "",
   input_type: "text",
   normal_value: "",
@@ -144,13 +145,28 @@ function getParameterScoringForm(param: Parameter) {
   };
 }
 
-function parsePlainOptions(configJson?: string) {
+function parseCorporateParameterConfig(configJson?: string) {
   try {
     const parsed = JSON.parse(configJson || "[]");
-    return Array.isArray(parsed) ? parsed.join("\n") : "";
+    const options = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.options)
+        ? parsed.options
+        : [];
+
+    return {
+      options_text: options.map((item: any) => String(item ?? "")).filter(Boolean).join("\n"),
+      barcode_category: String(parsed?.barcode_category || "").toLowerCase() === "non_paket"
+        ? "non_paket"
+        : "paket"
+    };
   } catch {
-    return "";
+    return { options_text: "", barcode_category: "paket" };
   }
+}
+
+function corporateBarcodeCategory(param: Parameter) {
+  return parseCorporateParameterConfig(param.config_json).barcode_category;
 }
 
 function createBlankOption(): ScoringOptionForm {
@@ -605,7 +621,7 @@ function SetupParameters({ user }: { user: any }) {
       ...(programType === "capaska"
         ? getParameterScoringForm(param)
         : {
-            options_text: parsePlainOptions(param.config_json),
+            ...parseCorporateParameterConfig(param.config_json),
             max_score: "",
             scoring_type: "by_option",
             include_in_total_score: true,
@@ -1055,6 +1071,23 @@ function SetupParameters({ user }: { user: any }) {
               <input className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Opsional" />
             </div>
 
+            {programType === "corporate" && (
+              <div>
+                <label className="label">Kategori Barcode</label>
+                <select
+                  className="input"
+                  value={form.barcode_category || "paket"}
+                  onChange={(e) => setForm({ ...form, barcode_category: e.target.value })}
+                >
+                  <option value="paket">Paket</option>
+                  <option value="non_paket">Non Paket</option>
+                </select>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Paket dicetak mengikuti station (contoh: Pemeriksaan Fisik/Darah). Non Paket dicetak memakai nama parameter yang dichecklist.
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="label">Tipe Input</label>
               <select className="input" value={form.input_type} onChange={(e) => setForm({ ...form, input_type: e.target.value })}>
@@ -1381,7 +1414,7 @@ function SetupParameters({ user }: { user: any }) {
                     <button type="button" className="flex-1 text-left" onClick={() => editParameter(param)}>
                       <span className="font-bold">☰ {param.name}</span>
                       <span className="block text-xs text-slate-500">
-                        {param.input_type || "text"} {param.unit ? `· ${param.unit}` : ""} {param.is_required ? "· wajib" : ""} {(() => { try { const cfg = typeof param.config_json === "string" ? JSON.parse(param.config_json || "{}") : param.config_json; return cfg?.include_in_progress === false ? "· tidak masuk progress" : "· masuk progress"; } catch { return "· masuk progress"; } })()}
+                        {param.input_type || "text"} {param.unit ? `· ${param.unit}` : ""} {param.is_required ? "· wajib" : ""} {programType === "corporate" ? `· barcode ${corporateBarcodeCategory(param) === "non_paket" ? "Non Paket" : "Paket"}` : (() => { try { const cfg = typeof param.config_json === "string" ? JSON.parse(param.config_json || "{}") : param.config_json; return cfg?.include_in_progress === false ? "· tidak masuk progress" : "· masuk progress"; } catch { return "· masuk progress"; } })()}
                       </span>
                     </button>
                   </div>
