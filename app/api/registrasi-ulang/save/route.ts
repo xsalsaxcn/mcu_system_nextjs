@@ -2,6 +2,10 @@ import { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
+import { getMcuCorporateSession } from "@/lib/server/mcuCorporateSession";
+import { ensureMcuQueueEntry, ensureMcuQueueSession } from "@/lib/server/mcuQueue";
+
+// MCU_DUAL_QUEUE_AUTO_ENQUEUE_V434
 
 async function tryMarkRegistrationStage(supabase: any, participantId: number, programType: string, user: any) {
   try {
@@ -44,6 +48,33 @@ async function tryMarkRegistrationStage(supabase: any, participantId: number, pr
     }
   } catch {
     // Jangan gagalkan save identitas hanya karena progress marker gagal.
+  }
+}
+
+async function tryEnqueueMcuCorporateParticipant(req: NextRequest, supabase: any, participant: any) {
+  try {
+    if (String(participant?.program_type || "").toLowerCase() !== "corporate") return;
+
+    const selected = getMcuCorporateSession(req);
+    if (!selected) return;
+
+    const companyId = Number(participant?.company_id || 0);
+    const packageId = Number(participant?.package_id || 0);
+    if (!companyId || !packageId) return;
+    if (companyId !== Number(selected.company_id) || packageId !== Number(selected.package_id)) return;
+
+    const queueSession = await ensureMcuQueueSession(supabase, {
+      companyId,
+      packageId,
+    });
+
+    await ensureMcuQueueEntry(supabase, {
+      queueSessionId: Number(queueSession.id),
+      participantId: Number(participant.id),
+    });
+  } catch {
+    // Antrian MCU bersifat tambahan. Jangan pernah menggagalkan Registrasi Ulang
+    // bila SQL queue belum dipasang atau sinkronisasi antrian sedang bermasalah.
   }
 }
 
@@ -92,6 +123,7 @@ export async function POST(req: NextRequest) {
   if (error) return fail(error.message, 500);
 
   await tryMarkRegistrationStage(supabase, id, body.program_type || data?.program_type || "capaska", user);
+  await tryEnqueueMcuCorporateParticipant(req, supabase, data);
 
   return ok({
     participant: data,

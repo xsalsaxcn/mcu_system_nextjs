@@ -1,0 +1,234 @@
+import { NextRequest } from "next/server";
+import { getSessionUser } from "@/lib/server/session";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { fail, ok } from "@/lib/server/response";
+import { getMcuCorporateSession } from "@/lib/server/mcuCorporateSession";
+import {
+  ensureMcuQueueEntry,
+  ensureMcuQueueSession,
+  loadMcuQueueEntriesWithParticipants,
+  type McuQueueTrack,
+} from "@/lib/server/mcuQueue";
+
+export const dynamic = "force-dynamic";
+
+function normalizeTrack(value: any): McuQueueTrack {
+  return String(value || "A").toUpperCase() === "B" ? "B" : "A";
+}
+
+function statusField(track: McuQueueTrack) {
+  return track === "A" ? "a_status" : "b_status";
+}
+
+function sequenceField(track: McuQueueTrack) {
+  return track === "A" ? "a_queue_sequence" : "b_queue_sequence";
+}
+
+function numberField(track: McuQueueTrack) {
+  return track === "A" ? "a_queue_number" : "b_queue_number";
+}
+
+function timestampField(track: McuQueueTrack, status: string) {
+  const prefix = track === "A" ? "a" : "b";
+  if (status === "CALLED") return `${prefix}_called_at`;
+  if (status === "IN_PROGRESS") return `${prefix}_started_at`;
+  if (status === "DONE") return `${prefix}_finished_at`;
+  if (status === "CANCELLED") return `${prefix}_cancelled_at`;
+  return "";
+}
+
+function actionToStatus(action: string) {
+  if (action === "recall") return "CALLED";
+  if (action === "start") return "IN_PROGRESS";
+  if (action === "finish") return "DONE";
+  if (action === "skip") return "SKIPPED";
+  if (action === "cancel") return "CANCELLED";
+  if (action === "waiting" || action === "reactivate") return "WAITING";
+  return "";
+}
+
+async function loadContext(req: NextRequest) {
+  const selected = getMcuCorporateSession(req);
+  if (!selected) throw new Error("Aktifkan Session MCU Corporate terlebih dahulu.");
+
+  const supabase = getSupabaseAdmin();
+  const queueSession = await ensureMcuQueueSession(supabase, {
+    companyId: selected.company_id,
+    packageId: selected.package_id,
+  });
+
+  return { selected, supabase, queueSession };
+}
+
+async function syncRegisteredParticipants(args: {
+  supabase: any;
+  queueSessionId: number;
+  companyId: number;
+  packageId: number;
+}) {
+  const { supabase, queueSessionId, companyId, packageId } = args;
+  let offset = 0;
+  const pageSize = 1000;
+  let synced = 0;
+
+  while (true) {
+    const result = await supabase
+      .from("participants")
+      .select("id")
+      .eq("program_type", "corporate")
+      .eq("company_id", companyId)
+      .eq("package_id", packageId)
+      .eq("registrasi_ulang_done", 1)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (result.error) throw new Error(result.error.message);
+    const batch = result.data || [];
+
+    for (const participant of batch) {
+      await ensureMcuQueueEntry(supabase, {
+        queueSessionId,
+        participantId: Number(participant.id),
+      });
+      synced += 1;
+    }
+
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return synced;
+}
+
+export async function GET(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  try {
+    const { selected, supabase, queueSession } = await loadContext(req);
+    const [entries, companyRes, packageRes] = await Promise.all([
+      loadMcuQueueEntriesWithParticipants(supabase, queueSession.id),
+      supabase.from("companies").select("id,name").eq("id", selected.company_id).maybeSingle(),
+      supabase.from("packages").select("id,name").eq("id", selected.package_id).maybeSingle(),
+    ]);
+
+    if (companyRes.error) throw new Error(companyRes.error.message);
+    if (packageRes.error) throw new Error(packageRes.error.message);
+
+    return ok({
+      queue_session: queueSession,
+      company: companyRes.data || { id: selected.company_id, name: selected.company_name },
+      package: packageRes.data || { id: selected.package_id, name: selected.package_name },
+      entries,
+      public_url: `/mcu/public/queue/${encodeURIComponent(queueSession.public_token)}`,
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Gagal mengambil Antrian MCU.", 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const user = getSessionUser(req);
+  if (!user) return fail("Unauthorized", 401);
+
+  const body = await req.json().catch(() => ({}));
+  const action = String(body.action || "").trim().toLowerCase();
+  const track = normalizeTrack(body.track);
+
+  try {
+    const { selected, supabase, queueSession } = await loadContext(req);
+
+    if (action === "sync") {
+      const synced = await syncRegisteredParticipants({
+        supabase,
+        queueSessionId: queueSession.id,
+        companyId: selected.company_id,
+        packageId: selected.package_id,
+      });
+      return ok({ message: `${synced} peserta Registrasi Ulang sudah tersinkron ke Antrian MCU.` });
+    }
+
+    if (action === "call-next") {
+      const statusKey = statusField(track);
+      const sequenceKey = sequenceField(track);
+      const numberKey = numberField(track);
+
+      const nextResult = await supabase
+        .from("mcu_queue_entries")
+        .select("*")
+        .eq("queue_session_id", queueSession.id)
+        .eq(statusKey, "WAITING")
+        .not(numberKey, "is", null)
+        .order(sequenceKey, { ascending: true, nullsFirst: false })
+        .order("id", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextResult.error) throw new Error(nextResult.error.message);
+      if (!nextResult.data) return fail(`Tidak ada antrian ${track} berikutnya.`, 404);
+
+      const now = new Date().toISOString();
+      const payload: Record<string, any> = {
+        [statusKey]: "CALLED",
+        [timestampField(track, "CALLED")]: now,
+        updated_at: now,
+      };
+
+      const updateResult = await supabase
+        .from("mcu_queue_entries")
+        .update(payload)
+        .eq("id", nextResult.data.id)
+        .select("*")
+        .single();
+
+      if (updateResult.error) throw new Error(updateResult.error.message);
+      return ok({
+        message: `Memanggil nomor ${String(updateResult.data?.[numberKey] || "-")}.`,
+        entry: updateResult.data,
+        track,
+      });
+    }
+
+    const entryId = Number(body.entry_id || body.entryId || 0);
+    if (!entryId) return fail("entry_id wajib diisi.", 400);
+
+    const nextStatus = actionToStatus(action);
+    if (!nextStatus) return fail("Action antrian tidak dikenali.", 400);
+
+    const existing = await supabase
+      .from("mcu_queue_entries")
+      .select("*")
+      .eq("id", entryId)
+      .eq("queue_session_id", queueSession.id)
+      .maybeSingle();
+
+    if (existing.error) throw new Error(existing.error.message);
+    if (!existing.data) return fail("Data antrian tidak ditemukan pada Session MCU aktif.", 404);
+
+    const now = new Date().toISOString();
+    const statusKey = statusField(track);
+    const payload: Record<string, any> = {
+      [statusKey]: nextStatus,
+      updated_at: now,
+    };
+    const tsKey = timestampField(track, nextStatus);
+    if (tsKey) payload[tsKey] = now;
+
+    const updateResult = await supabase
+      .from("mcu_queue_entries")
+      .update(payload)
+      .eq("id", entryId)
+      .select("*")
+      .single();
+
+    if (updateResult.error) throw new Error(updateResult.error.message);
+
+    return ok({
+      message: `Status antrian ${track} diubah ke ${nextStatus}.`,
+      entry: updateResult.data,
+      track,
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Gagal memperbarui Antrian MCU.", 500);
+  }
+}

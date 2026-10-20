@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 // MCU_SESSION_ALL_COMPANIES_V430
+// MCU_DUAL_QUEUE_SESSION_NAMES_V434
 
 type Company = {
   id: number;
@@ -32,6 +33,13 @@ type Diagnostics = {
   participant_link_count?: number;
 };
 
+type QueueConfig = {
+  id: number;
+  track_a_name: string;
+  track_b_name: string;
+  public_token: string;
+};
+
 export default function McuSessionPage() {
   return (
     <AuthGate>
@@ -51,6 +59,13 @@ function McuSessionContent() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [queueConfig, setQueueConfig] = useState<QueueConfig | null>(null);
+  const [queueAName, setQueueAName] = useState("Lab Darah");
+  const [queueBName, setQueueBName] = useState("Rontgen");
+  const [queuePublicUrl, setQueuePublicUrl] = useState("");
+  const [queueSaving, setQueueSaving] = useState(false);
+  const [queueMessage, setQueueMessage] = useState("");
+  const [queueError, setQueueError] = useState("");
 
   const selectedCompany = useMemo(
     () => companies.find((company) => String(company.id) === String(companyId)) || null,
@@ -62,6 +77,53 @@ function McuSessionContent() {
     const allowed = new Set((selectedCompany.package_ids || []).map((id) => Number(id)));
     return packages.filter((pkg) => allowed.has(Number(pkg.id)));
   }, [packages, selectedCompany]);
+
+  async function loadQueueConfig() {
+    setQueueError("");
+    try {
+      const res = await fetch("/api/mcu/queue-config", { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.message || "Gagal memuat setting Antrian MCU.");
+      const config = json.queue_session || null;
+      setQueueConfig(config);
+      setQueueAName(String(config?.track_a_name || "Lab Darah"));
+      setQueueBName(String(config?.track_b_name || "Rontgen"));
+      setQueuePublicUrl(String(json.public_url || ""));
+    } catch (err: any) {
+      setQueueConfig(null);
+      setQueuePublicUrl("");
+      setQueueError(err?.message || "Gagal memuat setting Antrian MCU.");
+    }
+  }
+
+  async function saveQueueNames(e: React.FormEvent) {
+    e.preventDefault();
+    setQueueSaving(true);
+    setQueueMessage("");
+    setQueueError("");
+    try {
+      const res = await fetch("/api/mcu/queue-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          track_a_name: queueAName,
+          track_b_name: queueBName,
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.message || "Gagal menyimpan penamaan Antrian MCU.");
+      const config = json.queue_session || null;
+      setQueueConfig(config);
+      setQueueAName(String(config?.track_a_name || queueAName));
+      setQueueBName(String(config?.track_b_name || queueBName));
+      setQueuePublicUrl(String(json.public_url || ""));
+      setQueueMessage(json.message || "Penamaan Antrian MCU berhasil disimpan.");
+    } catch (err: any) {
+      setQueueError(err?.message || "Gagal menyimpan penamaan Antrian MCU.");
+    } finally {
+      setQueueSaving(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -79,6 +141,10 @@ function McuSessionContent() {
       if (json.session) {
         setCompanyId(String(json.session.company_id || ""));
         setPackageId(String(json.session.package_id || ""));
+        await loadQueueConfig();
+      } else {
+        setQueueConfig(null);
+        setQueuePublicUrl("");
       }
     } catch (err: any) {
       setError(err?.message || "Gagal memuat Session MCU.");
@@ -131,6 +197,7 @@ function McuSessionContent() {
       if (!json.ok) throw new Error(json.message || "Gagal mengaktifkan Session MCU.");
       setActiveSession(json.session || null);
       setMessage("Session MCU Corporate berhasil diaktifkan.");
+      await loadQueueConfig();
     } catch (err: any) {
       setError(err?.message || "Gagal mengaktifkan Session MCU.");
     } finally {
@@ -149,6 +216,12 @@ function McuSessionContent() {
       setActiveSession(null);
       setCompanyId("");
       setPackageId("");
+      setQueueConfig(null);
+      setQueueAName("Lab Darah");
+      setQueueBName("Rontgen");
+      setQueuePublicUrl("");
+      setQueueMessage("");
+      setQueueError("");
       setMessage("Session MCU Corporate dikosongkan.");
     } catch (err: any) {
       setError(err?.message || "Gagal mengosongkan Session MCU.");
@@ -261,6 +334,51 @@ function McuSessionContent() {
           ) : null}
         </div>
       </form>
+
+
+      <section className="card p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-lg font-black text-slate-900">Setup Penamaan Antrian MCU</div>
+            <div className="mt-1 text-sm text-slate-500">
+              Nama antrian bisa diubah per perusahaan + paket. Default: A = Lab Darah, B = Rontgen.
+            </div>
+          </div>
+          {activeSession && queuePublicUrl ? (
+            <div className="flex flex-wrap gap-2">
+              <a href="/mcu/queue" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">Buka Antrian MCU</a>
+              <a target="_blank" href={queuePublicUrl} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">Public Queue</a>
+            </div>
+          ) : null}
+        </div>
+
+        {!activeSession ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+            Aktifkan perusahaan dan paket terlebih dahulu untuk mengatur nama antrian.
+          </div>
+        ) : (
+          <form onSubmit={saveQueueNames} className="mt-4 space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="label">Nama Antrian A</label>
+                <input className="input" value={queueAName} maxLength={80} onChange={(e) => setQueueAName(e.target.value)} placeholder="Lab Darah" />
+              </div>
+              <div>
+                <label className="label">Nama Antrian B</label>
+                <input className="input" value={queueBName} maxLength={80} onChange={(e) => setQueueBName(e.target.value)} placeholder="Rontgen" />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="submit" disabled={queueSaving || !queueAName.trim() || !queueBName.trim()} className="btn-primary">
+                {queueSaving ? "Menyimpan..." : "Simpan Penamaan Antrian"}
+              </button>
+              {queueConfig ? <span className="text-xs font-semibold text-slate-500">Aktif: A · {queueConfig.track_a_name} &nbsp; | &nbsp; B · {queueConfig.track_b_name}</span> : null}
+            </div>
+            {queueError ? <div className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{queueError}</div> : null}
+            {queueMessage ? <div className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{queueMessage}</div> : null}
+          </form>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
         Session ini khusus <b>MCU Corporate</b>. CAPASKA, Setup Label Paket, Registrasi Ulang, dan layout print label tidak diubah oleh menu ini.
