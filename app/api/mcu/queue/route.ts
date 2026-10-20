@@ -9,6 +9,11 @@ import {
   loadMcuQueueEntriesWithParticipants,
   type McuQueueTrack,
 } from "@/lib/server/mcuQueue";
+import {
+  loadMcuPendingParticipants,
+  markMcuParticipantInformed,
+  rotateMcuOperatorToken,
+} from "@/lib/server/mcuQueueDayOf";
 
 export const dynamic = "force-dynamic";
 
@@ -169,8 +174,13 @@ export async function GET(req: NextRequest) {
 
   try {
     const { selected, supabase, queueSession } = await resolveQueueContext(req);
-    const [entries, companyRes, packageRes] = await Promise.all([
+    const [entries, pendingParticipants, companyRes, packageRes] = await Promise.all([
       loadMcuQueueEntriesWithParticipants(supabase, queueSession.id),
+      loadMcuPendingParticipants(supabase, {
+        queueSessionId: Number(queueSession.id),
+        companyId: selected.company_id,
+        packageId: selected.package_id,
+      }),
       supabase.from("companies").select("id,name").eq("id", selected.company_id).maybeSingle(),
       supabase.from("packages").select("id,name").eq("id", selected.package_id).maybeSingle(),
     ]);
@@ -183,7 +193,11 @@ export async function GET(req: NextRequest) {
       company: companyRes.data || { id: selected.company_id, name: selected.company_name },
       package: packageRes.data || { id: selected.package_id, name: selected.package_name },
       entries,
+      pending_participants: pendingParticipants,
       public_url: `/mcu/public/queue/${encodeURIComponent(queueSession.public_token)}`,
+      operator_url: (queueSession as any)?.operator_token
+        ? `/mcu/operator/${encodeURIComponent(String((queueSession as any).operator_token))}`
+        : "",
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal mengambil Antrian MCU.", 500);
@@ -209,6 +223,27 @@ export async function POST(req: NextRequest) {
         packageId: selected.package_id,
       });
       return ok({ message: `${synced} peserta Registrasi Ulang sudah tersinkron ke Antrian MCU.` });
+    }
+
+    if (action === "informed") {
+      const participantId = Number(body.participant_id || body.participantId || 0);
+      if (!participantId) return fail("participant_id wajib diisi.", 400);
+      const informed = await markMcuParticipantInformed(supabase, {
+        queueSessionId: Number(queueSession.id),
+        participantId,
+        companyId: selected.company_id,
+        packageId: selected.package_id,
+        informedBy: String((user as any)?.username || (user as any)?.name || (user as any)?.email || "admin"),
+      });
+      return ok({ message: "Peserta ditandai sudah di-informed.", informed });
+    }
+
+    if (action === "generate-operator-link") {
+      const token = await rotateMcuOperatorToken(supabase, Number(queueSession.id));
+      return ok({
+        message: "Link Operator Antrian berhasil dibuat. Link lama otomatis tidak berlaku.",
+        operator_url: `/mcu/operator/${encodeURIComponent(token)}`,
+      });
     }
 
     if (action === "call-next") {

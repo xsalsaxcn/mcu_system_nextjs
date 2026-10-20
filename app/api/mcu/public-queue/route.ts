@@ -44,10 +44,16 @@ function buildTrack(rows: any[], track: McuQueueTrack) {
     .sort(sortTrack(track));
   const done = withNumber.filter((row) => statusOf(row, track) === "DONE");
   const skipped = withNumber.filter((row) => statusOf(row, track) === "SKIPPED");
+  const currentRow = active[0] || null;
+  const prepareSequence = currentRow ? sequenceOf(currentRow, track) + 3 : 0;
+  const prepareRow = prepareSequence
+    ? withNumber.find((row) => sequenceOf(row, track) === prepareSequence && statusOf(row, track) === "WAITING") || null
+    : null;
 
   return {
-    current: active[0] ? publicEntry(active[0], track) : null,
+    current: currentRow ? publicEntry(currentRow, track) : null,
     next: waiting[0] ? publicEntry(waiting[0], track) : null,
+    prepare: prepareRow ? publicEntry(prepareRow, track) : null,
     summary: {
       waiting: waiting.length,
       active: active.length,
