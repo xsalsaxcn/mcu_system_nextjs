@@ -56,7 +56,8 @@ function normalizeText(value: any) {
 
 function isCorporateNonPackageCategory(value: any) {
   const text = normalizeText(value);
-  return text === "non paket" || text === "nonpackage";
+  if (!text) return false;
+  return text === "non paket" || text === "nonpackage" || text === "non package" || (text.includes("non") && text.includes("paket"));
 }
 
 function stationKeysFromText(value: any): string[] {
@@ -125,10 +126,17 @@ async function loadCorporateBarcodePlan(supabase: any, packageId: number) {
   const orderedMappings = (mappings || []).filter((row: any) => Number(row.parameter_id || 0));
   const parameterIds = orderedMappings.map((row: any) => Number(row.parameter_id));
 
+  const registration = STATION_BY_KEY.get("registrasi_ulang")!;
+
   if (!parameterIds.length) {
-    const registration = STATION_BY_KEY.get("registrasi_ulang")!;
     return {
-      availableStations: [registration],
+      availableStations: [{
+        station_key: registration.key,
+        station_label: registration.label,
+        short_code: registration.shortCode,
+        default_copies: registration.defaultCopies,
+        kind: "system"
+      }],
       nonPackageParameters: [],
       packageParameters: []
     };
@@ -164,44 +172,65 @@ async function loadCorporateBarcodePlan(supabase: any, packageId: number) {
   const paketStations: StationTemplate[] = [];
   const nonPackageParameters: any[] = [];
   const packageParameters: any[] = [];
-  const seenStationKeys = new Set<string>();
+
+  // REGISTRASI ULANG adalah station sistem. Masukkan ke seen sejak awal supaya
+  // parameter/post bernama Registrasi Ulang tidak bisa membuat station duplikat.
+  const seenStationKeys = new Set<string>([registration.key]);
+  const seenNonPackageLabels = new Set<string>();
 
   for (const mapping of orderedMappings) {
     const parameter = parameterMap.get(Number(mapping.parameter_id));
     if (!parameter) continue;
 
     const postName = postMap.get(Number(parameter.post_id || 0)) || "";
-    const isNonPackage = isCorporateNonPackageCategory(parameter.category);
+    const categoryText = normalizeText(parameter.category);
+    const isNonPackage = isCorporateNonPackageCategory(parameter.category)
+      || (categoryText.includes("non") && categoryText.includes("paket"));
+
+    const parameterName = String(parameter.name || "").trim();
+    const registrationLike =
+      stationKeysFromText(postName).includes("registrasi_ulang")
+      || stationKeysFromText(parameterName).includes("registrasi_ulang");
 
     packageParameters.push({
       parameter_id: Number(parameter.id),
-      parameter_name: String(parameter.name || "").trim(),
+      parameter_name: parameterName,
+      raw_category: String(parameter.category || ""),
       barcode_category: isNonPackage ? "Non Paket" : "Paket",
       post_id: Number(parameter.post_id || 0) || null,
-      post_name: postName || null
+      post_name: postName || null,
+      ignored_system_registration: registrationLike
     });
 
+    // Registrasi Ulang hanya boleh berasal dari station sistem di atas.
+    if (registrationLike) continue;
+
     if (isNonPackage) {
-      const row = {
+      const normalizedLabel = normalizeText(parameterName);
+      if (!parameterName || !normalizedLabel || seenNonPackageLabels.has(normalizedLabel)) continue;
+      seenNonPackageLabels.add(normalizedLabel);
+
+      nonPackageParameters.push({
         parameter_id: Number(parameter.id),
         station_key: `non_paket_param_${Number(parameter.id)}`,
-        station_label: String(parameter.name || "").trim(),
+        station_label: parameterName,
         short_code: "NP",
         default_copies: 1,
         kind: "non_paket"
-      };
-      if (row.station_label) nonPackageParameters.push(row);
+      });
       continue;
     }
 
+    // Kategori Paket tetap memakai station/post pemeriksaan.
     for (const station of stationOptionsForPaketParameter(parameter, postName)) {
+      // Jangan pernah menambahkan REGISTRASI ULANG dari mapping paket.
+      if (station.key === registration.key) continue;
       if (seenStationKeys.has(station.key)) continue;
       seenStationKeys.add(station.key);
       paketStations.push(station);
     }
   }
 
-  const registration = STATION_BY_KEY.get("registrasi_ulang")!;
   const availableStations = [
     {
       station_key: registration.key,
