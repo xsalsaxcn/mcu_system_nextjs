@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
+// MCU_SESSION_ALL_COMPANIES_V430
+
 type Company = {
   id: number;
   name: string;
+  package_ids: number[];
 };
 
 type Package = {
@@ -23,6 +26,12 @@ type ActiveSession = {
   selected_at?: string;
 };
 
+type Diagnostics = {
+  corporate_company_count?: number;
+  corporate_package_count?: number;
+  participant_link_count?: number;
+};
+
 export default function McuSessionPage() {
   return (
     <AuthGate>
@@ -34,6 +43,7 @@ export default function McuSessionPage() {
 function McuSessionContent() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics>({});
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [companyId, setCompanyId] = useState("");
   const [packageId, setPackageId] = useState("");
@@ -42,10 +52,16 @@ function McuSessionContent() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const selectedCompany = useMemo(
+    () => companies.find((company) => String(company.id) === String(companyId)) || null,
+    [companies, companyId],
+  );
+
   const filteredPackages = useMemo(() => {
-    if (!companyId) return [];
-    return packages.filter((pkg) => String(pkg.company_id) === String(companyId));
-  }, [packages, companyId]);
+    if (!selectedCompany) return [];
+    const allowed = new Set((selectedCompany.package_ids || []).map((id) => Number(id)));
+    return packages.filter((pkg) => allowed.has(Number(pkg.id)));
+  }, [packages, selectedCompany]);
 
   async function load() {
     setLoading(true);
@@ -57,6 +73,7 @@ function McuSessionContent() {
 
       setCompanies(json.companies || []);
       setPackages(json.packages || []);
+      setDiagnostics(json.diagnostics || {});
       setActiveSession(json.session || null);
 
       if (json.session) {
@@ -76,11 +93,15 @@ function McuSessionContent() {
 
   function changeCompany(nextCompanyId: string) {
     setCompanyId(nextCompanyId);
-    const stillValid = packages.some(
-      (pkg) =>
-        String(pkg.id) === String(packageId) &&
-        String(pkg.company_id) === String(nextCompanyId),
+
+    const nextCompany = companies.find(
+      (company) => String(company.id) === String(nextCompanyId),
     );
+    const allowed = new Set((nextCompany?.package_ids || []).map((id) => Number(id)));
+    const stillValid = packages.some(
+      (pkg) => String(pkg.id) === String(packageId) && allowed.has(Number(pkg.id)),
+    );
+
     if (!stillValid) setPackageId("");
     setMessage("");
     setError("");
@@ -166,7 +187,14 @@ function McuSessionContent() {
       <form onSubmit={saveSession} className="card space-y-5 p-5">
         <div>
           <div className="text-lg font-black text-slate-900">Setting Session</div>
-          <div className="mt-1 text-sm text-slate-500">Paket otomatis difilter sesuai perusahaan yang dipilih.</div>
+          <div className="mt-1 text-sm text-slate-500">
+            Perusahaan dibaca dari data MCU Corporate. Paket mengikuti relasi aktual peserta Corporate dan paket yang sudah disetup.
+          </div>
+          {!loading ? (
+            <div className="mt-2 text-xs font-semibold text-slate-400">
+              Terdeteksi {Number(diagnostics.corporate_company_count || companies.length)} perusahaan MCU Corporate.
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -203,7 +231,9 @@ function McuSessionContent() {
               ))}
             </select>
             {companyId && !filteredPackages.length ? (
-              <div className="mt-2 text-xs font-semibold text-amber-700">Belum ada paket Corporate aktif untuk perusahaan ini.</div>
+              <div className="mt-2 text-xs font-semibold text-amber-700">
+                Belum ada paket Corporate aktif yang terhubung ke perusahaan ini.
+              </div>
             ) : null}
           </div>
         </div>
