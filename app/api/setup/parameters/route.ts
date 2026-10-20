@@ -285,10 +285,6 @@ export async function POST(req: NextRequest) {
     if (ruleErrors.length) return fail(ruleErrors.slice(0, 5).join(" "));
   }
 
-  const barcodeCategory = String(body.barcode_category || "paket").toLowerCase() === "non_paket"
-    ? "non_paket"
-    : "paket";
-
   const configJson = programType === "capaska"
     ? {
         // CAPASKA_SETUP_RULE_VALIDATION_API_V327_CONFIG
@@ -299,10 +295,7 @@ export async function POST(req: NextRequest) {
         include_in_total_score: body.include_in_total_score === false ? false : true,
         include_in_progress: body.include_in_progress === false ? false : true
       }
-    : {
-        options: plainOptions,
-        barcode_category: barcodeCategory
-      };
+    : plainOptions;
 
   const payload = {
     name,

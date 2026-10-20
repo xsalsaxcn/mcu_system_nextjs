@@ -22,40 +22,6 @@ const STATION_PRINT_OPTIONS = [
   { key: "ortopedi", label: "ORTOPEDI", shortCode: "ORT", defaultCopies: 1 }
 ];
 
-
-function readBarcodeCategory(configJson: any) {
-  try {
-    const parsed = typeof configJson === "string" ? JSON.parse(configJson || "[]") : configJson;
-    return String(parsed?.barcode_category || "paket").toLowerCase() === "non_paket"
-      ? "non_paket"
-      : "paket";
-  } catch {
-    return "paket";
-  }
-}
-
-function makeNonPackageStation(parameter: any) {
-  const id = Number(parameter?.id || 0);
-  const label = String(parameter?.name || `PARAMETER ${id}`).trim() || `PARAMETER ${id}`;
-  const shortCode = label
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.slice(0, 4))
-    .join("")
-    .slice(0, 12) || `NP${id}`;
-
-  return {
-    key: `non_paket_parameter_${id}`,
-    label,
-    shortCode,
-    defaultCopies: 1,
-    parameter_id: id
-  };
-}
-
 function defaultSettings(packageId: number, programType: string) {
   return STATION_PRINT_OPTIONS.map((station) => ({
     package_id: packageId,
@@ -98,53 +64,16 @@ export async function GET(req: NextRequest) {
 
   if (error) return fail(error.message, 500);
 
-  let nonPackageStations: any[] = [];
-
-  if (String(program).toLowerCase() === "corporate") {
-    const mappingsRes = await supabase
-      .from("package_parameters")
-      .select("parameter_id,sort_order")
-      .eq("package_id", packageId)
-      .order("sort_order", { ascending: true });
-
-    if (mappingsRes.error) return fail(mappingsRes.error.message, 500);
-
-    const mappedIds = (mappingsRes.data || [])
-      .map((row: any) => Number(row.parameter_id))
-      .filter((id: number) => Number.isFinite(id) && id > 0);
-
-    if (mappedIds.length) {
-      const parametersRes = await supabase
-        .from("parameters")
-        .select("id,name,config_json,is_active,sort_order,program_type")
-        .in("id", mappedIds)
-        .eq("program_type", "corporate")
-        .order("sort_order", { ascending: true })
-        .order("id", { ascending: true });
-
-      if (parametersRes.error) return fail(parametersRes.error.message, 500);
-
-      const mappingOrder = new Map<number, number>();
-      (mappingsRes.data || []).forEach((row: any, index: number) => {
-        mappingOrder.set(Number(row.parameter_id), Number(row.sort_order ?? index + 1));
-      });
-
-      nonPackageStations = (parametersRes.data || [])
-        .filter((parameter: any) => parameter.is_active === 1 || parameter.is_active === true || parameter.is_active === null)
-        .filter((parameter: any) => readBarcodeCategory(parameter.config_json) === "non_paket")
-        .sort((a: any, b: any) => {
-          const aOrder = mappingOrder.get(Number(a.id)) ?? Number(a.sort_order || 0);
-          const bOrder = mappingOrder.get(Number(b.id)) ?? Number(b.sort_order || 0);
-          return aOrder - bOrder || Number(a.id) - Number(b.id);
-        })
-        .map(makeNonPackageStation);
-    }
+  if (!data?.length) {
+    return ok({
+      settings: defaultSettings(packageId, program),
+      source: "default"
+    });
   }
 
   return ok({
-    settings: data?.length ? data : defaultSettings(packageId, program),
-    source: data?.length ? "database" : "default",
-    non_package_stations: nonPackageStations
+    settings: data,
+    source: "database"
   });
 }
 
