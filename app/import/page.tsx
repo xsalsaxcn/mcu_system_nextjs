@@ -141,7 +141,46 @@ function ImportForm({ user }: { user: any }) {
           description: row.description || "",
           program_type: row.program_type || "",
         })).filter((row: ImportSourceOptionV237) => row.id && row.name));
-        const companies = Array.isArray(json?.companies) ? json.companies : [];
+        let companies = Array.isArray(json?.companies) ? json.companies : [];
+        let corporatePackages = Array.isArray(json?.corporate_packages) ? json.corporate_packages : [];
+
+        // MCU_CORPORATE_IMPORT_SESSION_OPTIONS_V433
+        // Session MCU is the source of truth for company <-> package availability.
+        // Import must expose the exact same pairs, including setup/session pairs that
+        // do not yet have a participant database import.
+        if (programType === "corporate") {
+          try {
+            const sessionRes = await fetch("/api/mcu/session", { cache: "no-store" });
+            const sessionJson = await sessionRes.json().catch(() => ({}));
+            if (sessionRes.ok && sessionJson?.ok) {
+              const sessionCompanies = Array.isArray(sessionJson?.companies) ? sessionJson.companies : [];
+              const sessionPackages = Array.isArray(sessionJson?.packages) ? sessionJson.packages : [];
+
+              const packageCompanies = new Map<number, number[]>();
+              for (const company of sessionCompanies) {
+                const companyId = Number(company?.id || 0);
+                if (!companyId) continue;
+                const packageIds = Array.isArray(company?.package_ids) ? company.package_ids : [];
+                for (const rawPackageId of packageIds) {
+                  const packageId = Number(rawPackageId || 0);
+                  if (!packageId) continue;
+                  const list = packageCompanies.get(packageId) || [];
+                  if (!list.includes(companyId)) list.push(companyId);
+                  packageCompanies.set(packageId, list);
+                }
+              }
+
+              companies = sessionCompanies;
+              corporatePackages = sessionPackages.map((pkg: any) => ({
+                ...pkg,
+                company_ids: packageCompanies.get(Number(pkg?.id || 0)) || [],
+              }));
+            }
+          } catch {
+            // Keep /api/sources as a safe fallback if Session MCU cannot be read.
+          }
+        }
+
         setCompanyOptionsV238(
           companies
             .map((row: any) => ({
@@ -151,7 +190,6 @@ function ImportForm({ user }: { user: any }) {
             .filter((row: ImportCompanyOptionV238) => row.id && row.name),
         );
 
-        const corporatePackages = Array.isArray(json?.corporate_packages) ? json.corporate_packages : [];
         setCorporatePackageOptionsV432(
           corporatePackages
             .map((row: any) => ({
