@@ -3,6 +3,8 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
+// MCU_REG_ONSPOT_SESSION_V440
+
 const SELECT_COLUMNS = `
   id,
   name,
@@ -69,13 +71,24 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
     companyName = String(company?.name || "").trim();
   }
+  const [companyRes, packageRes, sourceRes] = await Promise.all([
+    data?.company_id
+      ? supabase.from("companies").select("id,name").eq("id", data.company_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    data?.package_id
+      ? supabase.from("packages").select("id,name").eq("id", data.package_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    data?.source_id
+      ? supabase.from("participant_sources").select("*").eq("id", data.source_id).maybeSingle()
+      : Promise.resolve({ data: null })
+  ]);
 
   return ok({
     participant: {
       ...data,
-      source_name: "-",
-      package_name: packageName,
-      company_name: companyName
+      source_name: String((sourceRes as any)?.data?.name || (sourceRes as any)?.data?.institution_name || (companyRes as any)?.data?.name || "-"),
+      package_name: String((packageRes as any)?.data?.name || "-"),
+      company_name: String((companyRes as any)?.data?.name || "")
     }
   });
 }

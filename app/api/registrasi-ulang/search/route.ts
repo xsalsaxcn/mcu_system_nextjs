@@ -3,6 +3,8 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
+// MCU_REG_ONSPOT_SESSION_V440
+
 const SELECT_COLUMNS = `
   id,
   name,
@@ -31,12 +33,34 @@ function clean(value: string) {
   return String(value || "").replace(/[,%]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function mapRows(rows: any[]) {
-  return (rows || []).map((p: any) => ({
-    ...p,
-    source_name: "-",
-    package_name: "-",
-    company_name: ""
+async function decorateRows(supabase: any, rows: any[]) {
+  const list = rows || [];
+  const companyIds = Array.from(new Set(list.map((row: any) => Number(row.company_id || 0)).filter(Boolean)));
+  const packageIds = Array.from(new Set(list.map((row: any) => Number(row.package_id || 0)).filter(Boolean)));
+  const sourceIds = Array.from(new Set(list.map((row: any) => Number(row.source_id || 0)).filter(Boolean)));
+
+  const companyMap = new Map<number, string>();
+  const packageMap = new Map<number, string>();
+  const sourceMap = new Map<number, string>();
+
+  if (companyIds.length) {
+    const { data } = await supabase.from("companies").select("id,name").in("id", companyIds);
+    for (const row of data || []) companyMap.set(Number(row.id), String(row.name || ""));
+  }
+  if (packageIds.length) {
+    const { data } = await supabase.from("packages").select("id,name").in("id", packageIds);
+    for (const row of data || []) packageMap.set(Number(row.id), String(row.name || ""));
+  }
+  if (sourceIds.length) {
+    const { data } = await supabase.from("participant_sources").select("*").in("id", sourceIds);
+    for (const row of data || []) sourceMap.set(Number(row.id), String(row.name || row.institution_name || ""));
+  }
+
+  return list.map((row: any) => ({
+    ...row,
+    source_name: sourceMap.get(Number(row.source_id || 0)) || companyMap.get(Number(row.company_id || 0)) || "-",
+    package_name: packageMap.get(Number(row.package_id || 0)) || "-",
+    company_name: companyMap.get(Number(row.company_id || 0)) || ""
   }));
 }
 
@@ -47,6 +71,9 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const program = req.nextUrl.searchParams.get("program") || "capaska";
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
+  const sessionMatch = /^session:(\d+):(\d+)$/.exec(sourceId);
+  const sessionCompanyId = sessionMatch ? Number(sessionMatch[1]) : 0;
+  const sessionPackageId = sessionMatch ? Number(sessionMatch[2]) : 0;
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 25), 1), 50);
 
@@ -61,7 +88,11 @@ export async function GET(req: NextRequest) {
     let query = supabase.from("participants").select(SELECT_COLUMNS).limit(limit);
 
     if (program !== "all") query = query.eq("program_type", program);
-    if (sourceId !== "all") query = query.eq("source_id", Number(sourceId));
+    if (sessionCompanyId && sessionPackageId) {
+      query = query.eq("company_id", sessionCompanyId).eq("package_id", sessionPackageId);
+    } else if (sourceId !== "all") {
+      query = query.eq("source_id", Number(sourceId));
+    }
 
     return query;
   }
@@ -72,7 +103,7 @@ export async function GET(req: NextRequest) {
       .order("name", { ascending: true });
 
     if (exactError) return fail(exactError.message, 500);
-    if (exactData?.length) return ok({ participants: mapRows(exactData), mode: "exact" });
+    if (exactData?.length) return ok({ participants: await decorateRows(supabase, exactData), mode: "exact" });
   }
 
   let query = baseQuery().order("name", { ascending: true });
@@ -85,5 +116,5 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
   if (error) return fail(error.message, 500);
 
-  return ok({ participants: mapRows(data || []), mode: keyword.length >= 2 ? "like" : "source" });
+  return ok({ participants: await decorateRows(supabase, data || []), mode: keyword.length >= 2 ? "like" : (sessionMatch ? "session" : "source") });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 // MCU_REG_UI_COMPACT_V436
+// MCU_REG_ONSPOT_SESSION_V440
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -302,6 +303,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [program, setProgram] = useState(user.program_type === "all" ? "capaska" : user.program_type || "capaska");
   const [sources, setSources] = useState<any[]>([]);
+  const [mcuSessionOptions, setMcuSessionOptions] = useState<{ companies: any[]; packages: any[]; session: any | null }>({ companies: [], packages: [], session: null });
   const [sourceId, setSourceId] = useState("all");
   const [keyword, setKeyword] = useState("");
   const [resultFilter, setResultFilter] = useState("");
@@ -331,10 +333,79 @@ function RegistrasiUlang({ user }: { user: any }) {
   const photoPreview = form?.photo_data_url || form?.photo_url || "";
 
   useEffect(() => {
+    let cancelled = false;
+
     fetch(`/api/sources?program=${program}`)
       .then((r) => r.json())
-      .then((d) => setSources(d.sources || []));
+      .then((d) => {
+        if (!cancelled) setSources(d.sources || []);
+      })
+      .catch(() => {
+        if (!cancelled) setSources([]);
+      });
+
+    if (program === "corporate") {
+      fetch("/api/mcu/session", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled && d?.ok) {
+            setMcuSessionOptions({
+              companies: d.companies || [],
+              packages: d.packages || [],
+              session: d.session || null
+            });
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setMcuSessionOptions({ companies: [], packages: [], session: null });
+        });
+    } else {
+      setMcuSessionOptions({ companies: [], packages: [], session: null });
+      if (String(sourceId).startsWith("session:")) setSourceId("all");
+    }
+
+    return () => { cancelled = true; };
   }, [program]);
+
+  const sessionSourceOptions = useMemo(() => {
+    const packageById = new Map<number, any>(
+      (mcuSessionOptions.packages || []).map((pkg: any) => [Number(pkg.id), pkg])
+    );
+    const rows: any[] = [];
+
+    for (const company of mcuSessionOptions.companies || []) {
+      for (const packageId of company.package_ids || []) {
+        const pkg = packageById.get(Number(packageId));
+        if (!pkg) continue;
+        rows.push({
+          value: `session:${Number(company.id)}:${Number(pkg.id)}`,
+          company_id: Number(company.id),
+          company_name: String(company.name || ""),
+          package_id: Number(pkg.id),
+          package_name: String(pkg.name || "")
+        });
+      }
+    }
+
+    return rows.sort((a, b) => `${a.company_name} ${a.package_name}`.localeCompare(`${b.company_name} ${b.package_name}`));
+  }, [mcuSessionOptions]);
+
+  function getSelectedSessionContext() {
+    const selectedOption = sessionSourceOptions.find((item) => item.value === sourceId);
+    if (selectedOption) return selectedOption;
+
+    if (sourceId === "all" && mcuSessionOptions.session) {
+      return {
+        value: `session:${Number(mcuSessionOptions.session.company_id)}:${Number(mcuSessionOptions.session.package_id)}`,
+        company_id: Number(mcuSessionOptions.session.company_id),
+        company_name: String(mcuSessionOptions.session.company_name || ""),
+        package_id: Number(mcuSessionOptions.session.package_id),
+        package_name: String(mcuSessionOptions.session.package_name || "")
+      };
+    }
+
+    return null;
+  }
 
   const ageValue = useMemo(() => {
     return form?.age ? String(form.age) : calcAge(form?.birth_date || form?.date_of_birth);
@@ -398,6 +469,47 @@ function RegistrasiUlang({ user }: { user: any }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function startOnSpotRegistration() {
+    const context = getSelectedSessionContext();
+    if (!context) {
+      setMessage("Pilih instansi dari bagian Session MCU terlebih dahulu untuk Registrasi On The Spot.");
+      return;
+    }
+
+    const draft: Participant = {
+      id: 0,
+      name: "",
+      mcu_id: "",
+      external_id: "",
+      nik: "",
+      employee_nik: "",
+      gender: "",
+      birth_date: "",
+      date_of_birth: "",
+      age: "",
+      examination_date: todayISO(),
+      exam_date: todayISO(),
+      department: "",
+      province: "",
+      phone: "",
+      company_id: context.company_id,
+      company_name: context.company_name,
+      package_id: context.package_id,
+      package_name: context.package_name,
+      source_name: `Session MCU · ${context.company_name}`,
+      program_type: "corporate",
+      registrasi_ulang_done: false
+    };
+
+    setResults([]);
+    setSelected(null);
+    setKeyword("");
+    setForm(draft);
+    setPrintReady(false);
+    await loadPackageLabelSettings(context.package_id, "corporate");
+    setMessage(`Registrasi On The Spot · ${context.company_name} · ${context.package_name}. Isi data peserta lalu klik Simpan Data.`);
   }
 
   async function loadDetail(participant: Participant) {
@@ -524,6 +636,14 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   async function save() {
     if (!form) return;
+    if (!String(form.name || "").trim()) {
+      setMessage("Nama Lengkap wajib diisi.");
+      return;
+    }
+    if (!form.id && (!form.company_id || !form.package_id)) {
+      setMessage("Registrasi On The Spot harus memiliki perusahaan dan paket dari Session MCU.");
+      return;
+    }
 
     setSaving(true);
     setMessage("Menyimpan registrasi ulang...");
@@ -545,6 +665,9 @@ function RegistrasiUlang({ user }: { user: any }) {
         department: form.department,
         province: form.province,
         phone: form.phone,
+        source_id: form.source_id || null,
+        company_id: form.company_id || null,
+        package_id: form.package_id || null,
         photo_data_url: form.photo_data_url || "",
         program_type: form.program_type || program
       };
@@ -740,7 +863,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       </section>
 
       <section className="card p-5 no-print">
-        <form onSubmit={search} className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_1fr_auto]">
+        <form onSubmit={search} className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_1fr_auto_auto]">
           <div>
             <label className="label">Program</label>
             <select className="input" value={program} onChange={(e) => setProgram(e.target.value)}>
@@ -751,12 +874,23 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <div>
-            <label className="label">Database / Instansi</label>
+            <label className="label">Database / Session Instansi</label>
             <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
               <option value="all">Semua Database</option>
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} - {s.institution_name || s.company_name || "-"}</option>
-              ))}
+              {!!sources.length && (
+                <optgroup label="Database Existing">
+                  {sources.map((s) => (
+                    <option key={`source-${s.id}`} value={String(s.id)}>{s.name} - {s.institution_name || s.company_name || "-"}</option>
+                  ))}
+                </optgroup>
+              )}
+              {program === "corporate" && !!sessionSourceOptions.length && (
+                <optgroup label="Session MCU · Perusahaan + Paket">
+                  {sessionSourceOptions.map((item) => (
+                    <option key={item.value} value={item.value}>Session · {item.company_name} · {item.package_name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 
@@ -773,6 +907,12 @@ function RegistrasiUlang({ user }: { user: any }) {
           <button className="btn-primary" disabled={loading}>
             {loading ? "Retrieve..." : "Retrieve Data"}
           </button>
+
+          {program === "corporate" && (
+            <button type="button" className="btn-secondary whitespace-nowrap" onClick={startOnSpotRegistration}>
+              + On The Spot
+            </button>
+          )}
         </form>
 
         {message && (
@@ -863,11 +1003,11 @@ function RegistrasiUlang({ user }: { user: any }) {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="text-xl font-black text-slate-900">Detail Peserta</div>
-                      <span className={`rounded-full px-3 py-1 text-xs font-black ${form.registrasi_ulang_done ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
-                        {form.registrasi_ulang_done ? "Sudah Registrasi" : "Belum Registrasi"}
+                      <span className={`rounded-full px-3 py-1 text-xs font-black ${form.id ? (form.registrasi_ulang_done ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700") : "bg-amber-100 text-amber-800"}`}>
+                        {form.id ? (form.registrasi_ulang_done ? "Sudah Registrasi" : "Belum Registrasi") : "On The Spot"}
                       </span>
                     </div>
-                    <div className="mt-1 text-sm text-slate-500">Edit identitas peserta dan foto onsite tanpa meninggalkan daftar peserta.</div>
+                    <div className="mt-1 text-sm text-slate-500">{form.id ? "Edit identitas peserta dan foto onsite tanpa meninggalkan daftar peserta." : "Peserta tambahan / dadakan. Nomor MCU akan dibuat otomatis jika dikosongkan."}</div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -947,9 +1087,17 @@ function RegistrasiUlang({ user }: { user: any }) {
                       <label className="label">Provinsi / Lokasi</label>
                       <input className="input" value={form.province || ""} onChange={(e) => updateField("province", e.target.value)} />
                     </div>
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2 xl:col-span-2">
-                      <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Database / Instansi</div>
-                      <div className="mt-1 truncate font-black text-slate-700">{form.source_name || form.company_name || "-"}</div>
+                    <div>
+                      <label className="label">No HP / WhatsApp <span className="text-xs text-slate-400">(opsional)</span></label>
+                      <input className="input" value={form.phone || ""} onChange={(e) => updateField("phone", e.target.value)} placeholder="08xxxxxxxxxx" />
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Instansi / Perusahaan</div>
+                      <div className="mt-1 truncate font-black text-slate-700">{form.company_name || form.source_name || "-"}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Paket Pemeriksaan</div>
+                      <div className="mt-1 truncate font-black text-slate-700">{form.package_name || "-"}</div>
                     </div>
                   </div>
                 </div>
