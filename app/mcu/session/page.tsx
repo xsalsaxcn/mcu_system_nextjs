@@ -5,6 +5,7 @@ import AuthGate from "@/components/AuthGate";
 
 // MCU_SESSION_ALL_COMPANIES_V430
 // MCU_DUAL_QUEUE_SESSION_NAMES_V434
+// MCU_PUBLIC_QUEUE_CENTRALIZED_V437
 
 type Company = {
   id: number;
@@ -344,10 +345,9 @@ function McuSessionContent() {
               Nama antrian bisa diubah per perusahaan + paket. Default: A = Lab Darah, B = Rontgen.
             </div>
           </div>
-          {activeSession && queuePublicUrl ? (
+          {activeSession ? (
             <div className="flex flex-wrap gap-2">
-              <a href="/mcu/queue" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">Buka Antrian MCU</a>
-              <a target="_blank" href={queuePublicUrl} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">Public Queue</a>
+              <a href="/mcu/queue" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">Buka Antrian MCU</a>
             </div>
           ) : null}
         </div>

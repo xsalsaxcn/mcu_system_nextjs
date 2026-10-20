@@ -1,9 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AuthGate from "@/components/AuthGate";
 
 type Track = "A" | "B";
+
+type CompanyOption = {
+  id: number;
+  name: string;
+  package_ids?: number[];
+};
+
+type PackageOption = {
+  id: number;
+  name: string;
+  description?: string;
+};
+
 
 type QueueEntry = {
   id: number;
@@ -61,6 +74,7 @@ export default function McuQueuePage() {
   );
 }
 
+// MCU_QUEUE_COMPANY_PACKAGE_SELECTOR_V435
 function McuQueueContent() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -68,20 +82,72 @@ function McuQueueContent() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [packages, setPackages] = useState<PackageOption[]>([]);
+  const [companyId, setCompanyId] = useState("");
+  const [packageId, setPackageId] = useState("");
+  const [optionsReady, setOptionsReady] = useState(false);
+
+  const filteredPackages = useMemo(() => {
+    const company = companies.find((item) => String(item.id) === String(companyId));
+    if (!company) return [];
+    const allowed = new Set((company.package_ids || []).map((id) => Number(id)));
+    return packages.filter((pkg) => allowed.has(Number(pkg.id)));
+  }, [companies, packages, companyId]);
 
   const entries: QueueEntry[] = data?.entries || [];
   const trackAName = String(data?.queue_session?.track_a_name || "Lab Darah");
   const trackBName = String(data?.queue_session?.track_b_name || "Rontgen");
 
-  async function load(silent = false) {
+  async function loadOptions() {
+    try {
+      const res = await fetch("/api/mcu/session", { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.message || "Gagal memuat daftar perusahaan MCU.");
+
+      const nextCompanies: CompanyOption[] = json.companies || [];
+      const nextPackages: PackageOption[] = json.packages || [];
+      setCompanies(nextCompanies);
+      setPackages(nextPackages);
+
+      const sessionCompanyId = String(json.session?.company_id || "");
+      const sessionPackageId = String(json.session?.package_id || "");
+      if (sessionCompanyId && sessionPackageId) {
+        setCompanyId(sessionCompanyId);
+        setPackageId(sessionPackageId);
+      } else if (nextCompanies.length) {
+        const firstCompany = nextCompanies[0];
+        const firstPackageId = String(firstCompany.package_ids?.[0] || "");
+        setCompanyId(String(firstCompany.id));
+        setPackageId(firstPackageId);
+      }
+      setOptionsReady(true);
+    } catch (err: any) {
+      setError(err?.message || "Gagal memuat daftar perusahaan MCU.");
+      setOptionsReady(true);
+      setLoading(false);
+    }
+  }
+
+  async function load(silent = false, overrideCompanyId?: string, overridePackageId?: string) {
+    const cid = String((overrideCompanyId ?? companyId) || "");
+    const pid = String((overridePackageId ?? packageId) || "");
+    if (!cid || !pid) {
+      setData(null);
+      if (!silent) setLoading(false);
+      return;
+    }
+
     if (!silent) setLoading(true);
     try {
-      const res = await fetch("/api/mcu/queue", { cache: "no-store" });
+      const query = new URLSearchParams({ company_id: cid, package_id: pid });
+      const res = await fetch(`/api/mcu/queue?${query.toString()}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat Antrian MCU.");
       setData(json);
       setError("");
     } catch (err: any) {
+      setData(null);
       setError(err?.message || "Gagal memuat Antrian MCU.");
     } finally {
       if (!silent) setLoading(false);
@@ -89,10 +155,15 @@ function McuQueueContent() {
   }
 
   useEffect(() => {
-    load();
-    const timer = window.setInterval(() => load(true), 5000);
-    return () => window.clearInterval(timer);
+    loadOptions();
   }, []);
+
+  useEffect(() => {
+    if (!optionsReady || !companyId || !packageId) return;
+    load(false, companyId, packageId);
+    const timer = window.setInterval(() => load(true, companyId, packageId), 5000);
+    return () => window.clearInterval(timer);
+  }, [optionsReady, companyId, packageId]);
 
   function speakCall(track: Track, entry: any) {
     if (!voiceEnabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -117,7 +188,7 @@ function McuQueueContent() {
       const res = await fetch("/api/mcu/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: actionName, track, entry_id: entryId }),
+        body: JSON.stringify({ action: actionName, track, entry_id: entryId, company_id: Number(companyId), package_id: Number(packageId) }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memperbarui antrian.");
@@ -125,7 +196,7 @@ function McuQueueContent() {
       if ((actionName === "call-next" || actionName === "recall") && json.entry && track) {
         speakCall(track, json.entry);
       }
-      await load(true);
+      await load(true, companyId, packageId);
     } catch (err: any) {
       setError(err?.message || "Gagal memperbarui antrian.");
     } finally {
@@ -226,7 +297,7 @@ function McuQueueContent() {
     );
   }
 
-  if (loading) return <div className="card p-6 text-sm font-semibold text-slate-500">Memuat Antrian MCU...</div>;
+  if (!optionsReady && loading) return <div className="card p-6 text-sm font-semibold text-slate-500">Memuat Antrian MCU...</div>;
 
   return (
     <div className="space-y-5">
@@ -234,7 +305,7 @@ function McuQueueContent() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-2xl font-black text-slate-900">Antrian MCU Corporate</div>
-            <div className="mt-1 text-sm text-slate-500">Dua antrian independen untuk Session MCU aktif.</div>
+            <div className="mt-1 text-sm text-slate-500">Pilih perusahaan dan paket. Satu Public Queue menampilkan antrian A + B untuk pilihan tersebut.</div>
             <div className="mt-3 flex flex-wrap gap-2">
               <span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">A · {trackAName}</span>
               <span className="rounded-xl bg-violet-100 px-3 py-2 text-xs font-black text-violet-800">B · {trackBName}</span>
@@ -244,27 +315,77 @@ function McuQueueContent() {
           <div className="flex flex-wrap gap-2">
             <button disabled={busy} onClick={() => action("sync")} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-50">Sinkronkan Registrasi Ulang</button>
             <button onClick={() => setVoiceEnabled((v) => !v)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button>
-            {data?.public_url ? <a target="_blank" href={data.public_url} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-blue-700">Public Queue A/B</a> : null}
+            {data?.public_url ? <a target="_blank" href={data.public_url} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-blue-700">Public Queue · {data?.company?.name || "Perusahaan"}</a> : null}
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs font-bold text-slate-500">Perusahaan</div><div className="mt-1 font-black text-slate-900">{data?.company?.name || "-"}</div></div>
-          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs font-bold text-slate-500">Paket Pemeriksaan</div><div className="mt-1 font-black text-slate-900">{data?.package?.name || "-"}</div></div>
+        <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="label">Perusahaan</label>
+              <select
+                className="input"
+                value={companyId}
+                onChange={(e) => {
+                  const nextCompanyId = e.target.value;
+                  const company = companies.find((item) => String(item.id) === String(nextCompanyId));
+                  setCompanyId(nextCompanyId);
+                  setPackageId(String(company?.package_ids?.[0] || ""));
+                  setData(null);
+                  setMessage("");
+                  setError("");
+                }}
+              >
+                <option value="">- Pilih Perusahaan -</option>
+                {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Paket Pemeriksaan</label>
+              <select
+                className="input"
+                value={packageId}
+                disabled={!companyId}
+                onChange={(e) => {
+                  setPackageId(e.target.value);
+                  setData(null);
+                  setMessage("");
+                  setError("");
+                }}
+              >
+                <option value="">- Pilih Paket -</option>
+                {filteredPackages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {companyId && !filteredPackages.length ? (
+            <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">Belum ada paket MCU Corporate yang terhubung ke perusahaan ini.</div>
+          ) : null}
+          {data?.company?.name && data?.package?.name ? (
+            <div className="mt-3 text-xs font-semibold text-slate-500">Antrian yang sedang ditampilkan: <b>{data.company.name}</b> · {data.package.name}</div>
+          ) : null}
         </div>
 
         {error ? <div className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div> : null}
         {message ? <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{message}</div> : null}
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <TrackPanel track="A" label={trackAName} accent="blue" />
-        <TrackPanel track="B" label={trackBName} accent="violet" />
-      </div>
+      {companyId && packageId && data ? (
+        <>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <TrackPanel track="A" label={trackAName} accent="blue" />
+            <TrackPanel track="B" label={trackBName} accent="violet" />
+          </div>
 
-      <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
-        Peserta masuk ke antrian setelah <b>Registrasi Ulang MCU Corporate</b>. Tombol Sinkronkan dipakai untuk peserta yang sudah registrasi sebelum fitur antrian dipasang.
-      </section>
+          <section className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+            Peserta masuk ke antrian setelah <b>Registrasi Ulang MCU Corporate</b>. Tombol Sinkronkan dipakai untuk peserta yang sudah registrasi sebelum fitur antrian dipasang. Public Queue di atas adalah <b>satu layar gabungan A + B</b> untuk perusahaan dan paket yang sedang dipilih.
+          </section>
+        </>
+      ) : (
+        <section className="card p-6 text-center text-sm font-semibold text-slate-500">
+          Pilih perusahaan dan paket pemeriksaan untuk menampilkan antrian.
+        </section>
+      )}
     </div>
   );
 }

@@ -47,11 +47,74 @@ function actionToStatus(action: string) {
   return "";
 }
 
-async function loadContext(req: NextRequest) {
-  const selected = getMcuCorporateSession(req);
-  if (!selected) throw new Error("Aktifkan Session MCU Corporate terlebih dahulu.");
+// MCU_QUEUE_CONTEXT_SELECTOR_V435
+async function resolveQueueContext(
+  req: NextRequest,
+  body?: Record<string, any>,
+) {
+  const cookieSelected = getMcuCorporateSession(req);
+  const requestedCompanyId = Number(
+    body?.company_id ||
+      body?.companyId ||
+      req.nextUrl.searchParams.get("company_id") ||
+      cookieSelected?.company_id ||
+      0,
+  );
+  const requestedPackageId = Number(
+    body?.package_id ||
+      body?.packageId ||
+      req.nextUrl.searchParams.get("package_id") ||
+      cookieSelected?.package_id ||
+      0,
+  );
+
+  if (!requestedCompanyId || !requestedPackageId) {
+    throw new Error("Pilih perusahaan dan paket pemeriksaan terlebih dahulu.");
+  }
 
   const supabase = getSupabaseAdmin();
+  const [companyRes, packageRes] = await Promise.all([
+    supabase.from("companies").select("id,name").eq("id", requestedCompanyId).maybeSingle(),
+    supabase
+      .from("packages")
+      .select("id,name,company_id,is_active,program_type")
+      .eq("id", requestedPackageId)
+      .eq("program_type", "corporate")
+      .eq("is_active", 1)
+      .maybeSingle(),
+  ]);
+
+  if (companyRes.error) throw new Error(companyRes.error.message);
+  if (packageRes.error) throw new Error(packageRes.error.message);
+  if (!companyRes.data) throw new Error("Perusahaan MCU Corporate tidak ditemukan.");
+  if (!packageRes.data) throw new Error("Paket MCU Corporate tidak ditemukan / tidak aktif.");
+
+  let linked = Number(packageRes.data.company_id || 0) === requestedCompanyId;
+  if (!linked) {
+    const participantLinkRes = await supabase
+      .from("participants")
+      .select("id")
+      .eq("program_type", "corporate")
+      .eq("company_id", requestedCompanyId)
+      .eq("package_id", requestedPackageId)
+      .limit(1)
+      .maybeSingle();
+
+    if (participantLinkRes.error) throw new Error(participantLinkRes.error.message);
+    linked = Boolean(participantLinkRes.data);
+  }
+
+  if (!linked) {
+    throw new Error("Paket belum terhubung ke perusahaan yang dipilih pada data MCU Corporate.");
+  }
+
+  const selected = {
+    company_id: requestedCompanyId,
+    package_id: requestedPackageId,
+    company_name: String(companyRes.data.name || ""),
+    package_name: String(packageRes.data.name || ""),
+  };
+
   const queueSession = await ensureMcuQueueSession(supabase, {
     companyId: selected.company_id,
     packageId: selected.package_id,
@@ -105,7 +168,7 @@ export async function GET(req: NextRequest) {
   if (!user) return fail("Unauthorized", 401);
 
   try {
-    const { selected, supabase, queueSession } = await loadContext(req);
+    const { selected, supabase, queueSession } = await resolveQueueContext(req);
     const [entries, companyRes, packageRes] = await Promise.all([
       loadMcuQueueEntriesWithParticipants(supabase, queueSession.id),
       supabase.from("companies").select("id,name").eq("id", selected.company_id).maybeSingle(),
@@ -136,7 +199,7 @@ export async function POST(req: NextRequest) {
   const track = normalizeTrack(body.track);
 
   try {
-    const { selected, supabase, queueSession } = await loadContext(req);
+    const { selected, supabase, queueSession } = await resolveQueueContext(req, body);
 
     if (action === "sync") {
       const synced = await syncRegisteredParticipants({

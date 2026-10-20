@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+
+// MCU_REG_UI_COMPACT_V436
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AuthGate from "@/components/AuthGate";
@@ -302,6 +304,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [sources, setSources] = useState<any[]>([]);
   const [sourceId, setSourceId] = useState("all");
   const [keyword, setKeyword] = useState("");
+  const [resultFilter, setResultFilter] = useState("");
   const [results, setResults] = useState<Participant[]>([]);
   const [selected, setSelected] = useState<Participant | null>(null);
   const [form, setForm] = useState<Participant | null>(null);
@@ -724,13 +727,15 @@ function RegistrasiUlang({ user }: { user: any }) {
         }
       `}</style>
 
-      <section className="card p-5 no-print">
-        <div className="text-2xl font-black">Registrasi Ulang</div>
-        <div className="mt-1 text-sm text-slate-500">
-          Stage tambahan untuk retrieve data peserta, edit identitas, ambil/upload foto, save, lalu print barcode.
-        </div>
-        <div className="mt-2 w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-          Registrasi Ulang v38  -  auto close hasil retrieve
+      <section className="card overflow-hidden p-0 no-print">
+        <div className="flex items-center gap-4 p-5 md:p-6">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-2xl">📋</div>
+          <div>
+            <div className="text-2xl font-black text-slate-900">Registrasi Ulang</div>
+            <div className="mt-1 text-sm text-slate-500">
+              Retrieve peserta, edit identitas, simpan registrasi, lalu cetak barcode tanpa harus scroll daftar panjang.
+            </div>
+          </div>
         </div>
       </section>
 
@@ -777,151 +782,210 @@ function RegistrasiUlang({ user }: { user: any }) {
         )}
       </section>
 
-      {!!results.length && (
-        <section className="card p-4 no-print">
-          <div className="mb-3 font-black">Hasil Retrieve Data</div>
-          <div className="grid gap-2">
-            {results.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => loadDetail(p)}
-                className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:bg-blue-50"
-              >
-                <div className="font-black">{p.name}</div>
-                <div className="text-sm text-slate-500">
-                  {p.mcu_id || p.external_id || "-"}  -  NIK {p.employee_nik || p.nik || "-"}  -  MCU {formatDate(p.examination_date || p.exam_date)}  -  Lahir {formatDate(p.birth_date || p.date_of_birth)}  -  {p.source_name || "-"}
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {form && (
-        <section className="card p-5 no-print">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xl font-black">Edit Data Registrasi Ulang</div>
-              <div className="text-sm text-slate-500">
-                Update data identitas peserta dan foto onsite.
+      {(results.length > 0 || form) && (
+        <section className="grid gap-4 no-print xl:grid-cols-[390px_minmax(0,1fr)]">
+          <aside className="card min-w-0 p-4 xl:sticky xl:top-4 xl:self-start">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-lg font-black text-slate-900">Hasil Retrieve Data</div>
+                <div className="text-xs font-semibold text-slate-500">{results.length} peserta ditemukan</div>
               </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{results.length} peserta</span>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary" onClick={() => setCameraOpen(true)}>
-                Aktifkan Kamera
-              </button>
-              <button type="button" className="btn-secondary" onClick={() => fileRef.current?.click()}>
-                Upload dari Galeri
-              </button>
-              <button
-                type="button"
-                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-black text-red-700 hover:bg-red-100 disabled:opacity-50"
-                disabled={saving || deleting || !form?.id}
-                onClick={deleteSelectedParticipantV271}
-              >
-                {deleting ? "Menghapus..." : "Hapus Peserta"}
-              </button>
-              <button type="button" className="btn-primary" disabled={saving} onClick={save}>
-                {saving ? "Menyimpan..." : "Save"}
-              </button>
-              <button type="button" className="btn-secondary" disabled={!printReady || !printJobs.length} onClick={printBarcode}>
-                Print Barcode ({printJobs.length})
-              </button>
+            <div className="relative mt-3">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">⌕</span>
+              <input
+                className="input pl-9"
+                placeholder="Cari nama, NIK, atau No MCU..."
+                value={resultFilter}
+                onChange={(e) => setResultFilter(e.target.value)}
+              />
             </div>
-          </div>
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              handlePhoto(e.target.files?.[0]);
-              e.currentTarget.value = "";
-            }}
-          />
+            <div className="mt-3 max-h-[690px] space-y-2 overflow-y-auto pr-1">
+              {results
+                .filter((p) => {
+                  const q = resultFilter.trim().toLowerCase();
+                  if (!q) return true;
+                  return [p.name, p.mcu_id, p.external_id, p.employee_nik, p.nik, p.source_name]
+                    .some((value) => String(value || "").toLowerCase().includes(q));
+                })
+                .map((p) => {
+                  const active = selected?.id === p.id;
+                  const registered = Boolean(p.registrasi_ulang_done);
+                  const initials = String(p.name || "?")
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((part) => part.slice(0, 1).toUpperCase())
+                    .join("") || "?";
 
-          <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
-            <div className="space-y-3">
-              <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
-                {photoPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photoPreview} alt="Foto peserta" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full items-center justify-center p-4 text-center text-sm font-semibold text-slate-500">
-                    Belum ada foto
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => loadDetail(p)}
+                      className={`w-full rounded-2xl border p-3 text-left transition ${
+                        active
+                          ? "border-blue-400 bg-blue-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-black ${active ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                          {initials}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-black text-slate-900">{p.name}</div>
+                          <div className="mt-0.5 truncate text-xs font-semibold text-slate-500">
+                            NIK {p.employee_nik || p.nik || "-"} · MCU {p.mcu_id || p.external_id || "-"}
+                          </div>
+                          <div className="mt-1 truncate text-[11px] text-slate-400">{p.source_name || "-"}</div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-black ${registered ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                            {registered ? "Sudah Registrasi" : "Belum Registrasi"}
+                          </span>
+                          <span className="text-lg text-slate-400">›</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+          </aside>
+
+          <div className="min-w-0">
+            {form ? (
+              <section className="card p-5">
+                <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-xl font-black text-slate-900">Detail Peserta</div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-black ${form.registrasi_ulang_done ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                        {form.registrasi_ulang_done ? "Sudah Registrasi" : "Belum Registrasi"}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-slate-500">Edit identitas peserta dan foto onsite tanpa meninggalkan daftar peserta.</div>
                   </div>
-                )}
-              </div>
-              <button type="button" className="w-full rounded-xl border border-slate-300 px-4 py-2 font-bold" onClick={() => setCameraOpen(true)}>
-                Aktifkan Kamera
-              </button>
-              <button type="button" className="w-full rounded-xl border border-slate-300 px-4 py-2 font-bold" onClick={() => fileRef.current?.click()}>
-                Upload dari Galeri
-              </button>
-            </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="label">Nama Lengkap</label>
-                <input className="input" value={form.name || ""} onChange={(e) => updateField("name", e.target.value)} />
-              </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-secondary" onClick={() => setCameraOpen(true)}>Kamera</button>
+                    <button type="button" className="btn-secondary" onClick={() => fileRef.current?.click()}>Upload Foto</button>
+                  </div>
+                </div>
 
-              <div>
-                <label className="label">Nomor MCU</label>
-                <input className="input" value={form.mcu_id || ""} onChange={(e) => updateField("mcu_id", e.target.value)} />
-              </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    handlePhoto(e.target.files?.[0]);
+                    e.currentTarget.value = "";
+                  }}
+                />
 
-              <div>
-                <label className="label">NIK Karyawan</label>
-                <input className="input" value={form.employee_nik || ""} onChange={(e) => updateField("employee_nik", e.target.value)} />
-              </div>
+                <div className="grid gap-5 lg:grid-cols-[170px_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <div className="aspect-[3/4] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+                      {photoPreview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={photoPreview} alt="Foto peserta" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-4 text-center text-sm font-semibold text-slate-500">Belum ada foto</div>
+                      )}
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2 text-center text-xs font-semibold text-slate-500">
+                      {form.mcu_id || form.external_id || "No MCU belum tersedia"}
+                    </div>
+                  </div>
 
-              <div>
-                <label className="label">NIK / Identitas</label>
-                <input className="input" value={form.nik || ""} onChange={(e) => updateField("nik", e.target.value)} />
-              </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="md:col-span-2">
+                      <label className="label">Nama Lengkap</label>
+                      <input className="input" value={form.name || ""} onChange={(e) => updateField("name", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Nomor MCU</label>
+                      <input className="input" value={form.mcu_id || ""} onChange={(e) => updateField("mcu_id", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">NIK Karyawan</label>
+                      <input className="input" value={form.employee_nik || ""} onChange={(e) => updateField("employee_nik", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">NIK / Identitas</label>
+                      <input className="input" value={form.nik || ""} onChange={(e) => updateField("nik", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Jenis Kelamin</label>
+                      <select className="input" value={form.gender || ""} onChange={(e) => updateField("gender", e.target.value)}>
+                        <option value="">-</option>
+                        <option value="Laki-laki">Laki-laki</option>
+                        <option value="Perempuan">Perempuan</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Tanggal Lahir</label>
+                      <input className="input" type="date" value={(form.birth_date || form.date_of_birth || "").slice(0, 10)} onChange={(e) => updateField("birth_date", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Usia</label>
+                      <input className="input" value={ageValue || ""} onChange={(e) => updateField("age", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Tanggal Pemeriksaan</label>
+                      <input className="input" type="date" value={(form.examination_date || form.exam_date || todayISO()).slice(0, 10)} onChange={(e) => updateField("examination_date", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Department Karyawan <span className="text-xs text-slate-400">(opsional)</span></label>
+                      <input className="input" value={form.department || ""} onChange={(e) => updateField("department", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="label">Provinsi / Lokasi</label>
+                      <input className="input" value={form.province || ""} onChange={(e) => updateField("province", e.target.value)} />
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2 xl:col-span-2">
+                      <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Database / Instansi</div>
+                      <div className="mt-1 truncate font-black text-slate-700">{form.source_name || form.company_name || "-"}</div>
+                    </div>
+                  </div>
+                </div>
 
-              <div>
-                <label className="label">Jenis Kelamin</label>
-                <select className="input" value={form.gender || ""} onChange={(e) => updateField("gender", e.target.value)}>
-                  <option value="">-</option>
-                  <option value="Laki-laki">Laki-laki</option>
-                  <option value="Perempuan">Perempuan</option>
-                </select>
-              </div>
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-black text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    disabled={saving || deleting || !form?.id}
+                    onClick={deleteSelectedParticipantV271}
+                  >
+                    {deleting ? "Menghapus..." : "Hapus Peserta"}
+                  </button>
 
-              <div>
-                <label className="label">Tanggal Lahir</label>
-                <input className="input" type="date" value={(form.birth_date || form.date_of_birth || "").slice(0, 10)} onChange={(e) => updateField("birth_date", e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">Usia</label>
-                <input className="input" value={ageValue || ""} onChange={(e) => updateField("age", e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">Tanggal Pemeriksaan</label>
-                <input className="input" type="date" value={(form.examination_date || form.exam_date || todayISO()).slice(0, 10)} onChange={(e) => updateField("examination_date", e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">Department Karyawan <span className="text-xs text-slate-400">(opsional)</span></label>
-                <input className="input" value={form.department || ""} onChange={(e) => updateField("department", e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">Provinsi / Lokasi</label>
-                <input className="input" value={form.province || ""} onChange={(e) => updateField("province", e.target.value)} />
-              </div>
-            </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-primary" disabled={saving} onClick={save}>
+                      {saving ? "Menyimpan..." : "Simpan Data"}
+                    </button>
+                    <button type="button" className="btn-secondary" disabled={!printReady || !printJobs.length} onClick={printBarcode}>
+                      Print Barcode ({printJobs.length})
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <section className="card flex min-h-[420px] items-center justify-center p-8 text-center">
+                <div>
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">👤</div>
+                  <div className="mt-4 text-lg font-black text-slate-800">Pilih peserta</div>
+                  <div className="mt-1 max-w-sm text-sm text-slate-500">Klik salah satu peserta di panel kiri untuk membuka detail Registrasi Ulang.</div>
+                </div>
+              </section>
+            )}
           </div>
         </section>
       )}
-
 
       {form && (
         <section className="card p-5 no-print">
