@@ -559,22 +559,33 @@ function ImportForm({ user }: { user: any }) {
       merged.date,
     ).slice(0, 10);
 
+    // MCU_CORPORATE_IMPORT_LOCATION_DROPDOWN_V473
     const locationName = first(
       merged.location_name,
+      merged.location?.name,
+      merged.location?.label,
+      merged.location?.location_name,
       merged.session_location_name,
+      merged.session_location?.name,
+      merged.session_location?.label,
       merged.session_location,
       merged.location_label,
-      merged.location,
+      typeof merged.location === "string" ? merged.location : "",
       merged.site_location,
       merged.site_name,
-      merged.site,
+      merged.site?.name,
+      typeof merged.site === "string" ? merged.site : "",
       merged.campus_name,
-      merged.campus,
+      merged.campus?.name,
+      typeof merged.campus === "string" ? merged.campus : "",
       merged.branch_name,
-      merged.branch,
+      merged.branch?.name,
+      typeof merged.branch === "string" ? merged.branch : "",
       merged.event_location,
-      merged.venue,
-      merged.place,
+      merged.venue?.name,
+      typeof merged.venue === "string" ? merged.venue : "",
+      merged.place?.name,
+      typeof merged.place === "string" ? merged.place : "",
     );
 
     const explicitLabel = first(
@@ -911,11 +922,11 @@ function ImportForm({ user }: { user: any }) {
     e.preventDefault();
     if (!file) return alert("Upload file Excel dulu.");
     if (programType === "corporate") {
+      // V473: lokasi selalu berasal dari Session MCU yang dipilih dari dropdown lokasi.
+      setCorporateLocationModeV466("session");
       if (!corporatePreviewV466) return alert("Klik Mapping Data & Session dulu sebelum import.");
       if (!String(corporateMappingV466.name || "").trim()) return alert("Mapping Nama Lengkap wajib dipilih.");
       if (!corporateSessionIdV466) return alert("Pilih Session MCU / Lokasi untuk import ini.");
-      if (corporateLocationModeV466 === "column" && !corporateLocationColumnV466) return alert("Pilih kolom Excel sumber lokasi.");
-      if (corporateLocationModeV466 === "fixed" && !corporateFixedLocationV466.trim()) return alert("Isi nilai lokasi tetap.");
     }
 
     const form = new FormData();
@@ -1392,34 +1403,45 @@ function ImportForm({ user }: { user: any }) {
                       </select>
                       {!corporateSessionsV466.length ? <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Belum ada Session MCU/Lokasi untuk perusahaan + paket ini. Buat Session MCU terlebih dahulu.</div> : null}
                     </div>
-                    <div>
-                      <label className="label">Sumber Lokasi</label>
-                      <select className="input" value={corporateLocationModeV466} onChange={(e) => setCorporateLocationModeV466(e.target.value as any)}>
-                        <option value="session">Gunakan Lokasi Session</option>
-                        <option value="column">Ambil dari kolom Excel</option>
-                        <option value="fixed">Isi nilai tetap</option>
+                    {/* MCU_CORPORATE_IMPORT_LOCATION_DROPDOWN_V473 */}
+                    <div className="md:col-span-2">
+                      <label className="label">Lokasi Pemeriksaan *</label>
+                      <select
+                        className="input"
+                        value={corporateSessionIdV466}
+                        onChange={(e) => {
+                          setCorporateSessionIdV466(e.target.value);
+                          setCorporateLocationModeV466("session");
+                          setCorporateLocationColumnV466("");
+                          setCorporateFixedLocationV466("");
+                        }}
+                      >
+                        <option value="">- Pilih Lokasi Pemeriksaan -</option>
+                        {corporateSessionsV466
+                          .filter((session) => String(session.location_name || "").trim())
+                          .map((session) => (
+                            <option key={`location-${session.id}`} value={String(session.id)}>
+                              {session.location_name}
+                              {session.session_date ? ` · ${session.session_date}` : ""}
+                            </option>
+                          ))}
                       </select>
-                    </div>
-                    <div>
-                      {corporateLocationModeV466 === "column" ? (
-                        <>
-                          <label className="label">Kolom Lokasi Excel</label>
-                          <select className="input" value={corporateLocationColumnV466} onChange={(e) => setCorporateLocationColumnV466(e.target.value)}>
-                            <option value="">- Pilih kolom -</option>
-                            {corporatePreviewV466.headers.map((header) => <option key={`loc-${header}`} value={header}>{header}</option>)}
-                          </select>
-                        </>
-                      ) : corporateLocationModeV466 === "fixed" ? (
-                        <>
-                          <label className="label">Nilai Lokasi Tetap</label>
-                          <input className="input" value={corporateFixedLocationV466} onChange={(e) => setCorporateFixedLocationV466(e.target.value)} placeholder="Contoh: BINUS - SERPONG" />
-                        </>
-                      ) : (
-                        <>
-                          <label className="label">Lokasi</label>
-                          <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-sm font-black text-slate-800">{corporateSessionsV466.find((row) => String(row.id) === corporateSessionIdV466)?.location_name || "Akan mengikuti Session yang dipilih"}</div>
-                        </>
-                      )}
+
+                      {corporateSessionsV466.length > 0 &&
+                      !corporateSessionsV466.some((session) => String(session.location_name || "").trim()) ? (
+                        <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                          Session sudah terbaca, tetapi nama lokasi belum ikut terbaca dari data Session MCU.
+                          Pastikan lokasi memang tersimpan pada Session MCU yang dipilih.
+                        </div>
+                      ) : null}
+
+                      {corporateSessionIdV466 ? (
+                        <div className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">
+                          Session aktif untuk import:{" "}
+                          {corporateSessionsV466.find((row) => String(row.id) === String(corporateSessionIdV466))?.label ||
+                            `Session #${corporateSessionIdV466}`}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
