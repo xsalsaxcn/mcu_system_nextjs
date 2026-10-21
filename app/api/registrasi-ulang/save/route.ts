@@ -1,9 +1,13 @@
 import { NextRequest } from "next/server";
+// MCU_QUEUE_RELEASE_ON_REGISTRATION_EXACT_SESSION_V454_R2
 import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 import { getMcuCorporateSession } from "@/lib/server/mcuCorporateSession";
-import { ensureMcuQueueEntry, ensureMcuQueueSession } from "@/lib/server/mcuQueue";
+import {
+  ensureMcuQueueEntry,
+  queueSchemaErrorMessage,
+} from "@/lib/server/mcuQueue";
 
 // MCU_DUAL_QUEUE_AUTO_ENQUEUE_V434
 // MCU_REG_ONSPOT_SESSION_V440
@@ -52,28 +56,105 @@ async function tryMarkRegistrationStage(supabase: any, participantId: number, pr
   }
 }
 
-async function tryEnqueueMcuCorporateParticipant(req: NextRequest, supabase: any, participant: any) {
-  try {
-    if (String(participant?.program_type || "").toLowerCase() !== "corporate") return;
-
-    // MCU_QUEUE_RELEASE_ON_REGISTRATION_V456
-    // Registrasi Ulang adalah event rilis antrian; company/package peserta menjadi sumber kebenaran.
-    const companyId = Number(participant?.company_id || 0);
-    const packageId = Number(participant?.package_id || 0);
-    if (!companyId || !packageId) return;
-    const queueSession = await ensureMcuQueueSession(supabase, {
-      companyId,
-      packageId,
-    });
-
-    await ensureMcuQueueEntry(supabase, {
-      queueSessionId: Number(queueSession.id),
-      participantId: Number(participant.id),
-    });
-  } catch {
-    // Antrian MCU bersifat tambahan. Jangan pernah menggagalkan Registrasi Ulang
-    // bila SQL queue belum dipasang atau sinkronisasi antrian sedang bermasalah.
+async function resolveExactMcuQueueSession(
+  supabase: any,
+  args: {
+    queueSessionId: number;
+    companyId?: number;
+    packageId?: number;
+  },
+) {
+  const queueSessionId = Number(args.queueSessionId || 0);
+  if (!queueSessionId) {
+    throw new Error(
+      "Pilih dan kunci Session MCU lokasi/tanggal sebelum menyimpan Registrasi Ulang.",
+    );
   }
+
+  const result = await supabase
+    .from("mcu_queue_sessions")
+    .select("id,company_id,package_id,session_name,location,session_date,track_a_name,track_b_name,is_active")
+    .eq("id", queueSessionId)
+    .eq("is_active", 1)
+    .maybeSingle();
+
+  if (result.error) throw new Error(queueSchemaErrorMessage(result.error));
+  if (!result.data) {
+    throw new Error("Session MCU lokasi/tanggal tidak ditemukan atau sudah nonaktif.");
+  }
+
+  const companyId = Number(args.companyId || 0);
+  const packageId = Number(args.packageId || 0);
+  if (companyId && Number(result.data.company_id || 0) !== companyId) {
+    throw new Error("Perusahaan peserta tidak sesuai dengan Session MCU yang dipilih.");
+  }
+  if (packageId && Number(result.data.package_id || 0) !== packageId) {
+    throw new Error("Paket peserta tidak sesuai dengan Session MCU yang dipilih.");
+  }
+
+  return result.data;
+}
+
+async function bindMcuCorporateRegistration(
+  supabase: any,
+  args: { participant: any; queueSession: any; user: any; source?: string },
+) {
+  const participant = args.participant;
+  if (String(participant?.program_type || "").toLowerCase() !== "corporate") {
+    return { binding: null, queueEntry: null };
+  }
+
+  const participantId = Number(participant?.id || 0);
+  const companyId = Number(participant?.company_id || 0);
+  const packageId = Number(participant?.package_id || 0);
+  const queueSessionId = Number(args.queueSession?.id || 0);
+  if (!participantId || !companyId || !packageId || !queueSessionId) {
+    throw new Error("Data peserta / Session MCU belum lengkap untuk merilis nomor antrean.");
+  }
+
+  if (
+    companyId !== Number(args.queueSession.company_id || 0) ||
+    packageId !== Number(args.queueSession.package_id || 0)
+  ) {
+    throw new Error("Peserta tidak sesuai dengan perusahaan/paket Session MCU yang dipilih.");
+  }
+
+  const now = new Date().toISOString();
+  const actor = String(
+    args.user?.username || args.user?.name || args.user?.email || "admin",
+  ).slice(0, 160);
+
+  const bindingResult = await supabase
+    .from("mcu_registration_sessions")
+    .upsert(
+      {
+        queue_session_id: queueSessionId,
+        participant_id: participantId,
+        company_id: companyId,
+        package_id: packageId,
+        registration_source: String(args.source || "REGISTRASI_ULANG").slice(0, 60),
+        registered_at: now,
+        registered_by: actor,
+        updated_at: now,
+      },
+      { onConflict: "queue_session_id,participant_id" },
+    )
+    .select("*")
+    .single();
+
+  if (bindingResult.error) {
+    throw new Error(`Gagal mengikat Registrasi Ulang ke Session MCU: ${bindingResult.error.message}`);
+  }
+
+  const queueEntry = await ensureMcuQueueEntry(supabase, {
+    queueSessionId,
+    participantId,
+  });
+  if (!queueEntry) {
+    throw new Error("Nomor antrean MCU gagal dirilis untuk Session yang dipilih.");
+  }
+
+  return { binding: bindingResult.data, queueEntry };
 }
 
 export async function POST(req: NextRequest) {
@@ -85,6 +166,20 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const now = new Date().toISOString();
   const programType = String(body.program_type || "corporate").toLowerCase();
+
+
+  let exactQueueSession: any = null;
+  if (programType === "corporate") {
+    try {
+      exactQueueSession = await resolveExactMcuQueueSession(supabase, {
+        queueSessionId: Number(body.queue_session_id || 0),
+        companyId: Number(body.company_id || 0) || undefined,
+        packageId: Number(body.package_id || 0) || undefined,
+      });
+    } catch (error: any) {
+      return fail(error?.message || "Session MCU tidak valid.", 400);
+    }
+  }
 
   const commonPayload: any = {
     name: String(body.name || "").trim(),
@@ -122,18 +217,60 @@ export async function POST(req: NextRequest) {
 
     if (error) return fail(error.message, 500);
 
-    await tryMarkRegistrationStage(supabase, id, programType || data?.program_type || "capaska", user);
-    await tryEnqueueMcuCorporateParticipant(req, supabase, data);
+    await tryMarkRegistrationStage(
+      supabase,
+      id,
+      programType || data?.program_type || "capaska",
+      user,
+    );
 
-    return ok({ participant: data, message: "Registrasi ulang berhasil disimpan." });
+    let queue: any = null;
+    if (String(data?.program_type || programType || "").toLowerCase() === "corporate") {
+      try {
+        const validatedSession = await resolveExactMcuQueueSession(supabase, {
+          queueSessionId: Number(exactQueueSession?.id || 0),
+          companyId: Number(data?.company_id || 0),
+          packageId: Number(data?.package_id || 0),
+        });
+        queue = await bindMcuCorporateRegistration(supabase, {
+          participant: data,
+          queueSession: validatedSession,
+          user,
+          source: "REGISTRASI_ULANG",
+        });
+      } catch (error: any) {
+        return fail(
+          error?.message ||
+            "Registrasi tersimpan tetapi binding Antrian MCU gagal. Silakan ulangi Save.",
+          500,
+        );
+      }
+    }
+
+    return ok({
+      participant: data,
+      queue_session: exactQueueSession,
+      queue_entry: queue?.queueEntry || null,
+      registration_binding: queue?.binding || null,
+      message:
+        programType === "corporate"
+          ? "Registrasi ulang berhasil disimpan ke Session MCU dan nomor antrean dirilis."
+          : "Registrasi ulang berhasil disimpan.",
+    });
   }
 
   if (programType !== "corporate") return fail("Registrasi On The Spot saat ini khusus MCU Corporate.", 400);
 
   const activeSession = getMcuCorporateSession(req);
-  const companyId = Number(body.company_id || activeSession?.company_id || 0);
-  const packageId = Number(body.package_id || activeSession?.package_id || 0);
-  if (!companyId || !packageId) return fail("Pilih Session MCU perusahaan + paket untuk Registrasi On The Spot.", 400);
+  const companyId = Number(
+    body.company_id || exactQueueSession?.company_id || activeSession?.company_id || 0,
+  );
+  const packageId = Number(
+    body.package_id || exactQueueSession?.package_id || activeSession?.package_id || 0,
+  );
+  if (!companyId || !packageId || !exactQueueSession?.id) {
+    return fail("Pilih Session MCU lokasi/tanggal untuk Registrasi On The Spot.", 400);
+  }
 
   const [companyRes, packageRes] = await Promise.all([
     supabase.from("companies").select("id,name").eq("id", companyId).maybeSingle(),
@@ -204,17 +341,46 @@ export async function POST(req: NextRequest) {
     finalParticipant = patched;
   }
 
-  await tryMarkRegistrationStage(supabase, Number(finalParticipant.id), "corporate", user);
-  await tryEnqueueMcuCorporateParticipant(req, supabase, finalParticipant);
+  await tryMarkRegistrationStage(
+    supabase,
+    Number(finalParticipant.id),
+    "corporate",
+    user,
+  );
+
+  let queue: any;
+  try {
+    queue = await bindMcuCorporateRegistration(supabase, {
+      participant: finalParticipant,
+      queueSession: exactQueueSession,
+      user,
+      source: "ON_THE_SPOT",
+    });
+  } catch (error: any) {
+    return fail(
+      error?.message ||
+        "Peserta On The Spot tersimpan tetapi binding Antrian MCU gagal. Silakan ulangi Save.",
+      500,
+    );
+  }
 
   return ok({
     participant: {
       ...finalParticipant,
       company_name: String(companyRes.data.name || ""),
       package_name: String(packageRes.data.name || ""),
-      source_name: `Session MCU · ${String(companyRes.data.name || "")}`
+      source_name: `Session MCU · ${String(
+        exactQueueSession?.location ||
+          exactQueueSession?.session_name ||
+          companyRes.data.name ||
+          "",
+      )}`,
     },
+    queue_session: exactQueueSession,
+    queue_entry: queue.queueEntry,
+    registration_binding: queue.binding,
     created_on_spot: true,
-    message: "Registrasi On The Spot berhasil disimpan."
+    message:
+      "Registrasi On The Spot berhasil disimpan ke Session MCU dan nomor antrean dirilis.",
   });
 }

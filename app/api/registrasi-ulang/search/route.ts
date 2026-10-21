@@ -64,6 +64,48 @@ async function decorateRows(supabase: any, rows: any[]) {
   }));
 }
 
+
+async function decorateSessionRegistration(
+  supabase: any,
+  rows: any[],
+  queueSessionId: number,
+) {
+  if (!queueSessionId || !rows.length) return rows;
+
+  const participantIds = rows
+    .map((row: any) => Number(row.id || 0))
+    .filter(Boolean);
+
+  if (!participantIds.length) return rows;
+
+  const bindingResult = await supabase
+    .from("mcu_registration_sessions")
+    .select("participant_id,registered_at")
+    .eq("queue_session_id", queueSessionId)
+    .in("participant_id", participantIds);
+
+  if (bindingResult.error) {
+    throw new Error(bindingResult.error.message);
+  }
+
+  const bindingMap = new Map<number, any>(
+    (bindingResult.data || []).map((row: any) => [
+      Number(row.participant_id || 0),
+      row,
+    ]),
+  );
+
+  return rows.map((row: any) => {
+    const binding = bindingMap.get(Number(row.id || 0));
+    return {
+      ...row,
+      session_registered: Boolean(binding),
+      session_registered_at: binding?.registered_at || null,
+      queue_session_id: queueSessionId,
+    };
+  });
+}
+
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user || user.role !== "admin") return fail("Unauthorized", 401);
@@ -71,9 +113,32 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const program = req.nextUrl.searchParams.get("program") || "capaska";
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
-  const sessionMatch = /^session:(\d+):(\d+)$/.exec(sourceId);
-  const sessionCompanyId = sessionMatch ? Number(sessionMatch[1]) : 0;
-  const sessionPackageId = sessionMatch ? Number(sessionMatch[2]) : 0;
+  const legacySessionMatch = /^session:(\d+):(\d+)$/.exec(sourceId);
+  const exactSessionMatch = /^mcu-session:(\d+)$/.exec(sourceId);
+
+  let sessionCompanyId = legacySessionMatch ? Number(legacySessionMatch[1]) : 0;
+  let sessionPackageId = legacySessionMatch ? Number(legacySessionMatch[2]) : 0;
+  let queueSession: any = null;
+
+  if (exactSessionMatch) {
+    const queueSessionId = Number(exactSessionMatch[1] || 0);
+    const sessionResult = await supabase
+      .from("mcu_queue_sessions")
+      .select("id,company_id,package_id,session_name,location,session_date,is_active")
+      .eq("id", queueSessionId)
+      .eq("is_active", 1)
+      .maybeSingle();
+
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    if (!sessionResult.data) {
+      return fail("Session MCU lokasi/tanggal tidak ditemukan atau sudah nonaktif.", 404);
+    }
+
+    queueSession = sessionResult.data;
+    sessionCompanyId = Number(queueSession.company_id || 0);
+    sessionPackageId = Number(queueSession.package_id || 0);
+  }
+
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 25), 1), 50);
 
@@ -103,7 +168,18 @@ export async function GET(req: NextRequest) {
       .order("name", { ascending: true });
 
     if (exactError) return fail(exactError.message, 500);
-    if (exactData?.length) return ok({ participants: await decorateRows(supabase, exactData), mode: "exact" });
+    if (exactData?.length) {
+      const decorated = await decorateRows(supabase, exactData);
+      return ok({
+        participants: await decorateSessionRegistration(
+          supabase,
+          decorated,
+          Number(queueSession?.id || 0),
+        ),
+        mode: "exact",
+        queue_session: queueSession,
+      });
+    }
   }
 
   let query = baseQuery().order("name", { ascending: true });
@@ -116,5 +192,19 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
   if (error) return fail(error.message, 500);
 
-  return ok({ participants: await decorateRows(supabase, data || []), mode: keyword.length >= 2 ? "like" : (sessionMatch ? "session" : "source") });
+  const decorated = await decorateRows(supabase, data || []);
+  return ok({
+    participants: await decorateSessionRegistration(
+      supabase,
+      decorated,
+      Number(queueSession?.id || 0),
+    ),
+    mode:
+      keyword.length >= 2
+        ? "like"
+        : exactSessionMatch || legacySessionMatch
+          ? "session"
+          : "source",
+    queue_session: queueSession,
+  });
 }

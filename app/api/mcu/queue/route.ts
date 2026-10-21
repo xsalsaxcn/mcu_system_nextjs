@@ -176,44 +176,58 @@ async function resolveQueueContext(
   return { selected, supabase, queueSession };
 }
 
-async function syncRegisteredParticipants(args: {
-  supabase: any;
-  queueSessionId: number;
-  companyId: number;
-  packageId: number;
-}) {
-  const { supabase, queueSessionId, companyId, packageId } = args;
-  let offset = 0;
-  const pageSize = 1000;
-  let synced = 0;
+async function ensureSessionRegistrationEntries(
+  supabase: any,
+  queueSessionId: number,
+) {
+  const sessionId = Number(queueSessionId || 0);
+  if (!sessionId) return { bound: 0, created: 0 };
 
-  while (true) {
-    const result = await supabase
-      .from("participants")
-      .select("id")
-      .eq("program_type", "corporate")
-      .eq("company_id", companyId)
-      .eq("package_id", packageId)
-      .eq("registrasi_ulang_done", 1)
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
+  const [bindingResult, entryResult] = await Promise.all([
+    supabase
+      .from("mcu_registration_sessions")
+      .select("participant_id")
+      .eq("queue_session_id", sessionId)
+      .order("id", { ascending: true }),
+    supabase
+      .from("mcu_queue_entries")
+      .select("participant_id")
+      .eq("queue_session_id", sessionId),
+  ]);
 
-    if (result.error) throw new Error(result.error.message);
-    const batch = result.data || [];
-
-    for (const participant of batch) {
-      await ensureMcuQueueEntry(supabase, {
-        queueSessionId,
-        participantId: Number(participant.id),
-      });
-      synced += 1;
-    }
-
-    if (batch.length < pageSize) break;
-    offset += pageSize;
+  if (bindingResult.error) {
+    throw new Error(bindingResult.error.message);
+  }
+  if (entryResult.error) {
+    throw new Error(entryResult.error.message);
   }
 
-  return synced;
+  const existingParticipantIds = new Set(
+    (entryResult.data || [])
+      .map((row: any) => Number(row.participant_id || 0))
+      .filter(Boolean),
+  );
+
+  let created = 0;
+  for (const row of bindingResult.data || []) {
+    const participantId = Number(row.participant_id || 0);
+    if (!participantId || existingParticipantIds.has(participantId)) {
+      continue;
+    }
+
+    await ensureMcuQueueEntry(supabase, {
+      queueSessionId: sessionId,
+      participantId,
+    });
+
+    existingParticipantIds.add(participantId);
+    created += 1;
+  }
+
+  return {
+    bound: (bindingResult.data || []).length,
+    created,
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -225,6 +239,11 @@ export async function GET(req: NextRequest) {
     const isLocationSession = Boolean(
       String((queueSession as any)?.location || "").trim() ||
       String((queueSession as any)?.session_date || "").trim()
+    );
+
+    const autoQueue = await ensureSessionRegistrationEntries(
+      supabase,
+      Number(queueSession.id),
     );
 
     const [entries, pendingParticipants, companyRes, packageRes] = await Promise.all([
@@ -253,9 +272,11 @@ export async function GET(req: NextRequest) {
       operator_url: (queueSession as any)?.operator_token
         ? `/mcu/operator/${encodeURIComponent(String((queueSession as any).operator_token))}`
         : "",
-      participant_sync_mode: isLocationSession
-        ? "SESSION_BOUND_REQUIRED"
-        : "LEGACY_COMPANY_PACKAGE",
+      auto_queue: {
+        mode: "SESSION_BOUND_AUTOMATIC",
+        bound: Number(autoQueue.bound || 0),
+        created: Number(autoQueue.created || 0),
+      },
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal mengambil Antrian MCU.", 500);
@@ -273,29 +294,6 @@ export async function POST(req: NextRequest) {
   try {
     const { selected, supabase, queueSession } = await resolveQueueContext(req, body);
 
-    if (action === "sync") {
-      const isLocationSession = Boolean(
-        String((queueSession as any)?.location || "").trim() ||
-        String((queueSession as any)?.session_date || "").trim()
-      );
-
-      if (isLocationSession) {
-        return fail(
-          "Session multi-lokasi sudah aktif, tetapi binding peserta Registrasi Ulang ke lokasi belum diaktifkan pada Stage 1. Sinkronisasi massal diblokir agar peserta dari lokasi lain tidak tercampur.",
-          409,
-        );
-      }
-
-      const synced = await syncRegisteredParticipants({
-        supabase,
-        queueSessionId: queueSession.id,
-        companyId: selected.company_id,
-        packageId: selected.package_id,
-      });
-      return ok({
-        message: `${synced} peserta Registrasi Ulang sudah tersinkron ke Antrian MCU.`,
-      });
-    }
 
     if (action === "informed") {
       const participantId = Number(body.participant_id || body.participantId || 0);

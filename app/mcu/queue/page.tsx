@@ -513,7 +513,7 @@ function McuQueueContent() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-2xl font-black text-slate-900">Antrian MCU Corporate</div>
-            <div className="mt-1 text-sm text-slate-500">Pilih perusahaan dan Session lokasi/tanggal. Setiap Session memiliki antrean A + B, Public Queue, dan Operator yang terpisah.</div>
+            <div className="mt-1 text-sm text-slate-500">Pilih perusahaan dan Session lokasi/tanggal. Peserta Registrasi Ulang otomatis masuk ke antrean Session aktif tanpa sinkron manual.</div>
             <div className="mt-3 flex flex-wrap gap-2">
               <span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">A · {trackAName}</span>
               <span className="rounded-xl bg-violet-100 px-3 py-2 text-xs font-black text-violet-800">B · {trackBName}</span>
@@ -521,21 +521,12 @@ function McuQueueContent() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              disabled={
-                busy ||
-                data?.participant_sync_mode === "SESSION_BOUND_REQUIRED"
-              }
-              onClick={() => action("sync")}
-              className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-50"
-              title={
-                data?.participant_sync_mode === "SESSION_BOUND_REQUIRED"
-                  ? "Binding Registrasi Ulang per lokasi akan diaktifkan pada Stage berikutnya."
-                  : ""
-              }
+            <div
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800"
+              title="Peserta yang Registrasi Ulang pada Session ini otomatis masuk Antrian MCU."
             >
-              Sinkronkan Registrasi Ulang
-            </button>
+              Auto Queue · Session Aktif
+            </div>
             <button onClick={() => setVoiceEnabled((v) => !v)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button>
             {data?.public_url ? <a target="_blank" href={data.public_url} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-blue-700">Public Queue · {data?.company?.name || "Perusahaan"}</a> : null}
             {data?.operator_url ? <a target="_blank" href={data.operator_url} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800">Buka Operator · {data?.company?.name || "Perusahaan"}</a> : null}
@@ -620,7 +611,7 @@ function McuQueueContent() {
           ) : null}
 
           {data?.queue_session ? (
-            <div className="mt-3 grid gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-blue-900 sm:grid-cols-3">
+            <div className="mt-3 grid gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-blue-900 sm:grid-cols-4">
               <div>
                 <span className="text-blue-600">Perusahaan</span>
                 <div className="mt-1 font-black">{data?.company?.name || "-"}</div>
@@ -633,6 +624,10 @@ function McuQueueContent() {
                 <span className="text-blue-600">Tanggal</span>
                 <div className="mt-1 font-black">{data.queue_session.session_date || "Belum diatur"}</div>
               </div>
+              <div>
+                <span className="text-blue-600">Paket</span>
+                <div className="mt-1 font-black">{data?.package?.name || "-"}</div>
+              </div>
             </div>
           ) : null}
         </div>
@@ -643,12 +638,6 @@ function McuQueueContent() {
 
       {companyId && packageId && queueSessionId && data ? (
         <>
-          {data?.participant_sync_mode === "SESSION_BOUND_REQUIRED" ? (
-            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-              Session multi-lokasi aktif. Pada Stage 1, sinkronisasi massal Registrasi Ulang sengaja diblokir agar peserta dari lokasi lain tidak masuk ke antrean ini. Binding Registrasi Ulang → Session lokasi akan dipasang pada Stage berikutnya.
-            </section>
-          ) : null}
-
           <section className="card p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>

@@ -40,6 +40,9 @@ type Participant = {
   photo_url?: string;
   registrasi_ulang_done?: number | boolean;
   registrasi_ulang_at?: string;
+  session_registered?: boolean;
+  session_registered_at?: string | null;
+  queue_session_id?: number;
   program_type?: string;
 };
 
@@ -310,7 +313,17 @@ function RegistrasiUlang({ user }: { user: any }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [program, setProgram] = useState(user.program_type === "all" ? "capaska" : user.program_type || "capaska");
   const [sources, setSources] = useState<any[]>([]);
-  const [mcuSessionOptions, setMcuSessionOptions] = useState<{ companies: any[]; packages: any[]; session: any | null }>({ companies: [], packages: [], session: null });
+  const [mcuSessionOptions, setMcuSessionOptions] = useState<{
+    companies: any[];
+    packages: any[];
+    queue_sessions: any[];
+    session: any | null;
+  }>({
+    companies: [],
+    packages: [],
+    queue_sessions: [],
+    session: null,
+  });
   const [sourceId, setSourceId] = useState("all");
   const [sessionLocked, setSessionLocked] = useState(false);
   const autoRetrieveKeyRef = useRef("");
@@ -363,43 +376,86 @@ function RegistrasiUlang({ user }: { user: any }) {
             setMcuSessionOptions({
               companies: d.companies || [],
               packages: d.packages || [],
-              session: d.session || null
+              queue_sessions: d.queue_sessions || [],
+              session: d.session || null,
             });
           }
         })
         .catch(() => {
-          if (!cancelled) setMcuSessionOptions({ companies: [], packages: [], session: null });
+          if (!cancelled)
+            setMcuSessionOptions({
+              companies: [],
+              packages: [],
+              queue_sessions: [],
+              session: null,
+            });
         });
     } else {
-      setMcuSessionOptions({ companies: [], packages: [], session: null });
-      if (String(sourceId).startsWith("session:")) setSourceId("all");
+      setMcuSessionOptions({
+        companies: [],
+        packages: [],
+        queue_sessions: [],
+        session: null,
+      });
+      if (String(sourceId).startsWith("session:") || String(sourceId).startsWith("mcu-session:")) setSourceId("all");
     }
 
     return () => { cancelled = true; };
   }, [program]);
 
   const sessionSourceOptions = useMemo(() => {
-    const packageById = new Map<number, any>(
-      (mcuSessionOptions.packages || []).map((pkg: any) => [Number(pkg.id), pkg])
+    const companiesById = new Map<number, any>(
+      (mcuSessionOptions.companies || []).map((company: any) => [
+        Number(company.id),
+        company,
+      ]),
     );
-    const rows: any[] = [];
+    const packagesById = new Map<number, any>(
+      (mcuSessionOptions.packages || []).map((pkg: any) => [
+        Number(pkg.id),
+        pkg,
+      ]),
+    );
 
-    for (const company of mcuSessionOptions.companies || []) {
-      for (const packageId of company.package_ids || []) {
-        const pkg = packageById.get(Number(packageId));
-        if (!pkg) continue;
-        rows.push({
-          value: `session:${Number(company.id)}:${Number(pkg.id)}`,
-          company_id: Number(company.id),
-          company_name: String(company.name || ""),
-          package_id: Number(pkg.id),
-          package_name: String(pkg.name || "")
-        });
-      }
-    }
-
-    return rows.sort((a, b) => `${a.company_name} ${a.package_name}`.localeCompare(`${b.company_name} ${b.package_name}`));
+    return (mcuSessionOptions.queue_sessions || [])
+      .filter((row: any) => Number(row.is_active || 0) === 1)
+      .map((row: any) => {
+        const company = companiesById.get(Number(row.company_id));
+        const pkg = packagesById.get(Number(row.package_id));
+        return {
+          value: `mcu-session:${Number(row.id)}`,
+          queue_session_id: Number(row.id),
+          company_id: Number(row.company_id),
+          company_name: String(row.company_name || company?.name || ""),
+          package_id: Number(row.package_id),
+          package_name: String(row.package_name || pkg?.name || ""),
+          session_name: String(row.session_name || ""),
+          location: String(row.location || "").trim() || "Legacy / belum diatur",
+          session_date: String(row.session_date || "").trim(),
+          track_a_name: String(row.track_a_name || "Lab Darah"),
+          track_b_name: String(row.track_b_name || "Rontgen"),
+        };
+      })
+      .sort((a: any, b: any) => {
+        const ak = `${a.company_name} ${a.session_date || "9999"} ${a.location}`;
+        const bk = `${b.company_name} ${b.session_date || "9999"} ${b.location}`;
+        return ak.localeCompare(bk);
+      });
   }, [mcuSessionOptions]);
+
+  function sessionDateLabel(value?: string) {
+    if (!value) return "Tanggal belum diatur";
+    try {
+      return new Intl.DateTimeFormat("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(`${value}T00:00:00`));
+    } catch {
+      return value;
+    }
+  }
+
 
   useEffect(() => {
     if (program !== "corporate" || typeof window === "undefined") return;
@@ -409,19 +465,25 @@ function RegistrasiUlang({ user }: { user: any }) {
       const locked = window.localStorage.getItem("mcu_reg_session_locked") === "1";
       const lockedSource = String(window.localStorage.getItem("mcu_reg_locked_source") || "").trim();
       if (locked && lockedSource) {
-        setSourceId(lockedSource);
-        setSessionLocked(true);
-        return;
+        if (lockedSource.startsWith("mcu-session:")) {
+          setSourceId(lockedSource);
+          setSessionLocked(true);
+          return;
+        }
+        window.localStorage.removeItem("mcu_reg_session_locked");
+        window.localStorage.removeItem("mcu_reg_locked_source");
       }
     }
 
     if (sessionLocked || sourceId !== "all") return;
     const active = mcuSessionOptions.session;
-    if (!active?.company_id || !active?.package_id) return;
-    const value = `session:${Number(active.company_id)}:${Number(active.package_id)}`;
-    if (sessionSourceOptions.some((item) => item.value === value)) {
-      setSourceId(value);
-    }
+    const preferred =
+      sessionSourceOptions.find(
+        (item: any) =>
+          Number(item.company_id) === Number(active?.company_id || 0) &&
+          Number(item.package_id) === Number(active?.package_id || 0),
+      ) || sessionSourceOptions[0];
+    if (preferred?.value) setSourceId(preferred.value);
   }, [program, sessionLocked, sourceId, mcuSessionOptions.session, sessionSourceOptions]);
 
   function toggleRegistrationSessionLock() {
@@ -435,11 +497,11 @@ function RegistrasiUlang({ user }: { user: any }) {
         window.localStorage.removeItem("mcu_reg_locked_source");
       }
       setSessionLocked(false);
-      setMessage("Session Registrasi dibuka. Perusahaan/paket dapat dipilih kembali.");
+      setMessage("Session Registrasi dibuka. Lokasi/tanggal MCU dapat dipilih kembali.");
       return;
     }
-    if (!sourceId || sourceId === "all") {
-      setMessage("Pilih Database / Session Instansi terlebih dahulu, lalu klik Kunci Session.");
+    if (!sourceId || sourceId === "all" || !String(sourceId).startsWith("mcu-session:")) {
+      setMessage("Pilih Session MCU lokasi/tanggal terlebih dahulu, lalu klik Kunci Session.");
       return;
     }
     if (typeof window !== "undefined") {
@@ -451,21 +513,11 @@ function RegistrasiUlang({ user }: { user: any }) {
   }
 
   function getSelectedSessionContext() {
-    const selectedOption = sessionSourceOptions.find((item) => item.value === sourceId);
-    if (selectedOption) return selectedOption;
-
-    if (sourceId === "all" && mcuSessionOptions.session) {
-      return {
-        value: `session:${Number(mcuSessionOptions.session.company_id)}:${Number(mcuSessionOptions.session.package_id)}`,
-        company_id: Number(mcuSessionOptions.session.company_id),
-        company_name: String(mcuSessionOptions.session.company_name || ""),
-        package_id: Number(mcuSessionOptions.session.package_id),
-        package_name: String(mcuSessionOptions.session.package_name || "")
-      };
-    }
-
-    return null;
+    return (
+      sessionSourceOptions.find((item: any) => item.value === sourceId) || null
+    );
   }
+
 
   const ageValue = useMemo(() => {
     return form?.age ? String(form.age) : calcAge(form?.birth_date || form?.date_of_birth);
@@ -480,14 +532,34 @@ function RegistrasiUlang({ user }: { user: any }) {
     );
   }, [results, resultFilter]);
 
-  async function loadQueueInfo(participantId?: number) {
+  function isRegisteredForSelectedSession(participant?: Participant | null) {
+    if (!participant) return false;
+    if (program === "corporate" && getSelectedSessionContext()?.queue_session_id) {
+      return Boolean(participant.session_registered);
+    }
+    return Boolean(participant.registrasi_ulang_done);
+  }
+
+  async function loadQueueInfo(
+    participantId?: number,
+    queueSessionId?: number,
+  ) {
     const id = Number(participantId || 0);
-    if (!id || program !== "corporate") {
+    const context = getSelectedSessionContext();
+    const sessionId = Number(queueSessionId || context?.queue_session_id || 0);
+    if (!id || program !== "corporate" || !sessionId) {
       setQueueInfo(null);
       return null;
     }
     try {
-      const res = await fetch(`/api/mcu/queue/participant?participant_id=${encodeURIComponent(String(id))}`, { cache: "no-store" });
+      const params = new URLSearchParams({
+        participant_id: String(id),
+        queue_session_id: String(sessionId),
+      });
+      const res = await fetch(
+        `/api/mcu/queue/participant?${params.toString()}`,
+        { cache: "no-store" },
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) {
         setQueueInfo(null);
@@ -531,7 +603,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       return;
     }
     void loadQueueInfo(participantId);
-  }, [form?.id, selected?.id, program]);
+  }, [form?.id, selected?.id, program, sourceId]);
 
 
 
@@ -637,7 +709,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       company_name: context.company_name,
       package_id: context.package_id,
       package_name: context.package_name,
-      source_name: `Session MCU · ${context.company_name}`,
+      source_name: `Session MCU · ${context.location} · ${sessionDateLabel(context.session_date)}`,
       program_type: "corporate",
       registrasi_ulang_done: false
     };
@@ -648,7 +720,7 @@ function RegistrasiUlang({ user }: { user: any }) {
     setForm(draft);
     setPrintReady(false);
     await loadPackageLabelSettings(context.package_id, "corporate");
-    setMessage(`Registrasi On The Spot · ${context.company_name} · ${context.package_name}. Isi data peserta lalu klik Simpan Data.`);
+    setMessage(`Registrasi On The Spot · ${context.company_name} · ${context.location} · ${sessionDateLabel(context.session_date)}. Isi data peserta lalu klik Simpan Data.`);
   }
 
   async function loadDetail(participant: Participant) {
@@ -668,6 +740,9 @@ function RegistrasiUlang({ user }: { user: any }) {
       const p = json.participant || participant;
       const nextParticipant = {
         ...p,
+        session_registered: participant.session_registered,
+        session_registered_at: participant.session_registered_at,
+        queue_session_id: participant.queue_session_id,
         examination_date: p.examination_date || p.exam_date || todayISO(),
         birth_date: p.birth_date || p.date_of_birth || ""
       };
@@ -780,6 +855,15 @@ function RegistrasiUlang({ user }: { user: any }) {
       setMessage("Nama Lengkap wajib diisi.");
       return;
     }
+
+    const selectedSessionContext =
+      program === "corporate" ? getSelectedSessionContext() : null;
+
+    if (program === "corporate" && !selectedSessionContext?.queue_session_id) {
+      setMessage("Pilih Session MCU lokasi/tanggal terlebih dahulu. Registrasi Ulang Corporate tidak boleh disimpan tanpa Session.");
+      return;
+    }
+
     if (!form.id && (!form.company_id || !form.package_id)) {
       setMessage("Registrasi On The Spot harus memiliki perusahaan dan paket dari Session MCU.");
       return;
@@ -809,7 +893,11 @@ function RegistrasiUlang({ user }: { user: any }) {
         company_id: form.company_id || null,
         package_id: form.package_id || null,
         photo_data_url: form.photo_data_url || "",
-        program_type: form.program_type || program
+        program_type: form.program_type || program,
+        queue_session_id:
+          program === "corporate"
+            ? Number(selectedSessionContext?.queue_session_id || 0)
+            : null,
       };
 
       const res = await fetch("/api/registrasi-ulang/save", {
@@ -825,16 +913,33 @@ function RegistrasiUlang({ user }: { user: any }) {
         return;
       }
 
-      const savedParticipant = { ...form, ...(json.participant || {}) };
+      const savedParticipant = {
+        ...form,
+        ...(json.participant || {}),
+        session_registered:
+          program === "corporate" ? true : form.session_registered,
+        session_registered_at:
+          json.registration_binding?.registered_at ||
+          form.session_registered_at ||
+          null,
+        queue_session_id:
+          Number(json.queue_session?.id || 0) || form.queue_session_id,
+      };
       setForm(savedParticipant);
       setSelected(savedParticipant);
       setResults((prev) => {
         const next = prev.filter((item) => Number(item.id) !== Number(savedParticipant.id));
         return [savedParticipant, ...next];
       });
-      await loadQueueInfo(savedParticipant.id);
+      await loadQueueInfo(
+        savedParticipant.id,
+        Number(selectedSessionContext?.queue_session_id || 0),
+      );
       setPrintReady(true);
-      setMessage("Registrasi ulang berhasil disimpan dan nomor antrian dirilis. Silakan print barcode/label.");
+      setMessage(
+        json.message ||
+          "Registrasi ulang berhasil disimpan ke Session MCU dan nomor antrean dirilis. Silakan print barcode/label.",
+      );
     } catch (err: any) {
       setMessage(err?.message || "Gagal menyimpan.");
     } finally {
@@ -1028,7 +1133,7 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <div>
-            <label className="label">Database / Session Instansi</label>
+            <label className="label">Database / Session Lokasi</label>
             <select className="input" value={sourceId} disabled={sessionLocked} onChange={(e) => { autoRetrieveKeyRef.current = ""; setSourceId(e.target.value); }}>
               <option value="all">Semua Database</option>
               {!!sources.length && (
@@ -1039,9 +1144,11 @@ function RegistrasiUlang({ user }: { user: any }) {
                 </optgroup>
               )}
               {program === "corporate" && !!sessionSourceOptions.length && (
-                <optgroup label="Session MCU · Perusahaan + Paket">
-                  {sessionSourceOptions.map((item) => (
-                    <option key={item.value} value={item.value}>Session · {item.company_name} · {item.package_name}</option>
+                <optgroup label="Session MCU · Lokasi / Tanggal">
+                  {sessionSourceOptions.map((item: any) => (
+                    <option key={item.value} value={item.value}>
+                      {item.company_name} · {item.location} · {sessionDateLabel(item.session_date)} · {item.package_name}
+                    </option>
                   ))}
                 </optgroup>
               )}
@@ -1076,6 +1183,15 @@ function RegistrasiUlang({ user }: { user: any }) {
             </button>
           )}
         </form>
+
+        {program === "corporate" && getSelectedSessionContext() ? (
+          <div className="mt-4 grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm sm:grid-cols-4">
+            <div><div className="text-xs font-black uppercase text-emerald-700">Perusahaan</div><div className="mt-1 font-black text-slate-900">{getSelectedSessionContext()?.company_name}</div></div>
+            <div><div className="text-xs font-black uppercase text-emerald-700">Lokasi</div><div className="mt-1 font-black text-slate-900">{getSelectedSessionContext()?.location}</div></div>
+            <div><div className="text-xs font-black uppercase text-emerald-700">Tanggal</div><div className="mt-1 font-black text-slate-900">{sessionDateLabel(getSelectedSessionContext()?.session_date)}</div></div>
+            <div><div className="text-xs font-black uppercase text-emerald-700">Paket</div><div className="mt-1 font-black text-slate-900">{getSelectedSessionContext()?.package_name}</div></div>
+          </div>
+        ) : null}
 
         {message && (
           <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">
@@ -1116,7 +1232,7 @@ function RegistrasiUlang({ user }: { user: any }) {
               )}
               {filteredResults.map((p) => {
                   const active = selected?.id === p.id;
-                  const registered = Boolean(p.registrasi_ulang_done);
+                  const registered = isRegisteredForSelectedSession(p);
                   const initials = String(p.name || "?")
                     .split(/\s+/)
                     .filter(Boolean)
@@ -1166,8 +1282,8 @@ function RegistrasiUlang({ user }: { user: any }) {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="text-xl font-black text-slate-900">Detail Peserta</div>
-                      <span className={`rounded-full px-3 py-1 text-xs font-black ${form.id ? (form.registrasi_ulang_done ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700") : "bg-amber-100 text-amber-800"}`}>
-                        {form.id ? (form.registrasi_ulang_done ? "Sudah Registrasi" : "Belum Registrasi") : "On The Spot"}
+                      <span className={`rounded-full px-3 py-1 text-xs font-black ${form.id ? (isRegisteredForSelectedSession(form) ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700") : "bg-amber-100 text-amber-800"}`}>
+                        {form.id ? (isRegisteredForSelectedSession(form) ? "Sudah Registrasi Session Ini" : "Belum Registrasi Session Ini") : "On The Spot"}
                       </span>
                     </div>
                     <div className="mt-1 text-sm text-slate-500">{form.id ? "Edit identitas peserta dan foto onsite tanpa meninggalkan daftar peserta." : "Peserta tambahan / dadakan. Nomor MCU akan dibuat otomatis jika dikosongkan."}</div>
