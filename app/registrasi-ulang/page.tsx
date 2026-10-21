@@ -1265,7 +1265,10 @@ function RegistrasiUlang({ user }: { user: any }) {
 
       {true && (
         <section className="grid items-start gap-4 no-print xl:grid-cols-[390px_minmax(0,1fr)]">
-          <aside className="card flex min-h-[690px] min-w-0 flex-col p-4 xl:sticky xl:top-4 xl:self-start">
+          {/* MCU_CORPORATE_RETRIEVE_SCROLL_PANEL_V496
+              Keep the retrieve list visually aligned with the participant detail panel.
+              The list itself scrolls instead of making the whole page grow downward. */}
+          <aside className="card flex h-[690px] min-h-0 min-w-0 flex-col overflow-hidden p-4 xl:sticky xl:top-4 xl:self-start">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-lg font-black text-slate-900">Hasil Retrieve Data</div>
