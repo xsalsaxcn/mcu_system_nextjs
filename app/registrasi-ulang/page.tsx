@@ -1416,7 +1416,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                     <button type="button" className="btn-primary" disabled={saving} onClick={save}>
                       {saving ? "Menyimpan..." : "Simpan Data"}
                     </button>
-                    <button type="button" className="btn-secondary" disabled={!printReady || !printJobs.length} onClick={printBarcode}>
+                    <button type="button" className="btn-secondary" disabled={!form?.id || !printJobs.length} onClick={printBarcode}>
                       Print Barcode ({printJobs.length})
                     </button>
                   </div>
