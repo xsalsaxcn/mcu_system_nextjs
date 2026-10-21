@@ -30,6 +30,11 @@ function numberField(track: McuQueueTrack) {
   return track === "A" ? "a_queue_number" : "b_queue_number";
 }
 
+// MCU_OPERATOR_EXPORT_CANCEL_REASON_V461
+function cancelReasonField(track: McuQueueTrack) {
+  return track === "A" ? "a_cancel_reason" : "b_cancel_reason";
+}
+
 function timestampField(track: McuQueueTrack, status: string) {
   const prefix = track === "A" ? "a" : "b";
   if (status === "CALLED") return `${prefix}_called_at`;
@@ -164,6 +169,12 @@ export async function POST(req: NextRequest) {
     if (!entryId) return fail("entry_id wajib diisi.", 400);
     const nextStatus = actionToStatus(action);
     if (!nextStatus) return fail("Action antrian tidak dikenali.", 400);
+    const cancelReason = nextStatus === "CANCELLED"
+      ? clean(body.cancel_reason || body.cancelReason).slice(0, 500)
+      : "";
+    if (nextStatus === "CANCELLED" && !cancelReason) {
+      return fail("Alasan cancel wajib diisi.", 400);
+    }
 
     const existing = await supabase
       .from("mcu_queue_entries")
@@ -180,6 +191,9 @@ export async function POST(req: NextRequest) {
       [statusKey]: nextStatus,
       updated_at: now,
     };
+    if (nextStatus === "CANCELLED") {
+      payload[cancelReasonField(track)] = cancelReason;
+    }
     const tsKey = timestampField(track, nextStatus);
     if (tsKey) payload[tsKey] = now;
 
