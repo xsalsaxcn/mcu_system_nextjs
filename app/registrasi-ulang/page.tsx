@@ -1,5 +1,7 @@
 "use client";
 
+// MCU_CORPORATE_VACCINATION_STRUCTURE_V452
+
 // MCU_STICKER_LAYOUT_ROLLBACK_ONLY_V450
 
 // MCU_REG_AUTOLOCK_QUEUE_STICKER_V449
@@ -1443,6 +1445,233 @@ function StationPrintLabel({
 
   const qrPx = 54;
   const qrValue = employeeNik || legacyMcuId || nameText;
+
+  if (isCorporate) {
+    const queueDisplay = queueText || "-";
+    const queueFont = queueDisplay.length > 13 ? Math.max(10, safeFont) : queueDisplay.length > 8 ? Math.max(12, safeFont + 2) : Math.max(16, safeFont + 6);
+    const stageFont = stationText.length > 18 ? Math.max(7, safeFont - 2) : stationText.length > 12 ? Math.max(8, safeFont - 1) : Math.max(9, safeFont);
+    const participantFont = nameText.length > 32 ? Math.max(11, safeFont + 1) : nameText.length > 22 ? Math.max(13, safeFont + 3) : Math.max(15, safeFont + 5);
+
+    return (
+      <section
+      className="label-page bg-white text-black"
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        border: showBorder ? "1px solid #d4d4d8" : undefined,
+        borderRadius: showBorder ? "18px" : undefined,
+        WebkitPrintColorAdjust: "exact",
+        printColorAdjust: "exact"
+      }}
+    >
+        {/* MCU_CORPORATE_VACCINATION_STRUCTURE_V452
+            Vaccination reference pattern: ticket-head -> queue-number -> divider -> participant/detail grid.
+            Outer MCU label canvas is copied verbatim from the existing MCU sticker. */}
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            boxSizing: "border-box",
+            padding: "5px 6px 4px",
+            display: "grid",
+            gridTemplateRows: "auto 1px minmax(0, 1fr)",
+            rowGap: "3px",
+            overflow: "hidden",
+            background: "#ffffff",
+            color: "#000000"
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(54px, 39%)",
+              columnGap: "6px",
+              alignItems: "start",
+              minWidth: 0
+            }}
+          >
+            <div
+              style={{
+                minWidth: 0,
+                fontSize: `${Math.max(6, safeFont - 4)}px`,
+                lineHeight: 1,
+                fontWeight: 900,
+                letterSpacing: "0.02em",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis"
+              }}
+            >
+              HARMONY HEALTH · MCU
+            </div>
+
+            <div style={{ minWidth: 0, textAlign: "right", overflow: "hidden" }}>
+              <div
+                style={{
+                  fontSize: `${Math.max(5, safeFont - 5)}px`,
+                  lineHeight: 1,
+                  fontWeight: 900,
+                  letterSpacing: "0.03em",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                NOMOR ANTRIAN
+              </div>
+              <div
+                style={{
+                  marginTop: "1px",
+                  fontSize: `${queueFont}px`,
+                  lineHeight: 0.92,
+                  fontWeight: 900,
+                  letterSpacing: "-0.035em",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}
+              >
+                {queueDisplay}
+              </div>
+              <div
+                style={{
+                  marginTop: "2px",
+                  fontSize: `${stageFont}px`,
+                  lineHeight: 1,
+                  fontWeight: 900,
+                  whiteSpace: "normal",
+                  overflowWrap: "anywhere",
+                  display: "-webkit-box",
+                  WebkitBoxOrient: "vertical",
+                  WebkitLineClamp: 2,
+                  overflow: "hidden"
+                }}
+              >
+                {stationText}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ width: "100%", height: "1px", background: "#111111" }} />
+
+          <div
+            style={{
+              minHeight: 0,
+              display: "grid",
+              gridTemplateColumns: showQr ? "minmax(0, 1fr) 54px" : "minmax(0, 1fr)",
+              columnGap: "6px",
+              overflow: "hidden"
+            }}
+          >
+            <div
+              style={{
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden"
+              }}
+            >
+              <div
+                style={{
+                  fontSize: `${participantFont}px`,
+                  lineHeight: 0.95,
+                  fontWeight: 900,
+                  letterSpacing: "-0.025em",
+                  whiteSpace: "normal",
+                  overflowWrap: "anywhere",
+                  display: "-webkit-box",
+                  WebkitBoxOrient: "vertical",
+                  WebkitLineClamp: 2,
+                  overflow: "hidden"
+                }}
+              >
+                {nameText || "-"}
+              </div>
+
+              <div style={{ marginTop: "4px", fontSize: `${Math.max(6, safeFont - 3)}px`, lineHeight: 1, fontWeight: 900 }}>
+                NIK KARYAWAN
+              </div>
+              <div
+                style={{
+                  marginTop: "1px",
+                  fontSize: `${Math.max(9, safeFont)}px`,
+                  lineHeight: 1,
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis"
+                }}
+              >
+                {employeeNik || "-"}
+              </div>
+
+              <div
+                style={{
+                  marginTop: "4px",
+                  fontSize: `${Math.max(7, safeFont - 2)}px`,
+                  lineHeight: 1.02,
+                  fontWeight: 900,
+                  whiteSpace: "normal",
+                  overflowWrap: "anywhere",
+                  display: "-webkit-box",
+                  WebkitBoxOrient: "vertical",
+                  WebkitLineClamp: 2,
+                  overflow: "hidden"
+                }}
+              >
+                {institution || "-"}
+              </div>
+            </div>
+
+            {showQr ? (
+              <div
+                style={{
+                  minWidth: 0,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  overflow: "hidden"
+                }}
+              >
+                <div
+                  style={{
+                    width: `${qrPx}px`,
+                    height: `${qrPx}px`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "#ffffff",
+                    flex: "0 0 auto"
+                  }}
+                >
+                  <QRCodeImage value={qrValue} size={qrPx} />
+                </div>
+                {showBarcodeText ? (
+                  <div
+                    style={{
+                      marginTop: "2px",
+                      width: "100%",
+                      textAlign: "center",
+                      fontSize: "9px",
+                      lineHeight: 1,
+                      fontWeight: 800,
+                      color: "#111827",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis"
+                    }}
+                  >
+                    {employeeNik || "-"}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
