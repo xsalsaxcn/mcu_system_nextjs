@@ -660,60 +660,20 @@ function ImportForm({ user }: { user: any }) {
     return singles.length ? singles : [];
   }
 
+  // MCU_CORPORATE_IMPORT_USE_REGISTRATION_SESSIONS_V476
   async function loadCorporateSessionOptionsV471(companyId: string, packageId: string) {
-    const qs = `company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}`;
-
-    const endpoints = [
-      `/api/mcu/queue?${qs}&session_options=1&t=${Date.now()}`,
-      `/api/mcu/session?${qs}&list_sessions=1&t=${Date.now()}`,
-      `/api/mcu/import-mapping?${qs}&t=${Date.now()}`,
-    ];
-
-    let fallback: CorporateImportSessionV466[] = [];
-    let lastError = "";
-
-    for (const endpoint of endpoints) {
-      try {
-        const res = await fetch(endpoint, {
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" },
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || json?.ok === false) {
-          lastError = String(json?.message || `HTTP ${res.status}`);
-          continue;
-        }
-
-        const rows = extractCorporateSessionArraysV471(json);
-        const normalized = rows
-          .map(normalizeCorporateSessionOptionV471)
-          .filter(Boolean) as CorporateImportSessionV466[];
-
-        const filtered = normalized.filter((session) => {
-          const companyMatch = !session.company_id || String(session.company_id) === String(companyId);
-          const packageMatch = !session.package_id || String(session.package_id) === String(packageId);
-          return companyMatch && packageMatch;
-        });
-
-        const deduped = Array.from(
-          new Map(filtered.map((session) => [`${session.id}:${session.label}`, session])).values(),
-        );
-
-        if (!deduped.length) continue;
-
-        const hasRichSession = deduped.some(
-          (session) => Boolean(session.session_date || session.location_name),
-        );
-        if (hasRichSession || deduped.length > 1) return deduped;
-
-        if (!fallback.length) fallback = deduped;
-      } catch (error: any) {
-        lastError = error?.message || String(error || "");
-      }
+    const res = await fetch(
+      `/api/mcu/import-registration-sessions?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}&t=${Date.now()}`,
+      {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      },
+    );
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.ok) {
+      throw new Error(json?.message || "Gagal membaca Session MCU Corporate.");
     }
-
-    if (fallback.length) return fallback;
-    throw new Error(lastError || "Belum ada Session MCU / Lokasi untuk perusahaan + paket ini.");
+    return Array.isArray(json?.sessions) ? json.sessions : [];
   }
 
   // MCU_CORPORATE_IMPORT_SESSION_TOP_V470
