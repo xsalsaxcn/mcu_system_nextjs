@@ -503,6 +503,17 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }
 
+  // MCU_QUEUE_BINDING_PRINT100_V456
+  useEffect(() => {
+    const participantId = Number(form?.id || selected?.id || 0);
+    if (program !== "corporate" || !participantId) {
+      setQueueInfo(null);
+      return;
+    }
+    void loadQueueInfo(participantId);
+  }, [form?.id, selected?.id, program]);
+
+
 
   const activeStationPrintOptions = useMemo<StationPrintOption[]>(() => {
     return packageStationOptions;
@@ -949,6 +960,8 @@ function RegistrasiUlang({ user }: { user: any }) {
             height: 30mm !important;
             page-break-after: always;
             break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
             box-sizing: border-box;
             overflow: hidden;
             margin: 0 !important;
@@ -1436,12 +1449,29 @@ function StationPrintLabel({
     nameText.length > 24 ? Math.max(14, safeFont + 4) :
     Math.max(16, safeFont + 6);
 
-  const queueA = String(queueInfo?.a_queue_number || "").trim();
-  const queueB = String(queueInfo?.b_queue_number || "").trim();
+  const queueASequence = Number(queueInfo?.a_queue_sequence || form?.a_queue_sequence || 0);
+  const queueBSequence = Number(queueInfo?.b_queue_sequence || form?.b_queue_sequence || 0);
+  const queueA = String(
+    queueInfo?.a_queue_number || queueInfo?.queue_a_number || queueInfo?.queueA ||
+    form?.a_queue_number || form?.queue_a_number || form?.queueA ||
+    (queueASequence > 0 ? `A-${String(queueASequence).padStart(3, "0")}` : "")
+  ).trim();
+  const queueB = String(
+    queueInfo?.b_queue_number || queueInfo?.queue_b_number || queueInfo?.queueB ||
+    form?.b_queue_number || form?.queue_b_number || form?.queueB ||
+    (queueBSequence > 0 ? `B-${String(queueBSequence).padStart(3, "0")}` : "")
+  ).trim();
+  const combinedQueueLabel = String(
+    queueInfo?.queue_label || queueInfo?.queue_number ||
+    form?.queue_label || form?.queue_number || form?.nomor_antrian || ""
+  ).trim();
   const stageUpper = `${station.key} ${stationText}`.toUpperCase();
   const isLabStage = /(DARAH|LAB|HBSAG|ANTI[ _-]?HBS|HIV|HEMATO|URIC|GLUCO|CHOLESTEROL)/.test(stageUpper);
   const isRadiologyStage = /(RONTGEN|RADIOLOGI|THORAX|XRAY|X-RAY)/.test(stageUpper);
-  const queueText = isLabStage ? queueA : isRadiologyStage ? queueB : [queueA, queueB].filter(Boolean).join(" / ");
+  const queueText =
+    isLabStage ? (queueA || combinedQueueLabel) :
+    isRadiologyStage ? (queueB || combinedQueueLabel) :
+    ([queueA, queueB].filter(Boolean).join(" / ") || combinedQueueLabel);
 
   const qrPx = 54;
   const qrValue = employeeNik || legacyMcuId || nameText;
@@ -1472,10 +1502,10 @@ function StationPrintLabel({
             width: "100%",
             height: "100%",
             boxSizing: "border-box",
-            padding: "5px 6px 4px",
+            padding: "3px 6px 2px",
             display: "grid",
-            gridTemplateRows: "minmax(34px, auto) 1px minmax(0, 1fr)",
-            rowGap: "3px",
+            gridTemplateRows: "34px 1px minmax(0, 1fr)",
+            rowGap: "2px",
             overflow: "hidden",
             background: "#ffffff",
             color: "#000000"

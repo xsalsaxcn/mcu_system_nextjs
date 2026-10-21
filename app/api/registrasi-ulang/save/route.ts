@@ -56,14 +56,11 @@ async function tryEnqueueMcuCorporateParticipant(req: NextRequest, supabase: any
   try {
     if (String(participant?.program_type || "").toLowerCase() !== "corporate") return;
 
-    const selected = getMcuCorporateSession(req);
-    if (!selected) return;
-
+    // MCU_QUEUE_RELEASE_ON_REGISTRATION_V456
+    // Registrasi Ulang adalah event rilis antrian; company/package peserta menjadi sumber kebenaran.
     const companyId = Number(participant?.company_id || 0);
     const packageId = Number(participant?.package_id || 0);
     if (!companyId || !packageId) return;
-    if (companyId !== Number(selected.company_id) || packageId !== Number(selected.package_id)) return;
-
     const queueSession = await ensureMcuQueueSession(supabase, {
       companyId,
       packageId,

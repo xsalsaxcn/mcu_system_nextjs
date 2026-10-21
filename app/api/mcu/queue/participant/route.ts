@@ -55,8 +55,15 @@ export async function GET(req: NextRequest) {
 
   if (entryRes.error) return fail(entryRes.error.message, 500);
 
+  const entry = entryRes.data || null;
+  // MCU_QUEUE_ALIAS_RESPONSE_V456
   return ok({
     queue_session: sessionRes.data,
-    queue_entry: entryRes.data || null,
+    queue_entry: entry,
+    a_queue_number: entry?.a_queue_number || null,
+    b_queue_number: entry?.b_queue_number || null,
+    queueA: entry?.a_queue_number || null,
+    queueB: entry?.b_queue_number || null,
+    queue_label: [entry?.a_queue_number, entry?.b_queue_number].filter(Boolean).join(" / ") || null,
   });
 }
