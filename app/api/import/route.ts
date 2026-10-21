@@ -42,6 +42,28 @@ export async function POST(req: NextRequest) {
   const packageName = String(form.get("package_name") || defaultPackage).trim();
   const description = String(form.get("description") || "").trim();
 
+  // MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
+  let corporateMapping: Record<string, string> = {};
+  try {
+    const rawMapping = String(form.get("mapping_json") || "").trim();
+    corporateMapping = rawMapping ? JSON.parse(rawMapping) : {};
+  } catch {
+    return fail("mapping_json tidak valid.", 400);
+  }
+  const queueSessionId = Number(form.get("queue_session_id") || 0);
+  const locationMode = String(form.get("location_mode") || "session").trim().toLowerCase();
+  const locationColumn = String(form.get("location_column") || "").trim();
+  const locationValue = String(form.get("location_value") || "").trim();
+  const mappingSheetName = String(form.get("mapping_sheet_name") || "").trim();
+  const mappingHeaderRow = Number(form.get("mapping_header_row") || 0);
+
+  if (programType === PROGRAM_CORPORATE && Object.keys(corporateMapping).length > 0) {
+    if (!String(corporateMapping.name || "").trim()) return fail("Mapping Nama Lengkap wajib dipilih.", 400);
+    if (!queueSessionId) return fail("Session MCU / Lokasi wajib dipilih untuk import Corporate.", 400);
+    if (locationMode === "column" && !locationColumn) return fail("Kolom sumber lokasi wajib dipilih.", 400);
+    if (locationMode === "fixed" && !locationValue) return fail("Nilai lokasi tetap wajib diisi.", 400);
+  }
+
   const supabase = getSupabaseAdmin();
 
   // V153.39 — Vaccination company-only setup.
@@ -144,7 +166,16 @@ export async function POST(req: NextRequest) {
     company_name: companyName,
     package_name: packageName,
     description,
-    program_type: programType
+    program_type: programType,
+    corporate_mapping: corporateMapping,
+    corporate_session: programType === PROGRAM_CORPORATE && queueSessionId > 0 ? {
+      queue_session_id: queueSessionId,
+      location_mode: locationMode,
+      location_column: locationColumn,
+      location_value: locationValue,
+      sheet_name: mappingSheetName,
+      header_row: Number.isFinite(mappingHeaderRow) ? mappingHeaderRow : 0,
+    } : undefined,
   });
 
   return ok({ stats });

@@ -62,6 +62,43 @@ function findColumn(headers: string[], candidates: string[]) {
   return -1;
 }
 
+// MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
+function findMappedColumn(headers: string[], mappedHeader: any) {
+  const target = clean(mappedHeader);
+  if (!target) return -1;
+  const targetNorm = norm(target);
+  return headers.findIndex((header) => norm(header) === targetNorm);
+}
+
+function corporateSessionLocationV466(row: any) {
+  return clean(
+    row?.location_name ??
+      row?.session_location ??
+      row?.location ??
+      row?.site_name ??
+      row?.site ??
+      row?.campus_name ??
+      row?.campus ??
+      "",
+  );
+}
+
+function corporateSessionDateV466(row: any) {
+  return clean(
+    row?.session_date ??
+      row?.event_date ??
+      row?.exam_date ??
+      row?.mcu_date ??
+      row?.date ??
+      "",
+  ).slice(0, 10);
+}
+
+function schemaColumnMissingV466(error: any) {
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return text.includes("column") || text.includes("schema cache") || text.includes("does not exist");
+}
+
 function chooseHeaderRow(rows: any[][]) {
   const known = [
     "nama",
@@ -600,8 +637,17 @@ export async function importParticipantsFromExcel(
     package_name: string;
     description?: string;
     program_type?: string;
-      source_id?: number;
-},
+    source_id?: number;
+    corporate_mapping?: Record<string, string>;
+    corporate_session?: {
+      queue_session_id?: number;
+      location_mode?: string;
+      location_column?: string;
+      location_value?: string;
+      sheet_name?: string;
+      header_row?: number;
+    };
+  },
 ) {
   await seedDefaults(supabase);
 
@@ -629,6 +675,24 @@ export async function importParticipantsFromExcel(
     description: options.description,
     program_type: programType,
   });
+  // Resolve selected Corporate Session/Lokasi once and verify that it belongs
+  // to the same company + package chosen on Import.
+  let corporateSessionRowV466: any = null;
+  const requestedCorporateSessionIdV466 = Number(options.corporate_session?.queue_session_id || 0);
+  if (programType === PROGRAM_CORPORATE && requestedCorporateSessionIdV466 > 0) {
+    const sessionResultV466 = await supabase
+      .from("mcu_queue_sessions")
+      .select("*")
+      .eq("id", requestedCorporateSessionIdV466)
+      .maybeSingle();
+    if (sessionResultV466.error) throw sessionResultV466.error;
+    if (!sessionResultV466.data) throw new Error("Session MCU / Lokasi yang dipilih tidak ditemukan.");
+    if (Number(sessionResultV466.data.company_id || 0) !== Number(companyId) || Number(sessionResultV466.data.package_id || 0) !== Number(packageId)) {
+      throw new Error("Session MCU / Lokasi tidak sesuai dengan perusahaan + paket import.");
+    }
+    corporateSessionRowV466 = sessionResultV466.data;
+  }
+
   const workbook = XLSX.read(fileBuffer, { type: "buffer" });
 
   const stats: any = {
@@ -644,6 +708,11 @@ export async function importParticipantsFromExcel(
     skipped_sheets: [],
     duplicate_candidates_skipped: 0,
     existing_participants_skipped: 0,
+    corporate_mapping_v466: programType === PROGRAM_CORPORATE ? options.corporate_mapping || {} : null,
+    corporate_queue_session_id_v466: corporateSessionRowV466?.id || null,
+    corporate_session_location_v466: corporateSessionRowV466 ? corporateSessionLocationV466(corporateSessionRowV466) : "",
+    corporate_session_date_v466: corporateSessionRowV466 ? corporateSessionDateV466(corporateSessionRowV466) : "",
+    corporate_session_assignments_v466: 0,
   };
 
   const existingParticipantKeysAppendOnlyV214 = await loadExistingParticipantKeysAppendOnlyV214(supabase, programType);
@@ -807,6 +876,23 @@ export async function importParticipantsFromExcel(
       "Tipe Karyawan",
     ]);
 
+    // MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
+    const corporateMappingV466 = programType === PROGRAM_CORPORATE ? (options.corporate_mapping || {}) : {};
+    const mappedNameColV466 = findMappedColumn(headers, corporateMappingV466.name);
+    const mappedEmployeeNikColV466 = findMappedColumn(headers, corporateMappingV466.employee_nik);
+    const mappedBirthDateColV466 = findMappedColumn(headers, corporateMappingV466.birth_date);
+    const mappedDepartmentColV466 = findMappedColumn(headers, corporateMappingV466.department);
+    const mappedPositionColV466 = findMappedColumn(headers, corporateMappingV466.position);
+    const mappedNikColV466 = findMappedColumn(headers, corporateMappingV466.nik);
+    const mappedGenderColV466 = findMappedColumn(headers, corporateMappingV466.gender);
+    const mappedPhoneColV466 = findMappedColumn(headers, corporateMappingV466.phone);
+    const mappedLocationColV466 = findMappedColumn(headers, options.corporate_session?.location_column);
+
+    const effectiveNameColV466 = programType === PROGRAM_CORPORATE && mappedNameColV466 >= 0 ? mappedNameColV466 : nameCol;
+    const effectiveExternalIdColV466 = programType === PROGRAM_CORPORATE && mappedEmployeeNikColV466 >= 0 ? mappedEmployeeNikColV466 : externalIdCol;
+    const effectiveNikColV466 = programType === PROGRAM_CORPORATE && mappedNikColV466 >= 0 ? mappedNikColV466 : nikCol;
+    const effectiveGenderColV466 = programType === PROGRAM_CORPORATE && mappedGenderColV466 >= 0 ? mappedGenderColV466 : genderCol;
+
     stats.detected_columns.push({
       sheet: sheetName,
       header_row: headerRowIndex + 1,
@@ -820,10 +906,21 @@ export async function importParticipantsFromExcel(
       vaccinationBatchCol,
       vaccinationTimeAreaCol,
       vaccinationTimeNameCol,
+      corporate_mapping_v466: programType === PROGRAM_CORPORATE ? {
+        name: effectiveNameColV466,
+        employee_nik: effectiveExternalIdColV466,
+        birth_date: mappedBirthDateColV466,
+        department: mappedDepartmentColV466,
+        position: mappedPositionColV466,
+        nik: effectiveNikColV466,
+        gender: effectiveGenderColV466,
+        phone: mappedPhoneColV466,
+        location: mappedLocationColV466,
+      } : null,
     });
 
     if (
-      nameCol < 0 &&
+      effectiveNameColV466 < 0 &&
       putraCol < 0 &&
       putriCol < 0 &&
       !(programType === PROGRAM_VACCINATION && vaccinationNameCol >= 0)
@@ -870,20 +967,37 @@ export async function importParticipantsFromExcel(
         external_id:
           programType === PROGRAM_VACCINATION && vaccinationBinusianIdCol >= 0
             ? clean(row[vaccinationBinusianIdCol])
-            : externalIdCol >= 0
-              ? clean(row[externalIdCol])
+            : effectiveExternalIdColV466 >= 0
+              ? clean(row[effectiveExternalIdColV466])
               : "",
-        nik: nikCol >= 0 ? clean(row[nikCol]) : "",
+        nik: effectiveNikColV466 >= 0 ? clean(row[effectiveNikColV466]) : "",
+        birth_date: mappedBirthDateColV466 >= 0 ? parseDateValue(row[mappedBirthDateColV466]) : "",
+        department: mappedDepartmentColV466 >= 0 ? clean(row[mappedDepartmentColV466]) : "",
+        position: mappedPositionColV466 >= 0 ? clean(row[mappedPositionColV466]) : "",
+        phone: mappedPhoneColV466 >= 0 ? clean(row[mappedPhoneColV466]) : "",
+        mapped_location:
+          programType === PROGRAM_CORPORATE
+            ? String(options.corporate_session?.location_mode || "session") === "column" && mappedLocationColV466 >= 0
+              ? clean(row[mappedLocationColV466])
+              : String(options.corporate_session?.location_mode || "session") === "fixed"
+                ? clean(options.corporate_session?.location_value)
+                : corporateSessionLocationV466(corporateSessionRowV466)
+            : "",
+        raw_json_v466: programType === PROGRAM_CORPORATE
+          ? Object.fromEntries(headers.map((header, idx) => [header, row[idx] ?? ""]))
+          : null,
         service_date:
-          programType === PROGRAM_VACCINATION &&
-          parsedVaccinationArea.session_date
+          programType === PROGRAM_VACCINATION && parsedVaccinationArea.session_date
             ? parsedVaccinationArea.session_date
-            : serviceDate,
+            : programType === PROGRAM_CORPORATE && corporateSessionDateV466(corporateSessionRowV466)
+              ? corporateSessionDateV466(corporateSessionRowV466)
+              : serviceDate,
         mcu_date:
-          programType === PROGRAM_VACCINATION &&
-          parsedVaccinationArea.session_date
+          programType === PROGRAM_VACCINATION && parsedVaccinationArea.session_date
             ? parsedVaccinationArea.session_date
-            : serviceDate,
+            : programType === PROGRAM_CORPORATE && corporateSessionDateV466(corporateSessionRowV466)
+              ? corporateSessionDateV466(corporateSessionRowV466)
+              : serviceDate,
         exam_type:
           programType === PROGRAM_VACCINATION && vaccinationBatchName
             ? vaccinationBatchName
@@ -940,7 +1054,7 @@ export async function importParticipantsFromExcel(
 
       const primaryName =
         vaccinationPrimaryName ||
-        (nameCol >= 0 && clean(row[nameCol]) ? clean(row[nameCol]) : "");
+        (effectiveNameColV466 >= 0 && clean(row[effectiveNameColV466]) ? clean(row[effectiveNameColV466]) : "");
 
       // v168:
       // Prefer a real name column when it exists.
@@ -958,8 +1072,8 @@ export async function importParticipantsFromExcel(
                       ? row[genderCol]
                       : "",
                 )
-              : genderCol >= 0
-                ? clean(row[genderCol])
+              : effectiveGenderColV466 >= 0
+                ? clean(row[effectiveGenderColV466])
                 : "",
           province:
             programType === PROGRAM_VACCINATION
@@ -1097,7 +1211,7 @@ export async function importParticipantsFromExcel(
           name: candidate.name,
           nik: base.nik,
           gender: candidate.gender,
-          birth_date: "",
+          birth_date: base.birth_date || "",
           company_id: companyId,
           package_id: packageId,
           mcu_date: base.mcu_date,
@@ -1108,6 +1222,18 @@ export async function importParticipantsFromExcel(
           exam_type: base.exam_type,
           doctor_assigned: base.doctor_assigned,
           nurse_assigned: base.nurse_assigned,
+          __corporate_import: programType === PROGRAM_CORPORATE
+            ? {
+                employee_nik: base.external_id || "",
+                department: base.department || "",
+                position: base.position || "",
+                phone: base.phone || "",
+                location_name: base.mapped_location || corporateSessionLocationV466(corporateSessionRowV466),
+                session_date: corporateSessionDateV466(corporateSessionRowV466),
+                queue_session_id: Number(corporateSessionRowV466?.id || 0),
+                raw_json: base.raw_json_v466 || {},
+              }
+            : null,
           __vaccination_import: base.vaccination_meta
             ? {
                 ...base.vaccination_meta,
@@ -1137,7 +1263,7 @@ export async function importParticipantsFromExcel(
   for (let i = 0; i < insertRows.length; i += chunkSize) {
     const chunk = insertRows.slice(i, i + chunkSize);
     const participantRows = chunk.map((row) => {
-      const { __vaccination_import, ...participant } = row;
+      const { __vaccination_import, __corporate_import, ...participant } = row;
       return participant;
     });
 
@@ -1180,14 +1306,57 @@ export async function importParticipantsFromExcel(
       await markInsertedParticipantsLabelUnprintedV216(supabase, (data || []).map((p: any) => Number(p.id)));
       stats.participants_created += data?.length || 0;
     } else {
-            const { data, error } = await supabase
+      const { data, error } = await supabase
         .from("participants")
         .insert(participantRows)
         .select("id");
       if (error) throw error;
+
+      const insertedRows = data || [];
+
+      if (programType === PROGRAM_CORPORATE && insertedRows.length) {
+        for (let idx = 0; idx < insertedRows.length; idx += 1) {
+          const participantId = Number(insertedRows[idx]?.id || 0);
+          const meta = chunk[idx]?.__corporate_import || {};
+          if (!participantId) continue;
+
+          // Optional participant profile columns were introduced in later MCU versions.
+          // Update each field independently so older schemas keep importing safely.
+          const optionalParticipantFields: Array<[string, any]> = [
+            ["employee_nik", meta.employee_nik || null],
+            ["department", meta.department || null],
+            ["position", meta.position || null],
+            ["phone", meta.phone || null],
+          ];
+          for (const [field, value] of optionalParticipantFields) {
+            if (value === null || value === "") continue;
+            const updateResult = await supabase.from("participants").update({ [field]: value }).eq("id", participantId);
+            if (updateResult.error && !schemaColumnMissingV466(updateResult.error)) throw updateResult.error;
+          }
+
+          if (Number(meta.queue_session_id || 0) > 0) {
+            const assignmentResult = await supabase
+              .from("mcu_participant_session_assignments")
+              .upsert({
+                participant_id: participantId,
+                queue_session_id: Number(meta.queue_session_id),
+                source_id: sourceId,
+                location_name: meta.location_name || null,
+                session_date: meta.session_date || null,
+                department: meta.department || null,
+                position: meta.position || null,
+                raw_json: meta.raw_json || {},
+                updated_at: new Date().toISOString(),
+              }, { onConflict: "participant_id,queue_session_id" });
+            if (assignmentResult.error) throw assignmentResult.error;
+            stats.corporate_session_assignments_v466 += 1;
+          }
+        }
+      }
+
       // LABEL_PRINT_MARK_NON_VACCINATION_V216
-      await markInsertedParticipantsLabelUnprintedV216(supabase, (data || []).map((p: any) => Number(p.id)));
-      stats.participants_created += data?.length || chunk.length;
+      await markInsertedParticipantsLabelUnprintedV216(supabase, insertedRows.map((p: any) => Number(p.id)));
+      stats.participants_created += insertedRows.length || chunk.length;
     }
   }
 

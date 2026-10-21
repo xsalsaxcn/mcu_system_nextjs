@@ -95,6 +95,38 @@ type ImportCorporatePackageOptionV432 = {
   company_ids: number[];
 };
 
+// MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
+type CorporateImportSessionV466 = {
+  id: number;
+  company_id: number;
+  package_id: number;
+  company_name: string;
+  package_name: string;
+  location_name: string;
+  session_date: string;
+  label: string;
+};
+
+type CorporatePreviewV466 = {
+  sheet_name: string;
+  header_row: number;
+  headers: string[];
+  row_count: number;
+  preview: Record<string, any>[];
+  suggested_mapping: Record<string, string>;
+};
+
+const CORPORATE_MAPPING_FIELDS_V466 = [
+  { key: "name", label: "Nama Lengkap", required: true },
+  { key: "employee_nik", label: "NIK Karyawan / Employee ID", required: false },
+  { key: "birth_date", label: "Tanggal Lahir", required: false },
+  { key: "department", label: "Department / Division", required: false },
+  { key: "position", label: "Posisi / Jabatan", required: false },
+  { key: "nik", label: "NIK / Identitas", required: false },
+  { key: "gender", label: "Jenis Kelamin", required: false },
+  { key: "phone", label: "No HP / WhatsApp", required: false },
+] as const;
+
 const NEW_VACCINATION_COMPANY_V238 = "__new_company__";
 // MCU_CORPORATE_IMPORT_COMPANY_DROPDOWN_V431
 const NEW_CORPORATE_COMPANY_V431 = "__new_corporate_company__";
@@ -116,6 +148,15 @@ function ImportForm({ user }: { user: any }) {
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [corporatePreviewV466, setCorporatePreviewV466] = useState<CorporatePreviewV466 | null>(null);
+  const [corporateMappingV466, setCorporateMappingV466] = useState<Record<string, string>>({});
+  const [corporateSessionsV466, setCorporateSessionsV466] = useState<CorporateImportSessionV466[]>([]);
+  const [corporateSessionIdV466, setCorporateSessionIdV466] = useState("");
+  const [corporateLocationModeV466, setCorporateLocationModeV466] = useState<"session" | "column" | "fixed">("session");
+  const [corporateLocationColumnV466, setCorporateLocationColumnV466] = useState("");
+  const [corporateFixedLocationV466, setCorporateFixedLocationV466] = useState("");
+  const [corporateMappingLoadingV466, setCorporateMappingLoadingV466] = useState(false);
+  const [corporateMappingErrorV466, setCorporateMappingErrorV466] = useState("");
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [companyOnlyModeV239, setCompanyOnlyModeV239] = useState(false);
@@ -239,6 +280,15 @@ function ImportForm({ user }: { user: any }) {
     setInstitutionName(target.value === "vaccination" ? "" : target.institution);
     setCompanyName(target.value === "vaccination" ? "" : target.company);
     setPackageName(target.packageName);
+    setFile(null);
+    setCorporatePreviewV466(null);
+    setCorporateMappingV466({});
+    setCorporateSessionsV466([]);
+    setCorporateSessionIdV466("");
+    setCorporateLocationModeV466("session");
+    setCorporateLocationColumnV466("");
+    setCorporateFixedLocationV466("");
+    setCorporateMappingErrorV466("");
   }
 
 
@@ -448,9 +498,71 @@ function ImportForm({ user }: { user: any }) {
     }
   }
 
+  async function openCorporateMappingV466() {
+    if (programType !== "corporate") return;
+    if (!file) return alert("Upload file Excel dulu.");
+    if (!corporateCompanyChoiceV431 || corporateCompanyChoiceV431 === NEW_CORPORATE_COMPANY_V431) {
+      return alert("Pilih perusahaan MCU Corporate existing dulu agar Session/Lokasi bisa dibaca.");
+    }
+    if (!corporatePackageChoiceV432 || corporatePackageChoiceV432 === NEW_CORPORATE_PACKAGE_V432) {
+      return alert("Pilih paket pemeriksaan existing dulu agar Session/Lokasi bisa dibaca.");
+    }
+
+    setCorporateMappingLoadingV466(true);
+    setCorporateMappingErrorV466("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const [previewRes, sessionRes] = await Promise.all([
+        fetch("/api/mcu/import-mapping", { method: "POST", body: form }),
+        fetch(`/api/mcu/import-mapping?company_id=${encodeURIComponent(corporateCompanyChoiceV431)}&package_id=${encodeURIComponent(corporatePackageChoiceV432)}`, { cache: "no-store" }),
+      ]);
+      const previewJson = await previewRes.json().catch(() => ({}));
+      const sessionJson = await sessionRes.json().catch(() => ({}));
+      if (!previewRes.ok || !previewJson?.ok) throw new Error(previewJson?.message || "Gagal membaca header Excel.");
+      if (!sessionRes.ok || !sessionJson?.ok) throw new Error(sessionJson?.message || "Gagal membaca Session MCU/Lokasi.");
+
+      const preview = previewJson.preview as CorporatePreviewV466;
+      const sessions = Array.isArray(sessionJson?.sessions) ? sessionJson.sessions : [];
+      setCorporatePreviewV466(preview);
+      setCorporateMappingV466(preview?.suggested_mapping || {});
+      setCorporateSessionsV466(sessions);
+      setCorporateSessionIdV466(sessions.length === 1 ? String(sessions[0].id) : "");
+      setCorporateLocationModeV466("session");
+      setCorporateLocationColumnV466("");
+      setCorporateFixedLocationV466("");
+    } catch (error: any) {
+      setCorporateMappingErrorV466(error?.message || "Gagal menyiapkan mapping data.");
+    } finally {
+      setCorporateMappingLoadingV466(false);
+    }
+  }
+
+  function updateCorporateMappingV466(key: string, value: string) {
+    setCorporateMappingV466((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function resetCorporateMappingV466() {
+    setCorporatePreviewV466(null);
+    setCorporateMappingV466({});
+    setCorporateSessionsV466([]);
+    setCorporateSessionIdV466("");
+    setCorporateLocationColumnV466("");
+    setCorporateFixedLocationV466("");
+    setCorporateLocationModeV466("session");
+    setCorporateMappingErrorV466("");
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return alert("Upload file Excel dulu.");
+    if (programType === "corporate") {
+      if (!corporatePreviewV466) return alert("Klik Mapping Data & Session dulu sebelum import.");
+      if (!String(corporateMappingV466.name || "").trim()) return alert("Mapping Nama Lengkap wajib dipilih.");
+      if (!corporateSessionIdV466) return alert("Pilih Session MCU / Lokasi untuk import ini.");
+      if (corporateLocationModeV466 === "column" && !corporateLocationColumnV466) return alert("Pilih kolom Excel sumber lokasi.");
+      if (corporateLocationModeV466 === "fixed" && !corporateFixedLocationV466.trim()) return alert("Isi nilai lokasi tetap.");
+    }
 
     const form = new FormData();
     form.append("program_type", programType);
@@ -460,6 +572,15 @@ function ImportForm({ user }: { user: any }) {
     form.append("company_name", companyName);
     form.append("package_name", packageName);
     form.append("description", description);
+    if (programType === "corporate" && corporatePreviewV466) {
+      form.append("mapping_json", JSON.stringify(corporateMappingV466));
+      form.append("queue_session_id", corporateSessionIdV466);
+      form.append("location_mode", corporateLocationModeV466);
+      form.append("location_column", corporateLocationColumnV466);
+      form.append("location_value", corporateFixedLocationV466);
+      form.append("mapping_sheet_name", corporatePreviewV466.sheet_name || "");
+      form.append("mapping_header_row", String(corporatePreviewV466.header_row || 1));
+    }
     form.append("file", file);
 
     setLoading(true);
@@ -789,15 +910,141 @@ function ImportForm({ user }: { user: any }) {
 
         <div>
           <label className="label">Upload Excel</label>
-          <input className="input" type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files?.[0] || null)} required />
+          <input
+            className="input"
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] || null);
+              resetCorporateMappingV466();
+            }}
+            required
+          />
           <div className="mt-2 text-xs text-slate-500">
             {programType === "vaccination"
               ? "Header vaksinasi: Nama Peserta, ID Peserta/NIK, Jenis Kelamin, Email, No HP, BatchName, TimeAreaName, TimeName. File BINUS dengan Child Name, Child Gender, Parent Binusian ID, Parent Email, Parent HP juga didukung."
-              : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
+              : programType === "corporate"
+                ? "Format Corporate boleh bervariasi. Setelah file dipilih, klik Mapping Data & Session agar kolom Excel dan Session/Lokasi diperiksa sebelum import."
+                : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
           </div>
         </div>
 
-        <button className="btn-primary" disabled={loading}>{loading ? "Import berjalan..." : "Import Database Peserta"}</button>
+        {programType === "corporate" ? (
+          <section className="rounded-3xl border border-cyan-200 bg-cyan-50/50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-lg font-black text-slate-900">Mapping Data & Session</div>
+                <div className="mt-1 text-sm font-semibold text-slate-600">Baca header Excel, tentukan field sistem, lalu hubungkan seluruh peserta ke Session MCU / Lokasi yang benar.</div>
+              </div>
+              <button
+                type="button"
+                disabled={!file || corporateMappingLoadingV466}
+                onClick={openCorporateMappingV466}
+                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+              >
+                {corporateMappingLoadingV466 ? "Membaca Excel..." : corporatePreviewV466 ? "Baca Ulang Mapping" : "Mapping Data & Session →"}
+              </button>
+            </div>
+
+            {corporateMappingErrorV466 ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{corporateMappingErrorV466}</div> : null}
+
+            {corporatePreviewV466 ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black">Step 1 · Mapping Kolom Excel</div>
+                      <div className="text-xs font-semibold text-slate-500">Sheet: {corporatePreviewV466.sheet_name} · Header baris {corporatePreviewV466.header_row} · {corporatePreviewV466.row_count} baris data terbaca</div>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">Preview siap</span>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {CORPORATE_MAPPING_FIELDS_V466.map((field) => (
+                      <div key={field.key}>
+                        <label className="label">{field.label}{field.required ? " *" : ""}</label>
+                        <select
+                          className="input"
+                          value={corporateMappingV466[field.key] || ""}
+                          onChange={(e) => updateCorporateMappingV466(field.key, e.target.value)}
+                        >
+                          <option value="">— Tidak ada / jangan import —</option>
+                          {corporatePreviewV466.headers.map((header) => <option key={`${field.key}-${header}`} value={header}>{header}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-blue-200 bg-white p-4">
+                  <div className="font-black">Step 2 · Mapping ke Session MCU / Lokasi</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">Peserta hasil import akan ditautkan ke Session yang dipilih, bukan menebak lokasi dari Department/BU.</div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="md:col-span-2">
+                      <label className="label">Session MCU / Lokasi *</label>
+                      <select className="input" value={corporateSessionIdV466} onChange={(e) => setCorporateSessionIdV466(e.target.value)}>
+                        <option value="">- Pilih Session MCU / Lokasi -</option>
+                        {corporateSessionsV466.map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}
+                      </select>
+                      {!corporateSessionsV466.length ? <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Belum ada Session MCU/Lokasi untuk perusahaan + paket ini. Buat Session MCU terlebih dahulu.</div> : null}
+                    </div>
+                    <div>
+                      <label className="label">Sumber Lokasi</label>
+                      <select className="input" value={corporateLocationModeV466} onChange={(e) => setCorporateLocationModeV466(e.target.value as any)}>
+                        <option value="session">Gunakan Lokasi Session</option>
+                        <option value="column">Ambil dari kolom Excel</option>
+                        <option value="fixed">Isi nilai tetap</option>
+                      </select>
+                    </div>
+                    <div>
+                      {corporateLocationModeV466 === "column" ? (
+                        <>
+                          <label className="label">Kolom Lokasi Excel</label>
+                          <select className="input" value={corporateLocationColumnV466} onChange={(e) => setCorporateLocationColumnV466(e.target.value)}>
+                            <option value="">- Pilih kolom -</option>
+                            {corporatePreviewV466.headers.map((header) => <option key={`loc-${header}`} value={header}>{header}</option>)}
+                          </select>
+                        </>
+                      ) : corporateLocationModeV466 === "fixed" ? (
+                        <>
+                          <label className="label">Nilai Lokasi Tetap</label>
+                          <input className="input" value={corporateFixedLocationV466} onChange={(e) => setCorporateFixedLocationV466(e.target.value)} placeholder="Contoh: BINUS - SERPONG" />
+                        </>
+                      ) : (
+                        <>
+                          <label className="label">Lokasi</label>
+                          <div className="rounded-2xl border bg-slate-50 px-4 py-3 text-sm font-black text-slate-800">{corporateSessionsV466.find((row) => String(row.id) === corporateSessionIdV466)?.location_name || "Akan mengikuti Session yang dipilih"}</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="font-black">Step 3 · Preview Data</div>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">Contoh 5 baris pertama sebelum import. Nilai asli Excel tidak diubah.</div>
+                  <div className="mt-3 overflow-x-auto rounded-xl border">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-slate-50">
+                        <tr>{corporatePreviewV466.headers.slice(0, 8).map((header) => <th key={header} className="whitespace-nowrap p-2 text-left font-black text-slate-600">{header}</th>)}</tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {corporatePreviewV466.preview.slice(0, 5).map((row, idx) => (
+                          <tr key={idx}>{corporatePreviewV466.headers.slice(0, 8).map((header) => <td key={`${idx}-${header}`} className="max-w-56 whitespace-nowrap p-2 text-slate-700">{String(row?.[header] ?? "")}</td>)}</tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <button className="btn-primary w-full" disabled={loading || !corporateSessionIdV466}>
+                  {loading ? "Import berjalan..." : `Import ${corporatePreviewV466.row_count || ""} Peserta ke Session Terpilih`}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        ) : (
+          <button className="btn-primary" disabled={loading}>{loading ? "Import berjalan..." : "Import Database Peserta"}</button>
+        )}
 
           </>
         )}
