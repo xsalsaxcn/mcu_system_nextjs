@@ -18,20 +18,39 @@ function csvEscape(value: any) {
 function toCsv(rows: any[]) {
   const headers = [
     "ANTRIAN",
+    "TRACK",
+    "JENIS_LAYANAN",
     "NAMA",
+    "FAMILY_ROLE",
     "MCU_ID",
     "EMPLOYEE_ID",
+    "NIK",
     "PERUSAHAAN",
     "DEPARTEMEN",
-    "NIK",
+    "SESSION",
+    "LOKASI",
+    "TANGGAL_SESSION",
+    "SOURCE_DATABASE",
     "STATUS",
+    "ITEM_STATUS",
     "VAKSIN",
+    "BRAND",
     "LOT_NUMBER",
+    "EXP_LOT",
+    "DOSIS",
     "TANGGAL_PEMBERIAN",
+    "TANGGAL_SELESAI_FLOW",
     "NEXT_DOSE",
     "DOKTER_PETUGAS",
+    "SUMBER_SELESAI",
+    "PRICE_CATEGORY",
+    "HARGA",
     "PAYMENT_METHOD",
+    "SURCHARGE_PERCENT",
+    "SURCHARGE_AMOUNT",
+    "TOTAL_PAYMENT",
     "PAYMENT_NOTE",
+    "ITEM_NOTE",
     "STATUS_NOTE",
   ];
 
@@ -40,25 +59,393 @@ function toCsv(rows: any[]) {
   for (const row of rows) {
     lines.push([
       row.queue_number || "",
+      row.track || "",
+      row.service_mode || "",
       row.participant_name || "",
+      row.family_role || "",
       row.mcu_id || "",
       row.employee_id || "",
+      row.nik || "",
       row.company_name || "",
       row.department || "",
-      row.nik || "",
-      row.dashboard_status || row.queue_status || "",
-      row.vaccine_names || "",
-      row.lot_numbers || "",
+      row.session_name || "",
+      row.location || "",
+      row.session_date || "",
+      row.source_name || "",
+      row.track_status || row.dashboard_status || row.queue_status || "",
+      row.item_status || "",
+      row.vaccine_name || "",
+      row.vaccine_brand || "",
+      row.lot_number || "",
+      row.lot_expiry || "",
+      row.dose_number ?? "",
       row.administered_at || "",
+      row.flow_completed_at || "",
       row.next_due_date || "",
       row.administered_by || "",
+      row.completion_source || "",
+      row.price_category || "",
+      row.price ?? "",
       row.payment_method || "",
+      row.payment_surcharge_percent ?? "",
+      row.payment_surcharge_amount ?? "",
+      row.payment_total ?? "",
       row.payment_note || "",
+      row.item_note || "",
       row.status_note || "",
     ].map(csvEscape).join(","));
   }
 
   return lines.join("\r\n");
+}
+
+function doneStatus(value: any) {
+  return ["ADMINISTERED", "DONE", "FINISHED"].includes(
+    clean(value).toUpperCase()
+  );
+}
+
+function normalizeServiceMode(value: any) {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+function registrationTrackStatus(registration: any, track: "A" | "B") {
+  return clean(
+    track === "B"
+      ? registration?.bazar_queue_status
+      : registration?.queue_status
+  ).toUpperCase();
+}
+
+function registrationTrackNumber(registration: any, track: "A" | "B") {
+  return clean(
+    track === "B"
+      ? registration?.bazar_queue_number
+      : registration?.queue_number
+  );
+}
+
+function serviceMatchesStage(
+  status: string,
+  done: boolean,
+  trackStatus: string,
+  queueNumber: string
+) {
+  if (status === "done") return done;
+  if (status === "not_done") return !done;
+  if (status === "no_queue") return !done && !queueNumber;
+  if (status === "waiting") {
+    return (
+      !done &&
+      Boolean(queueNumber) &&
+      ["WAITING", "WAITING_WITH_NOTE", "REGISTERED"].includes(trackStatus)
+    );
+  }
+  if (status === "doctor") {
+    return !done && ["CALLED", "IN_PROGRESS"].includes(trackStatus);
+  }
+  return true;
+}
+
+function sameRecordAsItem(record: any, item: any) {
+  const linkedRecordId = Number(item?.administered_record_id || 0);
+  if (linkedRecordId && Number(record?.id || 0) === linkedRecordId) return true;
+
+  if (
+    Number(record?.vaccine_id || 0) &&
+    Number(item?.vaccine_id || 0) &&
+    Number(record.vaccine_id) !== Number(item.vaccine_id)
+  ) {
+    return false;
+  }
+
+  const recordLotId = Number(record?.lot_id || 0);
+  const itemLotId = Number(item?.lot_id || 0);
+  if (recordLotId && itemLotId && recordLotId !== itemLotId) return false;
+
+  const recordDose = Number(record?.dose_number || 0);
+  const itemDose = Number(item?.dose_number || 0);
+  if (recordDose && itemDose && recordDose !== itemDose) return false;
+
+  return Boolean(
+    Number(record?.vaccine_id || 0) &&
+    Number(item?.vaccine_id || 0)
+  );
+}
+
+function buildCompleteExportRows(
+  registrations: any[],
+  itemsByReg: Map<number, any[]>,
+  recordsByReg: Map<number, any[]>,
+  status: string
+) {
+  const output: any[] = [];
+
+  for (const registration of registrations) {
+    const registrationId = Number(registration?.id || 0);
+    const items = itemsByReg.get(registrationId) || [];
+    const records = recordsByReg.get(registrationId) || [];
+    const usedRecordIds = new Set<number>();
+
+    const session = registration?.session || {};
+    const base = {
+      registration_id: registrationId,
+      participant_name: clean(registration?.participant_name),
+      family_role: clean(registration?.family_role),
+      mcu_id: clean(registration?.mcu_id),
+      employee_id: clean(registration?.employee_id),
+      nik: clean(registration?.nik),
+      company_name: firstValue(
+        registration?.company_name,
+        session?.company_name
+      ),
+      department: clean(registration?.department),
+      session_name: clean(session?.session_name),
+      location: clean(session?.location),
+      session_date: clean(session?.session_date),
+      source_name: firstValue(
+        registration?.source_name,
+        session?.source_name
+      ),
+      registered_at: firstValue(
+        registration?.registered_at,
+        registration?.created_at
+      ),
+      status_note: clean(registration?.status_note),
+    };
+
+    for (const item of items) {
+      const serviceMode = normalizeServiceMode(item?.service_mode);
+      const track: "A" | "B" = serviceMode === "BAZAR" ? "B" : "A";
+      const trackStatus = registrationTrackStatus(registration, track);
+      const queueNumber = registrationTrackNumber(registration, track);
+
+      const record = records.find((candidate: any) => {
+        const recordId = Number(candidate?.id || 0);
+        if (recordId && usedRecordIds.has(recordId)) return false;
+        return sameRecordAsItem(candidate, item);
+      }) || null;
+
+      if (record?.id) usedRecordIds.add(Number(record.id));
+
+      const itemStatus = clean(item?.status).toUpperCase();
+      const itemDone = doneStatus(itemStatus);
+      const trackDone = doneStatus(trackStatus);
+      const recordDone = Boolean(record);
+      const done = recordDone || itemDone || trackDone;
+
+      if (!serviceMatchesStage(status, done, trackStatus, queueNumber)) {
+        continue;
+      }
+
+      const flowCompletedAt = firstValue(
+        record?.administered_at,
+        item?.administered_at,
+        track === "B" && trackDone
+          ? registration?.bazar_finished_at
+          : "",
+        track === "A" && trackDone
+          ? registration?.updated_at
+          : ""
+      );
+
+      const completionSource = recordDone
+        ? "DOKTER_ADMINISTERED"
+        : itemDone && clean(item?.administered_at)
+          ? "ITEM_ADMINISTERED"
+          : trackDone
+            ? "QUEUE_DONE"
+            : "";
+
+      output.push({
+        ...base,
+        queue_number: queueNumber,
+        track,
+        service_mode: serviceMode,
+        track_status: trackStatus,
+        item_status: itemStatus,
+        vaccine_name: firstValue(
+          record?.vaccine_name,
+          item?.vaccine?.name,
+          registration?.vaccine?.name
+        ),
+        vaccine_brand: clean(item?.vaccine?.brand),
+        lot_number: firstValue(
+          record?.lot_number,
+          item?.lot?.lot_number
+        ),
+        lot_expiry: clean(item?.lot?.expiry_date),
+        dose_number:
+          Number(record?.dose_number || item?.dose_number || 1) || 1,
+
+        // Medical administration timestamp remains medical-only.
+        // Queue-only completion is kept separately in TANGGAL_SELESAI_FLOW.
+        administered_at: firstValue(
+          record?.administered_at,
+          itemDone ? item?.administered_at : ""
+        ),
+        flow_completed_at: flowCompletedAt,
+        next_due_date: clean(record?.next_due_date),
+        administered_by: clean(record?.administered_by),
+        completion_source: completionSource,
+
+        price_category: firstValue(
+          item?.price_category,
+          item?.vaccine?.price_category
+        ),
+        price:
+          item?.price == null
+            ? ""
+            : item.price,
+        payment_method: firstValue(
+          item?.payment_method,
+          registration?.payment_method
+        ),
+        payment_surcharge_percent:
+          item?.payment_surcharge_percent == null
+            ? ""
+            : item.payment_surcharge_percent,
+        payment_surcharge_amount:
+          item?.payment_surcharge_amount == null
+            ? ""
+            : item.payment_surcharge_amount,
+        payment_total:
+          item?.payment_total == null
+            ? (item?.price == null ? "" : item.price)
+            : item.payment_total,
+        payment_note: firstValue(
+          item?.payment_note,
+          registration?.payment_note
+        ),
+        item_note: clean(item?.item_note),
+      });
+    }
+
+    // Legacy/administered records that do not have a matching active registration item.
+    for (const record of records) {
+      const recordId = Number(record?.id || 0);
+      if (recordId && usedRecordIds.has(recordId)) continue;
+
+      let track: "A" | "B" = "A";
+      const serviceStatus = clean(
+        registration?.patient_service_status
+      ).toUpperCase();
+
+      if (
+        serviceStatus === "BAZAR" &&
+        clean(registration?.bazar_queue_number)
+      ) {
+        track = "B";
+      }
+
+      const trackStatus = registrationTrackStatus(registration, track);
+      const queueNumber = registrationTrackNumber(registration, track);
+      const done = true;
+
+      if (!serviceMatchesStage(status, done, trackStatus, queueNumber)) {
+        continue;
+      }
+
+      output.push({
+        ...base,
+        queue_number: queueNumber,
+        track,
+        service_mode: track === "B" ? "BAZAR" : "HEALTHDAY",
+        track_status: trackStatus || "ADMINISTERED",
+        item_status: "ADMINISTERED",
+        vaccine_name: clean(record?.vaccine_name),
+        vaccine_brand: "",
+        lot_number: clean(record?.lot_number),
+        lot_expiry: "",
+        dose_number: Number(record?.dose_number || 1) || 1,
+        administered_at: clean(record?.administered_at),
+        flow_completed_at: clean(record?.administered_at),
+        next_due_date: clean(record?.next_due_date),
+        administered_by: clean(record?.administered_by),
+        completion_source: "DOKTER_ADMINISTERED",
+        price_category: "",
+        price: "",
+        payment_method: clean(registration?.payment_method),
+        payment_surcharge_percent: "",
+        payment_surcharge_amount: "",
+        payment_total: "",
+        payment_note: clean(registration?.payment_note),
+        item_note: "",
+      });
+    }
+
+    // Very old registration: no item and no vaccination_record.
+    // Keep it exportable so participant/session/location data never disappear.
+    if (!items.length && !records.length) {
+      const aStatus = registrationTrackStatus(registration, "A");
+      const bStatus = registrationTrackStatus(registration, "B");
+
+      const fallbackTrack: "A" | "B" =
+        clean(registration?.patient_service_status).toUpperCase() === "BAZAR"
+          ? "B"
+          : "A";
+
+      const fallbackStatus =
+        fallbackTrack === "B" ? bStatus : aStatus;
+      const fallbackQueue =
+        registrationTrackNumber(registration, fallbackTrack);
+      const fallbackDone = doneStatus(fallbackStatus);
+
+      if (
+        serviceMatchesStage(
+          status,
+          fallbackDone,
+          fallbackStatus,
+          fallbackQueue
+        )
+      ) {
+        output.push({
+          ...base,
+          queue_number: fallbackQueue,
+          track: fallbackTrack,
+          service_mode:
+            fallbackTrack === "B" ? "BAZAR" : "HEALTHDAY",
+          track_status: fallbackStatus,
+          item_status: "",
+          vaccine_name: clean(registration?.vaccine?.name),
+          vaccine_brand: clean(registration?.vaccine?.brand),
+          lot_number: "",
+          lot_expiry: "",
+          dose_number: "",
+          administered_at: "",
+          flow_completed_at:
+            fallbackDone
+              ? firstValue(
+                  fallbackTrack === "B"
+                    ? registration?.bazar_finished_at
+                    : "",
+                  registration?.updated_at
+                )
+              : "",
+          next_due_date: "",
+          administered_by: "",
+          completion_source:
+            fallbackDone ? "QUEUE_DONE_LEGACY" : "",
+          price_category: "",
+          price:
+            registration?.payment_price == null
+              ? ""
+              : registration.payment_price,
+          payment_method: clean(registration?.payment_method),
+          payment_surcharge_percent: "",
+          payment_surcharge_amount: "",
+          payment_total:
+            registration?.payment_price == null
+              ? ""
+              : registration.payment_price,
+          payment_note: clean(registration?.payment_note),
+          item_note: "",
+        });
+      }
+    }
+  }
+
+  return output;
 }
 
 const ISERVE_HEADERS = [
@@ -159,7 +546,13 @@ function inDateRange(value: any, dateFrom: string, dateTo: string) {
 function filterRowsForExport(rows: any[], dateFrom: string, dateTo: string) {
   if (!dateFrom && !dateTo) return rows;
   return rows.filter((row) =>
-    inDateRange(row.administered_at || row.registered_at, dateFrom, dateTo)
+    inDateRange(
+      row.administered_at ||
+        row.flow_completed_at ||
+        row.registered_at,
+      dateFrom,
+      dateTo
+    )
   );
 }
 
@@ -235,7 +628,7 @@ export async function GET(req: NextRequest) {
 
   let regQuery = supabase
     .from("vaccination_registrations")
-    .select("*, session:vaccination_sessions(id,session_name,company_name,source_id,source_name)")
+    .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,source_id,source_name), vaccine:vaccination_vaccines(id,name,brand,price,price_category)")
     .order("id", { ascending: true })
     .limit(10000);
 
@@ -267,28 +660,88 @@ export async function GET(req: NextRequest) {
     recordsByReg.get(key)!.push(record);
   }
 
+  let registrationItems: any[] = [];
+  if (regIds.length) {
+    const itemsResult = await supabase
+      .from("vaccination_registration_items")
+      .select("*, vaccine:vaccination_vaccines(id,name,brand,price,price_category), lot:vaccination_vaccine_lots(id,lot_number,expiry_date)")
+      .in("registration_id", regIds)
+      .eq("active", true)
+      .order("id", { ascending: true });
+
+    if (itemsResult.error) return fail(itemsResult.error.message, 500);
+    registrationItems = itemsResult.data || [];
+  }
+
+  const itemsByReg = new Map<number, any[]>();
+  for (const item of registrationItems) {
+    const key = Number(item.registration_id);
+    if (!itemsByReg.has(key)) itemsByReg.set(key, []);
+    itemsByReg.get(key)!.push(item);
+  }
+
   const rows = registrations.map((registration: any) => {
     const recs = recordsByReg.get(Number(registration.id)) || [];
-    // V148_6_DASHBOARD_WORKFLOW_STATUS_SYNC
-    const legacyIsDone = recs.length > 0 || registration.queue_status === "ADMINISTERED";
-    const workflowDone = ["ADMINISTERED", "PENDING_VALIDATION", "DONE"].includes(
-      String(registration.queue_status || "").toUpperCase()
-    ) || ["PENDING", "DONE"].includes(
-      String(registration.validation_status || "").toUpperCase()
-    );
-    const isDone = workflowDone || legacyIsDone;
+    const regItems = itemsByReg.get(Number(registration.id)) || [];
 
-    const vaccineNames = Array.from(new Set(recs.map((record) => clean(record.vaccine_name)).filter(Boolean))).join(" | ");
-    const lotNumbers = Array.from(new Set(recs.map((record) => clean(record.lot_number)).filter(Boolean))).join(" | ");
-    const doctors = Array.from(new Set(recs.map((record) => clean(record.administered_by)).filter(Boolean))).join(" | ");
+    // Complete workflow status:
+    // doctor-administered record OR item administered OR either queue track done.
+    const recordDone = recs.length > 0;
+    const itemDone = regItems.some((item: any) =>
+      doneStatus(item?.status)
+    );
+    const queueADone = doneStatus(registration?.queue_status);
+    const queueBDone = doneStatus(registration?.bazar_queue_status);
+    const validationDone = ["PENDING", "DONE"].includes(
+      clean(registration?.validation_status).toUpperCase()
+    );
+    const isDone =
+      recordDone ||
+      itemDone ||
+      queueADone ||
+      queueBDone ||
+      validationDone;
+
+    // Dashboard display is also enriched from registration items,
+    // so vaccine/lot does not disappear when doctor-administered flow was skipped.
+    const vaccineNames = Array.from(
+      new Set(
+        [
+          ...recs.map((record: any) => clean(record?.vaccine_name)),
+          ...regItems.map((item: any) => clean(item?.vaccine?.name)),
+          clean(registration?.vaccine?.name),
+        ].filter(Boolean)
+      )
+    ).join(" | ");
+
+    const lotNumbers = Array.from(
+      new Set(
+        [
+          ...recs.map((record: any) => clean(record?.lot_number)),
+          ...regItems.map((item: any) => clean(item?.lot?.lot_number)),
+        ].filter(Boolean)
+      )
+    ).join(" | ");
+
+    const doctors = Array.from(
+      new Set(
+        recs
+          .map((record: any) => clean(record?.administered_by))
+          .filter(Boolean)
+      )
+    ).join(" | ");
 
     const lastRecord = recs[0] || {};
 
     return {
       ...registration,
       is_done: isDone,
-      dashboard_status: isDone ? "SUDAH" : registration.queue_number ? "BELUM - SUDAH ANTRIAN" : "BELUM - BELUM ANTRIAN",
-      vaccine_names: vaccineNames || registration.vaccine?.name || "",
+      dashboard_status: isDone
+        ? "SUDAH"
+        : registration.queue_number || registration.bazar_queue_number
+          ? "BELUM - SUDAH ANTRIAN"
+          : "BELUM - BELUM ANTRIAN",
+      vaccine_names: vaccineNames,
       lot_numbers: lotNumbers,
       administered_at: lastRecord.administered_at || "",
       next_due_date: lastRecord.next_due_date || "",
@@ -307,12 +760,22 @@ export async function GET(req: NextRequest) {
   };
 
   if (format === "csv") {
-    const exportRows = filterRowsForExport(filteredRows, dateFrom, dateTo);
+    const completeRows = buildCompleteExportRows(
+      registrations,
+      itemsByReg,
+      recordsByReg,
+      status
+    );
+    const exportRows = filterRowsForExport(
+      completeRows,
+      dateFrom,
+      dateTo
+    );
     const csv = toCsv(exportRows);
     const rangeLabel = dateFrom || dateTo
       ? `_${dateFrom || "awal"}_sd_${dateTo || "akhir"}`
       : "";
-    const filename = `vaccination_${status}${rangeLabel}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `vaccination_${status}_complete${rangeLabel}_${new Date().toISOString().slice(0, 10)}.csv`;
 
     return new NextResponse(csv, {
       status: 200,
