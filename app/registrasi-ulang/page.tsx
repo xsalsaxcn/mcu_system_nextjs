@@ -484,22 +484,42 @@ function RegistrasiUlang({ user }: { user: any }) {
     const id = Number(participantId || 0);
     if (!id || program !== "corporate") {
       setQueueInfo(null);
-      return;
+      return null;
     }
     try {
       const res = await fetch(`/api/mcu/queue/participant?participant_id=${encodeURIComponent(String(id))}`, { cache: "no-store" });
-      const json = await res.json();
-      if (!json?.ok) {
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
         setQueueInfo(null);
-        return;
+        return null;
       }
-      setQueueInfo({
-        ...(json.queue_entry || {}),
-        track_a_name: json.queue_session?.track_a_name || "Lab Darah",
-        track_b_name: json.queue_session?.track_b_name || "Rontgen",
-      });
+      const entry = json?.queue_entry || json?.entry || null;
+      const session = json?.queue_session || null;
+      const aSequence = Number(entry?.a_queue_sequence || json?.a_queue_sequence || 0);
+      const bSequence = Number(entry?.b_queue_sequence || json?.b_queue_sequence || 0);
+      const merged = {
+        ...(entry || {}),
+        a_queue_number:
+          entry?.a_queue_number || json?.a_queue_number || json?.queueA ||
+          (aSequence > 0 ? `A-${String(aSequence).padStart(3, "0")}` : null),
+        b_queue_number:
+          entry?.b_queue_number || json?.b_queue_number || json?.queueB ||
+          (bSequence > 0 ? `B-${String(bSequence).padStart(3, "0")}` : null),
+        a_queue_sequence: aSequence || null,
+        b_queue_sequence: bSequence || null,
+        queue_label:
+          json?.queue_label ||
+          [entry?.a_queue_number || json?.a_queue_number || json?.queueA,
+           entry?.b_queue_number || json?.b_queue_number || json?.queueB]
+            .filter(Boolean).join(" / ") || null,
+        track_a_name: session?.track_a_name || json?.track_a_name || "Lab Darah",
+        track_b_name: session?.track_b_name || json?.track_b_name || "Rontgen",
+      };
+      setQueueInfo(merged);
+      return merged;
     } catch {
       setQueueInfo(null);
+      return null;
     }
   }
 
@@ -869,9 +889,15 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }
 
-  function printBarcode() {
+  async function printBarcode() {
+    // MCU_QUEUE_BINDING_AUTHORITATIVE_V457
+    if (program === "corporate" && Number(form?.id || 0)) {
+      await loadQueueInfo(Number(form?.id));
+      // Give React one render frame so StationPrintLabel receives the fresh queue state.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
     setPrintReady(true);
-    setTimeout(() => window.print(), 300);
+    setTimeout(() => window.print(), 350);
   }
 
 
