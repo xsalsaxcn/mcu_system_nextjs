@@ -1448,9 +1448,9 @@ function StationPrintLabel({
 
   if (isCorporate) {
     const queueDisplay = queueText || "-";
-    const queueFont = queueDisplay.length > 13 ? Math.max(10, safeFont) : queueDisplay.length > 8 ? Math.max(12, safeFont + 2) : Math.max(16, safeFont + 6);
-    const stageFont = stationText.length > 18 ? Math.max(7, safeFont - 2) : stationText.length > 12 ? Math.max(8, safeFont - 1) : Math.max(9, safeFont);
-    const participantFont = nameText.length > 32 ? Math.max(11, safeFont + 1) : nameText.length > 22 ? Math.max(13, safeFont + 3) : Math.max(15, safeFont + 5);
+    const queueFont = queueDisplay.length > 13 ? Math.max(8, safeFont - 1) : queueDisplay.length > 8 ? Math.max(10, safeFont + 1) : Math.max(14, safeFont + 5);
+    const stageFont = stationText.length > 18 ? Math.max(6, safeFont - 3) : stationText.length > 12 ? Math.max(7, safeFont - 2) : Math.max(8, safeFont - 1);
+    const participantFont = nameText.length > 32 ? Math.max(10, safeFont + 1) : nameText.length > 22 ? Math.max(12, safeFont + 3) : Math.max(14, safeFont + 5);
 
     return (
       <section
@@ -1464,9 +1464,9 @@ function StationPrintLabel({
         printColorAdjust: "exact"
       }}
     >
-        {/* MCU_CORPORATE_VACCINATION_STRUCTURE_V452
-            Vaccination reference pattern: ticket-head -> queue-number -> divider -> participant/detail grid.
-            Outer MCU label canvas is copied verbatim from the existing MCU sticker. */}
+        {/* MCU_CORPORATE_VACCINATION_STRUCTURE_V453
+            Reference only: Vaccination ticket-head / queue-number / divider / participant/detail-grid.
+            Physical MCU canvas, @page, QR size, and Vaccination source are untouched. */}
         <div
           style={{
             width: "100%",
@@ -1474,7 +1474,7 @@ function StationPrintLabel({
             boxSizing: "border-box",
             padding: "5px 6px 4px",
             display: "grid",
-            gridTemplateRows: "auto 1px minmax(0, 1fr)",
+            gridTemplateRows: "minmax(34px, auto) 1px minmax(0, 1fr)",
             rowGap: "3px",
             overflow: "hidden",
             background: "#ffffff",
@@ -1484,34 +1484,48 @@ function StationPrintLabel({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) minmax(54px, 39%)",
+              gridTemplateColumns: "minmax(0, 56%) minmax(0, 44%)",
               columnGap: "6px",
               alignItems: "start",
-              minWidth: 0
+              minWidth: 0,
+              overflow: "hidden"
             }}
           >
             <div
               style={{
                 minWidth: 0,
-                fontSize: `${Math.max(6, safeFont - 4)}px`,
-                lineHeight: 1,
+                fontSize: `${participantFont}px`,
+                lineHeight: 0.94,
                 fontWeight: 900,
-                letterSpacing: "0.02em",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis"
+                letterSpacing: "-0.025em",
+                whiteSpace: "normal",
+                overflowWrap: "normal",
+                wordBreak: "normal",
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+                overflow: "hidden"
               }}
             >
-              HARMONY HEALTH · MCU
+              {nameText || "-"}
             </div>
 
-            <div style={{ minWidth: 0, textAlign: "right", overflow: "hidden" }}>
+            <div
+              style={{
+                minWidth: 0,
+                textAlign: "right",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-end",
+                overflow: "hidden"
+              }}
+            >
               <div
                 style={{
-                  fontSize: `${Math.max(5, safeFont - 5)}px`,
+                  fontSize: `${Math.max(5, safeFont - 4)}px`,
                   lineHeight: 1,
                   fontWeight: 900,
-                  letterSpacing: "0.03em",
+                  letterSpacing: "0.02em",
                   whiteSpace: "nowrap"
                 }}
               >
@@ -1520,8 +1534,9 @@ function StationPrintLabel({
               <div
                 style={{
                   marginTop: "1px",
+                  width: "100%",
                   fontSize: `${queueFont}px`,
-                  lineHeight: 0.92,
+                  lineHeight: 0.9,
                   fontWeight: 900,
                   letterSpacing: "-0.035em",
                   whiteSpace: "nowrap",
@@ -1534,11 +1549,13 @@ function StationPrintLabel({
               <div
                 style={{
                   marginTop: "2px",
+                  width: "100%",
                   fontSize: `${stageFont}px`,
-                  lineHeight: 1,
+                  lineHeight: 0.95,
                   fontWeight: 900,
                   whiteSpace: "normal",
-                  overflowWrap: "anywhere",
+                  wordBreak: "normal",
+                  overflowWrap: "normal",
                   display: "-webkit-box",
                   WebkitBoxOrient: "vertical",
                   WebkitLineClamp: 2,
@@ -1557,8 +1574,9 @@ function StationPrintLabel({
               minHeight: 0,
               display: "grid",
               gridTemplateColumns: showQr ? "minmax(0, 1fr) 54px" : "minmax(0, 1fr)",
-              columnGap: "6px",
-              overflow: "hidden"
+              columnGap: "7px",
+              overflow: "hidden",
+              alignItems: "start"
             }}
           >
             <div
@@ -1567,27 +1585,11 @@ function StationPrintLabel({
                 minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                overflow: "hidden"
+                overflow: "hidden",
+                paddingTop: "1px"
               }}
             >
-              <div
-                style={{
-                  fontSize: `${participantFont}px`,
-                  lineHeight: 0.95,
-                  fontWeight: 900,
-                  letterSpacing: "-0.025em",
-                  whiteSpace: "normal",
-                  overflowWrap: "anywhere",
-                  display: "-webkit-box",
-                  WebkitBoxOrient: "vertical",
-                  WebkitLineClamp: 2,
-                  overflow: "hidden"
-                }}
-              >
-                {nameText || "-"}
-              </div>
-
-              <div style={{ marginTop: "4px", fontSize: `${Math.max(6, safeFont - 3)}px`, lineHeight: 1, fontWeight: 900 }}>
+              <div style={{ fontSize: `${Math.max(6, safeFont - 3)}px`, lineHeight: 1, fontWeight: 900 }}>
                 NIK KARYAWAN
               </div>
               <div
@@ -1606,12 +1608,13 @@ function StationPrintLabel({
 
               <div
                 style={{
-                  marginTop: "4px",
+                  marginTop: "5px",
                   fontSize: `${Math.max(7, safeFont - 2)}px`,
-                  lineHeight: 1.02,
+                  lineHeight: 0.98,
                   fontWeight: 900,
                   whiteSpace: "normal",
-                  overflowWrap: "anywhere",
+                  wordBreak: "normal",
+                  overflowWrap: "normal",
                   display: "-webkit-box",
                   WebkitBoxOrient: "vertical",
                   WebkitLineClamp: 2,
@@ -1630,7 +1633,7 @@ function StationPrintLabel({
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  justifyContent: "flex-end",
+                  justifyContent: "flex-start",
                   overflow: "hidden"
                 }}
               >
