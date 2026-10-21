@@ -661,9 +661,10 @@ function ImportForm({ user }: { user: any }) {
   }
 
   // MCU_CORPORATE_IMPORT_USE_REGISTRATION_SESSIONS_V476
+  // MCU_CORPORATE_IMPORT_ACTIVE_SESSION_LIST_V479
   async function loadCorporateSessionOptionsV471(companyId: string, packageId: string) {
     const res = await fetch(
-      `/api/mcu/import-registration-sessions?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}&t=${Date.now()}`,
+      `/api/mcu/import-active-sessions?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}&t=${Date.now()}`,
       {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
@@ -671,7 +672,7 @@ function ImportForm({ user }: { user: any }) {
     );
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json?.ok) {
-      throw new Error(json?.message || "Gagal membaca Session MCU Corporate.");
+      throw new Error(json?.message || "Gagal membaca Session MCU Corporate aktif.");
     }
     return Array.isArray(json?.sessions) ? json.sessions : [];
   }
