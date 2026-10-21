@@ -10,9 +10,13 @@ type QueueEntry = {
   a_queue_number?: string;
   a_queue_sequence?: number;
   a_status?: string;
+  a_finished_at?: string;
+  a_cancelled_at?: string;
   b_queue_number?: string;
   b_queue_sequence?: number;
   b_status?: string;
+  b_finished_at?: string;
+  b_cancelled_at?: string;
   participant?: {
     id: number;
     name?: string;
@@ -190,6 +194,20 @@ export default function McuOperatorQueuePage({ params }: { params: { token: stri
     const rows = rowsForTrack(track);
     const activeRows = rows.filter((r) => !["SKIPPED", "DONE", "CANCELLED"].includes(String(r[statusKey] || "").toUpperCase()));
     const skippedRows = rows.filter((r) => String(r[statusKey] || "").toUpperCase() === "SKIPPED");
+    // MCU_OPERATOR_FINISHED_HISTORY_V458
+    const finishedAtKey = (track === "A" ? "a_finished_at" : "b_finished_at") as keyof QueueEntry;
+    const cancelledAtKey = (track === "A" ? "a_cancelled_at" : "b_cancelled_at") as keyof QueueEntry;
+    const historyRows = [...entries]
+      .filter((r) => ["DONE", "CANCELLED"].includes(String(r[statusKey] || "").toUpperCase()))
+      .sort((a, b) => {
+        const aStatus = String(a[statusKey] || "").toUpperCase();
+        const bStatus = String(b[statusKey] || "").toUpperCase();
+        const aTime = String(a[aStatus === "CANCELLED" ? cancelledAtKey : finishedAtKey] || "");
+        const bTime = String(b[bStatus === "CANCELLED" ? cancelledAtKey : finishedAtKey] || "");
+        const timeDiff = new Date(bTime || 0).getTime() - new Date(aTime || 0).getTime();
+        if (timeDiff) return timeDiff;
+        return Number(b[fieldFor(track, "sequence")] || 0) - Number(a[fieldFor(track, "sequence")] || 0);
+      });
     const currentRow = current(track);
     const nextRow = nextWaiting(track);
     const waitingCount = rows.filter((r) => String(r[statusKey] || "").toUpperCase() === "WAITING").length;
@@ -221,6 +239,42 @@ export default function McuOperatorQueuePage({ params }: { params: { token: stri
           </table>
         </div>
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="flex items-center justify-between"><div className="text-sm font-black text-amber-900">Skipped {track}</div><div className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-black text-amber-900">{skippedRows.length}</div></div>{skippedRows.length ? <div className="mt-2 space-y-2">{skippedRows.map((row) => <div key={`skip-${track}-${row.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white p-2"><div className="text-sm font-bold text-slate-800">{String(row[numberKey] || "-")} · {row.participant?.name || "-"}</div><button disabled={busy} onClick={() => action("reactivate", track, row.id)} className="rounded-lg bg-amber-600 px-3 py-1 text-xs font-black text-white">Aktifkan</button></div>)}</div> : <div className="mt-2 text-xs font-semibold text-amber-700">Belum ada antrian skipped.</div>}</div>
+
+        <div className="mt-4 overflow-hidden rounded-xl border bg-white">
+          <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2.5">
+            <div className="text-sm font-black text-slate-800">History {track}: Selesai / Cancel</div>
+            <div className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-black text-slate-700">{historyRows.length}</div>
+          </div>
+          <div className="max-h-[260px] overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-white text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="p-3 text-left">No</th>
+                  <th className="p-3 text-left">Nama</th>
+                  <th className="p-3 text-left">Status</th>
+                  <th className="p-3 text-left">Update</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {historyRows.length ? historyRows.map((row) => {
+                  const historyStatus = String(row[statusKey] || "").toUpperCase();
+                  const historyTime = row[historyStatus === "CANCELLED" ? cancelledAtKey : finishedAtKey] as string | undefined;
+                  return (
+                    <tr key={`history-${track}-${row.id}`}>
+                      <td className={`p-3 font-black ${numberClass}`}>{String(row[numberKey] || "-")}</td>
+                      <td className="p-3">
+                        <div className="font-black text-slate-900">{row.participant?.name || "-"}</div>
+                        <div className="text-xs text-slate-500">{row.participant?.mcu_id || row.participant?.external_id || row.participant?.employee_nik || "-"}</div>
+                      </td>
+                      <td className="p-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${statusClass(historyStatus)}`}>{statusLabel(historyStatus)}</span></td>
+                      <td className="p-3 text-xs font-bold text-slate-600">{formatLastUpdate(historyTime)}</td>
+                    </tr>
+                  );
+                }) : <tr><td colSpan={4} className="p-5 text-center text-sm font-semibold text-slate-500">Belum ada peserta selesai / cancel.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
     );
   }
