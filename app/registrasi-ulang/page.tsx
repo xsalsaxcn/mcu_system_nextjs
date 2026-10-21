@@ -1082,8 +1082,14 @@ function RegistrasiUlang({ user }: { user: any }) {
             margin: 0 !important;
           }
 
+          /* MCU_PRINT_WRAPPER_100_PERCENT_V459
+             Outer wrapper only. Inner sticker layout intentionally untouched. */
           .print-only {
             display: block !important;
+            width: 40mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            position: static !important;
           }
 
           .label-page {
@@ -1105,6 +1111,11 @@ function RegistrasiUlang({ user }: { user: any }) {
 
           .label-page * {
             box-sizing: border-box;
+          }
+
+          .print-only > .label-page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
         }
       `}</style>
