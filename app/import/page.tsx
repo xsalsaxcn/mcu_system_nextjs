@@ -498,34 +498,138 @@ function ImportForm({ user }: { user: any }) {
     }
   }
 
-  async function openCorporateMappingV466() {
+  // MCU_CORPORATE_IMPORT_MAPPING_FAST_V469
+  async function openCorporateMappingV466(fileOverride?: File | null) {
     if (programType !== "corporate") return;
-    if (!file) return alert("Upload file Excel dulu.");
+
+    const activeFile = fileOverride || file;
+    if (!activeFile) return alert("Upload file Excel dulu.");
+
     if (!corporateCompanyChoiceV431 || corporateCompanyChoiceV431 === NEW_CORPORATE_COMPANY_V431) {
-      return alert("Pilih perusahaan MCU Corporate existing dulu agar Session/Lokasi bisa dibaca.");
+      setCorporateMappingErrorV466("Pilih perusahaan MCU Corporate existing dulu agar Session/Lokasi bisa dibaca.");
+      return;
     }
     if (!corporatePackageChoiceV432 || corporatePackageChoiceV432 === NEW_CORPORATE_PACKAGE_V432) {
-      return alert("Pilih paket pemeriksaan existing dulu agar Session/Lokasi bisa dibaca.");
+      setCorporateMappingErrorV466("Pilih paket pemeriksaan existing dulu agar Session/Lokasi bisa dibaca.");
+      return;
     }
 
     setCorporateMappingLoadingV466(true);
     setCorporateMappingErrorV466("");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const [previewRes, sessionRes] = await Promise.all([
-        fetch("/api/mcu/import-mapping", { method: "POST", body: form }),
-        fetch(`/api/mcu/import-mapping?company_id=${encodeURIComponent(corporateCompanyChoiceV431)}&package_id=${encodeURIComponent(corporatePackageChoiceV432)}`, { cache: "no-store" }),
-      ]);
-      const previewJson = await previewRes.json().catch(() => ({}));
-      const sessionJson = await sessionRes.json().catch(() => ({}));
-      if (!previewRes.ok || !previewJson?.ok) throw new Error(previewJson?.message || "Gagal membaca header Excel.");
-      if (!sessionRes.ok || !sessionJson?.ok) throw new Error(sessionJson?.message || "Gagal membaca Session MCU/Lokasi.");
 
-      const preview = previewJson.preview as CorporatePreviewV466;
+    try {
+      const sessionPromise = fetch(
+        `/api/mcu/import-mapping?company_id=${encodeURIComponent(corporateCompanyChoiceV431)}&package_id=${encodeURIComponent(corporatePackageChoiceV432)}`,
+        { cache: "no-store" },
+      ).then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) throw new Error(json?.message || "Gagal membaca Session MCU/Lokasi.");
+        return json;
+      });
+
+      // FAST V469: parse workbook locally in browser. No upload just to inspect headers.
+      const XLSX = await import("xlsx");
+      const arrayBuffer = await activeFile.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+
+      const cleanLocal = (value: any) => String(value ?? "").trim();
+      const normLocal = (value: any) =>
+        cleanLocal(value)
+          .toLowerCase()
+          .replace(/[_\-.]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const knownHeaders = [
+        "nama", "nama peserta", "nama lengkap", "employee name",
+        "binusian id", "employee id", "date of birth", "tanggal lahir",
+        "department", "division", "bu/division", "posisi", "position", "jabatan",
+      ];
+
+      const chooseHeaderRowLocal = (rows: any[][]) => {
+        let bestIndex = 0;
+        let bestScore = -1;
+        rows.slice(0, 20).forEach((row, idx) => {
+          const values = (Array.isArray(row) ? row : []).map(normLocal);
+          const score = values.reduce(
+            (total, value) => total + (knownHeaders.some((candidate) => value.includes(candidate)) ? 1 : 0),
+            0,
+          );
+          if (score > bestScore) {
+            bestIndex = idx;
+            bestScore = score;
+          }
+        });
+        return bestIndex;
+      };
+
+      const exactOrPartialHeaderLocal = (headers: string[], candidates: string[]) => {
+        const normalized = headers.map(normLocal);
+        const targets = candidates.map(normLocal);
+        for (const candidate of targets) {
+          const idx = normalized.findIndex((header) => header === candidate);
+          if (idx >= 0) return headers[idx];
+        }
+        for (const candidate of targets) {
+          const idx = normalized.findIndex(
+            (header) => header && (header.includes(candidate) || candidate.includes(header)),
+          );
+          if (idx >= 0) return headers[idx];
+        }
+        return "";
+      };
+
+      const suggestedMappingLocal = (headers: string[]) => ({
+        name: exactOrPartialHeaderLocal(headers, ["Nama", "Nama Lengkap", "Nama Peserta", "Employee Name", "Nama Karyawan"]),
+        employee_nik: exactOrPartialHeaderLocal(headers, ["Binusian ID", "BinusianID", "NIK Karyawan", "Employee ID", "Employee No", "NIP"]),
+        birth_date: exactOrPartialHeaderLocal(headers, ["Date of Birth", "Tanggal Lahir", "Birth Date", "DOB"]),
+        department: exactOrPartialHeaderLocal(headers, ["BU/Division", "Department", "Division", "Departemen", "Divisi"]),
+        position: exactOrPartialHeaderLocal(headers, ["Posisi", "Position", "Jabatan", "Job Title"]),
+        nik: exactOrPartialHeaderLocal(headers, ["NIK", "NIK / Identitas", "Nomor Induk Kependudukan"]),
+        gender: exactOrPartialHeaderLocal(headers, ["Jenis Kelamin", "Gender", "JK", "L/P"]),
+        phone: exactOrPartialHeaderLocal(headers, ["No HP", "No. HP", "Phone", "Phone Number", "Telepon", "WhatsApp"]),
+        location: exactOrPartialHeaderLocal(headers, ["Lokasi", "Location", "Site", "Campus", "Kampus", "Cabang"]),
+      });
+
+      let preview: CorporatePreviewV466 | null = null;
+
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }) as any[][];
+        if (!rows.length) continue;
+
+        const headerRowIndex = chooseHeaderRowLocal(rows);
+        const headers = (rows[headerRowIndex] || []).map(
+          (value: any, index: number) => cleanLocal(value) || `Column_${index + 1}`,
+        );
+        const bodyRows = rows
+          .slice(headerRowIndex + 1)
+          .filter((row: any) => Array.isArray(row) && row.some((value: any) => cleanLocal(value)));
+
+        if (!headers.length || !bodyRows.length) continue;
+
+        const previewRows = bodyRows.slice(0, 5).map((row: any[]) =>
+          Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
+        );
+
+        preview = {
+          sheet_name: sheetName,
+          header_row: headerRowIndex + 1,
+          headers,
+          row_count: bodyRows.length,
+          preview: previewRows,
+          suggested_mapping: suggestedMappingLocal(headers),
+        };
+        break;
+      }
+
+      if (!preview) throw new Error("Tidak menemukan sheet Excel berisi data peserta.");
+
+      const sessionJson = await sessionPromise;
       const sessions = Array.isArray(sessionJson?.sessions) ? sessionJson.sessions : [];
+
       setCorporatePreviewV466(preview);
-      setCorporateMappingV466(preview?.suggested_mapping || {});
+      setCorporateMappingV466(preview.suggested_mapping || {});
       setCorporateSessionsV466(sessions);
       setCorporateSessionIdV466(sessions.length === 1 ? String(sessions[0].id) : "");
       setCorporateLocationModeV466("session");
@@ -915,8 +1019,12 @@ function ImportForm({ user }: { user: any }) {
             type="file"
             accept=".xlsx,.xls"
             onChange={(e) => {
-              setFile(e.target.files?.[0] || null);
+              const selectedFile = e.target.files?.[0] || null;
+              setFile(selectedFile);
               resetCorporateMappingV466();
+              if (programType === "corporate" && selectedFile) {
+                void openCorporateMappingV466(selectedFile);
+              }
             }}
             required
           />
@@ -924,7 +1032,7 @@ function ImportForm({ user }: { user: any }) {
             {programType === "vaccination"
               ? "Header vaksinasi: Nama Peserta, ID Peserta/NIK, Jenis Kelamin, Email, No HP, BatchName, TimeAreaName, TimeName. File BINUS dengan Child Name, Child Gender, Parent Binusian ID, Parent Email, Parent HP juga didukung."
               : programType === "corporate"
-                ? "Format Corporate boleh bervariasi. Setelah file dipilih, klik Mapping Data & Session agar kolom Excel dan Session/Lokasi diperiksa sebelum import."
+                ? "Format Corporate boleh bervariasi. Pilih file dan mapping akan dibaca otomatis di browser tanpa upload ulang."
                 : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
           </div>
         </div>
@@ -939,10 +1047,10 @@ function ImportForm({ user }: { user: any }) {
               <button
                 type="button"
                 disabled={!file || corporateMappingLoadingV466}
-                onClick={openCorporateMappingV466}
+                onClick={() => void openCorporateMappingV466()}
                 className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
               >
-                {corporateMappingLoadingV466 ? "Membaca Excel..." : corporatePreviewV466 ? "Baca Ulang Mapping" : "Mapping Data & Session →"}
+                {corporateMappingLoadingV466 ? "Membaca lokal..." : corporatePreviewV466 ? "Baca Ulang Mapping" : "Mapping Data & Session →"}
               </button>
             </div>
 
