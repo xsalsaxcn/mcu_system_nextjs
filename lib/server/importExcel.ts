@@ -1139,6 +1139,68 @@ export async function importParticipantsFromExcel(
         });
 
         if (existingKeysV214.some((key) => existingParticipantKeysAppendOnlyV214.has(key))) {
+          // MCU_CORPORATE_EXISTING_MERGE_SESSION_V491
+          // Re-importing an existing Corporate database must still refresh its mapping
+          // and bind the participant to the explicitly selected Session. Session itself
+          // never determines or mutates package_id; package remains the explicit Import choice.
+          if (programType === PROGRAM_CORPORATE) {
+            let existingQueryV491 = supabase
+              .from("participants")
+              .select("id")
+              .eq("company_id", companyId);
+            if (base.external_id) {
+              existingQueryV491 = existingQueryV491.eq("external_id", base.external_id);
+            } else {
+              existingQueryV491 = existingQueryV491.ilike("name", candidate.name);
+            }
+            const existingResultV491 = await existingQueryV491.limit(2);
+            if (existingResultV491.error) throw existingResultV491.error;
+            const matchesV491 = existingResultV491.data || [];
+            if (matchesV491.length === 1) {
+              const participantIdV491 = Number(matchesV491[0].id || 0);
+              const coreUpdateV491 = await supabase.from("participants").update({
+                source_id: sourceId,
+                company_id: companyId,
+                package_id: packageId,
+                external_id: base.external_id || null,
+                nik: base.nik || null,
+                birth_date: base.birth_date || null,
+              }).eq("id", participantIdV491);
+              if (coreUpdateV491.error) throw coreUpdateV491.error;
+
+              const optionalFieldsV491: Array<[string, any]> = [
+                ["employee_nik", base.external_id || null],
+                ["department", base.department || null],
+                ["position", base.position || null],
+                ["phone", base.phone || null],
+              ];
+              for (const [fieldV491, valueV491] of optionalFieldsV491) {
+                if (valueV491 === null || valueV491 === "") continue;
+                const optionalUpdateV491 = await supabase.from("participants").update({ [fieldV491]: valueV491 }).eq("id", participantIdV491);
+                if (optionalUpdateV491.error && !schemaColumnMissingV466(optionalUpdateV491.error)) throw optionalUpdateV491.error;
+              }
+
+              if (corporateSessionRowV466?.id) {
+                const assignmentV491 = await supabase
+                  .from("mcu_participant_session_assignments")
+                  .upsert({
+                    participant_id: participantIdV491,
+                    queue_session_id: Number(corporateSessionRowV466.id),
+                    source_id: sourceId,
+                    location_name: base.mapped_location || corporateSessionLocationV466(corporateSessionRowV466) || null,
+                    session_date: corporateSessionDateV466(corporateSessionRowV466) || null,
+                    department: base.department || null,
+                    position: base.position || null,
+                    raw_json: base.raw_json_v466 || {},
+                    updated_at: new Date().toISOString(),
+                  }, { onConflict: "participant_id,queue_session_id" });
+                if (assignmentV491.error) throw assignmentV491.error;
+                stats.corporate_session_assignments_v466 += 1;
+              }
+              stats.participants_updated += 1;
+              continue;
+            }
+          }
           stats.existing_participants_skipped += 1;
           stats.participants_skipped += 1;
           if (stats.skipped_rows.length < 50) {

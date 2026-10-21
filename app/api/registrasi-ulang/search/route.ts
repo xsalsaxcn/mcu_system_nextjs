@@ -113,6 +113,8 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabaseAdmin();
   const program = req.nextUrl.searchParams.get("program") || "capaska";
   const sourceId = req.nextUrl.searchParams.get("source_id") || "all";
+  const requestedQueueSessionId = Number(req.nextUrl.searchParams.get("queue_session_id") || 0);
+  // Legacy combined-selector values remain readable, but V491 sends session separately.
   const legacySessionMatch = /^session:(\d+):(\d+)$/.exec(sourceId);
   const exactSessionMatch = /^mcu-session:(\d+)$/.exec(sourceId);
 
@@ -120,8 +122,8 @@ export async function GET(req: NextRequest) {
   let sessionPackageId = legacySessionMatch ? Number(legacySessionMatch[2]) : 0;
   let queueSession: any = null;
 
-  if (exactSessionMatch) {
-    const queueSessionId = Number(exactSessionMatch[1] || 0);
+  if (requestedQueueSessionId || exactSessionMatch) {
+    const queueSessionId = requestedQueueSessionId || Number(exactSessionMatch?.[1] || 0);
     const sessionResult = await supabase
       .from("mcu_queue_sessions")
       .select("id,company_id,package_id,session_name,location,session_date,is_active")
@@ -139,10 +141,22 @@ export async function GET(req: NextRequest) {
     sessionPackageId = Number(queueSession.package_id || 0);
   }
 
+  let assignedParticipantIds: number[] | null = null;
+  if (queueSession?.id) {
+    const assignmentResult = await supabase
+      .from("mcu_participant_session_assignments")
+      .select("participant_id")
+      .eq("queue_session_id", Number(queueSession.id));
+    if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
+    assignedParticipantIds = (assignmentResult.data || [])
+      .map((row: any) => Number(row.participant_id || 0))
+      .filter(Boolean);
+  }
+
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 25), 1), 50);
 
-  if (sourceId === "all" && keyword.length < 2) {
+  if (sourceId === "all" && !queueSession?.id && keyword.length < 2) {
     return ok({
       participants: [],
       message: "Pilih database atau isi nama/MCU/NIK minimal 2 karakter."
@@ -153,9 +167,13 @@ export async function GET(req: NextRequest) {
     let query = supabase.from("participants").select(SELECT_COLUMNS).limit(limit);
 
     if (program !== "all") query = query.eq("program_type", program);
-    if (sessionCompanyId && sessionPackageId) {
-      query = query.eq("company_id", sessionCompanyId).eq("package_id", sessionPackageId);
-    } else if (sourceId !== "all") {
+    // V491: Session membership comes from the assignment table, never from package alone.
+    if (assignedParticipantIds !== null) {
+      if (!assignedParticipantIds.length) return query.in("id", [-1]);
+      query = query.in("id", assignedParticipantIds);
+    }
+    // Database is an independent optional narrowing filter.
+    if (sourceId !== "all" && !exactSessionMatch && !legacySessionMatch) {
       query = query.eq("source_id", Number(sourceId));
     }
 
@@ -202,7 +220,7 @@ export async function GET(req: NextRequest) {
     mode:
       keyword.length >= 2
         ? "like"
-        : exactSessionMatch || legacySessionMatch
+        : queueSession?.id || exactSessionMatch || legacySessionMatch
           ? "session"
           : "source",
     queue_session: queueSession,

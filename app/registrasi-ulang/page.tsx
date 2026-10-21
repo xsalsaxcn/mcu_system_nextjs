@@ -325,6 +325,9 @@ function RegistrasiUlang({ user }: { user: any }) {
     session: null,
   });
   const [sourceId, setSourceId] = useState("all");
+  // MCU_CORPORATE_SEPARATE_DATABASE_SESSION_V491
+  // Database batch and operational MCU Session are independent selectors.
+  const [registrationSessionIdV491, setRegistrationSessionIdV491] = useState("");
   const [sessionLocked, setSessionLocked] = useState(false);
   const autoRetrieveKeyRef = useRef("");
   const restoredLockRef = useRef(false);
@@ -397,7 +400,7 @@ function RegistrasiUlang({ user }: { user: any }) {
         queue_sessions: [],
         session: null,
       });
-      if (String(sourceId).startsWith("session:") || String(sourceId).startsWith("mcu-session:")) setSourceId("all");
+      setRegistrationSessionIdV491("");
     }
 
     return () => { cancelled = true; };
@@ -463,19 +466,21 @@ function RegistrasiUlang({ user }: { user: any }) {
     if (!restoredLockRef.current) {
       restoredLockRef.current = true;
       const locked = window.localStorage.getItem("mcu_reg_session_locked") === "1";
-      const lockedSource = String(window.localStorage.getItem("mcu_reg_locked_source") || "").trim();
-      if (locked && lockedSource) {
-        if (lockedSource.startsWith("mcu-session:")) {
-          setSourceId(lockedSource);
-          setSessionLocked(true);
-          return;
-        }
-        window.localStorage.removeItem("mcu_reg_session_locked");
-        window.localStorage.removeItem("mcu_reg_locked_source");
+      const lockedSession = String(window.localStorage.getItem("mcu_reg_locked_session") || "").trim();
+      // Backward compatibility with the old combined selector lock.
+      const legacyLockedSource = String(window.localStorage.getItem("mcu_reg_locked_source") || "").trim();
+      const resolvedLockedSession = lockedSession || (legacyLockedSource.startsWith("mcu-session:") ? legacyLockedSource : "");
+      if (locked && resolvedLockedSession) {
+        setRegistrationSessionIdV491(resolvedLockedSession);
+        setSessionLocked(true);
+        return;
       }
+      window.localStorage.removeItem("mcu_reg_session_locked");
+      window.localStorage.removeItem("mcu_reg_locked_session");
+      window.localStorage.removeItem("mcu_reg_locked_source");
     }
 
-    if (sessionLocked || sourceId !== "all") return;
+    if (sessionLocked || registrationSessionIdV491) return;
     const active = mcuSessionOptions.session;
     const preferred =
       sessionSourceOptions.find(
@@ -483,8 +488,8 @@ function RegistrasiUlang({ user }: { user: any }) {
           Number(item.company_id) === Number(active?.company_id || 0) &&
           Number(item.package_id) === Number(active?.package_id || 0),
       ) || sessionSourceOptions[0];
-    if (preferred?.value) setSourceId(preferred.value);
-  }, [program, sessionLocked, sourceId, mcuSessionOptions.session, sessionSourceOptions]);
+    if (preferred?.value) setRegistrationSessionIdV491(preferred.value);
+  }, [program, sessionLocked, registrationSessionIdV491, mcuSessionOptions.session, sessionSourceOptions]);
 
   function toggleRegistrationSessionLock() {
     if (program !== "corporate") {
@@ -494,19 +499,22 @@ function RegistrasiUlang({ user }: { user: any }) {
     if (sessionLocked) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem("mcu_reg_session_locked");
+        window.localStorage.removeItem("mcu_reg_locked_session");
         window.localStorage.removeItem("mcu_reg_locked_source");
       }
       setSessionLocked(false);
       setMessage("Session Registrasi dibuka. Lokasi/tanggal MCU dapat dipilih kembali.");
       return;
     }
-    if (!sourceId || sourceId === "all" || !String(sourceId).startsWith("mcu-session:")) {
+    if (!registrationSessionIdV491 || !String(registrationSessionIdV491).startsWith("mcu-session:")) {
       setMessage("Pilih Session MCU lokasi/tanggal terlebih dahulu, lalu klik Kunci Session.");
       return;
     }
     if (typeof window !== "undefined") {
       window.localStorage.setItem("mcu_reg_session_locked", "1");
-      window.localStorage.setItem("mcu_reg_locked_source", sourceId);
+      window.localStorage.setItem("mcu_reg_locked_session", registrationSessionIdV491);
+      // Remove legacy combined-selector lock so Database remains independently selectable.
+      window.localStorage.removeItem("mcu_reg_locked_source");
     }
     setSessionLocked(true);
     setMessage("Session Registrasi dikunci di browser ini.");
@@ -514,7 +522,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   function getSelectedSessionContext() {
     return (
-      sessionSourceOptions.find((item: any) => item.value === sourceId) || null
+      sessionSourceOptions.find((item: any) => item.value === registrationSessionIdV491) || null
     );
   }
 
@@ -603,7 +611,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       return;
     }
     void loadQueueInfo(participantId);
-  }, [form?.id, selected?.id, program, sourceId]);
+  }, [form?.id, selected?.id, program, registrationSessionIdV491]);
 
 
 
@@ -629,19 +637,19 @@ function RegistrasiUlang({ user }: { user: any }) {
 
   useEffect(() => {
     if (!canUse || program !== "corporate") return;
-    if (!sourceId || sourceId === "all") {
+    if ((!sourceId || sourceId === "all") && !registrationSessionIdV491) {
       setResults([]);
       autoRetrieveKeyRef.current = "";
       return;
     }
-    const key = `${program}|${sourceId}`;
+    const key = `${program}|${sourceId}|${registrationSessionIdV491}`;
     if (autoRetrieveKeyRef.current === key) return;
     autoRetrieveKeyRef.current = key;
     const timer = window.setTimeout(() => {
       void search();
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [program, sourceId, canUse]);
+  }, [program, sourceId, registrationSessionIdV491, canUse]);
 
   if (!canUse) {
     return <div className="card p-5 text-red-700">Hanya admin yang dapat mengakses Registrasi Ulang.</div>;
@@ -659,6 +667,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       const params = new URLSearchParams({
         program,
         source_id: sourceId,
+        queue_session_id: String(getSelectedSessionContext()?.queue_session_id || ""),
         keyword: keyword.trim(),
         limit: "25"
       });
@@ -1144,35 +1153,42 @@ function RegistrasiUlang({ user }: { user: any }) {
           </div>
 
           <div>
-            <label className="label">Database / Session Lokasi</label>
-            <select className="input" value={sourceId} disabled={sessionLocked} onChange={(e) => { autoRetrieveKeyRef.current = ""; setSourceId(e.target.value); }}>
+            <label className="label">Database Existing</label>
+            <select className="input" value={sourceId} onChange={(e) => { autoRetrieveKeyRef.current = ""; setSourceId(e.target.value); }}>
               <option value="all">Semua Database</option>
-              {!!sources.length && (
-                <optgroup label="Database Existing">
-                  {sources.map((s) => (
-                    <option key={`source-${s.id}`} value={String(s.id)}>{s.name} - {s.institution_name || s.company_name || "-"}</option>
-                  ))}
-                </optgroup>
-              )}
-              {program === "corporate" && !!sessionSourceOptions.length && (
-                <optgroup label="Session MCU · Lokasi / Tanggal">
+              {sources.map((s) => (
+                <option key={`source-${s.id}`} value={String(s.id)}>{s.name} - {s.institution_name || s.company_name || "-"}</option>
+              ))}
+            </select>
+          </div>
+
+          {program === "corporate" ? (
+            <div className="xl:col-span-2">
+              <label className="label">Session MCU / Lokasi / Tanggal</label>
+              <div className="flex gap-2">
+                <select
+                  className="input min-w-0 flex-1"
+                  value={registrationSessionIdV491}
+                  disabled={sessionLocked}
+                  onChange={(e) => { autoRetrieveKeyRef.current = ""; setRegistrationSessionIdV491(e.target.value); }}
+                >
+                  <option value="">Pilih Session MCU</option>
                   {sessionSourceOptions.map((item: any) => (
                     <option key={item.value} value={item.value}>
                       {item.company_name} · {item.location} · {sessionDateLabel(item.session_date)} · {item.package_name}
                     </option>
                   ))}
-                </optgroup>
-              )}
-            </select>
-          </div>
-
-          <button
-            type="button"
-            className={`btn-secondary whitespace-nowrap ${sessionLocked ? "border-emerald-300 bg-emerald-50 text-emerald-700" : ""}`}
-            onClick={toggleRegistrationSessionLock}
-          >
-            {sessionLocked ? "🔒 Session Terkunci" : "🔓 Kunci Session"}
-          </button>
+                </select>
+                <button
+                  type="button"
+                  className={`btn-secondary whitespace-nowrap ${sessionLocked ? "border-emerald-300 bg-emerald-50 text-emerald-700" : ""}`}
+                  onClick={toggleRegistrationSessionLock}
+                >
+                  {sessionLocked ? "🔒 Session Terkunci" : "🔓 Kunci Session"}
+                </button>
+              </div>
+            </div>
+          ) : <div />}
 
           <div>
             <label className="label">Cari Peserta</label>
