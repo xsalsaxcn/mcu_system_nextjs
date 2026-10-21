@@ -13,6 +13,60 @@ function clean(value: any) {
   return String(value ?? "").trim();
 }
 
+function normalizedName(value: any) {
+  return clean(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeFamilyRole(value: any) {
+  const role = clean(value).toUpperCase();
+  return ["DEPENDENT", "CHILD", "FAMILY"].includes(role)
+    ? "DEPENDENT"
+    : role === "PARENT" || role === "EMPLOYEE"
+      ? "PARENT"
+      : "";
+}
+
+function rowFamilyRole(row: any) {
+  const explicit = normalizeFamilyRole(row?.family_role);
+  if (explicit) return explicit;
+  return "";
+}
+
+function familySafeRegistrationMatch(row: any, identity: any) {
+  const wantedName = normalizedName(identity?.name);
+  const rowName = normalizedName(row?.participant_name);
+
+  // Shared Employee ID / NIK is common for a parent and dependents.
+  // If a name is available, it MUST also match.
+  if (wantedName && rowName && wantedName !== rowName) return false;
+
+  const wantedRole = normalizeFamilyRole(identity?.familyRole);
+  const candidateRole = rowFamilyRole(row);
+  if (wantedRole && candidateRole && wantedRole !== candidateRole) {
+    return false;
+  }
+
+  const wantedParentId = Number(identity?.parentHistoryPersonId || 0);
+  const candidateParentId = Number(row?.parent_history_person_id || 0);
+
+  if (
+    wantedRole === "DEPENDENT" &&
+    wantedParentId &&
+    candidateParentId &&
+    wantedParentId !== candidateParentId
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function finalStatus(value: any) {
   return ["ADMINISTERED", "DONE", "FINISHED", "CANCELLED"].includes(
     clean(value).toUpperCase(),
@@ -38,18 +92,44 @@ function dedupeRows(rows: any[]) {
 async function findRegistrations(supabase: any, identity: any) {
   const baseSelect =
     "*, session:vaccination_sessions(id,session_name,company_name,location,session_date,source_id,source_name)";
+
+  // Strongest key: History person ID. This is person-specific even when family
+  // members intentionally share one employee/BINUSIAN ID.
+  if (identity.historyPersonId) {
+    const result = await supabase
+      .from("vaccination_registrations")
+      .select(baseSelect)
+      .eq("history_person_id", Number(identity.historyPersonId))
+      .order("id", { ascending: false })
+      .limit(80);
+
+    if (result.error) throw new Error(result.error.message);
+    const rows = dedupeRows(result.data || []).filter((row: any) =>
+      familySafeRegistrationMatch(row, identity),
+    );
+    if (rows.length) return rows;
+  }
+
+  // Operational participant ID is also a strong exact key.
+  if (identity.participantId) {
+    const result = await supabase
+      .from("vaccination_registrations")
+      .select(baseSelect)
+      .eq("participant_id", Number(identity.participantId))
+      .order("id", { ascending: false })
+      .limit(80);
+
+    if (result.error) throw new Error(result.error.message);
+    const rows = dedupeRows(result.data || []).filter((row: any) =>
+      familySafeRegistrationMatch(row, identity),
+    );
+    if (rows.length) return rows;
+  }
+
   const jobs: Promise<any>[] = [];
 
-  if (identity.participantId) {
-    jobs.push(
-      supabase
-        .from("vaccination_registrations")
-        .select(baseSelect)
-        .eq("participant_id", identity.participantId)
-        .order("id", { ascending: false })
-        .limit(80),
-    );
-  }
+  // These keys can be shared by family members, so the result set is always
+  // filtered again by name + family role + parent binding when available.
   if (identity.employeeId) {
     jobs.push(
       supabase
@@ -60,6 +140,7 @@ async function findRegistrations(supabase: any, identity: any) {
         .limit(80),
     );
   }
+
   if (identity.nik) {
     jobs.push(
       supabase
@@ -70,6 +151,7 @@ async function findRegistrations(supabase: any, identity: any) {
         .limit(80),
     );
   }
+
   if (identity.email) {
     jobs.push(
       supabase
@@ -81,27 +163,40 @@ async function findRegistrations(supabase: any, identity: any) {
     );
   }
 
-  // Name-only is intentionally a last resort and only used when there is no stronger key.
-  if (!jobs.length && identity.name) {
-    jobs.push(
-      supabase
-        .from("vaccination_registrations")
-        .select(baseSelect)
-        .ilike("participant_name", identity.name)
-        .order("id", { ascending: false })
-        .limit(30),
+  if (jobs.length) {
+    const results = await Promise.all(jobs);
+    const rows: any[] = [];
+
+    for (const result of results) {
+      if (result.error) throw new Error(result.error.message);
+      rows.push(...(result.data || []));
+    }
+
+    const filtered = dedupeRows(rows).filter((row: any) =>
+      familySafeRegistrationMatch(row, identity),
+    );
+
+    if (filtered.length) return filtered;
+  }
+
+  // Name-only is intentionally the last resort. It must be exact after
+  // normalization and still obey explicit family-role / parent constraints.
+  if (identity.name) {
+    const result = await supabase
+      .from("vaccination_registrations")
+      .select(baseSelect)
+      .ilike("participant_name", identity.name)
+      .order("id", { ascending: false })
+      .limit(30);
+
+    if (result.error) throw new Error(result.error.message);
+
+    return dedupeRows(result.data || []).filter((row: any) =>
+      familySafeRegistrationMatch(row, identity),
     );
   }
 
-  if (!jobs.length) return [];
-
-  const results = await Promise.all(jobs);
-  const rows: any[] = [];
-  for (const result of results) {
-    if (result.error) throw new Error(result.error.message);
-    rows.push(...(result.data || []));
-  }
-  return dedupeRows(rows);
+  return [];
 }
 
 async function attachItems(supabase: any, registrations: any[]) {
@@ -136,8 +231,9 @@ async function findHistoryPerson(supabase: any, identity: any) {
     const direct = await supabase
       .from("vaccination_persons")
       .select("*")
-      .eq("id", identity.historyPersonId)
+      .eq("id", Number(identity.historyPersonId))
       .maybeSingle();
+
     if (direct.error) throw new Error(direct.error.message);
     if (direct.data) return direct.data;
   }
@@ -147,10 +243,13 @@ async function findHistoryPerson(supabase: any, identity: any) {
   const employeeKey = historyIdentityKey(identity.employeeId);
   const emailKey = historyEmailKey(identity.email);
   const nameKey = historyNameKey(identity.name);
+
   if (nikKey) checks.push(["nik_key", nikKey]);
   if (employeeKey) checks.push(["employee_key", employeeKey]);
   if (emailKey) checks.push(["email_key", emailKey]);
   if (nameKey) checks.push(["name_key", nameKey]);
+
+  const candidates = new Map<number, any>();
 
   for (const [field, value] of checks) {
     const result = await supabase
@@ -158,11 +257,62 @@ async function findHistoryPerson(supabase: any, identity: any) {
       .select("*")
       .eq(field, value)
       .eq("active", true)
-      .limit(2);
+      .limit(30);
+
     if (result.error) throw new Error(result.error.message);
-    if ((result.data || []).length === 1) return result.data[0];
+
+    for (const row of result.data || []) {
+      if (row?.id) candidates.set(Number(row.id), row);
+    }
   }
-  return null;
+
+  let rows = Array.from(candidates.values());
+
+  const wantedName = normalizedName(identity?.name);
+  if (wantedName) {
+    rows = rows.filter(
+      (row: any) =>
+        normalizedName(row?.participant_name) === wantedName,
+    );
+  }
+
+  const wantedRole = normalizeFamilyRole(identity?.familyRole);
+  if (wantedRole) {
+    rows = rows.filter((row: any) => {
+      const type = clean(row?.participant_type).toUpperCase();
+      return wantedRole === "DEPENDENT"
+        ? type === "DEPENDENT"
+        : type !== "DEPENDENT";
+    });
+  }
+
+  const parentId = Number(identity?.parentHistoryPersonId || 0);
+  if (wantedRole === "DEPENDENT" && parentId && rows.length) {
+    const childIds = rows
+      .map((row: any) => Number(row.id || 0))
+      .filter(Boolean);
+
+    const relations = await supabase
+      .from("vaccination_person_relationships")
+      .select("dependent_person_id")
+      .eq("parent_person_id", parentId)
+      .eq("active", true)
+      .in("dependent_person_id", childIds);
+
+    if (relations.error) throw new Error(relations.error.message);
+
+    const allowed = new Set<number>(
+      (relations.data || [])
+        .map((row: any) => Number(row.dependent_person_id || 0))
+        .filter(Boolean),
+    );
+
+    rows = rows.filter((row: any) => allowed.has(Number(row.id)));
+  }
+
+  // Ambiguous identity is safer as "no exact History person" than binding the
+  // wrong family member.
+  return rows.length === 1 ? rows[0] : null;
 }
 
 function registrationSummary(row: any, hasRecord: boolean) {
@@ -194,6 +344,11 @@ function registrationSummary(row: any, hasRecord: boolean) {
     nik: clean(row.nik),
     email: clean(row.email),
     phone: clean(row.phone),
+    familyRole: normalizeFamilyRole(row.family_role) || "",
+    historyPersonId: Number(row.history_person_id || 0) || null,
+    parentHistoryPersonId:
+      Number(row.parent_history_person_id || 0) || null,
+    parentName: "",
     companyName: clean(row.company_name),
     department: clean(row.department),
     registeredAt: row.registered_at || row.created_at || null,
@@ -237,6 +392,13 @@ export async function GET(req: NextRequest) {
     employeeId: clean(req.nextUrl.searchParams.get("employee_id")),
     nik: clean(req.nextUrl.searchParams.get("nik")),
     email: clean(req.nextUrl.searchParams.get("email")),
+    familyRole: normalizeFamilyRole(
+      req.nextUrl.searchParams.get("family_role"),
+    ),
+    parentHistoryPersonId: toInt(
+      req.nextUrl.searchParams.get("parent_history_person_id"),
+      0,
+    ),
   };
 
   const supabase = supabaseAdmin();
@@ -311,6 +473,34 @@ export async function GET(req: NextRequest) {
         )
       : null;
 
+    let parentName = "";
+    const parentHistoryPersonId = Number(
+      identity.parentHistoryPersonId ||
+        currentRegistration?.parentHistoryPersonId ||
+        otherRegistration?.parentHistoryPersonId ||
+        0,
+    );
+
+    if (parentHistoryPersonId) {
+      const parentResult = await supabase
+        .from("vaccination_persons")
+        .select("participant_name")
+        .eq("id", parentHistoryPersonId)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (!parentResult.error) {
+        parentName = clean(parentResult.data?.participant_name);
+      }
+    }
+
+    if (currentRegistration && parentName) {
+      currentRegistration.parentName = parentName;
+    }
+    if (otherRegistration && parentName) {
+      otherRegistration.parentName = parentName;
+    }
+
     const caseType = currentRegistration
       ? "CURRENT_SESSION"
       : otherRegistration?.moveAllowed
@@ -341,6 +531,14 @@ export async function GET(req: NextRequest) {
           }
         : null,
       historical,
+      identityPolicy: {
+        familySafe: true,
+        familyRole: identity.familyRole || "",
+        parentHistoryPersonId:
+          Number(identity.parentHistoryPersonId || 0) || null,
+        rule:
+          "history_person_id/participant_id first; otherwise family role + exact name + NIK/Employee ID + parent when available",
+      },
     });
   } catch (error: any) {
     const message = String(

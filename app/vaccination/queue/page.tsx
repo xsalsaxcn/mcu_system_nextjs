@@ -496,6 +496,15 @@ export default function VaccinationQueuePage() {
     void action("cancel", Number(row.id), track);
   }
 
+  function undoFinishTrack(row: any, track: "A" | "B") {
+    const number = trackNumber(row, track) || "-";
+    const confirmed = window.confirm(
+      `Batalkan status Selesai antrean ${track} ${number} - ${row?.participant_name || "peserta"}?\n\nAntrean akan dikembalikan ke Waiting agar bisa diproses lagi. Produk, nomor antrean, dan data peserta tidak dihapus.`,
+    );
+    if (!confirmed) return;
+    void action("undo-finish", Number(row.id), track);
+  }
+
   useEffect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
@@ -682,7 +691,7 @@ export default function VaccinationQueuePage() {
             <table className="min-w-full text-xs">
               <thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2 text-left">No</th><th className="p-2 text-left">Nama</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Update</th><th className="p-2 text-left">Aksi</th></tr></thead>
               <tbody className="divide-y">
-                {history.map((row) => { const s = trackStatus(row, track); const time = track === "B" ? (s === "CANCELLED" ? row.bazar_cancelled_at : row.bazar_finished_at) : row.updated_at; return <tr key={`history-${track}-${row.id}`}><td className={`p-2 font-black ${accent}`}>{row?.[numberKey] || "-"}</td><td className="p-2 font-bold">{row.participant_name}</td><td className="p-2"><span className={`rounded-full px-2 py-1 font-black ${colors[s] || "bg-slate-100 text-slate-700"}`}>{label(s)}</span></td><td className="p-2 text-slate-500">{time ? new Date(time).toLocaleString("id-ID") : "-"}</td><td className="p-2"><button onClick={() => openRegistrationEdit(row)} className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 font-bold text-blue-700">Edit</button></td></tr>; })}
+                {history.map((row) => { const s = trackStatus(row, track); const time = track === "B" ? (s === "CANCELLED" ? row.bazar_cancelled_at : row.bazar_finished_at) : row.updated_at; const done = ["ADMINISTERED", "DONE", "FINISHED"].includes(s); return <tr key={`history-${track}-${row.id}`}><td className={`p-2 font-black ${accent}`}>{row?.[numberKey] || "-"}</td><td className="p-2 font-bold">{row.participant_name}</td><td className="p-2"><span className={`rounded-full px-2 py-1 font-black ${colors[s] || "bg-slate-100 text-slate-700"}`}>{label(s)}</span></td><td className="p-2 text-slate-500">{time ? new Date(time).toLocaleString("id-ID") : "-"}</td><td className="p-2"><div className="flex flex-wrap gap-1"><button onClick={() => openRegistrationEdit(row)} className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 font-bold text-blue-700">Edit</button>{done ? <button onClick={() => undoFinishTrack(row, track)} className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 font-bold text-rose-700">Batalkan Selesai</button> : null}</div></td></tr>; })}
                 {!history.length ? <tr><td colSpan={5} className="p-3 text-center font-semibold text-slate-500">Belum ada history {track}.</td></tr> : null}
               </tbody>
             </table>

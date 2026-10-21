@@ -224,6 +224,7 @@ export async function POST(req: NextRequest) {
       action === "recall" ? "CALLED" :
       action === "start" ? "IN_PROGRESS" :
       action === "finish" ? "DONE" :
+      action === "undo-finish" ? "WAITING" :
       action === "skip" ? "SKIPPED" :
       action === "cancel" ? "CANCELLED" :
       action === "waiting" ? "WAITING" : "";
@@ -241,6 +242,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const currentTrackStatus = clean(existing.bazar_queue_status).toUpperCase();
+    if (
+      action === "undo-finish" &&
+      !["ADMINISTERED", "DONE", "FINISHED"].includes(currentTrackStatus)
+    ) {
+      return fail(
+        `Antrean B tidak berstatus Selesai (status saat ini: ${currentTrackStatus || "-"}).`,
+        409,
+      );
+    }
+
     const now = new Date().toISOString();
     const updatePayload: Record<string, any> = {
       bazar_queue_status: nextStatus,
@@ -251,6 +263,11 @@ export async function POST(req: NextRequest) {
     if (nextStatus === "CALLED") updatePayload.bazar_called_at = now;
     if (nextStatus === "DONE") updatePayload.bazar_finished_at = now;
     if (nextStatus === "CANCELLED") updatePayload.bazar_cancelled_at = now;
+    if (action === "undo-finish") {
+      updatePayload.bazar_finished_at = null;
+      updatePayload.bazar_cancelled_at = null;
+      updatePayload.bazar_called_at = null;
+    }
 
     const regResult = await supabase
       .from("vaccination_registrations")
@@ -260,17 +277,36 @@ export async function POST(req: NextRequest) {
       .single();
     if (regResult.error) return fail(regResult.error.message, 500);
 
-    return ok({ message: `Status antrian B diubah ke ${nextStatus}.`, registration: regResult.data, track });
+    return ok({
+      message:
+        action === "undo-finish"
+          ? "Status Selesai antrean B dibatalkan. Antrean dikembalikan ke Waiting."
+          : `Status antrian B diubah ke ${nextStatus}.`,
+      registration: regResult.data,
+      track,
+    });
   }
 
   const nextStatus =
     action === "recall" ? "CALLED" :
     action === "start" ? "IN_PROGRESS" :
     action === "finish" ? "DONE" :
+    action === "undo-finish" ? "WAITING" :
     action === "skip" ? "SKIPPED" :
     action === "cancel" ? "CANCELLED" :
     action === "waiting" ? "WAITING" : "";
   if (!nextStatus) return fail("Action tidak dikenali.");
+
+  const currentTrackStatus = clean(existing.queue_status).toUpperCase();
+  if (
+    action === "undo-finish" &&
+    !["ADMINISTERED", "DONE", "FINISHED"].includes(currentTrackStatus)
+  ) {
+    return fail(
+      `Antrean A tidak berstatus Selesai (status saat ini: ${currentTrackStatus || "-"}).`,
+      409,
+    );
+  }
 
   const activeQueueStatus = ["WAITING", "CALLED", "IN_PROGRESS"].includes(nextStatus);
   let queueNumber = clean(existing.queue_number);
@@ -303,5 +339,12 @@ export async function POST(req: NextRequest) {
       .eq("id", sessionId);
   }
 
-  return ok({ message: `Status antrian A diubah ke ${nextStatus}.`, registration: regResult.data, track });
+  return ok({
+    message:
+      action === "undo-finish"
+        ? "Status Selesai antrean A dibatalkan. Antrean dikembalikan ke Waiting."
+        : `Status antrian A diubah ke ${nextStatus}.`,
+    registration: regResult.data,
+    track,
+  });
 }

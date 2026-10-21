@@ -48,6 +48,22 @@ function benefitLabel(item: any) {
     : name;
 }
 
+function familyRoleLabel(value: any) {
+  return String(value || "").toUpperCase() === "DEPENDENT"
+    ? "Child / Family"
+    : "Parent";
+}
+
+function identityLabel(row: any) {
+  return [
+    clean(row?.participantName || row?.name),
+    clean(row?.employeeId) ? `ID ${clean(row.employeeId)}` : "",
+    clean(row?.nik) ? `NIK ${clean(row.nik)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export default function VaccinationParticipantMasterSearch({
   form,
   setForm,
@@ -299,6 +315,32 @@ export default function VaccinationParticipantMasterSearch({
       if (clean(row?.employeeId || row?.employee_id)) params.set("employee_id", clean(row?.employeeId || row?.employee_id));
       if (clean(row?.nik)) params.set("nik", clean(row?.nik));
       if (clean(row?.email)) params.set("email", clean(row?.email));
+
+      const participantType = clean(
+        row?.participantType ||
+          row?.participant_type ||
+          row?.familyRole ||
+          row?.family_role,
+      ).toUpperCase();
+      const familyRole =
+        participantType === "DEPENDENT" ||
+        participantType === "CHILD" ||
+        participantType === "FAMILY"
+          ? "DEPENDENT"
+          : "PARENT";
+      params.set("family_role", familyRole);
+
+      const parentHistoryPersonId = Number(
+        row?.parentHistoryPersonId ||
+          row?.parent_history_person_id ||
+          0,
+      );
+      if (parentHistoryPersonId) {
+        params.set(
+          "parent_history_person_id",
+          String(parentHistoryPersonId),
+        );
+      }
 
       const response = await fetch(
         `/api/vaccination/register-participant-context?${params.toString()}`,
@@ -781,23 +823,67 @@ export default function VaccinationParticipantMasterSearch({
                   </button>
                 </section>
               ) : other ? (
-                <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                  <div className="text-xs font-black uppercase text-amber-700">Peserta terdaftar di lokasi lain</div>
-                  <div className="mt-2 text-xl font-black text-amber-950">
-                    {other?.session?.location || other?.session?.name || "Lokasi lain"}
+                <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide text-amber-700">
+                        Peringatan · Pernah Terdaftar di Lokasi Lain
+                      </div>
+                      <div className="mt-2 text-lg font-black leading-snug text-amber-950">
+                        Peserta ini sudah pernah terdaftar di{" "}
+                        {other?.session?.location || other?.session?.name || "lokasi lain"},{" "}
+                        {dateLabel(other?.session?.date || other?.registeredAt)}.
+                      </div>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-black text-amber-800">
+                      {familyRoleLabel(
+                        other?.familyRole ||
+                          pending?.row?.participantType ||
+                          pending?.row?.participant_type,
+                      )}
+                    </span>
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-amber-800">{dateLabel(other?.session?.date || other?.registeredAt)}</div>
+
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-white p-3">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                      Identitas yang dicocokkan
+                    </div>
+                    <div className="mt-1 text-sm font-black text-slate-950">
+                      {identityLabel(other) ||
+                        identityLabel(pending?.row) ||
+                        pending?.row?.name ||
+                        "Peserta"}
+                    </div>
+                    {other?.familyRole === "DEPENDENT" && other?.parentName ? (
+                      <div className="mt-1 text-xs font-semibold text-slate-600">
+                        Parent: {other.parentName}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-[11px] font-semibold text-slate-500">
+                      Sistem membedakan peserta berdasarkan kombinasi status keluarga,
+                      nama, NIK/Employee ID, dan Parent bila tersedia — bukan dari NIK
+                      karyawan saja.
+                    </div>
+                  </div>
+
                   <div className="mt-4">
-                    <div className="text-xs font-black uppercase text-amber-700">Benefit / Layanan</div>
+                    <div className="text-xs font-black uppercase text-amber-700">
+                      Layanan Sebelumnya
+                    </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {(other?.benefits || []).map((benefit: any, index: number) => (
                         <span key={`${benefit?.vaccineId || index}-${index}`} className="rounded-full bg-white px-3 py-1 text-xs font-black text-amber-900">
                           {benefitLabel(benefit)}
                         </span>
                       ))}
-                      {!(other?.benefits || []).length ? <span className="text-xs font-semibold text-amber-800">Benefit belum tercatat.</span> : null}
+                      {!(other?.benefits || []).length ? (
+                        <span className="text-xs font-semibold text-amber-800">
+                          Layanan belum tercatat.
+                        </span>
+                      ) : null}
                     </div>
                   </div>
+
                   {other.moveAllowed ? (
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button type="button" onClick={() => continueFromPopup("MOVE")} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-black text-white hover:bg-amber-700">
