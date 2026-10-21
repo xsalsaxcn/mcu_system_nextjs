@@ -500,6 +500,211 @@ function ImportForm({ user }: { user: any }) {
   }
 
   // MCU_CORPORATE_IMPORT_MAPPING_FAST_V469
+  // MCU_CORPORATE_IMPORT_SESSION_SOURCE_V471
+  function normalizeCorporateSessionOptionV471(row: any): CorporateImportSessionV466 | null {
+    if (!row || typeof row !== "object") return null;
+
+    const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
+    const merged: any = { ...raw, ...row };
+
+    const clean = (value: any) => String(value ?? "").trim();
+    const first = (...values: any[]) => {
+      for (const value of values) {
+        const text = clean(value);
+        if (text) return text;
+      }
+      return "";
+    };
+
+    const id = Number(
+      merged.id ??
+      merged.queue_session_id ??
+      merged.session_id ??
+      merged.mcu_session_id ??
+      merged.sessionId ??
+      0
+    );
+    if (!id) return null;
+
+    const companyId = Number(merged.company_id ?? merged.companyId ?? corporateCompanyChoiceV431 ?? 0);
+    const packageId = Number(merged.package_id ?? merged.packageId ?? corporatePackageChoiceV432 ?? 0);
+
+    const companyName = first(
+      merged.company_name,
+      merged.company?.name,
+      merged.institution_name,
+      institutionName,
+      "MCU Corporate",
+    );
+
+    const resolvedPackageName = first(
+      merged.package_name,
+      merged.package?.name,
+      merged.service_name,
+      merged.program_name,
+      packageName,
+      "Paket MCU",
+    );
+
+    const sessionDate = first(
+      merged.session_date,
+      merged.sessionDate,
+      merged.event_date,
+      merged.exam_date,
+      merged.mcu_date,
+      merged.scheduled_date,
+      merged.service_date,
+      merged.appointment_date,
+      merged.queue_date,
+      merged.date,
+    ).slice(0, 10);
+
+    const locationName = first(
+      merged.location_name,
+      merged.session_location_name,
+      merged.session_location,
+      merged.location_label,
+      merged.location,
+      merged.site_location,
+      merged.site_name,
+      merged.site,
+      merged.campus_name,
+      merged.campus,
+      merged.branch_name,
+      merged.branch,
+      merged.event_location,
+      merged.venue,
+      merged.place,
+    );
+
+    const explicitLabel = first(
+      merged.label,
+      merged.session_label,
+      merged.display_label,
+      merged.display_name,
+      merged.session_name,
+      merged.title,
+    );
+
+    const richParts = [sessionDate, locationName, resolvedPackageName].filter(Boolean);
+    let label = richParts.length >= 2 ? richParts.join(" · ") : "";
+
+    if (
+      explicitLabel &&
+      (
+        explicitLabel !== resolvedPackageName ||
+        /\d{1,4}[-/ ]\d{1,2}|·| - |lokasi|session|serpong|jakarta|bandung|kampus/i.test(explicitLabel)
+      )
+    ) {
+      label = explicitLabel;
+    }
+
+    if (!label) {
+      label = explicitLabel || `Session #${id} · ${resolvedPackageName}`;
+    }
+
+    return {
+      id,
+      company_id: companyId,
+      package_id: packageId,
+      company_name: companyName,
+      package_name: resolvedPackageName,
+      location_name: locationName,
+      session_date: sessionDate,
+      label,
+    };
+  }
+
+  function extractCorporateSessionArraysV471(json: any): any[] {
+    if (!json || typeof json !== "object") return [];
+
+    const candidates: any[] = [
+      json.sessions,
+      json.session_options,
+      json.available_sessions,
+      json.queue_sessions,
+      json.mcu_sessions,
+      json.options,
+      json.data?.sessions,
+      json.data?.session_options,
+      json.data?.available_sessions,
+      json.data?.queue_sessions,
+      json.result?.sessions,
+    ];
+
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate) && candidate.length) return candidate;
+    }
+
+    const singles = [
+      json.selected_session,
+      json.current_session,
+      json.queue_session,
+      json.session,
+      json.data?.selected_session,
+      json.data?.queue_session,
+      json.data?.session,
+    ].filter(Boolean);
+
+    return singles.length ? singles : [];
+  }
+
+  async function loadCorporateSessionOptionsV471(companyId: string, packageId: string) {
+    const qs = `company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}`;
+
+    const endpoints = [
+      `/api/mcu/queue?${qs}&session_options=1&t=${Date.now()}`,
+      `/api/mcu/session?${qs}&list_sessions=1&t=${Date.now()}`,
+      `/api/mcu/import-mapping?${qs}&t=${Date.now()}`,
+    ];
+
+    let fallback: CorporateImportSessionV466[] = [];
+    let lastError = "";
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.ok === false) {
+          lastError = String(json?.message || `HTTP ${res.status}`);
+          continue;
+        }
+
+        const rows = extractCorporateSessionArraysV471(json);
+        const normalized = rows
+          .map(normalizeCorporateSessionOptionV471)
+          .filter(Boolean) as CorporateImportSessionV466[];
+
+        const filtered = normalized.filter((session) => {
+          const companyMatch = !session.company_id || String(session.company_id) === String(companyId);
+          const packageMatch = !session.package_id || String(session.package_id) === String(packageId);
+          return companyMatch && packageMatch;
+        });
+
+        const deduped = Array.from(
+          new Map(filtered.map((session) => [`${session.id}:${session.label}`, session])).values(),
+        );
+
+        if (!deduped.length) continue;
+
+        const hasRichSession = deduped.some(
+          (session) => Boolean(session.session_date || session.location_name),
+        );
+        if (hasRichSession || deduped.length > 1) return deduped;
+
+        if (!fallback.length) fallback = deduped;
+      } catch (error: any) {
+        lastError = error?.message || String(error || "");
+      }
+    }
+
+    if (fallback.length) return fallback;
+    throw new Error(lastError || "Belum ada Session MCU / Lokasi untuk perusahaan + paket ini.");
+  }
+
   // MCU_CORPORATE_IMPORT_SESSION_TOP_V470
   useEffect(() => {
     if (programType !== "corporate") return;
@@ -521,18 +726,9 @@ function ImportForm({ user }: { user: any }) {
     let cancelled = false;
     setCorporateSessionLoadingV470(true);
 
-    fetch(
-      `/api/mcu/import-mapping?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}`,
-      { cache: "no-store" },
-    )
-      .then(async (res) => {
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || !json?.ok) throw new Error(json?.message || "Gagal membaca Session MCU/Lokasi.");
-        return json;
-      })
-      .then((json) => {
+    loadCorporateSessionOptionsV471(companyId, packageId)
+      .then((sessions) => {
         if (cancelled) return;
-        const sessions = Array.isArray(json?.sessions) ? json.sessions : [];
         setCorporateSessionsV466(sessions);
         setCorporateSessionIdV466((prev) => {
           const existingStillValid = sessions.some((row: any) => String(row?.id) === String(prev));
@@ -574,14 +770,10 @@ function ImportForm({ user }: { user: any }) {
     setCorporateMappingErrorV466("");
 
     try {
-      const sessionPromise = fetch(
-        `/api/mcu/import-mapping?company_id=${encodeURIComponent(corporateCompanyChoiceV431)}&package_id=${encodeURIComponent(corporatePackageChoiceV432)}`,
-        { cache: "no-store" },
-      ).then(async (res) => {
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || !json?.ok) throw new Error(json?.message || "Gagal membaca Session MCU/Lokasi.");
-        return json;
-      });
+      const sessionPromise = loadCorporateSessionOptionsV471(
+        String(corporateCompanyChoiceV431),
+        String(corporatePackageChoiceV432),
+      );
 
       // FAST V469: parse workbook locally in browser. No upload just to inspect headers.
       const XLSX = await import("xlsx");
@@ -681,8 +873,7 @@ function ImportForm({ user }: { user: any }) {
 
       if (!preview) throw new Error("Tidak menemukan sheet Excel berisi data peserta.");
 
-      const sessionJson = await sessionPromise;
-      const sessions = Array.isArray(sessionJson?.sessions) ? sessionJson.sessions : [];
+      const sessions = await sessionPromise;
 
       setCorporatePreviewV466(preview);
       setCorporateMappingV466(preview.suggested_mapping || {});
@@ -1091,7 +1282,7 @@ function ImportForm({ user }: { user: any }) {
                   </option>
                   {corporateSessionsV466.map((session) => (
                     <option key={session.id} value={String(session.id)}>
-                      {session.label || `${session.session_date || "-"} · ${session.location_name || "-"} · ${session.package_name || ""}`}
+                      {session.label || `${session.session_date || "Tanpa tanggal"} · ${session.location_name || "Tanpa lokasi"} · ${session.package_name || ""}`}
                     </option>
                   ))}
                 </select>
