@@ -7,6 +7,7 @@ import {
   ensureMcuQueueEntry,
   ensureMcuQueueSession,
   loadMcuQueueEntriesWithParticipants,
+  queueSchemaErrorMessage,
   type McuQueueTrack,
 } from "@/lib/server/mcuQueue";
 import {
@@ -52,20 +53,30 @@ function actionToStatus(action: string) {
   return "";
 }
 
-// MCU_QUEUE_CONTEXT_SELECTOR_V435
+// MCU_QUEUE_MULTI_LOCATION_CONTEXT_V453
 async function resolveQueueContext(
   req: NextRequest,
   body?: Record<string, any>,
 ) {
   const cookieSelected = getMcuCorporateSession(req);
-  const requestedCompanyId = Number(
+  const requestedQueueSessionId = Number(
+    body?.queue_session_id ||
+      body?.queueSessionId ||
+      req.nextUrl.searchParams.get("queue_session_id") ||
+      0,
+  );
+
+  const supabase = getSupabaseAdmin();
+
+  let queueSession: any = null;
+  let requestedCompanyId = Number(
     body?.company_id ||
       body?.companyId ||
       req.nextUrl.searchParams.get("company_id") ||
       cookieSelected?.company_id ||
       0,
   );
-  const requestedPackageId = Number(
+  let requestedPackageId = Number(
     body?.package_id ||
       body?.packageId ||
       req.nextUrl.searchParams.get("package_id") ||
@@ -73,13 +84,38 @@ async function resolveQueueContext(
       0,
   );
 
-  if (!requestedCompanyId || !requestedPackageId) {
-    throw new Error("Pilih perusahaan dan paket pemeriksaan terlebih dahulu.");
+  if (requestedQueueSessionId) {
+    const queueSessionRes = await supabase
+      .from("mcu_queue_sessions")
+      .select("*")
+      .eq("id", requestedQueueSessionId)
+      .eq("is_active", 1)
+      .maybeSingle();
+
+    if (queueSessionRes.error) {
+      throw new Error(queueSchemaErrorMessage(queueSessionRes.error));
+    }
+    if (!queueSessionRes.data) {
+      throw new Error(
+        "Session MCU lokasi/tanggal tidak ditemukan atau sudah nonaktif.",
+      );
+    }
+
+    queueSession = queueSessionRes.data;
+    requestedCompanyId = Number(queueSession.company_id || 0);
+    requestedPackageId = Number(queueSession.package_id || 0);
   }
 
-  const supabase = getSupabaseAdmin();
+  if (!requestedCompanyId || !requestedPackageId) {
+    throw new Error("Pilih perusahaan dan Session MCU terlebih dahulu.");
+  }
+
   const [companyRes, packageRes] = await Promise.all([
-    supabase.from("companies").select("id,name").eq("id", requestedCompanyId).maybeSingle(),
+    supabase
+      .from("companies")
+      .select("id,name")
+      .eq("id", requestedCompanyId)
+      .maybeSingle(),
     supabase
       .from("packages")
       .select("id,name,company_id,is_active,program_type")
@@ -91,10 +127,16 @@ async function resolveQueueContext(
 
   if (companyRes.error) throw new Error(companyRes.error.message);
   if (packageRes.error) throw new Error(packageRes.error.message);
-  if (!companyRes.data) throw new Error("Perusahaan MCU Corporate tidak ditemukan.");
-  if (!packageRes.data) throw new Error("Paket MCU Corporate tidak ditemukan / tidak aktif.");
+  if (!companyRes.data) {
+    throw new Error("Perusahaan MCU Corporate tidak ditemukan.");
+  }
+  if (!packageRes.data) {
+    throw new Error("Paket MCU Corporate tidak ditemukan / tidak aktif.");
+  }
 
-  let linked = Number(packageRes.data.company_id || 0) === requestedCompanyId;
+  let linked =
+    Number(packageRes.data.company_id || 0) === requestedCompanyId;
+
   if (!linked) {
     const participantLinkRes = await supabase
       .from("participants")
@@ -105,12 +147,16 @@ async function resolveQueueContext(
       .limit(1)
       .maybeSingle();
 
-    if (participantLinkRes.error) throw new Error(participantLinkRes.error.message);
+    if (participantLinkRes.error) {
+      throw new Error(participantLinkRes.error.message);
+    }
     linked = Boolean(participantLinkRes.data);
   }
 
   if (!linked) {
-    throw new Error("Paket belum terhubung ke perusahaan yang dipilih pada data MCU Corporate.");
+    throw new Error(
+      "Paket belum terhubung ke perusahaan yang dipilih pada data MCU Corporate.",
+    );
   }
 
   const selected = {
@@ -120,10 +166,12 @@ async function resolveQueueContext(
     package_name: String(packageRes.data.name || ""),
   };
 
-  const queueSession = await ensureMcuQueueSession(supabase, {
-    companyId: selected.company_id,
-    packageId: selected.package_id,
-  });
+  if (!queueSession) {
+    queueSession = await ensureMcuQueueSession(supabase, {
+      companyId: selected.company_id,
+      packageId: selected.package_id,
+    });
+  }
 
   return { selected, supabase, queueSession };
 }
@@ -174,13 +222,20 @@ export async function GET(req: NextRequest) {
 
   try {
     const { selected, supabase, queueSession } = await resolveQueueContext(req);
+    const isLocationSession = Boolean(
+      String((queueSession as any)?.location || "").trim() ||
+      String((queueSession as any)?.session_date || "").trim()
+    );
+
     const [entries, pendingParticipants, companyRes, packageRes] = await Promise.all([
       loadMcuQueueEntriesWithParticipants(supabase, queueSession.id),
-      loadMcuPendingParticipants(supabase, {
-        queueSessionId: Number(queueSession.id),
-        companyId: selected.company_id,
-        packageId: selected.package_id,
-      }),
+      isLocationSession
+        ? Promise.resolve([])
+        : loadMcuPendingParticipants(supabase, {
+            queueSessionId: Number(queueSession.id),
+            companyId: selected.company_id,
+            packageId: selected.package_id,
+          }),
       supabase.from("companies").select("id,name").eq("id", selected.company_id).maybeSingle(),
       supabase.from("packages").select("id,name").eq("id", selected.package_id).maybeSingle(),
     ]);
@@ -198,6 +253,9 @@ export async function GET(req: NextRequest) {
       operator_url: (queueSession as any)?.operator_token
         ? `/mcu/operator/${encodeURIComponent(String((queueSession as any).operator_token))}`
         : "",
+      participant_sync_mode: isLocationSession
+        ? "SESSION_BOUND_REQUIRED"
+        : "LEGACY_COMPANY_PACKAGE",
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal mengambil Antrian MCU.", 500);
@@ -216,13 +274,27 @@ export async function POST(req: NextRequest) {
     const { selected, supabase, queueSession } = await resolveQueueContext(req, body);
 
     if (action === "sync") {
+      const isLocationSession = Boolean(
+        String((queueSession as any)?.location || "").trim() ||
+        String((queueSession as any)?.session_date || "").trim()
+      );
+
+      if (isLocationSession) {
+        return fail(
+          "Session multi-lokasi sudah aktif, tetapi binding peserta Registrasi Ulang ke lokasi belum diaktifkan pada Stage 1. Sinkronisasi massal diblokir agar peserta dari lokasi lain tidak tercampur.",
+          409,
+        );
+      }
+
       const synced = await syncRegisteredParticipants({
         supabase,
         queueSessionId: queueSession.id,
         companyId: selected.company_id,
         packageId: selected.package_id,
       });
-      return ok({ message: `${synced} peserta Registrasi Ulang sudah tersinkron ke Antrian MCU.` });
+      return ok({
+        message: `${synced} peserta Registrasi Ulang sudah tersinkron ke Antrian MCU.`,
+      });
     }
 
     if (action === "informed") {

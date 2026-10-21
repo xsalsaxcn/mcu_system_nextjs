@@ -6,9 +6,13 @@ export type McuQueueSessionRow = {
   id: number;
   company_id: number;
   package_id: number;
+  session_name?: string | null;
+  location?: string | null;
+  session_date?: string | null;
   track_a_name: string;
   track_b_name: string;
   public_token: string;
+  operator_token?: string | null;
   is_active: number;
   created_at?: string;
   updated_at?: string;
@@ -41,6 +45,14 @@ export function queueSchemaErrorMessage(error: any) {
   if (isMissingQueueTableError(error)) {
     return "Tabel Antrian MCU belum tersedia. Jalankan sql/mcu_corporate_dual_queue_v434.sql di Supabase SQL Editor terlebih dahulu.";
   }
+  const text = String(error?.message || error?.details || "").toLowerCase();
+  if (
+    text.includes("session_name") ||
+    text.includes("session_date") ||
+    text.includes("location")
+  ) {
+    return "Schema Session MCU multi-lokasi belum tersedia. Jalankan SQL V453_STAGE1_MCU_MULTI_LOCATION_SESSION.sql terlebih dahulu.";
+  }
   return String(error?.message || "Gagal mengakses data Antrian MCU.");
 }
 
@@ -49,26 +61,177 @@ export async function ensureMcuQueueSession(
   args: {
     companyId: number;
     packageId: number;
+    queueSessionId?: number;
+    sessionName?: string;
+    location?: string;
+    sessionDate?: string;
     trackAName?: string;
     trackBName?: string;
+    createSeparate?: boolean;
   },
 ): Promise<McuQueueSessionRow> {
   const companyId = Number(args.companyId || 0);
   const packageId = Number(args.packageId || 0);
-  if (!companyId || !packageId) throw new Error("Company/package Session MCU tidak valid.");
+  const queueSessionId = Number(args.queueSessionId || 0);
+  if (!companyId || !packageId) {
+    throw new Error("Company/package Session MCU tidak valid.");
+  }
+
+  const location = String(args.location || "").trim().replace(/\s+/g, " ").slice(0, 160);
+  const sessionDate = String(args.sessionDate || "").trim().slice(0, 10);
+  const sessionName = String(args.sessionName || "").trim().replace(/\s+/g, " ").slice(0, 180);
+
+  if (queueSessionId) {
+    const exact = await supabase
+      .from("mcu_queue_sessions")
+      .select("*")
+      .eq("id", queueSessionId)
+      .eq("company_id", companyId)
+      .eq("package_id", packageId)
+      .maybeSingle();
+
+    if (exact.error) throw new Error(queueSchemaErrorMessage(exact.error));
+    if (!exact.data) throw new Error("Session MCU lokasi/tanggal tidak ditemukan.");
+
+    const payload: Record<string, any> = {
+      is_active: 1,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (args.trackAName !== undefined) {
+      payload.track_a_name = cleanQueueName(
+        args.trackAName,
+        exact.data.track_a_name || "Lab Darah",
+      );
+    }
+    if (args.trackBName !== undefined) {
+      payload.track_b_name = cleanQueueName(
+        args.trackBName,
+        exact.data.track_b_name || "Rontgen",
+      );
+    }
+    if (args.sessionName !== undefined) payload.session_name = sessionName || null;
+    if (args.location !== undefined) payload.location = location || null;
+    if (args.sessionDate !== undefined) payload.session_date = sessionDate || null;
+
+    const updated = await supabase
+      .from("mcu_queue_sessions")
+      .update(payload)
+      .eq("id", queueSessionId)
+      .select("*")
+      .single();
+
+    if (updated.error) throw new Error(queueSchemaErrorMessage(updated.error));
+    return updated.data as McuQueueSessionRow;
+  }
+
+  if (args.createSeparate) {
+    if (!location || !sessionDate) {
+      throw new Error("Lokasi dan tanggal MCU wajib diisi.");
+    }
+
+    const existingExact = await supabase
+      .from("mcu_queue_sessions")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("package_id", packageId)
+      .eq("session_date", sessionDate)
+      .ilike("location", location)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingExact.error) {
+      throw new Error(queueSchemaErrorMessage(existingExact.error));
+    }
+
+    if (existingExact.data) {
+      const updated = await supabase
+        .from("mcu_queue_sessions")
+        .update({
+          session_name: sessionName || existingExact.data.session_name || null,
+          location,
+          session_date: sessionDate,
+          track_a_name: cleanQueueName(
+            args.trackAName,
+            existingExact.data.track_a_name || "Lab Darah",
+          ),
+          track_b_name: cleanQueueName(
+            args.trackBName,
+            existingExact.data.track_b_name || "Rontgen",
+          ),
+          is_active: 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingExact.data.id)
+        .select("*")
+        .single();
+
+      if (updated.error) throw new Error(queueSchemaErrorMessage(updated.error));
+      return updated.data as McuQueueSessionRow;
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const inserted = await supabase
+        .from("mcu_queue_sessions")
+        .insert({
+          company_id: companyId,
+          package_id: packageId,
+          session_name: sessionName || null,
+          location,
+          session_date: sessionDate,
+          track_a_name: cleanQueueName(args.trackAName, "Lab Darah"),
+          track_b_name: cleanQueueName(args.trackBName, "Rontgen"),
+          public_token: randomPublicToken(),
+          is_active: 1,
+          updated_at: new Date().toISOString(),
+        })
+        .select("*")
+        .single();
+
+      if (!inserted.error) return inserted.data as McuQueueSessionRow;
+
+      const retryRead = await supabase
+        .from("mcu_queue_sessions")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("package_id", packageId)
+        .eq("session_date", sessionDate)
+        .ilike("location", location)
+        .limit(1)
+        .maybeSingle();
+
+      if (!retryRead.error && retryRead.data) {
+        return retryRead.data as McuQueueSessionRow;
+      }
+
+      if (attempt === 3) {
+        throw new Error(queueSchemaErrorMessage(inserted.error));
+      }
+    }
+  }
 
   const existing = await supabase
     .from("mcu_queue_sessions")
     .select("*")
     .eq("company_id", companyId)
     .eq("package_id", packageId)
+    .eq("is_active", 1)
+    .order("id", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (existing.error) throw new Error(queueSchemaErrorMessage(existing.error));
 
   if (existing.data) {
-    const desiredA = cleanQueueName(args.trackAName, existing.data.track_a_name || "Lab Darah");
-    const desiredB = cleanQueueName(args.trackBName, existing.data.track_b_name || "Rontgen");
+    const desiredA = cleanQueueName(
+      args.trackAName,
+      existing.data.track_a_name || "Lab Darah",
+    );
+    const desiredB = cleanQueueName(
+      args.trackBName,
+      existing.data.track_b_name || "Rontgen",
+    );
+
     const needsUpdate =
       desiredA !== String(existing.data.track_a_name || "") ||
       desiredB !== String(existing.data.track_b_name || "") ||
@@ -92,36 +255,22 @@ export async function ensureMcuQueueSession(
     return updated.data as McuQueueSessionRow;
   }
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const inserted = await supabase
-      .from("mcu_queue_sessions")
-      .insert({
-        company_id: companyId,
-        package_id: packageId,
-        track_a_name: cleanQueueName(args.trackAName, "Lab Darah"),
-        track_b_name: cleanQueueName(args.trackBName, "Rontgen"),
-        public_token: randomPublicToken(),
-        is_active: 1,
-        updated_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
+  const inserted = await supabase
+    .from("mcu_queue_sessions")
+    .insert({
+      company_id: companyId,
+      package_id: packageId,
+      track_a_name: cleanQueueName(args.trackAName, "Lab Darah"),
+      track_b_name: cleanQueueName(args.trackBName, "Rontgen"),
+      public_token: randomPublicToken(),
+      is_active: 1,
+      updated_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
 
-    if (!inserted.error) return inserted.data as McuQueueSessionRow;
-
-    // Another request may have created the same company/package row first.
-    const retryRead = await supabase
-      .from("mcu_queue_sessions")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("package_id", packageId)
-      .maybeSingle();
-    if (!retryRead.error && retryRead.data) return retryRead.data as McuQueueSessionRow;
-
-    if (attempt === 3) throw new Error(queueSchemaErrorMessage(inserted.error));
-  }
-
-  throw new Error("Gagal membuat Session Antrian MCU.");
+  if (inserted.error) throw new Error(queueSchemaErrorMessage(inserted.error));
+  return inserted.data as McuQueueSessionRow;
 }
 
 async function nextSequence(supabase: any, queueSessionId: number, track: McuQueueTrack) {

@@ -11,13 +11,19 @@ type CompanyOption = {
   package_ids?: number[];
 };
 
-type PackageOption = {
+type QueueSessionOption = {
   id: number;
-  name: string;
-  description?: string;
+  company_id: number;
+  package_id: number;
+  company_name?: string;
+  package_name?: string;
+  session_name?: string | null;
+  location?: string | null;
+  session_date?: string | null;
+  track_a_name?: string;
+  track_b_name?: string;
+  is_active?: number;
 };
-
-
 
 type PendingParticipant = {
   id: number;
@@ -96,19 +102,42 @@ function McuQueueContent() {
   const [error, setError] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
-  const [packages, setPackages] = useState<PackageOption[]>([]);
+  const [queueSessions, setQueueSessions] = useState<QueueSessionOption[]>([]);
   const [companyId, setCompanyId] = useState("");
   const [packageId, setPackageId] = useState("");
+  const [queueSessionId, setQueueSessionId] = useState("");
   const [optionsReady, setOptionsReady] = useState(false);
   const [participantSearch, setParticipantSearch] = useState("");
   const [participantSort, setParticipantSort] = useState<"name" | "uninformed" | "informed">("uninformed");
 
-  const filteredPackages = useMemo(() => {
-    const company = companies.find((item) => String(item.id) === String(companyId));
-    if (!company) return [];
-    const allowed = new Set((company.package_ids || []).map((id) => Number(id)));
-    return packages.filter((pkg) => allowed.has(Number(pkg.id)));
-  }, [companies, packages, companyId]);
+  const filteredSessions = useMemo(
+    () =>
+      queueSessions
+        .filter(
+          (row) =>
+            String(row.company_id) === String(companyId) &&
+            Number(row.is_active || 0) === 1,
+        )
+        .sort((a, b) => {
+          const ad = String(a.session_date || "9999-12-31");
+          const bd = String(b.session_date || "9999-12-31");
+          return ad.localeCompare(bd) || Number(a.id) - Number(b.id);
+        }),
+    [queueSessions, companyId],
+  );
+
+  function sessionOptionLabel(row: QueueSessionOption) {
+    const date = row.session_date
+      ? new Intl.DateTimeFormat("id-ID", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }).format(new Date(`${row.session_date}T00:00:00`))
+      : "Tanggal belum diatur";
+
+    return `${date} · ${row.location || "Legacy"} · ${row.package_name || "Paket MCU"}`;
+  }
+
 
   const entries: QueueEntry[] = data?.entries || [];
   const pendingParticipants: PendingParticipant[] = data?.pending_participants || [];
@@ -135,36 +164,86 @@ function McuQueueContent() {
     try {
       const res = await fetch("/api/mcu/session", { cache: "no-store" });
       const json = await res.json();
-      if (!json.ok) throw new Error(json.message || "Gagal memuat daftar perusahaan MCU.");
+      if (!json.ok) {
+        throw new Error(
+          json.message || "Gagal memuat daftar perusahaan MCU.",
+        );
+      }
 
       const nextCompanies: CompanyOption[] = json.companies || [];
-      const nextPackages: PackageOption[] = json.packages || [];
-      setCompanies(nextCompanies);
-      setPackages(nextPackages);
+      const nextSessions: QueueSessionOption[] = json.queue_sessions || [];
 
-      const sessionCompanyId = String(json.session?.company_id || "");
-      const sessionPackageId = String(json.session?.package_id || "");
-      if (sessionCompanyId && sessionPackageId) {
-        setCompanyId(sessionCompanyId);
-        setPackageId(sessionPackageId);
-      } else if (nextCompanies.length) {
-        const firstCompany = nextCompanies[0];
-        const firstPackageId = String(firstCompany.package_ids?.[0] || "");
-        setCompanyId(String(firstCompany.id));
-        setPackageId(firstPackageId);
+      setCompanies(nextCompanies);
+      setQueueSessions(nextSessions);
+
+      const urlSessionId =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search).get("session_id")
+          : "";
+
+      const requested = urlSessionId
+        ? nextSessions.find(
+            (row) =>
+              String(row.id) === String(urlSessionId) &&
+              Number(row.is_active || 0) === 1,
+          )
+        : null;
+
+      if (requested) {
+        setCompanyId(String(requested.company_id));
+        setPackageId(String(requested.package_id));
+        setQueueSessionId(String(requested.id));
+      } else {
+        const preferredCompanyId = String(
+          json.session?.company_id || nextCompanies?.[0]?.id || "",
+        );
+
+        const candidate =
+          nextSessions.find(
+            (row) =>
+              String(row.company_id) === preferredCompanyId &&
+              Number(row.is_active || 0) === 1,
+          ) ||
+          nextSessions.find(
+            (row) => Number(row.is_active || 0) === 1,
+          ) ||
+          null;
+
+        if (candidate) {
+          setCompanyId(String(candidate.company_id));
+          setPackageId(String(candidate.package_id));
+          setQueueSessionId(String(candidate.id));
+        } else {
+          setCompanyId(preferredCompanyId);
+          setPackageId("");
+          setQueueSessionId("");
+        }
       }
+
       setOptionsReady(true);
     } catch (err: any) {
-      setError(err?.message || "Gagal memuat daftar perusahaan MCU.");
+      setError(
+        err?.message || "Gagal memuat daftar perusahaan MCU.",
+      );
       setOptionsReady(true);
       setLoading(false);
     }
   }
 
-  async function load(silent = false, overrideCompanyId?: string, overridePackageId?: string) {
+
+  async function load(
+    silent = false,
+    overrideCompanyId?: string,
+    overridePackageId?: string,
+    overrideQueueSessionId?: string,
+  ) {
     const cid = String((overrideCompanyId ?? companyId) || "");
     const pid = String((overridePackageId ?? packageId) || "");
-    if (!cid || !pid) {
+    const sid = String(
+      (overrideQueueSessionId ?? queueSessionId) || "",
+    );
+
+    if (!cid || !pid || !sid) {
       setData(null);
       if (!silent) setLoading(false);
       return;
@@ -172,7 +251,11 @@ function McuQueueContent() {
 
     if (!silent) setLoading(true);
     try {
-      const query = new URLSearchParams({ company_id: cid, package_id: pid });
+      const query = new URLSearchParams({
+        company_id: cid,
+        package_id: pid,
+        queue_session_id: sid,
+      });
       const res = await fetch(`/api/mcu/queue?${query.toString()}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat Antrian MCU.");
@@ -191,11 +274,24 @@ function McuQueueContent() {
   }, []);
 
   useEffect(() => {
-    if (!optionsReady || !companyId || !packageId) return;
-    load(false, companyId, packageId);
-    const timer = window.setInterval(() => load(true, companyId, packageId), 5000);
+    if (
+      !optionsReady ||
+      !companyId ||
+      !packageId ||
+      !queueSessionId
+    ) {
+      setData(null);
+      if (optionsReady) setLoading(false);
+      return;
+    }
+
+    load(false, companyId, packageId, queueSessionId);
+    const timer = window.setInterval(
+      () => load(true, companyId, packageId, queueSessionId),
+      5000,
+    );
     return () => window.clearInterval(timer);
-  }, [optionsReady, companyId, packageId]);
+  }, [optionsReady, companyId, packageId, queueSessionId]);
 
   function speakCall(track: Track, entry: any) {
     if (!voiceEnabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -220,7 +316,14 @@ function McuQueueContent() {
       const res = await fetch("/api/mcu/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: actionName, track, entry_id: entryId, company_id: Number(companyId), package_id: Number(packageId) }),
+        body: JSON.stringify({
+          action: actionName,
+          track,
+          entry_id: entryId,
+          company_id: Number(companyId),
+          package_id: Number(packageId),
+          queue_session_id: Number(queueSessionId),
+        }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memperbarui antrian.");
@@ -228,7 +331,7 @@ function McuQueueContent() {
       if ((actionName === "call-next" || actionName === "recall") && json.entry && track) {
         speakCall(track, json.entry);
       }
-      await load(true, companyId, packageId);
+      await load(true, companyId, packageId, queueSessionId);
     } catch (err: any) {
       setError(err?.message || "Gagal memperbarui antrian.");
     } finally {
@@ -249,12 +352,13 @@ function McuQueueContent() {
           participant_id: participantId,
           company_id: Number(companyId),
           package_id: Number(packageId),
+          queue_session_id: Number(queueSessionId),
         }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal menyimpan status informed.");
       setMessage(json.message || "Status informed tersimpan.");
-      await load(true, companyId, packageId);
+      await load(true, companyId, packageId, queueSessionId);
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan status informed.");
     } finally {
@@ -274,6 +378,7 @@ function McuQueueContent() {
           action: "generate-operator-link",
           company_id: Number(companyId),
           package_id: Number(packageId),
+          queue_session_id: Number(queueSessionId),
         }),
       });
       const json = await res.json();
@@ -284,7 +389,7 @@ function McuQueueContent() {
         await navigator.clipboard.writeText(fullUrl).catch(() => undefined);
       }
       setMessage(`${json.message || "Link Operator berhasil dibuat."}${fullUrl ? " Link sudah dicopy." : ""}`);
-      await load(true, companyId, packageId);
+      await load(true, companyId, packageId, queueSessionId);
     } catch (err: any) {
       setError(err?.message || "Gagal membuat link Operator.");
     } finally {
@@ -408,7 +513,7 @@ function McuQueueContent() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-2xl font-black text-slate-900">Antrian MCU Corporate</div>
-            <div className="mt-1 text-sm text-slate-500">Pilih perusahaan dan paket. Satu Public Queue menampilkan antrian A + B untuk pilihan tersebut.</div>
+            <div className="mt-1 text-sm text-slate-500">Pilih perusahaan dan Session lokasi/tanggal. Setiap Session memiliki antrean A + B, Public Queue, dan Operator yang terpisah.</div>
             <div className="mt-3 flex flex-wrap gap-2">
               <span className="rounded-xl bg-blue-100 px-3 py-2 text-xs font-black text-blue-800">A · {trackAName}</span>
               <span className="rounded-xl bg-violet-100 px-3 py-2 text-xs font-black text-violet-800">B · {trackBName}</span>
@@ -416,11 +521,25 @@ function McuQueueContent() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button disabled={busy} onClick={() => action("sync")} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-50">Sinkronkan Registrasi Ulang</button>
+            <button
+              disabled={
+                busy ||
+                data?.participant_sync_mode === "SESSION_BOUND_REQUIRED"
+              }
+              onClick={() => action("sync")}
+              className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-50"
+              title={
+                data?.participant_sync_mode === "SESSION_BOUND_REQUIRED"
+                  ? "Binding Registrasi Ulang per lokasi akan diaktifkan pada Stage berikutnya."
+                  : ""
+              }
+            >
+              Sinkronkan Registrasi Ulang
+            </button>
             <button onClick={() => setVoiceEnabled((v) => !v)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black text-slate-700">{voiceEnabled ? "Matikan Suara" : "Aktifkan Suara"}</button>
             {data?.public_url ? <a target="_blank" href={data.public_url} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-blue-700">Public Queue · {data?.company?.name || "Perusahaan"}</a> : null}
             {data?.operator_url ? <a target="_blank" href={data.operator_url} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800">Buka Operator · {data?.company?.name || "Perusahaan"}</a> : null}
-            <button disabled={busy || !companyId || !packageId} onClick={generateOperatorLink} className="rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-black text-emerald-800 disabled:opacity-50">{data?.operator_url ? "Reset Link Operator" : "Generate Link Operator"}</button>
+            <button disabled={busy || !companyId || !packageId || !queueSessionId} onClick={generateOperatorLink} className="rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-black text-emerald-800 disabled:opacity-50">{data?.operator_url ? "Reset Link Operator" : "Generate Link Operator"}</button>
           </div>
         </div>
 
@@ -433,41 +552,88 @@ function McuQueueContent() {
                 value={companyId}
                 onChange={(e) => {
                   const nextCompanyId = e.target.value;
-                  const company = companies.find((item) => String(item.id) === String(nextCompanyId));
+                  const firstSession = queueSessions.find(
+                    (row) =>
+                      String(row.company_id) ===
+                        String(nextCompanyId) &&
+                      Number(row.is_active || 0) === 1,
+                  );
+
                   setCompanyId(nextCompanyId);
-                  setPackageId(String(company?.package_ids?.[0] || ""));
+                  setPackageId(
+                    firstSession
+                      ? String(firstSession.package_id)
+                      : "",
+                  );
+                  setQueueSessionId(
+                    firstSession ? String(firstSession.id) : "",
+                  );
                   setData(null);
                   setMessage("");
                   setError("");
                 }}
               >
                 <option value="">- Pilih Perusahaan -</option>
-                {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                  </option>
+                ))}
               </select>
             </div>
+
             <div>
-              <label className="label">Paket Pemeriksaan</label>
+              <label className="label">Session MCU / Lokasi</label>
               <select
                 className="input"
-                value={packageId}
+                value={queueSessionId}
                 disabled={!companyId}
                 onChange={(e) => {
-                  setPackageId(e.target.value);
+                  const sid = e.target.value;
+                  const selected = queueSessions.find(
+                    (row) => String(row.id) === String(sid),
+                  );
+                  setQueueSessionId(sid);
+                  setPackageId(
+                    selected ? String(selected.package_id) : "",
+                  );
                   setData(null);
                   setMessage("");
                   setError("");
                 }}
               >
-                <option value="">- Pilih Paket -</option>
-                {filteredPackages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name}</option>)}
+                <option value="">- Pilih Session -</option>
+                {filteredSessions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {sessionOptionLabel(row)}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
-          {companyId && !filteredPackages.length ? (
-            <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">Belum ada paket MCU Corporate yang terhubung ke perusahaan ini.</div>
+
+          {companyId && !filteredSessions.length ? (
+            <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+              Belum ada Session lokasi/tanggal aktif untuk perusahaan ini.
+              Buat terlebih dahulu dari menu Session MCU Corporate.
+            </div>
           ) : null}
-          {data?.company?.name && data?.package?.name ? (
-            <div className="mt-3 text-xs font-semibold text-slate-500">Antrian yang sedang ditampilkan: <b>{data.company.name}</b> · {data.package.name}</div>
+
+          {data?.queue_session ? (
+            <div className="mt-3 grid gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold text-blue-900 sm:grid-cols-3">
+              <div>
+                <span className="text-blue-600">Perusahaan</span>
+                <div className="mt-1 font-black">{data?.company?.name || "-"}</div>
+              </div>
+              <div>
+                <span className="text-blue-600">Lokasi</span>
+                <div className="mt-1 font-black">{data.queue_session.location || "Legacy / belum diatur"}</div>
+              </div>
+              <div>
+                <span className="text-blue-600">Tanggal</span>
+                <div className="mt-1 font-black">{data.queue_session.session_date || "Belum diatur"}</div>
+              </div>
+            </div>
           ) : null}
         </div>
 
@@ -475,8 +641,14 @@ function McuQueueContent() {
         {message ? <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{message}</div> : null}
       </section>
 
-      {companyId && packageId && data ? (
+      {companyId && packageId && queueSessionId && data ? (
         <>
+          {data?.participant_sync_mode === "SESSION_BOUND_REQUIRED" ? (
+            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+              Session multi-lokasi aktif. Pada Stage 1, sinkronisasi massal Registrasi Ulang sengaja diblokir agar peserta dari lokasi lain tidak masuk ke antrean ini. Binding Registrasi Ulang → Session lokasi akan dipasang pada Stage berikutnya.
+            </section>
+          ) : null}
+
           <section className="card p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
