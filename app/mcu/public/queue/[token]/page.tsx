@@ -9,7 +9,9 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
   const [error, setError] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [preparePopup, setPreparePopup] = useState<any>(null);
   const lastAlertKeyRef = useRef("");
+  // MCU_PUBLIC_QUEUE_PREPARE_POPOUT_V460
 
   async function load() {
     if (!token) return;
@@ -62,27 +64,53 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
   function notifyPrepare(track: "A" | "B", queue: any, label: string) {
     const prepare = queue?.prepare;
     const current = queue?.current;
-    if (!alertsEnabled || !prepare?.queue_number || !current?.queue_number) return;
+    if (!prepare?.queue_number || !current?.queue_number) return;
+
     const key = `${track}:${current.queue_number}:${prepare.queue_number}`;
     if (lastAlertKeyRef.current.includes(key)) return;
     lastAlertKeyRef.current = `${lastAlertKeyRef.current}|${key}`.slice(-600);
 
-    const title = `${prepare.queue_number} bersiap`;
-    const body = `${prepare.participant_name || "Peserta"}, 3 nomor lagi untuk ${label}.`;
+    const queueNumber = String(prepare.queue_number || "");
+    const participantName = String(prepare.participant_name || "");
+    const serviceLabel = String(label || (track === "A" ? "Layanan A" : "Layanan B"));
+    const body = `Nomor antrian Anda tersisa 3 orang di depan Anda. Silakan segera menuju lokasi pemeriksaan ${serviceLabel}.`;
+
+    // Popout visual selalu muncul di layar Public Queue, tidak bergantung izin browser.
+    setPreparePopup({
+      key,
+      track,
+      queueNumber,
+      participantName,
+      label: serviceLabel,
+      message: body,
+    });
+
+    // Audio/getar/notifikasi OS membutuhkan interaksi awal user pada browser.
+    if (!alertsEnabled) return;
+
     try {
-      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate([350, 150, 350, 150, 500]);
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([450, 140, 450, 140, 700]);
+      }
     } catch {}
     try {
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification(title, { body });
+        new Notification(`Persiapan antrian ${queueNumber}`, {
+          body: `${track} · ${serviceLabel} — ${body}`,
+          tag: `mcu-prepare-${token}-${track}-${queueNumber}`,
+          requireInteraction: true,
+        } as any);
       }
     } catch {}
     try {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(`Nomor antrean ${prepare.queue_number}. ${prepare.participant_name || "Peserta"}. Mohon bersiap untuk ${label}.`);
+        const utterance = new SpeechSynthesisUtterance(
+          `Nomor antrian ${queueNumber}. Tersisa 3 orang di depan Anda. Silakan segera menuju lokasi pemeriksaan ${serviceLabel}.`,
+        );
         utterance.lang = "id-ID";
         utterance.rate = 0.9;
+        utterance.volume = 1;
         window.speechSynthesis.speak(utterance);
       }
     } catch {}
@@ -99,12 +127,46 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
     notifyPrepare("B", b, bName);
   }, [alertsEnabled, a?.current?.queue_number, a?.prepare?.queue_number, b?.current?.queue_number, b?.prepare?.queue_number, aName, bName]);
 
+  useEffect(() => {
+    if (!preparePopup?.key) return;
+    const timer = window.setTimeout(() => setPreparePopup(null), 10000);
+    return () => window.clearTimeout(timer);
+  }, [preparePopup?.key]);
+
   if (error) {
     return <main className="min-h-screen bg-slate-950 p-6 text-white"><div className="mx-auto max-w-3xl rounded-3xl border border-red-300/20 bg-red-950/30 p-6 font-bold text-red-100">{error}</div></main>;
   }
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-white">
+      {preparePopup ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center overflow-hidden bg-slate-950/90 px-4">
+          <div className="absolute inset-0 animate-pulse bg-[radial-gradient(circle_at_center,rgba(245,158,11,0.28),transparent_62%)]" />
+          <div className="relative w-full max-w-xl rounded-[2rem] border-4 border-amber-300 bg-white p-7 text-center text-slate-950 shadow-[0_0_90px_rgba(245,158,11,0.8)]">
+            <div className="text-sm font-black uppercase tracking-[0.28em] text-amber-700">🔔 Persiapan Antrian</div>
+            <div className="mt-3 text-lg font-black uppercase text-slate-600">{preparePopup.track} · {preparePopup.label}</div>
+            <div className="mt-5 text-7xl font-black leading-none text-amber-600 sm:text-8xl">{preparePopup.queueNumber}</div>
+            {preparePopup.participantName ? (
+              <div className="mt-3 text-2xl font-black text-slate-950">{preparePopup.participantName}</div>
+            ) : null}
+            <div className="mt-6 rounded-2xl bg-amber-500 px-5 py-5 text-xl font-black leading-snug text-white">
+              Nomor Antrian Anda tersisa 3 orang di depan Anda
+            </div>
+            <div className="mt-4 text-xl font-black leading-snug text-slate-800">
+              Silakan segera menuju lokasi pemeriksaan {preparePopup.label}
+            </div>
+            <div className="mt-3 text-sm font-bold text-slate-500">Kode layanan {preparePopup.track}</div>
+            <button
+              type="button"
+              onClick={() => setPreparePopup(null)}
+              className="mt-6 w-full rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 font-black text-slate-800"
+            >
+              OK · Saya Bersiap
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mx-auto w-full max-w-[1600px] rounded-3xl border border-white/20 bg-slate-900 p-6 shadow-2xl">
         <div className="grid items-center gap-5 lg:grid-cols-[1fr_220px]">
           <div className="text-center lg:pl-12">
