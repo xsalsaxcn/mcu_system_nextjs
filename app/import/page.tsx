@@ -163,6 +163,7 @@ function ImportForm({ user }: { user: any }) {
   const [companyOnlyModeV239, setCompanyOnlyModeV239] = useState(false);
   const [companyOnlyNameV239, setCompanyOnlyNameV239] = useState("");
   const [stageStaffOptionsV165, setStageStaffOptionsV165] = useState<Record<string, string[]>>(makeStageStaffMapV165());
+  const [selectedStageStaffV481, setSelectedStageStaffV481] = useState(MCU_STAGE_STAFF_STAGES_V165[0]); // MCU_CORPORATE_IMPORT_STAGE_STAFF_COMPACT_V481
 
 
   // IMPORT_EXISTING_DATABASE_SELECT_V237
@@ -1182,32 +1183,56 @@ function ImportForm({ user }: { user: any }) {
           )}
         </div>
         {showMcuStageStaffV165 && (
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-1">
-              <div className="text-lg font-black">Nama Petugas per Stage</div>
-              <div className="text-sm text-slate-500">
-                Tambahkan nama dokter/petugas untuk setiap proses. Nanti operator CAPASKA/MCU Corporate bisa memilih lebih dari 1 petugas di stage masing-masing.
-              </div>
-            </div>
+          <>
+            {programType === "corporate" ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                {/* MCU_CORPORATE_IMPORT_STAGE_STAFF_COMPACT_V481 */}
+                <div className="flex flex-col gap-1">
+                  <div className="text-lg font-black">Nama Petugas per Stage</div>
+                  <div className="text-sm text-slate-500">
+                    Pilih stage yang ingin diisi. Stage lain tetap tersimpan tanpa harus ditampilkan semua sekaligus.
+                  </div>
+                </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {MCU_STAGE_STAFF_STAGES_V165.map((stageName) => (
-                <div key={stageName} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-2 text-sm font-black text-slate-800">{stageName}</div>
+                <div className="mt-4">
+                  <label className="label">Pilih Stage</label>
+                  <select
+                    className="input"
+                    value={selectedStageStaffV481}
+                    onChange={(e) => setSelectedStageStaffV481(e.target.value)}
+                  >
+                    {MCU_STAGE_STAFF_STAGES_V165.map((stageName) => {
+                      const total = cleanStageStaffNamesV165(stageStaffOptionsV165[stageName] || []).length;
+                      return (
+                        <option key={stageName} value={stageName}>
+                          {stageName}{total ? ` · ${total} petugas` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="text-sm font-black text-slate-800">{selectedStageStaffV481}</div>
+                    <div className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500">
+                      {cleanStageStaffNamesV165(stageStaffOptionsV165[selectedStageStaffV481] || []).length} petugas
+                    </div>
+                  </div>
 
                   <div className="space-y-2">
-                    {(stageStaffOptionsV165[stageName] || [""]).map((staffName, index) => (
-                      <div key={`${stageName}-${index}`} className="flex gap-2">
+                    {(stageStaffOptionsV165[selectedStageStaffV481] || [""]).map((staffName, index) => (
+                      <div key={`${selectedStageStaffV481}-${index}`} className="flex gap-2">
                         <input
                           className="input"
                           value={staffName}
-                          onChange={(e) => updateStageStaffNameV165(stageName, index, e.target.value)}
+                          onChange={(e) => updateStageStaffNameV165(selectedStageStaffV481, index, e.target.value)}
                           placeholder="Nama dokter / petugas"
                         />
                         <button
                           type="button"
                           className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700"
-                          onClick={() => removeStageStaffNameV165(stageName, index)}
+                          onClick={() => removeStageStaffNameV165(selectedStageStaffV481, index)}
                         >
                           Hapus
                         </button>
@@ -1218,16 +1243,75 @@ function ImportForm({ user }: { user: any }) {
                   <button
                     type="button"
                     className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-black text-blue-700"
-                    onClick={() => addStageStaffNameV165(stageName)}
+                    onClick={() => addStageStaffNameV165(selectedStageStaffV481)}
                   >
                     + Add More
                   </button>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
 
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {MCU_STAGE_STAFF_STAGES_V165
+                    .filter((stageName) => cleanStageStaffNamesV165(stageStaffOptionsV165[stageName] || []).length > 0)
+                    .map((stageName) => (
+                      <button
+                        key={`filled-${stageName}`}
+                        type="button"
+                        onClick={() => setSelectedStageStaffV481(stageName)}
+                        className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800"
+                      >
+                        ✓ {stageName} · {cleanStageStaffNamesV165(stageStaffOptionsV165[stageName] || []).length}
+                      </button>
+                    ))}
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-1">
+                  <div className="text-lg font-black">Nama Petugas per Stage</div>
+                  <div className="text-sm text-slate-500">
+                    Tambahkan nama dokter/petugas untuk setiap proses. Nanti operator CAPASKA/MCU Corporate bisa memilih lebih dari 1 petugas di stage masing-masing.
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {MCU_STAGE_STAFF_STAGES_V165.map((stageName) => (
+                    <div key={stageName} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="mb-2 text-sm font-black text-slate-800">{stageName}</div>
+
+                      <div className="space-y-2">
+                        {(stageStaffOptionsV165[stageName] || [""]).map((staffName, index) => (
+                          <div key={`${stageName}-${index}`} className="flex gap-2">
+                            <input
+                              className="input"
+                              value={staffName}
+                              onChange={(e) => updateStageStaffNameV165(stageName, index, e.target.value)}
+                              placeholder="Nama dokter / petugas"
+                            />
+                            <button
+                              type="button"
+                              className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-black text-rose-700"
+                              onClick={() => removeStageStaffNameV165(stageName, index)}
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-black text-blue-700"
+                        onClick={() => addStageStaffNameV165(stageName)}
+                      >
+                        + Add More
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
 
         <div>
           <label className="label">Catatan</label>
