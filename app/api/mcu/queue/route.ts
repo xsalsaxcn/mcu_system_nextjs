@@ -34,6 +34,11 @@ function numberField(track: McuQueueTrack) {
   return track === "A" ? "a_queue_number" : "b_queue_number";
 }
 
+// MCU_ADMIN_QUEUE_HISTORY_EDIT_V465
+function cancelReasonField(track: McuQueueTrack) {
+  return track === "A" ? "a_cancel_reason" : "b_cancel_reason";
+}
+
 function timestampField(track: McuQueueTrack, status: string) {
   const prefix = track === "A" ? "a" : "b";
   if (status === "CALLED") return `${prefix}_called_at`;
@@ -362,6 +367,12 @@ export async function POST(req: NextRequest) {
 
     const nextStatus = actionToStatus(action);
     if (!nextStatus) return fail("Action antrian tidak dikenali.", 400);
+    const cancelReason = nextStatus === "CANCELLED"
+      ? String(body.cancel_reason || body.cancelReason || "").trim().slice(0, 500)
+      : "";
+    if (nextStatus === "CANCELLED" && !cancelReason) {
+      return fail("Alasan cancel wajib diisi.", 400);
+    }
 
     const existing = await supabase
       .from("mcu_queue_entries")
@@ -379,6 +390,20 @@ export async function POST(req: NextRequest) {
       [statusKey]: nextStatus,
       updated_at: now,
     };
+    const prefix = track === "A" ? "a" : "b";
+    if (nextStatus === "CANCELLED") {
+      payload[cancelReasonField(track)] = cancelReason;
+    } else {
+      payload[cancelReasonField(track)] = null;
+    }
+    if (nextStatus !== "DONE") payload[`${prefix}_finished_at`] = null;
+    if (nextStatus !== "CANCELLED") payload[`${prefix}_cancelled_at`] = null;
+    if (["WAITING", "SKIPPED"].includes(nextStatus)) {
+      payload[`${prefix}_called_at`] = null;
+      payload[`${prefix}_started_at`] = null;
+    } else if (nextStatus === "CALLED") {
+      payload[`${prefix}_started_at`] = null;
+    }
     const tsKey = timestampField(track, nextStatus);
     if (tsKey) payload[tsKey] = now;
 

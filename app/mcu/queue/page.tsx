@@ -115,6 +115,10 @@ function McuQueueContent() {
   const [optionsReady, setOptionsReady] = useState(false);
   const [participantSearch, setParticipantSearch] = useState("");
   const [participantSort, setParticipantSort] = useState<"name" | "uninformed" | "informed">("uninformed");
+  // MCU_ADMIN_QUEUE_HISTORY_EDIT_V465
+  const [historyEditTarget, setHistoryEditTarget] = useState<{ mode: "edit" | "cancel"; track: Track; entryId: number; queueNo: string; name: string; currentStatus: string } | null>(null);
+  const [historyEditStatus, setHistoryEditStatus] = useState("WAITING");
+  const [historyCancelReason, setHistoryCancelReason] = useState("");
 
   const filteredSessions = useMemo(
     () =>
@@ -314,7 +318,7 @@ function McuQueueContent() {
     }
   }
 
-  async function action(actionName: string, track?: Track, entryId?: number) {
+  async function action(actionName: string, track?: Track, entryId?: number, extra: Record<string, any> = {}) {
     setBusy(true);
     setMessage("");
     setError("");
@@ -322,14 +326,7 @@ function McuQueueContent() {
       const res = await fetch("/api/mcu/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: actionName,
-          track,
-          entry_id: entryId,
-          company_id: Number(companyId),
-          package_id: Number(packageId),
-          queue_session_id: Number(queueSessionId),
-        }),
+        body: JSON.stringify({ action: actionName, track, entry_id: entryId, company_id: Number(companyId), package_id: Number(packageId), ...extra }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memperbarui antrian.");
@@ -337,9 +334,11 @@ function McuQueueContent() {
       if ((actionName === "call-next" || actionName === "recall") && json.entry && track) {
         speakCall(track, json.entry);
       }
-      await load(true, companyId, packageId, queueSessionId);
+      await load(true, companyId, packageId);
+      return true;
     } catch (err: any) {
       setError(err?.message || "Gagal memperbarui antrian.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -400,6 +399,52 @@ function McuQueueContent() {
       setError(err?.message || "Gagal membuat link Operator.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function openHistoryEdit(row: QueueEntry, track: Track, mode: "edit" | "cancel") {
+    const statusKey = fieldFor(track, "status");
+    const numberKey = fieldFor(track, "number");
+    const currentStatus = String(row[statusKey] || "WAITING").toUpperCase();
+    const reasonKey = (track === "A" ? "a_cancel_reason" : "b_cancel_reason") as keyof QueueEntry;
+    setHistoryEditTarget({
+      mode,
+      track,
+      entryId: row.id,
+      queueNo: String(row[numberKey] || "-"),
+      name: String(row.participant?.name || "-"),
+      currentStatus,
+    });
+    setHistoryEditStatus(mode === "cancel" ? "CANCELLED" : currentStatus);
+    setHistoryCancelReason(mode === "cancel" || currentStatus === "CANCELLED" ? String(row[reasonKey] || "") : "");
+  }
+
+  async function submitHistoryEdit() {
+    if (!historyEditTarget) return;
+    const status = String(historyEditStatus || "").toUpperCase();
+    const actionMap: Record<string, string> = {
+      WAITING: "waiting",
+      CALLED: "recall",
+      IN_PROGRESS: "start",
+      DONE: "finish",
+      SKIPPED: "skip",
+      CANCELLED: "cancel",
+    };
+    const actionName = actionMap[status];
+    if (!actionName) {
+      setError("Status koreksi tidak dikenali.");
+      return;
+    }
+    const reason = historyCancelReason.trim();
+    if (status === "CANCELLED" && !reason) {
+      setError("Alasan cancel wajib diisi.");
+      return;
+    }
+    const ok = await action(actionName, historyEditTarget.track, historyEditTarget.entryId, status === "CANCELLED" ? { cancel_reason: reason } : {});
+    if (ok) {
+      setHistoryEditTarget(null);
+      setHistoryEditStatus("WAITING");
+      setHistoryCancelReason("");
     }
   }
 
@@ -509,7 +554,7 @@ function McuQueueContent() {
                       <button disabled={busy} onClick={() => action("start", track, row.id)} className="rounded-lg border px-2.5 py-1 text-xs font-bold">Start</button>
                       <button disabled={busy} onClick={() => action("finish", track, row.id)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">Done</button>
                       <button disabled={busy} onClick={() => action("skip", track, row.id)} className="rounded-lg border px-2.5 py-1 text-xs font-bold">Skip</button>
-                      <button disabled={busy} onClick={() => action("cancel", track, row.id)} className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">Cancel</button>
+                      <button disabled={busy} onClick={() => openHistoryEdit(row, track, "cancel")} className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">Cancel</button>
                     </div></td>
                   </tr>
                 );
@@ -538,6 +583,7 @@ function McuQueueContent() {
                   <th className="p-3 text-left">Status</th>
                   <th className="p-3 text-left">Update</th>
                   <th className="p-3 text-left">Alasan Cancel</th>
+                  <th className="p-3 text-left">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -555,9 +601,15 @@ function McuQueueContent() {
                       <td className="p-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${statusClass(historyStatus)}`}>{statusLabel(historyStatus)}</span></td>
                       <td className="p-3 text-xs font-bold text-slate-600">{formatLastUpdate(historyTime)}</td>
                       <td className="p-3 text-xs font-semibold text-slate-600">{historyStatus === "CANCELLED" ? (cancelReason || "-") : "-"}</td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-1.5">
+                          <button disabled={busy} onClick={() => openHistoryEdit(row, track, "edit")} className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">Edit</button>
+                          <button disabled={busy} onClick={() => openHistoryEdit(row, track, "cancel")} className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-black text-red-700">Cancel</button>
+                        </div>
+                      </td>
                     </tr>
                   );
-                }) : <tr><td colSpan={5} className="p-5 text-center text-sm font-semibold text-slate-500">Belum ada peserta selesai / cancel.</td></tr>}
+                }) : <tr><td colSpan={6} className="p-5 text-center text-sm font-semibold text-slate-500">Belum ada peserta selesai / cancel.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -776,6 +828,50 @@ function McuQueueContent() {
           Pilih perusahaan dan paket pemeriksaan untuk menampilkan antrian.
         </section>
       )}
+
+      {historyEditTarget ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="w-full max-w-lg rounded-2xl border bg-white p-5 shadow-2xl">
+            <div className="text-xl font-black text-slate-900">
+              {historyEditTarget.mode === "cancel" ? `Cancel Antrian ${historyEditTarget.track}` : `Edit Status Antrian ${historyEditTarget.track}`}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-500">{historyEditTarget.queueNo} · {historyEditTarget.name}</div>
+
+            {historyEditTarget.mode === "edit" ? (
+              <div className="mt-4">
+                <label className="block text-sm font-black text-slate-700">Status</label>
+                <select value={historyEditStatus} onChange={(e) => { setHistoryEditStatus(e.target.value); if (e.target.value !== "CANCELLED") setHistoryCancelReason(""); }} className="mt-2 w-full rounded-xl border px-3 py-2 text-sm font-bold outline-none focus:border-blue-400">
+                  <option value="WAITING">Menunggu / Kembalikan ke antrian</option>
+                  <option value="CALLED">Dipanggil</option>
+                  <option value="IN_PROGRESS">Proses</option>
+                  <option value="DONE">Selesai</option>
+                  <option value="SKIPPED">Skipped</option>
+                  <option value="CANCELLED">Cancel</option>
+                </select>
+              </div>
+            ) : null}
+
+            {historyEditStatus === "CANCELLED" ? (
+              <div className="mt-4">
+                <label className="block text-sm font-black text-slate-700">Alasan Cancel <span className="text-red-600">*</span></label>
+                <textarea autoFocus rows={4} maxLength={500} value={historyCancelReason} onChange={(e) => setHistoryCancelReason(e.target.value)} placeholder="Contoh: salah pilih peserta, peserta tidak hadir, menolak pemeriksaan, reschedule, atau alasan lain..." className="mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-red-400" />
+                <div className="mt-1 text-right text-xs font-semibold text-slate-400">{historyCancelReason.length}/500</div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-800">
+                Koreksi status tidak mengubah nomor antrian. Jika dikembalikan ke Menunggu, peserta muncul lagi di tabel antrian aktif pada nomor yang sama.
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button disabled={busy} onClick={() => { setHistoryEditTarget(null); setHistoryEditStatus("WAITING"); setHistoryCancelReason(""); }} className="rounded-xl border px-4 py-2 text-sm font-black text-slate-700">Batal</button>
+              <button disabled={busy || (historyEditStatus === "CANCELLED" && !historyCancelReason.trim())} onClick={submitHistoryEdit} className={`rounded-xl px-4 py-2 text-sm font-black text-white disabled:opacity-50 ${historyEditStatus === "CANCELLED" ? "bg-red-600" : "bg-blue-600"}`}>
+                {historyEditStatus === "CANCELLED" ? "Simpan & Cancel" : "Simpan Perubahan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
