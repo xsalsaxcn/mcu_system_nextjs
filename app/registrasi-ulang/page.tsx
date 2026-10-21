@@ -526,6 +526,28 @@ function RegistrasiUlang({ user }: { user: any }) {
     );
   }
 
+  // MCU_CORPORATE_SETUP_PACKAGE_AUTHORITY_V494
+  // Participant package and operational Session are deliberately separate.
+  // For label/station configuration, the selected MCU Session package is the
+  // authoritative package because Setup Parameters is configured per package.
+  // Never mutate participant.package_id just because the Session changes.
+  function getLabelSetupPackageId(participant?: Participant | null) {
+    const sessionPackageId =
+      program === "corporate"
+        ? Number(getSelectedSessionContext()?.package_id || 0)
+        : 0;
+    const participantPackageId = Number(participant?.package_id || 0);
+    return sessionPackageId || participantPackageId || null;
+  }
+
+  function getLabelSetupPackageName(participant?: Participant | null) {
+    const sessionPackageName =
+      program === "corporate"
+        ? String(getSelectedSessionContext()?.package_name || "").trim()
+        : "";
+    return sessionPackageName || String(participant?.package_name || "").trim() || "-";
+  }
+
 
   const ageValue = useMemo(() => {
     return form?.age ? String(form.age) : calcAge(form?.birth_date || form?.date_of_birth);
@@ -669,7 +691,7 @@ function RegistrasiUlang({ user }: { user: any }) {
         source_id: sourceId,
         queue_session_id: String(getSelectedSessionContext()?.queue_session_id || ""),
         keyword: keyword.trim(),
-        limit: "25"
+        limit: "200"
       });
 
       const res = await fetch(`/api/registrasi-ulang/search?${params.toString()}`, { cache: "no-store" });
@@ -757,11 +779,15 @@ function RegistrasiUlang({ user }: { user: any }) {
       };
 
       setForm(nextParticipant);
+      const labelSetupPackageId = getLabelSetupPackageId(nextParticipant);
       await Promise.all([
-        loadPackageLabelSettings(nextParticipant.package_id, nextParticipant.program_type || program),
+        loadPackageLabelSettings(labelSetupPackageId, nextParticipant.program_type || program),
         loadQueueInfo(nextParticipant.id),
       ]);
-      setMessage("Data peserta dipilih. Daftar peserta tetap tersedia di sebelah kiri. Silakan lengkapi registrasi ulang lalu klik Save.");
+      setMessage(
+        `Data peserta dipilih. Label/station mengikuti Setup Parameters paket ${getLabelSetupPackageName(nextParticipant)}. ` +
+        "Daftar peserta tetap tersedia di sebelah kiri. Silakan lengkapi registrasi ulang lalu klik Save."
+      );
     } catch (err: any) {
       setMessage(err?.message || "Gagal memuat detail.");
     }
@@ -791,6 +817,16 @@ function RegistrasiUlang({ user }: { user: any }) {
       setMessage("Gagal memproses foto.");
     }
   }
+
+
+  // Keep the label/station list synchronized to the selected Session package.
+  // This also covers switching Session while a participant remains selected.
+  useEffect(() => {
+    if (program !== "corporate" || !form) return;
+    const packageId = getLabelSetupPackageId(form);
+    if (!packageId) return;
+    void loadPackageLabelSettings(packageId, "corporate");
+  }, [program, registrationSessionIdV491, form?.id, form?.package_id, sessionSourceOptions]);
 
 
   async function loadPackageLabelSettings(packageId?: number | null, programType?: string) {
@@ -1457,8 +1493,13 @@ function RegistrasiUlang({ user }: { user: any }) {
             <div>
               <div className="text-xl font-black">Setting Print Barcode / Label Station</div>
               <div className="text-sm text-slate-500">
-                Jumlah print dan style label otomatis mengikuti Setup Label Paket. Pengaturan di bawah bisa override sementara sebelum print.
+                Jumlah print dan station otomatis mengikuti Setup Parameters paket yang dipakai Session MCU. Pengaturan jumlah di bawah hanya override sementara sebelum print.
               </div>
+              {program === "corporate" && (
+                <div className="mt-1 text-xs font-bold text-blue-700">
+                  Sumber Setup Parameters: {getLabelSetupPackageName(form)}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">

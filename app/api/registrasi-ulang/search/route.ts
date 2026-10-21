@@ -190,7 +190,11 @@ export async function GET(req: NextRequest) {
   }
 
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
-  const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 25), 1), 50);
+  // MCU_CORPORATE_RETRIEVE_LIMIT_V494_1
+  const limit = Math.min(
+    Math.max(Number(req.nextUrl.searchParams.get("limit") || 200), 1),
+    200,
+  );
 
   if (sourceId === "all" && !queueSession?.id && keyword.length < 2) {
     return ok({
