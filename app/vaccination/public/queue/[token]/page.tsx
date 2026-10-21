@@ -25,6 +25,10 @@ function calledAlertKey(track: "A" | "B", queueNumber: string) {
   return `${track}:${queueNumber}`;
 }
 
+function oneAheadAlertKey(track: "A" | "B", queueNumber: string) {
+  return `${track}:${queueNumber}:ONE_AHEAD`;
+}
+
 function trackLabel(track: "A" | "B") {
   return track === "A" ? "Healthday" : "Bazar";
 }
@@ -98,7 +102,8 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   const [deviceLocked, setDeviceLocked] = useState(false);
   const [notificationState, setNotificationState] = useState<"idle" | "granted" | "denied" | "unsupported">("idle");
   const [watchError, setWatchError] = useState("");
-  const [oneAheadMessage, setOneAheadMessage] = useState("");
+  const [oneAheadAlert, setOneAheadAlert] = useState<any>(null);
+  const [dismissedOneAheadKey, setDismissedOneAheadKey] = useState("");
   const [calledAlert, setCalledAlert] = useState<any>(null);
   const [dismissedCalledKey, setDismissedCalledKey] = useState("");
   const [selectedFamilyRegistrationId, setSelectedFamilyRegistrationId] =
@@ -291,26 +296,64 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
   ) {
     const queueNumber = String(trackData?.queueNumber || "").trim();
     if (!queueNumber) return;
-    const key = notifiedStorageKey(params.token, track, queueNumber);
-    try {
-      if (window.localStorage.getItem(key) === "1") return;
-      window.localStorage.setItem(key, "1");
-    } catch {}
 
-    const text = `${participantName ? `${participantName}: ` : ""}tinggal 1 peserta lagi sebelum ${queueNumber}. Mohon bersiap untuk ${trackLabel(track)}.`;
-    setOneAheadMessage(text);
-    if ("vibrate" in navigator) {
-      try { navigator.vibrate([300, 120, 300]); } catch {}
+    const alertKey = oneAheadAlertKey(track, queueNumber);
+
+    setOneAheadAlert({
+      key: alertKey,
+      track,
+      queueNumber,
+      label: trackLabel(track),
+      participantName,
+    });
+
+    // If the user already dismissed this exact warning during this page session,
+    // do not force it open again on every polling refresh.
+    if (dismissedOneAheadKey !== alertKey) {
+      setDismissedOneAheadKey("");
     }
 
-    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+    const key = notifiedStorageKey(params.token, track, queueNumber);
+    let alreadyNotified = false;
+    try {
+      alreadyNotified = window.localStorage.getItem(key) === "1";
+      if (!alreadyNotified) window.localStorage.setItem(key, "1");
+    } catch {}
+
+    if (!alreadyNotified && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([350, 120, 350]);
+      } catch {}
+    }
+
+    // Native browser notification remains once-per-queue.
+    if (alreadyNotified) return;
+
+    const notificationText =
+      `${participantName ? `${participantName} · ` : ""}` +
+      `Sisa 1 antrean lagi di depan Anda. ` +
+      `Silakan bersiap menuju lokasi ${trackLabel(track)}.`;
+
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      Notification.permission !== "granted"
+    ) {
+      return;
+    }
+
     try {
       const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification("Antrean hampir dipanggil", {
-        body: text,
+      await registration.showNotification("Bersiap · Sisa 1 antrean lagi", {
+        body: notificationText,
         tag: `vaccination-existing-one-ahead-${params.token}-${track}-${queueNumber}`,
         requireInteraction: true,
-        data: { url: window.location.href, queueNumber, status: "ONE_AHEAD" },
+        data: {
+          url: window.location.href,
+          queueNumber,
+          track,
+          status: "ONE_AHEAD",
+        },
       } as any);
     } catch {}
   }
@@ -451,6 +494,7 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
           ];
 
     let anyCalled = false;
+    let anyOneAhead = false;
 
     for (const member of members) {
       const participantName = String(member?.participantName || "").trim();
@@ -460,9 +504,11 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       const b = queueTrackCard("B", bTrack);
 
       if (a?.oneAhead) {
+        anyOneAhead = true;
         void sendOneAheadNotification("A", aTrack, participantName);
       }
       if (b?.oneAhead) {
+        anyOneAhead = true;
         void sendOneAheadNotification("B", bTrack, participantName);
       }
 
@@ -481,9 +527,18 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
       }
     }
 
-    if (!anyCalled) {
+    if (anyCalled) {
+      // Main CALLED alert always wins over the preparation warning.
+      setOneAheadAlert(null);
+      setDismissedOneAheadKey("");
+    } else {
       setCalledAlert(null);
       setDismissedCalledKey("");
+
+      if (!anyOneAhead) {
+        setOneAheadAlert(null);
+        setDismissedOneAheadKey("");
+      }
     }
   }, [watchData]);
 
@@ -717,12 +772,63 @@ export default function PublicVaccinationQueuePage({ params }: { params: { token
                       : "Setelah konfirmasi, sistem akan meminta izin notifikasi browser."}
               </div>
 
-              {oneAheadMessage ? (
-                <div className="rounded-2xl border border-amber-300 bg-amber-100 p-4 text-center font-black text-amber-900">{oneAheadMessage}</div>
-              ) : null}
             </div>
           ) : null}
         </div>
+
+        {oneAheadAlert &&
+        dismissedOneAheadKey !== oneAheadAlert.key &&
+        !calledAlert ? (
+          <div className="fixed inset-0 z-[75] flex items-center justify-center overflow-hidden bg-slate-950/90 px-4">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(245,158,11,0.22),transparent_62%)]" />
+            <div className="relative w-full max-w-lg rounded-[2rem] border-4 border-amber-300 bg-white p-7 text-center text-slate-950 shadow-[0_0_70px_rgba(245,158,11,0.55)]">
+              <div className="text-sm font-black uppercase tracking-[0.28em] text-amber-700">
+                Bersiap
+              </div>
+
+              <div className="mt-4 text-4xl font-black leading-tight text-slate-950 sm:text-5xl">
+                Sisa 1 Antrean Lagi
+              </div>
+              <div className="mt-2 text-xl font-black text-slate-600">
+                di depan Anda
+              </div>
+
+              <div className="mt-6 rounded-3xl bg-amber-50 px-4 py-5">
+                <div className="text-5xl font-black leading-none text-amber-700 sm:text-6xl">
+                  {oneAheadAlert.queueNumber}
+                </div>
+
+                {oneAheadAlert.participantName ? (
+                  <div className="mt-3 text-xl font-black text-slate-950">
+                    {oneAheadAlert.participantName}
+                  </div>
+                ) : null}
+
+                <div className="mt-2 text-base font-black text-slate-600">
+                  {oneAheadAlert.label}
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl bg-amber-500 px-4 py-4 text-lg font-black text-white">
+                Silakan bersiap menuju lokasi layanan
+              </div>
+
+              <div className="mt-4 text-sm font-semibold text-slate-500">
+                Setelah antrean di depan selesai, nomor Anda akan segera dipanggil.
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setDismissedOneAheadKey(oneAheadAlert.key)
+                }
+                className="mt-6 w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 font-black text-amber-900"
+              >
+                OK · Saya Bersiap
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {calledAlert && dismissedCalledKey !== calledAlert.key ? (
           <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden bg-slate-950/95 px-4">
