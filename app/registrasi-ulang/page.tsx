@@ -1448,9 +1448,9 @@ function StationPrintLabel({
 
   if (isCorporate) {
     const queueDisplay = queueText || "-";
-    const queueFont = queueDisplay.length > 13 ? Math.max(8, safeFont - 1) : queueDisplay.length > 8 ? Math.max(10, safeFont + 1) : Math.max(14, safeFont + 5);
+    const queueFont = queueDisplay.length > 11 ? Math.max(7, safeFont - 2) : queueDisplay.length > 8 ? Math.max(8, safeFont - 1) : Math.max(13, safeFont + 4);
     const stageFont = stationText.length > 18 ? Math.max(6, safeFont - 3) : stationText.length > 12 ? Math.max(7, safeFont - 2) : Math.max(8, safeFont - 1);
-    const participantFont = nameText.length > 32 ? Math.max(10, safeFont + 1) : nameText.length > 22 ? Math.max(12, safeFont + 3) : Math.max(14, safeFont + 5);
+    const participantFont = nameText.length > 32 ? Math.max(9, safeFont) : nameText.length > 22 ? Math.max(10, safeFont + 1) : nameText.length > 16 ? Math.max(11, safeFont + 2) : Math.max(12, safeFont + 3);
 
     return (
       <section
@@ -1464,7 +1464,7 @@ function StationPrintLabel({
         printColorAdjust: "exact"
       }}
     >
-        {/* MCU_CORPORATE_VACCINATION_STRUCTURE_V453
+        {/* MCU_CORPORATE_VACCINATION_STRUCTURE_V455
             Reference only: Vaccination ticket-head / queue-number / divider / participant/detail-grid.
             Physical MCU canvas, @page, QR size, and Vaccination source are untouched. */}
         <div
@@ -1484,7 +1484,7 @@ function StationPrintLabel({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 56%) minmax(0, 44%)",
+              gridTemplateColumns: "minmax(0, 60%) minmax(0, 40%)",
               columnGap: "6px",
               alignItems: "start",
               minWidth: 0,
@@ -1495,15 +1495,13 @@ function StationPrintLabel({
               style={{
                 minWidth: 0,
                 fontSize: `${participantFont}px`,
-                lineHeight: 0.94,
+                lineHeight: 0.92,
                 fontWeight: 900,
-                letterSpacing: "-0.025em",
+                letterSpacing: "-0.015em",
                 whiteSpace: "normal",
                 overflowWrap: "normal",
                 wordBreak: "normal",
-                display: "-webkit-box",
-                WebkitBoxOrient: "vertical",
-                WebkitLineClamp: 2,
+                maxHeight: "1.9em",
                 overflow: "hidden"
               }}
             >
@@ -1540,8 +1538,8 @@ function StationPrintLabel({
                   fontWeight: 900,
                   letterSpacing: "-0.035em",
                   whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis"
+                  overflow: "visible",
+                  textOverflow: "clip"
                 }}
               >
                 {queueDisplay}
