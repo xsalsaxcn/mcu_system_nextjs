@@ -157,6 +157,7 @@ function ImportForm({ user }: { user: any }) {
   const [corporateFixedLocationV466, setCorporateFixedLocationV466] = useState("");
   const [corporateMappingLoadingV466, setCorporateMappingLoadingV466] = useState(false);
   const [corporateMappingErrorV466, setCorporateMappingErrorV466] = useState("");
+  const [corporateSessionLoadingV470, setCorporateSessionLoadingV470] = useState(false); // MCU_CORPORATE_IMPORT_SESSION_TOP_V470
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [companyOnlyModeV239, setCompanyOnlyModeV239] = useState(false);
@@ -499,6 +500,61 @@ function ImportForm({ user }: { user: any }) {
   }
 
   // MCU_CORPORATE_IMPORT_MAPPING_FAST_V469
+  // MCU_CORPORATE_IMPORT_SESSION_TOP_V470
+  useEffect(() => {
+    if (programType !== "corporate") return;
+
+    const companyId = String(corporateCompanyChoiceV431 || "");
+    const packageId = String(corporatePackageChoiceV432 || "");
+
+    if (
+      !companyId ||
+      companyId === NEW_CORPORATE_COMPANY_V431 ||
+      !packageId ||
+      packageId === NEW_CORPORATE_PACKAGE_V432
+    ) {
+      setCorporateSessionsV466([]);
+      setCorporateSessionIdV466("");
+      return;
+    }
+
+    let cancelled = false;
+    setCorporateSessionLoadingV470(true);
+
+    fetch(
+      `/api/mcu/import-mapping?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}`,
+      { cache: "no-store" },
+    )
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) throw new Error(json?.message || "Gagal membaca Session MCU/Lokasi.");
+        return json;
+      })
+      .then((json) => {
+        if (cancelled) return;
+        const sessions = Array.isArray(json?.sessions) ? json.sessions : [];
+        setCorporateSessionsV466(sessions);
+        setCorporateSessionIdV466((prev) => {
+          const existingStillValid = sessions.some((row: any) => String(row?.id) === String(prev));
+          if (existingStillValid) return String(prev);
+          return sessions.length === 1 ? String(sessions[0].id) : "";
+        });
+      })
+      .catch((error: any) => {
+        if (cancelled) return;
+        setCorporateSessionsV466([]);
+        setCorporateSessionIdV466("");
+        setCorporateMappingErrorV466(error?.message || "Gagal membaca Session MCU/Lokasi.");
+      })
+      .finally(() => {
+        if (!cancelled) setCorporateSessionLoadingV470(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [programType, corporateCompanyChoiceV431, corporatePackageChoiceV432]);
+
   async function openCorporateMappingV466(fileOverride?: File | null) {
     if (programType !== "corporate") return;
 
@@ -631,7 +687,11 @@ function ImportForm({ user }: { user: any }) {
       setCorporatePreviewV466(preview);
       setCorporateMappingV466(preview.suggested_mapping || {});
       setCorporateSessionsV466(sessions);
-      setCorporateSessionIdV466(sessions.length === 1 ? String(sessions[0].id) : "");
+      setCorporateSessionIdV466((prev) => {
+        const existingStillValid = sessions.some((row: any) => String(row?.id) === String(prev));
+        if (existingStillValid) return String(prev);
+        return sessions.length === 1 ? String(sessions[0].id) : "";
+      });
       setCorporateLocationModeV466("session");
       setCorporateLocationColumnV466("");
       setCorporateFixedLocationV466("");
@@ -649,8 +709,7 @@ function ImportForm({ user }: { user: any }) {
   function resetCorporateMappingV466() {
     setCorporatePreviewV466(null);
     setCorporateMappingV466({});
-    setCorporateSessionsV466([]);
-    setCorporateSessionIdV466("");
+    // V470: Session sudah dipilih dari bagian atas. Jangan dihapus saat ganti/upload file.
     setCorporateLocationColumnV466("");
     setCorporateFixedLocationV466("");
     setCorporateLocationModeV466("session");
@@ -1011,6 +1070,53 @@ function ImportForm({ user }: { user: any }) {
           <label className="label">Catatan</label>
           <textarea className="input min-h-24" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
+
+        {programType === "corporate" &&
+        corporateCompanyChoiceV431 &&
+        corporateCompanyChoiceV431 !== NEW_CORPORATE_COMPANY_V431 &&
+        corporatePackageChoiceV432 &&
+        corporatePackageChoiceV432 !== NEW_CORPORATE_PACKAGE_V432 ? (
+          <section className="rounded-3xl border border-blue-200 bg-blue-50/60 p-4">
+            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+              <div>
+                <label className="label">Session MCU / Lokasi *</label>
+                <select
+                  className="input"
+                  value={corporateSessionIdV466}
+                  onChange={(e) => setCorporateSessionIdV466(e.target.value)}
+                  disabled={corporateSessionLoadingV470}
+                >
+                  <option value="">
+                    {corporateSessionLoadingV470 ? "Membaca Session MCU..." : "- Pilih Session MCU / Lokasi -"}
+                  </option>
+                  {corporateSessionsV466.map((session) => (
+                    <option key={session.id} value={String(session.id)}>
+                      {session.label || `${session.session_date || "-"} · ${session.location_name || "-"} · ${session.package_name || ""}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-3 text-xs font-bold text-slate-600">
+                {corporateSessionLoadingV470
+                  ? "Membaca session..."
+                  : corporateSessionsV466.length
+                    ? `${corporateSessionsV466.length} session tersedia`
+                    : "Belum ada Session MCU untuk perusahaan + paket ini"}
+              </div>
+            </div>
+
+            {corporateSessionIdV466 ? (
+              <div className="mt-3 rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                Session terpilih:{" "}
+                <span className="font-black text-blue-700">
+                  {corporateSessionsV466.find((session) => String(session.id) === String(corporateSessionIdV466))?.label ||
+                    corporateSessionsV466.find((session) => String(session.id) === String(corporateSessionIdV466))?.location_name ||
+                    corporateSessionIdV466}
+                </span>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <div>
           <label className="label">Upload Excel</label>
