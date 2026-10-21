@@ -141,16 +141,52 @@ export async function GET(req: NextRequest) {
     sessionPackageId = Number(queueSession.package_id || 0);
   }
 
-  let assignedParticipantIds: number[] | null = null;
+  // MCU_CORPORATE_SESSION_PARTICIPANT_UNION_V493
+  // A Session may already contain participants from historical registration/queue
+  // rows even when their newer participant-session assignment row does not exist.
+  // Treat all three operational links as valid Session membership so Registrasi
+  // Ulang can still display the complete Session population.
+  let sessionParticipantIds: number[] | null = null;
   if (queueSession?.id) {
-    const assignmentResult = await supabase
-      .from("mcu_participant_session_assignments")
-      .select("participant_id")
-      .eq("queue_session_id", Number(queueSession.id));
-    if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
-    assignedParticipantIds = (assignmentResult.data || [])
-      .map((row: any) => Number(row.participant_id || 0))
-      .filter(Boolean);
+    const queueSessionId = Number(queueSession.id);
+
+    const [assignmentResult, registrationResult, queueEntryResult] =
+      await Promise.all([
+        supabase
+          .from("mcu_participant_session_assignments")
+          .select("participant_id")
+          .eq("queue_session_id", queueSessionId),
+        supabase
+          .from("mcu_registration_sessions")
+          .select("participant_id")
+          .eq("queue_session_id", queueSessionId),
+        supabase
+          .from("mcu_queue_entries")
+          .select("participant_id")
+          .eq("queue_session_id", queueSessionId),
+      ]);
+
+    if (assignmentResult.error) {
+      return fail(assignmentResult.error.message, 500);
+    }
+    if (registrationResult.error) {
+      return fail(registrationResult.error.message, 500);
+    }
+    if (queueEntryResult.error) {
+      return fail(queueEntryResult.error.message, 500);
+    }
+
+    sessionParticipantIds = Array.from(
+      new Set(
+        [
+          ...(assignmentResult.data || []),
+          ...(registrationResult.data || []),
+          ...(queueEntryResult.data || []),
+        ]
+          .map((row: any) => Number(row.participant_id || 0))
+          .filter(Boolean),
+      ),
+    );
   }
 
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
@@ -167,14 +203,47 @@ export async function GET(req: NextRequest) {
     let query = supabase.from("participants").select(SELECT_COLUMNS).limit(limit);
 
     if (program !== "all") query = query.eq("program_type", program);
-    // V491: Session membership comes from the assignment table, never from package alone.
-    if (assignedParticipantIds !== null) {
-      if (!assignedParticipantIds.length) return query.in("id", [-1]);
-      query = query.in("id", assignedParticipantIds);
-    }
-    // Database is an independent optional narrowing filter.
-    if (sourceId !== "all" && !exactSessionMatch && !legacySessionMatch) {
-      query = query.eq("source_id", Number(sourceId));
+
+    const hasExplicitDatabase =
+      sourceId !== "all" && !exactSessionMatch && !legacySessionMatch;
+
+    // MCU_CORPORATE_DATABASE_PLUS_SESSION_UNION_V493
+    // Database Existing remains the batch selector for participants that still
+    // need Registrasi Ulang. When a Session is also selected, merge in everyone
+    // already operationally linked to that Session (assignment, registration,
+    // or queue entry). This prevents previously registered/queued participants
+    // from disappearing just because their source_id differs from the selected
+    // Database Existing.
+    if (hasExplicitDatabase) {
+      const numericSourceId = Number(sourceId);
+      if (!Number.isFinite(numericSourceId) || numericSourceId <= 0) {
+        return query.in("id", [-1]);
+      }
+
+      if (sessionParticipantIds?.length) {
+        const safeParticipantIds = sessionParticipantIds
+          .filter((id) => Number.isFinite(id) && id > 0)
+          .map((id) => Math.trunc(id));
+
+        if (safeParticipantIds.length) {
+          query = query.or(
+            `source_id.eq.${numericSourceId},id.in.(${safeParticipantIds.join(",")})`,
+          );
+        } else {
+          query = query.eq("source_id", numericSourceId);
+        }
+      } else {
+        query = query.eq("source_id", numericSourceId);
+      }
+
+      if (queueSession?.company_id) {
+        query = query.eq("company_id", Number(queueSession.company_id));
+      }
+    } else if (sessionParticipantIds !== null) {
+      // With no Database Existing selected, Session membership itself is the
+      // retrieval source.
+      if (!sessionParticipantIds.length) return query.in("id", [-1]);
+      query = query.in("id", sessionParticipantIds);
     }
 
     return query;

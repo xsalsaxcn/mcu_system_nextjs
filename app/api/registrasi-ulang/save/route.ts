@@ -88,10 +88,10 @@ async function resolveExactMcuQueueSession(
   if (companyId && Number(result.data.company_id || 0) !== companyId) {
     throw new Error("Perusahaan peserta tidak sesuai dengan Session MCU yang dipilih.");
   }
-  if (packageId && Number(result.data.package_id || 0) !== packageId) {
-    throw new Error("Paket peserta tidak sesuai dengan Session MCU yang dipilih.");
-  }
-
+  // MCU_CORPORATE_PACKAGE_SESSION_DECOUPLE_V492
+  // Package peserta dan Session MCU adalah dua konsep berbeda.
+  // Session hanya wajib cocok pada perusahaan; memilih Session tidak boleh
+  // memaksa / mengubah package_id peserta.
   return result.data;
 }
 
@@ -112,11 +112,8 @@ async function bindMcuCorporateRegistration(
     throw new Error("Data peserta / Session MCU belum lengkap untuk merilis nomor antrean.");
   }
 
-  if (
-    companyId !== Number(args.queueSession.company_id || 0) ||
-    packageId !== Number(args.queueSession.package_id || 0)
-  ) {
-    throw new Error("Peserta tidak sesuai dengan perusahaan/paket Session MCU yang dipilih.");
+  if (companyId !== Number(args.queueSession.company_id || 0)) {
+    throw new Error("Peserta tidak sesuai dengan perusahaan Session MCU yang dipilih.");
   }
 
   const now = new Date().toISOString();
@@ -144,6 +141,28 @@ async function bindMcuCorporateRegistration(
 
   if (bindingResult.error) {
     throw new Error(`Gagal mengikat Registrasi Ulang ke Session MCU: ${bindingResult.error.message}`);
+  }
+
+  // Persist participant -> operational Session assignment separately from package_id.
+  const assignmentResult = await supabase
+    .from("mcu_participant_session_assignments")
+    .upsert(
+      {
+        participant_id: participantId,
+        queue_session_id: queueSessionId,
+        source_id: Number(participant?.source_id || 0) || null,
+        location_name: args.queueSession?.location || null,
+        session_date: args.queueSession?.session_date || null,
+        department: participant?.department || null,
+        position: participant?.position || null,
+        raw_json: {},
+        updated_at: now,
+      },
+      { onConflict: "participant_id,queue_session_id" },
+    );
+
+  if (assignmentResult.error) {
+    throw new Error(`Gagal menyimpan assignment peserta ke Session MCU: ${assignmentResult.error.message}`);
   }
 
   const queueEntry = await ensureMcuQueueEntry(supabase, {
