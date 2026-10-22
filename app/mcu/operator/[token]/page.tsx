@@ -90,20 +90,22 @@ export default function McuOperatorQueuePage({ params }: { params: { token: stri
   const trackAName = String(data?.queue_session?.track_a_name || "Lab Darah");
   const trackBName = String(data?.queue_session?.track_b_name || "Rontgen");
 
+  const uninformedParticipantCount = useMemo(
+    () => pendingParticipants.filter((row) => !row.informed_at).length,
+    [pendingParticipants],
+  );
   const visibleParticipants = useMemo(() => {
     const term = participantSearch.trim().toLowerCase();
-    const rows = pendingParticipants.filter((row) => {
+    let rows = pendingParticipants.filter((row) => {
       if (!term) return true;
       return [row.name, row.nik, row.employee_nik, row.mcu_id, row.external_id, row.department]
         .some((value) => String(value || "").toLowerCase().includes(term));
     });
-    return [...rows].sort((a, b) => {
-      const aInformed = Boolean(a.informed_at);
-      const bInformed = Boolean(b.informed_at);
-      if (participantSort === "uninformed" && aInformed !== bInformed) return aInformed ? 1 : -1;
-      if (participantSort === "informed" && aInformed !== bInformed) return aInformed ? -1 : 1;
-      return String(a.name || "").localeCompare(String(b.name || ""), "id", { sensitivity: "base" });
-    });
+    if (participantSort === "uninformed") rows = rows.filter((row) => !row.informed_at);
+    if (participantSort === "informed") rows = rows.filter((row) => Boolean(row.informed_at));
+    return [...rows].sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""), "id", { sensitivity: "base" }),
+    );
   }, [pendingParticipants, participantSearch, participantSort]);
 
   async function load(silent = false) {
@@ -372,9 +374,9 @@ export default function McuOperatorQueuePage({ params }: { params: { token: stri
         </section>
 
         <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="text-xl font-black text-slate-900">List Peserta Hari H</div><div className="mt-1 text-sm text-slate-500">Klik <b>Informed</b> setelah peserta sudah dihubungi. Peserta otomatis hilang setelah hadir / Registrasi Ulang.</div></div><div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{pendingParticipants.length} peserta belum hadir</div></div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="text-xl font-black text-slate-900">List Peserta Hari H</div><div className="mt-1 text-sm text-slate-500">Klik <b>Informed</b> setelah peserta sudah dihubungi. Pada tampilan default, peserta otomatis hilang setelah statusnya menjadi <b>Sudah di Informed</b>.</div></div><div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{uninformedParticipantCount} peserta belum di informed</div></div>
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_240px]"><input className="w-full rounded-xl border px-3 py-2 text-sm" value={participantSearch} onChange={(e) => setParticipantSearch(e.target.value)} placeholder="Cari nama, NIK, No MCU..." /><select className="w-full rounded-xl border px-3 py-2 text-sm" value={participantSort} onChange={(e) => setParticipantSort(e.target.value as any)}><option value="uninformed">Belum diinfokan dulu</option><option value="informed">Informed dulu</option><option value="name">Nama A - Z</option></select></div>
-          <div className="mt-4 max-h-[440px] overflow-auto rounded-2xl border"><table className="min-w-full text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3 text-left">Nama Peserta</th><th className="p-3 text-left">NIK / No MCU</th><th className="p-3 text-left">Status Informasi</th><th className="p-3 text-left">Last Update</th><th className="p-3 text-left">Aksi</th></tr></thead><tbody className="divide-y">{visibleParticipants.length ? visibleParticipants.map((row) => <tr key={row.id} className={row.informed_at ? "bg-emerald-50/40" : "bg-white"}><td className="p-3"><div className="font-black text-slate-900">{row.name || "-"}</div><div className="text-xs text-slate-500">{row.department || "-"}</div></td><td className="p-3 text-xs font-semibold text-slate-600"><div>NIK: {row.nik || row.employee_nik || "-"}</div><div>MCU: {row.mcu_id || row.external_id || "-"}</div></td><td className="p-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.informed_at ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{row.informed_at ? "Informed" : "Belum Diinfokan"}</span></td><td className="p-3"><div className="text-xs font-bold text-slate-700">{formatLastUpdate(row.informed_at)}</div><div className="mt-1 text-[11px] text-slate-500">{row.informed_by ? `oleh ${row.informed_by}` : "-"}</div></td><td className="p-3"><button disabled={busy} onClick={() => action("informed", undefined, undefined, row.id)} className={`rounded-lg px-3 py-1.5 text-xs font-black disabled:opacity-50 ${row.informed_at ? "border border-emerald-200 bg-white text-emerald-700" : "bg-emerald-600 text-white"}`}>{row.informed_at ? "Update Informed" : "Informed"}</button></td></tr>) : <tr><td colSpan={5} className="p-8 text-center text-sm font-semibold text-slate-500">Tidak ada peserta yang perlu diinformasikan.</td></tr>}</tbody></table></div>
+          <div className="mt-4 max-h-[440px] overflow-auto rounded-2xl border"><table className="min-w-full text-sm"><thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3 text-left">Nama Peserta</th><th className="p-3 text-left">NIK / No MCU</th><th className="p-3 text-left">Status Informasi</th><th className="p-3 text-left">Last Update</th><th className="p-3 text-left">Aksi</th></tr></thead><tbody className="divide-y">{visibleParticipants.length ? visibleParticipants.map((row) => <tr key={row.id} className={row.informed_at ? "bg-emerald-50/40" : "bg-white"}><td className="p-3"><div className="font-black text-slate-900">{row.name || "-"}</div><div className="text-xs text-slate-500">{row.department || "-"}</div></td><td className="p-3 text-xs font-semibold text-slate-600"><div>NIK: {row.nik || row.employee_nik || "-"}</div><div>MCU: {row.mcu_id || row.external_id || "-"}</div></td><td className="p-3"><span className={`rounded-full px-2.5 py-1 text-xs font-black ${row.informed_at ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{row.informed_at ? "Sudah di Informed" : "Belum di Informed"}</span></td><td className="p-3"><div className="text-xs font-bold text-slate-700">{formatLastUpdate(row.informed_at)}</div><div className="mt-1 text-[11px] text-slate-500">{row.informed_by ? `oleh ${row.informed_by}` : "-"}</div></td><td className="p-3"><button disabled={busy || Boolean(row.informed_at)} onClick={() => action("informed", undefined, undefined, row.id)} className={`rounded-lg px-3 py-1.5 text-xs font-black disabled:opacity-50 ${row.informed_at ? "border border-emerald-200 bg-white text-emerald-700" : "bg-emerald-600 text-white"}`}>{row.informed_at ? "Sudah Informed" : "Informed"}</button></td></tr>) : <tr><td colSpan={5} className="p-8 text-center text-sm font-semibold text-slate-500">Tidak ada peserta yang perlu diinformasikan.</td></tr>}</tbody></table></div>
         </section>
 
         <div className="grid gap-5 xl:grid-cols-2"><TrackPanel track="A" label={trackAName} accent="blue" /><TrackPanel track="B" label={trackBName} accent="violet" /></div>

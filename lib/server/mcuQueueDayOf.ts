@@ -15,26 +15,57 @@ export type McuPendingParticipant = {
   informed_by?: string | null;
 };
 
-function isArrived(row: any) {
-  return row?.registrasi_ulang_done === true || Number(row?.registrasi_ulang_done || 0) === 1;
+async function loadSessionParticipantScope(
+  supabase: any,
+  queueSessionId: number,
+) {
+  const result = await supabase
+    .from("mcu_participant_session_assignments")
+    .select("participant_id,source_id")
+    .eq("queue_session_id", queueSessionId);
+
+  if (result.error) throw new Error(queueSchemaErrorMessage(result.error));
+
+  const rows = result.data || [];
+  const participantIds = Array.from(
+    new Set(rows.map((row: any) => Number(row.participant_id || 0)).filter(Boolean)),
+  );
+  const sourceIds = Array.from(
+    new Set(rows.map((row: any) => Number(row.source_id || 0)).filter(Boolean)),
+  );
+
+  return { participantIds, sourceIds };
 }
 
 async function loadAllParticipants(
   supabase: any,
-  companyId: number,
-  packageId: number,
+  args: { queueSessionId: number; companyId: number; packageId: number },
 ) {
+  const scope = await loadSessionParticipantScope(supabase, args.queueSessionId);
   const rows: any[] = [];
   const pageSize = 1000;
   let offset = 0;
 
   while (true) {
-    const result = await supabase
+    let query = supabase
       .from("participants")
-      .select("id,name,mcu_id,external_id,nik,employee_nik,department,registrasi_ulang_done,registrasi_ulang_at")
+      .select("id,name,mcu_id,external_id,nik,employee_nik,department,source_id,package_id,registrasi_ulang_done,registrasi_ulang_at")
       .eq("program_type", "corporate")
-      .eq("company_id", companyId)
-      .eq("package_id", packageId)
+      .eq("company_id", args.companyId);
+
+    // Location/date sessions use the imported database/source that was linked to
+    // the session. This intentionally does NOT force participant.package_id to
+    // equal the queue session package because those concepts are separate.
+    if (scope.sourceIds.length) {
+      query = query.in("source_id", scope.sourceIds);
+    } else if (scope.participantIds.length) {
+      query = query.in("id", scope.participantIds);
+    } else {
+      // Legacy queue sessions that predate explicit session assignments.
+      query = query.eq("package_id", args.packageId);
+    }
+
+    const result = await query
       .order("name", { ascending: true })
       .order("id", { ascending: true })
       .range(offset, offset + pageSize - 1);
@@ -46,7 +77,7 @@ async function loadAllParticipants(
     offset += pageSize;
   }
 
-  return rows;
+  return { rows, scope };
 }
 
 async function loadInformedRows(
@@ -77,15 +108,14 @@ export async function loadMcuPendingParticipants(
   supabase: any,
   args: { queueSessionId: number; companyId: number; packageId: number },
 ): Promise<McuPendingParticipant[]> {
-  const participants = await loadAllParticipants(supabase, args.companyId, args.packageId);
-  const pending = participants.filter((row) => !isArrived(row));
-  const participantIds = pending.map((row) => Number(row.id || 0)).filter(Boolean);
+  const { rows: participants } = await loadAllParticipants(supabase, args);
+  const participantIds = participants.map((row) => Number(row.id || 0)).filter(Boolean);
   const informedRows = await loadInformedRows(supabase, args.queueSessionId, participantIds);
   const informedMap = new Map<number, any>(
     informedRows.map((row) => [Number(row.participant_id || 0), row]),
   );
 
-  return pending.map((row) => {
+  return participants.map((row) => {
     const informed = informedMap.get(Number(row.id || 0));
     return {
       ...row,
@@ -107,17 +137,26 @@ export async function markMcuParticipantInformed(
 ) {
   const participantRes = await supabase
     .from("participants")
-    .select("id,registrasi_ulang_done")
+    .select("id,source_id,package_id")
     .eq("id", args.participantId)
     .eq("program_type", "corporate")
     .eq("company_id", args.companyId)
-    .eq("package_id", args.packageId)
     .maybeSingle();
 
   if (participantRes.error) throw new Error(participantRes.error.message);
-  if (!participantRes.data) throw new Error("Peserta tidak ditemukan pada perusahaan/paket ini.");
-  if (isArrived(participantRes.data)) {
-    throw new Error("Peserta sudah hadir/Registrasi Ulang sehingga tidak lagi berada di list informasi.");
+  if (!participantRes.data) throw new Error("Peserta tidak ditemukan pada perusahaan MCU Corporate ini.");
+
+  const scope = await loadSessionParticipantScope(supabase, args.queueSessionId);
+  const participantSourceId = Number((participantRes.data as any)?.source_id || 0);
+  const participantPackageId = Number((participantRes.data as any)?.package_id || 0);
+  const inSessionScope = scope.sourceIds.length
+    ? scope.sourceIds.includes(participantSourceId) || scope.participantIds.includes(args.participantId)
+    : scope.participantIds.length
+      ? scope.participantIds.includes(args.participantId)
+      : participantPackageId === args.packageId;
+
+  if (!inSessionScope) {
+    throw new Error("Peserta tidak termasuk roster Session MCU yang dipilih.");
   }
 
   const now = new Date().toISOString();

@@ -241,11 +241,6 @@ export async function GET(req: NextRequest) {
 
   try {
     const { selected, supabase, queueSession } = await resolveQueueContext(req);
-    const isLocationSession = Boolean(
-      String((queueSession as any)?.location || "").trim() ||
-      String((queueSession as any)?.session_date || "").trim()
-    );
-
     const autoQueue = await ensureSessionRegistrationEntries(
       supabase,
       Number(queueSession.id),
@@ -253,13 +248,11 @@ export async function GET(req: NextRequest) {
 
     const [entries, pendingParticipants, companyRes, packageRes] = await Promise.all([
       loadMcuQueueEntriesWithParticipants(supabase, queueSession.id),
-      isLocationSession
-        ? Promise.resolve([])
-        : loadMcuPendingParticipants(supabase, {
-            queueSessionId: Number(queueSession.id),
-            companyId: selected.company_id,
-            packageId: selected.package_id,
-          }),
+      loadMcuPendingParticipants(supabase, {
+        queueSessionId: Number(queueSession.id),
+        companyId: selected.company_id,
+        packageId: selected.package_id,
+      }),
       supabase.from("companies").select("id,name").eq("id", selected.company_id).maybeSingle(),
       supabase.from("packages").select("id,name").eq("id", selected.package_id).maybeSingle(),
     ]);
