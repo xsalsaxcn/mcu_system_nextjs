@@ -338,6 +338,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [selected, setSelected] = useState<Participant | null>(null);
   const [form, setForm] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exportingFullDataV506, setExportingFullDataV506] = useState(false);
   const [saving, setSaving] = useState(false);
   const [releasingQueue, setReleasingQueue] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -828,6 +829,27 @@ function RegistrasiUlang({ user }: { user: any }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  // MCU_CORPORATE_FULL_EXPORT_V506
+  async function exportFullCorporateDataV506() {
+    if (program !== "corporate") { setMessage("Export lengkap ini khusus MCU Corporate."); return; }
+    const participantIds = results.map((participant) => Number(participant.id || 0)).filter((id) => id > 0);
+    const queueSessionId = Number(getSelectedSessionContext()?.queue_session_id || 0);
+    if (!participantIds.length) { setMessage("Belum ada data Hasil Retrieve untuk diexport."); return; }
+    setExportingFullDataV506(true);
+    setMessage(`Menyiapkan export lengkap ${participantIds.length} peserta...`);
+    try {
+      const res = await fetch("/api/registrasi-ulang/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participant_ids: participantIds, queue_session_id: queueSessionId || null }) });
+      if (!res.ok) { const json = await res.json().catch(() => ({})); throw new Error(json?.message || "Gagal menyiapkan export."); }
+      const blob = await res.blob();
+      const disposition = String(res.headers.get("content-disposition") || "");
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = match?.[1] || `MCU_Corporate_Export_${new Date().toISOString().slice(0, 10)}.xls`;
+      const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+      setMessage(`Export lengkap ${participantIds.length} peserta berhasil dibuat.`);
+    } catch (error: any) { setMessage(error?.message || "Gagal export data MCU Corporate."); }
+    finally { setExportingFullDataV506(false); }
   }
 
   async function startOnSpotRegistration() {
@@ -1391,7 +1413,14 @@ function RegistrasiUlang({ user }: { user: any }) {
                 <div className="text-lg font-black text-slate-900">Hasil Retrieve Data</div>
                 <div className="text-xs font-semibold text-slate-500">{results.length} peserta ditemukan</div>
               </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{results.length} peserta</span>
+              <div className="flex items-center gap-2">
+                {program === "corporate" ? (
+                  <button type="button" className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={exportFullCorporateDataV506} disabled={exportingFullDataV506 || results.length === 0} title="Export lengkap biodata, Session, informed, registrasi, dan antrian A/B">
+                    {exportingFullDataV506 ? "Exporting..." : "Export Excel"}
+                  </button>
+                ) : null}
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{results.length} peserta</span>
+              </div>
             </div>
 
             <div className="relative mt-3">
