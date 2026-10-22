@@ -791,7 +791,7 @@ function McuQueueContent() {
                         <div className="text-xs text-slate-500">{row.department || "-"}</div>
                       </td>
                       <td className="p-3 text-xs font-semibold text-slate-600">
-                        <div>NIK: {row.nik || row.employee_nik || "-"}</div>
+                        <div>NIK Karyawan: {row.employee_nik || row.nik || "-"}</div>
                         <div>MCU: {row.mcu_id || row.external_id || "-"}</div>
                       </td>
                       <td className="p-3">
