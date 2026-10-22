@@ -51,8 +51,14 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const participantIds = Array.from(new Set((Array.isArray(body?.participant_ids) ? body.participant_ids : [])
-    .map((value: any) => Number(value || 0)).filter((value: number) => Number.isFinite(value) && value > 0))).slice(0, 1000);
+  // MCU_CORPORATE_FULL_EXPORT_TYPES_V506_2
+  const participantIds: number[] = Array.from(
+    new Set<number>(
+      (Array.isArray(body?.participant_ids) ? body.participant_ids : [])
+        .map((value: any) => Number(value || 0))
+        .filter((value: number) => Number.isFinite(value) && value > 0),
+    ),
+  ).slice(0, 1000);
   const queueSessionId = Number(body?.queue_session_id || 0);
   if (!participantIds.length) return NextResponse.json({ ok: false, message: "Tidak ada peserta untuk diexport." }, { status: 400 });
 
@@ -92,11 +98,30 @@ export async function POST(req: NextRequest) {
     if (packagesRes.error) throw new Error(packagesRes.error.message);
     if (sourcesRes.error) throw new Error(sourcesRes.error.message);
 
-    const companyMap = new Map((companiesRes.data || []).map((item: any) => [Number(item.id), item]));
-    const packageMap = new Map((packagesRes.data || []).map((item: any) => [Number(item.id), item]));
-    const sourceMap = new Map((sourcesRes.data || []).map((item: any) => [Number(item.id), item]));
-    const assignmentMap = latestByParticipant(assignments), registrationMap = latestByParticipant(registrations), queueMap = latestByParticipant(queues), informedMap = latestByParticipant(informedRows);
-    const orderMap = new Map(participantIds.map((id, index) => [id, index]));
+    const companyMap: Map<number, any> = new Map<number, any>(
+      (companiesRes.data || []).map(
+        (item: any): [number, any] => [Number(item.id), item],
+      ),
+    );
+    const packageMap: Map<number, any> = new Map<number, any>(
+      (packagesRes.data || []).map(
+        (item: any): [number, any] => [Number(item.id), item],
+      ),
+    );
+    const sourceMap: Map<number, any> = new Map<number, any>(
+      (sourcesRes.data || []).map(
+        (item: any): [number, any] => [Number(item.id), item],
+      ),
+    );
+    const assignmentMap: Map<number, any> = latestByParticipant(assignments);
+    const registrationMap: Map<number, any> = latestByParticipant(registrations);
+    const queueMap: Map<number, any> = latestByParticipant(queues);
+    const informedMap: Map<number, any> = latestByParticipant(informedRows);
+    const orderMap: Map<number, number> = new Map<number, number>(
+      participantIds.map(
+        (id: number, index: number): [number, number] => [id, index],
+      ),
+    );
     const sessionCompany = companyMap.get(Number(queueSession?.company_id || 0));
     const sessionPackage = packageMap.get(Number(queueSession?.package_id || 0));
 
