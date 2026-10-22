@@ -20,6 +20,18 @@ export async function POST(req: NextRequest) {
     ? rawProgramType
     : PROGRAM_CAPASKA;
 
+  // IMPORT_SERVICE_TYPE_GUARD_V494
+  const serviceType = String(form.get("service_type") || programType).trim().toLowerCase();
+  if (serviceType === "wellness") {
+    return fail("Jenis Layanan Wellness menggunakan halaman Import Wellness agar mapping tidak tercampur.", 400);
+  }
+  if (![PROGRAM_CAPASKA, PROGRAM_CORPORATE, PROGRAM_VACCINATION].includes(serviceType)) {
+    return fail("Jenis Layanan tidak valid.", 400);
+  }
+  if (serviceType !== programType) {
+    return fail("Jenis Layanan harus sesuai dengan Tujuan Import.", 400);
+  }
+
   const defaultInstitution =
     programType === PROGRAM_CORPORATE
       ? "Corporate"

@@ -41,6 +41,28 @@ const IMPORT_TARGETS = [
   },
 ];
 
+const IMPORT_SERVICE_TYPES = [
+  {
+    value: "capaska",
+    label: "CAPASKA",
+    helper: "Gunakan mapping khusus peserta CAPASKA / BPIP.",
+  },
+  {
+    value: "corporate",
+    label: "MCU Corporate",
+    helper: "Gunakan mapping karyawan, perusahaan, paket, dan Session MCU / Lokasi.",
+  },
+  {
+    value: "vaccination",
+    label: "Vaksinasi",
+    helper: "Gunakan mapping database peserta dan Session Vaksinasi.",
+  },
+  {
+    value: "wellness",
+    label: "Wellness",
+    helper: "Wellness memakai flow import khusus agar target, histori, dan data Wellness tidak tercampur dengan MCU.",
+  },
+] as const;
 
 const MCU_STAGE_STAFF_STAGES_V165 = [
   "Registrasi Ulang",
@@ -134,6 +156,7 @@ const NEW_CORPORATE_PACKAGE_V432 = "__new_corporate_package__";
 
 function ImportForm({ user }: { user: any }) {
   const [programType, setProgramType] = useState("capaska");
+  const [serviceType, setServiceType] = useState("capaska");
   const [databaseName, setDatabaseName] = useState("");
   const [selectedSourceIdV237, setSelectedSourceIdV237] = useState("");
   const [sourceOptionsV237, setSourceOptionsV237] = useState<ImportSourceOptionV237[]>([]);
@@ -266,12 +289,16 @@ function ImportForm({ user }: { user: any }) {
   }
 
   const selectedTarget = getImportTarget(programType);
+  const selectedServiceType =
+    IMPORT_SERVICE_TYPES.find((item) => item.value === serviceType) ||
+    IMPORT_SERVICE_TYPES[0];
   const showMcuStageStaffV165 = programType === "capaska" || programType === "corporate";
 
   function changeProgram(nextProgram: string) {
     const target = getImportTarget(nextProgram);
 
     setProgramType(target.value);
+    setServiceType(target.value);
     setSelectedSourceIdV237("");
     setDatabaseName("");
     setVaccinationCompanyChoiceV238("");
@@ -294,6 +321,19 @@ function ImportForm({ user }: { user: any }) {
   }
 
 
+
+  function changeServiceType(nextService: string) {
+    if (nextService === "wellness") {
+      setServiceType("wellness");
+      window.location.href = "/wellness/import";
+      return;
+    }
+
+    setServiceType(nextService);
+    if (nextService !== programType) {
+      changeProgram(nextService);
+    }
+  }
 
   function packagesForCorporateCompanyV432(companyIdValue: string | number) {
     const companyId = Number(companyIdValue || 0);
@@ -893,6 +933,7 @@ function ImportForm({ user }: { user: any }) {
 
     const form = new FormData();
     form.append("program_type", programType);
+    form.append("service_type", serviceType);
     form.append("database_name", databaseName);
     form.append("source_id", selectedSourceIdV237);
     form.append("institution_name", institutionName);
@@ -931,7 +972,7 @@ function ImportForm({ user }: { user: any }) {
       <section className="card p-5">
         <div className="text-2xl font-black">Import Database Peserta</div>
         <div className="mt-1 text-sm text-slate-500">
-          Import peserta dipusatkan di Admin. Pilih tujuan data: MCU Corporate, CAPASKA, atau Vaksinasi. Template tidak wajib, sistem auto-detect header nama peserta.
+          Import peserta dipusatkan di Admin. Pilih Tujuan Import lalu pastikan Jenis Layanan sesuai agar mapping dan pilihan Session tidak tercampur.
           Field Database Existing dipakai untuk merge import berkala ke database yang sama.
         </div>
       </section>
@@ -948,6 +989,27 @@ function ImportForm({ user }: { user: any }) {
           </select>
           <div className="mt-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
             {selectedTarget.helper}
+          </div>
+
+          <div className="mt-4">
+            <label className="label">Jenis Layanan</label>
+            <select
+              className="input"
+              value={serviceType}
+              onChange={(e) => changeServiceType(e.target.value)}
+            >
+              {IMPORT_SERVICE_TYPES.map((service) => (
+                <option key={service.value} value={service.value}>
+                  {service.label}
+                </option>
+              ))}
+            </select>
+            <div className="mt-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              {selectedServiceType.helper}
+            </div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">
+              Jenis Layanan menjaga mapping, paket, dan Session tetap sesuai modul yang dipilih.
+            </div>
           </div>
 
           {programType === "vaccination" && (
@@ -1539,4 +1601,3 @@ function ImportForm({ user }: { user: any }) {
     </div>
   );
 }
-
