@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/mcuQueue";
 
 // MCU_QUEUE_BINDING_AUTHORITATIVE_EXACT_SESSION_V458_R3
+// MCU_CORPORATE_EXISTING_QUEUE_RELEASE_V502
 function normalizeEntry(entry: any) {
   if (!entry) return null;
 
@@ -32,7 +33,6 @@ async function loadExactSession(
   args: {
     sessionId: number;
     companyId: number;
-    packageId: number;
   },
 ) {
   const result = await supabase
@@ -42,7 +42,6 @@ async function loadExactSession(
     )
     .eq("id", Number(args.sessionId))
     .eq("company_id", Number(args.companyId))
-    .eq("package_id", Number(args.packageId))
     .eq("is_active", 1)
     .maybeSingle();
 
@@ -67,6 +66,8 @@ export async function GET(req: NextRequest) {
   const requestedQueueSessionId = Number(
     req.nextUrl.searchParams.get("queue_session_id") || 0,
   );
+  // V502 existing-only mode: never allocate a new queue sequence while reading/releasing.
+  const existingOnly = req.nextUrl.searchParams.get("existing_only") === "1";
 
   if (!participantId) {
     return fail("participant_id wajib diisi.", 400);
@@ -119,7 +120,6 @@ export async function GET(req: NextRequest) {
       queueSession = await loadExactSession(supabase, {
         sessionId: requestedQueueSessionId,
         companyId,
-        packageId,
       });
 
       if (!queueSession) {
@@ -150,7 +150,6 @@ export async function GET(req: NextRequest) {
         queueSession = await loadExactSession(supabase, {
           sessionId: Number(bindingRes.data.queue_session_id),
           companyId,
-          packageId,
         });
         resolvedFromBinding = Boolean(queueSession);
       }
@@ -215,7 +214,7 @@ export async function GET(req: NextRequest) {
 
   // Preserve V457's authoritative "released queue number" repair,
   // but ONLY inside the exact selected/bound Session.
-  if (!entry) {
+  if (!entry && !existingOnly) {
     const registered =
       Number(participant.registrasi_ulang_done || 0) === 1 ||
       Boolean(participant.registrasi_ulang_at);

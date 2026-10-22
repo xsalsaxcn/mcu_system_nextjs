@@ -1,6 +1,7 @@
 "use client";
 
 // MCU_CORPORATE_VACCINATION_STRUCTURE_V452
+// MCU_CORPORATE_EXISTING_QUEUE_RELEASE_BUTTON_V502
 
 // MCU_STICKER_LAYOUT_ROLLBACK_ONLY_V450
 
@@ -338,6 +339,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [form, setForm] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [releasingQueue, setReleasingQueue] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [printReady, setPrintReady] = useState(false);
@@ -585,6 +587,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       const params = new URLSearchParams({
         participant_id: String(id),
         queue_session_id: String(sessionId),
+        existing_only: "1",
       });
       const res = await fetch(
         `/api/mcu/queue/participant?${params.toString()}`,
@@ -622,6 +625,42 @@ function RegistrasiUlang({ user }: { user: any }) {
     } catch {
       setQueueInfo(null);
       return null;
+    }
+  }
+
+  async function releaseExistingQueueNumberV502() {
+    const participantId = Number(form?.id || 0);
+    const sessionId = Number(getSelectedSessionContext()?.queue_session_id || 0);
+
+    if (program !== "corporate" || !participantId) {
+      setMessage("Pilih peserta MCU Corporate terlebih dahulu.");
+      return;
+    }
+    if (!sessionId) {
+      setMessage("Pilih Session MCU lokasi/tanggal terlebih dahulu.");
+      return;
+    }
+
+    setReleasingQueue(true);
+    setMessage("Mengambil nomor antrean existing dari Session MCU...");
+    try {
+      const info = await loadQueueInfo(participantId, sessionId);
+      const aNumber = String(info?.a_queue_number || "").trim();
+      const bNumber = String(info?.b_queue_number || "").trim();
+
+      if (!aNumber && !bNumber) {
+        setMessage("Nomor antrean belum ditemukan pada Session ini. Tombol ini tidak membuat nomor baru agar tidak terjadi antrean ganda.");
+        return;
+      }
+
+      setPrintReady(true);
+      setMessage(
+        `Nomor antrean berhasil dirilis ke label: ${[aNumber, bNumber].filter(Boolean).join(" / ")}. Nomor existing tetap dipakai.`
+      );
+    } catch (error: any) {
+      setMessage(error?.message || "Gagal mengambil nomor antrean existing.");
+    } finally {
+      setReleasingQueue(false);
     }
   }
 
@@ -1471,6 +1510,16 @@ function RegistrasiUlang({ user }: { user: any }) {
                     <button type="button" className="btn-primary" disabled={saving} onClick={save}>
                       {saving ? "Menyimpan..." : "Simpan Data"}
                     </button>
+                    {program === "corporate" ? (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={saving || releasingQueue || !form?.id || !getSelectedSessionContext()?.queue_session_id}
+                        onClick={releaseExistingQueueNumberV502}
+                      >
+                        {releasingQueue ? "Merilis..." : "Rilis Nomor Antrian"}
+                      </button>
+                    ) : null}
                     <button type="button" className="btn-secondary" disabled={!form?.id || !printJobs.length} onClick={printBarcode}>
                       Print Barcode ({printJobs.length})
                     </button>
