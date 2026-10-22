@@ -462,27 +462,67 @@ function RegistrasiUlang({ user }: { user: any }) {
   }
 
 
+  // MCU_CORPORATE_LOCKED_SESSION_REFRESH_PERSISTENCE_V505
   useEffect(() => {
-    if (program !== "corporate" || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
+
+    const locked =
+      window.localStorage.getItem("mcu_reg_session_locked") === "1";
+
+    if (program !== "corporate") {
+      if (locked && !restoredLockRef.current) {
+        setProgram("corporate");
+      }
+      return;
+    }
 
     if (!restoredLockRef.current) {
-      restoredLockRef.current = true;
-      const locked = window.localStorage.getItem("mcu_reg_session_locked") === "1";
-      const lockedSession = String(window.localStorage.getItem("mcu_reg_locked_session") || "").trim();
-      // Backward compatibility with the old combined selector lock.
-      const legacyLockedSource = String(window.localStorage.getItem("mcu_reg_locked_source") || "").trim();
-      const resolvedLockedSession = lockedSession || (legacyLockedSource.startsWith("mcu-session:") ? legacyLockedSource : "");
+      const lockedSession = String(
+        window.localStorage.getItem("mcu_reg_locked_session") || "",
+      ).trim();
+      const lockedDatabaseSource = String(
+        window.localStorage.getItem("mcu_reg_locked_database_source") || "",
+      ).trim();
+
+      const legacyLockedSource = String(
+        window.localStorage.getItem("mcu_reg_locked_source") || "",
+      ).trim();
+
+      const resolvedLockedSession =
+        lockedSession ||
+        (legacyLockedSource.startsWith("mcu-session:")
+          ? legacyLockedSource
+          : "");
+
       if (locked && resolvedLockedSession) {
-        setRegistrationSessionIdV491(resolvedLockedSession);
-        setSessionLocked(true);
-        return;
+        if (!sessionSourceOptions.length) return;
+
+        const stillExists = sessionSourceOptions.some(
+          (item: any) => item.value === resolvedLockedSession,
+        );
+
+        if (stillExists) {
+          restoredLockRef.current = true;
+          autoRetrieveKeyRef.current = "";
+          setRegistrationSessionIdV491(resolvedLockedSession);
+          if (lockedDatabaseSource) {
+            setSourceId(lockedDatabaseSource);
+          }
+          setSessionLocked(true);
+          return;
+        }
+
+        window.localStorage.removeItem("mcu_reg_session_locked");
+        window.localStorage.removeItem("mcu_reg_locked_session");
+        window.localStorage.removeItem("mcu_reg_locked_database_source");
+        window.localStorage.removeItem("mcu_reg_locked_source");
       }
-      window.localStorage.removeItem("mcu_reg_session_locked");
-      window.localStorage.removeItem("mcu_reg_locked_session");
-      window.localStorage.removeItem("mcu_reg_locked_source");
+
+      restoredLockRef.current = true;
     }
 
     if (sessionLocked || registrationSessionIdV491) return;
+
     const active = mcuSessionOptions.session;
     const preferred =
       sessionSourceOptions.find(
@@ -490,8 +530,34 @@ function RegistrasiUlang({ user }: { user: any }) {
           Number(item.company_id) === Number(active?.company_id || 0) &&
           Number(item.package_id) === Number(active?.package_id || 0),
       ) || sessionSourceOptions[0];
-    if (preferred?.value) setRegistrationSessionIdV491(preferred.value);
-  }, [program, sessionLocked, registrationSessionIdV491, mcuSessionOptions.session, sessionSourceOptions]);
+
+    if (preferred?.value) {
+      setRegistrationSessionIdV491(preferred.value);
+    }
+  }, [
+    program,
+    sessionLocked,
+    registrationSessionIdV491,
+    mcuSessionOptions.session,
+    sessionSourceOptions,
+  ]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      program !== "corporate" ||
+      !sessionLocked
+    ) return;
+
+    if (sourceId && sourceId !== "all") {
+      window.localStorage.setItem(
+        "mcu_reg_locked_database_source",
+        String(sourceId),
+      );
+    } else {
+      window.localStorage.removeItem("mcu_reg_locked_database_source");
+    }
+  }, [program, sessionLocked, sourceId]);
 
   function toggleRegistrationSessionLock() {
     if (program !== "corporate") {
@@ -502,6 +568,7 @@ function RegistrasiUlang({ user }: { user: any }) {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem("mcu_reg_session_locked");
         window.localStorage.removeItem("mcu_reg_locked_session");
+        window.localStorage.removeItem("mcu_reg_locked_database_source");
         window.localStorage.removeItem("mcu_reg_locked_source");
       }
       setSessionLocked(false);
@@ -514,7 +581,18 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
     if (typeof window !== "undefined") {
       window.localStorage.setItem("mcu_reg_session_locked", "1");
-      window.localStorage.setItem("mcu_reg_locked_session", registrationSessionIdV491);
+      window.localStorage.setItem(
+        "mcu_reg_locked_session",
+        registrationSessionIdV491,
+      );
+      if (sourceId && sourceId !== "all") {
+        window.localStorage.setItem(
+          "mcu_reg_locked_database_source",
+          String(sourceId),
+        );
+      } else {
+        window.localStorage.removeItem("mcu_reg_locked_database_source");
+      }
       // Remove legacy combined-selector lock so Database remains independently selectable.
       window.localStorage.removeItem("mcu_reg_locked_source");
     }
