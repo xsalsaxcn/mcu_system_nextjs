@@ -10,3 +10,8 @@ services/mcu-engine/credentials.json
 services/mcu-engine/gdrive_token.json
 services/mcu-engine/core/__pycache__/
 services/mcu-engine/__pycache__/services/mcu-engine/credentials.json
+.aider*
+
+# Local patch backups - keep outside repository
+_backup_before_*/
+.vaccination_patch_backups/
