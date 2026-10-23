@@ -168,10 +168,18 @@ export async function GET(req: NextRequest) {
       .order("id", { ascending: false })
       .limit(5000),
   ]);
+  // VACCINATION_STOCK_SESSION_SCHEMA_REPAIR_V2_1
   const companyStockReady = !ownershipProbe.error;
   const companyStockMessage = companyStockReady
     ? ""
-    : "Scope stok Session/Lokasi belum aktif. Jalankan SQL vaccination_company_stock_ownership_v2 terlebih dahulu.";
+    : [
+        "Scope stok Session/Lokasi belum aktif di API database.",
+        "Jalankan sql_vaccination_company_stock_ownership_v2_1_repair.sql lalu refresh halaman.",
+        ownershipProbe.error?.code ? `DB ${ownershipProbe.error.code}` : "",
+        ownershipProbe.error?.message || "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   const mappingResult = await supabase
     .from("vaccination_product_mappings")

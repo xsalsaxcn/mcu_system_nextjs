@@ -149,6 +149,39 @@ const CORPORATE_MAPPING_FIELDS_V466 = [
   { key: "phone", label: "No HP / WhatsApp", required: false },
 ] as const;
 
+// VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154
+type VaccinationLocationPreviewV154 = {
+  key: string;
+  timeAreaName: string;
+  timeName: string;
+  locationName: string;
+  sessionDate: string;
+  timeSlot: string;
+  participantCount: number;
+};
+
+type VaccinationImportPreviewV154 = {
+  sheet_name: string;
+  header_row: number;
+  headers: string[];
+  row_count: number;
+  preview: Record<string, any>[];
+  suggested_mapping: Record<string, string>;
+  locations: VaccinationLocationPreviewV154[];
+};
+
+const VACCINATION_MAPPING_FIELDS_V154 = [
+  { key: "name", label: "Nama Peserta / Anak", required: true },
+  { key: "gender", label: "Jenis Kelamin Peserta / Anak", required: false },
+  { key: "external_id", label: "NIK Karyawan / Parent Binusian ID", required: false },
+  { key: "email", label: "Email / Parent Email", required: false },
+  { key: "phone", label: "No HP / Parent HP", required: false },
+  { key: "employee_type", label: "BU / Division / Employee Type", required: false },
+  { key: "batch_name", label: "Batch / Produk Vaksin", required: false },
+  { key: "time_area_name", label: "Lokasi + Tanggal (TimeAreaName)", required: true },
+  { key: "time_name", label: "Jam / Slot (TimeName)", required: false },
+] as const;
+
 const NEW_VACCINATION_COMPANY_V238 = "__new_company__";
 // MCU_CORPORATE_IMPORT_COMPANY_DROPDOWN_V431
 const NEW_CORPORATE_COMPANY_V431 = "__new_corporate_company__";
@@ -171,6 +204,11 @@ function ImportForm({ user }: { user: any }) {
   const [packageName, setPackageName] = useState("CAPASKA 2025/2026");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [vaccinationPreviewV154, setVaccinationPreviewV154] = useState<VaccinationImportPreviewV154 | null>(null);
+  const [vaccinationMappingV154, setVaccinationMappingV154] = useState<Record<string, string>>({});
+  const [vaccinationLocationRowsV154, setVaccinationLocationRowsV154] = useState<VaccinationLocationPreviewV154[]>([]);
+  const [vaccinationMappingLoadingV154, setVaccinationMappingLoadingV154] = useState(false);
+  const [vaccinationMappingErrorV154, setVaccinationMappingErrorV154] = useState("");
   const [corporatePreviewV466, setCorporatePreviewV466] = useState<CorporatePreviewV466 | null>(null);
   const [corporateMappingV466, setCorporateMappingV466] = useState<Record<string, string>>({});
   const [corporateSessionsV466, setCorporateSessionsV466] = useState<CorporateImportSessionV466[]>([]);
@@ -310,6 +348,10 @@ function ImportForm({ user }: { user: any }) {
     setCompanyName(target.value === "vaccination" ? "" : target.company);
     setPackageName(target.packageName);
     setFile(null);
+    setVaccinationPreviewV154(null);
+    setVaccinationMappingV154({});
+    setVaccinationLocationRowsV154([]);
+    setVaccinationMappingErrorV154("");
     setCorporatePreviewV466(null);
     setCorporateMappingV466({});
     setCorporateSessionsV466([]);
@@ -764,6 +806,201 @@ function ImportForm({ user }: { user: any }) {
     };
   }, [programType, corporateCompanyChoiceV431, corporatePackageChoiceV432]);
 
+  async function openVaccinationMappingV154(fileOverride?: File | null) {
+    if (programType !== "vaccination") return;
+
+    const activeFile = fileOverride || file;
+    if (!activeFile) return alert("Upload file Excel dulu.");
+
+    setVaccinationMappingLoadingV154(true);
+    setVaccinationMappingErrorV154("");
+
+    try {
+      const XLSX = await import("xlsx");
+      const arrayBuffer = await activeFile.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
+
+      const cleanLocal = (value: any) => String(value ?? "").trim();
+      const normLocal = (value: any) =>
+        cleanLocal(value)
+          .toLowerCase()
+          .replace(/[_\-.]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const exactOrPartialHeaderLocal = (headers: string[], candidates: string[]) => {
+        const normalized = headers.map(normLocal);
+        const targets = candidates.map(normLocal);
+        for (const candidate of targets) {
+          const idx = normalized.findIndex((header) => header === candidate);
+          if (idx >= 0) return headers[idx];
+        }
+        for (const candidate of targets) {
+          const idx = normalized.findIndex(
+            (header) => header && (header.includes(candidate) || candidate.includes(header)),
+          );
+          if (idx >= 0) return headers[idx];
+        }
+        return "";
+      };
+
+      const knownHeaders = [
+        "child name", "nama anak", "nama peserta", "nama lengkap",
+        "parent binusian id", "binusian id", "time area name", "time name",
+        "parent email", "parent hp", "child gender",
+      ];
+
+      const chooseHeaderRowLocal = (rows: any[][]) => {
+        let bestIndex = 0;
+        let bestScore = -1;
+        rows.slice(0, 20).forEach((row, idx) => {
+          const values = (Array.isArray(row) ? row : []).map(normLocal);
+          const score = values.reduce(
+            (total, value) => total + (knownHeaders.some((candidate) => value.includes(candidate)) ? 1 : 0),
+            0,
+          );
+          if (score > bestScore) {
+            bestIndex = idx;
+            bestScore = score;
+          }
+        });
+        return bestIndex;
+      };
+
+      const parseSessionDateLocal = (value: any) => {
+        const raw = cleanLocal(value);
+        if (!raw) return { locationName: "", sessionDate: "" };
+        const parts = raw.split(" - ").map((item) => item.trim()).filter(Boolean);
+        const datePart = parts.length > 1 ? parts[parts.length - 1] : "";
+        const months: Record<string, string> = {
+          jan: "01", january: "01", januari: "01",
+          feb: "02", february: "02", februari: "02",
+          mar: "03", march: "03", maret: "03",
+          apr: "04", april: "04",
+          may: "05", mei: "05",
+          jun: "06", june: "06", juni: "06",
+          jul: "07", july: "07", juli: "07",
+          aug: "08", august: "08", agustus: "08",
+          sep: "09", sept: "09", september: "09",
+          oct: "10", october: "10", oktober: "10", okt: "10",
+          nov: "11", november: "11",
+          dec: "12", december: "12", desember: "12", des: "12",
+        };
+        const cleanedDate = datePart.replace(
+          /^(mon|tue|wed|thu|fri|sat|sun|sen|sel|rab|kam|jum|sab|min)\w*,?\s+/i,
+          "",
+        );
+        const match = cleanedDate.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
+        let sessionDate = "";
+        if (match) {
+          const mm = months[match[2].toLowerCase()] || "";
+          if (mm) sessionDate = `${match[3]}-${mm}-${String(match[1]).padStart(2, "0")}`;
+        }
+        return {
+          locationName: sessionDate ? parts.slice(0, -1).join(" - ") || raw : raw,
+          sessionDate,
+        };
+      };
+
+      let preview: VaccinationImportPreviewV154 | null = null;
+
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false }) as any[][];
+        if (!rows.length) continue;
+
+        const headerRowIndex = chooseHeaderRowLocal(rows);
+        const headers = (rows[headerRowIndex] || []).map(
+          (value: any, index: number) => cleanLocal(value) || `Column_${index + 1}`,
+        );
+        const bodyRows = rows
+          .slice(headerRowIndex + 1)
+          .filter((row: any) => Array.isArray(row) && row.some((value: any) => cleanLocal(value)));
+        if (!headers.length || !bodyRows.length) continue;
+
+        const suggestedMapping = {
+          name: exactOrPartialHeaderLocal(headers, ["ChildName", "Child Name", "Nama Anak", "Nama Peserta", "Nama Lengkap", "Nama"]),
+          gender: exactOrPartialHeaderLocal(headers, ["ChildGender", "Child Gender", "Gender Anak", "Jenis Kelamin Anak", "Gender"]),
+          external_id: exactOrPartialHeaderLocal(headers, ["ParentBinusianID", "Parent Binusian ID", "BinusianID", "Binusian ID", "Employee ID", "NIP"]),
+          email: exactOrPartialHeaderLocal(headers, ["ParentEmail", "Parent Email", "Email"]),
+          phone: exactOrPartialHeaderLocal(headers, ["ParentHP", "Parent HP", "Parent Phone", "No HP", "Phone"]),
+          employee_type: exactOrPartialHeaderLocal(headers, ["ParentBUDivision", "Parent BU Division", "BU Division", "Division", "Department", "Employee Type"]),
+          batch_name: exactOrPartialHeaderLocal(headers, ["BatchName", "Batch Name", "Nama Vaksin", "Vaksin", "Produk Vaksin"]),
+          time_area_name: exactOrPartialHeaderLocal(headers, ["TimeAreaName", "Time Area Name", "Lokasi Tanggal", "Lokasi dan Tanggal", "Lokasi"]),
+          time_name: exactOrPartialHeaderLocal(headers, ["TimeName", "Time Name", "Jam", "Slot", "Time Slot"]),
+        };
+
+        const headerIndex = new Map(headers.map((header, index) => [header, index]));
+        const timeAreaIndex = headerIndex.get(suggestedMapping.time_area_name || "") ?? -1;
+        const timeNameIndex = headerIndex.get(suggestedMapping.time_name || "") ?? -1;
+        const nameIndex = headerIndex.get(suggestedMapping.name || "") ?? -1;
+
+        const groups = new Map<string, VaccinationLocationPreviewV154>();
+        for (const row of bodyRows) {
+          const timeAreaName = timeAreaIndex >= 0 ? cleanLocal(row[timeAreaIndex]) : "";
+          const timeName = timeNameIndex >= 0 ? cleanLocal(row[timeNameIndex]) : "";
+          if (!timeAreaName && !timeName) continue;
+          const key = `${timeAreaName}||${timeName}`;
+          const parsed = parseSessionDateLocal(timeAreaName);
+          const current = groups.get(key) || {
+            key,
+            timeAreaName,
+            timeName,
+            locationName: parsed.locationName || timeAreaName || "Lokasi belum ditentukan",
+            sessionDate: parsed.sessionDate,
+            timeSlot: timeName || "Belum ditentukan",
+            participantCount: 0,
+          };
+          const participantName = nameIndex >= 0 ? cleanLocal(row[nameIndex]) : "";
+          if (participantName || timeAreaName || timeName) current.participantCount += 1;
+          groups.set(key, current);
+        }
+
+        const previewRows = bodyRows.slice(0, 5).map((row: any[]) =>
+          Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])),
+        );
+
+        preview = {
+          sheet_name: sheetName,
+          header_row: headerRowIndex + 1,
+          headers,
+          row_count: bodyRows.length,
+          preview: previewRows,
+          suggested_mapping: suggestedMapping,
+          locations: Array.from(groups.values()),
+        };
+        break;
+      }
+
+      if (!preview) throw new Error("Tidak menemukan sheet Excel berisi data peserta vaksinasi.");
+
+      setVaccinationPreviewV154(preview);
+      setVaccinationMappingV154(preview.suggested_mapping || {});
+      setVaccinationLocationRowsV154(preview.locations || []);
+    } catch (error: any) {
+      setVaccinationMappingErrorV154(error?.message || "Gagal membaca mapping Vaksinasi.");
+    } finally {
+      setVaccinationMappingLoadingV154(false);
+    }
+  }
+
+  function updateVaccinationMappingV154(key: string, value: string) {
+    setVaccinationMappingV154((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateVaccinationLocationV154(key: string, patch: Partial<VaccinationLocationPreviewV154>) {
+    setVaccinationLocationRowsV154((rows) =>
+      rows.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+    );
+  }
+
+  function resetVaccinationMappingV154() {
+    setVaccinationPreviewV154(null);
+    setVaccinationMappingV154({});
+    setVaccinationLocationRowsV154([]);
+    setVaccinationMappingErrorV154("");
+  }
+
   async function openCorporateMappingV466(fileOverride?: File | null) {
     if (programType !== "corporate") return;
 
@@ -923,6 +1160,11 @@ function ImportForm({ user }: { user: any }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return alert("Upload file Excel dulu.");
+    if (programType === "vaccination") {
+      if (!vaccinationPreviewV154) return alert("Klik Mapping Data & Session dulu sebelum import Vaksinasi.");
+      if (!String(vaccinationMappingV154.name || "").trim()) return alert("Mapping Nama Peserta / Anak wajib dipilih.");
+      if (!String(vaccinationMappingV154.time_area_name || "").trim()) return alert("Mapping Lokasi + Tanggal / TimeAreaName wajib dipilih.");
+    }
     if (programType === "corporate") {
       // V473: lokasi selalu berasal dari Session MCU yang dipilih dari dropdown lokasi.
       setCorporateLocationModeV466("session");
@@ -940,6 +1182,24 @@ function ImportForm({ user }: { user: any }) {
     form.append("company_name", companyName);
     form.append("package_name", packageName);
     form.append("description", description);
+    if (programType === "vaccination" && vaccinationPreviewV154) {
+      form.append("vaccination_mapping_json", JSON.stringify(vaccinationMappingV154));
+      form.append(
+        "vaccination_location_overrides_json",
+        JSON.stringify(
+          Object.fromEntries(
+            vaccinationLocationRowsV154.map((row) => [
+              row.key,
+              {
+                location_name: row.locationName,
+                session_date: row.sessionDate,
+                time_slot: row.timeSlot,
+              },
+            ]),
+          ),
+        ),
+      );
+    }
     if (programType === "corporate" && corporatePreviewV466) {
       form.append("mapping_json", JSON.stringify(corporateMappingV466));
       form.append("queue_session_id", corporateSessionIdV466);
@@ -1436,7 +1696,11 @@ function ImportForm({ user }: { user: any }) {
             onChange={(e) => {
               const selectedFile = e.target.files?.[0] || null;
               setFile(selectedFile);
+              resetVaccinationMappingV154();
               resetCorporateMappingV466();
+              if (programType === "vaccination" && selectedFile) {
+                void openVaccinationMappingV154(selectedFile);
+              }
               if (programType === "corporate" && selectedFile) {
                 void openCorporateMappingV466(selectedFile);
               }
@@ -1451,6 +1715,153 @@ function ImportForm({ user }: { user: any }) {
                 : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
           </div>
         </div>
+
+        {programType === "vaccination" ? (
+          <section className="rounded-3xl border border-cyan-200 bg-cyan-50/50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-lg font-black text-slate-900">Mapping Data & Session Vaksinasi</div>
+                <div className="mt-1 text-sm font-semibold text-slate-600">
+                  Mapping manual header Excel lalu cek lokasi, tanggal, dan jam yang akan menjadi metadata Session.
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={!file || vaccinationMappingLoadingV154}
+                onClick={() => void openVaccinationMappingV154()}
+                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-black text-white disabled:opacity-50"
+              >
+                {vaccinationMappingLoadingV154
+                  ? "Membaca Excel..."
+                  : vaccinationPreviewV154
+                    ? "Baca Ulang Mapping"
+                    : "Mapping Data & Session →"}
+              </button>
+            </div>
+
+            {vaccinationMappingErrorV154 ? (
+              <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">
+                {vaccinationMappingErrorV154}
+              </div>
+            ) : null}
+
+            {vaccinationPreviewV154 ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black">Step 1 · Mapping Kolom Excel</div>
+                      <div className="text-xs font-semibold text-slate-500">
+                        Sheet: {vaccinationPreviewV154.sheet_name} · Header baris {vaccinationPreviewV154.header_row} · {vaccinationPreviewV154.row_count} baris data
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-700">
+                      Mapping manual aktif
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {VACCINATION_MAPPING_FIELDS_V154.map((field) => (
+                      <div key={field.key}>
+                        <label className="label">
+                          {field.label}{field.required ? " *" : ""}
+                        </label>
+                        <select
+                          className="input"
+                          value={vaccinationMappingV154[field.key] || ""}
+                          onChange={(e) => updateVaccinationMappingV154(field.key, e.target.value)}
+                        >
+                          <option value="">— Tidak ada / jangan import —</option>
+                          {vaccinationPreviewV154.headers.map((header) => (
+                            <option key={`${field.key}-${header}`} value={header}>
+                              {header}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800">
+                    Untuk file BINUS anak: ChildName → Nama Peserta, ParentBinusianID → NIK Karyawan/Parent ID, TimeAreaName → Lokasi + Tanggal, TimeName → Jam/Slot.
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-blue-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-black">Step 2 · Preview & Mapping Manual Session/Lokasi</div>
+                      <div className="text-xs font-semibold text-slate-500">
+                        Ubah lokasi/tanggal/jam bila hasil auto-detect perlu dikoreksi. Nilai ini disimpan sebagai metadata Session saat import.
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">
+                      {vaccinationLocationRowsV154.length} kombinasi
+                    </span>
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto rounded-xl border">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                        <tr>
+                          <th className="p-3 text-left">Data Excel</th>
+                          <th className="p-3 text-left">Lokasi</th>
+                          <th className="p-3 text-left">Tanggal</th>
+                          <th className="p-3 text-left">Jam / Slot</th>
+                          <th className="p-3 text-left">Peserta</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {vaccinationLocationRowsV154.map((row) => (
+                          <tr key={row.key}>
+                            <td className="p-3 align-top">
+                              <div className="font-bold">{row.timeAreaName || "-"}</div>
+                              <div className="mt-1 text-xs text-slate-500">{row.timeName || "-"}</div>
+                            </td>
+                            <td className="p-3 align-top">
+                              <input
+                                className="input min-w-[220px]"
+                                value={row.locationName}
+                                onChange={(e) => updateVaccinationLocationV154(row.key, { locationName: e.target.value })}
+                              />
+                            </td>
+                            <td className="p-3 align-top">
+                              <input
+                                className="input min-w-[150px]"
+                                type="date"
+                                value={row.sessionDate}
+                                onChange={(e) => updateVaccinationLocationV154(row.key, { sessionDate: e.target.value })}
+                              />
+                            </td>
+                            <td className="p-3 align-top">
+                              <input
+                                className="input min-w-[150px]"
+                                value={row.timeSlot}
+                                onChange={(e) => updateVaccinationLocationV154(row.key, { timeSlot: e.target.value })}
+                              />
+                            </td>
+                            <td className="p-3 align-top font-black">{row.participantCount}</td>
+                          </tr>
+                        ))}
+                        {!vaccinationLocationRowsV154.length ? (
+                          <tr>
+                            <td colSpan={5} className="p-4 text-center text-sm font-semibold text-amber-700">
+                              Kombinasi Session belum terdeteksi otomatis. Pilih mapping TimeAreaName / TimeName di Step 1; backend tetap akan memakai mapping tersebut saat import.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+                Pilih file Excel. Mapping akan dibaca otomatis dan tetap bisa dikoreksi manual sebelum Import.
+              </div>
+            )}
+          </section>
+        ) : null}
 
         {programType === "corporate" ? (
           <section className="rounded-3xl border border-cyan-200 bg-cyan-50/50 p-4">

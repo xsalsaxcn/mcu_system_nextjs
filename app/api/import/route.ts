@@ -54,6 +54,23 @@ export async function POST(req: NextRequest) {
   const packageName = String(form.get("package_name") || defaultPackage).trim();
   const description = String(form.get("description") || "").trim();
 
+  // VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154
+  let vaccinationMapping: Record<string, string> = {};
+  let vaccinationLocationOverrides: Record<string, { location_name?: string; session_date?: string; time_slot?: string }> = {};
+  try {
+    const rawVaccinationMapping = String(form.get("vaccination_mapping_json") || "").trim();
+    vaccinationMapping = rawVaccinationMapping ? JSON.parse(rawVaccinationMapping) : {};
+    const rawVaccinationLocations = String(form.get("vaccination_location_overrides_json") || "").trim();
+    vaccinationLocationOverrides = rawVaccinationLocations ? JSON.parse(rawVaccinationLocations) : {};
+  } catch {
+    return fail("Mapping manual Vaksinasi tidak valid.", 400);
+  }
+
+  if (programType === PROGRAM_VACCINATION && Object.keys(vaccinationMapping).length > 0) {
+    if (!String(vaccinationMapping.name || "").trim()) return fail("Mapping Nama Peserta/Anak wajib dipilih.", 400);
+    if (!String(vaccinationMapping.time_area_name || "").trim()) return fail("Mapping TimeAreaName / Lokasi+Tanggal wajib dipilih.", 400);
+  }
+
   // MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
   let corporateMapping: Record<string, string> = {};
   try {
@@ -179,6 +196,8 @@ export async function POST(req: NextRequest) {
     package_name: packageName,
     description,
     program_type: programType,
+    vaccination_mapping: vaccinationMapping,
+    vaccination_location_overrides: vaccinationLocationOverrides,
     corporate_mapping: corporateMapping,
     corporate_session: programType === PROGRAM_CORPORATE && queueSessionId > 0 ? {
       queue_session_id: queueSessionId,

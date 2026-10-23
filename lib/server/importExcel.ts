@@ -257,18 +257,27 @@ function makeImportLocationKey(
   ].join("|");
 }
 
+function vaccinationLocationOverrideKey(timeAreaName: any, timeName: any) {
+  return `${clean(timeAreaName)}||${clean(timeName)}`;
+}
+
 function importParticipantDedupeKeyV168(row: {
   name: string;
   gender: string;
   province: string;
   nik?: string;
   external_id?: string;
-}
-) {
+}, programType = PROGRAM_CAPASKA) {
   const nik = norm(row.nik || "");
   if (nik) return `nik|${nik}`;
 
   const externalId = norm(row.external_id || "");
+  // VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154:
+  // ParentBinusianID can repeat for siblings. Never dedupe child participants
+  // only by parent/external id; include the participant name.
+  if (externalId && programType === PROGRAM_VACCINATION) {
+    return ["vaccination", "external", externalId, "name", norm(row.name)].join("|");
+  }
   if (externalId) return `external|${externalId}`;
 
   return [
@@ -299,13 +308,13 @@ function participantKeyVariantsAppendOnlyV214(row: {
   province: string;
   nik?: string;
   external_id?: string;
-}) {
+}, programType = PROGRAM_CAPASKA) {
   const variants = new Set<string>();
   for (const gender of genderAliasesAppendOnlyV214(row.gender)) {
     const key = importParticipantDedupeKeyV168({
       ...row,
       gender,
-    });
+    }, programType);
     if (key) variants.add(key);
   }
   return Array.from(variants);
@@ -332,7 +341,7 @@ async function loadExistingParticipantKeysAppendOnlyV214(supabase: any, programT
         province: row.province || "",
         nik: row.nik || "",
         external_id: row.external_id || "",
-      })) {
+      }, programType)) {
         keys.add(key);
       }
     }
@@ -638,6 +647,8 @@ export async function importParticipantsFromExcel(
     description?: string;
     program_type?: string;
     source_id?: number;
+    vaccination_mapping?: Record<string, string>;
+    vaccination_location_overrides?: Record<string, { location_name?: string; session_date?: string; time_slot?: string }>;
     corporate_mapping?: Record<string, string>;
     corporate_session?: {
       queue_session_id?: number;
@@ -708,6 +719,9 @@ export async function importParticipantsFromExcel(
     skipped_sheets: [],
     duplicate_candidates_skipped: 0,
     existing_participants_skipped: 0,
+    vaccination_mapping_v154: programType === PROGRAM_VACCINATION ? options.vaccination_mapping || {} : null,
+    vaccination_location_overrides_v154: programType === PROGRAM_VACCINATION ? options.vaccination_location_overrides || {} : null,
+    vaccination_metadata_backfilled_v154: 0,
     corporate_mapping_v466: programType === PROGRAM_CORPORATE ? options.corporate_mapping || {} : null,
     corporate_queue_session_id_v466: corporateSessionRowV466?.id || null,
     corporate_session_location_v466: corporateSessionRowV466 ? corporateSessionLocationV466(corporateSessionRowV466) : "",
@@ -717,6 +731,7 @@ export async function importParticipantsFromExcel(
 
   const existingParticipantKeysAppendOnlyV214 = await loadExistingParticipantKeysAppendOnlyV214(supabase, programType);
   const insertRows: any[] = [];
+  const vaccinationExistingMetadataRowsV154: any[] = [];
   const counterByYear = new Map<string, number>();
   const seenImportParticipantKeysV168 = new Set<string>();
 
@@ -876,6 +891,28 @@ export async function importParticipantsFromExcel(
       "Tipe Karyawan",
     ]);
 
+    // VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154
+    const vaccinationMappingV154 = programType === PROGRAM_VACCINATION ? (options.vaccination_mapping || {}) : {};
+    const mappedVaccinationNameColV154 = findMappedColumn(headers, vaccinationMappingV154.name);
+    const mappedVaccinationGenderColV154 = findMappedColumn(headers, vaccinationMappingV154.gender);
+    const mappedVaccinationExternalIdColV154 = findMappedColumn(headers, vaccinationMappingV154.external_id);
+    const mappedVaccinationEmailColV154 = findMappedColumn(headers, vaccinationMappingV154.email);
+    const mappedVaccinationPhoneColV154 = findMappedColumn(headers, vaccinationMappingV154.phone);
+    const mappedVaccinationBatchColV154 = findMappedColumn(headers, vaccinationMappingV154.batch_name);
+    const mappedVaccinationTimeAreaColV154 = findMappedColumn(headers, vaccinationMappingV154.time_area_name);
+    const mappedVaccinationTimeNameColV154 = findMappedColumn(headers, vaccinationMappingV154.time_name);
+    const mappedVaccinationEmployeeTypeColV154 = findMappedColumn(headers, vaccinationMappingV154.employee_type);
+
+    const effectiveVaccinationNameColV154 = mappedVaccinationNameColV154 >= 0 ? mappedVaccinationNameColV154 : vaccinationNameCol;
+    const effectiveVaccinationGenderColV154 = mappedVaccinationGenderColV154 >= 0 ? mappedVaccinationGenderColV154 : vaccinationGenderCol;
+    const effectiveVaccinationExternalIdColV154 = mappedVaccinationExternalIdColV154 >= 0 ? mappedVaccinationExternalIdColV154 : vaccinationBinusianIdCol;
+    const effectiveVaccinationEmailColV154 = mappedVaccinationEmailColV154 >= 0 ? mappedVaccinationEmailColV154 : vaccinationEmailCol;
+    const effectiveVaccinationPhoneColV154 = mappedVaccinationPhoneColV154 >= 0 ? mappedVaccinationPhoneColV154 : vaccinationPhoneCol;
+    const effectiveVaccinationBatchColV154 = mappedVaccinationBatchColV154 >= 0 ? mappedVaccinationBatchColV154 : vaccinationBatchCol;
+    const effectiveVaccinationTimeAreaColV154 = mappedVaccinationTimeAreaColV154 >= 0 ? mappedVaccinationTimeAreaColV154 : vaccinationTimeAreaCol;
+    const effectiveVaccinationTimeNameColV154 = mappedVaccinationTimeNameColV154 >= 0 ? mappedVaccinationTimeNameColV154 : vaccinationTimeNameCol;
+    const effectiveVaccinationEmployeeTypeColV154 = mappedVaccinationEmployeeTypeColV154 >= 0 ? mappedVaccinationEmployeeTypeColV154 : vaccinationEmployeeTypeCol;
+
     // MCU_CORPORATE_IMPORT_MAPPING_SESSION_V466
     const corporateMappingV466 = programType === PROGRAM_CORPORATE ? (options.corporate_mapping || {}) : {};
     const mappedNameColV466 = findMappedColumn(headers, corporateMappingV466.name);
@@ -898,14 +935,14 @@ export async function importParticipantsFromExcel(
       header_row: headerRowIndex + 1,
       headers,
       nameCol,
-      vaccinationNameCol,
-      vaccinationGenderCol,
+      vaccinationNameCol: effectiveVaccinationNameColV154,
+      vaccinationGenderCol: effectiveVaccinationGenderColV154,
       putraCol,
       putriCol,
       provinceCol,
-      vaccinationBatchCol,
-      vaccinationTimeAreaCol,
-      vaccinationTimeNameCol,
+      vaccinationBatchCol: effectiveVaccinationBatchColV154,
+      vaccinationTimeAreaCol: effectiveVaccinationTimeAreaColV154,
+      vaccinationTimeNameCol: effectiveVaccinationTimeNameColV154,
       corporate_mapping_v466: programType === PROGRAM_CORPORATE ? {
         name: effectiveNameColV466,
         employee_nik: effectiveExternalIdColV466,
@@ -923,7 +960,7 @@ export async function importParticipantsFromExcel(
       effectiveNameColV466 < 0 &&
       putraCol < 0 &&
       putriCol < 0 &&
-      !(programType === PROGRAM_VACCINATION && vaccinationNameCol >= 0)
+      !(programType === PROGRAM_VACCINATION && effectiveVaccinationNameColV154 >= 0)
     ) {
       stats.skipped_sheets.push({
         sheet: sheetName,
@@ -955,18 +992,27 @@ export async function importParticipantsFromExcel(
       };
 
       const vaccinationTimeArea =
-        vaccinationTimeAreaCol >= 0 ? clean(row[vaccinationTimeAreaCol]) : "";
-      const parsedVaccinationArea =
-        parseVaccinationTimeArea(vaccinationTimeArea);
+        effectiveVaccinationTimeAreaColV154 >= 0 ? clean(row[effectiveVaccinationTimeAreaColV154]) : "";
+      const parsedVaccinationAreaAutoV154 = parseVaccinationTimeArea(vaccinationTimeArea);
+      const vaccinationTimeNameRawV154 =
+        effectiveVaccinationTimeNameColV154 >= 0 ? clean(row[effectiveVaccinationTimeNameColV154]) : "";
+      const vaccinationOverrideV154 = options.vaccination_location_overrides?.[
+        vaccinationLocationOverrideKey(vaccinationTimeArea, vaccinationTimeNameRawV154)
+      ];
+      const parsedVaccinationArea = {
+        ...parsedVaccinationAreaAutoV154,
+        location_name: clean(vaccinationOverrideV154?.location_name) || parsedVaccinationAreaAutoV154.location_name,
+        session_date: clean(vaccinationOverrideV154?.session_date) || parsedVaccinationAreaAutoV154.session_date,
+      };
       const vaccinationTimeSlot =
-        vaccinationTimeNameCol >= 0 ? clean(row[vaccinationTimeNameCol]) : "";
+        clean(vaccinationOverrideV154?.time_slot) || vaccinationTimeNameRawV154;
       const vaccinationBatchName =
-        vaccinationBatchCol >= 0 ? clean(row[vaccinationBatchCol]) : "";
+        effectiveVaccinationBatchColV154 >= 0 ? clean(row[effectiveVaccinationBatchColV154]) : "";
 
       const base = {
         external_id:
-          programType === PROGRAM_VACCINATION && vaccinationBinusianIdCol >= 0
-            ? clean(row[vaccinationBinusianIdCol])
+          programType === PROGRAM_VACCINATION && effectiveVaccinationExternalIdColV154 >= 0
+            ? clean(row[effectiveVaccinationExternalIdColV154])
             : effectiveExternalIdColV466 >= 0
               ? clean(row[effectiveExternalIdColV466])
               : "",
@@ -1016,12 +1062,12 @@ export async function importParticipantsFromExcel(
                 session_date: parsedVaccinationArea.session_date,
                 time_slot: vaccinationTimeSlot || "Belum ditentukan",
                 email:
-                  vaccinationEmailCol >= 0
-                    ? clean(row[vaccinationEmailCol])
+                  effectiveVaccinationEmailColV154 >= 0
+                    ? clean(row[effectiveVaccinationEmailColV154])
                     : "",
                 phone:
-                  vaccinationPhoneCol >= 0
-                    ? clean(row[vaccinationPhoneCol])
+                  effectiveVaccinationPhoneColV154 >= 0
+                    ? clean(row[effectiveVaccinationPhoneColV154])
                     : "",
                 marital_status:
                   vaccinationMaritalCol >= 0
@@ -1032,8 +1078,8 @@ export async function importParticipantsFromExcel(
                     ? clean(row[vaccinationNationalityCol])
                     : "",
                 employee_type:
-                  vaccinationEmployeeTypeCol >= 0
-                    ? clean(row[vaccinationEmployeeTypeCol])
+                  effectiveVaccinationEmployeeTypeColV154 >= 0
+                    ? clean(row[effectiveVaccinationEmployeeTypeColV154])
                     : "",
                 raw_json: Object.fromEntries(
                   headers.map((header, idx) => [header, row[idx] ?? ""]),
@@ -1047,9 +1093,9 @@ export async function importParticipantsFromExcel(
 
       const vaccinationPrimaryName =
         programType === PROGRAM_VACCINATION &&
-        vaccinationNameCol >= 0 &&
-        clean(row[vaccinationNameCol])
-          ? clean(row[vaccinationNameCol])
+        effectiveVaccinationNameColV154 >= 0 &&
+        clean(row[effectiveVaccinationNameColV154])
+          ? clean(row[effectiveVaccinationNameColV154])
           : "";
 
       const primaryName =
@@ -1066,8 +1112,8 @@ export async function importParticipantsFromExcel(
           gender:
             programType === PROGRAM_VACCINATION
               ? normalizeVaccinationGender(
-                  vaccinationGenderCol >= 0
-                    ? row[vaccinationGenderCol]
+                  effectiveVaccinationGenderColV154 >= 0
+                    ? row[effectiveVaccinationGenderColV154]
                     : genderCol >= 0
                       ? row[genderCol]
                       : "",
@@ -1130,13 +1176,13 @@ export async function importParticipantsFromExcel(
           ...candidate,
           nik: base.nik,
           external_id: base.external_id,
-        });
+        }, programType);
 
         const existingKeysV214 = participantKeyVariantsAppendOnlyV214({
           ...candidate,
           nik: base.nik,
           external_id: base.external_id,
-        });
+        }, programType);
 
         if (existingKeysV214.some((key) => existingParticipantKeysAppendOnlyV214.has(key))) {
           // MCU_CORPORATE_EXISTING_MERGE_SESSION_V491
@@ -1201,6 +1247,52 @@ export async function importParticipantsFromExcel(
               continue;
             }
           }
+
+          // VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154
+          // Re-import must backfill TimeAreaName/TimeName metadata even when the
+          // participant already exists (append-only participant behavior stays intact).
+          if (programType === PROGRAM_VACCINATION && base.vaccination_meta) {
+            const existingParticipantV154 = await supabase
+              .from("participants")
+              .select("id,mcu_id,external_id,name,nik,gender,source_id")
+              .eq("source_id", sourceId)
+              .ilike("name", candidate.name)
+              .limit(2);
+            if (existingParticipantV154.error) throw existingParticipantV154.error;
+            const matchesV154 = existingParticipantV154.data || [];
+            if (matchesV154.length === 1) {
+              const existingV154 = matchesV154[0];
+              const metaV154 = base.vaccination_meta;
+              vaccinationExistingMetadataRowsV154.push({
+                source_id: sourceId,
+                participant_id: existingV154.id,
+                mcu_id: existingV154.mcu_id || null,
+                external_id: existingV154.external_id || base.external_id || null,
+                participant_name: existingV154.name || candidate.name,
+                nik: existingV154.nik || base.nik || null,
+                gender: existingV154.gender || candidate.gender || null,
+                batch_name: metaV154.batch_name || null,
+                time_area_name: metaV154.time_area_name || null,
+                time_name: metaV154.time_name || null,
+                location_name: metaV154.location_name || null,
+                session_date: metaV154.session_date || null,
+                time_slot: metaV154.time_slot || null,
+                import_location_key: makeImportLocationKey(
+                  sourceId,
+                  metaV154.location_name,
+                  metaV154.session_date,
+                  metaV154.time_slot,
+                ),
+                email: metaV154.email || null,
+                phone: metaV154.phone || null,
+                marital_status: metaV154.marital_status || null,
+                nationality_text: metaV154.nationality_text || null,
+                employee_type: metaV154.employee_type || null,
+                raw_json: metaV154.raw_json || null,
+              });
+            }
+          }
+
           stats.existing_participants_skipped += 1;
           stats.participants_skipped += 1;
           if (stats.skipped_rows.length < 50) {
@@ -1422,17 +1514,47 @@ export async function importParticipantsFromExcel(
     }
   }
 
-  if (programType === PROGRAM_VACCINATION && vaccinationImportRows.length) {
-    for (let i = 0; i < vaccinationImportRows.length; i += chunkSize) {
-      const chunk = vaccinationImportRows.slice(i, i + chunkSize);
+  const vaccinationMetadataRowsV154 = [
+    ...vaccinationImportRows,
+    ...vaccinationExistingMetadataRowsV154,
+  ];
+
+  if (programType === PROGRAM_VACCINATION && vaccinationMetadataRowsV154.length) {
+    const existingMetadataResultV154 = await supabase
+      .from("vaccination_import_rows")
+      .select("participant_id,batch_name,time_area_name,time_name")
+      .eq("source_id", sourceId)
+      .limit(10000);
+    if (existingMetadataResultV154.error) throw existingMetadataResultV154.error;
+
+    const metadataKeyV154 = (row: any) => [
+      Number(row.participant_id || 0),
+      norm(row.batch_name || ""),
+      clean(row.time_area_name || ""),
+      clean(row.time_name || ""),
+    ].join("|");
+    const existingMetadataKeysV154 = new Set(
+      (existingMetadataResultV154.data || []).map(metadataKeyV154),
+    );
+    const metadataToInsertV154 = vaccinationMetadataRowsV154.filter((row: any) => {
+      const key = metadataKeyV154(row);
+      if (existingMetadataKeysV154.has(key)) return false;
+      existingMetadataKeysV154.add(key);
+      return true;
+    });
+
+    for (let i = 0; i < metadataToInsertV154.length; i += chunkSize) {
+      const chunk = metadataToInsertV154.slice(i, i + chunkSize);
       const { error } = await supabase
         .from("vaccination_import_rows")
         .insert(chunk);
       if (error) throw error;
     }
 
+    stats.vaccination_metadata_backfilled_v154 = vaccinationExistingMetadataRowsV154.length;
+
     const groupedLocations = new Map<string, any>();
-    for (const row of vaccinationImportRows) {
+    for (const row of vaccinationMetadataRowsV154) {
       const key =
         row.import_location_key ||
         `${row.location_name}|${row.session_date}|${row.time_slot}`;
