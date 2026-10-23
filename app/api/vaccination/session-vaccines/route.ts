@@ -5,6 +5,10 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
+function normalizeCompanyName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -49,9 +53,35 @@ export async function POST(req: NextRequest) {
     if (!vaccineId) return fail("Vaksin wajib dipilih.");
     if (!lotId) return fail("Lot number wajib dipilih.");
 
-    const lotResult = await supabase.from("vaccination_vaccine_lots").select("*").eq("id", lotId).single();
+    const [lotResult, sessionResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccine_lots")
+        .select("*")
+        .eq("id", lotId)
+        .single(),
+      supabase
+        .from("vaccination_sessions")
+        .select("id,company_name")
+        .eq("id", sessionId)
+        .single(),
+    ]);
     if (lotResult.error) return fail(lotResult.error.message, 500);
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
     if (Number(lotResult.data.vaccine_id) !== Number(vaccineId)) return fail("Lot number tidak sesuai dengan vaksin.");
+
+    const scope = clean(lotResult.data.stock_scope).toUpperCase() === "COMPANY"
+      ? "COMPANY"
+      : "GENERAL";
+    if (scope === "COMPANY") {
+      const owner = clean(lotResult.data.stock_company_name);
+      const sessionCompany = clean(sessionResult.data.company_name);
+      if (!sessionCompany || normalizeCompanyName(owner) !== normalizeCompanyName(sessionCompany)) {
+        return fail(
+          `Lot ${lotResult.data.lot_number || lotId} khusus ${owner || "perusahaan tertentu"} dan tidak boleh dipakai untuk session ${sessionCompany || "tanpa perusahaan"}.`,
+          409,
+        );
+      }
+    }
 
     const insertResult = await supabase
       .from("vaccination_session_vaccines")

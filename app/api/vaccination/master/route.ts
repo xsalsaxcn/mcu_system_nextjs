@@ -23,6 +23,33 @@ function importQty(value: any) {
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
 }
 
+function sanitizeStockScope(value: any) {
+  return clean(value).toUpperCase() === "COMPANY" ? "COMPANY" : "GENERAL";
+}
+
+function stockOwnershipFromBody(body: any, fallback?: any) {
+  const scopeInput =
+    body.stockScope !== undefined || body.stock_scope !== undefined
+      ? body.stockScope ?? body.stock_scope
+      : fallback?.stock_scope;
+  const companyInput =
+    body.stockCompanyName !== undefined || body.stock_company_name !== undefined
+      ? body.stockCompanyName ?? body.stock_company_name
+      : fallback?.stock_company_name;
+
+  const stockScope = sanitizeStockScope(scopeInput);
+  const stockCompanyName = clean(companyInput);
+
+  if (stockScope === "COMPANY" && !stockCompanyName) {
+    throw new Error("Perusahaan wajib dipilih jika Scope Stok = Perusahaan.");
+  }
+
+  return {
+    stock_scope: stockScope,
+    stock_company_name: stockScope === "COMPANY" ? stockCompanyName : null,
+  };
+}
+
 function isStockQuantImportedLot(lot: any) {
   const note = clean(lot?.inventory_notes).toLowerCase();
   return note.includes("import odoo_stock_quant") || note.includes("import stock.quant");
@@ -66,6 +93,15 @@ export async function GET(req: NextRequest) {
 
   if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
+  const ownershipProbe = await supabase
+    .from("vaccination_vaccine_lots")
+    .select("id,stock_scope,stock_company_name")
+    .limit(1);
+  const companyStockReady = !ownershipProbe.error;
+  const companyStockMessage = companyStockReady
+    ? ""
+    : "Scope stok perusahaan belum aktif. Jalankan SQL vaccination_company_stock_ownership_v1 terlebih dahulu.";
+
   const mappingResult = await supabase
     .from("vaccination_product_mappings")
     .select(`
@@ -98,6 +134,8 @@ export async function GET(req: NextRequest) {
     productMappings: mappingReady ? mappingResult.data || [] : [],
     mappingReady,
     mappingMessage,
+    companyStockReady,
+    companyStockMessage,
   });
 }
 
@@ -657,6 +695,13 @@ export async function POST(req: NextRequest) {
     if (!vaccineId) return fail("Vaksin wajib dipilih.");
     if (!lotNumber) return fail("Lot Number wajib diisi.");
 
+    let ownership: Record<string, any>;
+    try {
+      ownership = stockOwnershipFromBody(body);
+    } catch (error: any) {
+      return fail(error?.message || "Scope stok tidak valid.");
+    }
+
     const result = await supabase
       .from("vaccination_vaccine_lots")
       .insert({
@@ -669,6 +714,7 @@ export async function POST(req: NextRequest) {
         inventory_notes: clean(body.inventoryNotes) || null,
         stock_used: 0,
         active: body.active !== false,
+        ...ownership,
       })
       .select("*")
       .single();
@@ -694,7 +740,7 @@ export async function POST(req: NextRequest) {
 
     const beforeResult = await supabase
       .from("vaccination_vaccine_lots")
-      .select("id,vaccine_id,stock_added")
+      .select("id,vaccine_id,stock_added,stock_scope,stock_company_name")
       .eq("id", lotId)
       .maybeSingle();
 
@@ -703,6 +749,13 @@ export async function POST(req: NextRequest) {
 
     const beforeAdded = Number(beforeResult.data.stock_added || 0);
     const nextAdded = Math.max(0, toInt(body.stockAdded, beforeAdded));
+
+    let ownership: Record<string, any>;
+    try {
+      ownership = stockOwnershipFromBody(body, beforeResult.data);
+    } catch (error: any) {
+      return fail(error?.message || "Scope stok tidak valid.");
+    }
 
     const result = await supabase
       .from("vaccination_vaccine_lots")
@@ -714,6 +767,7 @@ export async function POST(req: NextRequest) {
           ? null
           : Math.max(0, toInt(body.stockPhysicalCount, 0)),
         inventory_notes: clean(body.inventoryNotes) || null,
+        ...ownership,
         updated_at: new Date().toISOString(),
       })
       .eq("id", lotId)

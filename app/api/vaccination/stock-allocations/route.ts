@@ -10,6 +10,10 @@ function relationMissing(error: any) {
   return code === "42P01" || message.includes("vaccination_session_stock_allocations") && message.includes("does not exist");
 }
 
+function normalizeCompanyName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 async function loadUsedMap(supabase: any, allocations: any[]) {
   const sessionIds = Array.from(new Set(allocations.map((row: any) => Number(row.session_id)).filter(Boolean)));
   const lotIds = Array.from(new Set(allocations.map((row: any) => Number(row.lot_id)).filter(Boolean)));
@@ -43,7 +47,7 @@ export async function GET(req: NextRequest) {
   const [sessionsResult, vaccinesResult, lotsResult, allocationsResult] = await Promise.all([
     supabase.from("vaccination_sessions").select("id,session_name,company_name,location,session_date,status").order("session_date", { ascending: false }).order("id", { ascending: false }).limit(3000),
     supabase.from("vaccination_vaccines").select("id,name,brand,active").order("name", { ascending: true }).limit(5000),
-    supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active").order("id", { ascending: false }).limit(10000),
+    supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_scope,stock_company_name,active").order("id", { ascending: false }).limit(10000),
     supabase.from("vaccination_session_stock_allocations").select("*").order("updated_at", { ascending: false }).limit(10000),
   ]);
 
@@ -121,9 +125,36 @@ export async function POST(req: NextRequest) {
   if (!lotId) return fail("Lot wajib dipilih.");
   if (!allocatedQty) return fail("Jumlah alokasi harus lebih dari 0.");
 
-  const lotResult = await supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used").eq("id", lotId).single();
+  const [lotResult, sessionResult] = await Promise.all([
+    supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_company_name")
+      .eq("id", lotId)
+      .single(),
+    supabase
+      .from("vaccination_sessions")
+      .select("id,company_name")
+      .eq("id", sessionId)
+      .single(),
+  ]);
   if (lotResult.error) return fail(lotResult.error.message, 500);
+  if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const lot = lotResult.data;
+
+  const scope = clean(lot.stock_scope).toUpperCase() === "COMPANY"
+    ? "COMPANY"
+    : "GENERAL";
+  if (scope === "COMPANY") {
+    const owner = clean(lot.stock_company_name);
+    const sessionCompany = clean(sessionResult.data.company_name);
+    if (!sessionCompany || normalizeCompanyName(owner) !== normalizeCompanyName(sessionCompany)) {
+      return fail(
+        `Lot ${lot.lot_number || lotId} khusus ${owner || "perusahaan tertentu"} dan tidak boleh dialokasikan ke session ${sessionCompany || "tanpa perusahaan"}.`,
+        409,
+      );
+    }
+  }
+
   const globalRemaining = Number(lot.stock_initial || 0) + Number(lot.stock_added || 0) - Number(lot.stock_used || 0);
   if (allocatedQty > globalRemaining) {
     return fail(`Alokasi ${allocatedQty} melebihi sisa stock global ${globalRemaining} untuk Lot ${lot.lot_number}.`, 409);

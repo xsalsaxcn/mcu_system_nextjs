@@ -13,6 +13,7 @@ import {
 // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
 // V153_18_IMPORTED_PRODUCT_LOT_SESSION_SAFE
 // V153_23_SESSION_ALL_ACTIVE_MASTER_LOTS_SAFE
+// VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 type SourceItem = {
   id: number;
   name: string;
@@ -104,6 +105,22 @@ function normalizeBatchName(value: any) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function normalizeCompanyName(value: any) {
+  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function lotAllowedForCompany(lot: any, companyName: any) {
+  const scope =
+    String(lot?.stock_scope || "").trim().toUpperCase() === "COMPANY"
+      ? "COMPANY"
+      : "GENERAL";
+  if (scope !== "COMPANY") return true;
+
+  const owner = normalizeCompanyName(lot?.stock_company_name);
+  const company = normalizeCompanyName(companyName);
+  return Boolean(owner && company && owner === company);
+}
+
 export default function VaccinationSessionPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -152,6 +169,12 @@ export default function VaccinationSessionPage() {
   const selectedSource = sources.find(
     (source) => String(source.id) === String(form.sourceId),
   );
+  const currentCompanyName =
+    form.companyName ||
+    selectedSource?.institution_name ||
+    selectedSource?.name ||
+    "";
+  const editCompanyName = editSessionForm.companyName || editingSession?.company_name || "";
   const selectedLocation = locations.find(
     (item) => item.key === form.locationKey,
   );
@@ -219,11 +242,15 @@ export default function VaccinationSessionPage() {
   const activeLotVaccineIds = useMemo(() => {
     return new Set(
       lots
-        .filter((lot) => lot.active !== false)
+        .filter(
+          (lot) =>
+            lot.active !== false &&
+            lotAllowedForCompany(lot, currentCompanyName),
+        )
         .map((lot) => String(lot.vaccine_id || ""))
         .filter(Boolean),
     );
-  }, [lots]);
+  }, [lots, currentCompanyName]);
 
   const selectableVaccines = useMemo(() => {
     const grandfatheredIds = new Set(
@@ -241,9 +268,10 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
+        lotAllowedForCompany(lot, currentCompanyName) &&
         (!draft.vaccineId || String(lot.vaccine_id) === String(draft.vaccineId)),
     );
-  }, [lots, draft.vaccineId]);
+  }, [lots, draft.vaccineId, currentCompanyName]);
 
   const selectedVaccineHasNoActiveLot = useMemo(() => {
     if (!draft.vaccineId) return false;
@@ -254,10 +282,28 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
+        lotAllowedForCompany(lot, editCompanyName) &&
         (!editVaccineDraft.vaccineId ||
           String(lot.vaccine_id) === String(editVaccineDraft.vaccineId)),
     );
-  }, [lots, editVaccineDraft.vaccineId]);
+  }, [lots, editVaccineDraft.vaccineId, editCompanyName]);
+
+  const editSelectableVaccines = useMemo(() => {
+    const allowedIds = new Set(
+      lots
+        .filter(
+          (lot) =>
+            lot.active !== false &&
+            lotAllowedForCompany(lot, editCompanyName),
+        )
+        .map((lot) => String(lot.vaccine_id || ""))
+        .filter(Boolean),
+    );
+    for (const item of editSessionVaccines) {
+      if (item.vaccineId) allowedIds.add(String(item.vaccineId));
+    }
+    return vaccines.filter((vaccine) => allowedIds.has(String(vaccine.id)));
+  }, [vaccines, lots, editCompanyName, editSessionVaccines]);
 
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
@@ -365,6 +411,7 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
+        lotAllowedForCompany(lot, editCompanyName) &&
         String(lot.vaccine_id || "") === String(vaccineId || ""),
     );
   }
@@ -1177,6 +1224,10 @@ export default function VaccinationSessionPage() {
             Semua vaksin yang memiliki Lot Aktif di Master Vaksin dapat dipilih untuk session. Setelah vaksin dipilih, dropdown Lot Number otomatis hanya menampilkan lot aktif milik vaksin tersebut.
           </div>
 
+          <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+            Lot yang tampil mengikuti perusahaan session: <b>{currentCompanyName || "belum dipilih"}</b>. Lot General tetap dapat dipakai lintas perusahaan.
+          </div>
+
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">
             <select
               className="rounded-xl border px-3 py-2.5"
@@ -1915,7 +1966,7 @@ export default function VaccinationSessionPage() {
                     }
                   >
                     <option value="">Pilih vaksin</option>
-                    {vaccines.map((vaccine) => (
+                    {editSelectableVaccines.map((vaccine) => (
                       <option key={vaccine.id} value={String(vaccine.id)}>
                         {vaccineName(String(vaccine.id))}
                       </option>
@@ -2002,7 +2053,7 @@ export default function VaccinationSessionPage() {
                                 {!rowVaccineExists && item.vaccineId ? (
                                   <option value={item.vaccineId}>{editVaccineLabel(item)}</option>
                                 ) : null}
-                                {vaccines.map((vaccine) => (
+                                {editSelectableVaccines.map((vaccine) => (
                                   <option key={vaccine.id} value={String(vaccine.id)}>
                                     {vaccineName(String(vaccine.id))}
                                   </option>

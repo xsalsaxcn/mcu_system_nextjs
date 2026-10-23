@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
+// VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 type StockImportRow = {
   externalProductKey: string;
@@ -29,6 +30,16 @@ function normalizeName(value: any) {
   return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function normalizeCompany(value: any) {
+  return cleanText(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function lotScope(lot: any) {
+  return cleanText(lot?.stock_scope).toUpperCase() === "COMPANY"
+    ? "COMPANY"
+    : "GENERAL";
+}
+
 function parseQuantity(value: any) {
   const text = cleanText(value).replace(/,/g, "");
   const number = Number(text);
@@ -48,6 +59,10 @@ export default function VaccinationMasterPage() {
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
   const [productMappings, setProductMappings] = useState<any[]>([]);
+  const [companySources, setCompanySources] = useState<any[]>([]);
+  const [stockFilter, setStockFilter] = useState("ALL");
+  const [companyStockReady, setCompanyStockReady] = useState(true);
+  const [companyStockMessage, setCompanyStockMessage] = useState("");
   const [mappingReady, setMappingReady] = useState(true);
   const [mappingMessage, setMappingMessage] = useState("");
   const [message, setMessage] = useState("Buat master vaksin, harga produk, dan lot number.");
@@ -69,17 +84,38 @@ export default function VaccinationMasterPage() {
     doseCount: 1,
     defaultNextDoseDays: "",
   });
-  const [lotForm, setLotForm] = useState({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" });
+  const [lotForm, setLotForm] = useState({
+    vaccineId: "",
+    lotNumber: "",
+    expiryDate: "",
+    stockInitial: 0,
+    stockAdded: 0,
+    stockPhysicalCount: "",
+    inventoryNotes: "",
+    stockScope: "GENERAL",
+    stockCompanyName: "",
+  });
 
   async function loadData() {
-    const json = await fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json());
-    if (!json.ok) { setError(json.message || "Gagal mengambil data."); return; }
-    setVaccines(json.vaccines || []);
-    setLots(json.lots || []);
-    setProductMappings(json.productMappings || []);
-    setMappingReady(json.mappingReady !== false);
-    setMappingMessage(json.mappingMessage || "");
-    if (!lotForm.vaccineId && json.vaccines?.[0]?.id) setLotForm((s) => ({ ...s, vaccineId: String(json.vaccines[0].id) }));
+    const [masterJson, sourcesJson] = await Promise.all([
+      fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/sources?program=vaccination", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, sources: [] })),
+    ]);
+    if (!masterJson.ok) {
+      setError(masterJson.message || "Gagal mengambil data.");
+      return;
+    }
+    setVaccines(masterJson.vaccines || []);
+    setLots(masterJson.lots || []);
+    setProductMappings(masterJson.productMappings || []);
+    setCompanySources(sourcesJson.ok ? sourcesJson.sources || [] : []);
+    setMappingReady(masterJson.mappingReady !== false);
+    setMappingMessage(masterJson.mappingMessage || "");
+    setCompanyStockReady(masterJson.companyStockReady !== false);
+    setCompanyStockMessage(masterJson.companyStockMessage || "");
+    if (!lotForm.vaccineId && masterJson.vaccines?.[0]?.id) {
+      setLotForm((s) => ({ ...s, vaccineId: String(masterJson.vaccines[0].id) }));
+    }
   }
 
   function findMappedVaccineId(productKey: string, productName: string) {
@@ -121,6 +157,8 @@ export default function VaccinationMasterPage() {
       stockAdded: existingLot ? Number(existingLot.stock_added || 0) : 0,
       stockPhysicalCount: String(importedAvailable),
       inventoryNotes: cleanText(existingLot?.inventory_notes) || `Import stock.quant · ${importedLocations.join(", ")}`,
+      stockScope: lotScope(existingLot),
+      stockCompanyName: lotScope(existingLot) === "COMPANY" ? cleanText(existingLot?.stock_company_name) : "",
     });
   }
 
@@ -171,6 +209,14 @@ export default function VaccinationMasterPage() {
       setError("Nama vaksin / produk wajib diisi.");
       return;
     }
+    if (
+      cleanText(lotForm.lotNumber) &&
+      lotForm.stockScope === "COMPANY" &&
+      !cleanText(lotForm.stockCompanyName)
+    ) {
+      setError("Pilih perusahaan untuk lot dengan Scope Stok = Perusahaan.");
+      return;
+    }
 
     try {
       let vaccineId = selectedMasterVaccineId;
@@ -216,6 +262,8 @@ export default function VaccinationMasterPage() {
             stockAdded: lotForm.stockAdded,
             stockPhysicalCount: lotForm.stockPhysicalCount,
             inventoryNotes: lotForm.inventoryNotes,
+            stockScope: lotForm.stockScope,
+            stockCompanyName: lotForm.stockCompanyName,
           });
         } else {
           await postMaster({
@@ -262,6 +310,8 @@ export default function VaccinationMasterPage() {
       stockAdded: 0,
       stockPhysicalCount: "",
       inventoryNotes: "",
+      stockScope: "GENERAL",
+      stockCompanyName: "",
     });
     setMessage(`Edit produk ${vaccine.name}. Ubah field yang diperlukan lalu klik Simpan Perubahan Produk & Lot.`);
     window.setTimeout(() => {
@@ -292,6 +342,8 @@ export default function VaccinationMasterPage() {
       stockAdded: Number(lot.stock_added || 0),
       stockPhysicalCount: lot.stock_physical_count == null ? "" : String(lot.stock_physical_count),
       inventoryNotes: cleanText(lot.inventory_notes),
+      stockScope: lotScope(lot),
+      stockCompanyName: lotScope(lot) === "COMPANY" ? cleanText(lot.stock_company_name) : "",
     });
     setMessage(`Edit lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Ubah field lalu simpan.`);
     window.setTimeout(() => {
@@ -308,7 +360,7 @@ export default function VaccinationMasterPage() {
       if (String(selectedMasterVaccineId) === String(vaccine.id)) {
         setSelectedMasterVaccineId("");
         setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
-        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "" });
+        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "" });
       }
       await loadData();
     } catch (err: any) {
@@ -488,6 +540,71 @@ export default function VaccinationMasterPage() {
   useEffect(() => { loadData(); }, []);
   const activeVaccines = useMemo(() => vaccines.filter((v) => v.active), [vaccines]);
 
+  const companyOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const source of companySources) {
+      const label = cleanText(source.institution_name || source.name);
+      const key = normalizeCompany(label);
+      if (key && !byKey.has(key)) byKey.set(key, label);
+    }
+    for (const lot of lots) {
+      if (lotScope(lot) !== "COMPANY") continue;
+      const label = cleanText(lot.stock_company_name);
+      const key = normalizeCompany(label);
+      if (key && !byKey.has(key)) byKey.set(key, label);
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b, "id"));
+  }, [companySources, lots]);
+
+  const filteredMasterLots = useMemo(() => {
+    if (stockFilter === "ALL") return lots;
+    if (stockFilter === "GENERAL") {
+      return lots.filter((lot) => lotScope(lot) === "GENERAL");
+    }
+    const filterKey = normalizeCompany(stockFilter);
+    return lots.filter(
+      (lot) =>
+        lotScope(lot) === "COMPANY" &&
+        normalizeCompany(lot.stock_company_name) === filterKey,
+    );
+  }, [lots, stockFilter]);
+
+  const filteredVaccines = useMemo(() => {
+    if (stockFilter === "ALL") return vaccines;
+
+    const visibleIds = new Set(
+      filteredMasterLots.map((lot) => String(lot.vaccine_id || lot.vaccine?.id || "")),
+    );
+
+    if (stockFilter === "GENERAL") {
+      for (const vaccine of vaccines) {
+        const vaccineLots = lots.filter(
+          (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(vaccine.id),
+        );
+        if (!vaccineLots.length) visibleIds.add(String(vaccine.id));
+      }
+    }
+
+    return vaccines.filter((vaccine) => visibleIds.has(String(vaccine.id)));
+  }, [vaccines, lots, filteredMasterLots, stockFilter]);
+
+  function vaccineStockTargets(vaccineId: any) {
+    const ownedLots = lots.filter(
+      (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(vaccineId),
+    );
+    if (!ownedLots.length) return ["General"];
+
+    const targets = new Set<string>();
+    for (const lot of ownedLots) {
+      if (lotScope(lot) === "COMPANY") {
+        targets.add(cleanText(lot.stock_company_name) || "Perusahaan");
+      } else {
+        targets.add("General");
+      }
+    }
+    return Array.from(targets);
+  }
+
   const importProducts = useMemo(() => {
     const grouped = new Map<string, { key: string; code: string; name: string; label: string; locations: Set<string>; lots: Set<string> }>();
     for (const row of importRows) {
@@ -541,6 +658,11 @@ export default function VaccinationMasterPage() {
         {!mappingReady ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
             {mappingMessage || "Mapping produk import belum aktif. Jalankan SQL V153.18 terlebih dahulu."}
+          </div>
+        ) : null}
+        {!companyStockReady ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {companyStockMessage || "Scope stok perusahaan belum aktif. Jalankan SQL ownership stok perusahaan terlebih dahulu."}
           </div>
         ) : null}
 
@@ -751,6 +873,62 @@ export default function VaccinationMasterPage() {
                 </select>
               ) : null}
 
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Scope Stok
+                  <select
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    value={lotForm.stockScope}
+                    disabled={!companyStockReady}
+                    onChange={(e) =>
+                      setLotForm((current) => ({
+                        ...current,
+                        stockScope: e.target.value,
+                        stockCompanyName:
+                          e.target.value === "COMPANY"
+                            ? current.stockCompanyName
+                            : "",
+                      }))
+                    }
+                  >
+                    <option value="GENERAL">General</option>
+                    <option value="COMPANY">Perusahaan</option>
+                  </select>
+                </label>
+
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Perusahaan
+                  <select
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+                    value={lotForm.stockCompanyName}
+                    disabled={!companyStockReady || lotForm.stockScope !== "COMPANY"}
+                    onChange={(e) =>
+                      setLotForm((current) => ({
+                        ...current,
+                        stockCompanyName: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {lotForm.stockScope === "COMPANY"
+                        ? "Pilih perusahaan"
+                        : "Tidak diperlukan untuk General"}
+                    </option>
+                    {companyOptions.map((company) => (
+                      <option key={company} value={company}>
+                        {company}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {lotForm.stockScope === "GENERAL" ? (
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                  General dapat dipakai lintas perusahaan dan tidak dikunci ke perusahaan tertentu.
+                </div>
+              ) : null}
+
               <input
                 className="rounded-xl border px-3 py-2"
                 placeholder="Lot Number / Batch"
@@ -884,8 +1062,32 @@ export default function VaccinationMasterPage() {
           </div>
         </section>
 
+        <section className="mt-6 rounded-2xl border bg-slate-50 p-4">
+          <div className="grid gap-2 md:grid-cols-[220px_1fr] md:items-center">
+            <div>
+              <div className="text-sm font-bold text-slate-800">Filter Tujuan Stok</div>
+              <div className="text-xs text-slate-500">Pilih perusahaan agar hanya produk/lot untuk perusahaan itu yang tampil.</div>
+            </div>
+            <select
+              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+              value={stockFilter}
+              onChange={(e) => setStockFilter(e.target.value)}
+            >
+              <option value="ALL">Semua Produk & Stok</option>
+              <option value="GENERAL">General</option>
+              {companyOptions.map((company) => (
+                <option key={company} value={company}>
+                  {company}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+
         <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Produk</div>
+          <div className="border-b bg-slate-50 p-4 font-bold">
+            Daftar Produk · {stockFilter === "ALL" ? "Semua" : stockFilter}
+          </div>
           <div className="max-h-[260px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -894,17 +1096,27 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Brand</th>
                   <th className="p-3 text-left">Kategori Harga</th>
                   <th className="p-3 text-left">Harga</th>
+                  <th className="p-3 text-left">Tujuan Stok</th>
                   <th className="p-3 text-left">Status</th>
                   <th className="p-3 text-left">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {vaccines.map((v) => (
+                {filteredVaccines.map((v) => (
                   <tr key={v.id}>
                     <td className="p-3 font-bold">{v.name}</td>
                     <td className="p-3">{v.brand || "-"}</td>
                     <td className="p-3">{v.price_category || "-"}</td>
                     <td className="p-3 font-bold">{money(v.price)}</td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {vaccineStockTargets(v.id).map((target) => (
+                          <span key={target} className="rounded-full border bg-slate-50 px-2 py-1 text-xs font-semibold">
+                            {target}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -920,13 +1132,15 @@ export default function VaccinationMasterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif</div>
+          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif · {stockFilter === "ALL" ? "Semua" : stockFilter}</div>
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
                   <th className="p-3 text-left">Vaksin</th>
                   <th className="p-3 text-left">Lot</th>
+                  <th className="p-3 text-left">Scope</th>
+                  <th className="p-3 text-left">Perusahaan</th>
                   <th className="p-3 text-left">Expired</th>
                   <th className="p-3 text-left">Awal</th>
                   <th className="p-3 text-left">Tambahan</th>
@@ -938,7 +1152,7 @@ export default function VaccinationMasterPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {lots.map((lot) => {
+                {filteredMasterLots.map((lot) => {
                   const awal = Number(lot.stock_initial || 0);
                   const tambah = Number(lot.stock_added || 0);
                   const used = Number(lot.stock_used || 0);
@@ -947,6 +1161,12 @@ export default function VaccinationMasterPage() {
                     <tr key={lot.id}>
                       <td className="p-3">{lot.vaccine?.name || "-"}</td>
                       <td className="p-3 font-bold">{lot.lot_number}</td>
+                      <td className="p-3">
+                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${lotScope(lot) === "COMPANY" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-700"}`}>
+                          {lotScope(lot) === "COMPANY" ? "Perusahaan" : "General"}
+                        </span>
+                      </td>
+                      <td className="p-3">{lotScope(lot) === "COMPANY" ? lot.stock_company_name || "-" : "-"}</td>
                       <td className="p-3">{lot.expiry_date || "-"}</td>
                       <td className="p-3">{awal}</td>
                       <td className="p-3">{tambah}</td>

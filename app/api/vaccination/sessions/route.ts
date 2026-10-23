@@ -119,6 +119,63 @@ function sessionVaccineKey(vaccineId: any, lotId: any, doseNumber: any) {
   return `${toInt(vaccineId, 0)}|${toInt(lotId, 0)}|${Math.max(1, toInt(doseNumber, 1))}`;
 }
 
+function normalizeCompanyName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+async function validateSessionLotOwnership(
+  supabase: any,
+  companyName: string,
+  sessionVaccines: any[],
+) {
+  const lotIds = Array.from(
+    new Set(
+      (sessionVaccines || [])
+        .map((item: any) => toInt(item?.lotId ?? item?.lot_id, 0))
+        .filter(Boolean),
+    ),
+  );
+
+  if (!lotIds.length) return;
+
+  const result = await supabase
+    .from("vaccination_vaccine_lots")
+    .select("id,lot_number,stock_scope,stock_company_name")
+    .in("id", lotIds);
+
+  if (result.error) {
+    const message = String(result.error.message || "");
+    if (String(result.error.code || "") === "42703" || message.includes("stock_scope")) {
+      throw new Error(
+        "Scope stok perusahaan belum aktif. Jalankan SQL vaccination_company_stock_ownership_v1 terlebih dahulu.",
+      );
+    }
+    throw new Error(message || "Gagal memvalidasi ownership stok.");
+  }
+
+  const lotMap = new Map<number, any>(
+    (result.data || []).map((row: any): [number, any] => [Number(row.id), row]),
+  );
+  const companyKey = normalizeCompanyName(companyName);
+
+  for (const lotId of lotIds) {
+    const lot = lotMap.get(Number(lotId));
+    if (!lot) throw new Error(`Lot ID ${lotId} tidak ditemukan.`);
+
+    const scope = clean(lot.stock_scope).toUpperCase() === "COMPANY"
+      ? "COMPANY"
+      : "GENERAL";
+    if (scope !== "COMPANY") continue;
+
+    const owner = clean(lot.stock_company_name);
+    if (!companyKey || normalizeCompanyName(owner) !== companyKey) {
+      throw new Error(
+        `Lot ${lot.lot_number || lot.id} khusus ${owner || "perusahaan tertentu"} dan tidak boleh dipakai untuk session ${companyName || "tanpa perusahaan"}.`,
+      );
+    }
+  }
+}
+
 async function syncSessionVaccines(
   supabase: any,
   sessionId: number,
@@ -509,6 +566,11 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      await validateSessionLotOwnership(
+        supabase,
+        clean(session.company_name),
+        sessionVaccines,
+      );
       await syncSessionVaccines(supabase, sessionId, sessionVaccines);
       await syncSessionBatchMappings(
         supabase,
@@ -598,6 +660,16 @@ export async function POST(req: NextRequest) {
     }
 
     if (shouldSyncSessionVaccines) {
+      try {
+        await validateSessionLotOwnership(
+          supabase,
+          clean(body.companyName),
+          editSessionVaccines,
+        );
+      } catch (error: any) {
+        return fail(error?.message || "Lot tidak sesuai dengan perusahaan session.");
+      }
+
       payload.default_vaccine_id = firstEditedSessionVaccine
         ? toInt(firstEditedSessionVaccine.vaccineId, 0) || null
         : null;
@@ -674,6 +746,12 @@ export async function POST(req: NextRequest) {
   );
   const companyName = clean(body.companyName);
   const sourceName = clean(body.sourceName);
+
+  try {
+    await validateSessionLotOwnership(supabase, companyName, sessionVaccines);
+  } catch (error: any) {
+    return fail(error?.message || "Lot tidak sesuai dengan perusahaan session.");
+  }
 
   if (body.autoGenerateFromLocations) {
     if (!sourceId)
