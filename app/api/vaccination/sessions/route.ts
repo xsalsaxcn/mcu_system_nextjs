@@ -6,6 +6,7 @@ import {
   sanitizeOnsiteQueueFormConfig,
 } from "@/lib/vaccination/onsiteQueueForm";
 
+// VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,7 @@ async function validateSessionLotOwnership(
   supabase: any,
   companyName: string,
   sessionVaccines: any[],
+  sessionId?: number,
 ) {
   const lotIds = Array.from(
     new Set(
@@ -140,14 +142,18 @@ async function validateSessionLotOwnership(
 
   const result = await supabase
     .from("vaccination_vaccine_lots")
-    .select("id,lot_number,stock_scope,stock_company_name")
+    .select("id,lot_number,stock_scope,stock_company_name,stock_session_id")
     .in("id", lotIds);
 
   if (result.error) {
     const message = String(result.error.message || "");
-    if (String(result.error.code || "") === "42703" || message.includes("stock_scope")) {
+    if (
+      String(result.error.code || "") === "42703" ||
+      message.includes("stock_scope") ||
+      message.includes("stock_session_id")
+    ) {
       throw new Error(
-        "Scope stok perusahaan belum aktif. Jalankan SQL vaccination_company_stock_ownership_v1 terlebih dahulu.",
+        "Scope stok Session/Lokasi belum aktif. Jalankan SQL vaccination_company_stock_ownership_v2 terlebih dahulu.",
       );
     }
     throw new Error(message || "Gagal memvalidasi ownership stok.");
@@ -162,16 +168,35 @@ async function validateSessionLotOwnership(
     const lot = lotMap.get(Number(lotId));
     if (!lot) throw new Error(`Lot ID ${lotId} tidak ditemukan.`);
 
-    const scope = clean(lot.stock_scope).toUpperCase() === "COMPANY"
-      ? "COMPANY"
-      : "GENERAL";
-    if (scope !== "COMPANY") continue;
+    const rawScope = clean(lot.stock_scope).toUpperCase();
+    const scope =
+      rawScope === "SESSION"
+        ? "SESSION"
+        : rawScope === "COMPANY"
+          ? "COMPANY"
+          : "GENERAL";
+
+    if (scope === "GENERAL") continue;
 
     const owner = clean(lot.stock_company_name);
     if (!companyKey || normalizeCompanyName(owner) !== companyKey) {
       throw new Error(
         `Lot ${lot.lot_number || lot.id} khusus ${owner || "perusahaan tertentu"} dan tidak boleh dipakai untuk session ${companyName || "tanpa perusahaan"}.`,
       );
+    }
+
+    if (scope === "SESSION") {
+      const ownerSessionId = toInt(lot.stock_session_id, 0);
+      if (!sessionId) {
+        throw new Error(
+          `Lot ${lot.lot_number || lot.id} dikunci ke Session ID ${ownerSessionId || "-"} dan tidak dapat dipakai saat membuat session baru. Buat session terlebih dahulu, lalu assign stok ke session tersebut.`,
+        );
+      }
+      if (ownerSessionId !== Number(sessionId)) {
+        throw new Error(
+          `Lot ${lot.lot_number || lot.id} dikunci ke Session ID ${ownerSessionId || "-"} dan tidak boleh dipakai oleh Session ID ${sessionId}.`,
+        );
+      }
     }
   }
 }
@@ -570,6 +595,7 @@ export async function POST(req: NextRequest) {
         supabase,
         clean(session.company_name),
         sessionVaccines,
+        sessionId,
       );
       await syncSessionVaccines(supabase, sessionId, sessionVaccines);
       await syncSessionBatchMappings(
@@ -665,6 +691,7 @@ export async function POST(req: NextRequest) {
           supabase,
           clean(body.companyName),
           editSessionVaccines,
+          id,
         );
       } catch (error: any) {
         return fail(error?.message || "Lot tidak sesuai dengan perusahaan session.");

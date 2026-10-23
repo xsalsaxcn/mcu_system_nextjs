@@ -13,6 +13,7 @@ import {
 // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
 // V153_18_IMPORTED_PRODUCT_LOT_SESSION_SAFE
 // V153_23_SESSION_ALL_ACTIVE_MASTER_LOTS_SAFE
+// VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 type SourceItem = {
   id: number;
@@ -109,16 +110,31 @@ function normalizeCompanyName(value: any) {
   return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function lotAllowedForCompany(lot: any, companyName: any) {
+function lotAllowedForSession(
+  lot: any,
+  companyName: any,
+  sessionId?: any,
+) {
+  const rawScope = String(lot?.stock_scope || "").trim().toUpperCase();
   const scope =
-    String(lot?.stock_scope || "").trim().toUpperCase() === "COMPANY"
-      ? "COMPANY"
-      : "GENERAL";
-  if (scope !== "COMPANY") return true;
+    rawScope === "SESSION"
+      ? "SESSION"
+      : rawScope === "COMPANY"
+        ? "COMPANY"
+        : "GENERAL";
+
+  if (scope === "GENERAL") return true;
 
   const owner = normalizeCompanyName(lot?.stock_company_name);
   const company = normalizeCompanyName(companyName);
-  return Boolean(owner && company && owner === company);
+  if (!owner || !company || owner !== company) return false;
+
+  if (scope === "COMPANY") return true;
+
+  return (
+    Number(lot?.stock_session_id || 0) > 0 &&
+    Number(lot?.stock_session_id || 0) === Number(sessionId || 0)
+  );
 }
 
 export default function VaccinationSessionPage() {
@@ -206,6 +222,9 @@ export default function VaccinationSessionPage() {
     );
   }, [form.locationKey, form.sourceId, selectedLocation, sessions]);
 
+  const currentSessionId = Number(selectedExistingSession?.id || 0);
+  const editSessionId = Number(editingSession?.id || 0);
+
   const availableBatchNames = useMemo(() => {
     const selectedLocations =
       form.locationKey && form.locationKey !== allLocationsKey
@@ -245,12 +264,12 @@ export default function VaccinationSessionPage() {
         .filter(
           (lot) =>
             lot.active !== false &&
-            lotAllowedForCompany(lot, currentCompanyName),
+            lotAllowedForSession(lot, currentCompanyName, currentSessionId),
         )
         .map((lot) => String(lot.vaccine_id || ""))
         .filter(Boolean),
     );
-  }, [lots, currentCompanyName]);
+  }, [lots, currentCompanyName, currentSessionId]);
 
   const selectableVaccines = useMemo(() => {
     const grandfatheredIds = new Set(
@@ -268,10 +287,10 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
-        lotAllowedForCompany(lot, currentCompanyName) &&
+        lotAllowedForSession(lot, currentCompanyName, currentSessionId) &&
         (!draft.vaccineId || String(lot.vaccine_id) === String(draft.vaccineId)),
     );
-  }, [lots, draft.vaccineId, currentCompanyName]);
+  }, [lots, draft.vaccineId, currentCompanyName, currentSessionId]);
 
   const selectedVaccineHasNoActiveLot = useMemo(() => {
     if (!draft.vaccineId) return false;
@@ -282,11 +301,11 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
-        lotAllowedForCompany(lot, editCompanyName) &&
+        lotAllowedForSession(lot, editCompanyName, editSessionId) &&
         (!editVaccineDraft.vaccineId ||
           String(lot.vaccine_id) === String(editVaccineDraft.vaccineId)),
     );
-  }, [lots, editVaccineDraft.vaccineId, editCompanyName]);
+  }, [lots, editVaccineDraft.vaccineId, editCompanyName, editSessionId]);
 
   const editSelectableVaccines = useMemo(() => {
     const allowedIds = new Set(
@@ -294,7 +313,7 @@ export default function VaccinationSessionPage() {
         .filter(
           (lot) =>
             lot.active !== false &&
-            lotAllowedForCompany(lot, editCompanyName),
+            lotAllowedForSession(lot, editCompanyName, editSessionId),
         )
         .map((lot) => String(lot.vaccine_id || ""))
         .filter(Boolean),
@@ -303,7 +322,7 @@ export default function VaccinationSessionPage() {
       if (item.vaccineId) allowedIds.add(String(item.vaccineId));
     }
     return vaccines.filter((vaccine) => allowedIds.has(String(vaccine.id)));
-  }, [vaccines, lots, editCompanyName, editSessionVaccines]);
+  }, [vaccines, lots, editCompanyName, editSessionId, editSessionVaccines]);
 
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
@@ -411,7 +430,7 @@ export default function VaccinationSessionPage() {
     return lots.filter(
       (lot) =>
         lot.active !== false &&
-        lotAllowedForCompany(lot, editCompanyName) &&
+        lotAllowedForSession(lot, editCompanyName, editSessionId) &&
         String(lot.vaccine_id || "") === String(vaccineId || ""),
     );
   }
@@ -1225,7 +1244,7 @@ export default function VaccinationSessionPage() {
           </div>
 
           <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-            Lot yang tampil mengikuti perusahaan session: <b>{currentCompanyName || "belum dipilih"}</b>. Lot General tetap dapat dipakai lintas perusahaan.
+            Lot yang tampil mengikuti perusahaan dan Session/Lokasi. <b>{currentCompanyName || "perusahaan belum dipilih"}</b>{currentSessionId ? ` · Session ID ${currentSessionId}` : " · session baru"}. Lot General tetap dapat dipakai lintas perusahaan; lot Session hanya muncul pada session yang sama.
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">

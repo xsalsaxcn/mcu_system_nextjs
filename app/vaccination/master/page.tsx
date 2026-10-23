@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
+// VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 type StockImportRow = {
@@ -35,9 +36,20 @@ function normalizeCompany(value: any) {
 }
 
 function lotScope(lot: any) {
-  return cleanText(lot?.stock_scope).toUpperCase() === "COMPANY"
-    ? "COMPANY"
-    : "GENERAL";
+  const scope = cleanText(lot?.stock_scope).toUpperCase();
+  if (scope === "SESSION") return "SESSION";
+  if (scope === "COMPANY") return "COMPANY";
+  return "GENERAL";
+}
+
+function sessionLabel(session: any) {
+  if (!session) return "-";
+  const parts = [
+    cleanText(session.session_name),
+    cleanText(session.location),
+    cleanText(session.session_date),
+  ].filter(Boolean);
+  return parts.join(" · ") || `Session ${session.id || ""}`;
 }
 
 function parseQuantity(value: any) {
@@ -60,7 +72,9 @@ export default function VaccinationMasterPage() {
   const [lots, setLots] = useState<any[]>([]);
   const [productMappings, setProductMappings] = useState<any[]>([]);
   const [companySources, setCompanySources] = useState<any[]>([]);
+  const [stockSessions, setStockSessions] = useState<any[]>([]);
   const [stockFilter, setStockFilter] = useState("ALL");
+  const [stockSessionFilter, setStockSessionFilter] = useState("ALL");
   const [companyStockReady, setCompanyStockReady] = useState(true);
   const [companyStockMessage, setCompanyStockMessage] = useState("");
   const [mappingReady, setMappingReady] = useState(true);
@@ -94,6 +108,7 @@ export default function VaccinationMasterPage() {
     inventoryNotes: "",
     stockScope: "GENERAL",
     stockCompanyName: "",
+    stockSessionId: "",
   });
 
   async function loadData() {
@@ -109,6 +124,7 @@ export default function VaccinationMasterPage() {
     setLots(masterJson.lots || []);
     setProductMappings(masterJson.productMappings || []);
     setCompanySources(sourcesJson.ok ? sourcesJson.sources || [] : []);
+    setStockSessions(masterJson.stockSessions || []);
     setMappingReady(masterJson.mappingReady !== false);
     setMappingMessage(masterJson.mappingMessage || "");
     setCompanyStockReady(masterJson.companyStockReady !== false);
@@ -158,7 +174,8 @@ export default function VaccinationMasterPage() {
       stockPhysicalCount: String(importedAvailable),
       inventoryNotes: cleanText(existingLot?.inventory_notes) || `Import stock.quant · ${importedLocations.join(", ")}`,
       stockScope: lotScope(existingLot),
-      stockCompanyName: lotScope(existingLot) === "COMPANY" ? cleanText(existingLot?.stock_company_name) : "",
+      stockCompanyName: lotScope(existingLot) === "GENERAL" ? "" : cleanText(existingLot?.stock_company_name),
+      stockSessionId: lotScope(existingLot) === "SESSION" ? String(existingLot?.stock_session_id || "") : "",
     });
   }
 
@@ -211,10 +228,18 @@ export default function VaccinationMasterPage() {
     }
     if (
       cleanText(lotForm.lotNumber) &&
-      lotForm.stockScope === "COMPANY" &&
+      lotForm.stockScope !== "GENERAL" &&
       !cleanText(lotForm.stockCompanyName)
     ) {
-      setError("Pilih perusahaan untuk lot dengan Scope Stok = Perusahaan.");
+      setError("Pilih perusahaan untuk lot yang dikunci ke Perusahaan/Session.");
+      return;
+    }
+    if (
+      cleanText(lotForm.lotNumber) &&
+      lotForm.stockScope === "SESSION" &&
+      !cleanText(lotForm.stockSessionId)
+    ) {
+      setError("Pilih Session/Lokasi untuk lot dengan Scope Stok = Session/Lokasi.");
       return;
     }
 
@@ -264,6 +289,7 @@ export default function VaccinationMasterPage() {
             inventoryNotes: lotForm.inventoryNotes,
             stockScope: lotForm.stockScope,
             stockCompanyName: lotForm.stockCompanyName,
+            stockSessionId: lotForm.stockSessionId,
           });
         } else {
           await postMaster({
@@ -312,6 +338,7 @@ export default function VaccinationMasterPage() {
       inventoryNotes: "",
       stockScope: "GENERAL",
       stockCompanyName: "",
+      stockSessionId: "",
     });
     setMessage(`Edit produk ${vaccine.name}. Ubah field yang diperlukan lalu klik Simpan Perubahan Produk & Lot.`);
     window.setTimeout(() => {
@@ -343,7 +370,8 @@ export default function VaccinationMasterPage() {
       stockPhysicalCount: lot.stock_physical_count == null ? "" : String(lot.stock_physical_count),
       inventoryNotes: cleanText(lot.inventory_notes),
       stockScope: lotScope(lot),
-      stockCompanyName: lotScope(lot) === "COMPANY" ? cleanText(lot.stock_company_name) : "",
+      stockCompanyName: lotScope(lot) === "GENERAL" ? "" : cleanText(lot.stock_company_name),
+      stockSessionId: lotScope(lot) === "SESSION" ? String(lot.stock_session_id || "") : "",
     });
     setMessage(`Edit lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Ubah field lalu simpan.`);
     window.setTimeout(() => {
@@ -360,7 +388,7 @@ export default function VaccinationMasterPage() {
       if (String(selectedMasterVaccineId) === String(vaccine.id)) {
         setSelectedMasterVaccineId("");
         setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
-        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "" });
+        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "", stockSessionId: "" });
       }
       await loadData();
     } catch (err: any) {
@@ -548,38 +576,97 @@ export default function VaccinationMasterPage() {
       if (key && !byKey.has(key)) byKey.set(key, label);
     }
     for (const lot of lots) {
-      if (lotScope(lot) !== "COMPANY") continue;
+      if (lotScope(lot) === "GENERAL") continue;
       const label = cleanText(lot.stock_company_name);
       const key = normalizeCompany(label);
       if (key && !byKey.has(key)) byKey.set(key, label);
     }
+    for (const session of stockSessions) {
+      const label = cleanText(session.company_name);
+      const key = normalizeCompany(label);
+      if (key && !byKey.has(key)) byKey.set(key, label);
+    }
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b, "id"));
-  }, [companySources, lots]);
+  }, [companySources, lots, stockSessions]);
+
+  const lotCompanySessions = useMemo(() => {
+    const companyKey = normalizeCompany(lotForm.stockCompanyName);
+    if (!companyKey) return [];
+    return stockSessions
+      .filter(
+        (session) =>
+          normalizeCompany(session.company_name) === companyKey &&
+          String(session.status || "").toUpperCase() !== "CANCELLED",
+      )
+      .sort((a, b) => {
+        const dateCompare = String(b.session_date || "").localeCompare(
+          String(a.session_date || ""),
+        );
+        return dateCompare || Number(b.id || 0) - Number(a.id || 0);
+      });
+  }, [stockSessions, lotForm.stockCompanyName]);
+
+  const filterCompanySessions = useMemo(() => {
+    if (stockFilter === "ALL" || stockFilter === "GENERAL") return [];
+    const companyKey = normalizeCompany(stockFilter);
+    return stockSessions
+      .filter((session) => normalizeCompany(session.company_name) === companyKey)
+      .sort((a, b) => {
+        const dateCompare = String(b.session_date || "").localeCompare(
+          String(a.session_date || ""),
+        );
+        return dateCompare || Number(b.id || 0) - Number(a.id || 0);
+      });
+  }, [stockSessions, stockFilter]);
+
+  const sessionMap = useMemo(
+    () =>
+      new Map<number, any>(
+        stockSessions.map(
+          (session): [number, any] => [Number(session.id), session],
+        ),
+      ),
+    [stockSessions],
+  );
 
   const filteredMasterLots = useMemo(() => {
     if (stockFilter === "ALL") return lots;
     if (stockFilter === "GENERAL") {
       return lots.filter((lot) => lotScope(lot) === "GENERAL");
     }
+
     const filterKey = normalizeCompany(stockFilter);
-    return lots.filter(
+    const companyLots = lots.filter(
       (lot) =>
-        lotScope(lot) === "COMPANY" &&
+        lotScope(lot) !== "GENERAL" &&
         normalizeCompany(lot.stock_company_name) === filterKey,
     );
-  }, [lots, stockFilter]);
+
+    if (stockSessionFilter === "ALL") return companyLots;
+
+    const sessionId = Number(stockSessionFilter || 0);
+    return companyLots.filter(
+      (lot) =>
+        lotScope(lot) === "SESSION" &&
+        Number(lot.stock_session_id || 0) === sessionId,
+    );
+  }, [lots, stockFilter, stockSessionFilter]);
 
   const filteredVaccines = useMemo(() => {
     if (stockFilter === "ALL") return vaccines;
 
     const visibleIds = new Set(
-      filteredMasterLots.map((lot) => String(lot.vaccine_id || lot.vaccine?.id || "")),
+      filteredMasterLots.map((lot) =>
+        String(lot.vaccine_id || lot.vaccine?.id || ""),
+      ),
     );
 
     if (stockFilter === "GENERAL") {
       for (const vaccine of vaccines) {
         const vaccineLots = lots.filter(
-          (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(vaccine.id),
+          (lot) =>
+            String(lot.vaccine_id || lot.vaccine?.id || "") ===
+            String(vaccine.id),
         );
         if (!vaccineLots.length) visibleIds.add(String(vaccine.id));
       }
@@ -590,13 +677,21 @@ export default function VaccinationMasterPage() {
 
   function vaccineStockTargets(vaccineId: any) {
     const ownedLots = lots.filter(
-      (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(vaccineId),
+      (lot) =>
+        String(lot.vaccine_id || lot.vaccine?.id || "") ===
+        String(vaccineId),
     );
     if (!ownedLots.length) return ["General"];
 
     const targets = new Set<string>();
     for (const lot of ownedLots) {
-      if (lotScope(lot) === "COMPANY") {
+      const scope = lotScope(lot);
+      if (scope === "SESSION") {
+        const session = sessionMap.get(Number(lot.stock_session_id || 0));
+        targets.add(
+          `${cleanText(lot.stock_company_name) || "Perusahaan"} · ${sessionLabel(session)}`,
+        );
+      } else if (scope === "COMPANY") {
         targets.add(cleanText(lot.stock_company_name) || "Perusahaan");
       } else {
         targets.add("General");
@@ -604,6 +699,14 @@ export default function VaccinationMasterPage() {
     }
     return Array.from(targets);
   }
+
+  const stockFilterLabel = useMemo(() => {
+    if (stockFilter === "ALL") return "Semua";
+    if (stockFilter === "GENERAL") return "General";
+    if (stockSessionFilter === "ALL") return stockFilter;
+    const session = sessionMap.get(Number(stockSessionFilter || 0));
+    return `${stockFilter} · ${sessionLabel(session)}`;
+  }, [stockFilter, stockSessionFilter, sessionMap]);
 
   const importProducts = useMemo(() => {
     const grouped = new Map<string, { key: string; code: string; name: string; label: string; locations: Set<string>; lots: Set<string> }>();
@@ -873,7 +976,7 @@ export default function VaccinationMasterPage() {
                 </select>
               ) : null}
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <label className="grid gap-1 text-xs font-semibold text-slate-500">
                   Scope Stok
                   <select
@@ -885,14 +988,19 @@ export default function VaccinationMasterPage() {
                         ...current,
                         stockScope: e.target.value,
                         stockCompanyName:
-                          e.target.value === "COMPANY"
-                            ? current.stockCompanyName
+                          e.target.value === "GENERAL"
+                            ? ""
+                            : current.stockCompanyName,
+                        stockSessionId:
+                          e.target.value === "SESSION"
+                            ? current.stockSessionId
                             : "",
                       }))
                     }
                   >
                     <option value="GENERAL">General</option>
                     <option value="COMPANY">Perusahaan</option>
+                    <option value="SESSION">Session / Lokasi</option>
                   </select>
                 </label>
 
@@ -901,18 +1009,19 @@ export default function VaccinationMasterPage() {
                   <select
                     className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
                     value={lotForm.stockCompanyName}
-                    disabled={!companyStockReady || lotForm.stockScope !== "COMPANY"}
+                    disabled={!companyStockReady || lotForm.stockScope === "GENERAL"}
                     onChange={(e) =>
                       setLotForm((current) => ({
                         ...current,
                         stockCompanyName: e.target.value,
+                        stockSessionId: "",
                       }))
                     }
                   >
                     <option value="">
-                      {lotForm.stockScope === "COMPANY"
-                        ? "Pilih perusahaan"
-                        : "Tidak diperlukan untuk General"}
+                      {lotForm.stockScope === "GENERAL"
+                        ? "Tidak diperlukan untuk General"
+                        : "Pilih perusahaan"}
                     </option>
                     {companyOptions.map((company) => (
                       <option key={company} value={company}>
@@ -921,13 +1030,51 @@ export default function VaccinationMasterPage() {
                     ))}
                   </select>
                 </label>
+
+                <label className="grid gap-1 text-xs font-semibold text-slate-500">
+                  Session / Lokasi
+                  <select
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+                    value={lotForm.stockSessionId}
+                    disabled={
+                      !companyStockReady ||
+                      lotForm.stockScope !== "SESSION" ||
+                      !lotForm.stockCompanyName
+                    }
+                    onChange={(e) =>
+                      setLotForm((current) => ({
+                        ...current,
+                        stockSessionId: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {lotForm.stockScope === "SESSION"
+                        ? "Pilih session / lokasi"
+                        : "Hanya untuk Scope Session"}
+                    </option>
+                    {lotCompanySessions.map((session) => (
+                      <option key={session.id} value={String(session.id)}>
+                        {sessionLabel(session)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
               {lotForm.stockScope === "GENERAL" ? (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                  General dapat dipakai lintas perusahaan dan tidak dikunci ke perusahaan tertentu.
+                  General dapat dipakai lintas perusahaan dan lintas session.
                 </div>
-              ) : null}
+              ) : lotForm.stockScope === "COMPANY" ? (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                  Stok perusahaan dapat dipakai oleh seluruh session/lokasi perusahaan yang sama.
+                </div>
+              ) : (
+                <div className="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-700">
+                  Stok Session/Lokasi hanya dapat dipakai oleh session yang dipilih. Session lain, walaupun perusahaannya sama, tidak dapat memakai lot ini.
+                </div>
+              )}
 
               <input
                 className="rounded-xl border px-3 py-2"
@@ -1063,15 +1210,20 @@ export default function VaccinationMasterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-4">
-          <div className="grid gap-2 md:grid-cols-[220px_1fr] md:items-center">
+          <div className="grid gap-3 lg:grid-cols-[220px_1fr_1fr] lg:items-center">
             <div>
               <div className="text-sm font-bold text-slate-800">Filter Tujuan Stok</div>
-              <div className="text-xs text-slate-500">Pilih perusahaan agar hanya produk/lot untuk perusahaan itu yang tampil.</div>
+              <div className="text-xs text-slate-500">
+                Filter per perusahaan lalu per Session/Lokasi untuk melihat stok lokasi secara terpisah.
+              </div>
             </div>
             <select
               className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
               value={stockFilter}
-              onChange={(e) => setStockFilter(e.target.value)}
+              onChange={(e) => {
+                setStockFilter(e.target.value);
+                setStockSessionFilter("ALL");
+              }}
             >
               <option value="ALL">Semua Produk & Stok</option>
               <option value="GENERAL">General</option>
@@ -1081,12 +1233,25 @@ export default function VaccinationMasterPage() {
                 </option>
               ))}
             </select>
+            <select
+              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100 disabled:text-slate-400"
+              value={stockSessionFilter}
+              disabled={stockFilter === "ALL" || stockFilter === "GENERAL"}
+              onChange={(e) => setStockSessionFilter(e.target.value)}
+            >
+              <option value="ALL">Semua Session / Lokasi perusahaan</option>
+              {filterCompanySessions.map((session) => (
+                <option key={session.id} value={String(session.id)}>
+                  {sessionLabel(session)}
+                </option>
+              ))}
+            </select>
           </div>
         </section>
 
         <section className="mt-6 rounded-2xl border">
           <div className="border-b bg-slate-50 p-4 font-bold">
-            Daftar Produk · {stockFilter === "ALL" ? "Semua" : stockFilter}
+            Daftar Produk · {stockFilterLabel}
           </div>
           <div className="max-h-[260px] overflow-auto">
             <table className="min-w-full text-sm">
@@ -1132,7 +1297,7 @@ export default function VaccinationMasterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif · {stockFilter === "ALL" ? "Semua" : stockFilter}</div>
+          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif · {stockFilterLabel}</div>
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -1141,6 +1306,7 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Lot</th>
                   <th className="p-3 text-left">Scope</th>
                   <th className="p-3 text-left">Perusahaan</th>
+                  <th className="p-3 text-left">Session / Lokasi</th>
                   <th className="p-3 text-left">Expired</th>
                   <th className="p-3 text-left">Awal</th>
                   <th className="p-3 text-left">Tambahan</th>
@@ -1162,11 +1328,30 @@ export default function VaccinationMasterPage() {
                       <td className="p-3">{lot.vaccine?.name || "-"}</td>
                       <td className="p-3 font-bold">{lot.lot_number}</td>
                       <td className="p-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${lotScope(lot) === "COMPANY" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-700"}`}>
-                          {lotScope(lot) === "COMPANY" ? "Perusahaan" : "General"}
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-bold ${
+                            lotScope(lot) === "SESSION"
+                              ? "bg-violet-50 text-violet-700"
+                              : lotScope(lot) === "COMPANY"
+                                ? "bg-blue-50 text-blue-700"
+                                : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {lotScope(lot) === "SESSION"
+                            ? "Session"
+                            : lotScope(lot) === "COMPANY"
+                              ? "Perusahaan"
+                              : "General"}
                         </span>
                       </td>
-                      <td className="p-3">{lotScope(lot) === "COMPANY" ? lot.stock_company_name || "-" : "-"}</td>
+                      <td className="p-3">
+                        {lotScope(lot) === "GENERAL" ? "-" : lot.stock_company_name || "-"}
+                      </td>
+                      <td className="p-3">
+                        {lotScope(lot) === "SESSION"
+                          ? sessionLabel(sessionMap.get(Number(lot.stock_session_id || 0)))
+                          : "-"}
+                      </td>
                       <td className="p-3">{lot.expiry_date || "-"}</td>
                       <td className="p-3">{awal}</td>
                       <td className="p-3">{tambah}</td>

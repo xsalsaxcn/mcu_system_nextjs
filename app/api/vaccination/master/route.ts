@@ -3,6 +3,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // VACCINATION_ROLE_GUARD_V150
+// VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // V153_22_SESSION_LOT_RECONCILE_SAFE
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
@@ -24,10 +25,21 @@ function importQty(value: any) {
 }
 
 function sanitizeStockScope(value: any) {
-  return clean(value).toUpperCase() === "COMPANY" ? "COMPANY" : "GENERAL";
+  const scope = clean(value).toUpperCase();
+  if (scope === "SESSION") return "SESSION";
+  if (scope === "COMPANY") return "COMPANY";
+  return "GENERAL";
 }
 
-function stockOwnershipFromBody(body: any, fallback?: any) {
+function normalizeCompanyName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+async function stockOwnershipFromBody(
+  supabase: any,
+  body: any,
+  fallback?: any,
+) {
   const scopeInput =
     body.stockScope !== undefined || body.stock_scope !== undefined
       ? body.stockScope ?? body.stock_scope
@@ -36,17 +48,68 @@ function stockOwnershipFromBody(body: any, fallback?: any) {
     body.stockCompanyName !== undefined || body.stock_company_name !== undefined
       ? body.stockCompanyName ?? body.stock_company_name
       : fallback?.stock_company_name;
+  const sessionInput =
+    body.stockSessionId !== undefined || body.stock_session_id !== undefined
+      ? body.stockSessionId ?? body.stock_session_id
+      : fallback?.stock_session_id;
 
   const stockScope = sanitizeStockScope(scopeInput);
-  const stockCompanyName = clean(companyInput);
+  let stockCompanyName = clean(companyInput);
+  let stockSessionId = toInt(sessionInput, 0);
 
-  if (stockScope === "COMPANY" && !stockCompanyName) {
-    throw new Error("Perusahaan wajib dipilih jika Scope Stok = Perusahaan.");
+  if (stockScope === "GENERAL") {
+    return {
+      stock_scope: "GENERAL",
+      stock_company_name: null,
+      stock_session_id: null,
+    };
   }
 
+  if (stockScope === "COMPANY") {
+    if (!stockCompanyName) {
+      throw new Error("Perusahaan wajib dipilih jika Scope Stok = Perusahaan.");
+    }
+    return {
+      stock_scope: "COMPANY",
+      stock_company_name: stockCompanyName,
+      stock_session_id: null,
+    };
+  }
+
+  if (!stockSessionId) {
+    throw new Error("Session/Lokasi wajib dipilih jika Scope Stok = Session/Lokasi.");
+  }
+
+  const sessionResult = await supabase
+    .from("vaccination_sessions")
+    .select("id,session_name,company_name,location,session_date")
+    .eq("id", stockSessionId)
+    .maybeSingle();
+
+  if (sessionResult.error) throw new Error(sessionResult.error.message);
+  if (!sessionResult.data) throw new Error("Session/Lokasi tujuan stok tidak ditemukan.");
+
+  const canonicalCompany = clean(sessionResult.data.company_name);
+  if (!canonicalCompany) {
+    throw new Error("Session/Lokasi tujuan stok belum memiliki perusahaan.");
+  }
+
+  if (
+    stockCompanyName &&
+    normalizeCompanyName(stockCompanyName) !== normalizeCompanyName(canonicalCompany)
+  ) {
+    throw new Error(
+      `Session/Lokasi yang dipilih milik ${canonicalCompany}, bukan ${stockCompanyName}.`,
+    );
+  }
+
+  stockCompanyName = canonicalCompany;
+  stockSessionId = Number(sessionResult.data.id);
+
   return {
-    stock_scope: stockScope,
-    stock_company_name: stockScope === "COMPANY" ? stockCompanyName : null,
+    stock_scope: "SESSION",
+    stock_company_name: stockCompanyName,
+    stock_session_id: stockSessionId,
   };
 }
 
@@ -93,14 +156,22 @@ export async function GET(req: NextRequest) {
 
   if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
-  const ownershipProbe = await supabase
-    .from("vaccination_vaccine_lots")
-    .select("id,stock_scope,stock_company_name")
-    .limit(1);
+  const [ownershipProbe, stockSessionsResult] = await Promise.all([
+    supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,stock_scope,stock_company_name,stock_session_id")
+      .limit(1),
+    supabase
+      .from("vaccination_sessions")
+      .select("id,session_name,company_name,location,session_date,status")
+      .order("session_date", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(5000),
+  ]);
   const companyStockReady = !ownershipProbe.error;
   const companyStockMessage = companyStockReady
     ? ""
-    : "Scope stok perusahaan belum aktif. Jalankan SQL vaccination_company_stock_ownership_v1 terlebih dahulu.";
+    : "Scope stok Session/Lokasi belum aktif. Jalankan SQL vaccination_company_stock_ownership_v2 terlebih dahulu.";
 
   const mappingResult = await supabase
     .from("vaccination_product_mappings")
@@ -136,6 +207,7 @@ export async function GET(req: NextRequest) {
     mappingMessage,
     companyStockReady,
     companyStockMessage,
+    stockSessions: stockSessionsResult.error ? [] : stockSessionsResult.data || [],
   });
 }
 
@@ -697,7 +769,7 @@ export async function POST(req: NextRequest) {
 
     let ownership: Record<string, any>;
     try {
-      ownership = stockOwnershipFromBody(body);
+      ownership = await stockOwnershipFromBody(supabase, body);
     } catch (error: any) {
       return fail(error?.message || "Scope stok tidak valid.");
     }
@@ -740,7 +812,7 @@ export async function POST(req: NextRequest) {
 
     const beforeResult = await supabase
       .from("vaccination_vaccine_lots")
-      .select("id,vaccine_id,stock_added,stock_scope,stock_company_name")
+      .select("id,vaccine_id,stock_added,stock_scope,stock_company_name,stock_session_id")
       .eq("id", lotId)
       .maybeSingle();
 
@@ -752,7 +824,7 @@ export async function POST(req: NextRequest) {
 
     let ownership: Record<string, any>;
     try {
-      ownership = stockOwnershipFromBody(body, beforeResult.data);
+      ownership = await stockOwnershipFromBody(supabase, body, beforeResult.data);
     } catch (error: any) {
       return fail(error?.message || "Scope stok tidak valid.");
     }

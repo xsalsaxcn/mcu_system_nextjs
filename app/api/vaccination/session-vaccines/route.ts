@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
+// VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
@@ -69,18 +70,36 @@ export async function POST(req: NextRequest) {
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
     if (Number(lotResult.data.vaccine_id) !== Number(vaccineId)) return fail("Lot number tidak sesuai dengan vaksin.");
 
-    const scope = clean(lotResult.data.stock_scope).toUpperCase() === "COMPANY"
-      ? "COMPANY"
-      : "GENERAL";
-    if (scope === "COMPANY") {
+    const rawScope = clean(lotResult.data.stock_scope).toUpperCase();
+    const scope =
+      rawScope === "SESSION"
+        ? "SESSION"
+        : rawScope === "COMPANY"
+          ? "COMPANY"
+          : "GENERAL";
+
+    if (scope !== "GENERAL") {
       const owner = clean(lotResult.data.stock_company_name);
       const sessionCompany = clean(sessionResult.data.company_name);
-      if (!sessionCompany || normalizeCompanyName(owner) !== normalizeCompanyName(sessionCompany)) {
+      if (
+        !sessionCompany ||
+        normalizeCompanyName(owner) !== normalizeCompanyName(sessionCompany)
+      ) {
         return fail(
           `Lot ${lotResult.data.lot_number || lotId} khusus ${owner || "perusahaan tertentu"} dan tidak boleh dipakai untuk session ${sessionCompany || "tanpa perusahaan"}.`,
           409,
         );
       }
+    }
+
+    if (
+      scope === "SESSION" &&
+      Number(lotResult.data.stock_session_id || 0) !== Number(sessionId)
+    ) {
+      return fail(
+        `Lot ${lotResult.data.lot_number || lotId} dikunci untuk Session ID ${lotResult.data.stock_session_id || "-"} dan tidak boleh dipakai oleh Session ID ${sessionId}.`,
+        409,
+      );
     }
 
     const insertResult = await supabase
