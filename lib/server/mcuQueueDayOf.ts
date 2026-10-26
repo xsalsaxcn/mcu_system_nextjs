@@ -59,8 +59,30 @@ async function loadSessionParticipantScope(
     ),
   );
 
+  // MCU_CORPORATE_DAYH_PRE_REGISTRATION_ROSTER_V514_1
+  // List Hari H is a pre-registration roster. Informed status NEVER removes
+  // a participant. A participant leaves only after exact-Session registration
+  // or an exact-Session queue entry exists.
+  const registrationParticipantIds: number[] = Array.from(
+    new Set<number>(
+      registrationRows
+        .map((row: any) => Number(row.participant_id || 0))
+        .filter((value: number) => Number.isFinite(value) && value > 0),
+    ),
+  );
+
+  const queueParticipantIds: number[] = Array.from(
+    new Set<number>(
+      queueRows
+        .map((row: any) => Number(row.participant_id || 0))
+        .filter((value: number) => Number.isFinite(value) && value > 0),
+    ),
+  );
+
   return {
     participantIds,
+    registrationParticipantIds,
+    queueParticipantIds,
     assignmentCount: assignmentRows.length,
     registrationCount: registrationRows.length,
     queueCount: queueRows.length,
@@ -135,14 +157,40 @@ export async function loadMcuPendingParticipants(
   supabase: any,
   args: { queueSessionId: number; companyId: number; packageId: number },
 ): Promise<McuPendingParticipant[]> {
-  const { rows: participants } = await loadAllParticipants(supabase, args);
-  const participantIds = participants.map((row) => Number(row.id || 0)).filter(Boolean);
-  const informedRows = await loadInformedRows(supabase, args.queueSessionId, participantIds);
+  const { rows: participants, scope } = await loadAllParticipants(supabase, args);
+
+  const registeredIds = (scope.registrationParticipantIds || [])
+    .map((value: any) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+
+  const queuedIds = (scope.queueParticipantIds || [])
+    .map((value: any) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+
+  const alreadyRegisteredOrQueued = new Set<number>([
+    ...registeredIds,
+    ...queuedIds,
+  ]);
+
+  const pendingParticipants = participants.filter(
+    (row: any) =>
+      !alreadyRegisteredOrQueued.has(Number(row?.id || 0)),
+  );
+
+  const participantIds = pendingParticipants
+    .map((row: any) => Number(row.id || 0))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+
+  const informedRows = await loadInformedRows(
+    supabase,
+    args.queueSessionId,
+    participantIds,
+  );
   const informedMap = new Map<number, any>(
     informedRows.map((row) => [Number(row.participant_id || 0), row]),
   );
 
-  return participants.map((row) => {
+  return pendingParticipants.map((row) => {
     const informed = informedMap.get(Number(row.id || 0));
     return {
       ...row,
@@ -178,6 +226,23 @@ export async function markMcuParticipantInformed(
 
   if (!inSessionScope) {
     throw new Error("Peserta tidak termasuk roster Session MCU yang dipilih.");
+  }
+
+  const registeredIdsV514 = (scope.registrationParticipantIds || [])
+    .map((value: any) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+
+  const queuedIdsV514 = (scope.queueParticipantIds || [])
+    .map((value: any) => Number(value))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+
+  if (
+    registeredIdsV514.includes(args.participantId) ||
+    queuedIdsV514.includes(args.participantId)
+  ) {
+    throw new Error(
+      "Peserta sudah Registrasi Ulang / mengambil nomor antrean pada Session ini.",
+    );
   }
 
   const now = new Date().toISOString();

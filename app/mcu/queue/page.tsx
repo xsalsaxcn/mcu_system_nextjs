@@ -114,7 +114,10 @@ function McuQueueContent() {
   const [queueSessionId, setQueueSessionId] = useState("");
   const [optionsReady, setOptionsReady] = useState(false);
   const [participantSearch, setParticipantSearch] = useState("");
-  const [participantSort, setParticipantSort] = useState<"name" | "uninformed" | "informed">("uninformed");
+  // MCU_CORPORATE_DAYH_INFORMED_SORT_V514_1
+  const [participantSort, setParticipantSort] = useState<
+    "name" | "uninformed" | "informed" | "updated"
+  >("uninformed");
   // MCU_ADMIN_QUEUE_HISTORY_EDIT_V465
   const [historyEditTarget, setHistoryEditTarget] = useState<{ mode: "edit" | "cancel"; track: Track; entryId: number; queueNo: string; name: string; currentStatus: string } | null>(null);
   const [historyEditStatus, setHistoryEditStatus] = useState("WAITING");
@@ -163,12 +166,41 @@ function McuQueueContent() {
         .some((value) => String(value || "").toLowerCase().includes(term));
     });
 
-    if (participantSort === "uninformed") rows = rows.filter((row) => !row.informed_at);
-    if (participantSort === "informed") rows = rows.filter((row) => Boolean(row.informed_at));
+    const byName = (a: PendingParticipant, b: PendingParticipant) =>
+      String(a.name || "").localeCompare(
+        String(b.name || ""),
+        "id",
+        { sensitivity: "base" },
+      );
 
-    return [...rows].sort((a, b) =>
-      String(a.name || "").localeCompare(String(b.name || ""), "id", { sensitivity: "base" }),
-    );
+    // V514.1: dropdown is SORT only, never a filter.
+    // Informed participants remain visible until they register / receive queue.
+    return [...rows].sort((a, b) => {
+      if (participantSort === "uninformed") {
+        const aInformed = Boolean(a.informed_at);
+        const bInformed = Boolean(b.informed_at);
+        if (aInformed != bInformed) return aInformed ? 1 : -1;
+        return byName(a, b);
+      }
+
+      if (participantSort === "informed") {
+        const aInformed = Boolean(a.informed_at);
+        const bInformed = Boolean(b.informed_at);
+        if (aInformed != bInformed) return aInformed ? -1 : 1;
+
+        const aTime = a.informed_at ? new Date(a.informed_at).getTime() : 0;
+        const bTime = b.informed_at ? new Date(b.informed_at).getTime() : 0;
+        return bTime - aTime || byName(a, b);
+      }
+
+      if (participantSort === "updated") {
+        const aTime = a.informed_at ? new Date(a.informed_at).getTime() : 0;
+        const bTime = b.informed_at ? new Date(b.informed_at).getTime() : 0;
+        return bTime - aTime || byName(a, b);
+      }
+
+      return byName(a, b);
+    });
   }, [pendingParticipants, participantSearch, participantSort]);
   const trackAName = String(data?.queue_session?.track_a_name || "Lab Darah");
   const trackBName = String(data?.queue_session?.track_b_name || "Rontgen");
@@ -827,16 +859,28 @@ function McuQueueContent() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="text-xl font-black text-slate-900">List Peserta Hari H</div>
-                <div className="mt-1 text-sm text-slate-500">Panitia klik <b>Informed</b> setelah peserta sudah dihubungi. Pada tampilan default, peserta otomatis hilang setelah statusnya menjadi <b>Sudah di Informed</b>.</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Peserta tetap ada di list walaupun sudah <b>Informed</b>.
+                  Peserta baru keluar setelah <b>Registrasi Ulang / mengambil nomor antrean</b>
+                  pada Session ini.
+                </div>
               </div>
-              <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">{uninformedParticipantCount} peserta belum di informed</div>
+              <div className="flex flex-wrap gap-2">
+                <div className="rounded-xl bg-blue-50 px-3 py-2 text-sm font-black text-blue-700">
+                  {pendingParticipants.length} belum registrasi/antrian
+                </div>
+                <div className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-700">
+                  {uninformedParticipantCount} belum di informed
+                </div>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-[1fr_240px]">
               <input className="input" value={participantSearch} onChange={(e) => setParticipantSearch(e.target.value)} placeholder="Cari nama, NIK, No MCU, departemen..." />
               <select className="input" value={participantSort} onChange={(e) => setParticipantSort(e.target.value as any)}>
-                <option value="uninformed">Belum diinfokan dulu</option>
-                <option value="informed">Informed dulu</option>
+                <option value="uninformed">Belum di Informed dulu</option>
+                <option value="informed">Sudah di Informed dulu</option>
+                <option value="updated">Last Update terbaru</option>
                 <option value="name">Nama A - Z</option>
               </select>
             </div>
