@@ -205,7 +205,13 @@ export async function POST(req: NextRequest) {
     mcu_id: body.mcu_id || null,
     external_id: body.external_id || null,
     nik: body.nik || null,
-    employee_nik: body.employee_nik || null,
+    // MCU_CORPORATE_EMPLOYEE_NIK_BACKFILL_V515
+    // Binusian ID = employee_nik. Legacy Corporate rows may have it only
+    // in external_id. Never backfill from personal Identity NIK.
+    employee_nik:
+      programType === "corporate"
+        ? (body.employee_nik || body.external_id || null)
+        : (body.employee_nik || null),
     gender: body.gender || null,
     birth_date: body.birth_date || null,
     date_of_birth: body.date_of_birth || body.birth_date || null,

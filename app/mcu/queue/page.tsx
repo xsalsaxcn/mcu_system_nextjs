@@ -353,15 +353,31 @@ function McuQueueContent() {
     }
   }
 
+  // MCU_CORPORATE_EXACT_SESSION_CALL_NEXT_V515
+  // Every queue mutation must be bound to the exact Session currently shown.
+  // This prevents "Panggil Berikutnya" from falling back to a stale cookie Session.
   async function action(actionName: string, track?: Track, entryId?: number, extra: Record<string, any> = {}) {
     setBusy(true);
     setMessage("");
     setError("");
     try {
+      const exactQueueSessionId = Number(queueSessionId || 0);
+      if (!exactQueueSessionId) {
+        throw new Error("Pilih Session MCU / Lokasi terlebih dahulu.");
+      }
+
       const res = await fetch("/api/mcu/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: actionName, track, entry_id: entryId, company_id: Number(companyId), package_id: Number(packageId), ...extra }),
+        body: JSON.stringify({
+          action: actionName,
+          track,
+          entry_id: entryId,
+          company_id: Number(companyId),
+          package_id: Number(packageId),
+          queue_session_id: exactQueueSessionId,
+          ...extra,
+        }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memperbarui antrian.");
@@ -369,7 +385,8 @@ function McuQueueContent() {
       if ((actionName === "call-next" || actionName === "recall") && json.entry && track) {
         speakCall(track, json.entry);
       }
-      await load(true, companyId, packageId);
+      // Keep card "Berikutnya", table, and voice on the same exact Session.
+      await load(true, companyId, packageId, String(exactQueueSessionId));
       return true;
     } catch (err: any) {
       setError(err?.message || "Gagal memperbarui antrian.");
@@ -904,7 +921,7 @@ function McuQueueContent() {
                         <div className="text-xs text-slate-500">{row.department || "-"}</div>
                       </td>
                       <td className="p-3 text-xs font-semibold text-slate-600">
-                        <div>NIK Karyawan: {row.employee_nik || row.nik || "-"}</div>
+                        <div>NIK Karyawan: {row.employee_nik || row.external_id || "-"}</div>
                         <div>MCU: {row.mcu_id || row.external_id || "-"}</div>
                       </td>
                       <td className="p-3">

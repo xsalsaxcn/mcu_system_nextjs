@@ -967,8 +967,17 @@ function RegistrasiUlang({ user }: { user: any }) {
       }
 
       const p = json.participant || participant;
+      // MCU_CORPORATE_EMPLOYEE_NIK_FALLBACK_V515
+      // Binusian ID is NIK Karyawan. Legacy rows may still store it only
+      // in external_id, so expose it immediately in Detail Peserta.
       const nextParticipant = {
         ...p,
+        employee_nik:
+          String(p?.employee_nik || "").trim() ||
+          String(p?.external_id || "").trim() ||
+          String(participant?.employee_nik || "").trim() ||
+          String(participant?.external_id || "").trim() ||
+          "",
         session_registered: participant.session_registered,
         session_registered_at: participant.session_registered_at,
         queue_session_id: participant.queue_session_id,
@@ -1171,7 +1180,10 @@ function RegistrasiUlang({ user }: { user: any }) {
         mcu_id: form.mcu_id,
         external_id: form.external_id,
         nik: form.nik,
-        employee_nik: form.employee_nik,
+        employee_nik:
+          String(form.employee_nik || "").trim() ||
+          String(form.external_id || "").trim() ||
+          null,
         gender: form.gender,
         birth_date: form.birth_date || form.date_of_birth || null,
         date_of_birth: form.birth_date || form.date_of_birth || null,
@@ -1583,7 +1595,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-black text-slate-900">{p.name}</div>
                           <div className="mt-0.5 truncate text-xs font-semibold text-slate-500">
-                            NIK {p.employee_nik || p.nik || "-"} · MCU {p.mcu_id || p.external_id || "-"}
+                            NIK {p.employee_nik || p.external_id || "-"} · MCU {p.mcu_id || "-"}
                           </div>
                           <div className="mt-1 truncate text-[11px] text-slate-400">{p.source_name || "-"}</div>
                         </div>
@@ -1908,7 +1920,9 @@ function StationPrintLabel({
   queueInfo?: any;
 }) {
   const legacyMcuId = String(form?.mcu_id || form?.external_id || form?.nomor_mcu || form?.id || "").trim();
-  const employeeNik = String(form?.employee_nik || form?.nik || "").trim();
+  const employeeNik = String(
+    form?.employee_nik || form?.external_id || ""
+  ).trim();
   const nameText = String(form?.name || form?.nama || form?.full_name || "-").trim().toUpperCase();
   const isCorporate = String(form?.program_type || "").toLowerCase() === "corporate" || Number(form?.company_id || 0) > 0;
   const institution = String(
