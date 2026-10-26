@@ -1,5 +1,7 @@
 "use client";
 
+// MCU_CORPORATE_PUBLIC_OPERATOR_NOTIFICATION_LOCK_V517
+
 import { FormEvent, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 
@@ -109,6 +111,12 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
   }, [token]);
 
   async function enableBrowserAlerts() {
+    // V517: Public Queue monitor is display-only.
+    // Browser/vibrate/personal speech alerts are allowed ONLY in ?mode=participant.
+    if (!participantMode) {
+      setAlertsEnabled(false);
+      return;
+    }
     setAlertsEnabled(true);
     try {
       if (typeof Notification !== "undefined" && Notification.permission === "default") {
@@ -126,44 +134,11 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
     } catch {}
   }
 
-  function notifyPrepare(track: "A" | "B", queue: any, label: string) {
-    const prepare = queue?.prepare;
-    const current = queue?.current;
-    if (!prepare?.queue_number || !current?.queue_number || participantMode) return;
-
-    const key = `${track}:${current.queue_number}:${prepare.queue_number}`;
-    if (lastAlertKeyRef.current.includes(key)) return;
-    lastAlertKeyRef.current = `${lastAlertKeyRef.current}|${key}`.slice(-800);
-
-    const serviceLabel = String(label || (track === "A" ? "Layanan A" : "Layanan B"));
-    const body = `Nomor Antrian Anda tersisa 3 orang di depan Anda. Silakan segera menuju lokasi pemeriksaan ${serviceLabel}.`;
-    setPreparePopup({
-      key,
-      track,
-      queueNumber: String(prepare.queue_number || ""),
-      participantName: String(prepare.participant_name || ""),
-      label: serviceLabel,
-      message: body,
-    });
-
-    if (!alertsEnabled) return;
-    try {
-      if ("vibrate" in navigator) navigator.vibrate([450, 140, 450, 140, 700]);
-    } catch {}
-    try {
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification(`Persiapan antrian ${prepare.queue_number}`, { body: `${track} · ${serviceLabel} — ${body}` });
-      }
-    } catch {}
-    try {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(`Nomor antrian ${prepare.queue_number}. Tersisa 3 orang di depan Anda. Silakan segera menuju lokasi pemeriksaan ${serviceLabel}.`);
-        utterance.lang = "id-ID";
-        utterance.rate = 0.9;
-        window.speechSynthesis.speak(utterance);
-      }
-    } catch {}
+  function notifyPrepare(_track: "A" | "B", _queue: any, _label: string) {
+    // V517 LOCK:
+    // Public monitor/operator must never produce participant preparation popup,
+    // Notification API, vibration, or personal preparation speech.
+    return;
   }
 
   function notifyParticipantTrack(track: "A" | "B", trackData: any, label: string) {
@@ -320,16 +295,16 @@ export default function McuPublicQueuePage({ params }: { params: { token: string
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-white">
-      {preparePopup ? <PreparePopup popup={preparePopup} onClose={() => setPreparePopup(null)} /> : null}
+      {/* V517: no participant preparation popup on Public Queue monitor. */}
       <div className="mx-auto w-full max-w-[1600px] rounded-3xl border border-white/20 bg-slate-900 p-6 shadow-2xl">
         <div className="grid items-center gap-5 lg:grid-cols-[1fr_220px]">
           <div className="text-center lg:pl-12">
             <div className="text-sm font-black uppercase tracking-[0.3em] text-slate-300">Antrian MCU Corporate</div>
             <h1 className="mt-4 text-3xl font-black leading-tight sm:text-4xl">{session?.package_name || "Paket MCU"}</h1>
             <div className="mt-3 text-base font-bold text-slate-200">{session?.company_name || "MCU Corporate"}</div>
-            <button onClick={enableBrowserAlerts} className={`mt-4 rounded-xl px-4 py-2 text-sm font-black ${alertsEnabled ? "bg-emerald-500 text-white" : "bg-white text-slate-900"}`}>
-              {alertsEnabled ? "🔔 Notifikasi Browser Aktif" : "Aktifkan Notifikasi Browser"}
-            </button>
+            <div className="mt-4 inline-flex rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-black text-slate-300">
+              🔒 Monitor Publik · Notifikasi Peserta Nonaktif
+            </div>
           </div>
 
           <aside className="rounded-3xl bg-white p-3 text-center text-slate-950 shadow-xl">
@@ -358,12 +333,6 @@ function QueueCard({ track, name, data, accent }: { track: "A" | "B"; name: stri
       <div className="mt-3 text-center text-sm font-bold uppercase tracking-wide text-slate-500">Sedang Dipanggil</div>
       <div className={`mt-3 text-center text-6xl font-black leading-none sm:text-8xl ${textClass}`}>{data?.current?.queue_number || "-"}</div>
       <div className="mt-3 min-h-7 text-center text-xl font-black text-slate-900">{data?.current?.participant_name || "-"}</div>
-
-      <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
-        <div className="text-xs font-black uppercase tracking-wide text-amber-700">Bersiap · 3 nomor lagi</div>
-        <div className="mt-1 text-3xl font-black text-amber-900">{data?.prepare?.queue_number || "-"}</div>
-        <div className="mt-1 truncate text-sm font-bold text-amber-800">{data?.prepare?.participant_name || "-"}</div>
-      </div>
 
       <div className="mt-6 grid grid-cols-3 gap-3">
         <div className="rounded-2xl bg-slate-100 p-4 text-center"><div className="text-xs font-bold uppercase text-slate-500">Berikutnya</div><div className="mt-1 text-2xl font-black text-slate-950 sm:text-3xl">{data?.next?.queue_number || "-"}</div><div className="mt-1 truncate text-xs font-bold text-slate-600">{data?.next?.participant_name || "-"}</div></div>
