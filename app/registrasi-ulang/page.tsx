@@ -732,6 +732,11 @@ function RegistrasiUlang({ user }: { user: any }) {
             .filter(Boolean).join(" / ") || null,
         track_a_name: session?.track_a_name || json?.track_a_name || "Lab Darah",
         track_b_name: session?.track_b_name || json?.track_b_name || "Rontgen",
+        // MCU_CORPORATE_PRINT_QUEUE_SESSION_ON_LABEL_V513
+        // Session label must come from the exact queue_session used for A/B.
+        queue_session_name: String(session?.session_name || "").trim() || null,
+        queue_session_location: String(session?.location || "").trim() || null,
+        queue_session_date: String(session?.session_date || "").trim() || null,
       };
       setQueueInfo(merged);
       return merged;
@@ -1911,6 +1916,32 @@ function StationPrintLabel({
       ? (form?.company_name || form?.institution_name || form?.company || form?.source_name || "-")
       : (form?.company_name || form?.institution_name || form?.company || "BPIP / CAPASKA")
   ).trim();
+  const queueSessionLocation = String(
+    queueInfo?.queue_session_location || queueInfo?.location || ""
+  ).trim();
+  const queueSessionName = String(
+    queueInfo?.queue_session_name || queueInfo?.session_name || ""
+  ).trim();
+  const queueSessionDateRaw = String(
+    queueInfo?.queue_session_date || queueInfo?.session_date || ""
+  ).trim();
+  const queueSessionDateLabel = (() => {
+    if (!queueSessionDateRaw) return "";
+    const raw = queueSessionDateRaw.slice(0, 10);
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return queueSessionDateRaw.toUpperCase();
+
+    const monthNames = [
+      "JAN", "FEB", "MAR", "APR", "MEI", "JUN",
+      "JUL", "AGU", "SEP", "OKT", "NOV", "DES",
+    ];
+    const monthIndex = Number(match[2]) - 1;
+    return `${Number(match[3])} ${monthNames[monthIndex] || match[2]} ${match[1]}`;
+  })();
+  const queueSessionText = [
+    (queueSessionLocation || queueSessionName).toUpperCase(),
+    queueSessionDateLabel,
+  ].filter(Boolean).join(" · ");
   const birthDate = String(form?.date_of_birth || form?.birth_date || form?.tanggal_lahir || form?.dob || "").trim();
   const provinceText = String(form?.province || form?.provinsi || form?.location || form?.lokasi || "").trim();
   const stationText =
@@ -2128,6 +2159,26 @@ function StationPrintLabel({
               >
                 {institution || "-"}
               </div>
+
+              {queueSessionText ? (
+                <div
+                  style={{
+                    marginTop: "3px",
+                    fontSize: `${Math.max(5, safeFont - 4)}px`,
+                    lineHeight: 1,
+                    fontWeight: 800,
+                    whiteSpace: "normal",
+                    wordBreak: "normal",
+                    overflowWrap: "normal",
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: 2,
+                    overflow: "hidden",
+                  }}
+                >
+                  SESSION: {queueSessionText}
+                </div>
+              ) : null}
             </div>
 
             {showQr ? (
