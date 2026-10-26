@@ -686,8 +686,10 @@ export async function importParticipantsFromExcel(
     description: options.description,
     program_type: programType,
   });
-  // Resolve selected Corporate Session/Lokasi once and verify that it belongs
-  // to the same company + package chosen on Import.
+  // MCU_CORPORATE_IMPORT_VALIDATE_SESSION_COMPANY_ONLY_V508
+  // Resolve selected Corporate Session/Lokasi once.
+  // Session wajib milik company yang sama, tetapi package Session TIDAK menentukan
+  // package peserta. Paket Peserta tetap pilihan eksplisit pada halaman Import.
   let corporateSessionRowV466: any = null;
   const requestedCorporateSessionIdV466 = Number(options.corporate_session?.queue_session_id || 0);
   if (programType === PROGRAM_CORPORATE && requestedCorporateSessionIdV466 > 0) {
@@ -698,8 +700,8 @@ export async function importParticipantsFromExcel(
       .maybeSingle();
     if (sessionResultV466.error) throw sessionResultV466.error;
     if (!sessionResultV466.data) throw new Error("Session MCU / Lokasi yang dipilih tidak ditemukan.");
-    if (Number(sessionResultV466.data.company_id || 0) !== Number(companyId) || Number(sessionResultV466.data.package_id || 0) !== Number(packageId)) {
-      throw new Error("Session MCU / Lokasi tidak sesuai dengan perusahaan + paket import.");
+    if (Number(sessionResultV466.data.company_id || 0) !== Number(companyId)) {
+      throw new Error("Session MCU / Lokasi tidak sesuai dengan perusahaan import.");
     }
     corporateSessionRowV466 = sessionResultV466.data;
   }

@@ -18,6 +18,10 @@ function response(data: any, status = 200) {
   return res;
 }
 
+// MCU_CORPORATE_IMPORT_SESSION_COMPANY_SCOPE_V508
+// Session MCU Corporate untuk Import di-scope oleh company_id saja.
+// package_id pada request tetap diterima untuk backward compatibility,
+// tetapi TIDAK menentukan Session; Paket Peserta tetap pilihan Import.
 export async function GET(req: NextRequest) {
   const companyId = Number(req.nextUrl.searchParams.get("company_id") || 0);
   const packageId = Number(req.nextUrl.searchParams.get("package_id") || 0);
@@ -34,7 +38,6 @@ export async function GET(req: NextRequest) {
         .from("mcu_queue_sessions")
         .select("*")
         .eq("company_id", companyId)
-        .eq("package_id", packageId)
         .eq("is_active", 1)
         .order("session_date", { ascending: true })
         .order("id", { ascending: true }),

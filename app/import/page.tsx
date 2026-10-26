@@ -745,6 +745,8 @@ function ImportForm({ user }: { user: any }) {
 
   // MCU_CORPORATE_IMPORT_USE_REGISTRATION_SESSIONS_V476
   // MCU_CORPORATE_IMPORT_ACTIVE_SESSION_LIST_V479
+  // MCU_CORPORATE_IMPORT_SESSION_LABEL_V508
+  // Session tersedia berdasarkan perusahaan; package peserta tetap terpisah.
   async function loadCorporateSessionOptionsV471(companyId: string, packageId: string) {
     const res = await fetch(
       `/api/mcu/import-active-sessions?company_id=${encodeURIComponent(companyId)}&package_id=${encodeURIComponent(packageId)}&t=${Date.now()}`,
@@ -1670,7 +1672,7 @@ function ImportForm({ user }: { user: any }) {
                   ? "Membaca session..."
                   : corporateSessionsV466.length
                     ? `${corporateSessionsV466.length} session tersedia`
-                    : "Belum ada Session MCU untuk perusahaan + paket ini"}
+                    : "Belum ada Session MCU aktif untuk perusahaan ini"}
               </div>
             </div>
 
@@ -1919,7 +1921,7 @@ function ImportForm({ user }: { user: any }) {
                         <option value="">- Pilih Session MCU / Lokasi -</option>
                         {corporateSessionsV466.map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}
                       </select>
-                      {!corporateSessionsV466.length ? <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Belum ada Session MCU/Lokasi untuk perusahaan + paket ini. Buat Session MCU terlebih dahulu.</div> : null}
+                      {!corporateSessionsV466.length ? <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">Belum ada Session MCU/Lokasi aktif untuk perusahaan ini. Buat Session MCU terlebih dahulu.</div> : null}
                     </div>
                     {/* MCU_CORPORATE_IMPORT_LOCATION_DROPDOWN_V473 */}
                     <div className="md:col-span-2">
