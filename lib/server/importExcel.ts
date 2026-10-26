@@ -1206,6 +1206,9 @@ export async function importParticipantsFromExcel(
             const matchesV491 = existingResultV491.data || [];
             if (matchesV491.length === 1) {
               const participantIdV491 = Number(matchesV491[0].id || 0);
+              // MCU_CORPORATE_IMPORT_BULK_PERFORMANCE_V509
+              // Current Corporate schema has employee_nik/department/phone.
+              // Position remains Session-assignment data, not a participants column.
               const coreUpdateV491 = await supabase.from("participants").update({
                 source_id: sourceId,
                 company_id: companyId,
@@ -1213,20 +1216,11 @@ export async function importParticipantsFromExcel(
                 external_id: base.external_id || null,
                 nik: base.nik || null,
                 birth_date: base.birth_date || null,
+                employee_nik: base.external_id || null,
+                department: base.department || null,
+                phone: base.phone || null,
               }).eq("id", participantIdV491);
               if (coreUpdateV491.error) throw coreUpdateV491.error;
-
-              const optionalFieldsV491: Array<[string, any]> = [
-                ["employee_nik", base.external_id || null],
-                ["department", base.department || null],
-                ["position", base.position || null],
-                ["phone", base.phone || null],
-              ];
-              for (const [fieldV491, valueV491] of optionalFieldsV491) {
-                if (valueV491 === null || valueV491 === "") continue;
-                const optionalUpdateV491 = await supabase.from("participants").update({ [fieldV491]: valueV491 }).eq("id", participantIdV491);
-                if (optionalUpdateV491.error && !schemaColumnMissingV466(optionalUpdateV491.error)) throw optionalUpdateV491.error;
-              }
 
               if (corporateSessionRowV466?.id) {
                 const assignmentV491 = await supabase
@@ -1420,6 +1414,19 @@ export async function importParticipantsFromExcel(
     const chunk = insertRows.slice(i, i + chunkSize);
     const participantRows = chunk.map((row) => {
       const { __vaccination_import, __corporate_import, ...participant } = row;
+
+      if (programType === PROGRAM_CORPORATE) {
+        return {
+          ...participant,
+          // V509: known Corporate profile fields masuk di bulk INSERT yang sama.
+          // position sengaja tidak di participants; tetap milik Session assignment.
+          employee_nik: __corporate_import?.employee_nik || null,
+          department: __corporate_import?.department || null,
+          phone: __corporate_import?.phone || null,
+          label_print_count: 0,
+        };
+      }
+
       return participant;
     });
 
@@ -1471,47 +1478,48 @@ export async function importParticipantsFromExcel(
       const insertedRows = data || [];
 
       if (programType === PROGRAM_CORPORATE && insertedRows.length) {
-        for (let idx = 0; idx < insertedRows.length; idx += 1) {
-          const participantId = Number(insertedRows[idx]?.id || 0);
-          const meta = chunk[idx]?.__corporate_import || {};
-          if (!participantId) continue;
+        // V509: profile Corporate sudah masuk bersama bulk INSERT.
+        // Semua exact Session assignment di-upsert sekaligus per chunk.
+        const assignmentRowsV509 = insertedRows
+          .map((inserted: any, idx: number) => {
+            const participantId = Number(inserted?.id || 0);
+            const meta = chunk[idx]?.__corporate_import || {};
+            const queueSessionId = Number(meta.queue_session_id || 0);
+            if (!participantId || !queueSessionId) return null;
 
-          // Optional participant profile columns were introduced in later MCU versions.
-          // Update each field independently so older schemas keep importing safely.
-          const optionalParticipantFields: Array<[string, any]> = [
-            ["employee_nik", meta.employee_nik || null],
-            ["department", meta.department || null],
-            ["position", meta.position || null],
-            ["phone", meta.phone || null],
-          ];
-          for (const [field, value] of optionalParticipantFields) {
-            if (value === null || value === "") continue;
-            const updateResult = await supabase.from("participants").update({ [field]: value }).eq("id", participantId);
-            if (updateResult.error && !schemaColumnMissingV466(updateResult.error)) throw updateResult.error;
-          }
+            return {
+              participant_id: participantId,
+              queue_session_id: queueSessionId,
+              source_id: sourceId,
+              location_name: meta.location_name || null,
+              session_date: meta.session_date || null,
+              department: meta.department || null,
+              position: meta.position || null,
+              raw_json: meta.raw_json || {},
+              updated_at: new Date().toISOString(),
+            };
+          })
+          .filter(Boolean);
 
-          if (Number(meta.queue_session_id || 0) > 0) {
-            const assignmentResult = await supabase
-              .from("mcu_participant_session_assignments")
-              .upsert({
-                participant_id: participantId,
-                queue_session_id: Number(meta.queue_session_id),
-                source_id: sourceId,
-                location_name: meta.location_name || null,
-                session_date: meta.session_date || null,
-                department: meta.department || null,
-                position: meta.position || null,
-                raw_json: meta.raw_json || {},
-                updated_at: new Date().toISOString(),
-              }, { onConflict: "participant_id,queue_session_id" });
-            if (assignmentResult.error) throw assignmentResult.error;
-            stats.corporate_session_assignments_v466 += 1;
-          }
+        if (assignmentRowsV509.length) {
+          const assignmentResultV509 = await supabase
+            .from("mcu_participant_session_assignments")
+            .upsert(assignmentRowsV509, {
+              onConflict: "participant_id,queue_session_id",
+            });
+          if (assignmentResultV509.error) throw assignmentResultV509.error;
+          stats.corporate_session_assignments_v466 += assignmentRowsV509.length;
         }
       }
 
       // LABEL_PRINT_MARK_NON_VACCINATION_V216
-      await markInsertedParticipantsLabelUnprintedV216(supabase, insertedRows.map((p: any) => Number(p.id)));
+      // Corporate V509 sudah insert barcode null + label_print_count=0.
+      if (programType !== PROGRAM_CORPORATE) {
+        await markInsertedParticipantsLabelUnprintedV216(
+          supabase,
+          insertedRows.map((p: any) => Number(p.id)),
+        );
+      }
       stats.participants_created += insertedRows.length || chunk.length;
     }
   }
