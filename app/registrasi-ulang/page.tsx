@@ -2007,17 +2007,20 @@ function StationPrintLabel({
   // for the exact selected Session. Participant then uses the existing
   // scan/input Binusian ID flow on that public page.
   const sessionPublicToken = String(queueInfo?.public_token || "").trim();
-  const sessionPublicQueueUrl =
+  // MCU_CORPORATE_STICKER_PUBLIC_PARTICIPANT_QR_V525_DEV
+  // IMPORTANT: this MUST match the Public Queue "SCAN UNTUK PESERTA" QR
+  // for this exact Session. No participant identity is embedded in URL.
+  const sessionParticipantEntryUrl =
     isCorporate &&
     sessionPublicToken &&
     typeof window !== "undefined"
       ? `${window.location.origin}/mcu/public/queue/${encodeURIComponent(
           sessionPublicToken,
-        )}`
+        )}?mode=participant`
       : "";
 
   const qrValue = isCorporate
-    ? sessionPublicQueueUrl
+    ? sessionParticipantEntryUrl
     : (employeeNik || legacyMcuId || nameText);
 
   if (isCorporate) {
