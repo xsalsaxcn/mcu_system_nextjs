@@ -2,6 +2,7 @@
 
 // MCU_CORPORATE_VACCINATION_STRUCTURE_V452
 // MCU_CORPORATE_EXISTING_QUEUE_RELEASE_BUTTON_V502
+// MCU_CORPORATE_REG_SESSION_QUEUE_LABEL_GUARD_V512
 
 // MCU_STICKER_LAYOUT_ROLLBACK_ONLY_V450
 
@@ -332,6 +333,8 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [sessionLocked, setSessionLocked] = useState(false);
   const autoRetrieveKeyRef = useRef("");
   const restoredLockRef = useRef(false);
+  const labelSettingsRequestRef = useRef(0);
+  const [labelSetupErrorV512, setLabelSetupErrorV512] = useState("");
   const [keyword, setKeyword] = useState("");
   const [resultFilter, setResultFilter] = useState("");
   const [results, setResults] = useState<Participant[]>([]);
@@ -560,6 +563,36 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }, [program, sessionLocked, sourceId]);
 
+  // V512: changing Database Existing is an explicit context change.
+  // Keep refresh persistence, but never carry a locked Session from another database.
+  function changeDatabaseSourceV512(nextSourceId: string) {
+    if (String(nextSourceId) === String(sourceId)) return;
+
+    autoRetrieveKeyRef.current = "";
+    setSourceId(nextSourceId);
+
+    if (program !== "corporate") return;
+
+    setRegistrationSessionIdV491("");
+    setSessionLocked(false);
+    setSelected(null);
+    setForm(null);
+    setResults([]);
+    setQueueInfo(null);
+    setPrintReady(false);
+
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("mcu_reg_session_locked");
+      window.localStorage.removeItem("mcu_reg_locked_session");
+      window.localStorage.removeItem("mcu_reg_locked_database_source");
+      window.localStorage.removeItem("mcu_reg_locked_source");
+    }
+
+    setMessage(
+      "Database Existing berubah. Session lama dibuka demi keamanan. Pilih dan kunci Session MCU/Lokasi yang sesuai database ini.",
+    );
+  }
+
   function toggleRegistrationSessionLock() {
     if (program !== "corporate") {
       setMessage("Kunci Session hanya digunakan untuk MCU Corporate.");
@@ -654,6 +687,7 @@ function RegistrasiUlang({ user }: { user: any }) {
   async function loadQueueInfo(
     participantId?: number,
     queueSessionId?: number,
+    existingOnly = true,
   ) {
     const id = Number(participantId || 0);
     const context = getSelectedSessionContext();
@@ -666,8 +700,8 @@ function RegistrasiUlang({ user }: { user: any }) {
       const params = new URLSearchParams({
         participant_id: String(id),
         queue_session_id: String(sessionId),
-        existing_only: "1",
       });
+      if (existingOnly) params.set("existing_only", "1");
       const res = await fetch(
         `/api/mcu/queue/participant?${params.toString()}`,
         { cache: "no-store" },
@@ -707,7 +741,7 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
   }
 
-  async function releaseExistingQueueNumberV502() {
+  async function releaseQueueNumberV512() {
     const participantId = Number(form?.id || 0);
     const sessionId = Number(getSelectedSessionContext()?.queue_session_id || 0);
 
@@ -721,23 +755,43 @@ function RegistrasiUlang({ user }: { user: any }) {
     }
 
     setReleasingQueue(true);
-    setMessage("Mengambil nomor antrean existing dari Session MCU...");
+    setMessage("Memeriksa nomor antrean exact Session MCU...");
     try {
-      const info = await loadQueueInfo(participantId, sessionId);
-      const aNumber = String(info?.a_queue_number || "").trim();
-      const bNumber = String(info?.b_queue_number || "").trim();
+      // Step 1: reuse existing number when it already exists.
+      let info = await loadQueueInfo(participantId, sessionId, true);
+      let aNumber = String(info?.a_queue_number || "").trim();
+      let bNumber = String(info?.b_queue_number || "").trim();
 
       if (!aNumber && !bNumber) {
-        setMessage("Nomor antrean belum ditemukan pada Session ini. Tombol ini tidak membuat nomor baru agar tidak terjadi antrean ganda.");
+        // Never create queue before exact-session Registrasi Ulang.
+        if (!isRegisteredForSelectedSession(form)) {
+          setMessage(
+            "Peserta belum Registrasi Ulang pada Session ini. Klik Simpan Data terlebih dahulu, lalu Rilis Nomor Antrian.",
+          );
+          return;
+        }
+
+        // Step 2: exact registration binding exists, so API may safely allocate
+        // the next A/B number for this exact queue_session_id.
+        setMessage("Merilis nomor antrean baru pada exact Session MCU...");
+        info = await loadQueueInfo(participantId, sessionId, false);
+        aNumber = String(info?.a_queue_number || "").trim();
+        bNumber = String(info?.b_queue_number || "").trim();
+      }
+
+      if (!aNumber && !bNumber) {
+        setMessage(
+          "Nomor antrean belum dapat dirilis. Pastikan peserta sudah tersimpan pada Session MCU yang sedang dipilih.",
+        );
         return;
       }
 
       setPrintReady(true);
       setMessage(
-        `Nomor antrean berhasil dirilis ke label: ${[aNumber, bNumber].filter(Boolean).join(" / ")}. Nomor existing tetap dipakai.`
+        `Nomor antrean aktif: ${[aNumber, bNumber].filter(Boolean).join(" / ")}. Exact Session tetap dipakai dan nomor existing tidak diduplikasi.`,
       );
     } catch (error: any) {
-      setMessage(error?.message || "Gagal mengambil nomor antrean existing.");
+      setMessage(error?.message || "Gagal merilis nomor antrean.");
     } finally {
       setReleasingQueue(false);
     }
@@ -969,42 +1023,80 @@ function RegistrasiUlang({ user }: { user: any }) {
 
 
   async function loadPackageLabelSettings(packageId?: number | null, programType?: string) {
+    const requestId = ++labelSettingsRequestRef.current;
+    const effectiveProgram = programType || program;
+
     if (!packageId) {
-      setPackageStationOptions(STATION_PRINT_OPTIONS);
-      setStationCopies(createDefaultStationCopies());
+      if (requestId !== labelSettingsRequestRef.current) return;
+      setLabelSetupErrorV512("");
+      if (effectiveProgram === "corporate") {
+        // Corporate must fail closed: never invent station labels that are not
+        // selected in Setup Parameters.
+        setPackageStationOptions([]);
+        setStationCopies({});
+      } else {
+        setPackageStationOptions(STATION_PRINT_OPTIONS);
+        setStationCopies(createDefaultStationCopies());
+      }
       return;
     }
 
     try {
       const params = new URLSearchParams({
         package_id: String(packageId),
-        program: programType || program
+        program: effectiveProgram,
       });
 
-      const res = await fetch(`/api/package-label-settings?${params.toString()}`, { cache: "no-store" });
-      const json = await res.json();
+      const res = await fetch(`/api/package-label-settings?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
 
-      const apiStations = programType === "corporate" && Array.isArray(json.available_stations)
-        ? apiStationsToOptions(json.available_stations)
-        : STATION_PRINT_OPTIONS;
-      const nextStations = apiStations.length ? apiStations : STATION_PRINT_OPTIONS;
+      // Ignore late responses from a previously selected participant/session.
+      if (requestId !== labelSettingsRequestRef.current) return;
 
-      setPackageStationOptions(nextStations);
-
-      if (!json.ok || !json.settings?.length) {
-        setStationCopies(
-          Object.fromEntries(nextStations.map((station) => [station.key, station.defaultCopies])) as Record<string, number>
-        );
-        return;
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || "Gagal memuat Setup Parameters paket.");
       }
 
+      if (
+        effectiveProgram === "corporate" &&
+        Number(json?.package_id || 0) !== Number(packageId)
+      ) {
+        throw new Error("Response Setup Parameters berasal dari paket yang berbeda.");
+      }
+
+      const apiStations =
+        effectiveProgram === "corporate" && Array.isArray(json.available_stations)
+          ? apiStationsToOptions(json.available_stations)
+          : STATION_PRINT_OPTIONS;
+
+      // Corporate is strict: available_stations from exact package_parameters
+      // is the only authority. No full-static fallback is allowed.
+      const nextStations =
+        effectiveProgram === "corporate"
+          ? apiStations
+          : (apiStations.length ? apiStations : STATION_PRINT_OPTIONS);
+
+      if (effectiveProgram === "corporate" && !nextStations.length) {
+        throw new Error(
+          "Setup Parameters paket ini kosong. Simpan mapping paket terlebih dahulu.",
+        );
+      }
+
+      setPackageStationOptions(nextStations);
+      setLabelSetupErrorV512("");
+
       const next = Object.fromEntries(
-        nextStations.map((station) => [station.key, station.defaultCopies])
+        nextStations.map((station) => [station.key, station.defaultCopies]),
       ) as Record<string, number>;
 
-      json.settings.forEach((setting: any) => {
+      (json.settings || []).forEach((setting: any) => {
         if (setting.station_key in next) {
-          next[setting.station_key] = Math.max(0, Math.min(20, Number(setting.default_copies ?? 0)));
+          next[setting.station_key] = Math.max(
+            0,
+            Math.min(20, Number(setting.default_copies ?? 0)),
+          );
         }
       });
 
@@ -1020,16 +1112,27 @@ function RegistrasiUlang({ user }: { user: any }) {
         font_size: nextFont,
         show_border: nextBorder ? 1 : 0,
         show_qr: nextQr ? 1 : 0,
-        show_footer_text: nextFooter ? 1 : 0
+        show_footer_text: nextFooter ? 1 : 0,
       });
 
       setLabelFontSize(nextFont);
       setShowLabelBorder(nextBorder);
       setShowLabelQr(nextQr);
       setShowLabelBarcodeText(nextFooter);
-    } catch {
-      setPackageStationOptions(STATION_PRINT_OPTIONS);
-      setStationCopies(createDefaultStationCopies());
+    } catch (error: any) {
+      if (requestId !== labelSettingsRequestRef.current) return;
+
+      if (effectiveProgram === "corporate") {
+        setPackageStationOptions([]);
+        setStationCopies({});
+        setLabelSetupErrorV512(
+          error?.message ||
+            "Gagal memuat Setup Parameters. Barcode dinonaktifkan agar station yang salah tidak tercetak.",
+        );
+      } else {
+        setPackageStationOptions(STATION_PRINT_OPTIONS);
+        setStationCopies(createDefaultStationCopies());
+      }
     }
   }
 
@@ -1329,7 +1432,7 @@ function RegistrasiUlang({ user }: { user: any }) {
 
           <div>
             <label className="label">Database Existing</label>
-            <select className="input" value={sourceId} onChange={(e) => { autoRetrieveKeyRef.current = ""; setSourceId(e.target.value); }}>
+            <select className="input" value={sourceId} onChange={(e) => changeDatabaseSourceV512(e.target.value)}>
               <option value="all">Semua Database</option>
               {sources.map((s) => (
                 <option key={`source-${s.id}`} value={String(s.id)}>{s.name} - {s.institution_name || s.company_name || "-"}</option>
@@ -1400,6 +1503,11 @@ function RegistrasiUlang({ user }: { user: any }) {
             {message}
           </div>
         )}
+        {program === "corporate" && labelSetupErrorV512 ? (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">
+            Setup Label belum aman: {labelSetupErrorV512}
+          </div>
+        ) : null}
       </section>
 
       {true && (
@@ -1622,7 +1730,7 @@ function RegistrasiUlang({ user }: { user: any }) {
                         type="button"
                         className="btn-secondary"
                         disabled={saving || releasingQueue || !form?.id || !getSelectedSessionContext()?.queue_session_id}
-                        onClick={releaseExistingQueueNumberV502}
+                        onClick={releaseQueueNumberV512}
                       >
                         {releasingQueue ? "Merilis..." : "Rilis Nomor Antrian"}
                       </button>

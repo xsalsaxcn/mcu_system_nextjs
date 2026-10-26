@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/server/session";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
+// MCU_CORPORATE_STRICT_PACKAGE_PARAMETER_STATIONS_V512
 type StationTemplate = {
   key: string;
   label: string;
@@ -328,11 +329,15 @@ export async function GET(req: NextRequest) {
     const hasRelevantSavedSetting = settings.some((setting: any) => savedMap.has(String(setting.station_key || "")));
 
     return ok({
+      package_id: packageId,
+      program_type: "corporate",
       settings,
       source: hasRelevantSavedSetting ? "database" : "default",
       available_stations: plan.availableStations,
       non_package_parameters: plan.nonPackageParameters,
-      package_parameters: plan.packageParameters
+      package_parameters: plan.packageParameters,
+      mapping_parameter_ids: plan.packageParameters.map((row: any) => Number(row.parameter_id || 0)).filter(Boolean),
+      mapping_parameter_count: plan.packageParameters.length
     });
   } catch (planError: any) {
     return fail(planError?.message || "Gagal memuat isi paket Corporate untuk setting barcode.", 500);

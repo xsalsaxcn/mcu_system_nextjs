@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 import { fail, ok } from "@/lib/server/response";
 
 // MCU_REG_ONSPOT_SESSION_V440
+// MCU_CORPORATE_DATABASE_SESSION_MISMATCH_GUARD_V512
 
 const SELECT_COLUMNS = `
   id,
@@ -187,6 +188,40 @@ export async function GET(req: NextRequest) {
           .filter(Boolean),
       ),
     );
+  }
+
+  // V512: Database Existing + Session must refer to the same imported batch.
+  // This prevents e.g. source ALSUT from being UNIONed with Session Serpong.
+  const hasExplicitDatabaseV512 =
+    sourceId !== "all" && !exactSessionMatch && !legacySessionMatch;
+  if (
+    program === "corporate" &&
+    hasExplicitDatabaseV512 &&
+    queueSession?.id
+  ) {
+    const numericSourceIdV512 = Number(sourceId);
+    if (!Number.isFinite(numericSourceIdV512) || numericSourceIdV512 <= 0) {
+      return fail("Database Existing tidak valid.", 400);
+    }
+
+    const assignmentMatchV512 = await supabase
+      .from("mcu_participant_session_assignments")
+      .select("participant_id")
+      .eq("queue_session_id", Number(queueSession.id))
+      .eq("source_id", numericSourceIdV512)
+      .limit(1)
+      .maybeSingle();
+
+    if (assignmentMatchV512.error) {
+      return fail(assignmentMatchV512.error.message, 500);
+    }
+
+    if (!assignmentMatchV512.data) {
+      return fail(
+        "Database Existing yang dipilih tidak terhubung ke Session MCU ini. Pilih Session lokasi/tanggal yang sesuai agar peserta antar lokasi tidak tercampur.",
+        409,
+      );
+    }
   }
 
   const keyword = clean(req.nextUrl.searchParams.get("keyword") || "");
