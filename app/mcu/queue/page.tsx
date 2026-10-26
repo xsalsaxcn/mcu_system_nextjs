@@ -374,6 +374,67 @@ function McuQueueContent() {
     }
   }
 
+  // MCU_CORPORATE_SESSION_TEST_RESET_BUTTON_V511
+  async function resetSessionTesting() {
+    if (!queueSessionId) return;
+
+    const sessionLabel = [
+      data?.queue_session?.location,
+      data?.queue_session?.session_date,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const confirmed =
+      typeof window === "undefined"
+        ? false
+        : window.confirm(
+            `RESET TESTING SESSION${sessionLabel ? `\n${sessionLabel}` : ""}\n\n` +
+              "Yang akan direset:\n" +
+              "• status Informed\n" +
+              "• Registrasi Ulang Session ini\n" +
+              "• nomor & seluruh status antrean A/B\n" +
+              "• history Done / Skip / Cancel Session ini\n\n" +
+              "Yang TETAP AMAN:\n" +
+              "• Database Existing / peserta\n" +
+              "• roster assignment ke Session\n" +
+              "• Session MCU\n" +
+              "• Session/lokasi lain\n\n" +
+              "Lanjutkan reset?",
+          );
+
+    if (!confirmed) return;
+
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const res = await fetch("/api/mcu/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reset-session-test",
+          company_id: Number(companyId),
+          package_id: Number(packageId),
+          queue_session_id: Number(queueSessionId),
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        throw new Error(json.message || "Gagal mereset testing Session MCU.");
+      }
+
+      setParticipantSearch("");
+      setParticipantSort("uninformed");
+      setMessage(json.message || "Testing Session berhasil direset.");
+      await load(true, companyId, packageId, queueSessionId);
+    } catch (err: any) {
+      setError(err?.message || "Gagal mereset testing Session MCU.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generateOperatorLink() {
     setBusy(true);
     setMessage("");
@@ -647,6 +708,14 @@ function McuQueueContent() {
             {data?.public_url ? <a target="_blank" href={data.public_url} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-blue-700">Public Queue · {data?.company?.name || "Perusahaan"}</a> : null}
             {data?.operator_url ? <a target="_blank" href={data.operator_url} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-800">Buka Operator · {data?.company?.name || "Perusahaan"}</a> : null}
             <button disabled={busy || !companyId || !packageId || !queueSessionId} onClick={generateOperatorLink} className="rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-black text-emerald-800 disabled:opacity-50">{data?.operator_url ? "Reset Link Operator" : "Generate Link Operator"}</button>
+            <button
+              disabled={busy || !companyId || !packageId || !queueSessionId}
+              onClick={resetSessionTesting}
+              className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-black text-red-700 disabled:opacity-50"
+              title="Reset hanya status testing pada Session MCU yang sedang dipilih. Roster/import tidak dihapus."
+            >
+              Reset Testing Session
+            </button>
           </div>
         </div>
 

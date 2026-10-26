@@ -293,6 +293,157 @@ export async function POST(req: NextRequest) {
     const { selected, supabase, queueSession } = await resolveQueueContext(req, body);
 
 
+    // MCU_CORPORATE_SESSION_TEST_RESET_V511
+    // Reset ONLY operational state for the exact selected MCU Corporate Session.
+    // Roster/import/session assignment are intentionally preserved.
+    if (action === "reset-session-test") {
+      const sessionId = Number(queueSession.id || 0);
+      if (!sessionId) return fail("Session MCU wajib dipilih.", 400);
+
+      const [
+        assignmentRows,
+        registrationRows,
+        queueRows,
+        informedRows,
+      ] = await Promise.all([
+        supabase
+          .from("mcu_participant_session_assignments")
+          .select("participant_id")
+          .eq("queue_session_id", sessionId),
+        supabase
+          .from("mcu_registration_sessions")
+          .select("participant_id")
+          .eq("queue_session_id", sessionId),
+        supabase
+          .from("mcu_queue_entries")
+          .select("participant_id")
+          .eq("queue_session_id", sessionId),
+        supabase
+          .from("mcu_queue_informed")
+          .select("participant_id")
+          .eq("queue_session_id", sessionId),
+      ]);
+
+      for (const result of [
+        assignmentRows,
+        registrationRows,
+        queueRows,
+        informedRows,
+      ]) {
+        if (result.error) throw new Error(queueSchemaErrorMessage(result.error));
+      }
+
+      const sessionParticipantIds = Array.from(
+        new Set(
+          [
+            ...(assignmentRows.data || []),
+            ...(registrationRows.data || []),
+            ...(queueRows.data || []),
+            ...(informedRows.data || []),
+          ]
+            .map((row: any) => Number(row?.participant_id || 0))
+            .filter(Boolean),
+        ),
+      );
+
+      // Preserve global registrasi flag for anyone who is still registered
+      // in another MCU Session.
+      const registeredElsewhere = new Set<number>();
+      const chunkSize = 400;
+      for (let i = 0; i < sessionParticipantIds.length; i += chunkSize) {
+        const ids = sessionParticipantIds.slice(i, i + chunkSize);
+        if (!ids.length) continue;
+
+        const otherRegistration = await supabase
+          .from("mcu_registration_sessions")
+          .select("participant_id,queue_session_id")
+          .in("participant_id", ids)
+          .neq("queue_session_id", sessionId);
+
+        if (otherRegistration.error) {
+          throw new Error(queueSchemaErrorMessage(otherRegistration.error));
+        }
+
+        for (const row of otherRegistration.data || []) {
+          const participantId = Number(row?.participant_id || 0);
+          if (participantId) registeredElsewhere.add(participantId);
+        }
+      }
+
+      // Delete only transactional rows from this exact Session.
+      // The mcu_participant_session_assignments roster is NEVER deleted here.
+      const [deletedQueue, deletedRegistration, deletedInformed] =
+        await Promise.all([
+          supabase
+            .from("mcu_queue_entries")
+            .delete()
+            .eq("queue_session_id", sessionId)
+            .select("id"),
+          supabase
+            .from("mcu_registration_sessions")
+            .delete()
+            .eq("queue_session_id", sessionId)
+            .select("id"),
+          supabase
+            .from("mcu_queue_informed")
+            .delete()
+            .eq("queue_session_id", sessionId)
+            .select("participant_id"),
+        ]);
+
+      for (const result of [
+        deletedQueue,
+        deletedRegistration,
+        deletedInformed,
+      ]) {
+        if (result.error) throw new Error(queueSchemaErrorMessage(result.error));
+      }
+
+      // Reset global Registrasi Ulang flag only for members of THIS Session
+      // that are not still registered in another MCU Session.
+      const safeGlobalResetIds = sessionParticipantIds.filter(
+        (participantId) => !registeredElsewhere.has(participantId),
+      );
+
+      let globalFlagsReset = 0;
+      for (let i = 0; i < safeGlobalResetIds.length; i += chunkSize) {
+        const ids = safeGlobalResetIds.slice(i, i + chunkSize);
+        if (!ids.length) continue;
+
+        const resetParticipants = await supabase
+          .from("participants")
+          .update({
+            registrasi_ulang_done: 0,
+            registrasi_ulang_at: null,
+          })
+          .in("id", ids)
+          .eq("program_type", "corporate")
+          .eq("company_id", selected.company_id)
+          .select("id");
+
+        if (resetParticipants.error) {
+          throw new Error(resetParticipants.error.message);
+        }
+        globalFlagsReset += (resetParticipants.data || []).length;
+      }
+
+      return ok({
+        message:
+          `Reset testing Session selesai. Roster ${sessionParticipantIds.length} peserta tetap aman; ` +
+          `Registrasi, nomor/status antrean, dan Informed Session ini dikosongkan.`,
+        reset: {
+          queue_session_id: sessionId,
+          roster_preserved: sessionParticipantIds.length,
+          assignments_preserved: (assignmentRows.data || []).length,
+          registrations_deleted: (deletedRegistration.data || []).length,
+          queue_entries_deleted: (deletedQueue.data || []).length,
+          informed_deleted: (deletedInformed.data || []).length,
+          global_registration_flags_reset: globalFlagsReset,
+          protected_by_other_session: registeredElsewhere.size,
+        },
+      });
+    }
+
     if (action === "informed") {
       const participantId = Number(body.participant_id || body.participantId || 0);
       if (!participantId) return fail("participant_id wajib diisi.", 400);
