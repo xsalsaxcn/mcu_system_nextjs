@@ -15,26 +15,56 @@ export type McuPendingParticipant = {
   informed_by?: string | null;
 };
 
+// MCU_CORPORATE_EXACT_DAYH_SESSION_SCOPE_V507
 async function loadSessionParticipantScope(
   supabase: any,
   queueSessionId: number,
 ) {
-  const result = await supabase
-    .from("mcu_participant_session_assignments")
-    .select("participant_id,source_id")
-    .eq("queue_session_id", queueSessionId);
+  const [assignmentResult, registrationResult, queueResult] = await Promise.all([
+    supabase
+      .from("mcu_participant_session_assignments")
+      .select("participant_id,source_id")
+      .eq("queue_session_id", queueSessionId),
+    supabase
+      .from("mcu_registration_sessions")
+      .select("participant_id")
+      .eq("queue_session_id", queueSessionId),
+    supabase
+      .from("mcu_queue_entries")
+      .select("participant_id")
+      .eq("queue_session_id", queueSessionId),
+  ]);
 
-  if (result.error) throw new Error(queueSchemaErrorMessage(result.error));
+  if (assignmentResult.error) {
+    throw new Error(queueSchemaErrorMessage(assignmentResult.error));
+  }
+  if (registrationResult.error) {
+    throw new Error(queueSchemaErrorMessage(registrationResult.error));
+  }
+  if (queueResult.error) {
+    throw new Error(queueSchemaErrorMessage(queueResult.error));
+  }
 
-  const rows = result.data || [];
+  const assignmentRows = assignmentResult.data || [];
+  const registrationRows = registrationResult.data || [];
+  const queueRows = queueResult.data || [];
+
+  // Exact Session membership only. Never expand one Session through company,
+  // package, or source_id because those values can be shared by locations/dates.
   const participantIds = Array.from(
-    new Set(rows.map((row: any) => Number(row.participant_id || 0)).filter(Boolean)),
-  );
-  const sourceIds = Array.from(
-    new Set(rows.map((row: any) => Number(row.source_id || 0)).filter(Boolean)),
+    new Set(
+      [...assignmentRows, ...registrationRows, ...queueRows]
+        .map((row: any) => Number(row.participant_id || 0))
+        .filter(Boolean),
+    ),
   );
 
-  return { participantIds, sourceIds };
+  return {
+    participantIds,
+    assignmentCount: assignmentRows.length,
+    registrationCount: registrationRows.length,
+    queueCount: queueRows.length,
+  };
 }
 
 async function loadAllParticipants(
@@ -42,40 +72,37 @@ async function loadAllParticipants(
   args: { queueSessionId: number; companyId: number; packageId: number },
 ) {
   const scope = await loadSessionParticipantScope(supabase, args.queueSessionId);
-  const rows: any[] = [];
-  const pageSize = 1000;
-  let offset = 0;
 
-  while (true) {
-    let query = supabase
+  // A newly-created Session stays empty until participants are explicitly
+  // assigned/imported/registered to THIS exact queue_session_id.
+  if (!scope.participantIds.length) {
+    return { rows: [], scope };
+  }
+
+  const rows: any[] = [];
+  const chunkSize = 500;
+
+  for (let i = 0; i < scope.participantIds.length; i += chunkSize) {
+    const ids = scope.participantIds.slice(i, i + chunkSize);
+    const result = await supabase
       .from("participants")
       .select("id,name,mcu_id,external_id,nik,employee_nik,department,source_id,package_id,registrasi_ulang_done,registrasi_ulang_at")
       .eq("program_type", "corporate")
-      .eq("company_id", args.companyId);
-
-    // Location/date sessions use the imported database/source that was linked to
-    // the session. This intentionally does NOT force participant.package_id to
-    // equal the queue session package because those concepts are separate.
-    if (scope.sourceIds.length) {
-      query = query.in("source_id", scope.sourceIds);
-    } else if (scope.participantIds.length) {
-      query = query.in("id", scope.participantIds);
-    } else {
-      // Legacy queue sessions that predate explicit session assignments.
-      query = query.eq("package_id", args.packageId);
-    }
-
-    const result = await query
+      .eq("company_id", args.companyId)
+      .in("id", ids)
       .order("name", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
+      .order("id", { ascending: true });
 
     if (result.error) throw new Error(result.error.message);
-    const batch = result.data || [];
-    rows.push(...batch);
-    if (batch.length < pageSize) break;
-    offset += pageSize;
+    rows.push(...(result.data || []));
   }
+
+  rows.sort((a: any, b: any) => {
+    const byName = String(a?.name || "").localeCompare(String(b?.name || ""), "id", {
+      sensitivity: "base",
+    });
+    return byName || Number(a?.id || 0) - Number(b?.id || 0);
+  });
 
   return { rows, scope };
 }
@@ -147,13 +174,7 @@ export async function markMcuParticipantInformed(
   if (!participantRes.data) throw new Error("Peserta tidak ditemukan pada perusahaan MCU Corporate ini.");
 
   const scope = await loadSessionParticipantScope(supabase, args.queueSessionId);
-  const participantSourceId = Number((participantRes.data as any)?.source_id || 0);
-  const participantPackageId = Number((participantRes.data as any)?.package_id || 0);
-  const inSessionScope = scope.sourceIds.length
-    ? scope.sourceIds.includes(participantSourceId) || scope.participantIds.includes(args.participantId)
-    : scope.participantIds.length
-      ? scope.participantIds.includes(args.participantId)
-      : participantPackageId === args.packageId;
+  const inSessionScope = scope.participantIds.includes(args.participantId);
 
   if (!inSessionScope) {
     throw new Error("Peserta tidak termasuk roster Session MCU yang dipilih.");
