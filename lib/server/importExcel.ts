@@ -320,29 +320,80 @@ function participantKeyVariantsAppendOnlyV214(row: {
   return Array.from(variants);
 }
 
-async function loadExistingParticipantKeysAppendOnlyV214(supabase: any, programType: string) {
+// MCU_CORPORATE_EXISTING_SESSION_ASSIGNMENT_STABLE_V520
+async function loadExistingParticipantKeysAppendOnlyV214(
+  supabase: any,
+  programType: string,
+  companyId?: number,
+) {
   const keys = new Set<string>();
   const pageSize = 1000;
   let from = 0;
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("participants")
-      .select("name,gender,province,nik,external_id,program_type")
-      .eq("program_type", programType)
-      .range(from, from + pageSize - 1);
+      .select("name,gender,province,nik,external_id,employee_nik,program_type,company_id")
+      .eq("program_type", programType);
 
+    // Corporate dedupe must never leak across companies.
+    if (programType === PROGRAM_CORPORATE && Number(companyId || 0) > 0) {
+      query = query.eq("company_id", Number(companyId));
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) throw error;
 
     for (const row of data || []) {
-      for (const key of participantKeyVariantsAppendOnlyV214({
-        name: row.name || "",
-        gender: row.gender || "",
-        province: row.province || "",
-        nik: row.nik || "",
-        external_id: row.external_id || "",
-      }, programType)) {
-        keys.add(key);
+      if (programType === PROGRAM_CORPORATE) {
+        const employeeIds = Array.from(
+          new Set(
+            [clean(row.external_id), clean(row.employee_nik)].filter(Boolean),
+          ),
+        );
+
+        if (employeeIds.length) {
+          for (const employeeId of employeeIds) {
+            for (const key of participantKeyVariantsAppendOnlyV214(
+              {
+                name: row.name || "",
+                gender: row.gender || "",
+                province: row.province || "",
+                nik: "",
+                external_id: employeeId,
+              },
+              programType,
+            )) {
+              keys.add(key);
+            }
+          }
+        } else {
+          for (const key of participantKeyVariantsAppendOnlyV214(
+            {
+              name: row.name || "",
+              gender: row.gender || "",
+              province: row.province || "",
+              nik: "",
+              external_id: "",
+            },
+            programType,
+          )) {
+            keys.add(key);
+          }
+        }
+      } else {
+        for (const key of participantKeyVariantsAppendOnlyV214(
+          {
+            name: row.name || "",
+            gender: row.gender || "",
+            province: row.province || "",
+            nik: row.nik || "",
+            external_id: row.external_id || "",
+          },
+          programType,
+        )) {
+          keys.add(key);
+        }
       }
     }
 
@@ -352,7 +403,6 @@ async function loadExistingParticipantKeysAppendOnlyV214(supabase: any, programT
 
   return keys;
 }
-
 
 
 async function getOrCreateCompany(
@@ -729,13 +779,24 @@ export async function importParticipantsFromExcel(
     corporate_session_location_v466: corporateSessionRowV466 ? corporateSessionLocationV466(corporateSessionRowV466) : "",
     corporate_session_date_v466: corporateSessionRowV466 ? corporateSessionDateV466(corporateSessionRowV466) : "",
     corporate_session_assignments_v466: 0,
+    corporate_existing_reused_v520: 0,
+    corporate_import_resolved_v520: 0,
+    corporate_import_assigned_v520: 0,
+    corporate_import_unassigned_v520: [] as number[],
+    corporate_session_assignment_complete_v520: null as boolean | null,
   };
 
-  const existingParticipantKeysAppendOnlyV214 = await loadExistingParticipantKeysAppendOnlyV214(supabase, programType);
+  const existingParticipantKeysAppendOnlyV214 =
+    await loadExistingParticipantKeysAppendOnlyV214(
+      supabase,
+      programType,
+      programType === PROGRAM_CORPORATE ? companyId : undefined,
+    );
   const insertRows: any[] = [];
   const vaccinationExistingMetadataRowsV154: any[] = [];
   const counterByYear = new Map<string, number>();
   const seenImportParticipantKeysV168 = new Set<string>();
+  const corporateResolvedParticipantIdsV520 = new Set<number>();
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -1018,11 +1079,25 @@ export async function importParticipantsFromExcel(
             : effectiveExternalIdColV466 >= 0
               ? clean(row[effectiveExternalIdColV466])
               : "",
-        nik: effectiveNikColV466 >= 0 ? clean(row[effectiveNikColV466]) : "",
+        nik:
+          programType === PROGRAM_CORPORATE &&
+          effectiveNikColV466 >= 0 &&
+          ["no", "no.", "nomor", "number"].includes(norm(headers[effectiveNikColV466]))
+            ? ""
+            : effectiveNikColV466 >= 0
+              ? clean(row[effectiveNikColV466])
+              : "",
         birth_date: mappedBirthDateColV466 >= 0 ? parseDateValue(row[mappedBirthDateColV466]) : "",
         department: mappedDepartmentColV466 >= 0 ? clean(row[mappedDepartmentColV466]) : "",
         position: mappedPositionColV466 >= 0 ? clean(row[mappedPositionColV466]) : "",
-        phone: mappedPhoneColV466 >= 0 ? clean(row[mappedPhoneColV466]) : "",
+        phone:
+          programType === PROGRAM_CORPORATE &&
+          mappedPhoneColV466 >= 0 &&
+          ["no", "no.", "nomor", "number"].includes(norm(headers[mappedPhoneColV466]))
+            ? ""
+            : mappedPhoneColV466 >= 0
+              ? clean(row[mappedPhoneColV466])
+              : "",
         mapped_location:
           programType === PROGRAM_CORPORATE
             ? String(options.corporate_session?.location_mode || "session") === "column" && mappedLocationColV466 >= 0
@@ -1174,74 +1249,104 @@ export async function importParticipantsFromExcel(
       }
 
       for (const candidate of candidates) {
+        const corporateDedupeNikV520 =
+          programType === PROGRAM_CORPORATE ? "" : base.nik;
+
         const dedupeKeyV168 = importParticipantDedupeKeyV168({
           ...candidate,
-          nik: base.nik,
+          nik: corporateDedupeNikV520,
           external_id: base.external_id,
         }, programType);
 
         const existingKeysV214 = participantKeyVariantsAppendOnlyV214({
           ...candidate,
-          nik: base.nik,
+          nik: corporateDedupeNikV520,
           external_id: base.external_id,
         }, programType);
 
         if (existingKeysV214.some((key) => existingParticipantKeysAppendOnlyV214.has(key))) {
-          // MCU_CORPORATE_EXISTING_MERGE_SESSION_V491
-          // Re-importing an existing Corporate database must still refresh its mapping
-          // and bind the participant to the explicitly selected Session. Session itself
-          // never determines or mutates package_id; package remains the explicit Import choice.
+          // MCU_CORPORATE_EXISTING_SESSION_ASSIGNMENT_STABLE_V520
+          // Existing Corporate participant is reused without moving/mutating its
+          // profile/source/package. The exact selected Session assignment is the
+          // only required write for re-import.
           if (programType === PROGRAM_CORPORATE) {
-            let existingQueryV491 = supabase
-              .from("participants")
-              .select("id")
-              .eq("company_id", companyId);
-            if (base.external_id) {
-              existingQueryV491 = existingQueryV491.eq("external_id", base.external_id);
-            } else {
-              existingQueryV491 = existingQueryV491.ilike("name", candidate.name);
-            }
-            const existingResultV491 = await existingQueryV491.limit(2);
-            if (existingResultV491.error) throw existingResultV491.error;
-            const matchesV491 = existingResultV491.data || [];
-            if (matchesV491.length === 1) {
-              const participantIdV491 = Number(matchesV491[0].id || 0);
-              // MCU_CORPORATE_IMPORT_BULK_PERFORMANCE_V509
-              // Current Corporate schema has employee_nik/department/phone.
-              // Position remains Session-assignment data, not a participants column.
-              const coreUpdateV491 = await supabase.from("participants").update({
-                source_id: sourceId,
-                company_id: companyId,
-                package_id: packageId,
-                external_id: base.external_id || null,
-                nik: base.nik || null,
-                birth_date: base.birth_date || null,
-                employee_nik: base.external_id || null,
-                department: base.department || null,
-                phone: base.phone || null,
-              }).eq("id", participantIdV491);
-              if (coreUpdateV491.error) throw coreUpdateV491.error;
+            const employeeIdV520 = clean(base.external_id);
+            const resolvedMatchesV520 = new Map<number, any>();
 
-              if (corporateSessionRowV466?.id) {
-                const assignmentV491 = await supabase
-                  .from("mcu_participant_session_assignments")
-                  .upsert({
-                    participant_id: participantIdV491,
+            if (employeeIdV520) {
+              for (const fieldV520 of ["external_id", "employee_nik"]) {
+                const resultV520 = await supabase
+                  .from("participants")
+                  .select("id,name,external_id,employee_nik,company_id")
+                  .eq("company_id", companyId)
+                  .eq(fieldV520, employeeIdV520)
+                  .limit(3);
+                if (resultV520.error) throw resultV520.error;
+                for (const matchV520 of resultV520.data || []) {
+                  const idV520 = Number(matchV520.id || 0);
+                  if (idV520) resolvedMatchesV520.set(idV520, matchV520);
+                }
+              }
+            }
+
+            // Fallback only when there is no employee ID match. It must be unique
+            // inside the selected company; otherwise stop rather than bind wrong person.
+            if (!resolvedMatchesV520.size) {
+              const byNameV520 = await supabase
+                .from("participants")
+                .select("id,name,external_id,employee_nik,company_id")
+                .eq("company_id", companyId)
+                .ilike("name", candidate.name)
+                .limit(3);
+              if (byNameV520.error) throw byNameV520.error;
+              for (const matchV520 of byNameV520.data || []) {
+                const idV520 = Number(matchV520.id || 0);
+                if (idV520) resolvedMatchesV520.set(idV520, matchV520);
+              }
+            }
+
+            if (resolvedMatchesV520.size !== 1) {
+              throw new Error(
+                resolvedMatchesV520.size > 1
+                  ? `Import Corporate dihentikan: peserta existing ambigu untuk ${candidate.name} [${employeeIdV520 || "-"}].`
+                  : `Import Corporate dihentikan: peserta existing tidak berhasil di-resolve untuk ${candidate.name} [${employeeIdV520 || "-"}].`,
+              );
+            }
+
+            const participantIdV520 = Array.from(resolvedMatchesV520.keys())[0];
+
+            if (corporateSessionRowV466?.id) {
+              const assignmentV520 = await supabase
+                .from("mcu_participant_session_assignments")
+                .upsert(
+                  {
+                    participant_id: participantIdV520,
                     queue_session_id: Number(corporateSessionRowV466.id),
                     source_id: sourceId,
-                    location_name: base.mapped_location || corporateSessionLocationV466(corporateSessionRowV466) || null,
-                    session_date: corporateSessionDateV466(corporateSessionRowV466) || null,
+                    location_name:
+                      base.mapped_location ||
+                      corporateSessionLocationV466(corporateSessionRowV466) ||
+                      null,
+                    session_date:
+                      corporateSessionDateV466(corporateSessionRowV466) || null,
                     department: base.department || null,
                     position: base.position || null,
-                    raw_json: base.raw_json_v466 || {},
+                    raw_json: {
+                      ...(base.raw_json_v466 || {}),
+                      import_version: "V520",
+                      employee_nik: employeeIdV520 || null,
+                    },
                     updated_at: new Date().toISOString(),
-                  }, { onConflict: "participant_id,queue_session_id" });
-                if (assignmentV491.error) throw assignmentV491.error;
-                stats.corporate_session_assignments_v466 += 1;
-              }
-              stats.participants_updated += 1;
-              continue;
+                  },
+                  { onConflict: "participant_id,queue_session_id" },
+                );
+              if (assignmentV520.error) throw assignmentV520.error;
+              stats.corporate_session_assignments_v466 += 1;
             }
+
+            corporateResolvedParticipantIdsV520.add(participantIdV520);
+            stats.corporate_existing_reused_v520 += 1;
+            continue;
           }
 
           // VACCINATION_IMPORT_MANUAL_SESSION_MAPPING_V154
@@ -1477,6 +1582,15 @@ export async function importParticipantsFromExcel(
 
       const insertedRows = data || [];
 
+      if (programType === PROGRAM_CORPORATE) {
+        for (const inserted of insertedRows) {
+          const participantIdV520 = Number(inserted?.id || 0);
+          if (participantIdV520) {
+            corporateResolvedParticipantIdsV520.add(participantIdV520);
+          }
+        }
+      }
+
       if (programType === PROGRAM_CORPORATE && insertedRows.length) {
         // V509: profile Corporate sudah masuk bersama bulk INSERT.
         // Semua exact Session assignment di-upsert sekaligus per chunk.
@@ -1583,6 +1697,46 @@ export async function importParticipantsFromExcel(
 
     stats.vaccination_locations = Array.from(groupedLocations.values());
     stats.vaccination_location_count = groupedLocations.size;
+  }
+
+  if (programType === PROGRAM_CORPORATE && corporateSessionRowV466?.id) {
+    const resolvedIdsV520 = Array.from(corporateResolvedParticipantIdsV520);
+    stats.corporate_import_resolved_v520 = resolvedIdsV520.length;
+
+    if (resolvedIdsV520.length) {
+      const assignmentCheckV520 = await supabase
+        .from("mcu_participant_session_assignments")
+        .select("participant_id")
+        .eq("queue_session_id", Number(corporateSessionRowV466.id))
+        .in("participant_id", resolvedIdsV520);
+
+      if (assignmentCheckV520.error) throw assignmentCheckV520.error;
+
+      const assignedIdsV520 = new Set<number>(
+        (assignmentCheckV520.data || [])
+          .map((row: any) => Number(row.participant_id || 0))
+          .filter((value: number) => Number.isFinite(value) && value > 0),
+      );
+
+      const unassignedV520 = resolvedIdsV520.filter(
+        (participantIdV520) => !assignedIdsV520.has(participantIdV520),
+      );
+
+      stats.corporate_import_assigned_v520 = assignedIdsV520.size;
+      stats.corporate_import_unassigned_v520 = unassignedV520;
+      stats.corporate_session_assignment_complete_v520 =
+        unassignedV520.length === 0;
+
+      if (unassignedV520.length) {
+        throw new Error(
+          `Import Corporate belum lengkap: ${unassignedV520.length} peserta resolved belum terikat ke Session ${corporateSessionRowV466.id}.`,
+        );
+      }
+    } else {
+      stats.corporate_import_assigned_v520 = 0;
+      stats.corporate_import_unassigned_v520 = [];
+      stats.corporate_session_assignment_complete_v520 = true;
+    }
   }
 
   stats.import_mode = programType === PROGRAM_CAPASKA ? "merge_existing_by_nik_external_or_name_gender_province" : "insert_new";

@@ -732,6 +732,12 @@ function RegistrasiUlang({ user }: { user: any }) {
             .filter(Boolean).join(" / ") || null,
         track_a_name: session?.track_a_name || json?.track_a_name || "Lab Darah",
         track_b_name: session?.track_b_name || json?.track_b_name || "Rontgen",
+        // MCU_CORPORATE_STICKER_SESSION_PUBLIC_QR_V518_1
+        // Read-only exact Session public token for Corporate sticker QR.
+        public_token:
+          String(session?.public_token || json?.public_token || "").trim() || null,
+        public_queue_session_id:
+          Number(session?.id || sessionId || 0) || null,
         // MCU_CORPORATE_PRINT_QUEUE_SESSION_ON_LABEL_V513
         // Session label must come from the exact queue_session used for A/B.
         queue_session_name: String(session?.session_name || "").trim() || null,
@@ -1996,7 +2002,23 @@ function StationPrintLabel({
     ([queueA, queueB].filter(Boolean).join(" / ") || combinedQueueLabel);
 
   const qrPx = 54;
-  const qrValue = employeeNik || legacyMcuId || nameText;
+
+  // V518.1: Corporate sticker QR opens the GENERAL Public Queue
+  // for the exact selected Session. Participant then uses the existing
+  // scan/input Binusian ID flow on that public page.
+  const sessionPublicToken = String(queueInfo?.public_token || "").trim();
+  const sessionPublicQueueUrl =
+    isCorporate &&
+    sessionPublicToken &&
+    typeof window !== "undefined"
+      ? `${window.location.origin}/mcu/public/queue/${encodeURIComponent(
+          sessionPublicToken,
+        )}`
+      : "";
+
+  const qrValue = isCorporate
+    ? sessionPublicQueueUrl
+    : (employeeNik || legacyMcuId || nameText);
 
   if (isCorporate) {
     const queueDisplay = queueText || "-";

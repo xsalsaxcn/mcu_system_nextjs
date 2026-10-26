@@ -97,6 +97,61 @@ function getImportTarget(programType: string) {
   return IMPORT_TARGETS.find((target) => target.value === programType) || IMPORT_TARGETS[0];
 }
 
+
+// MCU_CORPORATE_IMPORT_TEMPLATE_V523
+async function downloadCorporateTemplateV523() {
+  const XLSX = await import("xlsx");
+
+  const headers = [
+    "Nama",
+    "Binusian ID",
+    "Date of Birth",
+    "BU/Division",
+    "Posisi",
+    "NIK",
+    "Gender",
+    "No HP",
+  ];
+
+  const dataSheet = XLSX.utils.aoa_to_sheet([headers]);
+  dataSheet["!cols"] = [
+    { wch: 32 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 34 },
+    { wch: 28 },
+    { wch: 22 },
+    { wch: 16 },
+    { wch: 20 },
+  ];
+  dataSheet["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  const guideRows = [
+    ["TEMPLATE IMPORT MCU CORPORATE", ""],
+    ["Aturan", "Keterangan"],
+    ["Nama", "WAJIB. Nama lengkap peserta."],
+    ["Binusian ID", "Disarankan WAJIB untuk BINUS. Dipakai sebagai NIK Karyawan / key utama peserta. Jangan isi dengan nomor urut."],
+    ["Date of Birth", "Opsional. Format aman: YYYY-MM-DD, contoh 1987-07-06."],
+    ["BU/Division", "Opsional. Department / divisi peserta."],
+    ["Posisi", "Opsional. Jabatan / posisi peserta."],
+    ["NIK", "Opsional. NIK Identitas/KTP. BUKAN nomor urut Excel dan BUKAN Binusian ID."],
+    ["Gender", "Opsional. Isi Male/Female atau L/P secara konsisten."],
+    ["No HP", "Opsional. Nomor HP/WhatsApp peserta. Jangan isi dengan nomor urut Excel."],
+    ["Session / Lokasi", "TIDAK diisi di Excel. Pilih Session MCU / Lokasi pada halaman Import sebelum import."],
+    ["Penting", "Jangan ubah nama header pada sheet DATA_MCU_CORPORATE agar mapping otomatis konsisten."],
+    ["Penting", "Satu peserta = satu baris. Jangan tambahkan kolom No/nomor urut di depan template."],
+  ];
+
+  const guideSheet = XLSX.utils.aoa_to_sheet(guideRows);
+  guideSheet["!cols"] = [{ wch: 24 }, { wch: 100 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, dataSheet, "DATA_MCU_CORPORATE");
+  XLSX.utils.book_append_sheet(workbook, guideSheet, "PETUNJUK");
+
+  XLSX.writeFile(workbook, "TEMPLATE_IMPORT_MCU_CORPORATE.xlsx");
+}
+
 type ImportSourceOptionV237 = {
   id: number;
   name: string;
@@ -1690,7 +1745,23 @@ function ImportForm({ user }: { user: any }) {
         ) : null}
 
         <div>
-          <label className="label">Upload Excel</label>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <label className="label mb-0">Upload Excel</label>
+            {programType === "corporate" ? (
+              <button
+                type="button"
+                onClick={() => void downloadCorporateTemplateV523()}
+                className="rounded-xl border border-cyan-300 bg-white px-3 py-2 text-xs font-black text-cyan-700 hover:bg-cyan-50"
+              >
+                Download Template MCU Corporate
+              </button>
+            ) : null}
+          </div>
+          {programType === "corporate" ? (
+            <div className="mb-3 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-900">
+              Gunakan template resmi agar mapping konsisten. Binusian ID = NIK Karyawan. Jangan gunakan kolom nomor urut sebagai NIK atau No HP.
+            </div>
+          ) : null}
           <input
             className="input"
             type="file"
@@ -1713,7 +1784,7 @@ function ImportForm({ user }: { user: any }) {
             {programType === "vaccination"
               ? "Header vaksinasi: Nama Peserta, ID Peserta/NIK, Jenis Kelamin, Email, No HP, BatchName, TimeAreaName, TimeName. File BINUS dengan Child Name, Child Gender, Parent Binusian ID, Parent Email, Parent HP juga didukung."
               : programType === "corporate"
-                ? "Format Corporate boleh bervariasi. Pilih file dan mapping akan dibaca otomatis di browser tanpa upload ulang."
+                ? "Disarankan pakai Template MCU Corporate. Header baku: Nama, Binusian ID, Date of Birth, BU/Division, Posisi, NIK, Gender, No HP. Session/Lokasi tetap dipilih di sistem."
                 : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
           </div>
         </div>
