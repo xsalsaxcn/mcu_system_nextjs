@@ -762,7 +762,7 @@ function providerStatus(integrations: any[], provider: string) {
 
 function formatFitnessLastSync(value: any) {
   const raw = clean(value);
-  if (!raw) return "Belum pernah sync";
+  if (!raw) return "Belum pernah diperbarui";
 
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
@@ -786,34 +786,34 @@ function noticeText(value: string) {
 
   const map: Record<string, string> = {
     STRAVA_CONNECTED:
-      "Strava berhasil terhubung. Klik Sync Strava untuk menarik activity terbaru.",
+      "Strava berhasil terhubung. Data aktivitas siap diperbarui.",
     GOOGLE_FIT_CONNECTED:
       "Google Fit berhasil terhubung. Untuk data lama yang sempat 0 atau kurang, buka Device lalu gunakan Tarik Data Backdate.",
     GOOGLE_FIT_CONNECTED_ACCESS_ONLY:
-      "Google Fit terhubung dengan access token. Jika Tarik Data Backdate meminta reconnect, hubungkan ulang Google Fit lalu coba lagi.",
+      "Google Fit berhasil terhubung. Jika diminta, hubungkan ulang Google Fit lalu coba lagi.",
     GOOGLE_FIT_SAVE_VERIFY_FAILED:
-      "Google Fit authorize berhasil tetapi koneksi belum terbaca kembali dari database. Silakan reconnect sekali lagi.",
+      "Koneksi Google Fit belum aktif sepenuhnya. Silakan hubungkan ulang Google Fit.",
     STRAVA_CLIENT_ID_NOT_SET:
-      "STRAVA_CLIENT_ID belum diatur di Environment Variables.",
+      "Layanan Strava sedang belum tersedia. Silakan hubungi Admin.",
     STRAVA_CLIENT_ID_MISSING:
-      "STRAVA_CLIENT_ID belum terbaca di Environment Variables Vercel Production.",
+      "Layanan Strava sedang belum tersedia. Silakan hubungi Admin.",
     GOOGLE_FIT_CLIENT_ID_MISSING:
-      "GOOGLE_FIT_CLIENT_ID belum terbaca di Environment Variables Vercel Production.",
-    APP_SECRET_MISSING: "APP_SECRET belum terbaca di Environment Variables.",
+      "Layanan Google Fit sedang belum tersedia. Silakan hubungi Admin.",
+    APP_SECRET_MISSING: "Layanan login sedang belum tersedia. Silakan hubungi Admin.",
     PORTAL_SESSION_REQUIRED:
       "Session peserta belum aktif. Silakan login OTP ulang.",
     STRAVA_TOKEN_EXCHANGE_FAILED:
-      "Strava sudah authorize, tetapi token gagal dibuat. Cek STRAVA_CLIENT_SECRET.",
+      "Koneksi Strava belum berhasil. Silakan hubungkan ulang atau hubungi Admin.",
     GOOGLE_FIT_TOKEN_EXCHANGE_FAILED:
-      "Google sudah authorize, tetapi token gagal dibuat. Cek GOOGLE_FIT_CLIENT_SECRET.",
+      "Koneksi Google Fit belum berhasil. Silakan hubungkan ulang atau hubungi Admin.",
     STRAVA_SAVE_FAILED:
-      "Strava sudah authorize, tetapi gagal menyimpan koneksi ke database.",
+      "Koneksi Strava belum berhasil disimpan. Silakan coba hubungkan ulang.",
     GOOGLE_FIT_SAVE_FAILED:
-      "Google Fit sudah authorize, tetapi gagal menyimpan koneksi ke database.",
+      "Koneksi Google Fit belum berhasil disimpan. Silakan coba hubungkan ulang.",
     STRAVA_STATE_INVALID:
-      "State Strava tidak valid atau sudah kedaluwarsa. Silakan konek ulang.",
+      "Sesi koneksi Strava sudah berakhir. Silakan hubungkan ulang.",
     GOOGLE_FIT_STATE_INVALID:
-      "State Google Fit tidak valid atau sudah kedaluwarsa. Silakan konek ulang.",
+      "Sesi koneksi Google Fit sudah berakhir. Silakan hubungkan ulang.",
     OTP_REQUIRED: "Silakan aktifkan OTP peserta terlebih dahulu.",
     FITNESS_SOURCE_GOOGLE_FIT_NOT_ACTIVE:
       "Google Fit belum diaktifkan sebagai sumber utama. Hubungi Admin untuk memilih Google Fit.",
@@ -1654,7 +1654,7 @@ export default function WellnessParticipantPortalPage() {
 
       if (!options?.keepMessage) {
         setMessage(
-          "Portal peserta aktif. Silakan input nutrisi harian, workout manual, atau sync device.",
+          "Portal peserta aktif. Silakan catat nutrisi, aktivitas, atau perbarui data perangkat.",
         );
       }
 
@@ -1668,7 +1668,7 @@ export default function WellnessParticipantPortalPage() {
         loadPoints(),
       ]);
     } else {
-      setMessage(result.message || "Session Wellness belum aktif.");
+      setMessage(result.message || "Status Wellness belum aktif.");
       if (/dinonaktifkan|session|otp/i.test(clean(result.message))) {
         setParticipant(null);
         setFitnessSettings(null);
@@ -1951,7 +1951,7 @@ export default function WellnessParticipantPortalPage() {
 
           if (!wasSilent) {
             setMessage(
-              "Google Fit belum merespons. Tombol sudah dibuka kembali; silakan tekan Sync Google Fit sekali lagi.",
+              "Google Fit belum merespons. Silakan coba lagi.",
             );
           }
         }, 60_000);
@@ -1979,7 +1979,7 @@ export default function WellnessParticipantPortalPage() {
 
     if (!silent) {
       setSyncing(provider);
-      setMessage(`Sync ${provider === "strava" ? "Strava" : "Google Fit"}...`);
+      setMessage(`Memperbarui data ${provider === "strava" ? "Strava" : "Google Fit"}...`);
     }
 
     try {
@@ -2069,7 +2069,7 @@ export default function WellnessParticipantPortalPage() {
           }
         }
       } else if (!silent) {
-        setMessage(result.message || "Gagal sync activity.");
+        setMessage(result.message || "Data aktivitas belum berhasil diperbarui.");
       }
     } finally {
       if (!silent) {
@@ -2081,7 +2081,7 @@ export default function WellnessParticipantPortalPage() {
   async function saveNutrition(): Promise<{ ok: boolean; message: string }> {
     if (nutritionSubmitInFlightV126L.current) {
       const duplicateMessage =
-        "Submission nutrisi sedang diproses. Mohon tunggu.";
+        "Data nutrisi sedang diproses. Mohon tunggu.";
       setMessage(duplicateMessage);
       return {
         ok: false,
@@ -2188,7 +2188,7 @@ export default function WellnessParticipantPortalPage() {
       }
     }
 
-    setMessage("Menyimpan nutrisi ke Google Sheet...");
+    setMessage("Menyimpan nutrisi...");
     updateSavingOverlayV126M46(
       "Menyimpan data nutrisi dan menyinkronkan riwayat...",
     );
@@ -2305,7 +2305,7 @@ export default function WellnessParticipantPortalPage() {
   async function saveWorkout() {
     if (workoutSubmitInFlightV126L.current) {
       setMessage(
-        "Submission workout sedang diproses. Mohon tunggu.",
+        "Data workout sedang diproses. Mohon tunggu.",
       );
       return;
     }
@@ -2466,7 +2466,7 @@ export default function WellnessParticipantPortalPage() {
         ? "Menyiapkan bukti dan memvalidasi data Health Talk..."
         : "Memvalidasi data Health Talk...",
     );
-    setMessage("Menyimpan Health Talk ke Google Sheet...");
+    setMessage("Menyimpan Health Talk...");
     updateSavingOverlayV126M46(
       "Menyimpan Health Talk dan menyinkronkan riwayat...",
     );
@@ -4508,13 +4508,6 @@ function HomeTab({
           </button>
         </div>
 
-        {directNutrition?.sources ? (
-          <div className="mt-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            Source: Supabase {directNutrition.sources.supabase_rows || 0} row |
-            Google Sheet {directNutrition.sources.google_sheet_rows || 0} row
-          </div>
-        ) : null}
-
         <div className="mt-5 space-y-3">
           {mealLogs.length === 0 ? (
             <div className="rounded-[2rem] border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
@@ -4523,8 +4516,7 @@ function HomeTab({
               </div>
 
               <p className="mt-2 text-sm font-bold leading-6 text-slate-500">
-                Input nutrisi akan muncul di sini setelah data Google Sheet atau
-                Supabase terbaca.
+                Input nutrisi yang kamu simpan akan muncul di sini.
               </p>
             </div>
           ) : (
@@ -4591,13 +4583,6 @@ function normalizeImageUrlV34(value: any) {
 
 function PortalMealLogItemV34({ item }: { item: any }) {
   const photo = normalizeImageUrlV34(item.photo_url);
-  const sourceLabel =
-    item.source === "google_sheet"
-      ? "Google Sheet"
-      : item.source === "supabase"
-        ? "Supabase"
-        : item.source || "Food log";
-
   return (
     <div className="rounded-[1.7rem] bg-slate-50 p-3">
       <div className="flex items-center gap-3">
@@ -4630,9 +4615,6 @@ function PortalMealLogItemV34({ item }: { item: any }) {
               {fmtNumber(item.calories || item.total_calories || 0, 0)} kkal
             </span>
 
-            <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-slate-500">
-              {sourceLabel}
-            </span>
           </div>
         </div>
       </div>
@@ -5909,12 +5891,6 @@ function NutritionTab({
                 </button>
               </div>
 
-              {directNutrition?.sources ? (
-                <p className="mt-3 text-[10px] font-bold leading-5 text-slate-500">
-                  Google Sheet{" "}
-                  {directNutrition.sources.google_sheet_rows || 0} data
-                </p>
-              ) : null}
             </div>
 
             <div className="mt-3 max-h-[30rem] space-y-3 overflow-y-auto pr-1">
@@ -6079,13 +6055,6 @@ function CompactNutritionHistoryItemV43({ item }: { item: any }) {
   const photo = normalizeImageUrlV37
     ? normalizeImageUrlV37(item.photo_url)
     : clean(item.photo_url);
-  const sourceLabel =
-    item.source === "google_sheet"
-      ? "Google Sheet"
-      : item.source === "supabase"
-        ? "Supabase"
-        : item.source || "Food log";
-
   return (
     <div className="rounded-[1.4rem] bg-slate-50 p-3">
       <div className="flex items-center gap-3">
@@ -6118,9 +6087,6 @@ function CompactNutritionHistoryItemV43({ item }: { item: any }) {
               {fmtNumber(item.calories || item.total_calories || 0, 0)} kkal
             </span>
 
-            <span className="rounded-full bg-white px-3 py-1 text-[10px] font-black text-slate-500">
-              {sourceLabel}
-            </span>
           </div>
         </div>
       </div>
@@ -6215,13 +6181,6 @@ function AutoFoodBreakdownV29({
 }
 
 function NutritionHistoryItemV29({ item }: { item: any }) {
-  const sourceLabel =
-    item.source === "google_sheet"
-      ? "Google Sheet"
-      : item.source === "supabase"
-        ? "Supabase"
-        : item.source || "Food log";
-
   return (
     <div className="rounded-[1.7rem] bg-slate-50 p-3">
       <div className="flex items-center gap-3">
@@ -6251,9 +6210,6 @@ function NutritionHistoryItemV29({ item }: { item: any }) {
               {fmtNumber(item.calories || item.total_calories || 0, 0)} kkal
             </span>
 
-            <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-slate-500">
-              {sourceLabel}
-            </span>
           </div>
         </div>
       </div>
@@ -6791,38 +6747,25 @@ function WorkoutTab({
 
           {masterPreviewErrorV126M50B4 ? (
             <div className="mt-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
-              {masterPreviewErrorV126M50B4}
+              Perhitungan aktivitas belum tersedia. Periksa jenis aktivitas dan durasi lalu coba lagi.
             </div>
           ) : masterPreviewV126M50B4 ? (
-            <div className="mt-4 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-2">
-              <div>Sumber input: <b className="text-slate-900">Manual Peserta</b></div>
-              <div>Master: <b className="text-slate-900">{masterPreviewV126M50B4.activity_reference_name || "Fallback MET existing"}</b></div>
-              <div>Metode: <b className="text-slate-900">{masterPreviewV126M50B4.calorie_method || "-"}</b></div>
-              <div>BB dipakai: <b className="text-slate-900">{masterPreviewV126M50B4.participant_weight_kg_used || "-"} kg</b></div>
-              <div>MET: <b className="text-slate-900">{masterPreviewV126M50B4.met_used ?? "-"}</b></div>
-              <div>Kalori/km: <b className="text-slate-900">{masterPreviewV126M50B4.calories_per_km_used ?? "-"}</b></div>
-              {masterPreviewV126M50B4.warning ? (
-                <div className="md:col-span-2 rounded-xl bg-amber-50 px-3 py-2 text-amber-800">
-                  {masterPreviewV126M50B4.warning}
-                </div>
-              ) : null}
+            <div className="mt-3 text-xs font-bold leading-5 text-emerald-900">
+              Perkiraan kalori dihitung otomatis dari jenis aktivitas, durasi, dan data profil kamu.
             </div>
           ) : (
             <div className="mt-3 text-xs font-bold text-emerald-900">
-              Isi jenis aktivitas dan durasi untuk melihat hasil kalkulasi otomatis.
+              Isi jenis aktivitas dan durasi untuk melihat perkiraan kalori.
             </div>
           )}
-          <div className="mt-3 text-[11px] font-bold leading-5 text-emerald-900">
-            Nilai ini bukan field bebas. Saat Simpan Workout, backend menghitung ulang dari master agar hasil tersimpan tetap konsisten.
-          </div>
         </div>
       ) : null}
 
       <div className={`mt-5 rounded-2xl p-4 text-xs font-bold leading-5 ${smartwatchModeV126M50B3 ? "bg-sky-50 text-sky-900" : "bg-emerald-50 text-emerald-900"}`}>
         {smartwatchModeV126M50B3 ? (
-          <>Kalori Aktif dari smartwatch tetap menjadi nilai canonical workout untuk target, poin, total workout, dan grafik. Kalori Total serta HR hanya informasi perangkat.</>
+          <>Kalori Aktif dari smartwatch digunakan untuk target, poin, total workout, dan grafik. Kalori Total serta HR hanya sebagai informasi tambahan.</>
         ) : (
-          <>Sumber workout tetap Manual Peserta. Perhitungannya memakai Master Workout existing; Kalori Aktif hasil sistem tetap masuk ke fungsi target, poin, total workout, dan grafik yang sudah ada.</>
+          <>Workout manual dihitung otomatis dari data aktivitas yang kamu isi. Hasilnya digunakan untuk target, poin, total workout, dan grafik.</>
         )}
       </div>
 
@@ -8961,7 +8904,7 @@ function HistoryTab({
         : item?.activity_name || item?.activity_type || "workout ini";
 
     const confirmed = window.confirm(
-      `Hapus ${label}? Data nutrisi akan dihapus dari Google Sheet.`,
+      `Hapus ${label}? Data akan dihapus dari riwayat kamu.`,
     );
 
     if (!confirmed) return;
@@ -9331,18 +9274,12 @@ function HistoryTab({
         subtitle={
           nutritionLoaded
             ? `${nutrition.length} log | ${fmtNumber(nutritionCalories, 0)} kkal`
-            : "Klik untuk retrieve data nutrisi"
+            : "Klik untuk memuat riwayat nutrisi"
         }
         open={openSection === "nutrition"}
         loading={loadingKey === "nutrition"}
         onClick={() => openDropdown("nutrition")}
       >
-        {directNutrition?.sources ? (
-          <div className="mb-4 rounded-[1.4rem] bg-slate-50 px-4 py-3 text-[11px] font-bold leading-5 text-slate-500">
-            {rawNutrition.length} submission nutrisi · sumber Google Sheet
-          </div>
-        ) : null}
-
         {nutrition.length === 0 ? (
           <EmptyHistoryCardV37
             text={
@@ -9405,11 +9342,11 @@ function HistoryTab({
                     daily
                       ? selected
                         ? isGoogleFitDailyRow(item)
-                          ? "Dipakai untuk steps & grafik — data exact Last Sync"
+                          ? "Digunakan untuk langkah dan grafik"
                           : "Dipakai untuk total & grafik"
                         : isGoogleFitDailyRow(item)
-                          ? "Tidak dipakai — total Google Fit termasuk kalori istirahat"
-                          : "Tidak dipakai — sumber lain yang aktif"
+                          ? "Tidak digunakan untuk target workout"
+                          : "Tidak digunakan karena aplikasi fitness lain sedang aktif"
                       : ""
                   }
                   statusTone={selected ? "primary" : "secondary"}
@@ -10166,19 +10103,6 @@ function HistoryMealItemV37({
   deleting?: boolean;
 }) {
   const photo = normalizeImageUrlV37(item.photo_url);
-  const sourceLabel =
-    item.source ===
-      "google_sheet_supabase"
-      ? "Google Sheet + Supabase"
-      : item.source ===
-          "google_sheet"
-        ? "Google Sheet"
-        : item.source ===
-            "supabase"
-          ? "Supabase"
-          : item.source ||
-            "Food log";
-
   return (
     <div className="rounded-[1.7rem] bg-slate-50 p-3">
       <div className="flex items-center gap-3">
@@ -10212,9 +10136,6 @@ function HistoryMealItemV37({
               {fmtNumber(item.calories || item.total_calories || 0, 0)} kkal
             </span>
 
-            <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-slate-500">
-              {sourceLabel}
-            </span>
           </div>
         </div>
 
@@ -10343,8 +10264,8 @@ function DevicesTab({
   const googleFitWorkoutSourceV126M116 =
     googleFitWorkoutCaloriesV126M116 > 0
       ? googleFitExactActiveV126M116 > 0
-        ? "Active calories exact dari provider"
-        : "Estimasi aktif konservatif dari steps/distance/active minutes"
+        ? "Kalori aktif dari perangkat"
+        : "Perkiraan kalori dari aktivitas harian"
       : "Belum ada kalori workout aktif";
 
   const sourceLabel =
@@ -10450,15 +10371,14 @@ function DevicesTab({
     <section className="space-y-5">
       <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4 text-sky-950">
         <div className="text-[10px] font-black uppercase tracking-[0.15em] text-sky-700">
-          Sumber Fitness Aktif
+          Aplikasi Fitness Aktif
         </div>
         <div className="mt-1 text-xl font-black">
-          {enabled ? sourceLabel : "Fitness App Nonaktif"}
+          {enabled ? sourceLabel : "Aplikasi Fitness Nonaktif"}
         </div>
         <div className="mt-2 text-xs font-bold leading-5 text-sky-800">
-          Dashboard, grafik, target workout, dan ranking hanya menggunakan satu
-          sumber yang dipilih Admin. Data Health Connect dan Google Fit tidak
-          dijumlahkan.
+          Dashboard, grafik, target workout, dan ranking menggunakan satu aplikasi
+          fitness yang aktif agar data tidak terhitung ganda.
         </div>
       </div>
 
@@ -10496,8 +10416,8 @@ function DevicesTab({
               {healthSelected
                 ? "Sumber Aktif"
                 : healthConnectConnected
-                  ? "Connected"
-                  : "Belum sync"}
+                  ? "Terhubung"
+                  : "Belum diperbarui"}
             </span>
           </div>
 
@@ -10513,13 +10433,13 @@ function DevicesTab({
           ) : (
             <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-xs font-bold leading-5 text-emerald-900">
               Buka aplikasi Harmony Health Connect di HP Android, lalu klik Sync
-              Hari Ini. Nilai yang dipakai adalah active calories.
+              Hari Ini. Kalori aktif dari perangkat digunakan untuk perhitungan aktivitas.
             </div>
           )}
 
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
             <div className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
-              Last Sync
+              Terakhir Diperbarui
             </div>
             <div className="mt-1 break-words text-sm font-black text-slate-900">
               {formatFitnessLastSync(healthConnectLastSyncAt)}
@@ -10531,7 +10451,7 @@ function DevicesTab({
             onClick={() => window.location.reload()}
             className="mt-5 rounded-full bg-emerald-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-emerald-100"
           >
-            Refresh Portal
+            Perbarui Tampilan
           </button>
         </div>
 
@@ -10559,18 +10479,18 @@ function DevicesTab({
               }`}
             >
               {googleSelected && googleFitConnected
-                ? "Aktif · Connected"
+                ? "Aktif · Terhubung"
                 : googleSelected
                   ? "Dipilih · Belum terhubung"
                   : googleFitConnected
-                    ? "Connected"
+                    ? "Terhubung"
                     : "Not connected"}
             </span>
           </div>
 
           {googleSelected && !googleFitConnected ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">
-              Google Fit sudah dipilih sebagai sumber, tetapi token koneksi belum tersimpan. Tekan Reconnect Google Fit dan kembali ke portal setelah izin selesai.
+              Google Fit sudah dipilih tetapi koneksinya belum aktif. Tekan Hubungkan Ulang Google Fit, selesaikan izin akun, lalu kembali ke Harmony App.
             </div>
           ) : null}
 
@@ -10581,8 +10501,8 @@ function DevicesTab({
               tidak perlu memilih email kembali.
             </div>
             <div className="mt-1">
-              Energi total Google Fit dapat mencakup energi istirahat/basal dan hanya ditampilkan sebagai informasi.
-              Untuk target workout, streak, dan point, sistem memakai active calories exact bila tersedia; bila Google Fit tidak menyediakannya, sistem memakai estimasi aktif konservatif dari steps/distance/active minutes melalui resolver canonical yang sama dengan Coach/Admin.
+              Energi total Google Fit dapat mencakup energi istirahat dan hanya ditampilkan sebagai informasi.
+              Untuk target workout, streak, dan poin, Harmony menggunakan kalori aktif dari perangkat bila tersedia; jika belum tersedia, aplikasi menggunakan perkiraan dari aktivitas harian.
             </div>
           </div>
 
@@ -10599,7 +10519,7 @@ function DevicesTab({
 
           <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3">
             <div className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-500">
-              Last Sync Google Fit
+              Terakhir Diperbarui
             </div>
             <div className="mt-1 break-words text-sm font-black text-blue-950">
               {syncing === "google-fit"
@@ -10611,7 +10531,7 @@ function DevicesTab({
               <div className="mt-3 grid grid-cols-2 gap-2 border-t border-blue-100 pt-3">
                 <div className="rounded-xl bg-white/80 px-3 py-2">
                   <div className="text-[9px] font-black uppercase tracking-wide text-blue-400">
-                    Steps saat sync
+                    Langkah Terakhir
                   </div>
                   <div className="mt-1 text-base font-black text-blue-950">
                     {fmtNumber(googleFitLastSyncSnapshot.steps || 0, 0)}
@@ -10642,12 +10562,6 @@ function DevicesTab({
                     {googleFitWorkoutSourceV126M116}
                   </div>
                 </div>
-                <div className="col-span-2 break-all rounded-xl bg-white/60 px-3 py-2 text-[9px] font-bold leading-4 text-blue-700">
-                  Sumber steps: {clean(
-                    googleFitLastSyncSnapshot.step_data_source_id ||
-                      "estimated_steps",
-                  )}
-                </div>
               </div>
             ) : null}
           </div>
@@ -10658,7 +10572,7 @@ function DevicesTab({
                 href="/api/wellness/integrations/google-fit/connect"
                 className="rounded-full bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-100"
               >
-                {googleFitConnected ? "Ganti Akun Google Fit" : "Konek Google Fit"}
+                {googleFitConnected ? "Ganti Akun Google Fit" : "Hubungkan Google Fit"}
               </a>
             ) : (
               <span className="rounded-full bg-slate-100 px-5 py-3 text-xs font-black text-slate-500">
@@ -10677,9 +10591,8 @@ function DevicesTab({
           </div>
 
           <div className="mt-3 text-[10px] font-bold leading-4 text-slate-500">
-            Tarik Data Backdate hanya untuk tanggal Google Fit yang sempat 0 atau kurang.
-            Data disimpan berdasarkan <span className="font-black">Log Date</span> tanggal yang dipilih,
-            bukan timestamp saat tombol ditekan. Proses ini tidak menghitung ulang point.
+            Gunakan Tarik Data Backdate hanya untuk tanggal Google Fit yang sempat 0 atau kurang.
+            Data akan diperbarui sesuai tanggal aktivitas yang kamu pilih. Proses ini tidak menghitung ulang poin.
           </div>
         </div>
       </div>
@@ -10698,7 +10611,7 @@ function DevicesTab({
                           : "Tarik Data Google Fit Backdate"}
                     </div>
                     <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
-                      Khusus recovery steps Google Fit peserta ini.
+                      Untuk memperbaiki data langkah Google Fit yang sempat 0 atau kurang.
                     </div>
                   </div>
                   <button
@@ -10758,11 +10671,11 @@ function DevicesTab({
                         <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Baru</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.inserted || 0)}</div></div>
                         <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Diperbarui</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.updated || 0)}</div></div>
                         <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Sudah Sama</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.unchanged || 0)}</div></div>
-                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Native Dilindungi</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.skipped_native || 0)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Data Dipertahankan</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.skipped_native || 0)}</div></div>
                       </div>
                     ) : null}
                     {Array.isArray(manualBackdateResultV1?.cloud_missing_dates) && manualBackdateResultV1.cloud_missing_dates.length ? (
-                      <div className="rounded-2xl bg-amber-50 p-4 text-xs font-bold leading-5 text-amber-900">Belum tersedia di Google Fit cloud: <div className="mt-1 break-words font-black">{manualBackdateResultV1.cloud_missing_dates.join(", ")}</div><div className="mt-2">Buka Google Fit di HP sampai angka tanggal tersebut terlihat, lalu coba tarik ulang.</div></div>
+                      <div className="rounded-2xl bg-amber-50 p-4 text-xs font-bold leading-5 text-amber-900">Data langkah belum tersedia dari Google Fit: <div className="mt-1 break-words font-black">{manualBackdateResultV1.cloud_missing_dates.join(", ")}</div><div className="mt-2">Buka Google Fit di HP sampai angka tanggal tersebut terlihat, lalu coba tarik ulang.</div></div>
                     ) : null}
                     <button type="button" onClick={() => window.location.reload()} className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-xs font-black text-white">Selesai & Refresh Tampilan</button>
                   </div>
@@ -10792,7 +10705,13 @@ function ProfileTab({
       if (item?.is_active === 0) return false;
       return true;
     })
-    .map((item) => item.provider)
+    .map((item) => {
+      const provider = clean(item?.provider).toLowerCase().replace(/-/g, "_");
+      if (provider === "google_fit") return "Google Fit";
+      if (provider === "health_connect") return "Health Connect";
+      if (provider === "strava") return "Strava";
+      return "";
+    })
     .filter(Boolean);
 
   const participantId =
@@ -10812,7 +10731,7 @@ function ProfileTab({
         <h2 className="text-xl font-black">Data Peserta</h2>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          <ProfileRow label="Participant ID" value={participantId} />
+          <ProfileRow label="ID Peserta" value={participantId} />
           <ProfileRow label="Nama" value={participant?.name} />
           <ProfileRow label="Kode Karyawan" value={participant?.code} />
 
@@ -10862,7 +10781,7 @@ function ProfileTab({
 
         <div className="mt-6 rounded-3xl bg-emerald-50 p-4">
           <div className="text-sm font-black text-emerald-900">
-            ID untuk Sync Health Connect
+            ID Peserta untuk Health Connect
           </div>
           <div className="mt-2 text-3xl font-black text-emerald-700">
             {participantId}
@@ -10876,7 +10795,7 @@ function ProfileTab({
         <div className="mt-6 grid gap-3 md:grid-cols-2">
           <div className="rounded-3xl bg-sky-50 p-4">
             <div className="text-sm font-black text-sky-950">
-              Session Wellness
+              Status Wellness
             </div>
             <div className="mt-2 text-xs font-bold text-sky-700">
               {fitnessSettings?.session_enabled === false
@@ -10886,7 +10805,7 @@ function ProfileTab({
           </div>
           <div className="rounded-3xl bg-slate-50 p-4">
             <div className="text-sm font-black text-slate-900">
-              Fitness Source
+              Aplikasi Fitness
             </div>
             <div className="mt-2 text-xs font-bold text-slate-500">
               {fitnessSettings?.fitness_enabled
@@ -10902,7 +10821,7 @@ function ProfileTab({
 
         <div className="mt-3 rounded-3xl bg-slate-50 p-4">
           <div className="text-sm font-black text-slate-900">
-            Device Connected
+            Aplikasi Terhubung
           </div>
           <div className="mt-2 text-xs font-bold text-slate-500">
             {activeProviders.length
@@ -10973,9 +10892,6 @@ function NutritionMiniCard({ item }: { item: any }) {
               ? `${fmtNumber(item.calories, 0)} kkal`
               : "Belum match"}
           </div>
-          <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">
-            {item.calorie_match_status || item.calorie_source || "master"}
-          </div>
         </div>
       </div>
     </div>
@@ -11005,9 +10921,6 @@ function NutritionLogCard({ item }: { item: any }) {
             {Number.isFinite(Number(item.calories))
               ? `${fmtNumber(item.calories, 0)} kkal`
               : "Kalori belum terhitung"}
-          </div>
-          <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">
-            {item.calorie_match_status || item.calorie_source || "master"}
           </div>
         </div>
       </div>
