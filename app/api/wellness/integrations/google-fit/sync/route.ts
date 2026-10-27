@@ -375,13 +375,39 @@ async function upsertDailyRow(params: {
 
   const existing = await params.supabase
     .from("wellness_activity_logs")
-    .select("id")
+    .select("id,participant_id,log_date,external_activity_id,steps,calories,duration_minutes,distance_km,raw_payload")
     .eq("participant_id", params.participant.id)
     .eq("source", "google_fit")
     .eq("external_activity_id", externalId)
     .maybeSingle();
 
   if (existing.error) throw existing.error;
+
+  // WELLNESS_HARI_WAHYU_174_20261023_MANUAL_VERIFIED_DEVICE_GUARD_R3
+  // Ultra-targeted protection only for Hari Wahyu (participant_id 42),
+  // Log Date 2026-10-23, row id 6050, once the one-time repair marker exists.
+  // All other participants/dates continue through the exact existing sync path.
+  const existingRaw =
+    existing.data?.raw_payload &&
+    typeof existing.data.raw_payload === "object" &&
+    !Array.isArray(existing.data.raw_payload)
+      ? existing.data.raw_payload
+      : {};
+  const hariWahyuManualVerifiedProtected =
+    Number(params.participant.id) === 42 &&
+    params.row.date === "2026-10-23" &&
+    Number(existing.data?.id || 0) === 6050 &&
+    Number(existing.data?.steps || 0) === 9547 &&
+    existingRaw?.manual_verified_device_value === true &&
+    existingRaw?.manual_verified_device_participant_id === 42 &&
+    existingRaw?.manual_verified_device_log_date === "2026-10-23";
+
+  if (hariWahyuManualVerifiedProtected) {
+    return {
+      action: "protected_manual_verified",
+      row: existing.data,
+    };
+  }
 
   if (existing.data?.id) {
     const updated = await params.supabase
@@ -560,18 +586,55 @@ export async function POST(req: NextRequest) {
 
     let inserted = 0;
     let updated = 0;
+    let protectedManualVerified = 0;
+    const protectedManualVerifiedDates = new Set<string>();
+    const responseDailyRows = [];
 
     for (const row of dailyRows) {
       const saved = await upsertDailyRow({ supabase, participant, row });
       if (saved.action === "inserted") inserted += 1;
       if (saved.action === "updated") updated += 1;
+
+      if (saved.action === "protected_manual_verified") {
+        protectedManualVerified += 1;
+        protectedManualVerifiedDates.add(row.date);
+
+        // Keep Portal response aligned with the protected DB value so a normal
+        // Google Fit sync cannot visually downgrade Hari Wahyu's 23 Oct row.
+        responseDailyRows.push({
+          ...row,
+          steps: Number(saved.row?.steps || row.steps || 0),
+          calories: Number(saved.row?.calories || row.calories || 0),
+          duration_minutes: Number(
+            saved.row?.duration_minutes || row.duration_minutes || 0,
+          ),
+          distance_km: Number(
+            saved.row?.distance_km || row.distance_km || 0,
+          ),
+        });
+      } else {
+        responseDailyRows.push(row);
+      }
     }
 
     // WELLNESS_PROVIDER_SYNC_WORKOUT_RECONCILIATION_V126M119_27
-    // Provider sync mutates canonical activity rows, so recompute workout_daily
-    // using the same pointWriter contract already used by manual workout input.
+    // Existing reconciliation behavior is unchanged for all normal rows.
+    // The one explicitly manual-verified Hari Wahyu date is excluded so this
+    // protection does not recalculate or mutate points for that historical row.
     const workoutPointReconciliation = [];
     for (const row of dailyRows) {
+      if (protectedManualVerifiedDates.has(row.date)) {
+        workoutPointReconciliation.push({
+          date: row.date,
+          ok: true,
+          points: null,
+          calories: null,
+          target: null,
+          warning: "MANUAL_VERIFIED_DEVICE_VALUE_PROTECTED_NO_POINT_RECALC",
+        });
+        continue;
+      }
+
       const result = await reconcileWorkoutDailyPoint({
         supabase,
         participant,
@@ -627,8 +690,9 @@ export async function POST(req: NextRequest) {
       fetched_daily: dailyRows.length,
       inserted,
       updated,
+      protected_manual_verified: protectedManualVerified,
       workout_point_reconciliation: workoutPointReconciliation,
-      daily: dailyRows,
+      daily: responseDailyRows,
     });
   } catch (error: any) {
     console.error("WELLNESS_GOOGLE_FIT_SYNC_AGGREGATE_RECENT_STATUS_V414_ERROR", error);
