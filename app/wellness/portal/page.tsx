@@ -788,9 +788,9 @@ function noticeText(value: string) {
     STRAVA_CONNECTED:
       "Strava berhasil terhubung. Klik Sync Strava untuk menarik activity terbaru.",
     GOOGLE_FIT_CONNECTED:
-      "Google Fit berhasil terhubung. Klik Sync Google Fit untuk menarik activity terbaru.",
+      "Google Fit berhasil terhubung. Untuk data lama yang sempat 0 atau kurang, buka Device lalu gunakan Tarik Data Backdate.",
     GOOGLE_FIT_CONNECTED_ACCESS_ONLY:
-      "Google Fit terhubung dengan access token. Klik Sync sekarang; koneksi ulang mungkin diperlukan setelah token kedaluwarsa.",
+      "Google Fit terhubung dengan access token. Jika Tarik Data Backdate meminta reconnect, hubungkan ulang Google Fit lalu coba lagi.",
     GOOGLE_FIT_SAVE_VERIFY_FAILED:
       "Google Fit authorize berhasil tetapi koneksi belum terbaca kembali dari database. Silakan reconnect sekali lagi.",
     STRAVA_CLIENT_ID_NOT_SET:
@@ -10366,6 +10366,86 @@ function DevicesTab({
   const healthSelected = enabled && source === "health_connect";
   const googleSelected = enabled && source === "google_fit";
 
+  // WELLNESS_GOOGLE_FIT_PARTICIPANT_BACKDATE_SELF_SERVICE_V1
+  const [manualBackdateOpenV1, setManualBackdateOpenV1] = useState(false);
+  const [manualBackdateModeV1, setManualBackdateModeV1] = useState<"form" | "reconnect" | "result">("form");
+  const [manualBackdateStartV1, setManualBackdateStartV1] = useState(todayDate());
+  const [manualBackdateEndV1, setManualBackdateEndV1] = useState(todayDate());
+  const [manualBackdateLoadingV1, setManualBackdateLoadingV1] = useState(false);
+  const [manualBackdateMessageV1, setManualBackdateMessageV1] = useState("");
+  const [manualBackdateResultV1, setManualBackdateResultV1] = useState<any>(null);
+
+  function openManualBackdateV1() {
+    setManualBackdateMessageV1("");
+    setManualBackdateResultV1(null);
+    setManualBackdateModeV1(googleFitConnected ? "form" : "reconnect");
+    setManualBackdateOpenV1(true);
+  }
+
+  function manualBackdateInclusiveDaysV1(startDate: string, endDate: string) {
+    const start = new Date(`${startDate}T00:00:00+07:00`).getTime();
+    const end = new Date(`${endDate}T00:00:00+07:00`).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+    return Math.floor((end - start) / 86400000) + 1;
+  }
+
+  async function submitManualBackdateV1() {
+    const startDate = clean(manualBackdateStartV1);
+    const endDate = clean(manualBackdateEndV1);
+    const today = todayDate();
+    const days = manualBackdateInclusiveDaysV1(startDate, endDate);
+
+    if (!startDate || !endDate) {
+      setManualBackdateMessageV1("Pilih tanggal mulai dan tanggal akhir.");
+      return;
+    }
+    if (startDate > endDate) {
+      setManualBackdateMessageV1("Tanggal mulai tidak boleh setelah tanggal akhir.");
+      return;
+    }
+    if (endDate > today) {
+      setManualBackdateMessageV1("Tanggal akhir tidak boleh melebihi hari ini.");
+      return;
+    }
+    if (days < 1 || days > 14) {
+      setManualBackdateMessageV1("Maksimal 14 hari dalam satu kali tarik data.");
+      return;
+    }
+    if (!googleFitConnected) {
+      setManualBackdateModeV1("reconnect");
+      setManualBackdateMessageV1("Google Fit belum terhubung. Hubungkan ulang terlebih dahulu.");
+      return;
+    }
+
+    setManualBackdateLoadingV1(true);
+    setManualBackdateMessageV1("Menarik steps Google Fit sesuai Log Date...");
+    setManualBackdateResultV1(null);
+
+    try {
+      const response = await fetch("/api/wellness/integrations/google-fit/manual-backfill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (result?.reconnect_required === true) {
+        setManualBackdateModeV1("reconnect");
+        setManualBackdateMessageV1(result?.message || "Koneksi Google Fit perlu dihubungkan ulang ke Harmony App.");
+        return;
+      }
+      if (!response.ok || result?.ok !== true) {
+        throw new Error(result?.message || "Tarik data Google Fit belum berhasil.");
+      }
+      setManualBackdateResultV1(result);
+      setManualBackdateModeV1("result");
+      setManualBackdateMessageV1(result?.message || "Tarik data Google Fit selesai.");
+    } catch (error: any) {
+      setManualBackdateMessageV1(error?.message || "Tarik data Google Fit belum berhasil.");
+    } finally {
+      setManualBackdateLoadingV1(false);
+    }
+  }
+
   return (
     <section className="space-y-5">
       <div className="rounded-[1.5rem] border border-sky-100 bg-sky-50 p-4 text-sky-950">
@@ -10496,8 +10576,8 @@ function DevicesTab({
 
           <div className="mt-5 rounded-3xl bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
             <div>
-              Tombol Sync menggunakan koneksi Google Fit yang sudah tersimpan
-              di server. Setelah akun terhubung satu kali, sinkronisasi berikutnya
+              Untuk data Google Fit yang sempat 0 atau kurang, gunakan Tarik Data Backdate
+              dan pilih tanggalnya sendiri. Selama koneksi akun masih sehat, peserta
               tidak perlu memilih email kembali.
             </div>
             <div className="mt-1">
@@ -10588,21 +10668,110 @@ function DevicesTab({
 
             <button
               type="button"
-              onClick={() => syncProvider("google-fit", { days: 30 })}
-              disabled={
-                !googleSelected ||
-                !googleFitConnected ||
-                syncing === "google-fit"
-              }
+              onClick={openManualBackdateV1}
+              disabled={!googleSelected || manualBackdateLoadingV1}
               className="rounded-full bg-slate-900 px-5 py-3 text-xs font-black text-white disabled:opacity-40"
             >
-              {syncing === "google-fit"
-                ? "Sync..."
-                : "Sync Google Fit"}
+              Tarik Data Backdate
             </button>
+          </div>
+
+          <div className="mt-3 text-[10px] font-bold leading-4 text-slate-500">
+            Tarik Data Backdate hanya untuk tanggal Google Fit yang sempat 0 atau kurang.
+            Data disimpan berdasarkan <span className="font-black">Log Date</span> tanggal yang dipilih,
+            bukan timestamp saat tombol ditekan. Proses ini tidak menghitung ulang point.
           </div>
         </div>
       </div>
+
+      {manualBackdateOpenV1 && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/55 p-4">
+              <div className="w-full max-w-lg overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+                  <div>
+                    <div className="text-base font-black text-slate-950">
+                      {manualBackdateModeV1 === "reconnect"
+                        ? "Hubungkan Ulang Google Fit"
+                        : manualBackdateModeV1 === "result"
+                          ? "Hasil Tarik Data"
+                          : "Tarik Data Google Fit Backdate"}
+                    </div>
+                    <div className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                      Khusus recovery steps Google Fit peserta ini.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setManualBackdateOpenV1(false)}
+                    className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-sm font-black text-slate-600"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {manualBackdateModeV1 === "form" ? (
+                  <div className="space-y-4 p-5">
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs font-bold leading-5 text-blue-950">
+                      Pilih hanya tanggal yang steps-nya sempat tidak masuk atau kurang. Maksimal 14 hari per sekali tarik.
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1.5 text-xs font-black text-slate-700">
+                        Dari Tanggal
+                        <input type="date" value={manualBackdateStartV1} max={todayDate()} onChange={(event) => { setManualBackdateStartV1(event.target.value); setManualBackdateMessageV1(""); }} className="rounded-2xl border border-slate-200 px-3 py-3 text-sm font-bold text-slate-900" />
+                      </label>
+                      <label className="grid gap-1.5 text-xs font-black text-slate-700">
+                        Sampai Tanggal
+                        <input type="date" value={manualBackdateEndV1} max={todayDate()} onChange={(event) => { setManualBackdateEndV1(event.target.value); setManualBackdateMessageV1(""); }} className="rounded-2xl border border-slate-200 px-3 py-3 text-sm font-bold text-slate-900" />
+                      </label>
+                    </div>
+                    <div className="rounded-2xl bg-amber-50 p-4 text-[11px] font-bold leading-5 text-amber-900">
+                      Yang ditarik hanya <span className="font-black">Steps Google Fit</span>. Kalori workout, distance, duration, rule streak, dan rule point tidak diubah. Jika steps tanggal terpilih berubah, tampilan pencapaian tanggal itu dapat ikut menyesuaikan sesuai rule existing.
+                    </div>
+                    {manualBackdateMessageV1 ? <div className="rounded-2xl bg-slate-100 p-3 text-xs font-bold leading-5 text-slate-700">{manualBackdateMessageV1}</div> : null}
+                    <div className="grid grid-cols-2 gap-3">
+                      <button type="button" onClick={() => setManualBackdateOpenV1(false)} disabled={manualBackdateLoadingV1} className="rounded-2xl bg-slate-100 px-4 py-3 text-xs font-black text-slate-700 disabled:opacity-50">Batal</button>
+                      <button type="button" onClick={submitManualBackdateV1} disabled={manualBackdateLoadingV1} className="rounded-2xl bg-blue-600 px-4 py-3 text-xs font-black text-white disabled:opacity-50">{manualBackdateLoadingV1 ? "Menarik Data..." : "Tarik Data Manual"}</button>
+                    </div>
+                  </div>
+                ) : manualBackdateModeV1 === "reconnect" ? (
+                  <div className="space-y-4 p-5">
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-bold leading-5 text-rose-900">{manualBackdateMessageV1 || "Koneksi Google Fit perlu dihubungkan ulang ke Harmony App."}</div>
+                    <div className="rounded-2xl border border-slate-200 p-4">
+                      <div className="text-xs font-black uppercase tracking-wide text-slate-500">Langkah Hubungkan Ulang</div>
+                      <ol className="mt-3 space-y-2 pl-5 text-xs font-bold leading-5 text-slate-700">
+                        <li className="list-decimal">Buka Google Fit di HP dan pastikan akun yang benar serta data langkah tanggal tersebut tampil.</li>
+                        <li className="list-decimal">Tekan <span className="font-black">Hubungkan Ulang Google Fit</span>.</li>
+                        <li className="list-decimal">Pilih akun Google yang sama dengan Google Fit di HP.</li>
+                        <li className="list-decimal">Izinkan akses aktivitas / fitness yang diminta Google.</li>
+                        <li className="list-decimal">Setelah kembali ke Harmony App, buka Google Fit lalu tekan <span className="font-black">Tarik Data Backdate</span> lagi.</li>
+                      </ol>
+                    </div>
+                    <a href="/api/wellness/integrations/google-fit/connect" className="block rounded-2xl bg-blue-600 px-4 py-3 text-center text-xs font-black text-white">Hubungkan Ulang Google Fit</a>
+                    <button type="button" onClick={() => { setManualBackdateModeV1("form"); setManualBackdateMessageV1(""); }} className="w-full rounded-2xl bg-slate-100 px-4 py-3 text-xs font-black text-slate-700">Kembali</button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 p-5">
+                    <div className={`rounded-2xl p-4 text-xs font-bold leading-5 ${manualBackdateResultV1?.no_cloud_data ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>{manualBackdateMessageV1}</div>
+                    {manualBackdateResultV1 ? (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Baru</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.inserted || 0)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Diperbarui</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.updated || 0)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Sudah Sama</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.unchanged || 0)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="font-bold text-slate-500">Native Dilindungi</div><div className="mt-1 text-lg font-black text-slate-950">{Number(manualBackdateResultV1.skipped_native || 0)}</div></div>
+                      </div>
+                    ) : null}
+                    {Array.isArray(manualBackdateResultV1?.cloud_missing_dates) && manualBackdateResultV1.cloud_missing_dates.length ? (
+                      <div className="rounded-2xl bg-amber-50 p-4 text-xs font-bold leading-5 text-amber-900">Belum tersedia di Google Fit cloud: <div className="mt-1 break-words font-black">{manualBackdateResultV1.cloud_missing_dates.join(", ")}</div><div className="mt-2">Buka Google Fit di HP sampai angka tanggal tersebut terlihat, lalu coba tarik ulang.</div></div>
+                    ) : null}
+                    <button type="button" onClick={() => window.location.reload()} className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-xs font-black text-white">Selesai & Refresh Tampilan</button>
+                  </div>
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }
