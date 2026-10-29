@@ -1,3 +1,4 @@
+// VACCINATION_IMPORT_NIK_SPLIT_V495_R1: NIP/NIK Karyawan -> external_id; CitizenID/NIK KTP -> nik; Gender remains separate
 import * as XLSX from "xlsx";
 import {
   PROGRAM_CAPASKA,
@@ -829,13 +830,20 @@ export async function importParticipantsFromExcel(
     const putraCol = findColumn(headers, ["Putra", "Nama Putra"]);
     const putriCol = findColumn(headers, ["Putri", "Nama Putri"]);
 
-    const nikCol = findColumn(headers, ["NIK", "Nomor Induk Kependudukan"]);
+    const nikCol = findColumn(headers, [
+      "NIK KTP",
+      "CitizenID",
+      "Citizen ID",
+      "NIK",
+      "Nomor Induk Kependudukan",
+    ]);
     const externalIdCol = findColumn(headers, [
+      "NIK Karyawan",
+      "NIP",
       "ID Instansi",
       "No Peserta",
       "Nomor Peserta",
       "ID Peserta",
-      "NIP",
       "Employee ID",
     ]);
     const genderCol = findColumn(headers, [
@@ -913,8 +921,11 @@ export async function importParticipantsFromExcel(
       "Time Slot",
     ]);
     const vaccinationBinusianIdCol = findColumn(headers, [
+      "NIK Karyawan",
+      "NIP",
       "BinusianID",
       "Binusian ID",
+      "ID Peserta / BinusianID",
       "Parent Binusian ID",
       "Parent ID",
       "External ID",

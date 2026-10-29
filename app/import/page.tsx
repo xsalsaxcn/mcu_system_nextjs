@@ -1,3 +1,4 @@
+// VACCINATION_IMPORT_NIK_SPLIT_V495_R1: explicit vaccination identity mapping + compact session control
 "use client";
 
 import { useEffect, useState } from "react";
@@ -1782,7 +1783,7 @@ function ImportForm({ user }: { user: any }) {
           />
           <div className="mt-2 text-xs text-slate-500">
             {programType === "vaccination"
-              ? "Header vaksinasi: Nama Peserta, ID Peserta/NIK, Jenis Kelamin, Email, No HP, BatchName, TimeAreaName, TimeName. File BINUS dengan Child Name, Child Gender, Parent Binusian ID, Parent Email, Parent HP juga didukung."
+              ? "Header vaksinasi: Nama Peserta/Name, NIK Karyawan/NIP, ID Peserta/BinusianID, NIK KTP/CitizenID, Jenis Kelamin/Gender, Email, No HP/PhoneNumber, BatchName, TimeAreaName, TimeName. NIK Karyawan adalah ID internal karyawan; NIK KTP/CitizenID adalah identitas 16 digit yang dipakai sebagai NIK untuk iServe."
               : programType === "corporate"
                 ? "Disarankan pakai Template MCU Corporate. Header baku: Nama, Binusian ID, Date of Birth, BU/Division, Posisi, NIK, Gender, No HP. Session/Lokasi tetap dipilih di sistem."
                 : "Header yang didukung: Nama Peserta, Nama Lengkap, Nama, Peserta, Putra, Putri, NIK, ID Peserta, Nomor Peserta, Employee ID, Provinsi, Jenis Kelamin, Email, Telepon/HP."}
@@ -1840,7 +1841,7 @@ function ImportForm({ user }: { user: any }) {
                           {field.label}{field.required ? " *" : ""}
                         </label>
                         <select
-                          className="input"
+                          className="input h-10 max-w-xl text-sm"
                           value={vaccinationMappingV154[field.key] || ""}
                           onChange={(e) => updateVaccinationMappingV154(field.key, e.target.value)}
                         >
