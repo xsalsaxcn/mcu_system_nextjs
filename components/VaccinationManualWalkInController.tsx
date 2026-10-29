@@ -29,6 +29,32 @@ function productLabel(item: any) {
     : name;
 }
 
+function saleMode(value: any): "PACKAGE" | "NON_PACKAGE" {
+  return String(value || "").trim().toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE";
+}
+
+function offersFor(item: any) {
+  const offers = Array.isArray(item?.sales_options) ? item.sales_options : [];
+  return offers.filter((offer: any) => offer?.active !== false && Number(offer?.price || 0) > 0);
+}
+
+function selectedOffer(item: any, modeInput: any) {
+  const mode = saleMode(modeInput);
+  const offer = offersFor(item).find((row: any) => saleMode(row?.sale_mode) === mode);
+  if (offer) return offer;
+  if (mode === "NON_PACKAGE" && Number(item?.vaccine?.price || 0) > 0) {
+    return {
+      id: null,
+      vaccine_id: Number(item?.vaccine_id || item?.vaccine?.id || 0),
+      sale_mode: "NON_PACKAGE",
+      package_dose_count: 1,
+      price: Number(item?.vaccine?.price || 0),
+      label: "Non Paket",
+    };
+  }
+  return null;
+}
+
 type QueueMode = "HEALTHDAY" | "BAZAR";
 
 type SelectionState = {
@@ -76,6 +102,7 @@ export default function VaccinationManualWalkInController({
   const [optionSets, setOptionSets] = useState<OptionState>(EMPTY_OPTIONS);
   const [selectedByMode, setSelectedByMode] =
     useState<SelectionState>(EMPTY_SELECTION);
+  const [bazarSaleModeByKey, setBazarSaleModeByKey] = useState<Record<string, "PACKAGE" | "NON_PACKAGE">>({});
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -84,6 +111,7 @@ export default function VaccinationManualWalkInController({
   useEffect(() => {
     let active = true;
     setSelectedByMode({ HEALTHDAY: [], BAZAR: [] });
+    setBazarSaleModeByKey({});
     setMessage("");
     setError("");
 
@@ -140,6 +168,7 @@ export default function VaccinationManualWalkInController({
 
   useEffect(() => {
     setSelectedByMode({ HEALTHDAY: [], BAZAR: [] });
+    setBazarSaleModeByKey({});
     setMessage("");
     setError("");
   }, [participantIdentity]);
@@ -183,10 +212,12 @@ export default function VaccinationManualWalkInController({
   const bazarSubtotal = useMemo(
     () =>
       bazarSelected.reduce((total: number, item: any) => {
-        const price = Number(item?.vaccine?.price);
+        const key = optionKey(item);
+        const offer = selectedOffer(item, bazarSaleModeByKey[key] || "NON_PACKAGE");
+        const price = Number(offer?.price || 0);
         return total + (Number.isFinite(price) ? price : 0);
       }, 0),
-    [bazarSelected],
+    [bazarSelected, bazarSaleModeByKey],
   );
   const bazarSurcharge =
     bazarPaymentMethod === "CREDIT_CARD"
@@ -214,6 +245,12 @@ export default function VaccinationManualWalkInController({
         : [...current, key];
       return { ...previous, [mode]: next } as SelectionState;
     });
+    if (mode === "BAZAR") {
+      setBazarSaleModeByKey((previous) => ({
+        ...previous,
+        [key]: previous[key] || "NON_PACKAGE",
+      }));
+    }
   }
 
   function popupPlaceholder(track: "A" | "B" | "AB") {
@@ -273,15 +310,12 @@ export default function VaccinationManualWalkInController({
       return;
     }
     if (
-      bazarSelected.some(
-        (item: any) =>
-          !Number.isFinite(Number(item?.vaccine?.price)) ||
-          Number(item?.vaccine?.price) <= 0,
-      )
+      bazarSelected.some((item: any) => {
+        const key = optionKey(item);
+        return !selectedOffer(item, bazarSaleModeByKey[key] || "NON_PACKAGE");
+      })
     ) {
-      setError(
-        "Ada layanan Bazar yang belum memiliki harga jual > 0 pada master produk.",
-      );
+      setError("Ada layanan Bazar yang belum memiliki harga Paket/Non Paket aktif pada Master Produk.");
       return;
     }
 
@@ -318,16 +352,25 @@ export default function VaccinationManualWalkInController({
           : (clean(form?.paymentNote || form?.payment_note) || null),
       }));
 
-      const bazarItems = bazarSelected.map((item: any) => ({
-        vaccineId: Number(item?.vaccine_id || item?.vaccine?.id || 0),
-        lotId: Number(item?.lot_id || item?.lot?.id || 0) || null,
-        doseNumber: Math.max(1, Number(item?.dose_number || 1)),
-        priceCategory: clean(item?.vaccine?.price_category) || null,
-        price: Number(item?.vaccine?.price),
-        serviceMode: "BAZAR",
-        paymentMethod: bazarPaymentMethod || null,
-        paymentNote: clean(form?.paymentNote || form?.payment_note) || null,
-      }));
+      const bazarItems = bazarSelected.map((item: any) => {
+        const key = optionKey(item);
+        const chosenMode = bazarSaleModeByKey[key] || "NON_PACKAGE";
+        const offer = selectedOffer(item, chosenMode);
+        return {
+          vaccineId: Number(item?.vaccine_id || item?.vaccine?.id || 0),
+          lotId: Number(item?.lot_id || item?.lot?.id || 0) || null,
+          doseNumber: Math.max(1, Number(item?.dose_number || 1)),
+          priceCategory: clean(item?.vaccine?.price_category) || null,
+          price: Number(offer?.price || 0),
+          serviceMode: "BAZAR",
+          paymentMethod: bazarPaymentMethod || null,
+          paymentNote: clean(form?.paymentNote || form?.payment_note) || null,
+          salesOptionId: Number(offer?.id || 0) || null,
+          saleMode: saleMode(offer?.sale_mode || chosenMode),
+          packageDoseCount: Math.max(1, Number(offer?.package_dose_count || 1)),
+          salesPriceSnapshot: Number(offer?.price || 0),
+        };
+      });
 
       const items = [...healthdayItems, ...bazarItems];
       const first = items[0];
@@ -448,6 +491,7 @@ export default function VaccinationManualWalkInController({
         } · ${totalSelected} produk.`,
       );
       setSelectedByMode({ HEALTHDAY: [], BAZAR: [] });
+      setBazarSaleModeByKey({});
 
       window.setTimeout(() => {
         window.location.reload();
@@ -654,8 +698,13 @@ export default function VaccinationManualWalkInController({
             const checked = activeSelectedKeys.includes(key);
             const lot = clean(item?.lot?.lot_number);
             const expiry = clean(item?.lot?.expiry_date);
-            const price = Number(item?.vaccine?.price);
             const isBazar = serviceMode === "BAZAR";
+            const itemSaleMode = bazarSaleModeByKey[key] || "NON_PACKAGE";
+            const offer = isBazar ? selectedOffer(item, itemSaleMode) : null;
+            const price = isBazar ? Number(offer?.price || 0) : Number(item?.vaccine?.price);
+            const availableOffers = offersFor(item);
+            const packageOffer = availableOffers.find((row: any) => saleMode(row?.sale_mode) === "PACKAGE");
+            const nonPackageOffer = selectedOffer(item, "NON_PACKAGE");
 
             return (
               <label
@@ -704,6 +753,28 @@ export default function VaccinationManualWalkInController({
                         ? " · benefit Healthday"
                         : ""}
                   </span>
+                  {isBazar && checked && packageOffer && nonPackageOffer ? (
+                    <span className="mt-2 block" onClick={(event) => event.preventDefault()}>
+                      <span className="mb-1 block text-[10px] font-black uppercase text-violet-700">Jenis Harga</span>
+                      <select
+                        value={itemSaleMode}
+                        onChange={(event) =>
+                          setBazarSaleModeByKey((previous) => ({
+                            ...previous,
+                            [key]: event.target.value === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+                          }))
+                        }
+                        className="w-full rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs font-black text-violet-800"
+                      >
+                        <option value="NON_PACKAGE">Harga Non Paket · Rp {money(nonPackageOffer?.price)}</option>
+                        <option value="PACKAGE">Harga Paket · Rp {money(packageOffer?.price)} · {Math.max(2, Number(packageOffer?.package_dose_count || 2))}x</option>
+                      </select>
+                    </span>
+                  ) : isBazar && checked && packageOffer && !nonPackageOffer ? (
+                    <span className="mt-2 block rounded-lg bg-violet-50 px-2 py-1 text-[10px] font-black text-violet-700">
+                      Harga Paket · Rp {money(packageOffer.price)}
+                    </span>
+                  ) : null}
                 </span>
               </label>
             );

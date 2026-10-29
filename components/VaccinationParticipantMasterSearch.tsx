@@ -289,7 +289,7 @@ export default function VaccinationParticipantMasterSearch({
       suggestedVaccineIds: (row?.items || [])
         .map((item: any) => item?.vaccine_id)
         .filter(Boolean),
-      contextLabel: `Terdaftar di ${session?.location || session?.session_name || "session ini"}`,
+      contextLabel: `Terdaftar di ${session?.session_name || session?.location || "session ini"}`,
     });
     setCurrentQuery(clean(row?.participant_name));
     setCurrentOpen(false);
@@ -388,7 +388,7 @@ export default function VaccinationParticipantMasterSearch({
         {
           sourceType: "CURRENT_SESSION",
           suggestedVaccineIds: current.vaccineIds || [],
-          contextLabel: `Sudah terdaftar di ${current?.session?.location || current?.session?.name || "session ini"}`,
+          contextLabel: `Sudah terdaftar di ${current?.session?.name || current?.session?.location || "session ini"}`,
         },
       );
     } else if (mode === "MOVE" && other) {
@@ -410,7 +410,7 @@ export default function VaccinationParticipantMasterSearch({
           moveFromRegistrationId: other.id,
           suggestedVaccineIds: other.vaccineIds || [],
           serviceMode: String(other?.patientServiceStatus || "").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
-          contextLabel: `Pindah dari ${other?.session?.location || other?.session?.name || "lokasi lain"}`,
+          contextLabel: `Pindah dari ${other?.session?.name || other?.session?.location || "lokasi lain"}`,
         },
       );
     } else {
@@ -513,6 +513,24 @@ export default function VaccinationParticipantMasterSearch({
   const other = context?.otherRegistration || null;
   const current = context?.currentRegistration || null;
   const historical = Array.isArray(context?.historical) ? context.historical : [];
+  const contextPerson = context?.historyPerson || {
+    name: current?.participantName || other?.participantName || pending?.row?.name || pending?.row?.participant_name || "",
+    employeeId: current?.employeeId || other?.employeeId || pending?.row?.employeeId || pending?.row?.employee_id || "",
+    nik: current?.nik || other?.nik || pending?.row?.nik || "",
+    email: current?.email || other?.email || pending?.row?.email || "",
+    phone: current?.phone || other?.phone || pending?.row?.phone || "",
+    participantType: pending?.row?.participantType || pending?.row?.participant_type || current?.familyRole || other?.familyRole || "",
+  };
+  const family = context?.family || { role: "", parent: null, children: [] };
+  const familyChildren = Array.isArray(family?.children) ? family.children : [];
+  const contextCompany = clean(
+    current?.companyName ||
+      other?.companyName ||
+      pending?.row?.companyName ||
+      pending?.row?.company_name ||
+      context?.selectedSession?.companyName ||
+      company?.name,
+  );
 
   return (
     <div className="w-full rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
@@ -524,7 +542,7 @@ export default function VaccinationParticipantMasterSearch({
           </div>
         </div>
         <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-[11px] font-black text-blue-700">
-          Session: {session?.location || session?.session_name || "belum dipilih"}
+          Session: {session?.session_name || session?.location || "belum dipilih"}
         </div>
       </div>
 
@@ -831,7 +849,7 @@ export default function VaccinationParticipantMasterSearch({
                       </div>
                       <div className="mt-2 text-lg font-black leading-snug text-amber-950">
                         Peserta ini sudah pernah terdaftar di{" "}
-                        {other?.session?.location || other?.session?.name || "lokasi lain"},{" "}
+                        {other?.session?.name || other?.session?.location || "lokasi lain"},{" "}
                         {dateLabel(other?.session?.date || other?.registeredAt)}.
                       </div>
                     </div>
@@ -900,6 +918,60 @@ export default function VaccinationParticipantMasterSearch({
                   )}
                 </section>
               ) : null}
+
+              <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-5">
+                <div className="text-xs font-black uppercase tracking-wide text-blue-700">Data Peserta</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ["Nama", clean(contextPerson?.name) || "-"],
+                    ["NIK Karyawan / BINUSIAN ID", clean(contextPerson?.employeeId) || "-"],
+                    ["NIK KTP", clean(contextPerson?.nik) || "-"],
+                    ["No. HP", clean(contextPerson?.phone) || "-"],
+                    ["Email", clean(contextPerson?.email) || "-"],
+                    ["Perusahaan", contextCompany || "-"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border bg-white p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+                      <div className="mt-1 break-words text-sm font-black text-slate-900">{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Parent</div>
+                    {family?.parent ? (
+                      <div className="mt-1">
+                        <div className="text-sm font-black text-slate-900">{family.parent.name || "-"}</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-500">
+                          {[family.parent.employeeId ? `ID ${family.parent.employeeId}` : "", family.parent.nik ? `NIK ${family.parent.nik}` : "", family.parent.phone || ""].filter(Boolean).join(" · ") || "-"}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-sm font-semibold text-slate-500">
+                        {String(family?.role || contextPerson?.participantType || "").toUpperCase() === "DEPENDENT" ? "Parent belum terhubung" : "Peserta adalah Parent / tidak ada Parent"}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Child / Family</div>
+                    {familyChildren.length ? (
+                      <div className="mt-2 space-y-2">
+                        {familyChildren.map((child: any) => (
+                          <div key={child.id || `${child.name}-${child.nik}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="text-sm font-black text-slate-900">{child.name || "-"}</div>
+                            <div className="mt-0.5 text-[11px] font-semibold text-slate-500">
+                              {[child.employeeId ? `ID ${child.employeeId}` : "", child.nik ? `NIK ${child.nik}` : "", child.phone || ""].filter(Boolean).join(" · ") || "-"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-sm font-semibold text-slate-500">Belum ada Child / Family terhubung.</div>
+                    )}
+                  </div>
+                </div>
+              </section>
 
               <section className="rounded-2xl border bg-white p-5">
                 <div className="flex items-center justify-between gap-3">

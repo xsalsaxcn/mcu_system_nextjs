@@ -287,13 +287,7 @@ export async function GET(req: NextRequest) {
           service_mode: serviceMode,
           qty: -1,
           session_label: session
-            ? [
-                clean(session.session_name),
-                clean(session.location),
-                clean(session.session_date),
-              ]
-                .filter(Boolean)
-                .join(" · ")
+            ? clean(session.session_name) || clean(session.location) || `Session ${session.id || ""}`
             : "",
         };
       })
@@ -503,6 +497,153 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const action = clean(body.action);
   const supabase = supabaseAdmin();
+
+  if (action === "duplicate-session-catalog") {
+    const sourceSessionId = toInt(body.sourceSessionId || body.source_session_id, 0);
+    const targetSessionIds: number[] = Array.from(
+      new Set<number>(
+        (Array.isArray(body.targetSessionIds) ? body.targetSessionIds : [])
+          .map((value: any) => toInt(value, 0))
+          .filter((id: number) => id > 0 && id !== sourceSessionId),
+      ),
+    );
+    const requestedVaccineIds: number[] = Array.from(
+      new Set<number>(
+        (Array.isArray(body.vaccineIds) ? body.vaccineIds : [])
+          .map((value: any) => toInt(value, 0))
+          .filter((id: number) => id > 0),
+      ),
+    );
+    if (!sourceSessionId) return fail("Session sumber wajib dipilih.");
+    if (!targetSessionIds.length) return fail("Pilih minimal satu Session tujuan.");
+    if (!requestedVaccineIds.length) return fail("Pilih minimal satu produk untuk diduplikat.");
+
+    const sessionIds: number[] = [sourceSessionId, ...targetSessionIds];
+    const sessionsResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,session_name,company_name,status")
+      .in("id", sessionIds);
+    if (sessionsResult.error) return fail(sessionsResult.error.message, 500);
+    const sessionMap = new Map<number, any>((sessionsResult.data || []).map((row: any) => [Number(row.id), row]));
+    const sourceSession = sessionMap.get(sourceSessionId);
+    if (!sourceSession) return fail("Session sumber tidak ditemukan.", 404);
+    const sourceCompany = normalizeCompanyName(sourceSession.company_name);
+    for (const targetId of targetSessionIds) {
+      const target = sessionMap.get(targetId);
+      if (!target) return fail(`Session tujuan ID ${targetId} tidak ditemukan.`, 404);
+      if (String(target.status || "").toUpperCase() === "CANCELLED") return fail(`Session ${target.session_name || targetId} berstatus CANCELLED.`);
+      if (sourceCompany && normalizeCompanyName(target.company_name) !== sourceCompany) {
+        return fail(`Session ${target.session_name || targetId} berbeda perusahaan dengan Session sumber.`);
+      }
+    }
+
+    const [assignmentResult, allocationResult] = await Promise.all([
+      supabase
+        .from("vaccination_session_product_assignments")
+        .select("vaccine_id,service_mode,planned_stock_initial,active")
+        .eq("session_id", sourceSessionId)
+        .eq("active", true),
+      supabase
+        .from("vaccination_session_stock_allocations")
+        .select("vaccine_id,lot_id,service_mode,active")
+        .eq("session_id", sourceSessionId)
+        .eq("active", true),
+    ]);
+    if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
+    if (allocationResult.error) return fail(allocationResult.error.message, 500);
+
+    const requestedSet = new Set<number>(requestedVaccineIds);
+    const sourceAssignments = (assignmentResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
+    const sourceAllocations = (allocationResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
+    const sourceCatalogVaccineIds = new Set<number>();
+    for (const row of sourceAssignments) sourceCatalogVaccineIds.add(Number(row.vaccine_id || 0));
+    for (const row of sourceAllocations) sourceCatalogVaccineIds.add(Number(row.vaccine_id || 0));
+    const invalidVaccineIds: number[] = requestedVaccineIds.filter((id: number) => !sourceCatalogVaccineIds.has(Number(id)));
+    if (invalidVaccineIds.length) {
+      return fail(`Ada ${invalidVaccineIds.length} produk yang bukan milik Session sumber. Refresh Master lalu pilih ulang semua produk.`);
+    }
+
+    const modesByVaccine = new Map<number, Set<string>>();
+    const addMode = (vaccineIdInput: any, modeInput: any) => {
+      const vaccineId = Number(vaccineIdInput || 0);
+      if (!vaccineId || !requestedSet.has(vaccineId)) return;
+      const mode = String(modeInput || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      if (!modesByVaccine.has(vaccineId)) modesByVaccine.set(vaccineId, new Set<string>());
+      modesByVaccine.get(vaccineId)!.add(mode);
+    };
+    for (const row of sourceAssignments) addMode(row.vaccine_id, row.service_mode);
+    for (const row of sourceAllocations) addMode(row.vaccine_id, row.service_mode);
+    for (const vaccineId of requestedVaccineIds) {
+      if (!modesByVaccine.get(Number(vaccineId))?.size) addMode(vaccineId, "HEALTHDAY");
+    }
+
+    const actor = (user as any)?.email || (user as any)?.name || (user as any)?.id || "system";
+    let assignmentCount = 0;
+    let lotCatalogCount = 0;
+    for (const targetSessionId of targetSessionIds) {
+      for (const vaccineId of requestedVaccineIds) {
+        for (const mode of Array.from(modesByVaccine.get(Number(vaccineId)) || new Set<string>(["HEALTHDAY"]))) {
+          const assignmentUpsert = await supabase
+            .from("vaccination_session_product_assignments")
+            .upsert({
+              session_id: targetSessionId,
+              vaccine_id: Number(vaccineId),
+              service_mode: mode,
+              planned_stock_initial: 0,
+              active: true,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "session_id,vaccine_id,service_mode" });
+          if (assignmentUpsert.error) return fail(assignmentUpsert.error.message, 500);
+          assignmentCount += 1;
+        }
+      }
+
+      for (const sourceRow of sourceAllocations) {
+        const vaccineId = Number(sourceRow.vaccine_id || 0);
+        const lotId = Number(sourceRow.lot_id || 0);
+        if (!vaccineId || !lotId || !requestedSet.has(vaccineId)) continue;
+        const mode = String(sourceRow.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        const allocationUpsert = await supabase
+          .from("vaccination_session_stock_allocations")
+          .upsert({
+            session_id: targetSessionId,
+            vaccine_id: vaccineId,
+            lot_id: lotId,
+            service_mode: mode,
+            allocated_qty: 0,
+            low_stock_threshold: 5,
+            dedicated: true,
+            active: true,
+            notes: `Catalog only from Session ${sourceSessionId}; stock not copied`,
+            created_by: actor,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "session_id,lot_id,service_mode" });
+        if (allocationUpsert.error) return fail(allocationUpsert.error.message, 500);
+
+        const sessionVaccineUpsert = await supabase
+          .from("vaccination_session_vaccines")
+          .upsert({
+            session_id: targetSessionId,
+            vaccine_id: vaccineId,
+            lot_id: lotId,
+            dose_number: 1,
+            active: true,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "session_id,vaccine_id,lot_id,dose_number" });
+        if (sessionVaccineUpsert.error) return fail(sessionVaccineUpsert.error.message, 500);
+        lotCatalogCount += 1;
+      }
+    }
+
+    return ok({
+      message: `Katalog berhasil diduplikat ke ${targetSessionIds.length} Session tanpa stok.`,
+      targetSessionCount: targetSessionIds.length,
+      productCount: requestedVaccineIds.length,
+      assignmentCount,
+      lotCatalogCount,
+      stockCopied: 0,
+    });
+  }
 
   if (action === "import-stock-quant") {
     const rawRows = Array.isArray(body.rows) ? body.rows : [];

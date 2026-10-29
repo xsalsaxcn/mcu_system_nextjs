@@ -58,12 +58,7 @@ function lotScope(lot: any) {
 
 function sessionLabel(session: any) {
   if (!session) return "-";
-  const parts = [
-    cleanText(session.session_name),
-    cleanText(session.location),
-    cleanText(session.session_date),
-  ].filter(Boolean);
-  return parts.join(" · ") || `Session ${session.id || ""}`;
+  return cleanText(session.session_name) || cleanText(session.location) || `Session ${session.id || ""}`;
 }
 
 function parseQuantity(value: any) {
@@ -158,6 +153,12 @@ export default function VaccinationMasterPage() {
   const [packageDoseCount, setPackageDoseCount] = useState("3");
   const [packagePrice, setPackagePrice] = useState("");
   const [savingInlinePricing, setSavingInlinePricing] = useState(false);
+  // V511_DUPLICATE_SESSION_CATALOG_NO_STOCK
+  const [catalogDuplicateOpen, setCatalogDuplicateOpen] = useState(false);
+  const [catalogSourceSessionId, setCatalogSourceSessionId] = useState("");
+  const [catalogTargetSessionIds, setCatalogTargetSessionIds] = useState<string[]>([]);
+  const [catalogVaccineIds, setCatalogVaccineIds] = useState<string[]>([]);
+  const [catalogDuplicating, setCatalogDuplicating] = useState(false);
 
   function resetProductLotEditor() {
     setSelectedImportProductKey("");
@@ -1225,6 +1226,67 @@ export default function VaccinationMasterPage() {
     }
   }
 
+  function openCatalogDuplicate() {
+    const preferred =
+      stockSessionFilter !== "ALL"
+        ? String(stockSessionFilter)
+        : stockSessions.find((session) => String(session.status || "").toUpperCase() !== "CANCELLED")?.id
+          ? String(stockSessions.find((session) => String(session.status || "").toUpperCase() !== "CANCELLED")!.id)
+          : "";
+    setCatalogSourceSessionId(preferred);
+    setCatalogTargetSessionIds([]);
+    setCatalogVaccineIds([]);
+    setCatalogDuplicateOpen(true);
+    setError("");
+  }
+
+  function changeCatalogSource(sessionId: string) {
+    setCatalogSourceSessionId(sessionId);
+    setCatalogTargetSessionIds([]);
+    setCatalogVaccineIds([]);
+  }
+
+  async function duplicateSessionCatalog() {
+    setError("");
+    if (!catalogSourceSessionId) {
+      setError("Pilih Session sumber.");
+      return;
+    }
+    if (!catalogVaccineIds.length) {
+      setError("Pilih minimal satu produk dari Session sumber.");
+      return;
+    }
+    if (!catalogTargetSessionIds.length) {
+      setError("Pilih minimal satu Session tujuan.");
+      return;
+    }
+
+    setCatalogDuplicating(true);
+    try {
+      const response = await fetch("/api/vaccination/master", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "duplicate-session-catalog",
+          sourceSessionId: Number(catalogSourceSessionId),
+          targetSessionIds: catalogTargetSessionIds.map((id) => Number(id)),
+          vaccineIds: catalogVaccineIds.map((id) => Number(id)),
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) throw new Error(json.message || "Duplikasi katalog gagal.");
+      setMessage(json.message || "Katalog produk dan lot berhasil diduplikat tanpa stok.");
+      setCatalogDuplicateOpen(false);
+      setCatalogTargetSessionIds([]);
+      setCatalogVaccineIds([]);
+      await loadData();
+    } catch (e: any) {
+      setError(e?.message || "Duplikasi katalog gagal.");
+    } finally {
+      setCatalogDuplicating(false);
+    }
+  }
+
   useEffect(() => { loadData(); }, []);
   const activeVaccines = useMemo(() => vaccines.filter((v) => v.active), [vaccines]);
 
@@ -1278,6 +1340,46 @@ export default function VaccinationMasterPage() {
         return dateCompare || Number(b.id || 0) - Number(a.id || 0);
       });
   }, [stockSessions, stockFilter]);
+
+  const catalogSourceSession = useMemo(
+    () => stockSessions.find((session) => String(session.id) === String(catalogSourceSessionId)) || null,
+    [stockSessions, catalogSourceSessionId],
+  );
+
+  const catalogSourceVaccineIds = useMemo(() => {
+    const sourceId = Number(catalogSourceSessionId || 0);
+    if (!sourceId) return [] as number[];
+    const ids = new Set<number>();
+    for (const row of sessionProductAssignments) {
+      if (row.active === false || Number(row.session_id || 0) !== sourceId) continue;
+      const vaccineId = Number(row.vaccine_id || 0);
+      if (vaccineId) ids.add(vaccineId);
+    }
+    for (const row of serviceStockAllocations) {
+      if (row.active === false || Number(row.session_id || 0) !== sourceId) continue;
+      const vaccineId = Number(row.vaccine_id || 0);
+      if (vaccineId) ids.add(vaccineId);
+    }
+    return Array.from(ids).sort((a, b) => a - b);
+  }, [catalogSourceSessionId, sessionProductAssignments, serviceStockAllocations]);
+
+  const catalogSourceVaccines = useMemo(
+    () => vaccines.filter((vaccine) => catalogSourceVaccineIds.includes(Number(vaccine.id || 0))),
+    [vaccines, catalogSourceVaccineIds],
+  );
+
+  const catalogTargetSessions = useMemo(() => {
+    const source = catalogSourceSession;
+    if (!source) return [];
+    const companyKey = normalizeCompany(source.company_name);
+    return stockSessions
+      .filter((session) =>
+        String(session.id) !== String(source.id) &&
+        String(session.status || "").toUpperCase() !== "CANCELLED" &&
+        (!companyKey || normalizeCompany(session.company_name) === companyKey),
+      )
+      .sort((a, b) => String(b.session_date || "").localeCompare(String(a.session_date || "")) || Number(b.id || 0) - Number(a.id || 0));
+  }, [stockSessions, catalogSourceSession]);
 
   const sessionMap = useMemo(
     () =>
@@ -2661,7 +2763,15 @@ export default function VaccinationMasterPage() {
                   Menampilkan {filteredVaccines.length} dari {vaccines.length} produk master.
                 </div>
               </div>
-              <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px] lg:w-[760px]">
+              <div className="flex flex-col gap-2 lg:items-end">
+                <button
+                  type="button"
+                  onClick={openCatalogDuplicate}
+                  className="self-start rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-700 hover:bg-violet-100 lg:self-end"
+                >
+                  Duplikat Katalog ke Session
+                </button>
+                <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px] lg:w-[760px]">
                 <input
                   type="text"
                   value={productSearch}
@@ -2687,6 +2797,7 @@ export default function VaccinationMasterPage() {
                   <option value="HEALTHDAY">Healthday</option>
                   <option value="BAZAR">Bazar</option>
                 </select>
+                </div>
               </div>
             </div>
           </div>
@@ -2937,7 +3048,98 @@ export default function VaccinationMasterPage() {
           )}
         </details>
 
-        {transactionProduct ? (
+        {catalogDuplicateOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !catalogDuplicating) setCatalogDuplicateOpen(false); }}>
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b bg-violet-50 px-6 py-5">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wide text-violet-700">Duplikat Katalog Session</div>
+                <h3 className="mt-1 text-xl font-black text-slate-900">Produk + Lot, tanpa membawa stok</h3>
+                <div className="mt-1 text-xs font-semibold text-slate-600">Target boleh lebih dari satu Session. Alokasi stok target selalu 0.</div>
+              </div>
+              <button type="button" disabled={catalogDuplicating} onClick={() => setCatalogDuplicateOpen(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black disabled:opacity-50">Tutup</button>
+            </div>
+            <div className="max-h-[calc(90vh-100px)] space-y-5 overflow-y-auto p-6">
+              <div>
+                <label className="text-xs font-black uppercase text-slate-600">Session Sumber</label>
+                <select value={catalogSourceSessionId} onChange={(e) => changeCatalogSource(e.target.value)} className="mt-2 w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold">
+                  <option value="">Pilih Session sumber</option>
+                  {stockSessions.filter((session) => String(session.status || "").toUpperCase() !== "CANCELLED").map((session) => (
+                    <option key={session.id} value={String(session.id)}>{sessionLabel(session)}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <section className="rounded-2xl border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-black text-slate-900">Produk dari Session Sumber</div>
+                      <div className="text-xs text-slate-500">{catalogSourceVaccines.length} produk tersedia</div>
+                    </div>
+                    <button type="button" onClick={() => setCatalogVaccineIds(catalogVaccineIds.length === catalogSourceVaccines.length ? [] : catalogSourceVaccines.map((vaccine) => String(vaccine.id)))} className="rounded-lg border px-3 py-1.5 text-xs font-black">
+                      {catalogSourceVaccines.length > 0 && catalogVaccineIds.length === catalogSourceVaccines.length ? "Clear" : "Pilih Semua Produk"}
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                    {catalogSourceVaccines.map((vaccine) => {
+                      const id = String(vaccine.id);
+                      const checked = catalogVaccineIds.includes(id);
+                      return (
+                        <label key={id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-slate-50 p-3">
+                          <input type="checkbox" checked={checked} onChange={() => setCatalogVaccineIds((prev) => checked ? prev.filter((value) => value !== id) : [...prev, id])} />
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-black text-slate-900">{vaccine.name}</span>
+                            <span className="block truncate text-xs text-slate-500">{vaccine.brand || "-"}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {!catalogSourceVaccines.length ? <div className="rounded-xl border border-dashed p-5 text-center text-sm font-semibold text-slate-500">Belum ada katalog produk pada Session sumber.</div> : null}
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-black text-slate-900">Session Tujuan</div>
+                      <div className="text-xs text-slate-500">Hanya Session perusahaan yang sama</div>
+                    </div>
+                    <button type="button" onClick={() => setCatalogTargetSessionIds(catalogTargetSessionIds.length === catalogTargetSessions.length ? [] : catalogTargetSessions.map((session) => String(session.id)))} className="rounded-lg border px-3 py-1.5 text-xs font-black">
+                      {catalogTargetSessions.length > 0 && catalogTargetSessionIds.length === catalogTargetSessions.length ? "Clear" : "Pilih Semua Session"}
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                    {catalogTargetSessions.map((session) => {
+                      const id = String(session.id);
+                      const checked = catalogTargetSessionIds.includes(id);
+                      return (
+                        <label key={id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-slate-50 p-3">
+                          <input type="checkbox" checked={checked} onChange={() => setCatalogTargetSessionIds((prev) => checked ? prev.filter((value) => value !== id) : [...prev, id])} />
+                          <span className="text-sm font-black text-slate-900">{sessionLabel(session)}</span>
+                        </label>
+                      );
+                    })}
+                    {catalogSourceSessionId && !catalogTargetSessions.length ? <div className="rounded-xl border border-dashed p-5 text-center text-sm font-semibold text-slate-500">Tidak ada Session tujuan aktif pada perusahaan yang sama.</div> : null}
+                  </div>
+                </section>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+                Yang diduplikat hanya katalog produk, lot, dan jenis layanan. Stok awal, stok tambahan, stok terpakai, serta riwayat transaksi TIDAK disalin.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" disabled={catalogDuplicating} onClick={() => setCatalogDuplicateOpen(false)} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button>
+                <button type="button" disabled={catalogDuplicating || !catalogSourceSessionId || !catalogVaccineIds.length || !catalogTargetSessionIds.length} onClick={duplicateSessionCatalog} className="rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">
+                  {catalogDuplicating ? "Memproses..." : "Duplikat Katalog Tanpa Stok"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {transactionProduct ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
             <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
               <div className="flex items-start justify-between border-b p-5">

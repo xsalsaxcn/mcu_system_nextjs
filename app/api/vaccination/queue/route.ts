@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { clean, fail, formatQueueNumber, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { reverseQueueDoneTrack, syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
 // VACCINATION_ROLE_GUARD_V150
 // V153.67_DUAL_QUEUE_A_B
@@ -134,6 +135,7 @@ export async function POST(req: NextRequest) {
   const registrationId = toInt(body.registrationId || body.registration_id, 0);
   const requestedTrack = String(body.track || "A").toUpperCase() === "B" ? "B" : "A";
   const supabase = supabaseAdmin();
+  const actor = (user as any)?.email || (user as any)?.name || (user as any)?.id || "queue";
 
   if (!sessionId) return fail("Session wajib dipilih.");
 
@@ -277,6 +279,23 @@ export async function POST(req: NextRequest) {
       .single();
     if (regResult.error) return fail(regResult.error.message, 500);
 
+    try {
+      if (action === "finish") await syncRegistrationTrackDone(supabase, registrationId, "BAZAR", actor);
+      if (action === "undo-finish") await reverseQueueDoneTrack(supabase, registrationId, "BAZAR", actor);
+    } catch (error: any) {
+      await supabase
+        .from("vaccination_registrations")
+        .update({
+          bazar_queue_status: existing.bazar_queue_status,
+          bazar_finished_at: existing.bazar_finished_at || null,
+          bazar_cancelled_at: existing.bazar_cancelled_at || null,
+          bazar_called_at: existing.bazar_called_at || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", registrationId);
+      return fail(error?.message || "Gagal menyinkronkan status Done Bazar ke stok.", 409);
+    }
+
     return ok({
       message:
         action === "undo-finish"
@@ -331,6 +350,17 @@ export async function POST(req: NextRequest) {
     .select("*")
     .single();
   if (regResult.error) return fail(regResult.error.message, 500);
+
+  try {
+    if (action === "finish") await syncRegistrationTrackDone(supabase, registrationId, "HEALTHDAY", actor);
+    if (action === "undo-finish") await reverseQueueDoneTrack(supabase, registrationId, "HEALTHDAY", actor);
+  } catch (error: any) {
+    await supabase
+      .from("vaccination_registrations")
+      .update({ queue_status: existing.queue_status, updated_at: new Date().toISOString() })
+      .eq("id", registrationId);
+    return fail(error?.message || "Gagal menyinkronkan status Done Healthday ke stok.", 409);
+  }
 
   if (nextStatus === "CALLED" || nextStatus === "IN_PROGRESS") {
     await supabase

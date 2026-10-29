@@ -19,6 +19,10 @@ type ProductItem = {
   itemNote: string;
   serviceMode: "HEALTHDAY" | "BAZAR";
   status?: string;
+  salesOptionId?: number | null;
+  saleMode?: "PACKAGE" | "NON_PACKAGE";
+  packageDoseCount?: number;
+  salesPriceSnapshot?: number | null;
 };
 
 type SortState = { key: string; direction: "asc" | "desc" };
@@ -47,10 +51,7 @@ function money(value: any) {
 }
 
 function sessionLabel(session: any) {
-  const eventName = session?.source_name || String(session?.session_name || "").split(" - ")[0] || "Session";
-  return [eventName, session?.location, session?.session_date]
-    .filter(Boolean)
-    .join(" · ");
+  return String(session?.session_name || session?.location || `Session ${session?.id || ""}`).trim();
 }
 
 function vaccineLabel(vaccine: any) {
@@ -70,6 +71,10 @@ function emptyProductItem(): ProductItem {
     itemNote: "",
     serviceMode: "HEALTHDAY",
     status: "WAITING",
+    salesOptionId: null,
+    saleMode: "NON_PACKAGE",
+    packageDoseCount: 1,
+    salesPriceSnapshot: null,
   };
 }
 
@@ -86,6 +91,10 @@ function itemFromRegistrationItem(item: any): ProductItem {
     itemNote: item?.item_note || "",
     serviceMode: String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
     status: item?.status || "WAITING",
+    salesOptionId: Number(item?.sales_option_id || 0) || null,
+    saleMode: String(item?.sale_mode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+    packageDoseCount: Math.max(1, Number(item?.package_dose_count || 1)),
+    salesPriceSnapshot: item?.sales_price_snapshot == null ? null : Number(item.sales_price_snapshot),
   };
 }
 
@@ -94,6 +103,7 @@ export default function VaccinationRegisterPage() {
   const [sources, setSources] = useState<any[]>([]);
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
+  const [salesOffers, setSalesOffers] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
 
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
@@ -318,7 +328,17 @@ export default function VaccinationRegisterPage() {
   }, [selectedVaccineIds, form.vaccineId, availableVaccines, vaccines]);
 
   function isDoneStatus(status: any) {
-    return ["ADMINISTERED", "DONE"].includes(String(status || "").toUpperCase());
+    return ["ADMINISTERED", "DONE", "FINISHED"].includes(String(status || "").toUpperCase());
+  }
+
+  function saleOffer(vaccineId: any, mode: "PACKAGE" | "NON_PACKAGE") {
+    return salesOffers.find(
+      (offer: any) =>
+        Number(offer?.vaccine_id || 0) === Number(vaccineId || 0) &&
+        String(offer?.sale_mode || "NON_PACKAGE").toUpperCase() === mode &&
+        offer?.active !== false &&
+        Number(offer?.price || 0) > 0,
+    ) || null;
   }
 
   function queueNumberValue(value: any) {
@@ -360,7 +380,7 @@ export default function VaccinationRegisterPage() {
       if (sort.key === "queue") { av = queueNumberValue(a.queue_number); bv = queueNumberValue(b.queue_number); }
       else if (sort.key === "bazarQueue") { av = queueNumberValue(a.bazar_queue_number); bv = queueNumberValue(b.bazar_queue_number); }
       else if (sort.key === "name") { av = a.participant_name || ""; bv = b.participant_name || ""; }
-      else if (sort.key === "identity") { av = a.nik || a.mcu_id || a.employee_id || ""; bv = b.nik || b.mcu_id || b.employee_id || ""; }
+      else if (sort.key === "identity") { av = a.employee_id || a.mcu_id || ""; bv = b.employee_id || b.mcu_id || ""; }
       else if (sort.key === "product") { av = (a.items || []).map((i: any) => i?.vaccine?.name || "").join(" ") || a.vaccine?.name || ""; bv = (b.items || []).map((i: any) => i?.vaccine?.name || "").join(" ") || b.vaccine?.name || ""; }
       else if (sort.key === "status") { av = statusInfo(a.queue_status).label; bv = statusInfo(b.queue_status).label; }
       else if (sort.key === "note") { av = a.status_note || a.payment_note || ""; bv = b.status_note || b.payment_note || ""; }
@@ -430,10 +450,11 @@ export default function VaccinationRegisterPage() {
   }, [registrations]);
 
   async function loadBase() {
-    const [sessionJson, sourceJson, masterJson] = await Promise.all([
+    const [sessionJson, sourceJson, masterJson, pricingJson] = await Promise.all([
       fetch("/api/vaccination/sessions", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/sources?program=vaccination", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/vaccination/pricing", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, offers: [] })),
     ]);
 
     if (sessionJson.ok) {
@@ -477,6 +498,7 @@ export default function VaccinationRegisterPage() {
     if (masterJson.ok) {
       setVaccines((masterJson.vaccines || []).filter((v: any) => v.active !== false));
       setLots((masterJson.lots || []).filter((l: any) => l.active !== false));
+      setSalesOffers(pricingJson?.ok ? pricingJson.offers || [] : []);
     }
   }
 
@@ -554,7 +576,7 @@ export default function VaccinationRegisterPage() {
 
   function applyVaccineSelection(ids: string[]) {
     const allowed = new Set(availableVaccines.map((vaccine) => String(vaccine.id)));
-    const unique = Array.from(new Set(ids.map(String).filter((id) => id && (!allowed.size || allowed.has(id)))));
+    const unique: string[] = Array.from(new Set<string>(ids.map(String).filter((id): id is string => Boolean(id && (!allowed.size || allowed.has(id))))));
     setSelectedVaccineIds(unique);
     const first = unique[0] || "";
     const vaccine = vaccines.find((v) => String(v.id) === String(first));
@@ -572,7 +594,7 @@ export default function VaccinationRegisterPage() {
   }
 
   function toggleVaccineSelection(vaccineId: string) {
-    const set = new Set(selectedVaccineIds.length ? selectedVaccineIds : (form.vaccineId ? [form.vaccineId] : []));
+    const set = new Set<string>(selectedVaccineIds.length ? selectedVaccineIds : (form.vaccineId ? [String(form.vaccineId)] : []));
     if (set.has(String(vaccineId))) set.delete(String(vaccineId));
     else set.add(String(vaccineId));
     applyVaccineSelection(Array.from(set));
@@ -580,7 +602,8 @@ export default function VaccinationRegisterPage() {
 
   function buildSelectedItems() {
     const ids = selectedVaccineIds.length ? selectedVaccineIds : (form.vaccineId ? [form.vaccineId] : []);
-    return Array.from(new Set(ids.map(String).filter(Boolean))).map((vaccineId) => {
+    const uniqueIds: string[] = Array.from(new Set<string>(ids.map(String).filter((id): id is string => Boolean(id))));
+    return uniqueIds.map((vaccineId: string) => {
       const vaccine = vaccines.find((v) => String(v.id) === String(vaccineId));
       const primaryLot = String(form.vaccineId) === String(vaccineId) && form.lotId ? lots.find((lot) => String(lot.id) === String(form.lotId)) : null;
       const lot = primaryLot || firstLotForVaccine(vaccineId);
@@ -629,14 +652,36 @@ export default function VaccinationRegisterPage() {
           next.lotId = firstLot?.id ? String(firstLot.id) : "";
           next.price = vaccine?.price == null ? next.price : String(vaccine.price);
           next.priceCategory = vaccine?.price_category || next.priceCategory || "Harga Perusahaan";
+          next.saleMode = "NON_PACKAGE";
+          const nonPackage = saleOffer(patch.vaccineId, "NON_PACKAGE");
+          next.salesOptionId = Number(nonPackage?.id || 0) || null;
+          next.packageDoseCount = 1;
+          next.salesPriceSnapshot = nonPackage?.price == null ? null : Number(nonPackage.price);
         }
         if (patch.priceCategory !== undefined) {
           const vaccine = vaccines.find((v) => String(v.id) === String(next.vaccineId));
           if (vaccine?.price_category === patch.priceCategory && vaccine?.price != null) next.price = String(vaccine.price);
         }
         if (patch.serviceMode === "BAZAR") {
+          const nonPackage = saleOffer(next.vaccineId, "NON_PACKAGE");
           const vaccine = vaccines.find((v) => String(v.id) === String(next.vaccineId));
-          if (vaccine?.price != null) next.price = String(vaccine.price);
+          const selectedPrice = nonPackage?.price ?? vaccine?.price;
+          if (selectedPrice != null) next.price = String(selectedPrice);
+          next.saleMode = "NON_PACKAGE";
+          next.salesOptionId = Number(nonPackage?.id || 0) || null;
+          next.packageDoseCount = 1;
+          next.salesPriceSnapshot = selectedPrice == null ? null : Number(selectedPrice);
+        }
+        if (patch.saleMode !== undefined) {
+          const mode = patch.saleMode === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE";
+          const offer = saleOffer(next.vaccineId, mode);
+          const vaccine = vaccines.find((v) => String(v.id) === String(next.vaccineId));
+          const selectedPrice = offer?.price ?? (mode === "NON_PACKAGE" ? vaccine?.price : null);
+          next.saleMode = mode;
+          next.salesOptionId = Number(offer?.id || 0) || null;
+          next.packageDoseCount = Math.max(1, Number(offer?.package_dose_count || 1));
+          next.salesPriceSnapshot = selectedPrice == null ? null : Number(selectedPrice);
+          if (selectedPrice != null) next.price = String(selectedPrice);
         }
         return next;
       });
@@ -1197,7 +1242,7 @@ export default function VaccinationRegisterPage() {
                   <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
                     {form.employeeId ? <span>ID {form.employeeId}</span> : null}
                     {form.walkInContextLabel ? <span>· {form.walkInContextLabel}</span> : null}
-                    <span>· {selectedSession?.location || selectedSession?.session_name || "Session"}</span>
+                    <span>· {selectedSession?.session_name || selectedSession?.location || "Session"}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1731,9 +1776,16 @@ export default function VaccinationRegisterPage() {
                         {lotOptions(item.vaccineId).map((lot) => <option key={lot.id} value={lot.id}>Lot {lot.lot_number} · exp {lot.expiry_date || "-"}</option>)}
                       </select>
                       <input disabled={isDoneStatus(item.status)} type="number" min={1} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.doseNumber} onChange={(e) => updateEditItem(index, { doseNumber: Number(e.target.value || 1) })} />
-                      <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.priceCategory} onChange={(e) => updateEditItem(index, { priceCategory: e.target.value })}>
-                        {priceCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-                      </select>
+                      {healthdayBazarEnabled && item.serviceMode === "BAZAR" ? (
+                        <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.saleMode || "NON_PACKAGE"} onChange={(e) => updateEditItem(index, { saleMode: e.target.value === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE" })}>
+                          <option value="NON_PACKAGE">Harga Non Paket · {money(saleOffer(item.vaccineId, "NON_PACKAGE")?.price ?? vaccines.find((v) => String(v.id) === String(item.vaccineId))?.price)}</option>
+                          {saleOffer(item.vaccineId, "PACKAGE") ? <option value="PACKAGE">Harga Paket · {money(saleOffer(item.vaccineId, "PACKAGE")?.price)}</option> : null}
+                        </select>
+                      ) : (
+                        <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={item.priceCategory} onChange={(e) => updateEditItem(index, { priceCategory: e.target.value })}>
+                          {priceCategoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+                        </select>
+                      )}
                       <input disabled={isDoneStatus(item.status) || (healthdayBazarEnabled && item.serviceMode === "BAZAR")} type="number" className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" placeholder={healthdayBazarEnabled && item.serviceMode === "BAZAR" ? "Harga master" : "Harga"} value={item.price} onChange={(e) => updateEditItem(index, { price: e.target.value })} />
                       {healthdayBazarEnabled && item.serviceMode === "BAZAR" ? (
                         <select disabled={isDoneStatus(item.status)} className="rounded-xl border px-3 py-2.5 font-bold disabled:bg-slate-100" value={item.paymentMethod} onChange={(e) => updateEditItem(index, { paymentMethod: e.target.value })}>
@@ -1794,7 +1846,7 @@ export default function VaccinationRegisterPage() {
                     <th className="p-3 text-left">{activeQueueView === "BAZAR" ? sortButton("Antrean Bazar", "bazarQueue") : sortButton("Antrean Healthday", "queue")}</th>
                     <th className="p-3 text-left">{activeQueueView === "BAZAR" ? "Aksi Bazar" : "Aksi Healthday"}</th>
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
-                    <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
+                    <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
                     <th className="p-3 text-left">Aksi Data</th>
@@ -1803,7 +1855,7 @@ export default function VaccinationRegisterPage() {
                   <tr>
                     <th className="p-3 text-left">{sortButton("Antrian", "queue")}</th>
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
-                    <th className="p-3 text-left">{sortButton("NIK / ID", "identity")}</th>
+                    <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
                     <th className="p-3 text-left">{sortButton("Status", "status")}</th>
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
@@ -1925,7 +1977,7 @@ export default function VaccinationRegisterPage() {
                             {activeQueueView === "BAZAR" ? "Bazar" : "Healthday"}
                           </div>
                         </td>
-                        <td className="p-3 align-top">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
+                        <td className="p-3 align-top">{registration.employee_id || registration.mcu_id || "-"}</td>
                         <td className="p-3 align-top">
                           <div className="space-y-1">
                             {items.length ? items.map((item: any) => (
@@ -1953,7 +2005,7 @@ export default function VaccinationRegisterPage() {
                           {registration.participant_name}
                         </button>
                       </td>
-                      <td className="p-3">{registration.nik || registration.mcu_id || registration.employee_id || "-"}</td>
+                      <td className="p-3">{registration.employee_id || registration.mcu_id || "-"}</td>
                       <td className="p-3">
                         <div className="space-y-1">
                           {items.length ? items.map((item: any) => (

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { clean, fail, formatQueueNumber, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
+import { syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 import {
   historyCompanyKey,
   historyEmailKey,
@@ -37,6 +38,10 @@ function moneyNumber(value: any) {
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
 }
 
+function normalizeSaleMode(value: any): "PACKAGE" | "NON_PACKAGE" {
+  return String(value || "").trim().toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE";
+}
+
 function patientServiceStatus(items: any[]) {
   const modes = new Set((items || []).map((item: any) => String(item?.service_mode || "HEALTHDAY").toUpperCase()));
   if (modes.has("HEALTHDAY") && modes.has("BAZAR")) return "COMBINATION";
@@ -65,18 +70,35 @@ async function validateBazarItems(supabase: any, items: any[], allowBazar: boole
     }
   }
 
-  const vaccineIds = Array.from(new Set(bazarItems.map((item: any) => Number(item?.vaccine_id)).filter(Boolean)));
-  const priceResult = await supabase
-    .from("vaccination_vaccines")
-    .select("id,price")
-    .in("id", vaccineIds);
+  const vaccineIds: number[] = Array.from(
+    new Set<number>(bazarItems.map((item: any) => Number(item?.vaccine_id || 0)).filter((id: number) => id > 0)),
+  );
+  const [priceResult, offerResult] = await Promise.all([
+    supabase.from("vaccination_vaccines").select("id,price").in("id", vaccineIds),
+    supabase
+      .from("vaccination_vaccine_sales_options")
+      .select("id,vaccine_id,sale_mode,package_dose_count,price,active")
+      .in("vaccine_id", vaccineIds)
+      .eq("active", true),
+  ]);
   if (priceResult.error) throw new Error(priceResult.error.message);
+  if (offerResult.error) throw new Error(offerResult.error.message);
 
   const priceMap = new Map<number, any>((priceResult.data || []).map((row: any) => [Number(row.id), row.price]));
+  const offerMap = new Map<string, any>();
+  for (const offer of offerResult.data || []) {
+    offerMap.set(`${Number(offer.vaccine_id)}:${normalizeSaleMode(offer.sale_mode)}`, offer);
+  }
+
   for (const item of bazarItems) {
-    const price = priceMap.get(Number(item.vaccine_id));
+    const vaccineId = Number(item.vaccine_id || 0);
+    const mode = normalizeSaleMode(item.sale_mode);
+    const offer = offerMap.get(`${vaccineId}:${mode}`);
+    const price = offer?.price ?? (mode === "NON_PACKAGE" ? priceMap.get(vaccineId) : null);
     if (price == null || !Number.isFinite(Number(price)) || Number(price) <= 0) {
-      return "Ada layanan Bazar yang belum memiliki harga jual > 0 pada master produk.";
+      return mode === "PACKAGE"
+        ? "Ada layanan Bazar Paket yang belum memiliki harga Paket aktif pada Master Produk."
+        : "Ada layanan Bazar yang belum memiliki harga Non Paket > 0 pada Master Produk.";
     }
   }
 
@@ -613,6 +635,13 @@ function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}, all
       payment_note: clean(item.paymentNote || item.payment_note) || clean(fallback.paymentNote) || null,
       item_note: clean(item.itemNote || item.item_note) || null,
       service_mode: normalizeServiceMode(item.serviceMode || item.service_mode || fallback.serviceMode, allowBazar),
+      sales_option_id: toInt(item.salesOptionId || item.sales_option_id, 0) || null,
+      sale_mode: normalizeSaleMode(item.saleMode || item.sale_mode),
+      package_dose_count: Math.max(1, toInt(item.packageDoseCount || item.package_dose_count, 1)),
+      sales_price_snapshot:
+        item.salesPriceSnapshot === "" || item.sales_price_snapshot === ""
+          ? null
+          : item.salesPriceSnapshot ?? item.sales_price_snapshot ?? null,
     }))
     .filter((item: any) => item.vaccine_id);
 }
@@ -646,33 +675,51 @@ async function attachRegistrationItems(supabase: any, registrations: any[]) {
 async function createItemsForRegistration(supabase: any, registration: any, items: any[], user: any, source = "registration", allowBazar = false) {
   if (!items.length) return [];
 
-  const vaccineIds = Array.from(new Set(items.map((item) => item.vaccine_id).filter(Boolean)));
-  const vaccinesResult = await supabase
-    .from("vaccination_vaccines")
-    .select("id,price,price_category")
-    .in("id", vaccineIds);
+  const vaccineIds: number[] = Array.from(
+    new Set<number>(items.map((item: any) => Number(item.vaccine_id || 0)).filter((id: number) => id > 0)),
+  );
+  const [vaccinesResult, offersResult] = await Promise.all([
+    supabase.from("vaccination_vaccines").select("id,price,price_category").in("id", vaccineIds),
+    supabase
+      .from("vaccination_vaccine_sales_options")
+      .select("id,vaccine_id,sale_mode,package_dose_count,price,label,active")
+      .in("vaccine_id", vaccineIds)
+      .eq("active", true),
+  ]);
 
   if (vaccinesResult.error) throw new Error(vaccinesResult.error.message);
+  if (offersResult.error) throw new Error(offersResult.error.message);
   const vaccineMap = new Map<number, any>((vaccinesResult.data || []).map((v: any) => [Number(v.id), v]));
+  const offerMap = new Map<string, any>();
+  for (const offer of offersResult.data || []) {
+    offerMap.set(`${Number(offer.vaccine_id)}:${normalizeSaleMode(offer.sale_mode)}`, offer);
+  }
 
-  const rows = items.map((item) => {
+  const rows = items.map((item: any) => {
     const vaccine = vaccineMap.get(Number(item.vaccine_id)) || {};
     const serviceMode = normalizeServiceMode(item.service_mode, allowBazar);
-    const masterPrice = vaccine.price == null ? null : moneyNumber(vaccine.price);
     const isFreeHealthday = allowBazar && serviceMode === "HEALTHDAY";
+    const saleMode = serviceMode === "BAZAR" ? normalizeSaleMode(item.sale_mode) : "NON_PACKAGE";
+    const offer = serviceMode === "BAZAR"
+      ? offerMap.get(`${Number(item.vaccine_id)}:${saleMode}`)
+      : null;
+    const fallbackMasterPrice = vaccine.price == null ? null : moneyNumber(vaccine.price);
+    const selectedPrice = offer?.price == null
+      ? (saleMode === "NON_PACKAGE" ? fallbackMasterPrice : null)
+      : moneyNumber(offer.price);
     const basePrice = isFreeHealthday
       ? 0
       : serviceMode === "BAZAR"
-        ? masterPrice
-        : (item.price == null ? masterPrice : moneyNumber(item.price));
+        ? selectedPrice
+        : (item.price == null ? fallbackMasterPrice : moneyNumber(item.price));
     const paymentMethod = isFreeHealthday
       ? null
       : serviceMode === "BAZAR"
         ? normalizeBazarPaymentMethod(item.payment_method)
         : (item.payment_method || null);
 
-    if (serviceMode === "BAZAR" && masterPrice == null) {
-      throw new Error("Harga layanan Bazar belum tersedia di master produk.");
+    if (serviceMode === "BAZAR" && (basePrice == null || Number(basePrice) <= 0)) {
+      throw new Error(saleMode === "PACKAGE" ? "Harga Paket Bazar belum tersedia di master produk." : "Harga Non Paket Bazar belum tersedia di master produk.");
     }
     if (serviceMode === "BAZAR" && !paymentMethod) {
       throw new Error("Metode pembayaran Bazar wajib QRIS, Debit, Credit Card, atau Transfer.");
@@ -694,6 +741,10 @@ async function createItemsForRegistration(supabase: any, registration: any, item
       payment_note: isFreeHealthday ? null : (item.payment_note || null),
       item_note: item.item_note || null,
       service_mode: serviceMode,
+      sales_option_id: serviceMode === "BAZAR" ? (Number(offer?.id || item.sales_option_id || 0) || null) : null,
+      sale_mode: serviceMode === "BAZAR" ? saleMode : "NON_PACKAGE",
+      package_dose_count: serviceMode === "BAZAR" ? Math.max(1, Number(offer?.package_dose_count || item.package_dose_count || 1)) : 1,
+      sales_price_snapshot: serviceMode === "BAZAR" ? basePrice : null,
       payment_surcharge_percent: surchargePercent,
       payment_surcharge_amount: surchargeAmount,
       payment_total: paymentTotal,
@@ -735,8 +786,40 @@ export async function GET(req: NextRequest) {
   if (result.error) return fail(result.error.message, 500);
 
   try {
-    const registrations = await attachRegistrationItems(supabase, result.data || []);
-    return ok({ registrations });
+    const actor = (user as any)?.email || (user as any)?.name || (user as any)?.id || "register-sync";
+    let registrations = await attachRegistrationItems(supabase, result.data || []);
+    let syncedLegacyDone = false;
+    const syncWarnings: string[] = [];
+
+    for (const registration of registrations) {
+      const queueStatus = String(registration?.queue_status || "").toUpperCase();
+      const bazarStatus = String(registration?.bazar_queue_status || "").toUpperCase();
+      const activeItems = Array.isArray(registration?.items) ? registration.items : [];
+      const healthdayNeedsSync = activeItems.some((item: any) =>
+        String(item?.service_mode || "HEALTHDAY").toUpperCase() !== "BAZAR" &&
+        !["ADMINISTERED", "DONE", "FINISHED"].includes(String(item?.status || "").toUpperCase())
+      );
+      const bazarNeedsSync = activeItems.some((item: any) =>
+        String(item?.service_mode || "").toUpperCase() === "BAZAR" &&
+        !["ADMINISTERED", "DONE", "FINISHED"].includes(String(item?.status || "").toUpperCase())
+      );
+
+      try {
+        if (healthdayNeedsSync && ["ADMINISTERED", "DONE", "FINISHED"].includes(queueStatus)) {
+          await syncRegistrationTrackDone(supabase, Number(registration.id), "HEALTHDAY", actor);
+          syncedLegacyDone = true;
+        }
+        if (bazarNeedsSync && ["ADMINISTERED", "DONE", "FINISHED"].includes(bazarStatus)) {
+          await syncRegistrationTrackDone(supabase, Number(registration.id), "BAZAR", actor);
+          syncedLegacyDone = true;
+        }
+      } catch (syncError: any) {
+        syncWarnings.push(`Registrasi ${registration.id}: ${syncError?.message || "sinkronisasi Done gagal"}`);
+      }
+    }
+
+    if (syncedLegacyDone) registrations = await attachRegistrationItems(supabase, result.data || []);
+    return ok({ registrations, syncWarnings });
   } catch (error: any) {
     return fail(error?.message || "Gagal mengambil item vaksin registrasi.", 500);
   }
@@ -1245,6 +1328,10 @@ export async function POST(req: NextRequest) {
       payment_note: clean(body.paymentNote) || null,
       item_note: null,
       service_mode: requestedServiceMode,
+      sales_option_id: null,
+      sale_mode: "NON_PACKAGE",
+      package_dose_count: 1,
+      sales_price_snapshot: null,
     });
   }
 

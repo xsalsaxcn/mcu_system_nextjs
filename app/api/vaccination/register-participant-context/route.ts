@@ -315,6 +315,58 @@ async function findHistoryPerson(supabase: any, identity: any) {
   return rows.length === 1 ? rows[0] : null;
 }
 
+function personSummary(row: any) {
+  if (!row) return null;
+  return {
+    id: Number(row.id || 0) || null,
+    name: clean(row.participant_name),
+    employeeId: clean(row.employee_id),
+    nik: clean(row.nik),
+    email: clean(row.email),
+    phone: clean(row.phone),
+    participantType: clean(row.participant_type).toUpperCase(),
+  };
+}
+
+async function loadFamilyContext(supabase: any, historyPerson: any) {
+  const personId = Number(historyPerson?.id || 0);
+  if (!personId) return { role: "", parent: null, children: [] as any[] };
+
+  const participantType = clean(historyPerson?.participant_type).toUpperCase();
+  if (participantType === "DEPENDENT") {
+    const relation = await supabase
+      .from("vaccination_person_relationships")
+      .select("relationship_type,parent:vaccination_persons!vaccination_person_relationships_parent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)")
+      .eq("dependent_person_id", personId)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    if (relation.error) throw new Error(relation.error.message);
+    const parent = Array.isArray(relation.data?.parent) ? relation.data?.parent?.[0] : relation.data?.parent;
+    return {
+      role: "DEPENDENT",
+      parent: parent?.active === false ? null : personSummary(parent),
+      children: [] as any[],
+    };
+  }
+
+  const relations = await supabase
+    .from("vaccination_person_relationships")
+    .select("relationship_type,dependent:vaccination_persons!vaccination_person_relationships_dependent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)")
+    .eq("parent_person_id", personId)
+    .eq("active", true)
+    .limit(100);
+  if (relations.error) throw new Error(relations.error.message);
+
+  const children = (relations.data || [])
+    .map((row: any) => Array.isArray(row?.dependent) ? row.dependent[0] : row?.dependent)
+    .filter((row: any) => row && row.active !== false)
+    .map((row: any) => personSummary(row))
+    .filter(Boolean);
+
+  return { role: "PARENT", parent: null, children };
+}
+
 function registrationSummary(row: any, hasRecord: boolean) {
   if (!row) return null;
   const session = Array.isArray(row.session) ? row.session[0] : row.session;
@@ -460,6 +512,8 @@ export async function GET(req: NextRequest) {
       historical = historyResult.data || [];
     }
 
+    const family = await loadFamilyContext(supabase, historyPerson);
+
     const currentRegistration = currentRaw
       ? registrationSummary(
           currentRaw,
@@ -520,16 +574,8 @@ export async function GET(req: NextRequest) {
       },
       currentRegistration,
       otherRegistration,
-      historyPerson: historyPerson
-        ? {
-            id: Number(historyPerson.id),
-            name: clean(historyPerson.participant_name),
-            employeeId: clean(historyPerson.employee_id),
-            nik: clean(historyPerson.nik),
-            email: clean(historyPerson.email),
-            phone: clean(historyPerson.phone),
-          }
-        : null,
+      historyPerson: historyPerson ? personSummary(historyPerson) : null,
+      family,
       historical,
       identityPolicy: {
         familySafe: true,

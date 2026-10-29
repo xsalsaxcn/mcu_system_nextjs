@@ -129,6 +129,21 @@ export async function GET(req: NextRequest) {
 
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
 
+  const salesOffersResult = await supabase
+    .from("vaccination_vaccine_sales_options")
+    .select("id,vaccine_id,sale_mode,package_dose_count,price,label,active")
+    .eq("active", true)
+    .order("vaccine_id", { ascending: true })
+    .order("sale_mode", { ascending: true });
+  if (salesOffersResult.error) return fail(salesOffersResult.error.message, 500);
+  const salesOffersByVaccine = new Map<number, any[]>();
+  for (const offer of salesOffersResult.data || []) {
+    const vaccineId = Number((offer as any).vaccine_id || 0);
+    if (!vaccineId) continue;
+    if (!salesOffersByVaccine.has(vaccineId)) salesOffersByVaccine.set(vaccineId, []);
+    salesOffersByVaccine.get(vaccineId)!.push(offer);
+  }
+
   const optionsResult = await supabase
     .from("vaccination_session_vaccines")
     .select(`
@@ -212,9 +227,11 @@ export async function GET(req: NextRequest) {
   const decorateOption = (option: any, serviceMode: "HEALTHDAY" | "BAZAR") => {
     const lotId = Number(option?.lot_id || option?.lot?.id || 0);
     const stock = lotId ? serviceStock.map.get(`${lotId}:${serviceMode}`) : null;
+    const vaccineId = Number(option?.vaccine_id || option?.vaccine?.id || 0);
     return {
       ...option,
       service_mode: serviceMode,
+      sales_options: salesOffersByVaccine.get(vaccineId) || [],
       service_stock_allocated: stock ? Number(stock.allocated || 0) : null,
       service_stock_used: stock ? Number(stock.used || 0) : null,
       service_stock_remaining: stock ? Number(stock.remaining || 0) : null,
@@ -251,7 +268,11 @@ export async function GET(req: NextRequest) {
 
     const pricedVaccines = new Map<number, any>(
       (vaccinesResult.data || [])
-        .filter((vaccine: any) => Number.isFinite(Number(vaccine?.price)) && Number(vaccine?.price) > 0)
+        .filter((vaccine: any) => {
+          const basePrice = Number(vaccine?.price || 0);
+          const offers = salesOffersByVaccine.get(Number(vaccine?.id || 0)) || [];
+          return basePrice > 0 || offers.some((offer: any) => Number(offer?.price || 0) > 0);
+        })
         .map((vaccine: any) => [Number(vaccine.id), vaccine]),
     );
 
