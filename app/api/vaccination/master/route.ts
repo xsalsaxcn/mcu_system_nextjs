@@ -2,6 +2,8 @@
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
 // V502_STOCK_TRANSACTION_AUDIT
 import { NextRequest } from "next/server";
+
+// V503_MASTER_UPDATE_REQUIRES_EXPLICIT_PRODUCT_EDIT
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
@@ -1452,6 +1454,13 @@ export async function POST(req: NextRequest) {
   if (action === "update-vaccine") {
     const id = toInt(body.id || body.vaccineId, 0);
     const name = clean(body.name);
+    const editIntent = clean(body.editIntent).toUpperCase();
+    if (editIntent !== "PRODUCT_MASTER") {
+      return fail(
+        "Update nama Master Produk ditolak karena bukan dari mode Edit Produk eksplisit.",
+        409,
+      );
+    }
     if (!id) return fail("Master vaksin wajib dipilih.");
     if (!name) return fail("Nama vaksin wajib diisi.");
 
@@ -1540,6 +1549,104 @@ export async function POST(req: NextRequest) {
     if (movements.length) await supabase.from("vaccination_inventory_movements").insert(movements);
 
     return ok({ message: "Lot number berhasil dibuat.", lot: result.data });
+  }
+
+  if (action === "reassign-lot-vaccine") {
+    const lotId = toInt(body.lotId || body.id, 0);
+    const targetVaccineId = toInt(body.targetVaccineId || body.vaccineId, 0);
+
+    if (!lotId) return fail("Lot wajib dipilih.");
+    if (!targetVaccineId) return fail("Produk tujuan wajib dipilih.");
+
+    const [lotResult, vaccineResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number")
+        .eq("id", lotId)
+        .maybeSingle(),
+      supabase
+        .from("vaccination_vaccines")
+        .select("id,name,active")
+        .eq("id", targetVaccineId)
+        .maybeSingle(),
+    ]);
+
+    if (lotResult.error) return fail(lotResult.error.message, 500);
+    if (vaccineResult.error) return fail(vaccineResult.error.message, 500);
+    if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+    if (!vaccineResult.data) return fail("Produk tujuan tidak ditemukan.", 404);
+    if (vaccineResult.data.active === false) return fail("Produk tujuan sudah nonaktif.", 409);
+
+    const currentVaccineId = Number(lotResult.data.vaccine_id || 0);
+    if (currentVaccineId === targetVaccineId) {
+      return ok({ message: "Produk induk Lot tidak berubah.", lot: lotResult.data });
+    }
+
+    const references = [
+      await supabase.from("vaccination_records").select("id").eq("lot_id", lotId).limit(1),
+      await supabase.from("vaccination_registration_items").select("id").eq("lot_id", lotId).limit(1),
+      await supabase.from("vaccination_session_vaccines").select("id").eq("lot_id", lotId).limit(1),
+    ];
+    const referenceError = references.find((item) => item.error)?.error;
+    if (referenceError) return fail(referenceError.message, 500);
+    if (references.some((item) => (item.data || []).length > 0)) {
+      return fail(
+        `Lot ${lotResult.data.lot_number} sudah dipakai pada data operasional, jadi produk induknya tidak boleh dipindahkan.`,
+        409,
+      );
+    }
+
+    const duplicateResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .select("id")
+      .eq("vaccine_id", targetVaccineId)
+      .eq("lot_number", lotResult.data.lot_number)
+      .neq("id", lotId)
+      .limit(1);
+    if (duplicateResult.error) return fail(duplicateResult.error.message, 500);
+    if ((duplicateResult.data || []).length > 0) {
+      return fail(
+        `Produk ${vaccineResult.data.name} sudah memiliki Lot ${lotResult.data.lot_number}.`,
+        409,
+      );
+    }
+
+    const updateResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .update({
+        vaccine_id: targetVaccineId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lotId)
+      .select("*")
+      .single();
+
+    if (updateResult.error) return fail(updateResult.error.message, 500);
+
+    const movementUpdate = await supabase
+      .from("vaccination_inventory_movements")
+      .update({ vaccine_id: targetVaccineId })
+      .eq("lot_id", lotId);
+
+    if (movementUpdate.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          vaccine_id: currentVaccineId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+
+      return fail(
+        `Pemindahan Lot dibatalkan karena audit inventory gagal diperbarui: ${movementUpdate.error.message}`,
+        500,
+      );
+    }
+
+    return ok({
+      message: `Lot ${lotResult.data.lot_number} dipindahkan ke produk ${vaccineResult.data.name}.`,
+      lot: updateResult.data,
+    });
   }
 
   if (action === "update-lot-details") {

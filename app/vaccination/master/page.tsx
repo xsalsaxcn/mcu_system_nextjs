@@ -1,5 +1,7 @@
 "use client";
 
+// V503_MASTER_SAVE_RESET_AND_EDIT_ISOLATION
+
 // V498_PRODUCT_LIST_FILTER
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
@@ -104,6 +106,8 @@ export default function VaccinationMasterPage() {
   const [importing, setImporting] = useState(false);
   const [selectedImportProductKey, setSelectedImportProductKey] = useState("");
   const [selectedMasterVaccineId, setSelectedMasterVaccineId] = useState("");
+  const [masterEditMode, setMasterEditMode] = useState<"CREATE" | "PRODUCT" | "LOT">("CREATE");
+  const [editingLotId, setEditingLotId] = useState("");
   const [editingMappingId, setEditingMappingId] = useState("");
   const [editingMappingVaccineId, setEditingMappingVaccineId] = useState("");
   const [transferLot, setTransferLot] = useState<any | null>(null);
@@ -147,6 +151,39 @@ export default function VaccinationMasterPage() {
     bazarStockQty: 0,
   });
 
+  function resetProductLotEditor() {
+    setSelectedImportProductKey("");
+    setSelectedMasterVaccineId("");
+    setMasterEditMode("CREATE");
+    setEditingLotId("");
+    setVaccineForm({
+      name: "",
+      brand: "",
+      description: "",
+      priceCategory: "Harga Perusahaan",
+      price: "",
+      doseCount: 1,
+      defaultNextDoseDays: "",
+    });
+    setLotForm({
+      vaccineId: "",
+      lotNumber: "",
+      expiryDate: "",
+      stockInitial: 0,
+      stockAdded: 0,
+      stockPhysicalCount: "",
+      inventoryNotes: "",
+      stockScope: "GENERAL",
+      stockCompanyName: "",
+      stockSessionId: "",
+      healthdayStockQty: 0,
+      bazarStockQty: 0,
+    });
+    setServiceStockEditorMode("HEALTHDAY");
+    setServiceStockEditorLotId("");
+    setServiceStockEditorQty(0);
+  }
+
   async function loadData() {
     const [masterJson, sourcesJson] = await Promise.all([
       fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json()),
@@ -171,9 +208,7 @@ export default function VaccinationMasterPage() {
     setMappingMessage(masterJson.mappingMessage || "");
     setCompanyStockReady(masterJson.companyStockReady !== false);
     setCompanyStockMessage(masterJson.companyStockMessage || "");
-    if (!lotForm.vaccineId && masterJson.vaccines?.[0]?.id) {
-      setLotForm((s) => ({ ...s, vaccineId: String(masterJson.vaccines[0].id) }));
-    }
+    // V503: form kosong harus tetap kosong; jangan auto-select produk pertama.
   }
 
   async function openStockTransactions(vaccine: any) {
@@ -370,11 +405,21 @@ export default function VaccinationMasterPage() {
     }
 
     try {
-      let vaccineId = selectedMasterVaccineId;
+      let vaccineId = "";
 
-      if (vaccineId) {
+      if (masterEditMode === "LOT") {
+        vaccineId = String(lotForm.vaccineId || selectedMasterVaccineId || "");
+        if (!vaccineId) {
+          throw new Error("Produk induk Lot tidak ditemukan. Batalkan Edit Lot lalu pilih ulang.");
+        }
+      } else if (masterEditMode === "PRODUCT") {
+        vaccineId = String(selectedMasterVaccineId || "");
+        if (!vaccineId) {
+          throw new Error("Master produk yang akan diedit tidak ditemukan.");
+        }
         const json = await postMaster({
           action: "update-vaccine",
+          editIntent: "PRODUCT_MASTER",
           id: vaccineId,
           ...vaccineForm,
         });
@@ -415,11 +460,27 @@ export default function VaccinationMasterPage() {
       let savedLotId = "";
 
       if (lotNumber) {
-        const existingLot = lots.find(
-          (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineId && cleanText(lot.lot_number) === lotNumber,
-        );
+        const existingLot =
+          masterEditMode === "LOT" && editingLotId
+            ? lots.find((lot) => String(lot.id || "") === String(editingLotId))
+            : lots.find(
+                (lot) =>
+                  String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineId &&
+                  cleanText(lot.lot_number) === lotNumber,
+              );
 
         if (existingLot?.id) {
+          if (
+            masterEditMode === "LOT" &&
+            String(vaccineId) !== String(selectedMasterVaccineId || "")
+          ) {
+            await postMaster({
+              action: "reassign-lot-vaccine",
+              lotId: existingLot.id,
+              targetVaccineId: vaccineId,
+            });
+          }
+
           const lotJson = await postMaster({
             action: "update-lot-details",
             lotId: existingLot.id,
@@ -465,18 +526,19 @@ export default function VaccinationMasterPage() {
         lotSaved = true;
       }
 
-      setSelectedMasterVaccineId(vaccineId);
-      setLotForm((current) => ({ ...current, vaccineId }));
       setMessage(
-        lotSaved
-          ? lotForm.stockScope === "SESSION"
-            ? "Master vaksin/produk dan lot berhasil disimpan. Sekarang pilih Jenis Stok Session + Lot Number untuk alokasi Healthday/Bazar."
-            : "Master vaksin/produk dan lot berhasil disimpan dalam satu form."
-          : lotForm.stockScope === "SESSION"
-            ? `Produk berhasil disimpan dan di-assign ke Session ${serviceModeLabel(serviceStockEditorMode)}. Lot Number opsional dan belum diisi.`
-            : "Master vaksin/produk berhasil disimpan. Lot Number opsional dan belum diisi.",
+        masterEditMode === "LOT"
+          ? "Perubahan Lot berhasil disimpan. Data Produk induk tidak diubah. Form sudah dikosongkan."
+          : lotSaved
+            ? lotForm.stockScope === "SESSION"
+              ? "Master vaksin/produk dan lot berhasil disimpan. Form sudah dikosongkan; pilih data baru untuk input berikutnya."
+              : "Master vaksin/produk dan lot berhasil disimpan. Form sudah dikosongkan."
+            : lotForm.stockScope === "SESSION"
+              ? `Produk berhasil disimpan dan di-assign ke Session ${serviceModeLabel(serviceStockEditorMode)}. Form sudah dikosongkan.`
+              : "Master vaksin/produk berhasil disimpan. Form sudah dikosongkan.",
       );
       await loadData();
+      resetProductLotEditor();
     } catch (err: any) {
       setError(err?.message || "Gagal menyimpan produk & lot.");
     }
@@ -486,6 +548,8 @@ export default function VaccinationMasterPage() {
     setError("");
     setSelectedImportProductKey("");
     setSelectedMasterVaccineId(String(vaccine.id || ""));
+    setMasterEditMode("PRODUCT");
+    setEditingLotId("");
 
     const filteredSessionId =
       stockSessionFilter !== "ALL" ? String(stockSessionFilter) : "";
@@ -559,6 +623,8 @@ export default function VaccinationMasterPage() {
     const vaccine = vaccines.find((item) => String(item.id) === vaccineId) || lot.vaccine || {};
     setSelectedImportProductKey("");
     setSelectedMasterVaccineId(vaccineId);
+    setMasterEditMode("LOT");
+    setEditingLotId(String(lot.id || ""));
     setVaccineForm({
       name: cleanText(vaccine.name),
       brand: cleanText(vaccine.brand),
@@ -594,7 +660,7 @@ export default function VaccinationMasterPage() {
           ? serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")
           : 0,
     });
-    setMessage(`Edit lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Ubah field lalu simpan.`);
+    setMessage(`Mode Edit Lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Data Produk dikunci agar nama produk lain tidak ikut berubah.`);
     window.setTimeout(() => {
       document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 0);
@@ -1587,8 +1653,15 @@ export default function VaccinationMasterPage() {
           ) : null}
 
           <div className="mt-4 grid gap-5 xl:grid-cols-2">
-            <div className="grid content-start gap-3">
-              <div className="text-sm font-bold text-slate-700">Data Produk</div>
+            <fieldset disabled={masterEditMode === "LOT"} className="grid content-start gap-3 disabled:opacity-60">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-bold text-slate-700">Data Produk</div>
+                {masterEditMode === "LOT" ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    Dikunci saat Edit Lot
+                  </span>
+                ) : null}
+              </div>
               <input
                 className="rounded-xl border px-3 py-2"
                 placeholder="Nama vaksin / produk"
@@ -1638,10 +1711,37 @@ export default function VaccinationMasterPage() {
                   onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })}
                 />
               </div>
-            </div>
+            </fieldset>
 
             <div className="grid content-start gap-3">
               <div className="text-sm font-bold text-slate-700">Lot & Stok</div>
+
+              {masterEditMode === "LOT" ? (
+                <label className="grid gap-1 text-xs font-semibold text-slate-600">
+                  Produk Induk Lot
+                  <select
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-slate-900"
+                    value={lotForm.vaccineId}
+                    onChange={(e) =>
+                      setLotForm((current) => ({
+                        ...current,
+                        vaccineId: e.target.value,
+                      }))
+                    }
+                  >
+                    {vaccines
+                      .filter((vaccine) => vaccine.active !== false)
+                      .map((vaccine) => (
+                        <option key={vaccine.id} value={String(vaccine.id)}>
+                          {vaccine.name}{vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="font-normal text-amber-700">
+                    Gunakan ini hanya untuk memperbaiki Lot yang terlanjur menempel ke produk salah. Sistem menolak pindah jika Lot sudah dipakai pada data operasional.
+                  </span>
+                </label>
+              ) : null}
 
               {selectedImportLots.length > 1 ? (
                 <select
@@ -2041,7 +2141,11 @@ export default function VaccinationMasterPage() {
             onClick={submitProductAndLot}
             className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700"
           >
-            {selectedMasterVaccineId ? "Simpan Perubahan Produk & Lot" : "Simpan Produk & Lot"}
+            {masterEditMode === "LOT"
+              ? "Simpan Perubahan Lot"
+              : masterEditMode === "PRODUCT"
+                ? "Simpan Perubahan Produk & Lot"
+                : "Simpan Produk & Lot"}
           </button>
         </section>
 
