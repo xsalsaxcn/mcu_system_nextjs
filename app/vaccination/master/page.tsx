@@ -1251,28 +1251,50 @@ export default function VaccinationMasterPage() {
       )
     : 0;
 
+  // V506_SERVICE_FILTER_LOT_TABLE: lot table follows Healthday/Bazar filter too.
   const filteredMasterLots = useMemo(() => {
-    if (stockFilter === "ALL") return lots;
-    if (stockFilter === "GENERAL") {
-      return lots.filter((lot) => lotScope(lot) === "GENERAL");
+    let scopedLots: any[];
+
+    if (stockFilter === "ALL") {
+      scopedLots = lots;
+    } else if (stockFilter === "GENERAL") {
+      scopedLots = lots.filter((lot) => lotScope(lot) === "GENERAL");
+    } else {
+      const filterKey = normalizeCompany(stockFilter);
+      const companyLots = lots.filter(
+        (lot) =>
+          lotScope(lot) !== "GENERAL" &&
+          normalizeCompany(lot.stock_company_name) === filterKey,
+      );
+
+      if (stockSessionFilter === "ALL") {
+        scopedLots = companyLots;
+      } else {
+        const sessionId = Number(stockSessionFilter || 0);
+        scopedLots = companyLots.filter(
+          (lot) =>
+            lotScope(lot) === "SESSION" &&
+            Number(lot.stock_session_id || 0) === sessionId,
+        );
+      }
     }
 
-    const filterKey = normalizeCompany(stockFilter);
-    const companyLots = lots.filter(
-      (lot) =>
-        lotScope(lot) !== "GENERAL" &&
-        normalizeCompany(lot.stock_company_name) === filterKey,
-    );
+    if (productServiceFilter === "ALL") return scopedLots;
 
-    if (stockSessionFilter === "ALL") return companyLots;
-
-    const sessionId = Number(stockSessionFilter || 0);
-    return companyLots.filter(
-      (lot) =>
-        lotScope(lot) === "SESSION" &&
-        Number(lot.stock_session_id || 0) === sessionId,
-    );
-  }, [lots, stockFilter, stockSessionFilter]);
+    const serviceMode = productServiceFilter === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    return scopedLots.filter((lot) => {
+      if (lotScope(lot) !== "SESSION") return false;
+      const sessionId = Number(lot.stock_session_id || 0);
+      if (!sessionId) return false;
+      return serviceAllocationQty(lot.id, sessionId, serviceMode) > 0;
+    });
+  }, [
+    lots,
+    stockFilter,
+    stockSessionFilter,
+    productServiceFilter,
+    serviceStockAllocations,
+  ]);
 
   function serviceModeLabel(value: any) {
     return String(value || "HEALTHDAY").toUpperCase() === "BAZAR"
@@ -2463,7 +2485,12 @@ export default function VaccinationMasterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">Daftar Lot Aktif · {stockFilterLabel}</div>
+          <div className="border-b bg-slate-50 p-4 font-bold">
+            Daftar Lot Aktif · {stockFilterLabel}
+            {productServiceFilter !== "ALL"
+              ? ` · ${productServiceFilter === "BAZAR" ? "Bazar" : "Healthday"}`
+              : ""}
+          </div>
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -2518,12 +2545,16 @@ export default function VaccinationMasterPage() {
                           <div>
                             <div>{sessionLabel(sessionMap.get(Number(lot.stock_session_id || 0)))}</div>
                             <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold">
-                              <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
-                                Healthday {serviceAllocationQty(lot.id, lot.stock_session_id, "HEALTHDAY")}
-                              </span>
-                              <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
-                                Bazar {serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")}
-                              </span>
+                              {productServiceFilter !== "BAZAR" ? (
+                                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                                  Healthday {serviceAllocationQty(lot.id, lot.stock_session_id, "HEALTHDAY")}
+                                </span>
+                              ) : null}
+                              {productServiceFilter !== "HEALTHDAY" ? (
+                                <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
+                                  Bazar {serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                         ) : (

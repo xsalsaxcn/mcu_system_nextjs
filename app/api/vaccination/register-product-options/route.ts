@@ -4,6 +4,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // VACCINATION_REGISTER_PRODUCT_OPTIONS_V153_1
 // V497_R2_SERVICE_STOCK_OPTIONS_SAFE
+// V506_BAZAR_REGISTRATION_EXACT_SERVICE_STOCK
 
 function normalizeServiceMode(value: any) {
   return String(value || "").trim().toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
@@ -71,6 +72,40 @@ async function loadServiceStockRemaining(supabase: any, sessionId: number) {
   }
 
   return { enabled: true, map };
+}
+
+
+async function loadAssignedVaccineIds(
+  supabase: any,
+  sessionId: number,
+  serviceMode: "HEALTHDAY" | "BAZAR",
+) {
+  const result = await supabase
+    .from("vaccination_session_product_assignments")
+    .select("vaccine_id,service_mode,active")
+    .eq("session_id", sessionId)
+    .eq("service_mode", serviceMode)
+    .eq("active", true)
+    .limit(10000);
+
+  if (result.error) {
+    const code = String(result.error?.code || "");
+    const message = String(result.error?.message || "").toLowerCase();
+    if (
+      code === "42P01" ||
+      message.includes("vaccination_session_product_assignments")
+    ) {
+      return { enabled: false, ids: new Set<number>() };
+    }
+    throw new Error(result.error.message);
+  }
+
+  const ids = new Set<number>();
+  for (const row of result.data || []) {
+    const vaccineId = Number((row as any).vaccine_id || 0);
+    if (vaccineId) ids.add(vaccineId);
+  }
+  return { enabled: true, ids };
 }
 export const dynamic = "force-dynamic";
 
@@ -164,10 +199,14 @@ export async function GET(req: NextRequest) {
       .toUpperCase() === "HEALTHDAY_BAZAR";
 
   let serviceStock: { enabled: boolean; map: Map<string, any> };
+  let bazarAssignments: { enabled: boolean; ids: Set<number> };
   try {
-    serviceStock = await loadServiceStockRemaining(supabase, sessionId);
+    [serviceStock, bazarAssignments] = await Promise.all([
+      loadServiceStockRemaining(supabase, sessionId),
+      loadAssignedVaccineIds(supabase, sessionId, "BAZAR"),
+    ]);
   } catch (error: any) {
-    return fail(error?.message || "Gagal membaca stok Healthday/Bazar.", 500);
+    return fail(error?.message || "Gagal membaca stok/assignment Healthday-Bazar.", 500);
   }
 
   const decorateOption = (option: any, serviceMode: "HEALTHDAY" | "BAZAR") => {
@@ -201,7 +240,7 @@ export async function GET(req: NextRequest) {
         .order("name", { ascending: true }),
       supabase
         .from("vaccination_vaccine_lots")
-        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active")
+        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active,stock_scope,stock_session_id,stock_company_name")
         .eq("active", true)
         .order("expiry_date", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true }),
@@ -218,8 +257,19 @@ export async function GET(req: NextRequest) {
 
     bazarOptions = (lotsResult.data || [])
       .map((lot: any) => {
-        const vaccine = pricedVaccines.get(Number(lot?.vaccine_id));
+        const vaccineId = Number(lot?.vaccine_id || 0);
+        const vaccine = pricedVaccines.get(vaccineId);
         if (!vaccine) return null;
+
+        const scope = String(lot?.stock_scope || "GENERAL").trim().toUpperCase();
+        const exactSessionLot =
+          scope === "SESSION" && Number(lot?.stock_session_id || 0) === sessionId;
+        if (!exactSessionLot) return null;
+
+        if (bazarAssignments.enabled && bazarAssignments.ids.size > 0) {
+          if (!bazarAssignments.ids.has(vaccineId)) return null;
+        }
+
         return {
           id: `bazar-${sessionId}-${Number(vaccine.id)}-${Number(lot.id)}`,
           session_id: sessionId,
@@ -227,7 +277,7 @@ export async function GET(req: NextRequest) {
           lot_id: Number(lot.id),
           dose_number: 1,
           active: true,
-          option_source: "BAZAR_MASTER",
+          option_source: "BAZAR_SESSION_SERVICE_STOCK",
           vaccine,
           lot,
         };
@@ -247,5 +297,6 @@ export async function GET(req: NextRequest) {
     healthdayOptions,
     bazarOptions,
     serviceStockEnabled: serviceStock.enabled,
+    bazarAssignmentReady: bazarAssignments.enabled,
   });
 }
