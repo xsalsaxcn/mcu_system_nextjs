@@ -2,6 +2,7 @@
 
 // V498_PRODUCT_LIST_FILTER
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
+// V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
 
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
@@ -89,6 +90,7 @@ export default function VaccinationMasterPage() {
   const [stockSessionFilter, setStockSessionFilter] = useState("ALL");
   const [productSearch, setProductSearch] = useState("");
   const [productStatusFilter, setProductStatusFilter] = useState("ALL");
+  const [productServiceFilter, setProductServiceFilter] = useState("ALL");
   const [companyStockReady, setCompanyStockReady] = useState(true);
   const [companyStockMessage, setCompanyStockMessage] = useState("");
   const [mappingReady, setMappingReady] = useState(true);
@@ -342,6 +344,7 @@ export default function VaccinationMasterPage() {
           sessionId: lotForm.stockSessionId,
           companyName: lotForm.stockCompanyName,
           serviceMode: serviceStockEditorMode,
+          plannedStockInitial: Math.max(0, Number(lotForm.stockInitial || 0)),
         });
       }
 
@@ -390,8 +393,17 @@ export default function VaccinationMasterPage() {
           lotForm.stockScope === "SESSION" &&
           cleanText(lotForm.stockSessionId)
         ) {
+          await postMaster({
+            action: "assign-product-session",
+            vaccineId,
+            sessionId: lotForm.stockSessionId,
+            companyName: lotForm.stockCompanyName,
+            serviceMode: serviceStockEditorMode,
+            plannedStockInitial: 0,
+          });
+
           setMessage(
-            "Lot Session tersimpan. Pilih Jenis Stok Session dan Lot Number pada panel Pembagian Stok Session untuk mengalokasikan Healthday/Bazar.",
+            "Lot Session tersimpan. Jumlah Awal rencana sudah dipindahkan ke Lot. Pilih Jenis Stok Session dan Lot Number pada panel Pembagian Stok Session untuk mengalokasikan Healthday/Bazar.",
           );
         }
 
@@ -419,6 +431,38 @@ export default function VaccinationMasterPage() {
     setError("");
     setSelectedImportProductKey("");
     setSelectedMasterVaccineId(String(vaccine.id || ""));
+
+    const filteredSessionId =
+      stockSessionFilter !== "ALL" ? String(stockSessionFilter) : "";
+    const preferredAssignment =
+      sessionProductAssignments.find(
+        (assignment) =>
+          assignment.active !== false &&
+          String(assignment.vaccine_id || "") === String(vaccine.id || "") &&
+          (!filteredSessionId ||
+            String(assignment.session_id || "") === filteredSessionId) &&
+          (productServiceFilter === "ALL" ||
+            String(assignment.service_mode || "HEALTHDAY").toUpperCase() ===
+              productServiceFilter),
+      ) ||
+      sessionProductAssignments.find(
+        (assignment) =>
+          assignment.active !== false &&
+          String(assignment.vaccine_id || "") === String(vaccine.id || ""),
+      );
+    const assignedSession = preferredAssignment
+      ? sessionMap.get(Number(preferredAssignment.session_id || 0))
+      : null;
+    const assignedServiceMode =
+      String(preferredAssignment?.service_mode || "HEALTHDAY").toUpperCase() ===
+      "BAZAR"
+        ? "BAZAR"
+        : "HEALTHDAY";
+
+    if (preferredAssignment) {
+      setServiceStockEditorMode(assignedServiceMode);
+    }
+
     setVaccineForm({
       name: cleanText(vaccine.name),
       brand: cleanText(vaccine.brand),
@@ -432,13 +476,19 @@ export default function VaccinationMasterPage() {
       vaccineId: String(vaccine.id || ""),
       lotNumber: "",
       expiryDate: "",
-      stockInitial: 0,
+      stockInitial: preferredAssignment
+        ? Math.max(0, Number(preferredAssignment.planned_stock_initial || 0))
+        : 0,
       stockAdded: 0,
       stockPhysicalCount: "",
       inventoryNotes: "",
-      stockScope: "GENERAL",
-      stockCompanyName: "",
-      stockSessionId: "",
+      stockScope: preferredAssignment ? "SESSION" : "GENERAL",
+      stockCompanyName: preferredAssignment
+        ? cleanText(assignedSession?.company_name)
+        : "",
+      stockSessionId: preferredAssignment
+        ? String(preferredAssignment.session_id || "")
+        : "",
       healthdayStockQty: 0,
       bazarStockQty: 0,
     });
@@ -1077,6 +1127,12 @@ export default function VaccinationMasterPage() {
     return visibleVaccines.filter((vaccine) => {
       if (status === "ACTIVE" && vaccine.active === false) return false;
       if (status === "INACTIVE" && vaccine.active !== false) return false;
+
+      if (productServiceFilter !== "ALL") {
+        const modes = vaccineServiceModes(vaccine.id);
+        if (!modes.includes(productServiceFilter)) return false;
+      }
+
       if (!query) return true;
 
       const searchText = [
@@ -1101,6 +1157,7 @@ export default function VaccinationMasterPage() {
     sessionProductAssignments,
     productSearch,
     productStatusFilter,
+    productServiceFilter,
     sessionMap,
   ]);
 
@@ -1141,6 +1198,43 @@ export default function VaccinationMasterPage() {
 
     if (!targets.size) targets.add("General");
     return Array.from(targets);
+  }
+
+  function vaccineServiceModes(vaccineId: any) {
+    const modes = new Set<string>();
+    for (const assignment of sessionProductAssignments) {
+      if (
+        assignment.active === false ||
+        String(assignment.vaccine_id || "") !== String(vaccineId)
+      ) {
+        continue;
+      }
+      if (
+        stockSessionFilter !== "ALL" &&
+        String(assignment.session_id || "") !== String(stockSessionFilter)
+      ) {
+        continue;
+      }
+      if (
+        stockSessionFilter === "ALL" &&
+        stockFilter !== "ALL" &&
+        stockFilter !== "GENERAL"
+      ) {
+        const assignmentSession = sessionMap.get(Number(assignment.session_id || 0));
+        if (
+          normalizeCompany(assignmentSession?.company_name) !==
+          normalizeCompany(stockFilter)
+        ) {
+          continue;
+        }
+      }
+      const mode =
+        String(assignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+          ? "BAZAR"
+          : "HEALTHDAY";
+      modes.add(mode);
+    }
+    return Array.from(modes);
   }
 
   const stockFilterLabel = useMemo(() => {
@@ -1765,8 +1859,7 @@ export default function VaccinationMasterPage() {
                   Jumlah awal
                   <input
                     type="number"
-                    className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
-                    disabled={!cleanText(lotForm.lotNumber)}
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
                     value={lotForm.stockInitial}
                     onChange={(e) => setLotForm({ ...lotForm, stockInitial: Number(e.target.value || 0) })}
                   />
@@ -1782,6 +1875,12 @@ export default function VaccinationMasterPage() {
                   />
                 </label>
               </div>
+
+              {!cleanText(lotForm.lotNumber) && lotForm.stockScope === "SESSION" ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Jumlah Awal boleh diisi sebelum Lot tersedia. Nilai ini disimpan sebagai stok rencana untuk Session + Jenis Stok ini, lalu otomatis dipakai sebagai stock initial saat Lot Number ditambahkan.
+                </div>
+              ) : null}
 
               <textarea
                 className="rounded-xl border px-3 py-2"
@@ -1916,7 +2015,7 @@ export default function VaccinationMasterPage() {
                   Menampilkan {filteredVaccines.length} dari {vaccines.length} produk master.
                 </div>
               </div>
-              <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_160px] lg:w-[560px]">
+              <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px] lg:w-[760px]">
                 <input
                   type="text"
                   value={productSearch}
@@ -1933,6 +2032,15 @@ export default function VaccinationMasterPage() {
                   <option value="ACTIVE">Aktif</option>
                   <option value="INACTIVE">Nonaktif</option>
                 </select>
+                <select
+                  value={productServiceFilter}
+                  onChange={(e) => setProductServiceFilter(e.target.value)}
+                  className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+                >
+                  <option value="ALL">Semua Jenis Stok</option>
+                  <option value="HEALTHDAY">Healthday</option>
+                  <option value="BAZAR">Bazar</option>
+                </select>
               </div>
             </div>
           </div>
@@ -1945,6 +2053,7 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Kategori Harga</th>
                   <th className="p-3 text-left">Harga</th>
                   <th className="p-3 text-left">Tujuan Stok</th>
+                  <th className="p-3 text-left">Jenis Stok</th>
                   <th className="p-3 text-left">Status</th>
                   <th className="p-3 text-left">Aksi</th>
                 </tr>
@@ -1965,6 +2074,26 @@ export default function VaccinationMasterPage() {
                         ))}
                       </div>
                     </td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {vaccineServiceModes(v.id).length ? (
+                          vaccineServiceModes(v.id).map((mode) => (
+                            <span
+                              key={mode}
+                              className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                mode === "BAZAR"
+                                  ? "bg-violet-50 text-violet-700"
+                                  : "bg-blue-50 text-blue-700"
+                              }`}
+                            >
+                              {mode === "BAZAR" ? "Bazar" : "Healthday"}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -1976,7 +2105,7 @@ export default function VaccinationMasterPage() {
                 ))}
                 {!filteredVaccines.length ? (
                   <tr>
-                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">
+                    <td colSpan={8} className="p-6 text-center text-sm text-slate-500">
                       Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, atau Session/Lokasi.
                     </td>
                   </tr>

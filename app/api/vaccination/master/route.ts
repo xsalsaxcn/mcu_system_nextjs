@@ -1,4 +1,5 @@
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
+// V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
@@ -209,7 +210,7 @@ export async function GET(req: NextRequest) {
 
   const sessionProductAssignmentsResult = await supabase
     .from("vaccination_session_product_assignments")
-    .select("id,session_id,vaccine_id,service_mode,active,created_at,updated_at")
+    .select("id,session_id,vaccine_id,service_mode,planned_stock_initial,active,created_at,updated_at")
     .eq("active", true)
     .order("updated_at", { ascending: false })
     .limit(20000);
@@ -1165,6 +1166,7 @@ export async function POST(req: NextRequest) {
     const serviceMode = String(body.serviceMode || "HEALTHDAY").trim().toUpperCase() === "BAZAR"
       ? "BAZAR"
       : "HEALTHDAY";
+    const plannedStockInitial = Math.max(0, toInt(body.plannedStockInitial, 0));
 
     if (!vaccineId) return fail("Master vaksin / produk wajib dipilih.");
     if (!sessionId) return fail("Session / Lokasi wajib dipilih.");
@@ -1204,12 +1206,13 @@ export async function POST(req: NextRequest) {
           session_id: sessionId,
           vaccine_id: vaccineId,
           service_mode: serviceMode,
+          planned_stock_initial: plannedStockInitial,
           active: true,
           updated_at: nowIso,
         },
         { onConflict: "session_id,vaccine_id,service_mode" },
       )
-      .select("id,session_id,vaccine_id,service_mode,active,created_at,updated_at")
+      .select("id,session_id,vaccine_id,service_mode,planned_stock_initial,active,created_at,updated_at")
       .single();
 
     if (assignmentResult.error) {
