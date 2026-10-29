@@ -175,6 +175,7 @@ export default function VaccinationSessionPage() {
     location: "",
     sessionDate: "",
     timeSlot: "",
+    existingFlowDoctorEnabled: false,
   });
 
   const [message, setMessage] = useState(
@@ -847,8 +848,38 @@ export default function VaccinationSessionPage() {
             "Belum ada metadata lokasi. Jalankan SQL v55 dan re-import data vaksinasi agar lokasi/tanggal/jam bisa dibuat otomatis.",
         );
       } else {
+        // VACCINATION_AUTO_PERSIST_DETECTED_SESSIONS_V153_31
+        // Candidate lokasi/tanggal dari Excel harus menjadi Session tersimpan,
+        // supaya Daftar Session dan Master Vaksin memakai sumber data yang sama.
+        const syncRes = await fetch("/api/vaccination/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "ensure-source-sessions",
+            sourceId,
+            companyName:
+              json.source?.institution_name || json.source?.name || "",
+            sourceName:
+              json.source?.name || json.source?.institution_name || "",
+            existingFlowConfig: {
+              registration: true,
+              queue: true,
+              doctor: form.existingFlowDoctorEnabled,
+            },
+          }),
+        });
+        const syncJson = await syncRes.json().catch(() => ({}));
+        if (!syncRes.ok || !syncJson.ok) {
+          setError(
+            syncJson.message ||
+              "Lokasi terdeteksi, tetapi sinkronisasi Session tersimpan gagal.",
+          );
+          return;
+        }
+
+        await loadSessions();
         setMessage(
-          `Ditemukan ${json.locations.length} rincian lokasi/tanggal dari database. Pilih lokasi atau pilih Generate Semua Lokasi.`,
+          `Ditemukan ${json.locations.length} rincian lokasi/tanggal. Session tersimpan otomatis: ${Number(syncJson.created || 0)} baru, ${Number(syncJson.existing || 0)} sudah ada.`,
         );
       }
     } catch (err: any) {
@@ -967,6 +998,11 @@ export default function VaccinationSessionPage() {
         importLocationKey: selectedLocation?.key || "",
         importTimeAreaName: selectedLocation?.timeAreaName || "",
         participantCountPlanned: selectedLocation?.participantCount || 0,
+        existingFlowConfig: {
+          registration: true,
+          queue: true,
+          doctor: form.existingFlowDoctorEnabled,
+        },
       }),
     });
 
@@ -985,6 +1021,7 @@ export default function VaccinationSessionPage() {
       location: "",
       sessionDate: "",
       timeSlot: "",
+      existingFlowDoctorEnabled: form.existingFlowDoctorEnabled,
     });
     setSessionVaccines([]);
     setDraft(emptyDraft);
@@ -1134,7 +1171,7 @@ export default function VaccinationSessionPage() {
               <option value="">Manual / pilih lokasi dari database</option>
               {locations.length ? (
                 <option value={allLocationsKey}>
-                  Generate semua lokasi dari database ({locations.length})
+                  Konfigurasi semua Session dari database ({locations.length})
                 </option>
               ) : null}
               {locations.map((item) => (
@@ -1205,6 +1242,43 @@ export default function VaccinationSessionPage() {
                 form.locationKey === allLocationsKey
               }
             />
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+            <div className="text-sm font-black text-slate-900">Flow Session Baru / Auto-generated</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+              <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                1. Registrasi
+              </span>
+              <span>→</span>
+              <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                2. Antrian
+              </span>
+              <span>→</span>
+              <label
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
+                  form.existingFlowDoctorEnabled
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.existingFlowDoctorEnabled}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      existingFlowDoctorEnabled: e.target.checked,
+                    }))
+                  }
+                />
+                3. Alur Dokter
+              </label>
+            </div>
+            <p className="mt-2 text-xs font-semibold text-slate-600">
+              Default session baru: Alur Dokter OFF. Jika dimatikan, flow berhenti setelah Antrian.
+              Session existing tidak diubah otomatis dan tetap dapat diatur lewat Edit Session.
+            </p>
           </div>
 
           {form.sourceId && !loadingLocations && !locations.length ? (

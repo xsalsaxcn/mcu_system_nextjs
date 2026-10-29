@@ -978,7 +978,7 @@ export default function VaccinationMasterPage() {
 
               <div className="grid gap-3 md:grid-cols-3">
                 <label className="grid gap-1 text-xs font-semibold text-slate-500">
-                  Scope Stok
+                  Penggunaan Stok
                   <select
                     className="rounded-xl border px-3 py-2 text-sm text-slate-900"
                     value={lotForm.stockScope}
@@ -998,9 +998,9 @@ export default function VaccinationMasterPage() {
                       }))
                     }
                   >
-                    <option value="GENERAL">General</option>
-                    <option value="COMPANY">Perusahaan</option>
-                    <option value="SESSION">Session / Lokasi</option>
+                    <option value="GENERAL">Global — lintas perusahaan</option>
+                    <option value="COMPANY">Semua Session Perusahaan</option>
+                    <option value="SESSION">Session / Lokasi Spesifik</option>
                   </select>
                 </label>
 
@@ -1064,15 +1064,15 @@ export default function VaccinationMasterPage() {
 
               {lotForm.stockScope === "GENERAL" ? (
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                  General dapat dipakai lintas perusahaan dan lintas session.
+                  Global dapat dipakai lintas perusahaan dan lintas session.
                 </div>
               ) : lotForm.stockScope === "COMPANY" ? (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                  Stok perusahaan dapat dipakai oleh seluruh session/lokasi perusahaan yang sama.
+                  Semua Session Perusahaan: tidak perlu memilih Session/Lokasi. Stok ini menjadi milik perusahaan dan dapat dipakai oleh seluruh session perusahaan tersebut.
                 </div>
               ) : (
                 <div className="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-700">
-                  Stok Session/Lokasi hanya dapat dipakai oleh session yang dipilih. Session lain, walaupun perusahaannya sama, tidak dapat memakai lot ini.
+                  Session / Lokasi Spesifik: pilih satu Session. Lot ini hanya milik session tersebut; pemindahan sisa stok ke session lain sebaiknya dilakukan melalui transaksi transfer agar audit tetap tercatat.
                 </div>
               )}
 

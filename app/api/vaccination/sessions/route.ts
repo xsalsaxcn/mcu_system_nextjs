@@ -539,6 +539,162 @@ export async function POST(req: NextRequest) {
   const action = clean(body.action);
   const supabase = supabaseAdmin();
 
+  // VACCINATION_AUTO_PERSIST_DETECTED_SESSIONS_V153_31
+  // Persist every detected Excel location/date as an actual vaccination_sessions row.
+  // This makes Session page, Daftar Session, and Master Vaksin share one source of truth.
+  if (action === "ensure-source-sessions") {
+    const sourceId = toInt(body.sourceId, 0);
+    if (!sourceId) return fail("Database vaksinasi wajib dipilih.");
+
+    let groups: SessionLocationGroup[] = [];
+    try {
+      groups = await getSourceLocationGroups(supabase, sourceId);
+    } catch (error: any) {
+      return fail(
+        `Gagal membaca lokasi/tanggal database vaksinasi: ${error?.message || ""}`,
+        500,
+      );
+    }
+
+    if (!groups.length) {
+      return ok({
+        message: "Belum ada rincian lokasi/tanggal untuk dibuat menjadi Session.",
+        created: 0,
+        existing: 0,
+        updated: 0,
+      });
+    }
+
+    const sourceResult = await supabase
+      .from("participant_sources")
+      .select("id,name,institution_name")
+      .eq("id", sourceId)
+      .maybeSingle();
+    if (sourceResult.error) return fail(sourceResult.error.message, 500);
+
+    const sourceName =
+      clean(body.sourceName) ||
+      clean(sourceResult.data?.name) ||
+      clean(sourceResult.data?.institution_name) ||
+      `Database ${sourceId}`;
+    const companyName =
+      clean(body.companyName) ||
+      clean(sourceResult.data?.institution_name) ||
+      clean(sourceResult.data?.name);
+    const flowConfig = sanitizeExistingFlowConfig(
+      body.existingFlowConfig || {
+        registration: true,
+        queue: true,
+        doctor: false,
+      },
+    );
+
+    const existingResult = await supabase
+      .from("vaccination_sessions")
+      .select(
+        "id,source_id,import_location_key,location,session_date,company_name,participant_count_planned",
+      )
+      .eq("source_id", sourceId);
+    if (existingResult.error) return fail(existingResult.error.message, 500);
+
+    const existingRows = existingResult.data || [];
+    const byImportKey = new Map<string, any>();
+    const byLocationDate = new Map<string, any>();
+
+    for (const row of existingRows) {
+      const importKey = clean(row.import_location_key);
+      if (importKey) byImportKey.set(importKey, row);
+
+      const locationDateKey = `${normalizeKey(row.location)}|${clean(row.session_date)}`;
+      if (normalizeKey(row.location) || clean(row.session_date)) {
+        byLocationDate.set(locationDateKey, row);
+      }
+    }
+
+    const rowsToInsert: any[] = [];
+    let updated = 0;
+    let existing = 0;
+
+    for (const group of groups) {
+      const locationDateKey = `${normalizeKey(group.locationName)}|${clean(group.sessionDate)}`;
+      const current =
+        byImportKey.get(group.key) ||
+        byLocationDate.get(locationDateKey) ||
+        null;
+
+      if (current) {
+        existing += 1;
+
+        const updates: Record<string, any> = {};
+        if (!clean(current.import_location_key)) {
+          updates.import_location_key = group.key;
+        }
+        if (!clean(current.company_name) && companyName) {
+          updates.company_name = companyName;
+        }
+        if (
+          (!Number(current.participant_count_planned || 0) ||
+            Number(current.participant_count_planned || 0) < group.participantCount) &&
+          group.participantCount > 0
+        ) {
+          updates.participant_count_planned = group.participantCount;
+        }
+
+        if (Object.keys(updates).length) {
+          const updateResult = await supabase
+            .from("vaccination_sessions")
+            .update(updates)
+            .eq("id", current.id);
+          if (updateResult.error) return fail(updateResult.error.message, 500);
+          updated += 1;
+        }
+        continue;
+      }
+
+      rowsToInsert.push({
+        session_name: buildSessionName("", sourceName, group, false),
+        company_name: companyName || null,
+        location: group.locationName || null,
+        session_date: group.sessionDate || null,
+        time_slot:
+          Array.from(group.timeSlots || []).filter(Boolean).join(", ") || null,
+        import_location_key: group.key,
+        import_time_area_name: group.timeAreaName || null,
+        participant_count_planned: group.participantCount || 0,
+        status: "OPEN",
+        source_id: sourceId,
+        source_name: sourceName || null,
+        default_vaccine_id: null,
+        default_lot_id: null,
+        existing_queue_profile: "LEGACY",
+        existing_flow_config: flowConfig,
+        existing_notification_config: {
+          enabled: false,
+          channel: "VOICE",
+          repeat: 3,
+        },
+      });
+    }
+
+    let inserted: any[] = [];
+    if (rowsToInsert.length) {
+      const insertResult = await supabase
+        .from("vaccination_sessions")
+        .insert(rowsToInsert)
+        .select("*");
+      if (insertResult.error) return fail(insertResult.error.message, 500);
+      inserted = insertResult.data || [];
+    }
+
+    return ok({
+      message: `Sinkronisasi Session selesai. ${inserted.length} baru, ${existing} sudah ada.`,
+      created: inserted.length,
+      existing,
+      updated,
+      sessions: inserted,
+    });
+  }
+
   // VACCINATION_SESSION_EXISTING_CONFIG_V153_3
   if (action === "sync-session-config") {
     const sessionId = toInt(body.sessionId || body.id, 0);
@@ -817,11 +973,12 @@ export async function POST(req: NextRequest) {
       );
 
     if (existingResult.error) return fail(existingResult.error.message, 500);
-    const existingKeys = new Set(
-      (existingResult.data || []).map((row: any) =>
-        clean(row.import_location_key),
-      ),
+    const existingByKey = new Map<string, any>(
+      (existingResult.data || [])
+        .filter((row: any) => clean(row.import_location_key))
+        .map((row: any): [string, any] => [clean(row.import_location_key), row]),
     );
+    const existingKeys = new Set(existingByKey.keys());
 
     const rows = selectedGroups
       .filter((group) => !existingKeys.has(group.key))
@@ -835,7 +992,8 @@ export async function POST(req: NextRequest) {
         company_name: companyName || null,
         location: group.locationName || null,
         session_date: group.sessionDate || null,
-        time_slot: null,
+        time_slot:
+          Array.from(group.timeSlots || []).filter(Boolean).join(", ") || null,
         import_location_key: group.key,
         import_time_area_name: group.timeAreaName || null,
         participant_count_planned: group.participantCount || 0,
@@ -845,11 +1003,13 @@ export async function POST(req: NextRequest) {
         default_vaccine_id: defaultVaccineId || null,
         default_lot_id: defaultLotId || null,
         existing_queue_profile: "LEGACY",
-        existing_flow_config: {
-          registration: true,
-          queue: true,
-          doctor: true,
-        },
+        existing_flow_config: sanitizeExistingFlowConfig(
+          body.existingFlowConfig || {
+            registration: true,
+            queue: true,
+            doctor: false,
+          },
+        ),
         existing_notification_config: {
           enabled: false,
           channel: "VOICE",
@@ -857,39 +1017,56 @@ export async function POST(req: NextRequest) {
         },
       }));
 
-    if (!rows.length) {
-      return ok({
-        message:
-          "Semua lokasi dari database ini sudah pernah dibuatkan session.",
-        created: 0,
-        skipped: selectedGroups.length,
-      });
+    let insertedSessions: any[] = [];
+    if (rows.length) {
+      const result = await supabase
+        .from("vaccination_sessions")
+        .insert(rows)
+        .select("*");
+      if (result.error) return fail(result.error.message, 500);
+      insertedSessions = result.data || [];
     }
 
-    const result = await supabase
-      .from("vaccination_sessions")
-      .insert(rows)
-      .select("*");
-    if (result.error) return fail(result.error.message, 500);
+    // "Generate semua lokasi" tetap berfungsi sebagai konfigurasi massal.
+    // Session yang sudah auto-persist tidak dilewati begitu saja: daftar
+    // vaksin/lot + mapping yang dipilih disinkronkan ke semua target.
+    const existingTargetSessions = selectedGroups
+      .map((group) => existingByKey.get(group.key))
+      .filter(Boolean);
+    const targetSessions = [...existingTargetSessions, ...insertedSessions];
 
     try {
-      await insertSessionVaccines(supabase, result.data || [], sessionVaccines);
-      await insertSessionBatchMappings(supabase, result.data || [], sourceId, batchMappings);
+      for (const session of targetSessions) {
+        const targetSessionId = toInt(session.id, 0);
+        if (!targetSessionId) continue;
+        await syncSessionVaccines(
+          supabase,
+          targetSessionId,
+          sessionVaccines,
+        );
+        await syncSessionBatchMappings(
+          supabase,
+          targetSessionId,
+          sourceId,
+          batchMappings,
+        );
+      }
     } catch (error: any) {
       return fail(
-        `Session dibuat, tetapi daftar vaksin/lot atau mapping BatchName gagal ditambahkan: ${error?.message || ""}`,
+        `Session tersedia, tetapi daftar vaksin/lot atau mapping BatchName gagal disinkronkan: ${error?.message || ""}`,
         500,
-        { sessions: result.data || [] },
+        { sessions: targetSessions },
       );
     }
 
     return ok({
-      message: `Auto-generate session selesai. Dibuat: ${result.data?.length || 0}, dilewati karena sudah ada: ${selectedGroups.length - rows.length}.`,
-      sessions: result.data || [],
-      created: result.data?.length || 0,
-      skipped: selectedGroups.length - rows.length,
+      message: `Konfigurasi semua lokasi selesai. Session baru: ${insertedSessions.length}, session existing diperbarui: ${existingTargetSessions.length}.`,
+      sessions: targetSessions,
+      created: insertedSessions.length,
+      skipped: existingTargetSessions.length,
     });
   }
+
 
   const sessionName = clean(body.sessionName);
   if (!sessionName) return fail("Nama session wajib diisi.");
