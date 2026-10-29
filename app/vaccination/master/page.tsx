@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V496_MASTER_LOT_STOCK_TRANSFER_SAFE
+// V497_SESSION_SERVICE_STOCK_SPLIT_SAFE
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
@@ -74,6 +75,9 @@ export default function VaccinationMasterPage() {
   const [productMappings, setProductMappings] = useState<any[]>([]);
   const [companySources, setCompanySources] = useState<any[]>([]);
   const [stockSessions, setStockSessions] = useState<any[]>([]);
+  const [serviceStockAllocations, setServiceStockAllocations] = useState<any[]>([]);
+  const [serviceStockReady, setServiceStockReady] = useState(true);
+  const [serviceStockMessage, setServiceStockMessage] = useState("");
   const [stockFilter, setStockFilter] = useState("ALL");
   const [stockSessionFilter, setStockSessionFilter] = useState("ALL");
   const [companyStockReady, setCompanyStockReady] = useState(true);
@@ -93,6 +97,7 @@ export default function VaccinationMasterPage() {
   const [transferLot, setTransferLot] = useState<any | null>(null);
   const [transferCompanyName, setTransferCompanyName] = useState("");
   const [transferSessionId, setTransferSessionId] = useState("");
+  const [transferServiceMode, setTransferServiceMode] = useState<"HEALTHDAY" | "BAZAR">("HEALTHDAY");
   const [transferringStock, setTransferringStock] = useState(false);
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
@@ -114,6 +119,8 @@ export default function VaccinationMasterPage() {
     stockScope: "GENERAL",
     stockCompanyName: "",
     stockSessionId: "",
+    healthdayStockQty: 0,
+    bazarStockQty: 0,
   });
 
   async function loadData() {
@@ -130,6 +137,9 @@ export default function VaccinationMasterPage() {
     setProductMappings(masterJson.productMappings || []);
     setCompanySources(sourcesJson.ok ? sourcesJson.sources || [] : []);
     setStockSessions(masterJson.stockSessions || []);
+    setServiceStockAllocations(masterJson.serviceStockAllocations || []);
+    setServiceStockReady(masterJson.serviceStockReady !== false);
+    setServiceStockMessage(masterJson.serviceStockMessage || "");
     setMappingReady(masterJson.mappingReady !== false);
     setMappingMessage(masterJson.mappingMessage || "");
     setCompanyStockReady(masterJson.companyStockReady !== false);
@@ -148,6 +158,17 @@ export default function VaccinationMasterPage() {
     if (existingMapping?.vaccine_id) return String(existingMapping.vaccine_id);
     const exact = vaccines.find((v) => normalizeName(v.name) === normalizeName(productName));
     return exact?.id ? String(exact.id) : "";
+  }
+
+  function serviceAllocationQty(lotId: any, sessionId: any, serviceMode: "HEALTHDAY" | "BAZAR") {
+    const row = serviceStockAllocations.find(
+      (item) =>
+        item.active !== false &&
+        Number(item.lot_id || 0) === Number(lotId || 0) &&
+        Number(item.session_id || 0) === Number(sessionId || 0) &&
+        String(item.service_mode || "HEALTHDAY").toUpperCase() === serviceMode,
+    );
+    return Math.max(0, Number(row?.allocated_qty || 0));
   }
 
   function applyImportLot(productKey: string, lotNumber: string, vaccineId?: string) {
@@ -181,6 +202,20 @@ export default function VaccinationMasterPage() {
       stockScope: lotScope(existingLot),
       stockCompanyName: lotScope(existingLot) === "GENERAL" ? "" : cleanText(existingLot?.stock_company_name),
       stockSessionId: lotScope(existingLot) === "SESSION" ? String(existingLot?.stock_session_id || "") : "",
+      healthdayStockQty:
+        existingLot && lotScope(existingLot) === "SESSION"
+          ? serviceAllocationQty(existingLot.id, existingLot.stock_session_id, "HEALTHDAY") ||
+            Math.max(
+              0,
+              Number(existingLot.stock_initial || 0) +
+                Number(existingLot.stock_added || 0) -
+                Number(existingLot.stock_used || 0),
+            )
+          : 0,
+      bazarStockQty:
+        existingLot && lotScope(existingLot) === "SESSION"
+          ? serviceAllocationQty(existingLot.id, existingLot.stock_session_id, "BAZAR")
+          : 0,
     });
   }
 
@@ -247,6 +282,14 @@ export default function VaccinationMasterPage() {
       setError("Pilih Session/Lokasi untuk lot dengan Scope Stok = Session/Lokasi.");
       return;
     }
+    if (
+      cleanText(lotForm.lotNumber) &&
+      lotForm.stockScope === "SESSION" &&
+      !serviceStockReady
+    ) {
+      setError(serviceStockMessage || "Aktifkan pembagian stok Healthday/Bazar terlebih dahulu.");
+      return;
+    }
 
     try {
       let vaccineId = selectedMasterVaccineId;
@@ -277,6 +320,7 @@ export default function VaccinationMasterPage() {
 
       const lotNumber = cleanText(lotForm.lotNumber);
       let lotSaved = false;
+      let savedLotId = "";
 
       if (lotNumber) {
         const existingLot = lots.find(
@@ -284,7 +328,7 @@ export default function VaccinationMasterPage() {
         );
 
         if (existingLot?.id) {
-          await postMaster({
+          const lotJson = await postMaster({
             action: "update-lot-details",
             lotId: existingLot.id,
             lotNumber,
@@ -296,14 +340,56 @@ export default function VaccinationMasterPage() {
             stockCompanyName: lotForm.stockCompanyName,
             stockSessionId: lotForm.stockSessionId,
           });
+          savedLotId = String(lotJson.lot?.id || existingLot.id || "");
         } else {
-          await postMaster({
+          const lotJson = await postMaster({
             action: "create-lot",
             ...lotForm,
             vaccineId,
             lotNumber,
           });
+          savedLotId = String(lotJson.lot?.id || "");
         }
+
+        if (
+          savedLotId &&
+          lotForm.stockScope === "SESSION" &&
+          cleanText(lotForm.stockSessionId)
+        ) {
+          const savedLot = existingLot || {
+            stock_initial: lotForm.stockInitial,
+            stock_added: lotForm.stockAdded,
+            stock_used: 0,
+          };
+          const available = Math.max(
+            0,
+            Number(savedLot.stock_initial || lotForm.stockInitial || 0) +
+              Number(lotForm.stockAdded || 0) -
+              Number(savedLot.stock_used || 0),
+          );
+          let healthdayQty = Math.max(0, Number(lotForm.healthdayStockQty || 0));
+          const bazarQty = Math.max(0, Number(lotForm.bazarStockQty || 0));
+
+          if (healthdayQty === 0 && bazarQty === 0 && available > 0) {
+            healthdayQty = available;
+          }
+
+          if (healthdayQty + bazarQty > available) {
+            throw new Error(
+              `Total stok Healthday + Bazar (${healthdayQty + bazarQty}) melebihi sisa stok lot (${available}).`,
+            );
+          }
+
+          await postMaster({
+            action: "save-session-service-stock",
+            lotId: savedLotId,
+            sessionId: lotForm.stockSessionId,
+            companyName: lotForm.stockCompanyName,
+            healthdayQty,
+            bazarQty,
+          });
+        }
+
         lotSaved = true;
       }
 
@@ -344,6 +430,8 @@ export default function VaccinationMasterPage() {
       stockScope: "GENERAL",
       stockCompanyName: "",
       stockSessionId: "",
+      healthdayStockQty: 0,
+      bazarStockQty: 0,
     });
     setMessage(`Edit produk ${vaccine.name}. Ubah field yang diperlukan lalu klik Simpan Perubahan Produk & Lot.`);
     window.setTimeout(() => {
@@ -377,6 +465,20 @@ export default function VaccinationMasterPage() {
       stockScope: lotScope(lot),
       stockCompanyName: lotScope(lot) === "GENERAL" ? "" : cleanText(lot.stock_company_name),
       stockSessionId: lotScope(lot) === "SESSION" ? String(lot.stock_session_id || "") : "",
+      healthdayStockQty:
+        lotScope(lot) === "SESSION"
+          ? serviceAllocationQty(lot.id, lot.stock_session_id, "HEALTHDAY") ||
+            Math.max(
+              0,
+              Number(lot.stock_initial || 0) +
+                Number(lot.stock_added || 0) -
+                Number(lot.stock_used || 0),
+            )
+          : 0,
+      bazarStockQty:
+        lotScope(lot) === "SESSION"
+          ? serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")
+          : 0,
     });
     setMessage(`Edit lot ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Ubah field lalu simpan.`);
     window.setTimeout(() => {
@@ -393,7 +495,7 @@ export default function VaccinationMasterPage() {
       if (String(selectedMasterVaccineId) === String(vaccine.id)) {
         setSelectedMasterVaccineId("");
         setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
-        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "", stockSessionId: "" });
+        setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "", stockSessionId: "", healthdayStockQty: 0, bazarStockQty: 0 });
       }
       await loadData();
     } catch (err: any) {
@@ -421,6 +523,7 @@ export default function VaccinationMasterPage() {
     setTransferLot(lot);
     setTransferCompanyName("");
     setTransferSessionId("");
+    setTransferServiceMode("HEALTHDAY");
   }
 
   function closeTransferStock() {
@@ -428,6 +531,7 @@ export default function VaccinationMasterPage() {
     setTransferLot(null);
     setTransferCompanyName("");
     setTransferSessionId("");
+    setTransferServiceMode("HEALTHDAY");
   }
 
   async function transferRemainingStock() {
@@ -461,7 +565,7 @@ export default function VaccinationMasterPage() {
     }
 
     const confirmed = window.confirm(
-      `Transfer seluruh sisa stok ${remaining} dari Lot ${transferLot.lot_number} ke ${sessionLabel(targetSession)}?`,
+      `Transfer seluruh sisa stok ${remaining} dari Lot ${transferLot.lot_number} ke ${sessionLabel(targetSession)} · ${transferServiceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"}?`,
     );
     if (!confirmed) return;
 
@@ -472,6 +576,7 @@ export default function VaccinationMasterPage() {
         lotId: transferLot.id,
         targetCompanyName: transferCompanyName,
         targetSessionId: transferSessionId,
+        targetServiceMode: transferServiceMode,
       });
 
       setMessage(
@@ -481,6 +586,7 @@ export default function VaccinationMasterPage() {
       setTransferLot(null);
       setTransferCompanyName("");
       setTransferSessionId("");
+      setTransferServiceMode("HEALTHDAY");
       await loadData();
     } catch (err: any) {
       setError(err?.message || "Transfer stok gagal.");
@@ -723,6 +829,27 @@ export default function VaccinationMasterPage() {
         return dateCompare || Number(b.id || 0) - Number(a.id || 0);
       });
   }, [stockSessions, transferCompanyName]);
+
+  const selectedLotForForm = useMemo(
+    () =>
+      lots.find(
+        (lot) =>
+          String(lot.vaccine_id || lot.vaccine?.id || "") === String(lotForm.vaccineId || "") &&
+          cleanText(lot.lot_number) === cleanText(lotForm.lotNumber),
+      ) || null,
+    [lots, lotForm.vaccineId, lotForm.lotNumber],
+  );
+
+  const lotFormRemaining = Math.max(
+    0,
+    Number(selectedLotForForm?.stock_initial ?? lotForm.stockInitial ?? 0) +
+      Number(lotForm.stockAdded || 0) -
+      Number(selectedLotForForm?.stock_used || 0),
+  );
+
+  const lotFormAllocatedTotal =
+    Math.max(0, Number(lotForm.healthdayStockQty || 0)) +
+    Math.max(0, Number(lotForm.bazarStockQty || 0));
 
   const transferRemaining = transferLot
     ? Math.max(
@@ -1099,6 +1226,10 @@ export default function VaccinationMasterPage() {
                           e.target.value === "SESSION"
                             ? current.stockSessionId
                             : "",
+                        healthdayStockQty:
+                          e.target.value === "SESSION" ? current.healthdayStockQty : 0,
+                        bazarStockQty:
+                          e.target.value === "SESSION" ? current.bazarStockQty : 0,
                       }))
                     }
                   >
@@ -1119,6 +1250,8 @@ export default function VaccinationMasterPage() {
                         ...current,
                         stockCompanyName: e.target.value,
                         stockSessionId: "",
+                        healthdayStockQty: 0,
+                        bazarStockQty: 0,
                       }))
                     }
                   >
@@ -1145,12 +1278,39 @@ export default function VaccinationMasterPage() {
                       lotForm.stockScope !== "SESSION" ||
                       !lotForm.stockCompanyName
                     }
-                    onChange={(e) =>
-                      setLotForm((current) => ({
-                        ...current,
-                        stockSessionId: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => {
+                      const nextSessionId = e.target.value;
+                      setLotForm((current) => {
+                        const currentLot = lots.find(
+                          (lot) =>
+                            String(lot.vaccine_id || lot.vaccine?.id || "") === String(current.vaccineId || "") &&
+                            cleanText(lot.lot_number) === cleanText(current.lotNumber),
+                        );
+                        const fallbackRemaining = currentLot
+                          ? Math.max(
+                              0,
+                              Number(currentLot.stock_initial || 0) +
+                                Number(currentLot.stock_added || 0) -
+                                Number(currentLot.stock_used || 0),
+                            )
+                          : 0;
+                        const healthdayExisting = currentLot
+                          ? serviceAllocationQty(currentLot.id, nextSessionId, "HEALTHDAY")
+                          : 0;
+                        return {
+                          ...current,
+                          stockSessionId: nextSessionId,
+                          healthdayStockQty:
+                            nextSessionId && currentLot
+                              ? healthdayExisting || fallbackRemaining
+                              : 0,
+                          bazarStockQty:
+                            nextSessionId && currentLot
+                              ? serviceAllocationQty(currentLot.id, nextSessionId, "BAZAR")
+                              : 0,
+                        };
+                      });
+                    }}
                   >
                     <option value="">
                       {lotForm.stockScope === "SESSION"
@@ -1179,6 +1339,75 @@ export default function VaccinationMasterPage() {
                   Session / Lokasi Spesifik: pilih satu Session. Lot ini hanya milik session tersebut; pemindahan sisa stok ke session lain sebaiknya dilakukan melalui transaksi transfer agar audit tetap tercatat.
                 </div>
               )}
+
+              {lotForm.stockScope === "SESSION" ? (
+                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-black text-violet-900">
+                        Pembagian Stok Session
+                      </div>
+                      <div className="text-xs text-violet-700">
+                        Healthday (Gratis) dan Bazar (Bayar) memiliki stok terpisah pada Session yang sama.
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-violet-800">
+                      Sisa lot: {lotFormRemaining} · Dialokasikan: {lotFormAllocatedTotal}
+                    </div>
+                  </div>
+
+                  {!serviceStockReady ? (
+                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {serviceStockMessage || "Pembagian stok Healthday/Bazar belum aktif di database."}
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-xs font-bold text-blue-700">
+                      Healthday (Gratis)
+                      <input
+                        type="number"
+                        min={0}
+                        className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900"
+                        value={lotForm.healthdayStockQty}
+                        onChange={(e) =>
+                          setLotForm((current) => ({
+                            ...current,
+                            healthdayStockQty: Math.max(0, Number(e.target.value || 0)),
+                          }))
+                        }
+                      />
+                    </label>
+
+                    <label className="grid gap-1 text-xs font-bold text-violet-700">
+                      Bazar (Bayar)
+                      <input
+                        type="number"
+                        min={0}
+                        className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-slate-900"
+                        value={lotForm.bazarStockQty}
+                        onChange={(e) =>
+                          setLotForm((current) => ({
+                            ...current,
+                            bazarStockQty: Math.max(0, Number(e.target.value || 0)),
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  {lotFormAllocatedTotal > lotFormRemaining ? (
+                    <div className="mt-2 text-xs font-bold text-red-600">
+                      Total alokasi melebihi sisa stok lot sebesar {lotFormAllocatedTotal - lotFormRemaining}.
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-violet-700">
+                      Belum dialokasikan: {Math.max(0, lotFormRemaining - lotFormAllocatedTotal)}.
+                      Jika kedua field 0 saat disimpan, seluruh sisa stok otomatis masuk Healthday.
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               <input
                 className="rounded-xl border px-3 py-2"
@@ -1452,9 +1681,21 @@ export default function VaccinationMasterPage() {
                         {lotScope(lot) === "GENERAL" ? "-" : lot.stock_company_name || "-"}
                       </td>
                       <td className="p-3">
-                        {lotScope(lot) === "SESSION"
-                          ? sessionLabel(sessionMap.get(Number(lot.stock_session_id || 0)))
-                          : "-"}
+                        {lotScope(lot) === "SESSION" ? (
+                          <div>
+                            <div>{sessionLabel(sessionMap.get(Number(lot.stock_session_id || 0)))}</div>
+                            <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold">
+                              <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                                Healthday {serviceAllocationQty(lot.id, lot.stock_session_id, "HEALTHDAY")}
+                              </span>
+                              <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
+                                Bazar {serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td className="p-3">{lot.expiry_date || "-"}</td>
                       <td className="p-3">{awal}</td>
@@ -1567,6 +1808,26 @@ export default function VaccinationMasterPage() {
                         </option>
                       ))}
                     </select>
+                  </label>
+
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-sm font-bold">Jenis Layanan Tujuan</span>
+                    <select
+                      className="input w-full"
+                      value={transferServiceMode}
+                      onChange={(e) =>
+                        setTransferServiceMode(
+                          e.target.value === "BAZAR" ? "BAZAR" : "HEALTHDAY",
+                        )
+                      }
+                      disabled={!transferSessionId}
+                    >
+                      <option value="HEALTHDAY">Healthday (Gratis)</option>
+                      <option value="BAZAR">Bazar (Bayar)</option>
+                    </select>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Seluruh sisa stok yang ditransfer akan masuk ke bucket layanan ini.
+                    </span>
                   </label>
                 </div>
 

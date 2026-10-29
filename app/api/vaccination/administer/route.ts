@@ -3,6 +3,7 @@ import { addDays, clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../
 import { canVaccinationAccess, vaccinationRole } from "@/lib/vaccination/access";
 
 // VACCINATION_ROLE_GUARD_V150
+// V497_SESSION_SERVICE_STOCK_SPLIT_SAFE
 export const dynamic = "force-dynamic";
 
 function normalizePrintHandler(value: any) {
@@ -21,45 +22,96 @@ function allocationTableMissing(error: any) {
   return code === "42P01" || (msg.includes("vaccination_session_stock_allocations") && msg.includes("does not exist"));
 }
 
-async function validateSessionStockAccess(supabase: any, sessionId: number, lot: any) {
-  const globalRemaining = Number(lot?.stock_initial || 0) + Number(lot?.stock_added || 0) - Number(lot?.stock_used || 0);
+function normalizeServiceMode(value: any) {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+async function validateSessionStockAccess(
+  supabase: any,
+  sessionId: number,
+  lot: any,
+  serviceModeInput: any = "HEALTHDAY",
+) {
+  const serviceMode = normalizeServiceMode(serviceModeInput);
+  const globalRemaining =
+    Number(lot?.stock_initial || 0) +
+    Number(lot?.stock_added || 0) -
+    Number(lot?.stock_used || 0);
+
   if (globalRemaining <= 0) {
     return { ok: false, message: `Stock Lot ${lot?.lot_number || "-"} sudah habis.` };
   }
 
   const allocationResult = await supabase
     .from("vaccination_session_stock_allocations")
-    .select("id,session_id,lot_id,allocated_qty,low_stock_threshold,dedicated,active")
+    .select("id,session_id,lot_id,allocated_qty,low_stock_threshold,dedicated,active,service_mode")
     .eq("lot_id", Number(lot?.id))
     .eq("active", true);
 
   if (allocationResult.error) {
-    if (allocationTableMissing(allocationResult.error)) return { ok: true, migrationMissing: true };
-    return { ok: false, message: allocationResult.error.message || "Gagal memvalidasi alokasi stock session." };
+    if (allocationTableMissing(allocationResult.error)) {
+      return { ok: true, migrationMissing: true };
+    }
+    return {
+      ok: false,
+      message:
+        allocationResult.error.message ||
+        "Gagal memvalidasi alokasi stock session.",
+    };
   }
 
-  const dedicatedRows = (allocationResult.data || []).filter((row: any) => row.dedicated !== false);
+  const dedicatedRows = (allocationResult.data || []).filter(
+    (row: any) => row.dedicated !== false,
+  );
   if (!dedicatedRows.length) return { ok: true };
 
-  const owned = dedicatedRows.find((row: any) => Number(row.session_id) === Number(sessionId));
+  const owned = dedicatedRows.find(
+    (row: any) =>
+      Number(row.session_id) === Number(sessionId) &&
+      normalizeServiceMode(row.service_mode) === serviceMode,
+  );
+
   if (!owned) {
-    return { ok: false, message: `Lot ${lot?.lot_number || "-"} didedikasikan untuk session lain dan tidak dapat digunakan pada session ini.` };
+    return {
+      ok: false,
+      message: `Lot ${lot?.lot_number || "-"} tidak memiliki alokasi ${serviceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"} untuk session ini.`,
+    };
   }
 
   const usedResult = await supabase
-    .from("vaccination_records")
-    .select("id,status")
-    .eq("session_id", sessionId)
+    .from("vaccination_registration_items")
+    .select("id,lot_id,service_mode,status,registration:vaccination_registrations!inner(session_id)")
     .eq("lot_id", Number(lot?.id))
+    .eq("service_mode", serviceMode)
+    .in("status", ["ADMINISTERED", "DONE"])
+    .eq("registration.session_id", sessionId)
+    .eq("active", true)
     .limit(20000);
-  if (usedResult.error) return { ok: false, message: usedResult.error.message || "Gagal menghitung pemakaian alokasi session." };
-  const used = (usedResult.data || []).filter((row: any) => !["CANCELLED", "CANCELED", "VOID", "BATAL"].includes(String(row.status || "").toUpperCase())).length;
-  const remaining = Number(owned.allocated_qty || 0) - used;
-  if (remaining <= 0) {
-    return { ok: false, message: `Alokasi Lot ${lot?.lot_number || "-"} untuk session ini sudah habis.` };
+
+  if (usedResult.error) {
+    return {
+      ok: false,
+      message:
+        usedResult.error.message ||
+        "Gagal menghitung pemakaian alokasi layanan.",
+    };
   }
 
-  return { ok: true, allocationRemaining: remaining, threshold: Number(owned.low_stock_threshold || 0) };
+  const used = (usedResult.data || []).length;
+  const remaining = Number(owned.allocated_qty || 0) - used;
+  if (remaining <= 0) {
+    return {
+      ok: false,
+      message: `Alokasi ${serviceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"} Lot ${lot?.lot_number || "-"} untuk session ini sudah habis.`,
+    };
+  }
+
+  return {
+    ok: true,
+    allocationRemaining: remaining,
+    threshold: Number(owned.low_stock_threshold || 0),
+    serviceMode,
+  };
 }
 
 async function getPrintLabelHandler(supabase: any, sessionId: number, fallback: any) {
@@ -426,6 +478,9 @@ export async function POST(req: NextRequest) {
       vaccineId: toInt(item.vaccineId || item.vaccine_id, 0),
       lotId: toInt(item.lotId || item.lot_id, 0),
       doseNumber: Math.max(1, toInt(item.doseNumber || item.dose_number, doseNumber)),
+      serviceMode: normalizeServiceMode(
+        item.serviceMode || item.service_mode || body.serviceMode || body.service_mode,
+      ),
     }))
     .filter((item: any) => item.vaccineId && item.lotId);
 
@@ -436,6 +491,7 @@ export async function POST(req: NextRequest) {
       vaccineId: toInt(item.vaccine_id, 0),
       lotId: toInt(item.lot_id, 0),
       doseNumber: Math.max(1, toInt(item.dose_number, 1)),
+      serviceMode: normalizeServiceMode(item.service_mode),
     })).filter((item: any) => item.vaccineId && item.lotId);
   }
 
@@ -446,6 +502,7 @@ export async function POST(req: NextRequest) {
       vaccineId: toInt(item.vaccine_id, 0),
       lotId: toInt(item.lot_id, 0),
       doseNumber: Math.max(1, toInt(item.dose_number, 1)),
+      serviceMode: "HEALTHDAY",
     }));
   }
 
@@ -466,6 +523,7 @@ export async function POST(req: NextRequest) {
       vaccineId: toInt(existing.vaccine_id, item.vaccineId),
       lotId: toInt(existing.lot_id, item.lotId),
       doseNumber: Math.max(1, toInt(existing.dose_number, item.doseNumber || 1)),
+      serviceMode: normalizeServiceMode(existing.service_mode),
       status: existing.status,
     };
   });
@@ -502,7 +560,12 @@ export async function POST(req: NextRequest) {
     }
 
     // V150 dedicated stock guard: server-side enforcement.
-    const stockAccess = await validateSessionStockAccess(supabase, toInt(reg.session_id, 0), lot);
+    const stockAccess = await validateSessionStockAccess(
+      supabase,
+      toInt(reg.session_id, 0),
+      lot,
+      item.serviceMode,
+    );
     if (!stockAccess.ok) return fail(stockAccess.message || "Stock session tidak dapat digunakan.", 409);
 
     const nextDueDate = addDays(administeredAt, vaccine.default_next_dose_days);

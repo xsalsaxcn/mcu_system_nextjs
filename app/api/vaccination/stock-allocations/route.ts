@@ -3,6 +3,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
+// V497_SESSION_SERVICE_STOCK_SPLIT_SAFE
 export const dynamic = "force-dynamic";
 
 function relationMissing(error: any) {
@@ -15,6 +16,10 @@ function normalizeCompanyName(value: any) {
   return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function normalizeServiceMode(value: any) {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
 async function loadUsedMap(supabase: any, allocations: any[]) {
   const sessionIds = Array.from(new Set(allocations.map((row: any) => Number(row.session_id)).filter(Boolean)));
   const lotIds = Array.from(new Set(allocations.map((row: any) => Number(row.lot_id)).filter(Boolean)));
@@ -22,16 +27,24 @@ async function loadUsedMap(supabase: any, allocations: any[]) {
   if (!sessionIds.length || !lotIds.length) return map;
 
   const result = await supabase
-    .from("vaccination_records")
-    .select("session_id,lot_id,status")
-    .in("session_id", sessionIds)
+    .from("vaccination_registration_items")
+    .select("id,lot_id,service_mode,status,registration:vaccination_registrations!inner(session_id)")
     .in("lot_id", lotIds)
+    .in("status", ["ADMINISTERED", "DONE"])
+    .in("registration.session_id", sessionIds)
+    .eq("active", true)
     .limit(20000);
   if (result.error) return map;
 
   for (const row of result.data || []) {
-    if (["CANCELLED", "CANCELED", "VOID", "BATAL"].includes(String(row.status || "").toUpperCase())) continue;
-    const key = `${Number(row.session_id)}:${Number(row.lot_id)}`;
+    const registration = Array.isArray((row as any).registration)
+      ? (row as any).registration[0]
+      : (row as any).registration;
+    const sessionId = Number(registration?.session_id || 0);
+    const lotId = Number((row as any).lot_id || 0);
+    if (!sessionId || !lotId) continue;
+    const serviceMode = normalizeServiceMode((row as any).service_mode);
+    const key = `${sessionId}:${lotId}:${serviceMode}`;
     map.set(key, (map.get(key) || 0) + 1);
   }
   return map;
@@ -74,9 +87,14 @@ export async function GET(req: NextRequest) {
   const lotMap = new Map((lotsResult.data || []).map((row: any) => [Number(row.id), row]));
 
   const rows = allocations.map((row: any) => {
-    const used = usedMap.get(`${Number(row.session_id)}:${Number(row.lot_id)}`) || 0;
+    const serviceMode = normalizeServiceMode(row.service_mode);
+    const used =
+      usedMap.get(
+        `${Number(row.session_id)}:${Number(row.lot_id)}:${serviceMode}`,
+      ) || 0;
     return {
       ...row,
+      service_mode: serviceMode,
       used_qty: used,
       remaining_qty: Math.max(0, Number(row.allocated_qty || 0) - used),
       session: sessionMap.get(Number(row.session_id)) || null,
@@ -122,6 +140,7 @@ export async function POST(req: NextRequest) {
   const allocatedQty = Math.max(0, toInt(body.allocatedQty ?? body.allocated_qty, 0));
   const threshold = Math.max(0, toInt(body.lowStockThreshold ?? body.low_stock_threshold, 5));
   const dedicated = body.dedicated !== false && String(body.dedicated) !== "false";
+  const serviceMode = normalizeServiceMode(body.serviceMode || body.service_mode);
   if (!sessionId) return fail("Session wajib dipilih.");
   if (!lotId) return fail("Lot wajib dipilih.");
   if (!allocatedQty) return fail("Jumlah alokasi harus lebih dari 0.");
@@ -182,15 +201,30 @@ export async function POST(req: NextRequest) {
   if (dedicated) {
     const otherResult = await supabase
       .from("vaccination_session_stock_allocations")
-      .select("id,session_id,allocated_qty,active,dedicated")
+      .select("id,session_id,lot_id,service_mode,allocated_qty,active,dedicated")
       .eq("lot_id", lotId)
       .eq("active", true)
-      .eq("dedicated", true)
-      .neq("session_id", sessionId);
+      .eq("dedicated", true);
     if (otherResult.error && !relationMissing(otherResult.error)) return fail(otherResult.error.message, 500);
-    const allocatedElsewhere = (otherResult.data || []).reduce((sum: number, row: any) => sum + Number(row.allocated_qty || 0), 0);
+
+    const allocatedElsewhere = (otherResult.data || [])
+      .filter(
+        (row: any) =>
+          !(
+            Number(row.session_id) === Number(sessionId) &&
+            normalizeServiceMode(row.service_mode) === serviceMode
+          ),
+      )
+      .reduce(
+        (sum: number, row: any) => sum + Number(row.allocated_qty || 0),
+        0,
+      );
+
     if (allocatedQty + allocatedElsewhere > globalRemaining) {
-      return fail(`Total alokasi dedicated melebihi sisa stock global ${globalRemaining}.`, 409);
+      return fail(
+        `Total alokasi Healthday/Bazar melebihi sisa stock global ${globalRemaining}.`,
+        409,
+      );
     }
   }
 
@@ -202,6 +236,7 @@ export async function POST(req: NextRequest) {
     low_stock_threshold: threshold,
     dedicated,
     active: true,
+    service_mode: serviceMode,
     notes: clean(body.notes) || null,
     created_by: String((user as any).name || (user as any).username || user.id),
     updated_at: new Date().toISOString(),
@@ -209,7 +244,7 @@ export async function POST(req: NextRequest) {
 
   const result = await supabase
     .from("vaccination_session_stock_allocations")
-    .upsert(payload, { onConflict: "session_id,lot_id" })
+    .upsert(payload, { onConflict: "session_id,lot_id,service_mode" })
     .select("*")
     .single();
   if (result.error) {

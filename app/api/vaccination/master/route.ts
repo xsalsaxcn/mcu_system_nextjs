@@ -7,6 +7,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 // V153_22_SESSION_LOT_RECONCILE_SAFE
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V496_MASTER_LOT_STOCK_TRANSFER_SAFE
+// V497_SESSION_SERVICE_STOCK_SPLIT_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ function sanitizeStockScope(value: any) {
 
 function normalizeCompanyName(value: any) {
   return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizeServiceMode(value: any) {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
 }
 
 async function stockOwnershipFromBody(
@@ -182,6 +187,25 @@ export async function GET(req: NextRequest) {
         .filter(Boolean)
         .join(" · ");
 
+  const serviceStockAllocationsResult = await supabase
+    .from("vaccination_session_stock_allocations")
+    .select("id,session_id,vaccine_id,lot_id,allocated_qty,low_stock_threshold,dedicated,active,service_mode,notes,updated_at")
+    .eq("active", true)
+    .order("updated_at", { ascending: false })
+    .limit(20000);
+
+  const serviceStockReady = !serviceStockAllocationsResult.error;
+  const serviceStockMessage = serviceStockReady
+    ? ""
+    : [
+        "Pembagian stok Healthday/Bazar belum aktif.",
+        "Jalankan sql_vaccination_v497_session_service_stock_split.sql lalu refresh halaman.",
+        serviceStockAllocationsResult.error?.code ? `DB ${serviceStockAllocationsResult.error.code}` : "",
+        serviceStockAllocationsResult.error?.message || "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
   const mappingResult = await supabase
     .from("vaccination_product_mappings")
     .select(`
@@ -216,6 +240,9 @@ export async function GET(req: NextRequest) {
     mappingMessage,
     companyStockReady,
     companyStockMessage,
+    serviceStockReady,
+    serviceStockMessage,
+    serviceStockAllocations: serviceStockReady ? serviceStockAllocationsResult.data || [] : [],
     stockSessions: stockSessionsResult.error ? [] : stockSessionsResult.data || [],
   });
 }
@@ -649,10 +676,126 @@ export async function POST(req: NextRequest) {
     return ok({ message: "Mapping produk berhasil dihapus. Master vaksin dan lot tetap aman." });
   }
 
+  if (action === "save-session-service-stock") {
+    const lotId = toInt(body.lotId || body.id, 0);
+    const sessionId = toInt(body.sessionId || body.stockSessionId, 0);
+    const companyName = clean(body.companyName || body.stockCompanyName);
+    const healthdayQty = Math.max(0, toInt(body.healthdayQty ?? body.healthday_qty, 0));
+    const bazarQty = Math.max(0, toInt(body.bazarQty ?? body.bazar_qty, 0));
+
+    if (!lotId) return fail("Lot wajib dipilih.");
+    if (!sessionId) return fail("Session / Lokasi wajib dipilih.");
+    if (!companyName) return fail("Perusahaan wajib dipilih.");
+
+    const [lotResult, sessionResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_company_name,stock_session_id")
+        .eq("id", lotId)
+        .maybeSingle(),
+      supabase
+        .from("vaccination_sessions")
+        .select("id,session_name,company_name,location,session_date,status")
+        .eq("id", sessionId)
+        .maybeSingle(),
+    ]);
+
+    if (lotResult.error) return fail(lotResult.error.message, 500);
+    if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    if (!sessionResult.data) return fail("Session / Lokasi tidak ditemukan.", 404);
+
+    const lot = lotResult.data as any;
+    const session = sessionResult.data as any;
+    const canonicalCompany = clean(session.company_name);
+    if (!canonicalCompany) return fail("Session / Lokasi belum memiliki perusahaan.", 409);
+    if (normalizeCompanyName(companyName) !== normalizeCompanyName(canonicalCompany)) {
+      return fail(`Session / Lokasi yang dipilih milik ${canonicalCompany}, bukan ${companyName}.`, 409);
+    }
+    if (String(session.status || "").toUpperCase() === "CANCELLED") {
+      return fail("Session / Lokasi sudah dibatalkan.", 409);
+    }
+    if (
+      sanitizeStockScope(lot.stock_scope) !== "SESSION" ||
+      Number(lot.stock_session_id || 0) !== Number(sessionId)
+    ) {
+      return fail("Lot harus memiliki Scope Stok = Session/Lokasi yang sama sebelum pembagian Healthday/Bazar disimpan.", 409);
+    }
+
+    const globalRemaining = Math.max(
+      0,
+      Number(lot.stock_initial || 0) +
+        Number(lot.stock_added || 0) -
+        Number(lot.stock_used || 0),
+    );
+    const requestedTotal = healthdayQty + bazarQty;
+    if (requestedTotal > globalRemaining) {
+      return fail(
+        `Total stok Healthday + Bazar (${requestedTotal}) melebihi sisa stok Lot ${lot.lot_number} (${globalRemaining}).`,
+        409,
+      );
+    }
+
+    const createdBy =
+      (user as any).email ||
+      (user as any).name ||
+      (user as any).id ||
+      "system";
+    const nowIso = new Date().toISOString();
+
+    const rows = [
+      {
+        session_id: sessionId,
+        vaccine_id: Number(lot.vaccine_id),
+        lot_id: lotId,
+        allocated_qty: healthdayQty,
+        low_stock_threshold: Math.min(5, healthdayQty),
+        dedicated: true,
+        active: healthdayQty > 0,
+        service_mode: "HEALTHDAY",
+        notes: "Alokasi stok Healthday (Gratis) dari Master Vaksin",
+        created_by: createdBy,
+        updated_at: nowIso,
+      },
+      {
+        session_id: sessionId,
+        vaccine_id: Number(lot.vaccine_id),
+        lot_id: lotId,
+        allocated_qty: bazarQty,
+        low_stock_threshold: Math.min(5, bazarQty),
+        dedicated: true,
+        active: bazarQty > 0,
+        service_mode: "BAZAR",
+        notes: "Alokasi stok Bazar (Bayar) dari Master Vaksin",
+        created_by: createdBy,
+        updated_at: nowIso,
+      },
+    ];
+
+    const allocationResult = await supabase
+      .from("vaccination_session_stock_allocations")
+      .upsert(rows, { onConflict: "session_id,lot_id,service_mode" })
+      .select("*");
+
+    if (allocationResult.error) {
+      return fail(
+        `Pembagian stok Healthday/Bazar gagal: ${allocationResult.error.message}`,
+        500,
+      );
+    }
+
+    return ok({
+      message: `Pembagian stok Lot ${lot.lot_number} disimpan: Healthday ${healthdayQty}, Bazar ${bazarQty}, belum dialokasikan ${Math.max(0, globalRemaining - requestedTotal)}.`,
+      allocations: allocationResult.data || [],
+      remainingUnallocated: Math.max(0, globalRemaining - requestedTotal),
+    });
+  }
+
   if (action === "transfer-lot-stock") {
     const lotId = toInt(body.lotId || body.id, 0);
     const targetCompanyName = clean(body.targetCompanyName || body.stockCompanyName);
     const targetSessionId = toInt(body.targetSessionId || body.stockSessionId, 0);
+    const targetServiceMode = normalizeServiceMode(body.targetServiceMode || body.serviceMode);
 
     if (!lotId) return fail("Lot wajib dipilih.");
     if (!targetCompanyName) return fail("Perusahaan tujuan wajib dipilih.");
@@ -779,13 +922,98 @@ export async function POST(req: NextRequest) {
 
     if (updateResult.error) return fail(updateResult.error.message, 500);
 
+    const previousAllocationResult = await supabase
+      .from("vaccination_session_stock_allocations")
+      .select("*")
+      .eq("lot_id", lotId)
+      .eq("active", true)
+      .limit(100);
+
+    if (previousAllocationResult.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          ...previousOwnership,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+      return fail(
+        `Transfer dibatalkan karena pembagian stok layanan gagal dibaca: ${previousAllocationResult.error.message}`,
+        500,
+      );
+    }
+
     const createdBy =
       (user as any).email ||
       (user as any).name ||
       (user as any).id ||
       "system";
+    const allocationDeactivate = await supabase
+      .from("vaccination_session_stock_allocations")
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq("lot_id", lotId)
+      .eq("active", true);
+
+    if (allocationDeactivate.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          ...previousOwnership,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+      return fail(
+        `Transfer dibatalkan karena alokasi stok lama gagal ditutup: ${allocationDeactivate.error.message}`,
+        500,
+      );
+    }
+
+    const targetAllocationResult = await supabase
+      .from("vaccination_session_stock_allocations")
+      .upsert(
+        {
+          session_id: Number(targetSession.id),
+          vaccine_id: Number(lot.vaccine_id),
+          lot_id: lotId,
+          allocated_qty: remaining,
+          low_stock_threshold: Math.min(5, remaining),
+          dedicated: true,
+          active: true,
+          service_mode: targetServiceMode,
+          notes: `Transfer sisa stok ke ${targetServiceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"}`,
+          created_by: createdBy,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "session_id,lot_id,service_mode" },
+      )
+      .select("*")
+      .single();
+
+    if (targetAllocationResult.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          ...previousOwnership,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+
+      if ((previousAllocationResult.data || []).length) {
+        await supabase
+          .from("vaccination_session_stock_allocations")
+          .upsert(previousAllocationResult.data, {
+            onConflict: "session_id,lot_id,service_mode",
+          });
+      }
+
+      return fail(
+        `Transfer dibatalkan karena alokasi stok layanan tujuan gagal disimpan: ${targetAllocationResult.error.message}`,
+        500,
+      );
+    }
+
     const note =
-      `Transfer sisa stok ${remaining} · ${sourceOwner} -> ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`}`;
+      `Transfer sisa stok ${remaining} · ${sourceOwner} -> ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`} · ${targetServiceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"}`;
 
     const movementResult = await supabase
       .from("vaccination_inventory_movements")
@@ -809,6 +1037,19 @@ export async function POST(req: NextRequest) {
         })
         .eq("id", lotId);
 
+      await supabase
+        .from("vaccination_session_stock_allocations")
+        .update({ active: false, updated_at: new Date().toISOString() })
+        .eq("lot_id", lotId);
+
+      if ((previousAllocationResult.data || []).length) {
+        await supabase
+          .from("vaccination_session_stock_allocations")
+          .upsert(previousAllocationResult.data, {
+            onConflict: "session_id,lot_id,service_mode",
+          });
+      }
+
       return fail(
         `Transfer dibatalkan karena audit inventory gagal disimpan: ${movementResult.error.message}`,
         500,
@@ -816,7 +1057,7 @@ export async function POST(req: NextRequest) {
     }
 
     return ok({
-      message: `Sisa stok ${remaining} Lot ${lot.lot_number} berhasil ditransfer ke ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`}.`,
+      message: `Sisa stok ${remaining} Lot ${lot.lot_number} berhasil ditransfer ke ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`} · ${targetServiceMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"}.`,
       transferredQty: remaining,
       lot: updateResult.data,
       targetSession,
