@@ -336,12 +336,20 @@ export default function VaccinationParticipantMasterSearch({
   }
 
   function chooseCurrentRegistration(row: any) {
+    const currentHealthdayVaccineIds = (Array.isArray(row?.items) ? row.items : [])
+      .filter((item: any) => clean(item?.service_mode || "HEALTHDAY").toUpperCase() !== "BAZAR")
+      .map((item: any) => String(item?.vaccine_id || item?.vaccine?.id || ""))
+      .filter(Boolean);
+    if (!currentHealthdayVaccineIds.length && row?.vaccine_id) {
+      currentHealthdayVaccineIds.push(String(row.vaccine_id));
+    }
+
     applyParticipant(row, {
       sourceType: "CURRENT_SESSION",
       existingRegistrationId: Number(row?.id || 0) || null,
-      // Existing A/B services are already attached to this registration. Do not
-      // auto-select them again when operator only wants to add the other track.
-      suggestedVaccineIds: [],
+      // V513: carry the participant's registered Healthday vaccine into the
+      // Healthday confirmation pop-up. Bazar mode ignores/clears this selection.
+      suggestedVaccineIds: Array.from(new Set(currentHealthdayVaccineIds)),
       contextLabel: `Terdaftar di ${session?.session_name || session?.location || "session ini"}`,
     });
     setCurrentQuery(clean(row?.participant_name));
@@ -441,7 +449,14 @@ export default function VaccinationParticipantMasterSearch({
         {
           sourceType: "CURRENT_SESSION",
           existingRegistrationId: Number(current?.id || 0) || null,
-          suggestedVaccineIds: [],
+          suggestedVaccineIds: Array.from(
+            new Set(
+              (Array.isArray(current?.benefits) ? current.benefits : [])
+                .filter((benefit: any) => clean(benefit?.serviceMode || "HEALTHDAY").toUpperCase() !== "BAZAR")
+                .map((benefit: any) => String(benefit?.vaccineId || ""))
+                .filter(Boolean),
+            ),
+          ),
           contextLabel: `Sudah terdaftar di ${current?.session?.name || current?.session?.location || "session ini"}`,
         },
       );

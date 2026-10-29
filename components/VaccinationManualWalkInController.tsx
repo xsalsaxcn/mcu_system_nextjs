@@ -174,6 +174,21 @@ export default function VaccinationManualWalkInController({
   }, [participantIdentity]);
 
   useEffect(() => {
+    if (!healthdayBazarEnabled) return;
+    setSelectedByMode((previous) =>
+      serviceMode === "HEALTHDAY"
+        ? { ...previous, BAZAR: [] }
+        : { ...previous, HEALTHDAY: [] },
+    );
+    if (serviceMode === "HEALTHDAY") {
+      setBazarSaleModeByKey({});
+    }
+    setMessage("");
+    setError("");
+  }, [healthdayBazarEnabled, serviceMode]);
+
+  useEffect(() => {
+    if (serviceMode !== "HEALTHDAY") return;
     if (!suggestedVaccineIds.length || !optionSets.HEALTHDAY.length) return;
     const wanted = new Set(suggestedVaccineIds);
     const chosen: string[] = [];
@@ -192,7 +207,7 @@ export default function VaccinationManualWalkInController({
         HEALTHDAY: chosen,
       }));
     }
-  }, [participantIdentity, suggestedVaccineKey, optionSets.HEALTHDAY]);
+  }, [participantIdentity, suggestedVaccineKey, optionSets.HEALTHDAY, serviceMode]);
 
   const healthdaySelected = useMemo(() => {
     const keys = new Set(selectedByMode.HEALTHDAY);
@@ -224,17 +239,6 @@ export default function VaccinationManualWalkInController({
       ? Math.round(bazarSubtotal * 0.03 * 100) / 100
       : 0;
   const bazarTotal = bazarSubtotal + bazarSurcharge;
-
-  function setMode(mode: QueueMode) {
-    setForm((previous: any) => ({
-      ...previous,
-      serviceMode: mode,
-      ...(mode === "HEALTHDAY" && !selectedByMode.BAZAR.length
-        ? { paymentMethod: "", paymentPrice: "", paymentNote: "" }
-        : {}),
-    }));
-    setError("");
-  }
 
   function toggle(item: any, mode: QueueMode) {
     const key = optionKey(item);
@@ -516,83 +520,46 @@ export default function VaccinationManualWalkInController({
     }
   }
 
-  const combinationSelected =
-    healthdaySelected.length > 0 && bazarSelected.length > 0;
+  const participantName = clean(
+    form?.participantName || form?.participant_name || form?.name,
+  );
+  const healthdaySummary = healthdaySelected.map((item: any) => ({
+    key: optionKey(item),
+    label: productLabel(item),
+    lot: clean(item?.lot?.lot_number),
+  }));
 
   return (
     <div className="col-span-full rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="text-sm font-black text-slate-900">
-            Pilih Produk / Vaksin & Lot Peserta
+            {healthdayBazarEnabled && serviceMode === "HEALTHDAY"
+              ? "Konfirmasi Healthday"
+              : healthdayBazarEnabled && serviceMode === "BAZAR"
+                ? "Produk Bazar & Pembayaran"
+                : "Pilih Produk / Vaksin & Lot Peserta"}
           </div>
           <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
-            {healthdayBazarEnabled
-              ? "Healthday = benefit FREE sesuai session. Bazar = tambahan berbayar dari master produk. Peserta boleh mengambil keduanya."
-              : "Pilih produk/lot yang akan diberikan kepada peserta ini."}
+            {healthdayBazarEnabled && serviceMode === "HEALTHDAY"
+              ? "Vaksin benefit peserta ditampilkan ringkas. Tidak ada harga atau pembayaran pada Healthday."
+              : healthdayBazarEnabled && serviceMode === "BAZAR"
+                ? "Pilih tambahan berbayar dari master produk. Healthday tidak ditampilkan pada mode Bazar."
+                : "Pilih produk/lot yang akan diberikan kepada peserta ini."}
           </p>
         </div>
-        <div className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-[11px] font-black text-emerald-700">
+        <div className={`rounded-full border bg-white px-3 py-1 text-[11px] font-black ${
+          serviceMode === "BAZAR"
+            ? "border-violet-200 text-violet-700"
+            : "border-blue-200 text-blue-700"
+        }`}>
           {healthdayBazarEnabled
-            ? `${totalSelected} dipilih · A ${healthdaySelected.length} · B ${bazarSelected.length}`
+            ? serviceMode === "HEALTHDAY"
+              ? "HEALTHDAY · FREE"
+              : `${bazarSelected.length} produk Bazar dipilih`
             : `${totalSelected} dipilih`}
         </div>
       </div>
-
-      {healthdayBazarEnabled ? (
-        <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-3">
-          <div className="text-xs font-black uppercase tracking-wide text-violet-700">
-            Jenis Layanan
-          </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setMode("HEALTHDAY")}
-              className={`rounded-xl border px-4 py-3 text-left text-sm font-black ${
-                serviceMode === "HEALTHDAY"
-                  ? "border-blue-500 bg-blue-600 text-white"
-                  : "border-slate-200 bg-white text-slate-700"
-              }`}
-            >
-              <span className="block">Healthday · FREE</span>
-              <span className={`mt-0.5 block text-[11px] font-semibold ${serviceMode === "HEALTHDAY" ? "text-blue-100" : "text-slate-500"}`}>
-                Benefit session · {healthdaySelected.length} dipilih
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("BAZAR")}
-              className={`rounded-xl border px-4 py-3 text-left text-sm font-black ${
-                serviceMode === "BAZAR"
-                  ? "border-violet-500 bg-violet-600 text-white"
-                  : "border-slate-200 bg-white text-slate-700"
-              }`}
-            >
-              <span className="block">Bazar · BERBAYAR</span>
-              <span className={`mt-0.5 block text-[11px] font-semibold ${serviceMode === "BAZAR" ? "text-violet-100" : "text-slate-500"}`}>
-                Master produk berharga · {bazarSelected.length} dipilih
-              </span>
-            </button>
-          </div>
-
-          {combinationSelected ? (
-            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800">
-              Kombinasi aktif: peserta mendapat antrean A Healthday + antrean B Bazar.
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {serviceMode === "HEALTHDAY" && healthdayBazarEnabled ? (
-        <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-          <div className="text-xs font-black uppercase tracking-wide text-blue-700">
-            Healthday · Benefit Free
-          </div>
-          <div className="mt-1 text-[11px] font-semibold text-blue-800">
-            Hanya vaksin benefit yang aktif pada session ini. Tidak ada harga atau field pembayaran.
-          </div>
-        </div>
-      ) : null}
 
       {serviceMode === "BAZAR" && healthdayBazarEnabled ? (
         <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
@@ -701,6 +668,58 @@ export default function VaccinationManualWalkInController({
         <div className="mt-3 rounded-xl border bg-white px-3 py-3 text-xs font-bold text-slate-500">
           Memuat produk...
         </div>
+      ) : healthdayBazarEnabled && serviceMode === "HEALTHDAY" ? (
+        healthdaySummary.length ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">
+              Konfirmasi Vaksin Healthday
+            </div>
+            <div className="mt-2 text-base font-black text-slate-900">
+              Atas nama {participantName || "peserta ini"} terdaftar vaksin Healthday:
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {healthdaySummary.map((item) => (
+                <div key={item.key} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-black text-blue-900">
+                  {item.label}
+                  {item.lot ? <span className="ml-2 text-[11px] font-bold text-blue-600">Lot {item.lot}</span> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : activeOptions.length ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">
+              Walk-in Healthday
+            </div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">
+              Peserta belum membawa vaksin Healthday terdaftar. Pilih satu vaksin benefit secara manual.
+            </div>
+            <select
+              value={activeSelectedKeys[0] || ""}
+              onChange={(event) =>
+                setSelectedByMode((previous) => ({
+                  ...previous,
+                  HEALTHDAY: event.target.value ? [event.target.value] : [],
+                }))
+              }
+              className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-800"
+            >
+              <option value="">Pilih vaksin Healthday</option>
+              {activeOptions.map((item: any) => {
+                const lot = clean(item?.lot?.lot_number);
+                return (
+                  <option key={optionKey(item)} value={optionKey(item)}>
+                    {productLabel(item)}{lot ? ` · Lot ${lot}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-bold text-amber-800">
+            Belum ada vaksin benefit Healthday aktif untuk session ini.
+          </div>
+        )
       ) : activeOptions.length ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           {activeOptions.map((item: any) => {
@@ -747,21 +766,15 @@ export default function VaccinationManualWalkInController({
                     >
                       {isBazar
                         ? `Rp ${money(price)}`
-                        : healthdayBazarEnabled
-                          ? "FREE"
-                          : Number.isFinite(price)
-                            ? `Rp ${money(price)}`
-                            : "HEALTHDAY"}
+                        : Number.isFinite(price)
+                          ? `Rp ${money(price)}`
+                          : "HEALTHDAY"}
                     </span>
                   </span>
                   <span className="mt-1 block text-[11px] font-semibold text-slate-500">
                     Lot {lot || "-"}
                     {expiry ? ` · exp ${expiry}` : ""}
-                    {isBazar
-                      ? " · harga master"
-                      : healthdayBazarEnabled
-                        ? " · benefit Healthday"
-                        : ""}
+                    {isBazar ? " · harga master" : ""}
                   </span>
                   {isBazar && checked && packageOffer && nonPackageOffer ? (
                     <span className="mt-2 block" onClick={(event) => event.preventDefault()}>
@@ -794,7 +807,7 @@ export default function VaccinationManualWalkInController({
         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-bold text-amber-800">
           {serviceMode === "BAZAR"
             ? "Belum ada produk Bazar aktif yang memiliki harga jual > 0 dan lot aktif di master."
-            : "Belum ada vaksin benefit Healthday aktif untuk session ini."}
+            : "Belum ada produk aktif untuk session ini."}
         </div>
       )}
 
@@ -814,13 +827,19 @@ export default function VaccinationManualWalkInController({
         type="button"
         onClick={submitManualRegistration}
         disabled={submitting || !sessionId || !totalSelected}
-        className="mt-4 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className={`mt-4 rounded-xl px-4 py-2.5 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+          serviceMode === "BAZAR"
+            ? "bg-violet-600 hover:bg-violet-700"
+            : "bg-blue-600 hover:bg-blue-700"
+        }`}
       >
         {submitting
           ? "Memproses Registrasi + Tiket..."
-          : combinationSelected
-            ? "Registrasi + Rilis Antrian A & B"
-            : "Registrasi Ulang + Rilis & Print Nomor Antrian"}
+          : healthdayBazarEnabled && serviceMode === "HEALTHDAY"
+            ? "Registrasi Ulang & Rilis Nomor Antrian"
+            : healthdayBazarEnabled && serviceMode === "BAZAR"
+              ? "Registrasi Ulang & Rilis Nomor Antrian Bazar"
+              : "Registrasi Ulang + Rilis & Print Nomor Antrian"}
       </button>
     </div>
   );
