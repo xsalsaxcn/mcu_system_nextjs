@@ -1,5 +1,6 @@
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
+// V502_STOCK_TRANSACTION_AUDIT
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
@@ -147,6 +148,226 @@ export async function GET(req: NextRequest) {
   if (!canVaccinationAccess(user, "master")) return fail("Akses modul vaksinasi ditolak untuk role ini.", 403);
 
   const supabase = supabaseAdmin();
+
+  const getAction = clean(req.nextUrl.searchParams.get("action"));
+  if (getAction === "stock-transactions") {
+    const vaccineId = toInt(req.nextUrl.searchParams.get("vaccine_id"), 0);
+    const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
+    const companyName = clean(req.nextUrl.searchParams.get("company_name"));
+    const requestedService = clean(req.nextUrl.searchParams.get("service_mode")).toUpperCase();
+
+    if (!vaccineId) return fail("Produk / vaksin wajib dipilih.");
+
+    let allowedSessionIds: number[] = [];
+    if (sessionId) {
+      allowedSessionIds = [sessionId];
+    } else if (companyName) {
+      const companySessions = await supabase
+        .from("vaccination_sessions")
+        .select("id,company_name")
+        .limit(5000);
+
+      if (companySessions.error) return fail(companySessions.error.message, 500);
+      allowedSessionIds = (companySessions.data || [])
+        .filter(
+          (row: any) =>
+            normalizeCompanyName(row.company_name) ===
+            normalizeCompanyName(companyName),
+        )
+        .map((row: any) => Number(row.id || 0))
+        .filter(Boolean);
+    }
+
+    let recordsQuery = supabase
+      .from("vaccination_records")
+      .select(
+        "id,registration_id,session_id,participant_name,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,status",
+      )
+      .eq("vaccine_id", vaccineId)
+      .order("administered_at", { ascending: false })
+      .limit(5000);
+
+    if (sessionId) {
+      recordsQuery = recordsQuery.eq("session_id", sessionId);
+    } else if (companyName) {
+      if (!allowedSessionIds.length) {
+        return ok({
+          usage: [],
+          movements: [],
+          summary: { usage_count: 0, participant_count: 0 },
+        });
+      }
+      recordsQuery = recordsQuery.in("session_id", allowedSessionIds);
+    }
+
+    const recordsResult = await recordsQuery;
+    if (recordsResult.error) return fail(recordsResult.error.message, 500);
+    const records = (recordsResult.data || []).filter(
+      (row: any) =>
+        !["CANCELLED", "VOID"].includes(clean(row.status).toUpperCase()),
+    );
+
+    const registrationIds = Array.from(
+      new Set(
+        records
+          .map((row: any) => Number(row.registration_id || 0))
+          .filter(Boolean),
+      ),
+    );
+
+    let itemRows: any[] = [];
+    if (registrationIds.length) {
+      const itemsResult = await supabase
+        .from("vaccination_registration_items")
+        .select(
+          "id,registration_id,vaccine_id,lot_id,service_mode,status,administered_record_id,active",
+        )
+        .in("registration_id", registrationIds)
+        .eq("vaccine_id", vaccineId)
+        .eq("active", true)
+        .limit(10000);
+
+      if (!itemsResult.error) itemRows = itemsResult.data || [];
+    }
+
+    const sessionIds = Array.from(
+      new Set(
+        records
+          .map((row: any) => Number(row.session_id || 0))
+          .filter(Boolean),
+      ),
+    );
+    const sessionMap = new Map<number, any>();
+    if (sessionIds.length) {
+      const sessionsResult = await supabase
+        .from("vaccination_sessions")
+        .select("id,session_name,company_name,location,session_date")
+        .in("id", sessionIds);
+
+      if (!sessionsResult.error) {
+        for (const row of sessionsResult.data || []) {
+          sessionMap.set(Number(row.id), row);
+        }
+      }
+    }
+
+    function serviceForRecord(record: any) {
+      const recordId = Number(record.id || 0);
+      const registrationId = Number(record.registration_id || 0);
+      const lotId = Number(record.lot_id || 0);
+
+      const exact =
+        itemRows.find(
+          (item: any) =>
+            Number(item.administered_record_id || 0) === recordId &&
+            recordId > 0,
+        ) ||
+        itemRows.find(
+          (item: any) =>
+            Number(item.registration_id || 0) === registrationId &&
+            Number(item.vaccine_id || 0) === vaccineId &&
+            (!lotId || Number(item.lot_id || 0) === lotId) &&
+            ["ADMINISTERED", "DONE", "FINISHED"].includes(
+              clean(item.status).toUpperCase(),
+            ),
+        );
+
+      return normalizeServiceMode(exact?.service_mode);
+    }
+
+    const usage = records
+      .map((record: any) => {
+        const serviceMode = serviceForRecord(record);
+        const session = sessionMap.get(Number(record.session_id || 0));
+        return {
+          ...record,
+          service_mode: serviceMode,
+          qty: -1,
+          session_label: session
+            ? [
+                clean(session.session_name),
+                clean(session.location),
+                clean(session.session_date),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : "",
+        };
+      })
+      .filter(
+        (row: any) =>
+          !requestedService ||
+          !["HEALTHDAY", "BAZAR"].includes(requestedService) ||
+          row.service_mode === requestedService,
+      );
+
+    let lotsQuery = supabase
+      .from("vaccination_vaccine_lots")
+      .select(
+        "id,lot_number,stock_scope,stock_company_name,stock_session_id",
+      )
+      .eq("vaccine_id", vaccineId)
+      .limit(5000);
+
+    if (sessionId) {
+      lotsQuery = lotsQuery.or(
+        `stock_session_id.eq.${sessionId},stock_scope.eq.GENERAL`,
+      );
+    }
+
+    const lotResult = await lotsQuery;
+    const lotRows = lotResult.error ? [] : lotResult.data || [];
+    const filteredLotRows = companyName
+      ? lotRows.filter((lot: any) => {
+          const scope = sanitizeStockScope(lot.stock_scope);
+          if (scope === "GENERAL") return true;
+          return (
+            normalizeCompanyName(lot.stock_company_name) ===
+            normalizeCompanyName(companyName)
+          );
+        })
+      : lotRows;
+
+    const lotIds = filteredLotRows
+      .map((row: any) => Number(row.id || 0))
+      .filter(Boolean);
+    const lotNumberById = new Map<number, string>(
+      filteredLotRows.map((row: any) => [
+        Number(row.id || 0),
+        clean(row.lot_number),
+      ]),
+    );
+
+    let movements: any[] = [];
+    if (lotIds.length) {
+      const movementResult = await supabase
+        .from("vaccination_inventory_movements")
+        .select(
+          "id,vaccine_id,lot_id,movement_type,qty,reference_type,reference_id,notes,created_by,created_at",
+        )
+        .in("lot_id", lotIds)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      if (!movementResult.error) {
+        movements = (movementResult.data || []).map((row: any) => ({
+          ...row,
+          lot_number: lotNumberById.get(Number(row.lot_id || 0)) || "",
+        }));
+      }
+    }
+
+    return ok({
+      usage,
+      movements,
+      summary: {
+        usage_count: usage.length,
+        participant_count: new Set(
+          usage.map((row: any) => clean(row.participant_name)).filter(Boolean),
+        ).size,
+      },
+    });
+  }
 
   const vaccinesResult = await supabase
     .from("vaccination_vaccines")

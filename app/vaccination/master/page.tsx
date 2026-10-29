@@ -3,6 +3,7 @@
 // V498_PRODUCT_LIST_FILTER
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
+// V502_ISERVE_BATCH_EXPORT_AND_STOCK_TRANSACTION_AUDIT
 
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
@@ -114,6 +115,14 @@ export default function VaccinationMasterPage() {
   const [serviceStockEditorLotId, setServiceStockEditorLotId] = useState("");
   const [serviceStockEditorQty, setServiceStockEditorQty] = useState(0);
   const [savingServiceStock, setSavingServiceStock] = useState(false);
+  const [transactionProduct, setTransactionProduct] = useState<any | null>(null);
+  const [stockTransactionLoading, setStockTransactionLoading] = useState(false);
+  const [stockTransactionError, setStockTransactionError] = useState("");
+  const [stockTransactionData, setStockTransactionData] = useState<{
+    usage: any[];
+    movements: any[];
+    summary?: any;
+  }>({ usage: [], movements: [] });
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -165,6 +174,52 @@ export default function VaccinationMasterPage() {
     if (!lotForm.vaccineId && masterJson.vaccines?.[0]?.id) {
       setLotForm((s) => ({ ...s, vaccineId: String(masterJson.vaccines[0].id) }));
     }
+  }
+
+  async function openStockTransactions(vaccine: any) {
+    setTransactionProduct(vaccine);
+    setStockTransactionLoading(true);
+    setStockTransactionError("");
+    setStockTransactionData({ usage: [], movements: [] });
+
+    try {
+      const params = new URLSearchParams();
+      params.set("action", "stock-transactions");
+      params.set("vaccine_id", String(vaccine?.id || ""));
+      if (stockSessionFilter !== "ALL") {
+        params.set("session_id", String(stockSessionFilter));
+      } else if (stockFilter !== "ALL" && stockFilter !== "GENERAL") {
+        params.set("company_name", stockFilter);
+      }
+      if (productServiceFilter !== "ALL") {
+        params.set("service_mode", productServiceFilter);
+      }
+
+      const response = await fetch(`/api/vaccination/master?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) {
+        throw new Error(json.message || "Gagal mengambil transaksi stok.");
+      }
+
+      setStockTransactionData({
+        usage: json.usage || [],
+        movements: json.movements || [],
+        summary: json.summary || {},
+      });
+    } catch (e: any) {
+      setStockTransactionError(e?.message || "Gagal mengambil transaksi stok.");
+    } finally {
+      setStockTransactionLoading(false);
+    }
+  }
+
+  function closeStockTransactions() {
+    setTransactionProduct(null);
+    setStockTransactionLoading(false);
+    setStockTransactionError("");
+    setStockTransactionData({ usage: [], movements: [] });
   }
 
   function findMappedVaccineId(productKey: string, productName: string) {
@@ -1237,6 +1292,87 @@ export default function VaccinationMasterPage() {
     return Array.from(modes);
   }
 
+  function productDisplayedInitialStock(vaccineId: any) {
+    const vaccineKey = String(vaccineId || "");
+
+    if (stockFilter !== "ALL" && stockFilter !== "GENERAL") {
+      const allowedSessionIds = assignmentSessionIdsForCurrentFilter();
+      const allowedModes =
+        productServiceFilter === "ALL"
+          ? new Set(["HEALTHDAY", "BAZAR"])
+          : new Set([productServiceFilter]);
+
+      const planned = sessionProductAssignments
+        .filter((assignment) => {
+          if (assignment.active === false) return false;
+          if (String(assignment.vaccine_id || "") !== vaccineKey) return false;
+          if (!allowedSessionIds.has(Number(assignment.session_id || 0))) return false;
+          const mode =
+            String(assignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+              ? "BAZAR"
+              : "HEALTHDAY";
+          return allowedModes.has(mode);
+        })
+        .reduce(
+          (sum, assignment) =>
+            sum + Math.max(0, Number(assignment.planned_stock_initial || 0)),
+          0,
+        );
+
+      const allocated = serviceStockAllocations
+        .filter((allocation) => {
+          if (allocation.active === false) return false;
+          if (String(allocation.vaccine_id || "") !== vaccineKey) return false;
+          if (!allowedSessionIds.has(Number(allocation.session_id || 0))) return false;
+          const mode =
+            String(allocation.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+              ? "BAZAR"
+              : "HEALTHDAY";
+          return allowedModes.has(mode);
+        })
+        .reduce(
+          (sum, allocation) =>
+            sum + Math.max(0, Number(allocation.allocated_qty || 0)),
+          0,
+        );
+
+      return planned + allocated;
+    }
+
+    const lotRows =
+      stockFilter === "GENERAL"
+        ? lots.filter(
+            (lot) =>
+              String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineKey &&
+              lotScope(lot) === "GENERAL",
+          )
+        : lots.filter(
+            (lot) =>
+              String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineKey,
+          );
+
+    const materializedInitial = lotRows.reduce(
+      (sum, lot) => sum + Math.max(0, Number(lot.stock_initial || 0)),
+      0,
+    );
+
+    if (stockFilter === "GENERAL") return materializedInitial;
+
+    const plannedUnmaterialized = sessionProductAssignments
+      .filter(
+        (assignment) =>
+          assignment.active !== false &&
+          String(assignment.vaccine_id || "") === vaccineKey,
+      )
+      .reduce(
+        (sum, assignment) =>
+          sum + Math.max(0, Number(assignment.planned_stock_initial || 0)),
+        0,
+      );
+
+    return materializedInitial + plannedUnmaterialized;
+  }
+
   const stockFilterLabel = useMemo(() => {
     if (stockFilter === "ALL") return "Semua";
     if (stockFilter === "GENERAL") return "General";
@@ -1291,7 +1427,15 @@ export default function VaccinationMasterPage() {
             <h1 className="text-2xl font-bold">Master Vaksin & Lot Number</h1>
             <p className="mt-2 text-sm text-slate-600">Tambahkan harga produk, kategori harga, stok awal, tambahan stok, dan lot number khusus modul vaksinasi.</p>
           </div>
-          <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/vaccination/iserve"
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100"
+            >
+              ⇩ Export iServe
+            </a>
+            <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          </div>
         </div>
         {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
@@ -2054,6 +2198,8 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Harga</th>
                   <th className="p-3 text-left">Tujuan Stok</th>
                   <th className="p-3 text-left">Jenis Stok</th>
+                  <th className="p-3 text-left">Stok Awal</th>
+                  <th className="p-3 text-left">Transaksi</th>
                   <th className="p-3 text-left">Status</th>
                   <th className="p-3 text-left">Aksi</th>
                 </tr>
@@ -2094,6 +2240,20 @@ export default function VaccinationMasterPage() {
                         )}
                       </div>
                     </td>
+                    <td className="p-3">
+                      <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-sm font-black text-slate-800">
+                        {productDisplayedInitialStock(v.id)}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={() => openStockTransactions(v)}
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        📋 Transaksi
+                      </button>
+                    </td>
                     <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
@@ -2105,7 +2265,7 @@ export default function VaccinationMasterPage() {
                 ))}
                 {!filteredVaccines.length ? (
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-sm text-slate-500">
+                    <td colSpan={10} className="p-6 text-center text-sm text-slate-500">
                       Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, atau Session/Lokasi.
                     </td>
                   </tr>
@@ -2212,6 +2372,158 @@ export default function VaccinationMasterPage() {
             </table>
           </div>
         </section>
+
+        {transactionProduct ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="max-h-[90vh] w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b p-5">
+                <div>
+                  <h2 className="text-xl font-black">Transaksi Stok</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {transactionProduct.name || "Produk"} · {stockFilterLabel}
+                    {productServiceFilter !== "ALL"
+                      ? ` · ${productServiceFilter === "BAZAR" ? "Bazar" : "Healthday"}`
+                      : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeStockTransactions}
+                  className="rounded-lg border px-3 py-1.5 text-sm font-bold"
+                >
+                  ✕ Tutup
+                </button>
+              </div>
+
+              <div className="max-h-[calc(90vh-90px)] overflow-auto p-5">
+                {stockTransactionLoading ? (
+                  <div className="rounded-xl border bg-slate-50 p-5 text-sm font-semibold text-slate-600">
+                    Memuat transaksi stok...
+                  </div>
+                ) : stockTransactionError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
+                    {stockTransactionError}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-5 grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-xl border bg-slate-50 p-4">
+                        <div className="text-xs font-bold uppercase text-slate-500">Stok Awal / Alokasi</div>
+                        <div className="mt-1 text-2xl font-black">{productDisplayedInitialStock(transactionProduct.id)}</div>
+                      </div>
+                      <div className="rounded-xl border bg-red-50 p-4">
+                        <div className="text-xs font-bold uppercase text-red-600">Keluar ke Peserta</div>
+                        <div className="mt-1 text-2xl font-black text-red-700">
+                          {stockTransactionData.summary?.usage_count ?? stockTransactionData.usage.length}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border bg-emerald-50 p-4">
+                        <div className="text-xs font-bold uppercase text-emerald-700">Peserta Unik</div>
+                        <div className="mt-1 text-2xl font-black text-emerald-800">
+                          {stockTransactionData.summary?.participant_count ?? new Set(stockTransactionData.usage.map((row) => row.participant_name)).size}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border">
+                      <div className="border-b bg-slate-50 px-4 py-3 font-bold">Pemakaian ke Peserta</div>
+                      <div className="max-h-[360px] overflow-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
+                            <tr>
+                              <th className="p-3 text-left">Tanggal</th>
+                              <th className="p-3 text-left">Nama Peserta</th>
+                              <th className="p-3 text-left">Jenis Stok</th>
+                              <th className="p-3 text-left">Lot</th>
+                              <th className="p-3 text-left">Qty</th>
+                              <th className="p-3 text-left">Session / Lokasi</th>
+                              <th className="p-3 text-left">Petugas</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {stockTransactionData.usage.map((row) => (
+                              <tr key={`usage-${row.id}`}>
+                                <td className="p-3 whitespace-nowrap">
+                                  {row.administered_at
+                                    ? new Date(row.administered_at).toLocaleString("id-ID")
+                                    : "-"}
+                                </td>
+                                <td className="p-3 font-bold">{row.participant_name || "-"}</td>
+                                <td className="p-3">
+                                  <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                    row.service_mode === "BAZAR"
+                                      ? "bg-violet-50 text-violet-700"
+                                      : "bg-blue-50 text-blue-700"
+                                  }`}>
+                                    {row.service_mode === "BAZAR" ? "Bazar" : "Healthday"}
+                                  </span>
+                                </td>
+                                <td className="p-3 font-mono font-bold">{row.lot_number || "-"}</td>
+                                <td className="p-3 font-black text-red-700">-1</td>
+                                <td className="p-3">{row.session_label || "-"}</td>
+                                <td className="p-3">{row.administered_by || "-"}</td>
+                              </tr>
+                            ))}
+                            {!stockTransactionData.usage.length ? (
+                              <tr>
+                                <td colSpan={7} className="p-6 text-center text-slate-500">
+                                  Belum ada stok keluar ke peserta pada filter ini.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl border">
+                      <div className="border-b bg-slate-50 px-4 py-3 font-bold">Movement Inventory</div>
+                      <div className="max-h-[260px] overflow-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
+                            <tr>
+                              <th className="p-3 text-left">Tanggal</th>
+                              <th className="p-3 text-left">Jenis</th>
+                              <th className="p-3 text-left">Lot</th>
+                              <th className="p-3 text-left">Qty</th>
+                              <th className="p-3 text-left">Catatan</th>
+                              <th className="p-3 text-left">Oleh</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {stockTransactionData.movements.map((row) => (
+                              <tr key={`movement-${row.id}`}>
+                                <td className="p-3 whitespace-nowrap">
+                                  {row.created_at
+                                    ? new Date(row.created_at).toLocaleString("id-ID")
+                                    : "-"}
+                                </td>
+                                <td className="p-3 font-bold">{row.movement_type || "-"}</td>
+                                <td className="p-3 font-mono">{row.lot_number || "-"}</td>
+                                <td className={`p-3 font-black ${Number(row.qty || 0) < 0 ? "text-red-700" : "text-emerald-700"}`}>
+                                  {Number(row.qty || 0) > 0 ? "+" : ""}{Number(row.qty || 0)}
+                                </td>
+                                <td className="p-3">{row.notes || "-"}</td>
+                                <td className="p-3">{row.created_by || "-"}</td>
+                              </tr>
+                            ))}
+                            {!stockTransactionData.movements.length ? (
+                              <tr>
+                                <td colSpan={6} className="p-5 text-center text-slate-500">
+                                  Belum ada movement inventory untuk produk/filter ini.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {transferLot ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
