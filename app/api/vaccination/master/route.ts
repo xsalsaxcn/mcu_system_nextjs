@@ -1,3 +1,4 @@
+// V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
@@ -206,6 +207,25 @@ export async function GET(req: NextRequest) {
         .filter(Boolean)
         .join(" · ");
 
+  const sessionProductAssignmentsResult = await supabase
+    .from("vaccination_session_product_assignments")
+    .select("id,session_id,vaccine_id,service_mode,active,created_at,updated_at")
+    .eq("active", true)
+    .order("updated_at", { ascending: false })
+    .limit(20000);
+
+  const sessionProductAssignmentReady = !sessionProductAssignmentsResult.error;
+  const sessionProductAssignmentMessage = sessionProductAssignmentReady
+    ? ""
+    : [
+        "Assignment produk ke Session belum aktif.",
+        "Jalankan sql_vaccination_v499_session_product_assignment.sql lalu refresh halaman.",
+        sessionProductAssignmentsResult.error?.code ? `DB ${sessionProductAssignmentsResult.error.code}` : "",
+        sessionProductAssignmentsResult.error?.message || "",
+      ]
+        .filter(Boolean)
+        .join(" · " );
+
   const mappingResult = await supabase
     .from("vaccination_product_mappings")
     .select(`
@@ -243,6 +263,9 @@ export async function GET(req: NextRequest) {
     serviceStockReady,
     serviceStockMessage,
     serviceStockAllocations: serviceStockReady ? serviceStockAllocationsResult.data || [] : [],
+    sessionProductAssignmentReady,
+    sessionProductAssignmentMessage,
+    sessionProductAssignments: sessionProductAssignmentReady ? sessionProductAssignmentsResult.data || [] : [],
     stockSessions: stockSessionsResult.error ? [] : stockSessionsResult.data || [],
   });
 }
@@ -1133,6 +1156,73 @@ export async function POST(req: NextRequest) {
     if (!deleteResult.data) return fail("Master vaksin tidak ditemukan saat proses hapus.", 404);
 
     return ok({ message: `Produk ${vaccineResult.data.name} beserta lot/mapping yang belum terpakai berhasil dihapus.` });
+  }
+
+  if (action === "assign-product-session") {
+    const vaccineId = toInt(body.vaccineId, 0);
+    const sessionId = toInt(body.sessionId, 0);
+    const companyName = clean(body.companyName);
+    const serviceMode = String(body.serviceMode || "HEALTHDAY").trim().toUpperCase() === "BAZAR"
+      ? "BAZAR"
+      : "HEALTHDAY";
+
+    if (!vaccineId) return fail("Master vaksin / produk wajib dipilih.");
+    if (!sessionId) return fail("Session / Lokasi wajib dipilih.");
+
+    const [vaccineResult, sessionResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccines")
+        .select("id,name,active")
+        .eq("id", vaccineId)
+        .maybeSingle(),
+      supabase
+        .from("vaccination_sessions")
+        .select("id,session_name,company_name,location,session_date,status")
+        .eq("id", sessionId)
+        .maybeSingle(),
+    ]);
+
+    if (vaccineResult.error) return fail(vaccineResult.error.message, 500);
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    if (!vaccineResult.data) return fail("Master vaksin / produk tidak ditemukan.", 404);
+    if (!sessionResult.data) return fail("Session / Lokasi tidak ditemukan.", 404);
+
+    const canonicalCompany = clean(sessionResult.data.company_name);
+    if (!canonicalCompany) return fail("Session / Lokasi belum memiliki perusahaan.", 409);
+    if (companyName && normalizeCompanyName(companyName) !== normalizeCompanyName(canonicalCompany)) {
+      return fail(`Session / Lokasi yang dipilih milik ${canonicalCompany}, bukan ${companyName}.`, 409);
+    }
+    if (String(sessionResult.data.status || "").toUpperCase() === "CANCELLED") {
+      return fail("Session / Lokasi sudah dibatalkan.", 409);
+    }
+
+    const nowIso = new Date().toISOString();
+    const assignmentResult = await supabase
+      .from("vaccination_session_product_assignments")
+      .upsert(
+        {
+          session_id: sessionId,
+          vaccine_id: vaccineId,
+          service_mode: serviceMode,
+          active: true,
+          updated_at: nowIso,
+        },
+        { onConflict: "session_id,vaccine_id,service_mode" },
+      )
+      .select("id,session_id,vaccine_id,service_mode,active,created_at,updated_at")
+      .single();
+
+    if (assignmentResult.error) {
+      return fail(
+        `Assignment produk ke Session gagal: ${assignmentResult.error.message}`,
+        500,
+      );
+    }
+
+    return ok({
+      message: `Produk ${vaccineResult.data.name} di-assign ke Session ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"}. Lot Number tetap opsional.`,
+      assignment: assignmentResult.data,
+    });
   }
 
   if (action === "update-vaccine") {

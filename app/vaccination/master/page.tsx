@@ -1,6 +1,7 @@
 "use client";
 
 // V498_PRODUCT_LIST_FILTER
+// V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
@@ -79,6 +80,9 @@ export default function VaccinationMasterPage() {
   const [companySources, setCompanySources] = useState<any[]>([]);
   const [stockSessions, setStockSessions] = useState<any[]>([]);
   const [serviceStockAllocations, setServiceStockAllocations] = useState<any[]>([]);
+  const [sessionProductAssignments, setSessionProductAssignments] = useState<any[]>([]);
+  const [sessionProductAssignmentReady, setSessionProductAssignmentReady] = useState(true);
+  const [sessionProductAssignmentMessage, setSessionProductAssignmentMessage] = useState("");
   const [serviceStockReady, setServiceStockReady] = useState(true);
   const [serviceStockMessage, setServiceStockMessage] = useState("");
   const [stockFilter, setStockFilter] = useState("ALL");
@@ -147,6 +151,9 @@ export default function VaccinationMasterPage() {
     setCompanySources(sourcesJson.ok ? sourcesJson.sources || [] : []);
     setStockSessions(masterJson.stockSessions || []);
     setServiceStockAllocations(masterJson.serviceStockAllocations || []);
+    setSessionProductAssignments(masterJson.sessionProductAssignments || []);
+    setSessionProductAssignmentReady(masterJson.sessionProductAssignmentReady !== false);
+    setSessionProductAssignmentMessage(masterJson.sessionProductAssignmentMessage || "");
     setServiceStockReady(masterJson.serviceStockReady !== false);
     setServiceStockMessage(masterJson.serviceStockMessage || "");
     setMappingReady(masterJson.mappingReady !== false);
@@ -276,19 +283,24 @@ export default function VaccinationMasterPage() {
       return;
     }
     if (
-      cleanText(lotForm.lotNumber) &&
       lotForm.stockScope !== "GENERAL" &&
       !cleanText(lotForm.stockCompanyName)
     ) {
-      setError("Pilih perusahaan untuk lot yang dikunci ke Perusahaan/Session.");
+      setError("Pilih perusahaan untuk Produk/Lot yang diarahkan ke Perusahaan/Session.");
       return;
     }
     if (
-      cleanText(lotForm.lotNumber) &&
       lotForm.stockScope === "SESSION" &&
       !cleanText(lotForm.stockSessionId)
     ) {
-      setError("Pilih Session/Lokasi untuk lot dengan Scope Stok = Session/Lokasi.");
+      setError("Pilih Session/Lokasi untuk assignment Produk/Stock Session.");
+      return;
+    }
+    if (
+      lotForm.stockScope === "SESSION" &&
+      !sessionProductAssignmentReady
+    ) {
+      setError(sessionProductAssignmentMessage || "Assignment produk ke Session belum aktif.");
       return;
     }
     if (
@@ -319,6 +331,19 @@ export default function VaccinationMasterPage() {
       }
 
       if (!vaccineId) throw new Error("Master vaksin tersimpan tetapi ID vaksin tidak ditemukan.");
+
+      if (
+        lotForm.stockScope === "SESSION" &&
+        cleanText(lotForm.stockSessionId)
+      ) {
+        await postMaster({
+          action: "assign-product-session",
+          vaccineId,
+          sessionId: lotForm.stockSessionId,
+          companyName: lotForm.stockCompanyName,
+          serviceMode: serviceStockEditorMode,
+        });
+      }
 
       if (selectedImportProductKey) {
         setImportMappingSelections((prev) => ({
@@ -380,7 +405,9 @@ export default function VaccinationMasterPage() {
           ? lotForm.stockScope === "SESSION"
             ? "Master vaksin/produk dan lot berhasil disimpan. Sekarang pilih Jenis Stok Session + Lot Number untuk alokasi Healthday/Bazar."
             : "Master vaksin/produk dan lot berhasil disimpan dalam satu form."
-          : "Master vaksin/produk berhasil disimpan. Lot belum diisi.",
+          : lotForm.stockScope === "SESSION"
+            ? `Produk berhasil disimpan dan di-assign ke Session ${serviceModeLabel(serviceStockEditorMode)}. Lot Number opsional dan belum diisi.`
+            : "Master vaksin/produk berhasil disimpan. Lot Number opsional dan belum diisi.",
       );
       await loadData();
     } catch (err: any) {
@@ -988,6 +1015,27 @@ export default function VaccinationMasterPage() {
     );
   }, [lots, stockFilter, stockSessionFilter]);
 
+  function serviceModeLabel(value: any) {
+    return String(value || "HEALTHDAY").toUpperCase() === "BAZAR"
+      ? "Bazar (Bayar)"
+      : "Healthday (Gratis)";
+  }
+
+  function assignmentSessionIdsForCurrentFilter() {
+    if (stockFilter === "ALL" || stockFilter === "GENERAL") return new Set<number>();
+    if (stockSessionFilter !== "ALL") {
+      const id = Number(stockSessionFilter || 0);
+      return id ? new Set([id]) : new Set<number>();
+    }
+    const companyKey = normalizeCompany(stockFilter);
+    return new Set(
+      stockSessions
+        .filter((session) => normalizeCompany(session.company_name) === companyKey)
+        .map((session) => Number(session.id || 0))
+        .filter(Boolean),
+    );
+  }
+
   const filteredVaccines = useMemo(() => {
     let visibleVaccines = vaccines;
 
@@ -997,6 +1045,15 @@ export default function VaccinationMasterPage() {
           String(lot.vaccine_id || lot.vaccine?.id || ""),
         ),
       );
+
+      if (stockFilter !== "GENERAL") {
+        const allowedSessionIds = assignmentSessionIdsForCurrentFilter();
+        for (const assignment of sessionProductAssignments) {
+          if (assignment.active === false) continue;
+          if (!allowedSessionIds.has(Number(assignment.session_id || 0))) continue;
+          visibleIds.add(String(assignment.vaccine_id || ""));
+        }
+      }
 
       if (stockFilter === "GENERAL") {
         for (const vaccine of vaccines) {
@@ -1039,6 +1096,9 @@ export default function VaccinationMasterPage() {
     lots,
     filteredMasterLots,
     stockFilter,
+    stockSessionFilter,
+    stockSessions,
+    sessionProductAssignments,
     productSearch,
     productStatusFilter,
     sessionMap,
@@ -1050,9 +1110,21 @@ export default function VaccinationMasterPage() {
         String(lot.vaccine_id || lot.vaccine?.id || "") ===
         String(vaccineId),
     );
-    if (!ownedLots.length) return ["General"];
+    const ownedAssignments = sessionProductAssignments.filter(
+      (assignment) =>
+        assignment.active !== false &&
+        String(assignment.vaccine_id || "") === String(vaccineId),
+    );
 
     const targets = new Set<string>();
+    for (const assignment of ownedAssignments) {
+      const session = sessionMap.get(Number(assignment.session_id || 0));
+      const companyName = cleanText(session?.company_name) || "Perusahaan";
+      targets.add(
+        `${companyName} · ${sessionLabel(session)} · ${serviceModeLabel(assignment.service_mode)}`,
+      );
+    }
+
     for (const lot of ownedLots) {
       const scope = lotScope(lot);
       if (scope === "SESSION") {
@@ -1066,6 +1138,8 @@ export default function VaccinationMasterPage() {
         targets.add("General");
       }
     }
+
+    if (!targets.size) targets.add("General");
     return Array.from(targets);
   }
 
@@ -1651,10 +1725,16 @@ export default function VaccinationMasterPage() {
 
               <input
                 className="rounded-xl border px-3 py-2"
-                placeholder="Lot Number / Batch"
+                placeholder="Lot Number / Batch (Opsional)"
                 value={lotForm.lotNumber}
                 onChange={(e) => setLotForm({ ...lotForm, lotNumber: e.target.value })}
               />
+
+              {!cleanText(lotForm.lotNumber) ? (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                  Lot Number tidak wajib untuk menyimpan produk ke Session. Tanpa Lot, produk tetap muncul di filter Session, tetapi stok fisik belum aktif sampai Lot Number dibuat.
+                </div>
+              ) : null}
 
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="grid gap-1 text-xs font-semibold text-slate-500">
@@ -1662,6 +1742,7 @@ export default function VaccinationMasterPage() {
                   <input
                     type="date"
                     className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    disabled={!cleanText(lotForm.lotNumber)}
                     value={lotForm.expiryDate}
                     onChange={(e) => setLotForm({ ...lotForm, expiryDate: e.target.value })}
                   />
@@ -1672,6 +1753,7 @@ export default function VaccinationMasterPage() {
                     type="number"
                     className="rounded-xl border px-3 py-2 text-sm text-slate-900"
                     placeholder="Stok fisik"
+                    disabled={!cleanText(lotForm.lotNumber)}
                     value={lotForm.stockPhysicalCount}
                     onChange={(e) => setLotForm({ ...lotForm, stockPhysicalCount: e.target.value })}
                   />
@@ -1683,7 +1765,8 @@ export default function VaccinationMasterPage() {
                   Jumlah awal
                   <input
                     type="number"
-                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+                    disabled={!cleanText(lotForm.lotNumber)}
                     value={lotForm.stockInitial}
                     onChange={(e) => setLotForm({ ...lotForm, stockInitial: Number(e.target.value || 0) })}
                   />
@@ -1692,7 +1775,8 @@ export default function VaccinationMasterPage() {
                   Tambahan stok
                   <input
                     type="number"
-                    className="rounded-xl border px-3 py-2 text-sm text-slate-900"
+                    className="rounded-xl border px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+                    disabled={!cleanText(lotForm.lotNumber)}
                     value={lotForm.stockAdded}
                     onChange={(e) => setLotForm({ ...lotForm, stockAdded: Number(e.target.value || 0) })}
                   />
@@ -1702,6 +1786,7 @@ export default function VaccinationMasterPage() {
               <textarea
                 className="rounded-xl border px-3 py-2"
                 placeholder="Keterangan inventory / stok"
+                disabled={!cleanText(lotForm.lotNumber)}
                 value={lotForm.inventoryNotes}
                 onChange={(e) => setLotForm({ ...lotForm, inventoryNotes: e.target.value })}
               />
