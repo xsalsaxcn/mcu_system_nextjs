@@ -1,5 +1,7 @@
 "use client";
 
+// V498_PRODUCT_LIST_FILTER
+
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
@@ -81,6 +83,8 @@ export default function VaccinationMasterPage() {
   const [serviceStockMessage, setServiceStockMessage] = useState("");
   const [stockFilter, setStockFilter] = useState("ALL");
   const [stockSessionFilter, setStockSessionFilter] = useState("ALL");
+  const [productSearch, setProductSearch] = useState("");
+  const [productStatusFilter, setProductStatusFilter] = useState("ALL");
   const [companyStockReady, setCompanyStockReady] = useState(true);
   const [companyStockMessage, setCompanyStockMessage] = useState("");
   const [mappingReady, setMappingReady] = useState(true);
@@ -985,27 +989,60 @@ export default function VaccinationMasterPage() {
   }, [lots, stockFilter, stockSessionFilter]);
 
   const filteredVaccines = useMemo(() => {
-    if (stockFilter === "ALL") return vaccines;
+    let visibleVaccines = vaccines;
 
-    const visibleIds = new Set(
-      filteredMasterLots.map((lot) =>
-        String(lot.vaccine_id || lot.vaccine?.id || ""),
-      ),
-    );
+    if (stockFilter !== "ALL") {
+      const visibleIds = new Set(
+        filteredMasterLots.map((lot) =>
+          String(lot.vaccine_id || lot.vaccine?.id || ""),
+        ),
+      );
 
-    if (stockFilter === "GENERAL") {
-      for (const vaccine of vaccines) {
-        const vaccineLots = lots.filter(
-          (lot) =>
-            String(lot.vaccine_id || lot.vaccine?.id || "") ===
-            String(vaccine.id),
-        );
-        if (!vaccineLots.length) visibleIds.add(String(vaccine.id));
+      if (stockFilter === "GENERAL") {
+        for (const vaccine of vaccines) {
+          const vaccineLots = lots.filter(
+            (lot) =>
+              String(lot.vaccine_id || lot.vaccine?.id || "") ===
+              String(vaccine.id),
+          );
+          if (!vaccineLots.length) visibleIds.add(String(vaccine.id));
+        }
       }
+
+      visibleVaccines = vaccines.filter((vaccine) =>
+        visibleIds.has(String(vaccine.id)),
+      );
     }
 
-    return vaccines.filter((vaccine) => visibleIds.has(String(vaccine.id)));
-  }, [vaccines, lots, filteredMasterLots, stockFilter]);
+    const status = String(productStatusFilter || "ALL").toUpperCase();
+    const query = cleanText(productSearch).toLowerCase();
+
+    return visibleVaccines.filter((vaccine) => {
+      if (status === "ACTIVE" && vaccine.active === false) return false;
+      if (status === "INACTIVE" && vaccine.active !== false) return false;
+      if (!query) return true;
+
+      const searchText = [
+        vaccine.name,
+        vaccine.brand,
+        vaccine.price_category,
+        vaccine.price,
+        ...vaccineStockTargets(vaccine.id),
+      ]
+        .map((value) => cleanText(value).toLowerCase())
+        .join(" ");
+
+      return searchText.includes(query);
+    });
+  }, [
+    vaccines,
+    lots,
+    filteredMasterLots,
+    stockFilter,
+    productSearch,
+    productStatusFilter,
+    sessionMap,
+  ]);
 
   function vaccineStockTargets(vaccineId: any) {
     const ownedLots = lots.filter(
@@ -1786,10 +1823,35 @@ export default function VaccinationMasterPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">
-            Daftar Produk · {stockFilterLabel}
+          <div className="border-b bg-slate-50 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="font-bold">Daftar Produk · {stockFilterLabel}</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Menampilkan {filteredVaccines.length} dari {vaccines.length} produk master.
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_160px] lg:w-[560px]">
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Cari produk, brand, kategori, tujuan stok..."
+                  className="rounded-xl border bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400"
+                />
+                <select
+                  value={productStatusFilter}
+                  onChange={(e) => setProductStatusFilter(e.target.value)}
+                  className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+                >
+                  <option value="ALL">Semua Status</option>
+                  <option value="ACTIVE">Aktif</option>
+                  <option value="INACTIVE">Nonaktif</option>
+                </select>
+              </div>
+            </div>
           </div>
-          <div className="max-h-[260px] overflow-auto">
+          <div className="max-h-[320px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
@@ -1827,6 +1889,13 @@ export default function VaccinationMasterPage() {
                     </td>
                   </tr>
                 ))}
+                {!filteredVaccines.length ? (
+                  <tr>
+                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">
+                      Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, atau Session/Lokasi.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
