@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
 // V496_MASTER_LOT_STOCK_TRANSFER_SAFE
 // V497_SESSION_SERVICE_STOCK_SPLIT_SAFE
+// V497_R3_SELECTOR_BASED_SERVICE_STOCK_UI
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
@@ -99,6 +100,10 @@ export default function VaccinationMasterPage() {
   const [transferSessionId, setTransferSessionId] = useState("");
   const [transferServiceMode, setTransferServiceMode] = useState<"HEALTHDAY" | "BAZAR">("HEALTHDAY");
   const [transferringStock, setTransferringStock] = useState(false);
+  const [serviceStockEditorMode, setServiceStockEditorMode] = useState<"HEALTHDAY" | "BAZAR">("HEALTHDAY");
+  const [serviceStockEditorLotId, setServiceStockEditorLotId] = useState("");
+  const [serviceStockEditorQty, setServiceStockEditorQty] = useState(0);
+  const [savingServiceStock, setSavingServiceStock] = useState(false);
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -356,38 +361,9 @@ export default function VaccinationMasterPage() {
           lotForm.stockScope === "SESSION" &&
           cleanText(lotForm.stockSessionId)
         ) {
-          const savedLot = existingLot || {
-            stock_initial: lotForm.stockInitial,
-            stock_added: lotForm.stockAdded,
-            stock_used: 0,
-          };
-          const available = Math.max(
-            0,
-            Number(savedLot.stock_initial || lotForm.stockInitial || 0) +
-              Number(lotForm.stockAdded || 0) -
-              Number(savedLot.stock_used || 0),
+          setMessage(
+            "Lot Session tersimpan. Pilih Jenis Stok Session dan Lot Number pada panel Pembagian Stok Session untuk mengalokasikan Healthday/Bazar.",
           );
-          let healthdayQty = Math.max(0, Number(lotForm.healthdayStockQty || 0));
-          const bazarQty = Math.max(0, Number(lotForm.bazarStockQty || 0));
-
-          if (healthdayQty === 0 && bazarQty === 0 && available > 0) {
-            healthdayQty = available;
-          }
-
-          if (healthdayQty + bazarQty > available) {
-            throw new Error(
-              `Total stok Healthday + Bazar (${healthdayQty + bazarQty}) melebihi sisa stok lot (${available}).`,
-            );
-          }
-
-          await postMaster({
-            action: "save-session-service-stock",
-            lotId: savedLotId,
-            sessionId: lotForm.stockSessionId,
-            companyName: lotForm.stockCompanyName,
-            healthdayQty,
-            bazarQty,
-          });
         }
 
         lotSaved = true;
@@ -397,7 +373,9 @@ export default function VaccinationMasterPage() {
       setLotForm((current) => ({ ...current, vaccineId }));
       setMessage(
         lotSaved
-          ? "Master vaksin/produk dan lot berhasil disimpan dalam satu form."
+          ? lotForm.stockScope === "SESSION"
+            ? "Master vaksin/produk dan lot berhasil disimpan. Sekarang pilih Jenis Stok Session + Lot Number untuk alokasi Healthday/Bazar."
+            : "Master vaksin/produk dan lot berhasil disimpan dalam satu form."
           : "Master vaksin/produk berhasil disimpan. Lot belum diisi.",
       );
       await loadData();
@@ -515,6 +493,87 @@ export default function VaccinationMasterPage() {
       await loadData();
     } catch (err: any) {
       setError(err?.message || "Gagal menghapus lot.");
+    }
+  }
+
+  function selectServiceStockMode(mode: "HEALTHDAY" | "BAZAR") {
+    setServiceStockEditorMode(mode);
+    if (!selectedServiceStockLot) {
+      setServiceStockEditorQty(0);
+      return;
+    }
+    setServiceStockEditorQty(
+      serviceAllocationQty(
+        selectedServiceStockLot.id,
+        lotForm.stockSessionId,
+        mode,
+      ),
+    );
+  }
+
+  function selectServiceStockLot(lotId: string) {
+    setServiceStockEditorLotId(lotId);
+    const lot = serviceStockEditorLots.find(
+      (item) => String(item.id) === String(lotId),
+    );
+    if (!lot) {
+      setServiceStockEditorQty(0);
+      return;
+    }
+    setServiceStockEditorQty(
+      serviceAllocationQty(
+        lot.id,
+        lotForm.stockSessionId,
+        serviceStockEditorMode,
+      ),
+    );
+  }
+
+  async function saveSelectedServiceStock() {
+    setError("");
+    if (!serviceStockReady) {
+      setError(serviceStockMessage || "Pembagian stok Healthday/Bazar belum aktif.");
+      return;
+    }
+    if (!cleanText(lotForm.stockCompanyName)) {
+      setError("Pilih Perusahaan terlebih dahulu.");
+      return;
+    }
+    if (!cleanText(lotForm.stockSessionId)) {
+      setError("Pilih Session / Lokasi terlebih dahulu.");
+      return;
+    }
+    if (!selectedServiceStockLot) {
+      setError("Pilih Lot Number yang akan dialokasikan.");
+      return;
+    }
+
+    const qty = Math.max(0, Math.min(selectedServiceStockMaxQty, Number(serviceStockEditorQty || 0)));
+    const healthdayQty =
+      serviceStockEditorMode === "HEALTHDAY" ? qty : selectedServiceStockHealthday;
+    const bazarQty =
+      serviceStockEditorMode === "BAZAR" ? qty : selectedServiceStockBazar;
+
+    setSavingServiceStock(true);
+    try {
+      const json = await postMaster({
+        action: "save-session-service-stock",
+        lotId: selectedServiceStockLot.id,
+        sessionId: lotForm.stockSessionId,
+        companyName: lotForm.stockCompanyName,
+        healthdayQty,
+        bazarQty,
+      });
+      setMessage(
+        json.message ||
+          `Alokasi ${serviceStockEditorMode === "BAZAR" ? "Bazar" : "Healthday"} untuk Lot ${selectedServiceStockLot.lot_number} berhasil disimpan.`,
+      );
+      await loadData();
+      setServiceStockEditorQty(qty);
+    } catch (err: any) {
+      setError(err?.message || "Gagal menyimpan alokasi stok Session.");
+    } finally {
+      setSavingServiceStock(false);
     }
   }
 
@@ -830,26 +889,68 @@ export default function VaccinationMasterPage() {
       });
   }, [stockSessions, transferCompanyName]);
 
-  const selectedLotForForm = useMemo(
-    () =>
-      lots.find(
+  const serviceStockEditorLots = useMemo(() => {
+    const companyKey = normalizeCompany(lotForm.stockCompanyName);
+    const sessionId = Number(lotForm.stockSessionId || 0);
+    if (!companyKey || !sessionId) return [];
+
+    return lots
+      .filter(
         (lot) =>
-          String(lot.vaccine_id || lot.vaccine?.id || "") === String(lotForm.vaccineId || "") &&
-          cleanText(lot.lot_number) === cleanText(lotForm.lotNumber),
+          lot.active !== false &&
+          lotScope(lot) === "SESSION" &&
+          Number(lot.stock_session_id || 0) === sessionId &&
+          normalizeCompany(lot.stock_company_name) === companyKey,
+      )
+      .sort((a, b) => {
+        const vaccineA = cleanText(a.vaccine?.name);
+        const vaccineB = cleanText(b.vaccine?.name);
+        return vaccineA.localeCompare(vaccineB) || cleanText(a.lot_number).localeCompare(cleanText(b.lot_number));
+      });
+  }, [lots, lotForm.stockCompanyName, lotForm.stockSessionId]);
+
+  const selectedServiceStockLot = useMemo(
+    () =>
+      serviceStockEditorLots.find(
+        (lot) => String(lot.id) === String(serviceStockEditorLotId),
       ) || null,
-    [lots, lotForm.vaccineId, lotForm.lotNumber],
+    [serviceStockEditorLots, serviceStockEditorLotId],
   );
 
-  const lotFormRemaining = Math.max(
+  const selectedServiceStockRemaining = selectedServiceStockLot
+    ? Math.max(
+        0,
+        Number(selectedServiceStockLot.stock_initial || 0) +
+          Number(selectedServiceStockLot.stock_added || 0) -
+          Number(selectedServiceStockLot.stock_used || 0),
+      )
+    : 0;
+
+  const selectedServiceStockHealthday = selectedServiceStockLot
+    ? serviceAllocationQty(
+        selectedServiceStockLot.id,
+        lotForm.stockSessionId,
+        "HEALTHDAY",
+      )
+    : 0;
+
+  const selectedServiceStockBazar = selectedServiceStockLot
+    ? serviceAllocationQty(
+        selectedServiceStockLot.id,
+        lotForm.stockSessionId,
+        "BAZAR",
+      )
+    : 0;
+
+  const selectedServiceStockOtherQty =
+    serviceStockEditorMode === "HEALTHDAY"
+      ? selectedServiceStockBazar
+      : selectedServiceStockHealthday;
+
+  const selectedServiceStockMaxQty = Math.max(
     0,
-    Number(selectedLotForForm?.stock_initial ?? lotForm.stockInitial ?? 0) +
-      Number(lotForm.stockAdded || 0) -
-      Number(selectedLotForForm?.stock_used || 0),
+    selectedServiceStockRemaining - selectedServiceStockOtherQty,
   );
-
-  const lotFormAllocatedTotal =
-    Math.max(0, Number(lotForm.healthdayStockQty || 0)) +
-    Math.max(0, Number(lotForm.bazarStockQty || 0));
 
   const transferRemaining = transferLot
     ? Math.max(
@@ -1342,17 +1443,12 @@ export default function VaccinationMasterPage() {
 
               {lotForm.stockScope === "SESSION" ? (
                 <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-black text-violet-900">
-                        Pembagian Stok Session
-                      </div>
-                      <div className="text-xs text-violet-700">
-                        Healthday (Gratis) dan Bazar (Bayar) memiliki stok terpisah pada Session yang sama.
-                      </div>
+                  <div className="mb-3">
+                    <div className="text-sm font-black text-violet-900">
+                      Pembagian Stok Session
                     </div>
-                    <div className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-violet-800">
-                      Sisa lot: {lotFormRemaining} · Dialokasikan: {lotFormAllocatedTotal}
+                    <div className="text-xs text-violet-700">
+                      Pilih jenis layanan dulu, lalu pilih Lot Number. Detail stok lot akan tampil otomatis.
                     </div>
                   </div>
 
@@ -1362,52 +1458,159 @@ export default function VaccinationMasterPage() {
                     </div>
                   ) : null}
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1 text-xs font-bold text-blue-700">
-                      Healthday (Gratis)
-                      <input
-                        type="number"
-                        min={0}
-                        className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900"
-                        value={lotForm.healthdayStockQty}
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1 text-xs font-bold text-slate-700">
+                      Jenis Stok Session
+                      <select
+                        className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                        value={serviceStockEditorMode}
                         onChange={(e) =>
-                          setLotForm((current) => ({
-                            ...current,
-                            healthdayStockQty: Math.max(0, Number(e.target.value || 0)),
-                          }))
+                          selectServiceStockMode(e.target.value === "BAZAR" ? "BAZAR" : "HEALTHDAY")
                         }
-                      />
+                      >
+                        <option value="HEALTHDAY">Healthday (Gratis)</option>
+                        <option value="BAZAR">Bazar (Bayar)</option>
+                      </select>
                     </label>
 
-                    <label className="grid gap-1 text-xs font-bold text-violet-700">
-                      Bazar (Bayar)
-                      <input
-                        type="number"
-                        min={0}
-                        className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm text-slate-900"
-                        value={lotForm.bazarStockQty}
-                        onChange={(e) =>
-                          setLotForm((current) => ({
-                            ...current,
-                            bazarStockQty: Math.max(0, Number(e.target.value || 0)),
-                          }))
-                        }
-                      />
+                    <label className="grid gap-1 text-xs font-bold text-slate-700">
+                      Lot Number
+                      <select
+                        className="rounded-xl border bg-white px-3 py-2 text-sm text-slate-900"
+                        value={serviceStockEditorLotId}
+                        onChange={(e) => selectServiceStockLot(e.target.value)}
+                        disabled={!cleanText(lotForm.stockSessionId) || !serviceStockEditorLots.length}
+                      >
+                        <option value="">
+                          {!cleanText(lotForm.stockSessionId)
+                            ? "Pilih Session / Lokasi dulu"
+                            : serviceStockEditorLots.length
+                              ? "Pilih Lot Number"
+                              : "Belum ada lot untuk Session ini"}
+                        </option>
+                        {serviceStockEditorLots.map((lot) => {
+                          const remaining = Math.max(
+                            0,
+                            Number(lot.stock_initial || 0) +
+                              Number(lot.stock_added || 0) -
+                              Number(lot.stock_used || 0),
+                          );
+                          return (
+                            <option key={lot.id} value={String(lot.id)}>
+                              {lot.vaccine?.name || "Vaksin"} · Lot {lot.lot_number} · Sisa {remaining}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </label>
                   </div>
 
-                  {lotFormAllocatedTotal > lotFormRemaining ? (
-                    <div className="mt-2 text-xs font-bold text-red-600">
-                      Total alokasi melebihi sisa stok lot sebesar {lotFormAllocatedTotal - lotFormRemaining}.
+                  {cleanText(lotForm.stockSessionId) && !serviceStockEditorLots.length ? (
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                      Belum ada Lot Number untuk Session ini. Simpan Produk & Lot terlebih dahulu, lalu pilih lot di sini untuk membagi stok Healthday/Bazar.
                     </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-violet-700">
-                      Belum dialokasikan: {Math.max(0, lotFormRemaining - lotFormAllocatedTotal)}.
-                      Jika kedua field 0 saat disimpan, seluruh sisa stok otomatis masuk Healthday.
+                  ) : null}
+
+                  {selectedServiceStockLot ? (
+                    <div className="mt-3 grid gap-3">
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Produk</div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">{selectedServiceStockLot.vaccine?.name || "-"}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Lot Number</div>
+                          <div className="mt-1 text-sm font-black text-slate-900">{selectedServiceStockLot.lot_number || "-"}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Expired</div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">{selectedServiceStockLot.expiry_date || "-"}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Stok Awal</div>
+                          <div className="mt-1 text-sm font-black text-slate-900">{Number(selectedServiceStockLot.stock_initial || 0)}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Tambahan</div>
+                          <div className="mt-1 text-sm font-black text-slate-900">{Number(selectedServiceStockLot.stock_added || 0)}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Terpakai</div>
+                          <div className="mt-1 text-sm font-black text-slate-900">{Number(selectedServiceStockLot.stock_used || 0)}</div>
+                        </div>
+                        <div className="rounded-lg border bg-white p-2">
+                          <div className="text-[11px] font-bold uppercase text-slate-500">Sisa Lot</div>
+                          <div className="mt-1 text-sm font-black text-slate-900">{selectedServiceStockRemaining}</div>
+                        </div>
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
+                          <div className="text-[11px] font-bold uppercase text-blue-600">Healthday</div>
+                          <div className="mt-1 text-sm font-black text-blue-900">{selectedServiceStockHealthday}</div>
+                        </div>
+                        <div className="rounded-lg border border-violet-100 bg-violet-50 p-2">
+                          <div className="text-[11px] font-bold uppercase text-violet-600">Bazar</div>
+                          <div className="mt-1 text-sm font-black text-violet-900">{selectedServiceStockBazar}</div>
+                        </div>
+                        <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
+                          <div className="text-[11px] font-bold uppercase text-emerald-600">Belum Dialokasikan</div>
+                          <div className="mt-1 text-sm font-black text-emerald-900">
+                            {Math.max(0, selectedServiceStockRemaining - selectedServiceStockHealthday - selectedServiceStockBazar)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-white p-3">
+                        <div className="min-w-[220px] flex-1">
+                          <div className="text-xs font-bold text-slate-600">
+                            Qty Alokasi · {serviceStockEditorMode === "BAZAR" ? "Bazar (Bayar)" : "Healthday (Gratis)"}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700"
+                              onClick={() => setServiceStockEditorQty((qty) => Math.max(0, qty - 1))}
+                            >
+                              −
+                            </button>
+                            <input
+                              readOnly
+                              className="h-10 w-24 rounded-lg border bg-white text-center text-base font-black text-slate-900"
+                              value={Math.max(0, Math.min(selectedServiceStockMaxQty, serviceStockEditorQty))}
+                            />
+                            <button
+                              type="button"
+                              className="h-10 w-10 rounded-lg border bg-slate-50 text-lg font-black text-slate-700"
+                              onClick={() =>
+                                setServiceStockEditorQty((qty) => Math.min(selectedServiceStockMaxQty, qty + 1))
+                              }
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              className="h-10 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-bold text-violet-700"
+                              onClick={() => setServiceStockEditorQty(selectedServiceStockMaxQty)}
+                            >
+                              Max {selectedServiceStockMaxQty}
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={savingServiceStock || !serviceStockReady}
+                          onClick={saveSelectedServiceStock}
+                          className="h-10 rounded-lg bg-violet-600 px-4 text-sm font-bold text-white disabled:opacity-50"
+                        >
+                          {savingServiceStock
+                            ? "Menyimpan..."
+                            : `Simpan Stok ${serviceStockEditorMode === "BAZAR" ? "Bazar" : "Healthday"}`}
+                        </button>
+                      </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : null}
+
 
               <input
                 className="rounded-xl border px-3 py-2"

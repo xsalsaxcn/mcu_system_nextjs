@@ -3,6 +3,75 @@ import { fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // VACCINATION_REGISTER_PRODUCT_OPTIONS_V153_1
+// V497_R2_SERVICE_STOCK_OPTIONS_SAFE
+
+function normalizeServiceMode(value: any) {
+  return String(value || "").trim().toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+async function loadServiceStockRemaining(supabase: any, sessionId: number) {
+  const allocationsResult = await supabase
+    .from("vaccination_session_stock_allocations")
+    .select("lot_id,service_mode,allocated_qty,active")
+    .eq("session_id", sessionId)
+    .eq("active", true)
+    .limit(10000);
+
+  if (allocationsResult.error) {
+    const code = String(allocationsResult.error?.code || "");
+    const message = String(allocationsResult.error?.message || "").toLowerCase();
+    if (code === "42P01" || message.includes("vaccination_session_stock_allocations")) {
+      return { enabled: false, map: new Map<string, any>() };
+    }
+    throw new Error(allocationsResult.error.message);
+  }
+
+  const allocations = allocationsResult.data || [];
+  if (!allocations.length) return { enabled: false, map: new Map<string, any>() };
+
+  const lotIds = Array.from(
+    new Set(allocations.map((row: any) => Number(row.lot_id)).filter(Boolean)),
+  );
+
+  const usedMap = new Map<string, number>();
+  if (lotIds.length) {
+    const usedResult = await supabase
+      .from("vaccination_registration_items")
+      .select("lot_id,service_mode,status,registration:vaccination_registrations!inner(session_id)")
+      .in("lot_id", lotIds)
+      .in("status", ["ADMINISTERED", "DONE"])
+      .eq("active", true)
+      .eq("registration.session_id", sessionId)
+      .limit(20000);
+
+    if (usedResult.error) throw new Error(usedResult.error.message);
+
+    for (const row of usedResult.data || []) {
+      const lotId = Number((row as any).lot_id || 0);
+      if (!lotId) continue;
+      const mode = normalizeServiceMode((row as any).service_mode);
+      const key = `${lotId}:${mode}`;
+      usedMap.set(key, (usedMap.get(key) || 0) + 1);
+    }
+  }
+
+  const map = new Map<string, any>();
+  for (const row of allocations) {
+    const lotId = Number((row as any).lot_id || 0);
+    if (!lotId) continue;
+    const mode = normalizeServiceMode((row as any).service_mode);
+    const key = `${lotId}:${mode}`;
+    const allocated = Number((row as any).allocated_qty || 0);
+    const used = usedMap.get(key) || 0;
+    map.set(key, {
+      allocated,
+      used,
+      remaining: Math.max(0, allocated - used),
+    });
+  }
+
+  return { enabled: true, map };
+}
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
@@ -86,13 +155,42 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const healthdayOptions = options;
+  let healthdayOptions = options;
 
   let bazarOptions: any[] = [];
   const healthdayBazarEnabled =
     String(sessionResult.data?.existing_queue_profile || "LEGACY")
       .trim()
       .toUpperCase() === "HEALTHDAY_BAZAR";
+
+  let serviceStock: { enabled: boolean; map: Map<string, any> };
+  try {
+    serviceStock = await loadServiceStockRemaining(supabase, sessionId);
+  } catch (error: any) {
+    return fail(error?.message || "Gagal membaca stok Healthday/Bazar.", 500);
+  }
+
+  const decorateOption = (option: any, serviceMode: "HEALTHDAY" | "BAZAR") => {
+    const lotId = Number(option?.lot_id || option?.lot?.id || 0);
+    const stock = lotId ? serviceStock.map.get(`${lotId}:${serviceMode}`) : null;
+    return {
+      ...option,
+      service_mode: serviceMode,
+      service_stock_allocated: stock ? Number(stock.allocated || 0) : null,
+      service_stock_used: stock ? Number(stock.used || 0) : null,
+      service_stock_remaining: stock ? Number(stock.remaining || 0) : null,
+    };
+  };
+
+  if (serviceStock.enabled) {
+    healthdayOptions = healthdayOptions
+      .map((option: any) => decorateOption(option, "HEALTHDAY"))
+      .filter((option: any) => Number(option.service_stock_remaining || 0) > 0);
+  } else {
+    healthdayOptions = healthdayOptions.map((option: any) =>
+      decorateOption(option, "HEALTHDAY"),
+    );
+  }
 
   if (healthdayBazarEnabled) {
     const [vaccinesResult, lotsResult] = await Promise.all([
@@ -134,7 +232,13 @@ export async function GET(req: NextRequest) {
           lot,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((option: any) => decorateOption(option, "BAZAR"))
+      .filter((option: any) =>
+        serviceStock.enabled
+          ? Number(option.service_stock_remaining || 0) > 0
+          : false,
+      );
   }
 
   return ok({
@@ -142,5 +246,6 @@ export async function GET(req: NextRequest) {
     options: healthdayOptions,
     healthdayOptions,
     bazarOptions,
+    serviceStockEnabled: serviceStock.enabled,
   });
 }
