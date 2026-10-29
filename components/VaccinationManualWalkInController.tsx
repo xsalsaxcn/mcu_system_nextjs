@@ -410,6 +410,8 @@ export default function VaccinationManualWalkInController({
         phone: clean(form?.phone),
         companyName: clean(form?.companyName || form?.company_name),
         department: clean(form?.department),
+        existingRegistrationId:
+          Number(form?.existingRegistrationId || form?.existing_registration_id || 0) || null,
         moveFromRegistrationId:
           Number(form?.moveFromRegistrationId || 0) || null,
         serviceMode: requestedMode,
@@ -486,9 +488,17 @@ export default function VaccinationManualWalkInController({
       ].filter(Boolean);
 
       setMessage(
-        `${json?.movedFrom ? "Pindah lokasi berhasil" : "Registrasi berhasil"} · ${
-          queueLabels.join(" + ") || "nomor antrian tersedia"
-        } · ${totalSelected} produk.`,
+        `${
+          json?.movedFrom
+            ? "Pindah lokasi berhasil"
+            : json?.reusedRegistration
+              ? "Registrasi existing digunakan"
+              : "Registrasi berhasil"
+        } · ${queueLabels.join(" + ") || "nomor antrian tersedia"} · ${
+          json?.insertedItemCount != null
+            ? `${json.insertedItemCount} produk baru`
+            : `${totalSelected} produk`
+        }.`,
       );
       setSelectedByMode({ HEALTHDAY: [], BAZAR: [] });
       setBazarSaleModeByKey({});

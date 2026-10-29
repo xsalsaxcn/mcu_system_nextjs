@@ -64,6 +64,42 @@ function identityLabel(row: any) {
     .join(" · ");
 }
 
+function sessionPersonKey(row: any) {
+  const historyPersonId = Number(row?.history_person_id || row?.historyPersonId || 0);
+  if (historyPersonId) return `history:${historyPersonId}`;
+
+  const participantId = Number(row?.participant_id || row?.participantId || 0);
+  if (participantId) return `participant:${participantId}`;
+
+  const role = clean(row?.family_role || row?.familyRole || "PARENT").toUpperCase();
+  const parentId = Number(row?.parent_history_person_id || row?.parentHistoryPersonId || 0);
+  return [
+    "fallback",
+    normalized(row?.participant_name || row?.name),
+    role,
+    parentId || 0,
+    normalized(row?.employee_id || row?.employeeId),
+    normalized(row?.nik),
+  ].join(":");
+}
+
+function registrationPriority(row: any) {
+  const aStatus = clean(row?.queue_status).toUpperCase();
+  const bStatus = clean(row?.bazar_queue_status).toUpperCase();
+  const done = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
+  const cancelled = new Set(["CANCELLED", "CANCELED", "VOID", "BATAL"]);
+  let score = 0;
+  if (done.has(aStatus)) score += 120;
+  else if (clean(row?.queue_number) && !cancelled.has(aStatus)) score += 90;
+  if (done.has(bStatus)) score += 120;
+  else if (clean(row?.bazar_queue_number) && !cancelled.has(bStatus)) score += 90;
+  if (clean(row?.queue_number)) score += 15;
+  if (clean(row?.bazar_queue_number)) score += 15;
+  if (cancelled.has(aStatus) && cancelled.has(bStatus || aStatus)) score -= 100;
+  score += Math.min(20, Number(row?.id || 0) / 1000000);
+  return score;
+}
+
 export default function VaccinationParticipantMasterSearch({
   form,
   setForm,
@@ -200,16 +236,24 @@ export default function VaccinationParticipantMasterSearch({
 
   const currentSessionRows = useMemo(() => {
     const keyword = normalized(currentQuery);
-    return (Array.isArray(sessionRegistrations) ? sessionRegistrations : [])
-      .filter((row: any) => {
-        if (!keyword) return true;
-        const haystack = normalized(
-          [row?.participant_name, row?.employee_id, row?.nik, row?.email]
-            .filter(Boolean)
-            .join(" "),
-        );
-        return haystack.includes(keyword);
-      })
+    const grouped = new Map<string, any>();
+
+    for (const row of Array.isArray(sessionRegistrations) ? sessionRegistrations : []) {
+      const haystack = normalized(
+        [row?.participant_name, row?.employee_id, row?.nik, row?.email, row?.queue_number, row?.bazar_queue_number]
+          .filter(Boolean)
+          .join(" "),
+      );
+      if (keyword && !haystack.includes(keyword)) continue;
+
+      const key = sessionPersonKey(row);
+      const current = grouped.get(key);
+      if (!current || registrationPriority(row) > registrationPriority(current)) {
+        grouped.set(key, row);
+      }
+    }
+
+    return Array.from(grouped.values())
       .sort((a: any, b: any) =>
         clean(a?.participant_name).localeCompare(clean(b?.participant_name), "id"),
       )
@@ -274,6 +318,14 @@ export default function VaccinationParticipantMasterSearch({
       parentNik: clean(row?.parentNik || row?.parent_nik || extra?.parentNik),
       parentEmail: clean(row?.parentEmail || row?.parent_email || extra?.parentEmail),
       masterSearchSource: clean(row?.sourceType || extra?.sourceType),
+      existingRegistrationId:
+        Number(
+          extra?.existingRegistrationId ||
+          row?.existingRegistrationId ||
+          row?.registrationId ||
+          row?.registration_id ||
+          0,
+        ) || null,
       moveFromRegistrationId: Number(extra?.moveFromRegistrationId || 0) || null,
       walkInSuggestedVaccineIds: Array.isArray(extra?.suggestedVaccineIds)
         ? extra.suggestedVaccineIds.map(String).filter(Boolean)
@@ -286,9 +338,10 @@ export default function VaccinationParticipantMasterSearch({
   function chooseCurrentRegistration(row: any) {
     applyParticipant(row, {
       sourceType: "CURRENT_SESSION",
-      suggestedVaccineIds: (row?.items || [])
-        .map((item: any) => item?.vaccine_id)
-        .filter(Boolean),
+      existingRegistrationId: Number(row?.id || 0) || null,
+      // Existing A/B services are already attached to this registration. Do not
+      // auto-select them again when operator only wants to add the other track.
+      suggestedVaccineIds: [],
       contextLabel: `Terdaftar di ${session?.session_name || session?.location || "session ini"}`,
     });
     setCurrentQuery(clean(row?.participant_name));
@@ -387,7 +440,8 @@ export default function VaccinationParticipantMasterSearch({
         },
         {
           sourceType: "CURRENT_SESSION",
-          suggestedVaccineIds: current.vaccineIds || [],
+          existingRegistrationId: Number(current?.id || 0) || null,
+          suggestedVaccineIds: [],
           contextLabel: `Sudah terdaftar di ${current?.session?.name || current?.session?.location || "session ini"}`,
         },
       );
@@ -802,6 +856,7 @@ export default function VaccinationParticipantMasterSearch({
                   participantId: null,
                   participant_id: null,
                   historyPersonId: null,
+                  existingRegistrationId: null,
                   moveFromRegistrationId: null,
                   walkInSuggestedVaccineIds: [],
                   walkInContextLabel: "",
@@ -924,10 +979,28 @@ export default function VaccinationParticipantMasterSearch({
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {[
                     ["Nama", clean(contextPerson?.name) || "-"],
-                    ["NIK Karyawan / BINUSIAN ID", clean(contextPerson?.employeeId) || "-"],
+                    [
+                      "NIK Karyawan / BINUSIAN ID",
+                      clean(contextPerson?.employeeId) ||
+                        (clean(family?.parent?.employeeId)
+                          ? `${clean(family.parent.employeeId)} (Parent)`
+                          : "-"),
+                    ],
                     ["NIK KTP", clean(contextPerson?.nik) || "-"],
-                    ["No. HP", clean(contextPerson?.phone) || "-"],
-                    ["Email", clean(contextPerson?.email) || "-"],
+                    [
+                      "No. HP",
+                      clean(contextPerson?.phone) ||
+                        (clean(family?.parent?.phone)
+                          ? `${clean(family.parent.phone)} (Parent)`
+                          : "-"),
+                    ],
+                    [
+                      "Email",
+                      clean(contextPerson?.email) ||
+                        (clean(family?.parent?.email)
+                          ? `${clean(family.parent.email)} (Parent)`
+                          : "-"),
+                    ],
                     ["Perusahaan", contextCompany || "-"],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-xl border bg-white p-3">

@@ -125,21 +125,21 @@ async function resolveRegistrationHistoryCompany(
   session: any,
   body: any,
 ) {
-  const hints = [
+  const hints: string[] = [
     body?.companyName,
     body?.company_name,
     session?.company_name,
     session?.source_name,
     session?.session_name,
   ]
-    .map(historyText)
-    .filter(Boolean);
+    .map((value: any) => String(historyText(value) || ""))
+    .filter((value: string) => Boolean(value));
 
-  const keys = Array.from(
-    new Set(
+  const keys: string[] = Array.from(
+    new Set<string>(
       hints
-        .map(historyCompanyKey)
-        .filter((key) => key && key !== "unknown-company"),
+        .map((value: string) => String(historyCompanyKey(value) || ""))
+        .filter((key: string) => key && key !== "unknown-company"),
     ),
   );
 
@@ -543,6 +543,122 @@ function sameMovePerson(oldRegistration: any, body: any) {
     && sameIdentityValue(oldRegistration?.company_name, body.companyName || body.company_name);
 }
 
+function normalizedPersonName(value: any) {
+  return clean(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function sameSessionPerson(registration: any, body: any) {
+  if (!registration) return false;
+
+  const requestedName = normalizedPersonName(body.participantName || body.participant_name);
+  const existingName = normalizedPersonName(registration.participant_name);
+  if (requestedName && existingName && requestedName !== existingName) return false;
+
+  const requestedRole = normalizeFamilyRole(body.familyRole || body.family_role);
+  const existingRole = normalizeFamilyRole(registration.family_role);
+  if (requestedRole && existingRole && requestedRole !== existingRole) return false;
+
+  const requestedParentId = toInt(body.parentHistoryPersonId || body.parent_history_person_id, 0);
+  const existingParentId = Number(registration.parent_history_person_id || 0);
+  if (requestedRole === "DEPENDENT" && requestedParentId && existingParentId && requestedParentId !== existingParentId) {
+    return false;
+  }
+
+  const historyPersonId = toInt(body.historyPersonId || body.history_person_id, 0);
+  if (historyPersonId && Number(registration.history_person_id || 0)) {
+    return Number(registration.history_person_id || 0) === historyPersonId;
+  }
+
+  const participantId = toInt(body.participantId || body.participant_id, 0);
+  if (participantId && Number(registration.participant_id || 0)) {
+    return Number(registration.participant_id || 0) === participantId;
+  }
+
+  const strongMatch =
+    sameIdentityValue(registration.employee_id, body.employeeId || body.employee_id) ||
+    sameIdentityValue(registration.nik, body.nik) ||
+    sameIdentityValue(registration.email, body.email);
+  if (strongMatch && (!requestedName || !existingName || requestedName === existingName)) return true;
+
+  return Boolean(
+    requestedName &&
+    existingName &&
+    requestedName === existingName &&
+    sameIdentityValue(registration.company_name, body.companyName || body.company_name),
+  );
+}
+
+function registrationFullyCancelled(registration: any) {
+  const cancelled = new Set(["CANCELLED", "CANCELED", "VOID", "BATAL"]);
+  const tracks: string[] = [];
+  if (clean(registration?.queue_number)) tracks.push(clean(registration?.queue_status).toUpperCase());
+  if (clean(registration?.bazar_queue_number)) tracks.push(clean(registration?.bazar_queue_status).toUpperCase());
+  return tracks.length > 0 && tracks.every((status: string) => cancelled.has(status));
+}
+
+function reusePriority(registration: any) {
+  const done = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
+  const cancelled = new Set(["CANCELLED", "CANCELED", "VOID", "BATAL"]);
+  const aStatus = clean(registration?.queue_status).toUpperCase();
+  const bStatus = clean(registration?.bazar_queue_status).toUpperCase();
+  let score = 0;
+  if (done.has(aStatus)) score += 120;
+  else if (clean(registration?.queue_number) && !cancelled.has(aStatus)) score += 90;
+  if (done.has(bStatus)) score += 120;
+  else if (clean(registration?.bazar_queue_number) && !cancelled.has(bStatus)) score += 90;
+  if (clean(registration?.queue_number)) score += 15;
+  if (clean(registration?.bazar_queue_number)) score += 15;
+  if (cancelled.has(aStatus) && cancelled.has(bStatus || aStatus)) score -= 100;
+  score += Math.min(20, Number(registration?.id || 0) / 1000000);
+  return score;
+}
+
+async function findSameSessionRegistrationForReuse(
+  supabase: any,
+  sessionId: number,
+  body: any,
+) {
+  const explicitId = toInt(body.existingRegistrationId || body.existing_registration_id, 0);
+  if (explicitId) {
+    const explicit = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", explicitId)
+      .eq("session_id", sessionId)
+      .maybeSingle();
+    if (explicit.error) throw new Error(explicit.error.message);
+    if (!explicit.data) throw new Error("Registrasi existing pada Session ini tidak ditemukan. Refresh lalu pilih peserta lagi.");
+    if (!sameSessionPerson(explicit.data, body)) {
+      throw new Error("Registrasi existing tidak cocok dengan identitas peserta yang dipilih.");
+    }
+    return registrationFullyCancelled(explicit.data) ? null : explicit.data;
+  }
+
+  const candidatesResult = await supabase
+    .from("vaccination_registrations")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("id", { ascending: false })
+    .limit(1000);
+  if (candidatesResult.error) throw new Error(candidatesResult.error.message);
+
+  const candidates = (candidatesResult.data || [])
+    .filter((row: any) => sameSessionPerson(row, body))
+    .filter((row: any) => !registrationFullyCancelled(row))
+    .sort((a: any, b: any) => reusePriority(b) - reusePriority(a));
+
+  return candidates[0] || null;
+}
+
+function registrationItemKey(item: any) {
+  return [
+    normalizeServiceMode(item?.service_mode || item?.serviceMode, true),
+    Number(item?.vaccine_id || item?.vaccineId || 0),
+    Number(item?.lot_id || item?.lotId || 0),
+    Math.max(1, Number(item?.dose_number || item?.doseNumber || 1)),
+  ].join(":");
+}
+
 async function rollbackInsertedRegistration(supabase: any, registrationId: number) {
   await supabase
     .from("vaccination_registration_items")
@@ -749,7 +865,12 @@ async function createItemsForRegistration(supabase: any, registration: any, item
       payment_surcharge_amount: surchargeAmount,
       payment_total: paymentTotal,
       item_source: source,
-      status: source === "registration_edit" ? "WAITING" : (String(registration.queue_status || "").toUpperCase() === "ADMINISTERED" ? "ADMINISTERED" : "WAITING"),
+      status:
+        source === "registration_edit"
+          ? "WAITING"
+          : serviceMode === "BAZAR"
+            ? (isDoneQueueStatus(registration.bazar_queue_status) ? "ADMINISTERED" : "WAITING")
+            : (isDoneQueueStatus(registration.queue_status) ? "ADMINISTERED" : "WAITING"),
       active: true,
       created_by: userLabel(user),
     };
@@ -1364,6 +1485,142 @@ export async function POST(req: NextRequest) {
 
   if (familyRole === "DEPENDENT" && !requestedParentHistoryPersonId) {
     return fail("Untuk Child / Family, parent existing wajib dipilih pada Step 1.");
+  }
+
+  // V512: one person + one Session = one active registration.
+  // Reuse the existing registration and create ONLY the missing A/B queue track.
+  let reusableRegistration: any = null;
+  try {
+    reusableRegistration = await findSameSessionRegistrationForReuse(
+      supabase,
+      sessionId,
+      { ...body, familyRole, historyPersonId: requestedHistoryPersonId, parentHistoryPersonId: requestedParentHistoryPersonId },
+    );
+  } catch (error: any) {
+    return fail(error?.message || "Gagal memeriksa registrasi existing pada Session ini.", 409);
+  }
+
+  if (reusableRegistration && !moveFromRegistrationId) {
+    const existingItemsResult = await supabase
+      .from("vaccination_registration_items")
+      .select("*")
+      .eq("registration_id", Number(reusableRegistration.id))
+      .eq("active", true)
+      .order("id", { ascending: true });
+    if (existingItemsResult.error) return fail(existingItemsResult.error.message, 500);
+
+    const existingItems = existingItemsResult.data || [];
+    const existingKeys = new Set(existingItems.map((item: any) => registrationItemKey(item)));
+    const newItems = items.filter((item: any) => !existingKeys.has(registrationItemKey(item)));
+
+    let insertedItems: any[] = [];
+    if (newItems.length) {
+      try {
+        insertedItems = await createItemsForRegistration(
+          supabase,
+          reusableRegistration,
+          newItems,
+          user,
+          "registration_reuse",
+          allowBazar,
+        );
+      } catch (error: any) {
+        return fail(error?.message || "Gagal menambahkan layanan ke registrasi existing.", 500);
+      }
+    }
+
+    const combinedItems = [...existingItems, ...insertedItems];
+    const serviceStatus = allowBazar
+      ? patientServiceStatus(combinedItems.length ? combinedItems : items)
+      : "HEALTHDAY";
+
+    let queueUpdate: Record<string, any> = {};
+    try {
+      queueUpdate = await buildServiceQueueUpdate(
+        supabase,
+        reusableRegistration,
+        serviceStatus,
+      );
+    } catch (error: any) {
+      if (insertedItems.length) {
+        await supabase
+          .from("vaccination_registration_items")
+          .delete()
+          .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
+      }
+      return fail(error?.message || "Gagal membuat nomor antrean track yang belum ada.", 500);
+    }
+
+    const billing = bazarBillingSummary(combinedItems);
+    const identityPatch: Record<string, any> = {
+      patient_service_status: serviceStatus,
+      ...queueUpdate,
+      participant_id:
+        toInt(body.participantId || body.participant_id, 0) ||
+        reusableRegistration.participant_id ||
+        null,
+      history_person_id:
+        requestedHistoryPersonId || reusableRegistration.history_person_id || null,
+      family_role: familyRole || reusableRegistration.family_role || "PARENT",
+      parent_history_person_id:
+        familyRole === "DEPENDENT"
+          ? (requestedParentHistoryPersonId || reusableRegistration.parent_history_person_id || null)
+          : null,
+      participant_name: participantName || reusableRegistration.participant_name,
+      employee_id:
+        clean(body.employeeId || body.employee_id) || reusableRegistration.employee_id || null,
+      nik: clean(body.nik) || reusableRegistration.nik || null,
+      email: clean(body.email) || reusableRegistration.email || null,
+      phone: clean(body.phone) || reusableRegistration.phone || null,
+      company_name:
+        clean(body.companyName || body.company_name) ||
+        reusableRegistration.company_name ||
+        clean(session.company_name) ||
+        null,
+      department:
+        clean(body.department) || reusableRegistration.department || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (billing.hasBazar) {
+      identityPatch.payment_price = billing.total;
+      identityPatch.payment_method = billing.paymentMethod;
+      identityPatch.payment_note = clean(body.paymentNote || body.payment_note) || reusableRegistration.payment_note || null;
+    }
+
+    const reuseUpdate = await supabase
+      .from("vaccination_registrations")
+      .update(identityPatch)
+      .eq("id", Number(reusableRegistration.id))
+      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,public_queue_token,source_id,source_name,default_vaccine_id,default_lot_id), vaccine:vaccination_vaccines(id,name,brand,price,price_category)")
+      .single();
+    if (reuseUpdate.error) {
+      if (insertedItems.length) {
+        await supabase
+          .from("vaccination_registration_items")
+          .delete()
+          .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
+      }
+      return fail(reuseUpdate.error.message, 500);
+    }
+
+    // Existing registration already owns its family binding. Reuse it without
+    // re-creating/reassigning family relationships as a side effect of adding Bazar/Healthday.
+    const refreshedItems = await attachRegistrationItems(supabase, [reuseUpdate.data]);
+    const registration = refreshedItems[0] || { ...reuseUpdate.data, items: combinedItems };
+    const queueLabels = [
+      clean(registration.queue_number),
+      clean(registration.bazar_queue_number),
+    ].filter(Boolean);
+
+    return ok({
+      message: newItems.length
+        ? `Registrasi existing digunakan. ${newItems.length} layanan baru ditambahkan tanpa membuat registrasi/nomor A duplikat.`
+        : "Registrasi existing digunakan. Tidak ada layanan duplikat yang dibuat.",
+      registration,
+      reusedRegistration: true,
+      insertedItemCount: newItems.length,
+      queueNumbers: queueLabels,
+    });
   }
 
   const payload: Record<string, any> = {

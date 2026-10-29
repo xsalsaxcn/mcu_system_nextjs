@@ -76,6 +76,7 @@ const BUCKET_TITLES: Record<string, string> = {
   used: "Detail Terpakai / OUT",
   remaining: "Detail Sisa Sistem",
   diff: "Detail Selisih Stock Opname",
+  movements: "Semua Pencatatan / Movement Inventory",
 };
 
 function clean(value: any) {
@@ -168,6 +169,13 @@ export default function VaccinationInventoryMovementEnhancer() {
         reference: "Saldo lot",
         note: `Awal ${row.initial} + Tambahan ${row.added} - Terpakai ${row.used}`,
       } as DetailRow));
+    }
+    if (activeBucket === "movements") {
+      return [...details].sort((a, b) => {
+        const at = a.date ? new Date(a.date).getTime() : 0;
+        const bt = b.date ? new Date(b.date).getTime() : 0;
+        return bt - at;
+      });
     }
     if (activeBucket === "diff") {
       return summaries.filter((row) => row.diff != null).map((row) => ({
@@ -340,6 +348,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={load} disabled={loading} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memuat..." : "Terapkan Filter"}</button>
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
+          <button type="button" onClick={() => setActiveBucket("movements")} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
         </div>
         <div className="mt-3 text-xs text-slate-500">Card dan angka tabel mengikuti filter yang sama. Tanpa date range, Terpakai memakai saldo kumulatif canonical Inventory (termasuk rekonsiliasi legacy bila ada). Dengan date range, Terpakai memakai record bertanggal yang dapat ditelusuri. Export mengikuti filter yang sama.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}

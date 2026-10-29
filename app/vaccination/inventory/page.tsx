@@ -13,9 +13,42 @@ function diffClass(value: any) {
   return "bg-amber-100 text-amber-700";
 }
 
+function clean(value: any) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function money(value: any) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `Rp ${new Intl.NumberFormat("id-ID").format(number)}`;
+}
+
+function sessionName(session: any) {
+  return clean(session?.session_name) || clean(session?.location) || (session?.id ? `Session ${session.id}` : "-");
+}
+
+function stockTarget(row: any) {
+  const scope = clean(row?.stock_scope || "GENERAL").toUpperCase();
+  if (scope === "SESSION") {
+    return {
+      scope: "Session",
+      company: clean(row?.stock_company_name) || clean(row?.stock_session?.company_name) || "-",
+      session: sessionName(row?.stock_session),
+    };
+  }
+  if (scope === "COMPANY") {
+    return { scope: "Perusahaan", company: clean(row?.stock_company_name) || "-", session: "Semua Session" };
+  }
+  return { scope: "General", company: "Semua Perusahaan", session: "Semua Session" };
+}
+
 export default function VaccinationInventoryPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("ALL");
+  const [sessionFilter, setSessionFilter] = useState("ALL");
+  const [serviceFilter, setServiceFilter] = useState("ALL");
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ stockAction: "ADD_STOCK", inventoryTarget: "SYSTEM", quantity: "", inventoryNotes: "" });
   const [message, setMessage] = useState("Inventory membaca stok terpakai dari data dokter/Administered yang sudah Done.");
@@ -67,11 +100,63 @@ export default function VaccinationInventoryPage() {
 
   useEffect(() => { load(); }, []);
 
+  const companyOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const row of rows) {
+      if (clean(row?.stock_company_name)) values.add(clean(row.stock_company_name));
+      for (const allocation of row?.service_allocations || []) {
+        if (clean(allocation?.company_name)) values.add(clean(allocation.company_name));
+      }
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "id"));
+  }, [rows]);
+
+  const sessionOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      const stockSessionId = Number(row?.stock_session_id || 0);
+      if (stockSessionId) map.set(String(stockSessionId), sessionName(row?.stock_session));
+      for (const allocation of row?.service_allocations || []) {
+        const id = Number(allocation?.session_id || 0);
+        if (id) map.set(String(id), clean(allocation?.session_name) || sessionName(allocation?.session));
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return rows;
-    return rows.filter((row) => [row.vaccine?.name, row.vaccine?.brand, row.lot_number, row.inventory_notes].filter(Boolean).join(" ").toLowerCase().includes(keyword));
-  }, [rows, search]);
+    return rows.filter((row) => {
+      const allocations = Array.isArray(row?.service_allocations) ? row.service_allocations : [];
+      const haystack = [
+        row.vaccine?.name,
+        row.vaccine?.brand,
+        row.lot_number,
+        row.inventory_notes,
+        row.stock_company_name,
+        row.stock_session?.session_name,
+        ...allocations.flatMap((a: any) => [a.company_name, a.session_name, a.service_mode]),
+      ].filter(Boolean).join(" ").toLowerCase();
+      if (keyword && !haystack.includes(keyword)) return false;
+
+      if (companyFilter !== "ALL") {
+        const companyMatch = clean(row?.stock_company_name) === companyFilter || allocations.some((a: any) => clean(a?.company_name) === companyFilter);
+        if (!companyMatch) return false;
+      }
+
+      if (sessionFilter !== "ALL") {
+        const sessionMatch = String(row?.stock_session_id || "") === sessionFilter || allocations.some((a: any) => String(a?.session_id || "") === sessionFilter);
+        if (!sessionMatch) return false;
+      }
+
+      if (serviceFilter !== "ALL") {
+        if (!allocations.some((a: any) => clean(a?.service_mode).toUpperCase() === serviceFilter)) return false;
+      }
+
+      return true;
+    });
+  }, [rows, search, companyFilter, sessionFilter, serviceFilter]);
+
 
   const summary = useMemo(() => {
     return rows.reduce((acc, row) => {
@@ -108,8 +193,25 @@ export default function VaccinationInventoryPage() {
         </section>
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <input className="rounded-xl border px-3 py-2.5" placeholder="Cari produk, lot, keterangan..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="mb-3">
+            <div className="text-sm font-black text-slate-900">Pelaporan Inventory mengikuti rule Master Produk & Lot</div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">Tujuan stok Perusahaan/Session, bucket Healthday/Bazar, harga Paket/Non Paket, pemakaian peserta, dan movement dibaca dari sumber data yang sama dengan Master.</div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_280px_180px_auto]">
+            <input className="rounded-xl border px-3 py-2.5" placeholder="Cari produk, lot, session, perusahaan..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("ALL"); }}>
+              <option value="ALL">Semua Perusahaan</option>
+              {companyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
+            </select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}>
+              <option value="ALL">Semua Session</option>
+              {sessionOptions.map((session) => <option key={session.id} value={session.id}>{session.name}</option>)}
+            </select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)}>
+              <option value="ALL">Healthday + Bazar</option>
+              <option value="HEALTHDAY">Healthday</option>
+              <option value="BAZAR">Bazar</option>
+            </select>
             <button onClick={async () => { await load(); window.dispatchEvent(new Event("vaccination-inventory-updated")); }} className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700">Refresh</button>
           </div>
         </section>
@@ -158,43 +260,81 @@ export default function VaccinationInventoryPage() {
         ) : null}
 
         <section className="mt-6 overflow-hidden rounded-2xl border">
-          <table data-inventory-canonical-table="1" className="min-w-full text-sm">
-            <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-              <tr>
-                <th className="p-3 text-left">Nama Vaksin / Produk</th>
-                <th className="p-3 text-left">Lot Number</th>
-                <th className="p-3 text-left">Jumlah Awal</th>
-                <th className="p-3 text-left">Tambahan Stok</th>
-                <th className="p-3 text-left">Terpakai</th>
-                <th className="p-3 text-left">IN Dari / Sumber</th>
-                <th className="p-3 text-left">OUT Ke / Perusahaan</th>
-                <th className="p-3 text-left">Sisa Sistem</th>
-                <th className="p-3 text-left">Sisa Fisik</th>
-                <th className="p-3 text-left">Selisih</th>
-                <th className="p-3 text-left">Keterangan</th>
-                <th className="p-3 text-left">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filteredRows.map((row) => (
-                <tr key={row.id}>
-                  <td className="p-3 font-bold">{row.vaccine?.name || "-"}</td>
-                  <td className="p-3">{row.lot_number}</td>
-                  <td className="p-3">{row.stock_initial || 0}</td>
-                  <td className="p-3">{row.stock_added || 0}</td>
-                  <td className="p-3">{row.stock_used || 0}</td>
-                  <td data-inventory-in-v150="1" className="p-3">-</td>
-                  <td data-inventory-out-v150="1" className="p-3">-</td>
-                  <td className="p-3 font-bold">{row.stock_system_remaining}</td>
-                  <td className="p-3">{row.stock_physical_count ?? "-"}</td>
-                  <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span></td>
-                  <td className="p-3">{row.inventory_notes || "-"}</td>
-                  <td className="p-3"><button onClick={() => startEdit(row)} className="rounded-xl border px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit</button></td>
+          <div className="overflow-x-auto">
+            <table data-inventory-canonical-table="1" className="min-w-[2200px] text-sm">
+              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <tr>
+                  <th className="p-3 text-left">Nama Vaksin / Produk</th>
+                  <th className="p-3 text-left">Brand</th>
+                  <th className="p-3 text-left">Lot Number</th>
+                  <th className="p-3 text-left">Non Paket</th>
+                  <th className="p-3 text-left">Paket</th>
+                  <th className="p-3 text-left">Dosis Paket</th>
+                  <th className="p-3 text-left">Tujuan Stok</th>
+                  <th className="p-3 text-left">Jenis Stok / Alokasi</th>
+                  <th className="p-3 text-left">Jumlah Awal</th>
+                  <th className="p-3 text-left">Tambahan Stok</th>
+                  <th className="p-3 text-left">Terpakai</th>
+                  <th className="p-3 text-left">IN Dari / Sumber</th>
+                  <th className="p-3 text-left">OUT Ke / Perusahaan</th>
+                  <th className="p-3 text-left">Sisa Sistem</th>
+                  <th className="p-3 text-left">Sisa Fisik</th>
+                  <th className="p-3 text-left">Selisih</th>
+                  <th className="p-3 text-left">Movement</th>
+                  <th className="p-3 text-left">Keterangan</th>
+                  <th className="p-3 text-left">Aksi</th>
                 </tr>
-              ))}
-              {!filteredRows.length ? <tr><td colSpan={12} className="p-5 text-center text-slate-500">Belum ada data inventory.</td></tr> : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y">
+                {filteredRows.map((row) => {
+                  const target = stockTarget(row);
+                  const allocations = (row?.service_allocations || []).filter((allocation: any) => serviceFilter === "ALL" || clean(allocation?.service_mode).toUpperCase() === serviceFilter);
+                  return (
+                    <tr key={row.id} className="align-top">
+                      <td className="p-3 font-bold">{row.vaccine?.name || "-"}</td>
+                      <td className="p-3">{row.vaccine?.brand || "-"}</td>
+                      <td className="p-3 font-semibold">{row.lot_number || "-"}</td>
+                      <td className="p-3 font-bold">{money(row.non_package_price)}</td>
+                      <td className="p-3 font-bold text-emerald-700">{money(row.package_price)}</td>
+                      <td className="p-3">{row.package_dose_count ? `${row.package_dose_count}x` : "-"}</td>
+                      <td className="p-3">
+                        <div className="max-w-[260px] rounded-xl border bg-slate-50 px-3 py-2">
+                          <div className="text-[10px] font-black uppercase text-slate-500">{target.scope}</div>
+                          <div className="mt-1 text-xs font-black text-slate-900">{target.company}</div>
+                          <div className="mt-0.5 text-xs text-slate-600">{target.session}</div>
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="min-w-[300px] space-y-1.5">
+                          {allocations.length ? allocations.map((allocation: any) => (
+                            <div key={`${allocation.id}-${allocation.service_mode}`} className={`rounded-lg px-2.5 py-2 text-xs font-bold ${clean(allocation.service_mode).toUpperCase() === "BAZAR" ? "bg-violet-50 text-violet-800" : "bg-blue-50 text-blue-800"}`}>
+                              <div>{clean(allocation.service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {clean(allocation.session_name) || "Session"}</div>
+                              <div className="mt-0.5 font-semibold opacity-80">Alokasi {Number(allocation.allocated_qty || 0)} · Terpakai {Number(allocation.used_qty || 0)} · Sisa {Number(allocation.remaining_qty || 0)}</div>
+                            </div>
+                          )) : <span className="text-xs text-slate-400">Belum ada alokasi Healthday/Bazar</span>}
+                        </div>
+                      </td>
+                      <td className="p-3 font-black">{row.stock_initial || 0}</td>
+                      <td className="p-3">{row.stock_added || 0}</td>
+                      <td className="p-3 font-bold">{row.stock_used || 0}</td>
+                      <td data-inventory-in-v150="1" className="p-3">-</td>
+                      <td data-inventory-out-v150="1" className="p-3">-</td>
+                      <td className="p-3 font-black text-emerald-700">{row.stock_system_remaining}</td>
+                      <td className="p-3">{row.stock_physical_count ?? "-"}</td>
+                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span></td>
+                      <td className="p-3">
+                        <div className="text-xs font-black text-slate-800">{Number(row.movement_count || 0)} transaksi</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{row.last_movement_type || "-"}</div>
+                      </td>
+                      <td className="p-3">{row.inventory_notes || "-"}</td>
+                      <td className="p-3"><button onClick={() => startEdit(row)} className="rounded-xl border px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit</button></td>
+                    </tr>
+                  );
+                })}
+                {!filteredRows.length ? <tr><td colSpan={19} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
 

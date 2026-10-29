@@ -367,6 +367,23 @@ async function loadFamilyContext(supabase: any, historyPerson: any) {
   return { role: "PARENT", parent: null, children };
 }
 
+function contextRegistrationPriority(row: any) {
+  const done = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
+  const cancelled = new Set(["CANCELLED", "CANCELED", "VOID", "BATAL"]);
+  const a = clean(row?.queue_status).toUpperCase();
+  const b = clean(row?.bazar_queue_status).toUpperCase();
+  let score = 0;
+  if (done.has(a)) score += 120;
+  else if (clean(row?.queue_number) && !cancelled.has(a)) score += 90;
+  if (done.has(b)) score += 120;
+  else if (clean(row?.bazar_queue_number) && !cancelled.has(b)) score += 90;
+  if (clean(row?.queue_number)) score += 15;
+  if (clean(row?.bazar_queue_number)) score += 15;
+  if (cancelled.has(a) && cancelled.has(b || a)) score -= 100;
+  score += Math.min(20, Number(row?.id || 0) / 1000000);
+  return score;
+}
+
 function registrationSummary(row: any, hasRecord: boolean) {
   if (!row) return null;
   const session = Array.isArray(row.session) ? row.session[0] : row.session;
@@ -481,9 +498,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const currentRaw = registrations.find(
-      (row) => Number(row.session_id) === sessionId,
-    );
+    const currentRaw = registrations
+      .filter((row) => Number(row.session_id) === sessionId)
+      .sort((a, b) => contextRegistrationPriority(b) - contextRegistrationPriority(a))[0] || null;
     const otherRows = registrations.filter(
       (row) => Number(row.session_id) !== sessionId,
     );

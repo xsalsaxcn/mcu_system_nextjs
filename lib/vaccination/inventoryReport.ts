@@ -291,6 +291,58 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       });
     }
 
+    // V512: expose every non-canonical inventory movement in Pelaporan Inventory too.
+    // Initial/stock-in are already rendered above, while administered is represented by
+    // vaccination_records to avoid double-counting the same participant usage.
+    for (const movement of lotMovements) {
+      if (!inRange(movement.created_at, from, to)) continue;
+      const type = clean(movement.movement_type).toUpperCase();
+      if (isInitial(type) || isStockIn(type) || type === "ADMINISTERED") continue;
+
+      let direction = "AUDIT";
+      let label = clean(movement.movement_type) || "Movement Inventory";
+      if (type === "STOCK_TRANSFER") {
+        direction = "TRANSFER";
+        label = "Transfer Stok";
+      } else if (type === "PHYSICAL_CHECK") {
+        direction = "AUDIT";
+        label = "Stock Opname Fisik";
+      } else if (type === "ADJUSTMENT_MINUS") {
+        direction = "OUT";
+        label = "Koreksi Stok Minus";
+      } else if (type === "QUEUE_DONE_REVERSAL_AUDIT") {
+        direction = "AUDIT";
+        label = "Undo Done / Reversal Audit";
+      } else if (num(movement.qty) < 0) {
+        direction = "OUT";
+      } else if (num(movement.qty) > 0) {
+        direction = "IN";
+      }
+
+      details.push({
+        date: movement.created_at,
+        direction,
+        movement_type: label,
+        company: movementSource(movement),
+        participant: "",
+        employee_id: "",
+        mcu_id: "",
+        session: "",
+        location: "",
+        vaccine_id: Number(lot.vaccine_id),
+        vaccine: vaccineName,
+        brand,
+        lot: clean(lot.lot_number),
+        dose: "",
+        doctor: clean(movement.created_by),
+        qty: num(movement.qty),
+        print_status: "",
+        validation_status: "",
+        reference: [clean(movement.reference_type), clean(movement.reference_id)].filter(Boolean).join(" #"),
+        note: clean(movement.notes),
+      });
+    }
+
     // If old stock_used contains usage that predates / lacks vaccination_records, show
     // one explicit reconciliation row so drill-down and export still total to the same
     // number as the Inventory table/card. A date filter cannot safely date legacy usage,
