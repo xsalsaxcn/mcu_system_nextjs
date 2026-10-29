@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
   try {
     const report = await buildVaccinationInventoryReport({
       vaccineIds: ids(req.nextUrl.searchParams.get("vaccine_ids")),
+      lotIds: ids(req.nextUrl.searchParams.get("lot_ids") || req.nextUrl.searchParams.get("lot_id")),
       from: req.nextUrl.searchParams.get("from") || "",
       to: req.nextUrl.searchParams.get("to") || "",
     });
@@ -41,6 +42,10 @@ export async function GET(req: NextRequest) {
       "VAKSIN",
       "BRAND",
       "LOT",
+      "LAYANAN",
+      "JENIS_HARGA",
+      "DOSIS_PAKET",
+      "HARGA_SNAPSHOT",
       "DOSE",
       "DOKTER_PETUGAS",
       "QTY",
@@ -65,6 +70,10 @@ export async function GET(req: NextRequest) {
         row.vaccine,
         row.brand,
         row.lot,
+        row.service_mode || "",
+        row.sale_mode || "",
+        row.package_dose_count || "",
+        row.sales_price_snapshot ?? "",
         row.dose,
         row.doctor,
         row.qty,

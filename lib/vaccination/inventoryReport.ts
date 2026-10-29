@@ -52,6 +52,7 @@ function movementSource(row: any) {
 
 export type InventoryReportFilters = {
   vaccineIds?: number[];
+  lotIds?: number[];
   from?: string;
   to?: string;
 };
@@ -59,6 +60,7 @@ export type InventoryReportFilters = {
 export async function buildVaccinationInventoryReport(filters: InventoryReportFilters = {}) {
   const supabase = getSupabaseAdmin();
   const vaccineIds = new Set((filters.vaccineIds || []).map(Number).filter(Boolean));
+  const lotIds = new Set((filters.lotIds || []).map(Number).filter(Boolean));
   const from = clean(filters.from);
   const to = clean(filters.to);
 
@@ -76,9 +78,11 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   const vaccines = vaccinesResult.data || [];
   const vaccineMap = new Map<number, any>(vaccines.map((row: any) => [Number(row.id), row]));
   const allLots = lotsResult.data || [];
-  const lots = vaccineIds.size
-    ? allLots.filter((row: any) => vaccineIds.has(Number(row.vaccine_id)))
-    : allLots;
+  const lots = allLots.filter((row: any) => {
+    if (vaccineIds.size && !vaccineIds.has(Number(row.vaccine_id))) return false;
+    if (lotIds.size && !lotIds.has(Number(row.id))) return false;
+    return true;
+  });
   const allowedLotIds = new Set(lots.map((row: any) => Number(row.id)));
 
   const allRecords = (recordsResult.data || []).filter((row: any) => !isCancelled(row.status));
@@ -95,6 +99,45 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     if (!result.error) registrations = result.data || [];
   }
   const registrationMap = new Map<number, any>(registrations.map((row: any) => [Number(row.id), row]));
+
+  // V514: pricing/service trace per administered record.
+  // Registration item snapshots are the source of truth for Package vs Non Package.
+  let registrationItems: any[] = [];
+  if (allowedLotIds.size) {
+    const result = await supabase
+      .from("vaccination_registration_items")
+      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,active")
+      .not("administered_record_id", "is", null)
+      .eq("active", true)
+      .limit(20000);
+    if (result.error) {
+      throw new Error(`Gagal membaca detail Paket/Non Paket: ${result.error.message}`);
+    }
+    registrationItems = (result.data || []).filter((row: any) =>
+      allowedLotIds.has(Number(row.lot_id || 0)),
+    );
+  }
+
+  const itemByRecordId = new Map<number, any>();
+  const fallbackItemsByKey = new Map<string, any[]>();
+  for (const item of registrationItems) {
+    const recordId = Number(item.administered_record_id || 0);
+    if (recordId) itemByRecordId.set(recordId, item);
+    const key = `${Number(item.registration_id || 0)}:${Number(item.vaccine_id || 0)}:${Number(item.lot_id || 0)}`;
+    const bucket = fallbackItemsByKey.get(key) || [];
+    bucket.push(item);
+    fallbackItemsByKey.set(key, bucket);
+  }
+
+  function itemForRecord(record: any) {
+    const direct = itemByRecordId.get(Number(record?.id || 0));
+    if (direct) return direct;
+    const key = `${Number(record?.registration_id || 0)}:${Number(record?.vaccine_id || 0)}:${Number(record?.lot_id || 0)}`;
+    const candidates = fallbackItemsByKey.get(key) || [];
+    return candidates.find((row: any) =>
+      ["ADMINISTERED", "DONE", "FINISHED"].includes(clean(row?.status).toUpperCase()),
+    ) || candidates[0] || null;
+  }
 
   const sessionIds = uniq([
     ...records.map((row: any) => row.session_id),
@@ -143,6 +186,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           mcu_id: "",
           session: "",
           location: "",
+          lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
           brand,
@@ -167,6 +211,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         mcu_id: "",
         session: "",
         location: "",
+        lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
         brand,
@@ -196,6 +241,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           mcu_id: "",
           session: "",
           location: "",
+          lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
           brand,
@@ -225,6 +271,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           mcu_id: "",
           session: "",
           location: "",
+          lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
           brand,
@@ -249,6 +296,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         mcu_id: "",
         session: "",
         location: "",
+        lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
         brand,
@@ -267,6 +315,22 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       if (!inRange(record.administered_at || record.created_at, from, to)) continue;
       const registration = registrationMap.get(Number(record.registration_id)) || {};
       const session = sessionMap.get(Number(record.session_id || registration.session_id)) || {};
+      const registrationItem = itemForRecord(record);
+      const rawServiceMode = clean(registrationItem?.service_mode).toUpperCase();
+      const serviceMode =
+        rawServiceMode === "BAZAR"
+          ? "BAZAR"
+          : rawServiceMode === "HEALTHDAY"
+            ? "HEALTHDAY"
+            : "UNMAPPED";
+      const saleMode =
+        serviceMode === "BAZAR"
+          ? (registrationItem
+              ? (clean(registrationItem?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE")
+              : "UNMAPPED")
+          : serviceMode === "HEALTHDAY"
+            ? "FREE"
+            : "UNMAPPED";
       details.push({
         date: record.administered_at || record.created_at,
         direction: "OUT",
@@ -277,11 +341,18 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         mcu_id: clean(registration.mcu_id),
         session: clean(session.session_name),
         location: clean(session.location),
+        lot_id: lotId,
+        record_id: Number(record.id || 0) || null,
+        registration_id: Number(record.registration_id || 0) || null,
         vaccine_id: Number(record.vaccine_id),
         vaccine: clean(record.vaccine_name) || vaccineName,
         brand,
         lot: clean(record.lot_number) || clean(lot.lot_number),
         dose: Number(record.dose_number || 1),
+        service_mode: serviceMode,
+        sale_mode: saleMode,
+        package_dose_count: saleMode === "PACKAGE" ? Math.max(1, Number(registrationItem?.package_dose_count || 1)) : null,
+        sales_price_snapshot: registrationItem?.sales_price_snapshot == null ? null : num(registrationItem.sales_price_snapshot),
         doctor: clean(record.administered_by),
         qty: 1,
         print_status: clean(registration.print_status) || (record.sticker_printed_at ? "PRINTED" : ""),
@@ -329,6 +400,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         mcu_id: "",
         session: "",
         location: "",
+        lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
         brand,
@@ -358,6 +430,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         mcu_id: "",
         session: "",
         location: "",
+        lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
         brand,
@@ -425,7 +498,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   details.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
 
   return {
-    filters: { vaccineIds: Array.from(vaccineIds), from, to },
+    filters: { vaccineIds: Array.from(vaccineIds), lotIds: Array.from(lotIds), from, to },
     products: vaccines.map((row: any) => ({ id: Number(row.id), name: clean(row.name), brand: clean(row.brand), active: row.active !== false })),
     summary,
     lotSummaries,

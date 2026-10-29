@@ -590,8 +590,13 @@ export default function VaccinationParticipantMasterSearch({
     phone: current?.phone || other?.phone || pending?.row?.phone || "",
     participantType: pending?.row?.participantType || pending?.row?.participant_type || current?.familyRole || other?.familyRole || "",
   };
-  const family = context?.family || { role: "", parent: null, children: [] };
+  const family = context?.family || { role: "", parent: null, children: [], siblings: [] };
   const familyChildren = Array.isArray(family?.children) ? family.children : [];
+  const familySiblings = Array.isArray(family?.siblings) ? family.siblings : [];
+  const familyDisplayRows =
+    String(family?.role || contextPerson?.participantType || "").toUpperCase() === "DEPENDENT"
+      ? familySiblings.map((row: any) => ({ ...row, relationshipLabel: "Sibling" }))
+      : familyChildren.map((row: any) => ({ ...row, relationshipLabel: "Child" }));
   const contextCompany = clean(
     current?.companyName ||
       other?.companyName ||
@@ -1043,13 +1048,15 @@ export default function VaccinationParticipantMasterSearch({
                   </div>
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Child / Family</div>
-                    {familyChildren.length ? (
+                    {familyDisplayRows.length ? (
                       <div className="mt-2 space-y-2">
-                        {familyChildren.map((child: any) => (
-                          <div key={child.id || `${child.name}-${child.nik}`} className="rounded-lg bg-slate-50 px-3 py-2">
-                            <div className="text-sm font-black text-slate-900">{child.name || "-"}</div>
+                        {familyDisplayRows.map((member: any) => (
+                          <div key={member.id || `${member.name}-${member.nik}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                            <div className="text-sm font-black text-slate-900">
+                              {member.name || "-"} <span className="font-bold text-violet-700">({member.relationshipLabel})</span>
+                            </div>
                             <div className="mt-0.5 text-[11px] font-semibold text-slate-500">
-                              {[child.employeeId ? `ID ${child.employeeId}` : "", child.nik ? `NIK ${child.nik}` : "", child.phone || ""].filter(Boolean).join(" · ") || "-"}
+                              {[member.employeeId ? `ID ${member.employeeId}` : "", member.nik ? `NIK ${member.nik}` : "", member.phone || ""].filter(Boolean).join(" · ") || "-"}
                             </div>
                           </div>
                         ))}

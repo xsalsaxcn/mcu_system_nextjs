@@ -330,7 +330,7 @@ function personSummary(row: any) {
 
 async function loadFamilyContext(supabase: any, historyPerson: any) {
   const personId = Number(historyPerson?.id || 0);
-  if (!personId) return { role: "", parent: null, children: [] as any[] };
+  if (!personId) return { role: "", parent: null, children: [] as any[], siblings: [] as any[] };
 
   const participantType = clean(historyPerson?.participant_type).toUpperCase();
   if (participantType === "DEPENDENT") {
@@ -343,10 +343,31 @@ async function loadFamilyContext(supabase: any, historyPerson: any) {
       .maybeSingle();
     if (relation.error) throw new Error(relation.error.message);
     const parent = Array.isArray(relation.data?.parent) ? relation.data?.parent?.[0] : relation.data?.parent;
+    const parentSummary = parent?.active === false ? null : personSummary(parent);
+
+    let siblings: any[] = [];
+    const parentId = Number(parentSummary?.id || 0);
+    if (parentId) {
+      const siblingRelations = await supabase
+        .from("vaccination_person_relationships")
+        .select("relationship_type,dependent:vaccination_persons!vaccination_person_relationships_dependent_person_id_fkey(id,participant_type,participant_name,employee_id,nik,email,phone,active)")
+        .eq("parent_person_id", parentId)
+        .eq("active", true)
+        .limit(100);
+      if (siblingRelations.error) throw new Error(siblingRelations.error.message);
+
+      siblings = (siblingRelations.data || [])
+        .map((row: any) => Array.isArray(row?.dependent) ? row.dependent[0] : row?.dependent)
+        .filter((row: any) => row && row.active !== false && Number(row.id || 0) !== personId)
+        .map((row: any) => ({ ...personSummary(row), relationship: "SIBLING" }))
+        .filter(Boolean);
+    }
+
     return {
       role: "DEPENDENT",
-      parent: parent?.active === false ? null : personSummary(parent),
+      parent: parentSummary,
       children: [] as any[],
+      siblings,
     };
   }
 
@@ -364,7 +385,7 @@ async function loadFamilyContext(supabase: any, historyPerson: any) {
     .map((row: any) => personSummary(row))
     .filter(Boolean);
 
-  return { role: "PARENT", parent: null, children };
+  return { role: "PARENT", parent: null, children, siblings: [] as any[] };
 }
 
 function contextRegistrationPriority(row: any) {

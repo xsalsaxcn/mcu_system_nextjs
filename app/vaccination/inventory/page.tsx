@@ -323,8 +323,25 @@ export default function VaccinationInventoryPage() {
                       <td className="p-3">{row.stock_physical_count ?? "-"}</td>
                       <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span></td>
                       <td className="p-3">
-                        <div className="text-xs font-black text-slate-800">{Number(row.movement_count || 0)} transaksi</div>
-                        <div className="mt-1 text-[11px] text-slate-500">{row.last_movement_type || "-"}</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent("vaccination-inventory-open-lot", {
+                                detail: {
+                                  lotId: Number(row.id || 0),
+                                  lotNumber: row.lot_number || "",
+                                  label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
+                                },
+                              }),
+                            );
+                          }}
+                          className="rounded-lg px-2 py-1 text-left hover:bg-blue-50"
+                          title="Klik untuk lihat detail transaksi lot"
+                        >
+                          <div className="text-xs font-black text-blue-700 underline underline-offset-2">{Number(row.movement_count || 0)} transaksi</div>
+                          <div className="mt-1 text-[11px] text-slate-500">{row.last_movement_type || "-"}</div>
+                        </button>
                       </td>
                       <td className="p-3">{row.inventory_notes || "-"}</td>
                       <td className="p-3"><button onClick={() => startEdit(row)} className="rounded-xl border px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit</button></td>

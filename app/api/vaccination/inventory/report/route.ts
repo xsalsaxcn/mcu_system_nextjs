@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   try {
     const report = await buildVaccinationInventoryReport({
       vaccineIds: ids(req.nextUrl.searchParams.get("vaccine_ids")),
+      lotIds: ids(req.nextUrl.searchParams.get("lot_ids") || req.nextUrl.searchParams.get("lot_id")),
       from: req.nextUrl.searchParams.get("from") || "",
       to: req.nextUrl.searchParams.get("to") || "",
     });

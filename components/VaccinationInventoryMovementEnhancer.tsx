@@ -13,6 +13,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 type DetailRow = {
   date?: string | null;
+  lot_id?: number | null;
+  record_id?: number | null;
+  registration_id?: number | null;
   direction: string;
   movement_type: string;
   company: string;
@@ -26,6 +29,10 @@ type DetailRow = {
   brand: string;
   lot: string;
   dose: any;
+  service_mode?: string;
+  sale_mode?: string;
+  package_dose_count?: number | null;
+  sales_price_snapshot?: number | null;
   doctor: string;
   qty: number;
   print_status: string;
@@ -77,6 +84,7 @@ const BUCKET_TITLES: Record<string, string> = {
   remaining: "Detail Sisa Sistem",
   diff: "Detail Selisih Stock Opname",
   movements: "Semua Pencatatan / Movement Inventory",
+  lot: "Detail Movement Lot",
 };
 
 function clean(value: any) {
@@ -103,6 +111,8 @@ export default function VaccinationInventoryMovementEnhancer() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [activeBucket, setActiveBucket] = useState("");
+  const [activeLotId, setActiveLotId] = useState(0);
+  const [activeLotLabel, setActiveLotLabel] = useState("");
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -140,6 +150,15 @@ export default function VaccinationInventoryMovementEnhancer() {
   const details = report.details || [];
 
   const activeRows = useMemo(() => {
+    if (activeBucket === "lot" && activeLotId) {
+      return details
+        .filter((row) => Number(row.lot_id || 0) === activeLotId)
+        .sort((a, b) => {
+          const at = a.date ? new Date(a.date).getTime() : 0;
+          const bt = b.date ? new Date(b.date).getTime() : 0;
+          return bt - at;
+        });
+    }
     if (activeBucket === "initial") return details.filter((row) => row.movement_type === "Jumlah Awal");
     if (activeBucket === "added") return details.filter((row) => row.movement_type === "Tambahan Stok");
     if (activeBucket === "used") return details.filter((row) => row.direction === "OUT");
@@ -202,7 +221,24 @@ export default function VaccinationInventoryMovementEnhancer() {
       } as DetailRow));
     }
     return [];
-  }, [activeBucket, details, summaries]);
+  }, [activeBucket, activeLotId, details, summaries]);
+
+  const activeParticipantRows = useMemo(
+    () => activeRows.filter((row) => row.direction === "OUT" && clean(row.participant)),
+    [activeRows],
+  );
+  const activePackageRows = useMemo(
+    () => activeParticipantRows.filter((row) => clean(row.service_mode).toUpperCase() === "BAZAR" && clean(row.sale_mode).toUpperCase() === "PACKAGE"),
+    [activeParticipantRows],
+  );
+  const activeNonPackageRows = useMemo(
+    () => activeParticipantRows.filter((row) => clean(row.service_mode).toUpperCase() === "BAZAR" && clean(row.sale_mode).toUpperCase() === "NON_PACKAGE"),
+    [activeParticipantRows],
+  );
+  const activeHealthdayRows = useMemo(
+    () => activeParticipantRows.filter((row) => clean(row.service_mode).toUpperCase() === "HEALTHDAY"),
+    [activeParticipantRows],
+  );
 
   const summaryMap = useMemo(() => report.summary || { initial: 0, added: 0, used: 0, remaining: 0, diff: 0 }, [report.summary]);
   const hasReportFilter = selectedProducts.length > 0 || Boolean(dateFrom || dateTo);
@@ -248,7 +284,7 @@ export default function VaccinationInventoryMovementEnhancer() {
         const cells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
         if (cells.length < 2) continue;
         const vaccineName = clean(cells[0]?.textContent);
-        const lotNumber = clean(cells[1]?.textContent);
+        const lotNumber = clean(cells[2]?.textContent);
         if (!vaccineName || !lotNumber) continue;
 
         const selectedIds = new Set(selectedProducts.map(Number));
@@ -292,13 +328,19 @@ export default function VaccinationInventoryMovementEnhancer() {
 
     function click(event: MouseEvent) {
       const card = (event.target as HTMLElement)?.closest<HTMLElement>("[data-inventory-card-v150]");
-      if (card?.dataset.inventoryCardV150) setActiveBucket(card.dataset.inventoryCardV150);
+      if (card?.dataset.inventoryCardV150) {
+        setActiveLotId(0);
+        setActiveLotLabel("");
+        setActiveBucket(card.dataset.inventoryCardV150);
+      }
     }
     function key(event: KeyboardEvent) {
       if (!["Enter", " "].includes(event.key)) return;
       const card = (event.target as HTMLElement)?.closest<HTMLElement>("[data-inventory-card-v150]");
       if (card?.dataset.inventoryCardV150) {
         event.preventDefault();
+        setActiveLotId(0);
+        setActiveLotLabel("");
         setActiveBucket(card.dataset.inventoryCardV150);
       }
     }
@@ -311,6 +353,19 @@ export default function VaccinationInventoryMovementEnhancer() {
     };
   }, [findLotSummary, selectedProducts, summaryMap, hasReportFilter]);
 
+  useEffect(() => {
+    function openLot(event: Event) {
+      const detail = (event as CustomEvent)?.detail || {};
+      const lotId = Number(detail?.lotId || 0);
+      if (!lotId) return;
+      setActiveLotId(lotId);
+      setActiveLotLabel(clean(detail?.label || `Lot ${detail?.lotNumber || lotId}`));
+      setActiveBucket("lot");
+    }
+    window.addEventListener("vaccination-inventory-open-lot", openLot as EventListener);
+    return () => window.removeEventListener("vaccination-inventory-open-lot", openLot as EventListener);
+  }, []);
+
   function toggleProduct(id: number) {
     const key = String(id);
     setSelectedProducts((prev) => prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]);
@@ -321,6 +376,15 @@ export default function VaccinationInventoryMovementEnhancer() {
     if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
     if (dateFrom) params.set("from", dateFrom);
     if (dateTo) params.set("to", dateTo);
+    window.location.href = `/api/vaccination/inventory/export${params.toString() ? `?${params.toString()}` : ""}`;
+  }
+
+  function exportActiveDetail() {
+    const params = new URLSearchParams();
+    if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
+    if (activeBucket === "lot" && activeLotId) params.set("lot_id", String(activeLotId));
     window.location.href = `/api/vaccination/inventory/export${params.toString() ? `?${params.toString()}` : ""}`;
   }
 
@@ -348,7 +412,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={load} disabled={loading} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memuat..." : "Terapkan Filter"}</button>
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
-          <button type="button" onClick={() => setActiveBucket("movements")} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
+          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
         </div>
         <div className="mt-3 text-xs text-slate-500">Card dan angka tabel mengikuti filter yang sama. Tanpa date range, Terpakai memakai saldo kumulatif canonical Inventory (termasuk rekonsiliasi legacy bila ada). Dengan date range, Terpakai memakai record bertanggal yang dapat ditelusuri. Export mengikuti filter yang sama.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}
@@ -357,16 +421,89 @@ export default function VaccinationInventoryMovementEnhancer() {
       {activeBucket ? (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setActiveBucket(""); }}>
           <div className="max-h-[88vh] w-full max-w-7xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-4">
-              <div><div className="text-lg font-black">{BUCKET_TITLES[activeBucket] || "Detail Inventory"}</div><div className="text-xs text-slate-500">{activeRows.length} baris sesuai filter aktif</div></div>
-              <button type="button" onClick={() => setActiveBucket("")} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
+            <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
+              <div>
+                <div className="text-lg font-black">{activeBucket === "lot" && activeLotLabel ? activeLotLabel : (BUCKET_TITLES[activeBucket] || "Detail Inventory")}</div>
+                <div className="text-xs text-slate-500">{activeRows.length} baris sesuai filter aktif</div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={exportActiveDetail} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Export Detail</button>
+                <button type="button" onClick={() => { setActiveBucket(""); setActiveLotId(0); setActiveLotLabel(""); }} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
+              </div>
             </div>
-            <div className="max-h-[72vh] overflow-auto">
-              <table className="min-w-full text-left text-xs">
-                <thead className="sticky top-0 bg-slate-100 text-[11px] uppercase text-slate-600"><tr><th className="p-3">Tanggal</th><th className="p-3">Arah</th><th className="p-3">Vaksin</th><th className="p-3">Lot</th><th className="p-3 text-right">Qty</th><th className="p-3">Perusahaan / Sumber</th><th className="p-3">Peserta</th><th className="p-3">Session / Lokasi</th><th className="p-3">Dokter</th><th className="p-3">Status</th></tr></thead>
+            {activeBucket === "lot" ? (
+              <div className="grid gap-3 border-b bg-slate-50 p-4 sm:grid-cols-4">
+                {[
+                  ["Peserta Terpakai", activeParticipantRows.length],
+                  ["Healthday", activeHealthdayRows.length],
+                  ["Paket", activePackageRows.length],
+                  ["Non Paket", activeNonPackageRows.length],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border bg-white p-3">
+                    <div className="text-[10px] font-black uppercase text-slate-500">{label}</div>
+                    <div className="mt-1 text-2xl font-black text-slate-900">{value}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="max-h-[66vh] overflow-auto">
+              <table className="min-w-[1500px] text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100 text-[11px] uppercase text-slate-600">
+                  <tr>
+                    <th className="p-3">Tanggal</th>
+                    <th className="p-3">Arah</th>
+                    <th className="p-3">Transaksi</th>
+                    <th className="p-3">Vaksin</th>
+                    <th className="p-3">Lot</th>
+                    <th className="p-3">Layanan</th>
+                    <th className="p-3">Jenis Harga</th>
+                    <th className="p-3">Harga</th>
+                    <th className="p-3 text-right">Qty</th>
+                    <th className="p-3">Perusahaan / Sumber</th>
+                    <th className="p-3">Peserta</th>
+                    <th className="p-3">Session / Lokasi</th>
+                    <th className="p-3">Dokter</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
                 <tbody className="divide-y">
-                  {activeRows.map((row, index) => <tr key={`${row.direction}-${row.vaccine}-${row.lot}-${row.date}-${index}`} className="align-top"><td className="p-3 whitespace-nowrap">{formatDate(row.date)}</td><td className="p-3 font-black">{row.direction}</td><td className="p-3 font-bold">{row.vaccine}{row.brand ? ` - ${row.brand}` : ""}</td><td className="p-3">{row.lot || "-"}</td><td className="p-3 text-right font-black">{row.qty}</td><td className="p-3 font-bold">{row.company || "-"}</td><td className="p-3">{row.participant || "-"}</td><td className="p-3">{[row.session, row.location].filter(Boolean).join(" - ") || "-"}</td><td className="p-3">{row.doctor || "-"}</td><td className="p-3">{[row.print_status, row.validation_status].filter(Boolean).join(" / ") || "-"}</td></tr>)}
-                  {!activeRows.length ? <tr><td colSpan={10} className="p-8 text-center text-slate-500">Belum ada detail pada filter ini.</td></tr> : null}
+                  {activeRows.map((row, index) => {
+                    const serviceMode = clean(row.service_mode).toUpperCase();
+                    const saleMode = clean(row.sale_mode).toUpperCase();
+                    const pricingLabel =
+                      saleMode === "PACKAGE"
+                        ? `Paket ${Math.max(1, Number(row.package_dose_count || 1))} dosis`
+                        : saleMode === "NON_PACKAGE"
+                          ? "Non Paket"
+                          : serviceMode === "HEALTHDAY"
+                            ? "Free"
+                            : saleMode === "UNMAPPED"
+                              ? "Belum terpetakan"
+                              : "-";
+                    const priceLabel =
+                      row.sales_price_snapshot === null || row.sales_price_snapshot === undefined
+                        ? "-"
+                        : `Rp ${new Intl.NumberFormat("id-ID").format(Number(row.sales_price_snapshot || 0))}`;
+                    return (
+                      <tr key={`${row.direction}-${row.vaccine}-${row.lot}-${row.date}-${index}`} className="align-top">
+                        <td className="p-3 whitespace-nowrap">{formatDate(row.date)}</td>
+                        <td className="p-3 font-black">{row.direction}</td>
+                        <td className="p-3 font-bold">{row.movement_type || "-"}</td>
+                        <td className="p-3 font-bold">{row.vaccine}{row.brand ? ` - ${row.brand}` : ""}</td>
+                        <td className="p-3">{row.lot || "-"}</td>
+                        <td className="p-3">{serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : "-"}</td>
+                        <td className="p-3 font-bold">{pricingLabel}</td>
+                        <td className="p-3">{priceLabel}</td>
+                        <td className="p-3 text-right font-black">{row.qty}</td>
+                        <td className="p-3 font-bold">{row.company || "-"}</td>
+                        <td className="p-3">{row.participant || "-"}</td>
+                        <td className="p-3">{[row.session, row.location].filter(Boolean).join(" - ") || "-"}</td>
+                        <td className="p-3">{row.doctor || "-"}</td>
+                        <td className="p-3">{[row.print_status, row.validation_status].filter(Boolean).join(" / ") || "-"}</td>
+                      </tr>
+                    );
+                  })}
+                  {!activeRows.length ? <tr><td colSpan={14} className="p-8 text-center text-slate-500">Belum ada detail pada filter ini.</td></tr> : null}
                 </tbody>
               </table>
             </div>
