@@ -15,6 +15,7 @@ import {
 // V153_23_SESSION_ALL_ACTIVE_MASTER_LOTS_SAFE
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
+// V500_SESSION_PRODUCT_ASSIGNMENT_SOURCE_OF_TRUTH
 type SourceItem = {
   id: number;
   name: string;
@@ -143,6 +144,10 @@ export default function VaccinationSessionPage() {
   const [vaccines, setVaccines] = useState<any[]>([]);
   const [lots, setLots] = useState<any[]>([]);
   const [productMappings, setProductMappings] = useState<any[]>([]);
+  const [sessionProductAssignments, setSessionProductAssignments] = useState<any[]>([]);
+  const [sessionProductAssignmentReady, setSessionProductAssignmentReady] = useState(true);
+  const [sessionProductAssignmentMessage, setSessionProductAssignmentMessage] = useState("");
+  const [pendingLotDrafts, setPendingLotDrafts] = useState<Record<string, { lotId: string; doseNumber: number }>>({});
   const [locations, setLocations] = useState<LocationOption[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [editingSession, setEditingSession] = useState<any | null>(null);
@@ -257,20 +262,25 @@ export default function VaccinationSessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionVaccines, vaccines, lots]);
 
-  // V153.23: Session eligibility follows active Master Lots, NOT import mappings.
-  // Every active vaccine that owns at least one active lot in Master must be selectable.
-  const activeLotVaccineIds = useMemo(() => {
+  // V500: Master Product & Lot assignment is the source of truth for Session eligibility.
+  // A product may be assigned before a Lot exists. Existing session_vaccines remain
+  // grandfathered so historical/operational mappings are never silently dropped.
+  const currentSessionAssignments = useMemo(() => {
+    if (!currentSessionId) return [];
+    return sessionProductAssignments.filter(
+      (assignment) =>
+        assignment.active !== false &&
+        Number(assignment.session_id || 0) === currentSessionId,
+    );
+  }, [sessionProductAssignments, currentSessionId]);
+
+  const assignedVaccineIdsForCurrentSession = useMemo(() => {
     return new Set(
-      lots
-        .filter(
-          (lot) =>
-            lot.active !== false &&
-            lotAllowedForSession(lot, currentCompanyName, currentSessionId),
-        )
-        .map((lot) => String(lot.vaccine_id || ""))
+      currentSessionAssignments
+        .map((assignment) => String(assignment.vaccine_id || ""))
         .filter(Boolean),
     );
-  }, [lots, currentCompanyName, currentSessionId]);
+  }, [currentSessionAssignments]);
 
   const selectableVaccines = useMemo(() => {
     const grandfatheredIds = new Set(
@@ -279,10 +289,63 @@ export default function VaccinationSessionPage() {
 
     return vaccines.filter(
       (vaccine) =>
-        activeLotVaccineIds.has(String(vaccine.id)) ||
+        assignedVaccineIdsForCurrentSession.has(String(vaccine.id)) ||
         grandfatheredIds.has(String(vaccine.id)),
     );
-  }, [vaccines, activeLotVaccineIds, sessionVaccines]);
+  }, [vaccines, assignedVaccineIdsForCurrentSession, sessionVaccines]);
+
+  function assignmentServiceModes(sessionId: number, vaccineId: any) {
+    const modes = new Set<string>();
+    for (const assignment of sessionProductAssignments) {
+      if (assignment.active === false) continue;
+      if (Number(assignment.session_id || 0) !== Number(sessionId || 0)) continue;
+      if (String(assignment.vaccine_id || "") !== String(vaccineId || "")) continue;
+      modes.add(
+        String(assignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+          ? "BAZAR"
+          : "HEALTHDAY",
+      );
+    }
+    return Array.from(modes);
+  }
+
+  function assignmentServiceLabel(sessionId: number, vaccineId: any) {
+    const modes = assignmentServiceModes(sessionId, vaccineId);
+    if (!modes.length) return "";
+    return modes
+      .map((mode) => (mode === "BAZAR" ? "Bazar" : "Healthday"))
+      .join(" + ");
+  }
+
+  const pendingAssignedProducts = useMemo(() => {
+    if (!currentSessionId) return [];
+    const existingIds = new Set(
+      sessionVaccines.map((item) => String(item.vaccineId || "")).filter(Boolean),
+    );
+    const seen = new Set<string>();
+    const rows: any[] = [];
+
+    for (const assignment of currentSessionAssignments) {
+      const vaccineId = String(assignment.vaccine_id || "");
+      if (!vaccineId || existingIds.has(vaccineId) || seen.has(vaccineId)) continue;
+      const vaccine = vaccines.find((item) => String(item.id) === vaccineId);
+      if (!vaccine) continue;
+      seen.add(vaccineId);
+      rows.push({
+        vaccineId,
+        vaccine,
+        modes: assignmentServiceModes(currentSessionId, vaccineId),
+      });
+    }
+
+    return rows;
+  }, [
+    currentSessionId,
+    currentSessionAssignments,
+    sessionVaccines,
+    vaccines,
+    sessionProductAssignments,
+  ]);
 
   const filteredLots = useMemo(() => {
     return lots.filter(
@@ -310,20 +373,29 @@ export default function VaccinationSessionPage() {
 
   const editSelectableVaccines = useMemo(() => {
     const allowedIds = new Set(
-      lots
+      sessionProductAssignments
         .filter(
-          (lot) =>
-            lot.active !== false &&
-            lotAllowedForSession(lot, editCompanyName, editSessionId),
+          (assignment) =>
+            assignment.active !== false &&
+            Number(assignment.session_id || 0) === editSessionId,
         )
-        .map((lot) => String(lot.vaccine_id || ""))
+        .map((assignment) => String(assignment.vaccine_id || ""))
         .filter(Boolean),
     );
+
+    // Grandfather existing active session vaccines even if the Master assignment
+    // was created later, so existing operations/history remain editable.
     for (const item of editSessionVaccines) {
       if (item.vaccineId) allowedIds.add(String(item.vaccineId));
     }
+
     return vaccines.filter((vaccine) => allowedIds.has(String(vaccine.id)));
-  }, [vaccines, lots, editCompanyName, editSessionId, editSessionVaccines]);
+  }, [
+    vaccines,
+    sessionProductAssignments,
+    editSessionId,
+    editSessionVaccines,
+  ]);
 
   function importedProductLabel(vaccineId: string) {
     const mapping = productMappings.find(
@@ -402,6 +474,59 @@ export default function VaccinationSessionPage() {
 
     setSessionVaccines((prev) => [...prev, draft]);
     setDraft(emptyDraft);
+  }
+
+  function pendingLotsForVaccine(vaccineId: string) {
+    return lots.filter(
+      (lot) =>
+        lot.active !== false &&
+        lotAllowedForSession(lot, currentCompanyName, currentSessionId) &&
+        String(lot.vaccine_id || "") === String(vaccineId || ""),
+    );
+  }
+
+  function setPendingAssignedLot(vaccineId: string, patch: { lotId?: string; doseNumber?: number }) {
+    setPendingLotDrafts((prev) => ({
+      ...prev,
+      [String(vaccineId)]: {
+        lotId: patch.lotId ?? prev[String(vaccineId)]?.lotId ?? "",
+        doseNumber: Math.max(
+          1,
+          Number(patch.doseNumber ?? prev[String(vaccineId)]?.doseNumber ?? 1),
+        ),
+      },
+    }));
+  }
+
+  function activatePendingAssignedProduct(vaccineId: string) {
+    setError("");
+    const pending = pendingLotDrafts[String(vaccineId)] || { lotId: "", doseNumber: 1 };
+    if (!pending.lotId) {
+      setError("Pilih Lot Number terlebih dahulu. Jika Lot belum ada, tambahkan di Master Produk & Lot.");
+      return;
+    }
+
+    const duplicate = sessionVaccines.some(
+      (item) =>
+        String(item.vaccineId) === String(vaccineId) &&
+        String(item.lotId) === String(pending.lotId) &&
+        Number(item.doseNumber) === Number(pending.doseNumber || 1),
+    );
+    if (duplicate) return;
+
+    setSessionVaccines((prev) => [
+      ...prev,
+      {
+        vaccineId: String(vaccineId),
+        lotId: String(pending.lotId),
+        doseNumber: Math.max(1, Number(pending.doseNumber || 1)),
+      },
+    ]);
+    setPendingLotDrafts((prev) => {
+      const next = { ...prev };
+      delete next[String(vaccineId)];
+      return next;
+    });
   }
 
   function removeSessionVaccine(index: number) {
@@ -811,6 +936,13 @@ export default function VaccinationSessionPage() {
       setVaccines((json.vaccines || []).filter((v: any) => v.active !== false));
       setLots((json.lots || []).filter((lot: any) => lot.active !== false));
       setProductMappings((json.productMappings || []).filter((mapping: any) => mapping.active !== false));
+      setSessionProductAssignments(
+        (json.sessionProductAssignments || []).filter(
+          (assignment: any) => assignment.active !== false,
+        ),
+      );
+      setSessionProductAssignmentReady(json.sessionProductAssignmentReady !== false);
+      setSessionProductAssignmentMessage(json.sessionProductAssignmentMessage || "");
     }
   }
 
@@ -1034,6 +1166,17 @@ export default function VaccinationSessionPage() {
     loadSources();
     loadMaster();
     loadSessions();
+  }, []);
+
+  // V500: when returning from Master Produk & Lot in another tab/window,
+  // refresh assignments + lots automatically so a newly added Lot appears
+  // without rebuilding the Session mapping from scratch.
+  useEffect(() => {
+    const refreshMasterOnFocus = () => {
+      loadMaster();
+    };
+    window.addEventListener("focus", refreshMasterOnFocus);
+    return () => window.removeEventListener("focus", refreshMasterOnFocus);
   }, []);
 
   useEffect(() => {
@@ -1314,11 +1457,17 @@ export default function VaccinationSessionPage() {
           </p>
 
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-            Semua vaksin yang memiliki Lot Aktif di Master Vaksin dapat dipilih untuk session. Setelah vaksin dipilih, dropdown Lot Number otomatis hanya menampilkan lot aktif milik vaksin tersebut.
+            Daftar vaksin mengikuti assignment di <b>Master Produk & Lot</b> untuk Session/Lokasi ini. Produk yang sudah di-assign tetap terbaca walaupun Lot belum tersedia; ketika Lot ditambahkan kemudian, Session akan membaca Lot tersebut otomatis saat halaman kembali aktif/di-refresh.
           </div>
 
+          {!sessionProductAssignmentReady ? (
+            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+              {sessionProductAssignmentMessage || "Assignment produk per Session belum aktif. Jalankan SQL V499 terlebih dahulu."}
+            </div>
+          ) : null}
+
           <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-            Lot yang tampil mengikuti perusahaan dan Session/Lokasi. <b>{currentCompanyName || "perusahaan belum dipilih"}</b>{currentSessionId ? ` · Session ID ${currentSessionId}` : " · session baru"}. Lot General tetap dapat dipakai lintas perusahaan; lot Session hanya muncul pada session yang sama.
+            Session aktif: <b>{currentCompanyName || "perusahaan belum dipilih"}</b>{currentSessionId ? ` · Session ID ${currentSessionId}` : " · session belum tersimpan"}. Produk existing yang sudah pernah aktif di Session tetap dipertahankan sebagai grandfathered; produk baru hanya berasal dari assignment Session ini.
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">
@@ -1336,6 +1485,9 @@ export default function VaccinationSessionPage() {
                   <option key={vaccine.id} value={vaccine.id}>
                     {importedLabel || vaccine.name}
                     {!importedLabel && vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                    {currentSessionId && assignmentServiceLabel(currentSessionId, vaccine.id)
+                      ? ` · ${assignmentServiceLabel(currentSessionId, vaccine.id)}`
+                      : ""}
                   </option>
                 );
               })}
@@ -1365,7 +1517,7 @@ export default function VaccinationSessionPage() {
 
             {selectedVaccineHasNoActiveLot ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 md:col-span-2">
-                Vaksin ini belum memiliki Lot Aktif di Master Vaksin. Tambahkan atau aktifkan lot di <a href="/vaccination/master" className="font-bold underline">Master Vaksin</a>.
+                Produk ini sudah boleh berada di Session, tetapi belum memiliki Lot aktif yang sesuai. Lot Number boleh ditambahkan belakangan di <a href="/vaccination/master" className="font-bold underline">Master Produk & Lot</a>; setelah itu kembali ke halaman ini dan Lot akan terbaca otomatis.
               </div>
             ) : null}
 
@@ -1420,10 +1572,76 @@ export default function VaccinationSessionPage() {
                   </tr>
                 ))}
 
-                {!sessionVaccines.length ? (
+                {pendingAssignedProducts.map((row) => {
+                  const vaccineId = String(row.vaccineId);
+                  const availableLots = pendingLotsForVaccine(vaccineId);
+                  const pending = pendingLotDrafts[vaccineId] || {
+                    lotId: "",
+                    doseNumber: 1,
+                  };
+                  return (
+                    <tr key={`assigned-${vaccineId}`} className="bg-amber-50/60">
+                      <td className="p-3">
+                        <div className="font-bold">{vaccineName(vaccineId)}</div>
+                        <div className="mt-1 text-[11px] font-semibold text-amber-700">
+                          Assigned dari Master · {row.modes
+                            .map((mode: string) => (mode === "BAZAR" ? "Bazar" : "Healthday"))
+                            .join(" + ") || "Session"}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        {availableLots.length ? (
+                          <select
+                            className="w-full min-w-[260px] rounded-lg border bg-white px-2 py-2 text-xs font-semibold"
+                            value={pending.lotId}
+                            onChange={(e) =>
+                              setPendingAssignedLot(vaccineId, { lotId: e.target.value })
+                            }
+                          >
+                            <option value="">Pilih Lot Number yang baru tersedia</option>
+                            {availableLots.map((lot) => (
+                              <option key={lot.id} value={String(lot.id)}>
+                                {lotName(String(lot.id))}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="rounded-lg bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800">
+                            Menunggu Lot
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-20 rounded-lg border bg-white px-2 py-2 text-xs font-semibold"
+                          value={pending.doseNumber}
+                          onChange={(e) =>
+                            setPendingAssignedLot(vaccineId, {
+                              doseNumber: Math.max(1, Number(e.target.value || 1)),
+                            })
+                          }
+                        />
+                      </td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          disabled={!availableLots.length || !pending.lotId}
+                          onClick={() => activatePendingAssignedProduct(vaccineId)}
+                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Set Lot
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!sessionVaccines.length && !pendingAssignedProducts.length ? (
                   <tr>
                     <td colSpan={4} className="p-5 text-center text-slate-500">
-                      Belum ada vaksin di session ini.
+                      Belum ada produk yang di-assign ke Session ini. Assign produk dari Master Produk & Lot terlebih dahulu.
                     </td>
                   </tr>
                 ) : null}
@@ -1436,11 +1654,11 @@ export default function VaccinationSessionPage() {
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div className="font-black text-amber-900">3. Mapping Manual Vaksin dari Database</div>
               <p className="mt-1 text-sm text-amber-800">
-                Mapping existing tetap dipertahankan. Produk/lot baru otomatis ditambahkan sebagai opsi mapping tanpa mengubah pilihan lama.
+                Mapping existing tetap dipertahankan. Opsi mapping hanya berasal dari produk Session ini yang sudah memiliki Lot aktif. Produk assigned tanpa Lot tetap tercatat sebagai Menunggu Lot; setelah Lot ditambahkan di Master dan di-set pada daftar di atas, opsi mapping otomatis ikut tersedia.
               </p>
               {!sessionVaccines.length ? (
                 <div className="mt-3 rounded-xl bg-white p-3 text-sm font-bold text-red-700">
-                  Tambahkan daftar vaksin & lot terlebih dahulu, baru pilih mapping.
+                  Belum ada produk Session yang memiliki Lot aktif. Produk assigned tanpa Lot tetap aman; tambahkan Lot di Master, lalu Set Lot pada daftar di atas.
                 </div>
               ) : null}
               <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
@@ -2062,6 +2280,9 @@ export default function VaccinationSessionPage() {
                     {editSelectableVaccines.map((vaccine) => (
                       <option key={vaccine.id} value={String(vaccine.id)}>
                         {vaccineName(String(vaccine.id))}
+                        {editSessionId && assignmentServiceLabel(editSessionId, vaccine.id)
+                          ? ` · ${assignmentServiceLabel(editSessionId, vaccine.id)}`
+                          : ""}
                       </option>
                     ))}
                   </select>
