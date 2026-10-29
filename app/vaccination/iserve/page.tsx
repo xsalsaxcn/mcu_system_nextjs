@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 // V502_ISERVE_EXACT_COMBINATION_BATCH_EXPORT_UI
+// V507_ISERVE_PRICING_METADATA_UI
 function cleanText(value: any) {
   return String(value ?? "").trim();
 }
@@ -292,6 +293,7 @@ export default function VaccinationIserveExportPage() {
                       <th className="p-3 text-left">Kombinasi Vaksin</th>
                       <th className="p-3 text-left">Jumlah Vaksin</th>
                       <th className="p-3 text-left">Peserta</th>
+                      <th className="p-3 text-left">Paket / Non Paket</th>
                       <th className="p-3 text-left">Contoh Nama</th>
                       <th className="p-3 text-left">Export</th>
                     </tr>
@@ -315,6 +317,22 @@ export default function VaccinationIserveExportPage() {
                             {combo.participant_count} peserta
                           </span>
                         </td>
+                        <td className="max-w-[360px] p-3 text-xs text-slate-600">
+                          {(combo.sales_options || []).map((row: any) => (
+                            <div key={`${row.vaccine_id || row.vaccine_name}`} className="mb-1 last:mb-0">
+                              <span className="font-bold text-slate-800">{row.vaccine_name}: </span>
+                              {(row.options || []).length
+                                ? (row.options || [])
+                                    .map((option: any) =>
+                                      String(option.sale_mode || "NON_PACKAGE").toUpperCase() === "PACKAGE"
+                                        ? `Paket ${option.package_dose_count} dosis · Rp ${Number(option.price || 0).toLocaleString("id-ID")}`
+                                        : `Non Paket · Rp ${Number(option.price || 0).toLocaleString("id-ID")}`
+                                    )
+                                    .join(" | ")
+                                : "Belum diset"}
+                            </div>
+                          ))}
+                        </td>
                         <td className="max-w-[420px] p-3 text-xs text-slate-600">
                           {(combo.participant_names || []).join(", ") || "-"}
                           {combo.participant_count >
@@ -335,7 +353,7 @@ export default function VaccinationIserveExportPage() {
                     {!combinations.length ? (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           className="p-8 text-center text-sm text-slate-500"
                         >
                           Belum ada exact combination untuk Session ini.
@@ -354,6 +372,7 @@ export default function VaccinationIserveExportPage() {
               Pilih Session → pilih satu exact combination → Export Batch →
               buka Import Appointment di iServe → pilih Vaccination/Product +
               Lot/Serial Number langsung di wizard → upload file batch tersebut.
+              Kategori Paket/Non Paket ikut dicatat pada sheet Notes dan tidak membuat stok/product iServe baru.
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
+// V507_PRICING_LINK
 // V503_MASTER_SAVE_RESET_AND_EDIT_ISOLATION
 
 // V498_PRODUCT_LIST_FILTER
@@ -1609,6 +1610,12 @@ export default function VaccinationMasterPage() {
               className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-100"
             >
               ⇩ Export iServe
+            </a>
+            <a
+              href="/vaccination/pricing"
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100"
+            >
+              💰 Paket / Non Paket
             </a>
             <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
           </div>

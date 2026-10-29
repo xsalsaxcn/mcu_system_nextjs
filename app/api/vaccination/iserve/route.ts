@@ -4,6 +4,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // V502_ISERVE_EXACT_COMBINATION_BATCH_EXPORT
+// V507_ISERVE_PRICING_METADATA
 export const dynamic = "force-dynamic";
 
 const ISERVE_HEADERS = [
@@ -73,6 +74,45 @@ function buildCombination(items: any[]) {
     label: benefits.map((row: any) => row.label).join(" + "),
     benefits,
   };
+}
+
+async function loadSalesOptionsForVaccines(supabase: any, vaccineIds: number[]) {
+  const ids = Array.from(new Set(vaccineIds.filter(Boolean)));
+  const map = new Map<number, any[]>();
+  if (!ids.length) return map;
+
+  const result = await supabase
+    .from("vaccination_vaccine_sales_options")
+    .select("id,vaccine_id,sale_mode,package_dose_count,price,label,active")
+    .in("vaccine_id", ids)
+    .eq("active", true)
+    .order("vaccine_id", { ascending: true })
+    .order("sale_mode", { ascending: true });
+
+  if (result.error) {
+    const code = String(result.error?.code || "");
+    const message = String(result.error?.message || "").toLowerCase();
+    if (code === "42P01" || message.includes("vaccination_vaccine_sales_options")) {
+      return map;
+    }
+    throw new Error(result.error.message);
+  }
+
+  for (const row of result.data || []) {
+    const vaccineId = Number((row as any).vaccine_id || 0);
+    if (!vaccineId) continue;
+    if (!map.has(vaccineId)) map.set(vaccineId, []);
+    map.get(vaccineId)!.push(row);
+  }
+  return map;
+}
+
+function pricingRowsForBenefits(benefits: any[], salesMap: Map<number, any[]>) {
+  return (benefits || []).map((benefit: any) => ({
+    vaccine_id: Number(benefit?.vaccine_id || 0) || null,
+    vaccine_name: clean(benefit?.label),
+    options: salesMap.get(Number(benefit?.vaccine_id || 0)) || [],
+  }));
 }
 
 async function loadSessionBatchData(supabase: any, sessionId: number) {
@@ -190,7 +230,7 @@ async function participantMapForRegistrations(supabase: any, registrations: any[
   return map;
 }
 
-function buildWorkbook(rows: any[], batchLabel: string, session: any) {
+function buildWorkbook(rows: any[], batchLabel: string, session: any, pricingInfo: any[] = []) {
   const appointmentRows = [
     ISERVE_HEADERS,
     ...rows.map((row: any) => [
@@ -237,6 +277,18 @@ function buildWorkbook(rows: any[], batchLabel: string, session: any) {
     ["Lokasi", clean(session?.location)],
     ["Tanggal", clean(session?.session_date)],
     ["Catatan", "1 exact kombinasi vaksin = 1 file batch. Jangan gabungkan kombinasi berbeda dalam satu import appointment."],
+    [],
+    ["Harga / Kategori Sistem", "Paket dan Non Paket hanya layer harga. Keduanya tetap memakai stok fisik produk/lot yang sama."],
+    ...pricingInfo.flatMap((row: any) => {
+      const options = Array.isArray(row?.options) ? row.options : [];
+      if (!options.length) {
+        return [[clean(row?.vaccine_name) || "Vaksin", "Belum ada kategori harga Paket/Non Paket"]];
+      }
+      return options.map((option: any) => [
+        clean(row?.vaccine_name) || "Vaksin",
+        `${String(option?.sale_mode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? `Paket ${Number(option?.package_dose_count || 1)} dosis` : "Non Paket"} · Rp ${Number(option?.price || 0).toLocaleString("id-ID")}`,
+      ]);
+    }),
   ];
   const notesSheet = XLSX.utils.aoa_to_sheet(notes);
   notesSheet["!cols"] = [{ wch: 28 }, { wch: 88 }];
@@ -287,6 +339,18 @@ export async function GET(req: NextRequest) {
     return fail(error?.message || "Gagal membaca data batch iServe.", 500);
   }
 
+  const vaccineIdsForPricing = data.groups.flatMap((group: any) =>
+    (group.benefits || [])
+      .map((benefit: any) => Number(benefit?.vaccine_id || 0))
+      .filter(Boolean),
+  );
+  let salesMap = new Map<number, any[]>();
+  try {
+    salesMap = await loadSalesOptionsForVaccines(supabase, vaccineIdsForPricing);
+  } catch (error: any) {
+    return fail(error?.message || "Gagal membaca harga Paket/Non Paket.", 500);
+  }
+
   if (mode === "meta") {
     return ok({
       session: data.session,
@@ -299,6 +363,7 @@ export async function GET(req: NextRequest) {
           .map((row: any) => clean(row.participant_name))
           .filter(Boolean)
           .slice(0, 12),
+        sales_options: pricingRowsForBenefits(group.benefits || [], salesMap),
       })),
       skipped_count: data.skipped.length,
       skipped_names: data.skipped
@@ -387,7 +452,8 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const output = buildWorkbook(rows, selectedGroup.label, data.session);
+  const pricingInfo = pricingRowsForBenefits(selectedGroup.benefits || [], salesMap);
+  const output = buildWorkbook(rows, selectedGroup.label, data.session, pricingInfo);
   const filename =
     mode === "template"
       ? "ISERVE_TEMPLATE_APPOINTMENT_KOSONG.xlsx"
