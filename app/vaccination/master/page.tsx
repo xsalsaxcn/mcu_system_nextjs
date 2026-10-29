@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
+// V496_MASTER_LOT_STOCK_TRANSFER_SAFE
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_COMPANY_STOCK_OWNERSHIP_V1
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
@@ -89,6 +90,10 @@ export default function VaccinationMasterPage() {
   const [selectedMasterVaccineId, setSelectedMasterVaccineId] = useState("");
   const [editingMappingId, setEditingMappingId] = useState("");
   const [editingMappingVaccineId, setEditingMappingVaccineId] = useState("");
+  const [transferLot, setTransferLot] = useState<any | null>(null);
+  const [transferCompanyName, setTransferCompanyName] = useState("");
+  const [transferSessionId, setTransferSessionId] = useState("");
+  const [transferringStock, setTransferringStock] = useState(false);
   const [vaccineForm, setVaccineForm] = useState({
     name: "",
     brand: "",
@@ -411,6 +416,79 @@ export default function VaccinationMasterPage() {
     }
   }
 
+  function openTransferStock(lot: any) {
+    setError("");
+    setTransferLot(lot);
+    setTransferCompanyName("");
+    setTransferSessionId("");
+  }
+
+  function closeTransferStock() {
+    if (transferringStock) return;
+    setTransferLot(null);
+    setTransferCompanyName("");
+    setTransferSessionId("");
+  }
+
+  async function transferRemainingStock() {
+    if (!transferLot) return;
+    setError("");
+
+    const remaining =
+      Number(transferLot.stock_initial || 0) +
+      Number(transferLot.stock_added || 0) -
+      Number(transferLot.stock_used || 0);
+
+    if (remaining <= 0) {
+      setError("Tidak ada sisa stok yang dapat ditransfer.");
+      return;
+    }
+    if (!cleanText(transferCompanyName)) {
+      setError("Pilih Perusahaan tujuan transfer stok.");
+      return;
+    }
+    if (!cleanText(transferSessionId)) {
+      setError("Pilih Session / Lokasi tujuan transfer stok.");
+      return;
+    }
+
+    const targetSession = stockSessions.find(
+      (session) => String(session.id) === String(transferSessionId),
+    );
+    if (!targetSession) {
+      setError("Session / Lokasi tujuan tidak ditemukan.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Transfer seluruh sisa stok ${remaining} dari Lot ${transferLot.lot_number} ke ${sessionLabel(targetSession)}?`,
+    );
+    if (!confirmed) return;
+
+    setTransferringStock(true);
+    try {
+      const json = await postMaster({
+        action: "transfer-lot-stock",
+        lotId: transferLot.id,
+        targetCompanyName: transferCompanyName,
+        targetSessionId: transferSessionId,
+      });
+
+      setMessage(
+        json.message ||
+          `Sisa stok Lot ${transferLot.lot_number} berhasil ditransfer.`,
+      );
+      setTransferLot(null);
+      setTransferCompanyName("");
+      setTransferSessionId("");
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || "Transfer stok gagal.");
+    } finally {
+      setTransferringStock(false);
+    }
+  }
+
   function startEditMapping(mapping: any) {
     setEditingMappingId(String(mapping.id || ""));
     setEditingMappingVaccineId(String(mapping.vaccine_id || mapping.vaccine?.id || ""));
@@ -628,6 +706,32 @@ export default function VaccinationMasterPage() {
       ),
     [stockSessions],
   );
+
+  const transferTargetSessions = useMemo(() => {
+    const companyKey = normalizeCompany(transferCompanyName);
+    if (!companyKey) return [];
+    return stockSessions
+      .filter(
+        (session) =>
+          normalizeCompany(session.company_name) === companyKey &&
+          String(session.status || "").toUpperCase() !== "CANCELLED",
+      )
+      .sort((a, b) => {
+        const dateCompare = String(b.session_date || "").localeCompare(
+          String(a.session_date || ""),
+        );
+        return dateCompare || Number(b.id || 0) - Number(a.id || 0);
+      });
+  }, [stockSessions, transferCompanyName]);
+
+  const transferRemaining = transferLot
+    ? Math.max(
+        0,
+        Number(transferLot.stock_initial || 0) +
+          Number(transferLot.stock_added || 0) -
+          Number(transferLot.stock_used || 0),
+      )
+    : 0;
 
   const filteredMasterLots = useMemo(() => {
     if (stockFilter === "ALL") return lots;
@@ -1362,6 +1466,15 @@ export default function VaccinationMasterPage() {
                       <td className="p-3">
                         <div className="flex gap-2">
                           <button type="button" onClick={() => editLot(lot)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                          <button
+                            type="button"
+                            onClick={() => openTransferStock(lot)}
+                            disabled={awal + tambah - used <= 0}
+                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={awal + tambah - used <= 0 ? "Tidak ada sisa stok" : "Transfer seluruh sisa stok ke Session lain"}
+                          >
+                            ⇄ Transfer Stok
+                          </button>
                           <button type="button" onClick={() => deleteLot(lot)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus lot">🗑️</button>
                         </div>
                       </td>
@@ -1372,6 +1485,123 @@ export default function VaccinationMasterPage() {
             </table>
           </div>
         </section>
+
+        {transferLot ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b p-5">
+                <div>
+                  <h2 className="text-xl font-black">Transfer Stok</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {transferLot.vaccine?.name || "Vaksin"} · Lot{" "}
+                    <span className="font-bold">{transferLot.lot_number}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeTransferStock}
+                  disabled={transferringStock}
+                  className="rounded-lg border px-3 py-2 text-sm font-bold disabled:opacity-50"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 sm:grid-cols-2">
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-500">Stok Saat Ini</div>
+                    <div className="mt-1 text-2xl font-black">{transferRemaining}</div>
+                    <div className="text-xs text-slate-500">Seluruh sisa stok akan dipindahkan.</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-500">Owner Saat Ini</div>
+                    <div className="mt-1 text-sm font-bold">
+                      {lotScope(transferLot) === "GENERAL"
+                        ? "Global"
+                        : lotScope(transferLot) === "COMPANY"
+                          ? transferLot.stock_company_name || "Perusahaan"
+                          : `${transferLot.stock_company_name || "Perusahaan"} · ${sessionLabel(
+                              sessionMap.get(Number(transferLot.stock_session_id || 0)),
+                            )}`}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-bold">Perusahaan Tujuan</span>
+                    <select
+                      className="input w-full"
+                      value={transferCompanyName}
+                      onChange={(e) => {
+                        setTransferCompanyName(e.target.value);
+                        setTransferSessionId("");
+                      }}
+                    >
+                      <option value="">Pilih perusahaan</option>
+                      {companyOptions.map((company) => (
+                        <option key={company} value={company}>
+                          {company}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-sm font-bold">Session / Lokasi Tujuan</span>
+                    <select
+                      className="input w-full"
+                      value={transferSessionId}
+                      onChange={(e) => setTransferSessionId(e.target.value)}
+                      disabled={!transferCompanyName}
+                    >
+                      <option value="">
+                        {transferCompanyName
+                          ? "Pilih Session / Lokasi"
+                          : "Pilih perusahaan terlebih dahulu"}
+                      </option>
+                      {transferTargetSessions.map((session) => (
+                        <option key={session.id} value={String(session.id)}>
+                          {sessionLabel(session)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Transfer tidak menghapus riwayat pemakaian sebelumnya. Hanya ownership
+                  <b> sisa stok</b> lot yang dipindahkan ke Session tujuan dan dicatat ke audit inventory.
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t p-5">
+                <button
+                  type="button"
+                  onClick={closeTransferStock}
+                  disabled={transferringStock}
+                  className="rounded-xl border px-4 py-2 font-bold disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={transferRemainingStock}
+                  disabled={
+                    transferringStock ||
+                    !transferCompanyName ||
+                    !transferSessionId ||
+                    transferRemaining <= 0
+                  }
+                  className="rounded-xl bg-amber-500 px-4 py-2 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {transferringStock ? "Memindahkan..." : `Transfer Sisa Stok (${transferRemaining})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   );

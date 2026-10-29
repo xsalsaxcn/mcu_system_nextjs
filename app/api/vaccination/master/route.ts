@@ -6,6 +6,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // V153_22_SESSION_LOT_RECONCILE_SAFE
 // V153_21_MASTER_ROW_EDIT_DELETE_SAFE
+// V496_MASTER_LOT_STOCK_TRANSFER_SAFE
 // V153_18_PRODUCT_LOT_IMPORT_MAPPING_SAFE
 export const dynamic = "force-dynamic";
 
@@ -646,6 +647,180 @@ export async function POST(req: NextRequest) {
     if (result.error) return fail(result.error.message, 500);
     if (!result.data) return fail("Mapping produk tidak ditemukan.", 404);
     return ok({ message: "Mapping produk berhasil dihapus. Master vaksin dan lot tetap aman." });
+  }
+
+  if (action === "transfer-lot-stock") {
+    const lotId = toInt(body.lotId || body.id, 0);
+    const targetCompanyName = clean(body.targetCompanyName || body.stockCompanyName);
+    const targetSessionId = toInt(body.targetSessionId || body.stockSessionId, 0);
+
+    if (!lotId) return fail("Lot wajib dipilih.");
+    if (!targetCompanyName) return fail("Perusahaan tujuan wajib dipilih.");
+    if (!targetSessionId) return fail("Session / Lokasi tujuan wajib dipilih.");
+
+    const [lotResult, sessionResult, recordsResult] = await Promise.all([
+      supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,stock_scope,stock_company_name,stock_session_id,inventory_notes")
+        .eq("id", lotId)
+        .maybeSingle(),
+      supabase
+        .from("vaccination_sessions")
+        .select("id,session_name,company_name,location,session_date,status")
+        .eq("id", targetSessionId)
+        .maybeSingle(),
+      supabase
+        .from("vaccination_records")
+        .select("id,status")
+        .eq("lot_id", lotId)
+        .limit(20000),
+    ]);
+
+    if (lotResult.error) return fail(lotResult.error.message, 500);
+    if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    if (!sessionResult.data) return fail("Session / Lokasi tujuan tidak ditemukan.", 404);
+    if (recordsResult.error) return fail(recordsResult.error.message, 500);
+
+    const targetSession = sessionResult.data as any;
+    const canonicalCompany = clean(targetSession.company_name);
+    if (!canonicalCompany) {
+      return fail("Session / Lokasi tujuan belum memiliki perusahaan.", 409);
+    }
+    if (
+      normalizeCompanyName(targetCompanyName) !==
+      normalizeCompanyName(canonicalCompany)
+    ) {
+      return fail(
+        `Session / Lokasi yang dipilih milik ${canonicalCompany}, bukan ${targetCompanyName}.`,
+        409,
+      );
+    }
+    if (String(targetSession.status || "").toUpperCase() === "CANCELLED") {
+      return fail("Session / Lokasi tujuan sudah dibatalkan.", 409);
+    }
+
+    const lot = lotResult.data as any;
+    if (
+      sanitizeStockScope(lot.stock_scope) === "SESSION" &&
+      Number(lot.stock_session_id || 0) === Number(targetSessionId)
+    ) {
+      return fail("Lot ini sudah dimiliki oleh Session / Lokasi tujuan tersebut.", 409);
+    }
+
+    const activeRecordCount = (recordsResult.data || []).filter(
+      (row: any) =>
+        !["CANCELLED", "CANCELED", "VOID", "VOIDED", "BATAL"].includes(
+          String(row.status || "").toUpperCase(),
+        ),
+    ).length;
+    const used = Math.max(Number(lot.stock_used || 0), activeRecordCount);
+    const remaining =
+      Number(lot.stock_initial || 0) +
+      Number(lot.stock_added || 0) -
+      used;
+
+    if (remaining <= 0) {
+      return fail("Tidak ada sisa stok yang dapat ditransfer.", 409);
+    }
+
+    const previousOwnership = {
+      stock_scope: sanitizeStockScope(lot.stock_scope),
+      stock_company_name: lot.stock_company_name ?? null,
+      stock_session_id: lot.stock_session_id ?? null,
+    };
+
+    const sourceSessionId = Number(lot.stock_session_id || 0);
+    let sourceSessionLabel = "";
+    if (sourceSessionId) {
+      const sourceSessionResult = await supabase
+        .from("vaccination_sessions")
+        .select("id,session_name,company_name,location,session_date")
+        .eq("id", sourceSessionId)
+        .maybeSingle();
+      if (!sourceSessionResult.error && sourceSessionResult.data) {
+        const sourceSession = sourceSessionResult.data as any;
+        sourceSessionLabel = [
+          clean(sourceSession.session_name),
+          clean(sourceSession.location),
+          clean(sourceSession.session_date),
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      }
+    }
+
+    const sourceOwner =
+      previousOwnership.stock_scope === "SESSION"
+        ? `${clean(previousOwnership.stock_company_name) || "Perusahaan"}${sourceSessionLabel ? ` · ${sourceSessionLabel}` : ""}`
+        : previousOwnership.stock_scope === "COMPANY"
+          ? clean(previousOwnership.stock_company_name) || "Perusahaan"
+          : "Global";
+
+    const targetLabel = [
+      clean(targetSession.session_name),
+      clean(targetSession.location),
+      clean(targetSession.session_date),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const updateResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .update({
+        stock_scope: "SESSION",
+        stock_company_name: canonicalCompany,
+        stock_session_id: Number(targetSession.id),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lotId)
+      .select("*")
+      .single();
+
+    if (updateResult.error) return fail(updateResult.error.message, 500);
+
+    const createdBy =
+      (user as any).email ||
+      (user as any).name ||
+      (user as any).id ||
+      "system";
+    const note =
+      `Transfer sisa stok ${remaining} · ${sourceOwner} -> ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`}`;
+
+    const movementResult = await supabase
+      .from("vaccination_inventory_movements")
+      .insert({
+        vaccine_id: lot.vaccine_id,
+        lot_id: lotId,
+        movement_type: "stock_transfer",
+        qty: remaining,
+        reference_type: "stock_transfer_session",
+        reference_id: Number(targetSession.id),
+        notes: note,
+        created_by: createdBy,
+      });
+
+    if (movementResult.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          ...previousOwnership,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+
+      return fail(
+        `Transfer dibatalkan karena audit inventory gagal disimpan: ${movementResult.error.message}`,
+        500,
+      );
+    }
+
+    return ok({
+      message: `Sisa stok ${remaining} Lot ${lot.lot_number} berhasil ditransfer ke ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`}.`,
+      transferredQty: remaining,
+      lot: updateResult.data,
+      targetSession,
+    });
   }
 
   if (action === "delete-lot") {
