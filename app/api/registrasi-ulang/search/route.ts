@@ -231,6 +231,180 @@ export async function GET(req: NextRequest) {
     200,
   );
 
+  // MCU_CORPORATE_OTHER_SESSION_SEARCH_V528
+  // Explicit read-only mode used only by the Registrasi Ulang
+  // "Cari Data di Session Lain" button. Normal retrieve behavior below is
+  // intentionally untouched.
+  const otherSessionModeV528 =
+    req.nextUrl.searchParams.get("other_session") === "1";
+
+  if (otherSessionModeV528) {
+    if (program !== "corporate") {
+      return fail("Pencarian Session lain hanya tersedia untuk MCU Corporate.", 400);
+    }
+
+    const companyIdV528 = Number(
+      req.nextUrl.searchParams.get("company_id") ||
+        queueSession?.company_id ||
+        0,
+    );
+    const currentSessionIdV528 = Number(queueSession?.id || 0);
+
+    if (!companyIdV528 || !currentSessionIdV528) {
+      return fail("Perusahaan dan Session MCU aktif wajib dipilih.", 400);
+    }
+    if (Number(queueSession?.company_id || 0) !== companyIdV528) {
+      return fail("Session MCU tidak sesuai dengan perusahaan yang dipilih.", 409);
+    }
+    if (keyword.length < 2) {
+      return ok({
+        participants: [],
+        mode: "other_session",
+        queue_session: queueSession,
+        message: "Masukkan minimal 2 karakter.",
+      });
+    }
+
+    const likeV528 = `%${keyword}%`;
+    const participantResultV528 = await supabase
+      .from("participants")
+      .select(SELECT_COLUMNS)
+      .eq("program_type", "corporate")
+      .eq("company_id", companyIdV528)
+      .or(
+        `name.ilike.${likeV528},mcu_id.ilike.${likeV528},external_id.ilike.${likeV528},nik.ilike.${likeV528},employee_nik.ilike.${likeV528},barcode_value.ilike.${likeV528}`,
+      )
+      .order("name", { ascending: true })
+      .limit(limit);
+
+    if (participantResultV528.error) {
+      return fail(participantResultV528.error.message, 500);
+    }
+
+    const candidatesV528 = participantResultV528.data || [];
+    const participantIdsV528 = candidatesV528
+      .map((row: any) => Number(row.id || 0))
+      .filter(Boolean);
+
+    if (!participantIdsV528.length) {
+      return ok({
+        participants: [],
+        mode: "other_session",
+        queue_session: queueSession,
+      });
+    }
+
+    const [assignmentV528, registrationV528, queueV528] = await Promise.all([
+      supabase
+        .from("mcu_participant_session_assignments")
+        .select("participant_id,queue_session_id")
+        .in("participant_id", participantIdsV528),
+      supabase
+        .from("mcu_registration_sessions")
+        .select("participant_id,queue_session_id")
+        .in("participant_id", participantIdsV528),
+      supabase
+        .from("mcu_queue_entries")
+        .select("participant_id,queue_session_id")
+        .in("participant_id", participantIdsV528),
+    ]);
+
+    for (const resultV528 of [assignmentV528, registrationV528, queueV528]) {
+      if (resultV528.error) return fail(resultV528.error.message, 500);
+    }
+
+    const linkedRowsV528 = [
+      ...(assignmentV528.data || []),
+      ...(registrationV528.data || []),
+      ...(queueV528.data || []),
+    ];
+
+    const currentParticipantIdsV528 = new Set<number>();
+    const otherSessionIdsByParticipantV528 = new Map<number, Set<number>>();
+    const allOtherSessionIdsV528 = new Set<number>();
+
+    for (const rowV528 of linkedRowsV528) {
+      const participantIdV528 = Number(rowV528.participant_id || 0);
+      const sessionIdV528 = Number(rowV528.queue_session_id || 0);
+      if (!participantIdV528 || !sessionIdV528) continue;
+
+      if (sessionIdV528 === currentSessionIdV528) {
+        currentParticipantIdsV528.add(participantIdV528);
+        continue;
+      }
+
+      if (!otherSessionIdsByParticipantV528.has(participantIdV528)) {
+        otherSessionIdsByParticipantV528.set(participantIdV528, new Set<number>());
+      }
+      otherSessionIdsByParticipantV528
+        .get(participantIdV528)!
+        .add(sessionIdV528);
+      allOtherSessionIdsV528.add(sessionIdV528);
+    }
+
+    let otherSessionRowsV528: any[] = [];
+    if (allOtherSessionIdsV528.size) {
+      const sessionRowsResultV528 = await supabase
+        .from("mcu_queue_sessions")
+        .select("id,company_id,session_name,location,session_date,is_active")
+        .in("id", Array.from(allOtherSessionIdsV528))
+        .eq("company_id", companyIdV528);
+
+      if (sessionRowsResultV528.error) {
+        return fail(sessionRowsResultV528.error.message, 500);
+      }
+      otherSessionRowsV528 = sessionRowsResultV528.data || [];
+    }
+
+    const validSessionMapV528 = new Map<number, any>(
+      otherSessionRowsV528.map((row: any) => [Number(row.id || 0), row]),
+    );
+
+    const eligibleV528 = candidatesV528
+      .filter((participantV528: any) => {
+        const participantIdV528 = Number(participantV528.id || 0);
+        if (!participantIdV528 || currentParticipantIdsV528.has(participantIdV528)) {
+          return false;
+        }
+        const linkedV528 =
+          otherSessionIdsByParticipantV528.get(participantIdV528) ||
+          new Set<number>();
+        return Array.from(linkedV528).some((idV528) =>
+          validSessionMapV528.has(idV528),
+        );
+      })
+      .map((participantV528: any) => {
+        const participantIdV528 = Number(participantV528.id || 0);
+        const linkedV528 =
+          otherSessionIdsByParticipantV528.get(participantIdV528) ||
+          new Set<number>();
+        const otherSessionsV528 = Array.from(linkedV528)
+          .map((idV528) => validSessionMapV528.get(idV528))
+          .filter(Boolean)
+          .sort((a: any, b: any) =>
+            String(b.session_date || "").localeCompare(
+              String(a.session_date || ""),
+            ),
+          );
+
+        return {
+          ...participantV528,
+          session_registered: false,
+          session_registered_at: null,
+          queue_session_id: currentSessionIdV528,
+          other_sessions_v528: otherSessionsV528,
+        };
+      });
+
+    const decoratedV528 = await decorateRows(supabase, eligibleV528);
+    return ok({
+      participants: decoratedV528,
+      mode: "other_session",
+      queue_session: queueSession,
+      company_id: companyIdV528,
+    });
+  }
+
   if (sourceId === "all" && !queueSession?.id && keyword.length < 2) {
     return ok({
       participants: [],

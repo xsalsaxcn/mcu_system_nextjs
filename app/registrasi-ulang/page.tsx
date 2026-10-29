@@ -46,6 +46,12 @@ type Participant = {
   session_registered_at?: string | null;
   queue_session_id?: number;
   program_type?: string;
+  other_sessions_v528?: Array<{
+    id: number;
+    session_name?: string;
+    location?: string;
+    session_date?: string;
+  }>;
 };
 
 
@@ -338,6 +344,13 @@ function RegistrasiUlang({ user }: { user: any }) {
   const [keyword, setKeyword] = useState("");
   const [resultFilter, setResultFilter] = useState("");
   const [results, setResults] = useState<Participant[]>([]);
+  // MCU_CORPORATE_OTHER_SESSION_SEARCH_V528
+  // Read-only search for participants who belong to another Session under the
+  // same selected company. Search itself never moves/assigns/registers anyone.
+  const [otherSessionSearchOpenV528, setOtherSessionSearchOpenV528] = useState(false);
+  const [otherSessionKeywordV528, setOtherSessionKeywordV528] = useState("");
+  const [otherSessionLoadingV528, setOtherSessionLoadingV528] = useState(false);
+  const [otherSessionResultsV528, setOtherSessionResultsV528] = useState<Participant[]>([]);
   const [selected, setSelected] = useState<Participant | null>(null);
   const [form, setForm] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(false);
@@ -915,6 +928,89 @@ function RegistrasiUlang({ user }: { user: any }) {
       setMessage(`Export lengkap ${participantIds.length} peserta berhasil dibuat.`);
     } catch (error: any) { setMessage(error?.message || "Gagal export data MCU Corporate."); }
     finally { setExportingFullDataV506(false); }
+  }
+
+  function openOtherSessionSearchV528() {
+    const context = getSelectedSessionContext();
+    if (program !== "corporate" || !context?.company_id || !context?.queue_session_id) {
+      setMessage("Pilih Session MCU / Lokasi / Tanggal terlebih dahulu.");
+      return;
+    }
+
+    setOtherSessionKeywordV528("");
+    setOtherSessionResultsV528([]);
+    setOtherSessionSearchOpenV528(true);
+  }
+
+  async function searchOtherSessionV528(e?: React.FormEvent) {
+    e?.preventDefault();
+    const context = getSelectedSessionContext();
+    const q = otherSessionKeywordV528.trim();
+
+    if (program !== "corporate" || !context?.company_id || !context?.queue_session_id) {
+      setMessage("Pilih Session MCU / Lokasi / Tanggal terlebih dahulu.");
+      return;
+    }
+    if (q.length < 2) {
+      setMessage("Masukkan minimal 2 karakter nama / NIK Karyawan / No MCU.");
+      return;
+    }
+
+    setOtherSessionLoadingV528(true);
+    try {
+      const params = new URLSearchParams({
+        program: "corporate",
+        source_id: "all",
+        queue_session_id: String(context.queue_session_id),
+        company_id: String(context.company_id),
+        keyword: q,
+        limit: "100",
+        other_session: "1",
+      });
+      const res = await fetch(
+        `/api/registrasi-ulang/search?${params.toString()}`,
+        { cache: "no-store" },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        setOtherSessionResultsV528([]);
+        setMessage(json?.message || "Gagal mencari peserta di Session lain.");
+        return;
+      }
+
+      const rows = Array.isArray(json?.participants) ? json.participants : [];
+      setOtherSessionResultsV528(rows);
+      setMessage(
+        rows.length
+          ? `Ditemukan ${rows.length} peserta dari Session lain pada ${context.company_name}.`
+          : `Tidak ada peserta Session lain yang cocok pada ${context.company_name}.`,
+      );
+    } catch (error: any) {
+      setOtherSessionResultsV528([]);
+      setMessage(error?.message || "Gagal mencari peserta di Session lain.");
+    } finally {
+      setOtherSessionLoadingV528(false);
+    }
+  }
+
+  async function chooseOtherSessionParticipantV528(participant: Participant) {
+    const context = getSelectedSessionContext();
+    if (!context?.queue_session_id) return;
+
+    setOtherSessionSearchOpenV528(false);
+    setOtherSessionResultsV528([]);
+    await loadDetail({
+      ...participant,
+      // Important: selecting from another Session is read-only. The current
+      // selected Session remains authoritative and is only bound on Save.
+      session_registered: false,
+      session_registered_at: null,
+      queue_session_id: Number(context.queue_session_id),
+    });
+    setMessage(
+      `Data ${participant.name} dimuat dari Session lain. Session aktif tetap ${context.location} · ${sessionDateLabel(context.session_date)}. ` +
+      "Belum ada perpindahan/assignment otomatis; klik Simpan Data jika peserta memang akan Registrasi Ulang di Session aktif.",
+    );
   }
 
   async function startOnSpotRegistration() {
@@ -1510,6 +1606,12 @@ function RegistrasiUlang({ user }: { user: any }) {
               + On The Spot
             </button>
           )}
+
+          {program === "corporate" && (
+            <button type="button" className="btn-secondary whitespace-nowrap" onClick={openOtherSessionSearchV528}>
+              Cari Data di Session Lain
+            </button>
+          )}
         </form>
 
         {program === "corporate" && getSelectedSessionContext() ? (
@@ -1529,6 +1631,81 @@ function RegistrasiUlang({ user }: { user: any }) {
         {program === "corporate" && labelSetupErrorV512 ? (
           <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">
             Setup Label belum aman: {labelSetupErrorV512}
+          </div>
+        ) : null}
+
+        {program === "corporate" && otherSessionSearchOpenV528 ? (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4">
+            <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+                <div>
+                  <div className="text-xl font-black text-slate-900">Cari Data di Session Lain</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-500">
+                    Hanya mencari peserta MCU Corporate dari perusahaan yang sama. Pencarian ini tidak memindahkan Session dan tidak membuat nomor antrian.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setOtherSessionSearchOpenV528(false)}
+                >
+                  Tutup
+                </button>
+              </div>
+
+              <form onSubmit={searchOtherSessionV528} className="flex gap-2 border-b border-slate-200 p-5">
+                <input
+                  autoFocus
+                  className="input flex-1"
+                  placeholder="Nama / NIK Karyawan / No MCU"
+                  value={otherSessionKeywordV528}
+                  onChange={(e) => setOtherSessionKeywordV528(e.target.value)}
+                />
+                <button className="btn-primary whitespace-nowrap" disabled={otherSessionLoadingV528}>
+                  {otherSessionLoadingV528 ? "Mencari..." : "Cari"}
+                </button>
+              </form>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-5">
+                {!otherSessionResultsV528.length ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">
+                    Masukkan minimal 2 karakter untuk mencari peserta dari Session lain.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {otherSessionResultsV528.map((participant) => (
+                      <button
+                        key={`other-session-${participant.id}`}
+                        type="button"
+                        className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-cyan-300 hover:bg-cyan-50"
+                        onClick={() => void chooseOtherSessionParticipantV528(participant)}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="font-black text-slate-900">{participant.name}</div>
+                            <div className="mt-1 text-xs font-semibold text-slate-500">
+                              NIK Karyawan: {participant.employee_nik || participant.external_id || "-"} · MCU: {participant.mcu_id || "-"}
+                            </div>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">
+                            Pilih
+                          </span>
+                        </div>
+                        <div className="mt-3 text-xs font-bold text-slate-600">
+                          Session asal:
+                          {(participant.other_sessions_v528 || []).map((session, index) => (
+                            <span key={`${participant.id}-${session.id}`} className="ml-1">
+                              {index ? " · " : ""}
+                              {session.location || session.session_name || "Session MCU"} · {sessionDateLabel(session.session_date)}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         ) : null}
       </section>
@@ -2251,7 +2428,7 @@ function StationPrintLabel({
                       marginTop: "2px",
                       width: "100%",
                       textAlign: "center",
-                      fontSize: "9px",
+                      fontSize: "7px", // MCU_CORPORATE_STICKER_DOB_FOOTER_SIZE_V528_1
                       lineHeight: 1,
                       fontWeight: 800,
                       color: "#111827",
@@ -2260,7 +2437,9 @@ function StationPrintLabel({
                       textOverflow: "ellipsis"
                     }}
                   >
-                    {employeeNik || "-"}
+                    {/* MCU_CORPORATE_STICKER_DOB_FOOTER_V528
+                        Value-only change: preserve the exact existing QR footer layout/styles. */}
+                    {formatDate(birthDate)}
                   </div>
                 ) : null}
               </div>
