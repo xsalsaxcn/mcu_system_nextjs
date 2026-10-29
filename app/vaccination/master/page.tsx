@@ -3,6 +3,7 @@
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V507_PRICING_LINK
 // V508_INLINE_PACKAGE_NONPACKAGE_PRICING
+// V509_RECOVER_SESSION_STOCK_AND_PRODUCT_SUMMARY
 // V503_MASTER_SAVE_RESET_AND_EDIT_ISOLATION
 
 // V498_PRODUCT_LIST_FILTER
@@ -676,8 +677,44 @@ export default function VaccinationMasterPage() {
             plannedStockInitial: 0,
           });
 
+          // V509: a newly saved exact-Session Lot must immediately belong to
+          // the selected Healthday/Bazar bucket. Previously the Lot was saved
+          // but service allocation stayed empty, making valid stock disappear
+          // from filters and Registration.
+          const existingServiceRows = serviceStockAllocations.filter(
+            (row) =>
+              row.active !== false &&
+              String(row.lot_id || "") === String(savedLotId) &&
+              String(row.session_id || "") === String(lotForm.stockSessionId),
+          );
+          const existingSavedLot = lots.find(
+            (row) => String(row.id || "") === String(savedLotId),
+          );
+          const usedBefore = Math.max(
+            0,
+            Number(existingSavedLot?.stock_used || 0),
+          );
+
+          if (!existingServiceRows.length && usedBefore === 0) {
+            const totalToBind = Math.max(
+              0,
+              Number(lotForm.stockInitial || 0) +
+                Number(lotForm.stockAdded || 0),
+            );
+            await postMaster({
+              action: "save-session-service-stock",
+              lotId: savedLotId,
+              sessionId: lotForm.stockSessionId,
+              companyName: lotForm.stockCompanyName,
+              healthdayQty:
+                serviceStockEditorMode === "HEALTHDAY" ? totalToBind : 0,
+              bazarQty:
+                serviceStockEditorMode === "BAZAR" ? totalToBind : 0,
+            });
+          }
+
           setMessage(
-            "Lot Session tersimpan. Jumlah Awal rencana sudah dipindahkan ke Lot. Pilih Jenis Stok Session dan Lot Number pada panel Pembagian Stok Session untuk mengalokasikan Healthday/Bazar.",
+            `Lot Session tersimpan dan stok otomatis masuk ke ${serviceModeLabel(serviceStockEditorMode)}. Form sudah dikosongkan.`,
           );
         }
 
@@ -1376,7 +1413,33 @@ export default function VaccinationMasterPage() {
       if (lotScope(lot) !== "SESSION") return false;
       const sessionId = Number(lot.stock_session_id || 0);
       if (!sessionId) return false;
-      return serviceAllocationQty(lot.id, sessionId, serviceMode) > 0;
+
+      // Primary source: explicit service allocation.
+      if (serviceAllocationQty(lot.id, sessionId, serviceMode) > 0) return true;
+
+      // V509 recovery visibility:
+      // Older Session lots can already contain real stock_initial while their
+      // Healthday/Bazar allocation row was never created. When the product has
+      // exactly one active service assignment for this Session, that assignment
+      // is the intended service bucket and the Lot must not disappear from UI.
+      const assignedModes = Array.from(
+        new Set(
+          sessionProductAssignments
+            .filter(
+              (assignment) =>
+                assignment.active !== false &&
+                Number(assignment.session_id || 0) === sessionId &&
+                String(assignment.vaccine_id || "") ===
+                  String(lot.vaccine_id || lot.vaccine?.id || ""),
+            )
+            .map((assignment) =>
+              String(assignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+                ? "BAZAR"
+                : "HEALTHDAY",
+            ),
+        ),
+      );
+      return assignedModes.length === 1 && assignedModes[0] === serviceMode;
     });
   }, [
     lots,
@@ -1384,6 +1447,7 @@ export default function VaccinationMasterPage() {
     stockSessionFilter,
     productServiceFilter,
     serviceStockAllocations,
+    sessionProductAssignments,
   ]);
 
   function serviceModeLabel(value: any) {
@@ -1637,6 +1701,99 @@ export default function VaccinationMasterPage() {
       );
 
     return materializedInitial + plannedUnmaterialized;
+  }
+
+
+  function productSalesOffer(vaccineId: any, mode: "PACKAGE" | "NON_PACKAGE") {
+    return salesOffers.find(
+      (offer) =>
+        offer.active !== false &&
+        String(offer.vaccine_id || "") === String(vaccineId || "") &&
+        String(offer.sale_mode || "").toUpperCase() === mode,
+    );
+  }
+
+  function productStockSummary(vaccineId: any) {
+    const vaccineKey = String(vaccineId || "");
+    const scopedLots = filteredMasterLots.filter(
+      (lot) =>
+        String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineKey,
+    );
+
+    const initialFromLots = scopedLots.reduce(
+      (sum, lot) => sum + Math.max(0, Number(lot.stock_initial || 0)),
+      0,
+    );
+    const added = scopedLots.reduce(
+      (sum, lot) => sum + Math.max(0, Number(lot.stock_added || 0)),
+      0,
+    );
+    const used = scopedLots.reduce(
+      (sum, lot) => sum + Math.max(0, Number(lot.stock_used || 0)),
+      0,
+    );
+
+    const importedValues = scopedLots
+      .map((lot) =>
+        lot.stock_physical_count == null
+          ? null
+          : Math.max(0, Number(lot.stock_physical_count || 0)),
+      )
+      .filter((value): value is number => value !== null);
+    const imported =
+      importedValues.length > 0
+        ? importedValues.reduce((sum, value) => sum + value, 0)
+        : null;
+
+    // If the product is assigned to the Session but its Lot has not yet been
+    // materialized, keep the planned initial visible. Once a Lot exists, the
+    // physical Lot is the source of truth to avoid double counting.
+    const initial =
+      scopedLots.length > 0
+        ? initialFromLots
+        : productDisplayedInitialStock(vaccineId);
+
+    return {
+      initial,
+      added,
+      used,
+      imported,
+      remaining: Math.max(0, initialFromLots + added - used),
+      lotCount: scopedLots.length,
+    };
+  }
+
+  function compactStockTarget(vaccineId: any) {
+    if (
+      stockFilter !== "ALL" &&
+      stockFilter !== "GENERAL" &&
+      stockSessionFilter !== "ALL"
+    ) {
+      const session = sessionMap.get(Number(stockSessionFilter || 0));
+      return {
+        company: cleanText(session?.company_name) || cleanText(stockFilter) || "-",
+        location:
+          cleanText(session?.location) ||
+          cleanText(session?.session_name) ||
+          "Session",
+        date: cleanText(session?.session_date),
+      };
+    }
+
+    const targets = vaccineStockTargets(vaccineId);
+    return {
+      company:
+        stockFilter === "GENERAL"
+          ? "General"
+          : stockFilter === "ALL"
+            ? "Semua tujuan"
+            : cleanText(stockFilter),
+      location:
+        targets.length === 1
+          ? targets[0]
+          : `${targets.length} tujuan stok`,
+      date: "",
+    };
   }
 
   const stockFilterLabel = useMemo(() => {
@@ -2534,84 +2691,124 @@ export default function VaccinationMasterPage() {
             </div>
           </div>
           <div className="max-h-[320px] overflow-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-[1720px] text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
                   <th className="p-3 text-left">Produk</th>
                   <th className="p-3 text-left">Brand</th>
-                  <th className="p-3 text-left">Kategori Harga</th>
-                  <th className="p-3 text-left">Harga</th>
+                  <th className="p-3 text-left">Non Paket</th>
+                  <th className="p-3 text-left">Paket</th>
+                  <th className="p-3 text-left">Dosis Paket</th>
                   <th className="p-3 text-left">Tujuan Stok</th>
                   <th className="p-3 text-left">Jenis Stok</th>
                   <th className="p-3 text-left">Stok Awal</th>
+                  <th className="p-3 text-left">Tambahan</th>
+                  <th className="p-3 text-left">Terpakai</th>
+                  <th className="p-3 text-left">Stok Import</th>
+                  <th className="p-3 text-left">Sisa Sistem</th>
                   <th className="p-3 text-left">Transaksi</th>
                   <th className="p-3 text-left">Status</th>
                   <th className="p-3 text-left">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredVaccines.map((v) => (
-                  <tr key={v.id}>
-                    <td className="p-3 font-bold">{v.name}</td>
-                    <td className="p-3">{v.brand || "-"}</td>
-                    <td className="p-3">{v.price_category || "-"}</td>
-                    <td className="p-3 font-bold">{money(v.price)}</td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        {vaccineStockTargets(v.id).map((target) => (
-                          <span key={target} className="rounded-full border bg-slate-50 px-2 py-1 text-xs font-semibold">
-                            {target}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        {vaccineServiceModes(v.id).length ? (
-                          vaccineServiceModes(v.id).map((mode) => (
-                            <span
-                              key={mode}
-                              className={`rounded-full px-2 py-1 text-xs font-bold ${
-                                mode === "BAZAR"
-                                  ? "bg-violet-50 text-violet-700"
-                                  : "bg-blue-50 text-blue-700"
-                              }`}
-                            >
-                              {mode === "BAZAR" ? "Bazar" : "Healthday"}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-slate-400">-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-sm font-black text-slate-800">
-                        {productDisplayedInitialStock(v.id)}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => openStockTransactions(v)}
-                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
-                      >
-                        📋 Transaksi
-                      </button>
-                    </td>
-                    <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
-                    <td className="p-3">
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => editProduct(v)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
-                        <button type="button" onClick={() => deleteVaccine(v)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus produk">🗑️</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredVaccines.map((v) => {
+                  const nonPackageOffer = productSalesOffer(v.id, "NON_PACKAGE");
+                  const packageOffer = productSalesOffer(v.id, "PACKAGE");
+                  const stock = productStockSummary(v.id);
+                  const target = compactStockTarget(v.id);
+                  const modes = vaccineServiceModes(v.id);
+
+                  return (
+                    <tr key={v.id} className="align-top">
+                      <td className="p-3 font-bold">{v.name}</td>
+                      <td className="p-3">{v.brand || "-"}</td>
+                      <td className="p-3 font-bold">
+                        {money(nonPackageOffer?.price ?? v.price)}
+                      </td>
+                      <td className="p-3 font-bold text-emerald-700">
+                        {packageOffer ? money(packageOffer.price) : "-"}
+                      </td>
+                      <td className="p-3">
+                        {packageOffer
+                          ? `${Math.max(2, Number(packageOffer.package_dose_count || 2))}x`
+                          : "-"}
+                      </td>
+                      <td className="p-3">
+                        <div className="max-w-[250px] rounded-xl border bg-slate-50 px-3 py-2">
+                          <div className="truncate text-xs font-black text-slate-800" title={target.company}>
+                            {target.company}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-slate-600" title={target.location}>
+                            {target.location}
+                          </div>
+                          {target.date ? (
+                            <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                              {target.date}
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-1">
+                          {modes.length ? (
+                            modes.map((mode) => (
+                              <span
+                                key={mode}
+                                className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                  mode === "BAZAR"
+                                    ? "bg-violet-50 text-violet-700"
+                                    : "bg-blue-50 text-blue-700"
+                                }`}
+                              >
+                                {mode === "BAZAR" ? "Bazar" : "Healthday"}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-slate-400">-</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 font-black">{stock.initial}</td>
+                      <td className="p-3">{stock.added}</td>
+                      <td className="p-3">{stock.used}</td>
+                      <td className="p-3 font-bold">
+                        {stock.imported == null ? "-" : stock.imported}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`rounded-lg px-2.5 py-1.5 font-black ${
+                            stock.remaining > 0
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {stock.remaining}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => openStockTransactions(v)}
+                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                        >
+                          📋 Transaksi
+                        </button>
+                      </td>
+                      <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
+                      <td className="p-3">
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => editProduct(v)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                          <button type="button" onClick={() => deleteVaccine(v)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus produk">🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {!filteredVaccines.length ? (
                   <tr>
-                    <td colSpan={10} className="p-6 text-center text-sm text-slate-500">
-                      Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, atau Session/Lokasi.
+                    <td colSpan={15} className="p-6 text-center text-sm text-slate-500">
+                      Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, Session/Lokasi, atau Jenis Stok.
                     </td>
                   </tr>
                 ) : null}
@@ -2620,13 +2817,21 @@ export default function VaccinationMasterPage() {
           </div>
         </section>
 
-        <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">
-            Daftar Lot Aktif · {stockFilterLabel}
+        <details className="mt-6 rounded-2xl border" open={filteredMasterLots.length > 0}>
+          <summary className="cursor-pointer list-none border-b bg-slate-50 p-4 font-bold">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                Detail Lot Aktif · {stockFilterLabel}
             {productServiceFilter !== "ALL"
               ? ` · ${productServiceFilter === "BAZAR" ? "Bazar" : "Healthday"}`
               : ""}
-          </div>
+              </span>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-600">
+                {filteredMasterLots.length} lot
+              </span>
+            </div>
+          </summary>
+          {filteredMasterLots.length ? (
           <div className="max-h-[420px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -2725,7 +2930,12 @@ export default function VaccinationMasterPage() {
               </tbody>
             </table>
           </div>
-        </section>
+          ) : (
+            <div className="p-4 text-sm text-slate-500">
+              Belum ada detail Lot yang cocok dengan filter ini. Produk tetap tampil di tabel ringkasan di atas.
+            </div>
+          )}
+        </details>
 
         {transactionProduct ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
