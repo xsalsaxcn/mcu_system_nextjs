@@ -2,6 +2,7 @@
 
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V507_PRICING_LINK
+// V508_INLINE_PACKAGE_NONPACKAGE_PRICING
 // V503_MASTER_SAVE_RESET_AND_EDIT_ISOLATION
 
 // V498_PRODUCT_LIST_FILTER
@@ -152,6 +153,10 @@ export default function VaccinationMasterPage() {
     healthdayStockQty: 0,
     bazarStockQty: 0,
   });
+  const [salesOffers, setSalesOffers] = useState<any[]>([]);
+  const [packageDoseCount, setPackageDoseCount] = useState("3");
+  const [packagePrice, setPackagePrice] = useState("");
+  const [savingInlinePricing, setSavingInlinePricing] = useState(false);
 
   function resetProductLotEditor() {
     setSelectedImportProductKey("");
@@ -184,12 +189,17 @@ export default function VaccinationMasterPage() {
     setServiceStockEditorMode("HEALTHDAY");
     setServiceStockEditorLotId("");
     setServiceStockEditorQty(0);
+    setPackageDoseCount("3");
+    setPackagePrice("");
   }
 
   async function loadData() {
-    const [masterJson, sourcesJson] = await Promise.all([
+    const [masterJson, sourcesJson, pricingJson] = await Promise.all([
       fetch("/api/vaccination/master", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/sources?program=vaccination", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, sources: [] })),
+      fetch("/api/vaccination/pricing", { cache: "no-store" })
+        .then((r) => r.json())
+        .catch(() => ({ ok: false, offers: [] })),
     ]);
     if (!masterJson.ok) {
       setError(masterJson.message || "Gagal mengambil data.");
@@ -210,6 +220,7 @@ export default function VaccinationMasterPage() {
     setMappingMessage(masterJson.mappingMessage || "");
     setCompanyStockReady(masterJson.companyStockReady !== false);
     setCompanyStockMessage(masterJson.companyStockMessage || "");
+    setSalesOffers(pricingJson?.ok ? pricingJson.offers || [] : []);
     // V503: form kosong harus tetap kosong; jangan auto-select produk pertama.
   }
 
@@ -414,6 +425,62 @@ export default function VaccinationMasterPage() {
     });
   }
 
+  async function saveInlinePricing(vaccineId: string) {
+    const requests: Promise<any>[] = [];
+
+    if (cleanText(vaccineForm.price) !== "") {
+      requests.push(
+        fetch("/api/vaccination/pricing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save",
+            vaccine_id: Number(vaccineId),
+            sale_mode: "NON_PACKAGE",
+            package_dose_count: 1,
+            price: Number(vaccineForm.price || 0),
+          }),
+        }).then(async (response) => {
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || !json.ok) {
+            throw new Error(json.message || "Gagal menyimpan harga Non Paket.");
+          }
+          return json;
+        }),
+      );
+    }
+
+    if (cleanText(packagePrice) !== "") {
+      requests.push(
+        fetch("/api/vaccination/pricing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save",
+            vaccine_id: Number(vaccineId),
+            sale_mode: "PACKAGE",
+            package_dose_count: Math.max(2, Number(packageDoseCount || 2)),
+            price: Number(packagePrice || 0),
+          }),
+        }).then(async (response) => {
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || !json.ok) {
+            throw new Error(json.message || "Gagal menyimpan harga Paket.");
+          }
+          return json;
+        }),
+      );
+    }
+
+    if (!requests.length) return;
+    setSavingInlinePricing(true);
+    try {
+      await Promise.all(requests);
+    } finally {
+      setSavingInlinePricing(false);
+    }
+  }
+
   async function submitProductAndLot() {
     setError("");
     const name = cleanText(vaccineForm.name);
@@ -522,6 +589,8 @@ export default function VaccinationMasterPage() {
       }
 
       if (!vaccineId) throw new Error("Master vaksin tersimpan tetapi ID vaksin tidak ditemukan.");
+
+      await saveInlinePricing(vaccineId);
 
       if (
         lotForm.stockScope === "SESSION" &&
@@ -680,6 +749,16 @@ export default function VaccinationMasterPage() {
       doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
       defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
     });
+    const packageOffer = salesOffers.find(
+      (offer) =>
+        offer.active !== false &&
+        String(offer.vaccine_id || "") === String(vaccine.id || "") &&
+        String(offer.sale_mode || "").toUpperCase() === "PACKAGE",
+    );
+    setPackageDoseCount(
+      packageOffer ? String(Math.max(2, Number(packageOffer.package_dose_count || 3))) : "3",
+    );
+    setPackagePrice(packageOffer ? String(packageOffer.price ?? "") : "");
     setLotForm({
       vaccineId: String(vaccine.id || ""),
       lotNumber: "",
@@ -723,6 +802,16 @@ export default function VaccinationMasterPage() {
       doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
       defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
     });
+    const packageOffer = salesOffers.find(
+      (offer) =>
+        offer.active !== false &&
+        String(offer.vaccine_id || "") === String(vaccineId) &&
+        String(offer.sale_mode || "").toUpperCase() === "PACKAGE",
+    );
+    setPackageDoseCount(
+      packageOffer ? String(Math.max(2, Number(packageOffer.package_dose_count || 3))) : "3",
+    );
+    setPackagePrice(packageOffer ? String(packageOffer.price ?? "") : "");
     setLotForm({
       vaccineId,
       lotNumber: cleanText(lot.lot_number),
@@ -1611,12 +1700,6 @@ export default function VaccinationMasterPage() {
             >
               ⇩ Export iServe
             </a>
-            <a
-              href="/vaccination/pricing"
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100"
-            >
-              💰 Paket / Non Paket
-            </a>
             <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
           </div>
         </div>
@@ -1801,7 +1884,7 @@ export default function VaccinationMasterPage() {
                 <input
                   type="number"
                   className="rounded-xl border px-3 py-2"
-                  placeholder="Harga produk"
+                  placeholder="Harga Non Paket / per dosis"
                   value={vaccineForm.price}
                   onChange={(e) => setVaccineForm({ ...vaccineForm, price: e.target.value })}
                 />
@@ -1827,6 +1910,49 @@ export default function VaccinationMasterPage() {
                   value={vaccineForm.defaultNextDoseDays}
                   onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })}
                 />
+              </div>
+              <div id="vaccination-pricing-inline" className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                <div className="text-sm font-black text-emerald-900">Paket / Non Paket</div>
+                <div className="mt-1 text-xs text-emerald-800">
+                  Harga layanan saja. Paket dan Non Paket tetap mengambil stok dari produk + Lot yang sama. Stok berkurang 1 setiap dosis benar-benar diberikan.
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-blue-200 bg-white p-3">
+                    <div className="text-xs font-black uppercase text-blue-700">Non Paket</div>
+                    <div className="mt-1 text-sm font-bold text-slate-900">
+                      Harga per dosis: {money(vaccineForm.price)}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Gunakan field “Harga Non Paket / per dosis” di atas.
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-[120px_1fr] gap-2 rounded-xl border border-violet-200 bg-white p-3">
+                    <label className="grid gap-1 text-xs font-bold text-slate-600">
+                      Dosis Paket
+                      <input
+                        type="number"
+                        min={2}
+                        className="rounded-xl border bg-white px-3 py-2 text-sm text-slate-900"
+                        value={packageDoseCount}
+                        onChange={(e) => setPackageDoseCount(e.target.value)}
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-bold text-slate-600">
+                      Harga Paket
+                      <input
+                        type="number"
+                        min={0}
+                        className="rounded-xl border bg-white px-3 py-2 text-sm text-slate-900"
+                        placeholder="Kosong = belum ada paket"
+                        value={packagePrice}
+                        onChange={(e) => setPackagePrice(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="mt-2 text-[11px] text-emerald-800">
+                  Contoh Hepatitis B: Non Paket Rp250.000/dosis, Paket 3 dosis Rp650.000. Inventory tetap satu Hepatitis B; tidak dibuat stok paket terpisah.
+                </div>
               </div>
             </fieldset>
 
@@ -2251,13 +2377,16 @@ export default function VaccinationMasterPage() {
           <button
             type="button"
             onClick={submitProductAndLot}
-            className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700"
+            disabled={savingInlinePricing}
+            className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {masterEditMode === "LOT"
-              ? "Simpan Perubahan Lot & Produk Ini"
-              : masterEditMode === "PRODUCT"
-                ? "Simpan Perubahan Produk & Lot"
-                : "Simpan Produk & Lot"}
+            {savingInlinePricing
+              ? "Menyimpan Produk, Lot & Harga..."
+              : masterEditMode === "LOT"
+                ? "Simpan Perubahan Lot & Produk Ini"
+                : masterEditMode === "PRODUCT"
+                  ? "Simpan Perubahan Produk & Lot"
+                  : "Simpan Produk & Lot"}
           </button>
         </section>
 
