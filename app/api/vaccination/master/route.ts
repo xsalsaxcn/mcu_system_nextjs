@@ -1,3 +1,4 @@
+// V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
 // V502_STOCK_TRANSACTION_AUDIT
@@ -1585,7 +1586,6 @@ export async function POST(req: NextRequest) {
     const references = [
       await supabase.from("vaccination_records").select("id").eq("lot_id", lotId).limit(1),
       await supabase.from("vaccination_registration_items").select("id").eq("lot_id", lotId).limit(1),
-      await supabase.from("vaccination_session_vaccines").select("id").eq("lot_id", lotId).limit(1),
     ];
     const referenceError = references.find((item) => item.error)?.error;
     if (referenceError) return fail(referenceError.message, 500);
@@ -1623,6 +1623,26 @@ export async function POST(req: NextRequest) {
 
     if (updateResult.error) return fail(updateResult.error.message, 500);
 
+    const sessionVaccineUpdate = await supabase
+      .from("vaccination_session_vaccines")
+      .update({ vaccine_id: targetVaccineId })
+      .eq("lot_id", lotId);
+
+    if (sessionVaccineUpdate.error) {
+      await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          vaccine_id: currentVaccineId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId);
+
+      return fail(
+        `Pemindahan Lot dibatalkan karena mapping Session gagal diperbarui: ${sessionVaccineUpdate.error.message}`,
+        500,
+      );
+    }
+
     const movementUpdate = await supabase
       .from("vaccination_inventory_movements")
       .update({ vaccine_id: targetVaccineId })
@@ -1636,6 +1656,10 @@ export async function POST(req: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", lotId);
+      await supabase
+        .from("vaccination_session_vaccines")
+        .update({ vaccine_id: currentVaccineId })
+        .eq("lot_id", lotId);
 
       return fail(
         `Pemindahan Lot dibatalkan karena audit inventory gagal diperbarui: ${movementUpdate.error.message}`,
