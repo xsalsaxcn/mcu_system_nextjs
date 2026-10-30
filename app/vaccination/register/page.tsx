@@ -159,6 +159,8 @@ export default function VaccinationRegisterPage() {
     parentEmployeeId: string;
     parentNik: string;
     parentEmail: string;
+    vendorQueueHealthday: string;
+    vendorQueueBazar: string;
   } | null>(null);
   const [editFamilyQuery, setEditFamilyQuery] = useState("");
   const [editFamilyResults, setEditFamilyResults] = useState<any[]>([]);
@@ -192,6 +194,20 @@ export default function VaccinationRegisterPage() {
   const internalQueueEnabled = String(form.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR"
     ? bazarQueueEnabled
     : healthdayQueueEnabled;
+
+  const editSession = edit
+    ? sessions.find((session) => String(session.id) === String(edit.registration?.session_id))
+    : null;
+  const editLegacyQueueEnabled = editSession?.existing_flow_config?.queue !== false;
+  const editHealthdayQueueEnabled = editSession?.existing_flow_config?.queue_healthday === undefined
+    ? editLegacyQueueEnabled
+    : editSession?.existing_flow_config?.queue_healthday !== false;
+  const editBazarQueueEnabled = editSession?.existing_flow_config?.queue_bazar === undefined
+    ? editLegacyQueueEnabled
+    : editSession?.existing_flow_config?.queue_bazar !== false;
+  const editHasHealthday = Boolean(edit?.items.some((item) => item.serviceMode === "HEALTHDAY"));
+  const editHasBazar = Boolean(edit?.items.some((item) => item.serviceMode === "BAZAR"));
+
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
 
   useEffect(() => {
@@ -748,6 +764,8 @@ export default function VaccinationRegisterPage() {
       parentEmployeeId: "",
       parentNik: "",
       parentEmail: "",
+      vendorQueueHealthday: String(registration.queue_number || ""),
+      vendorQueueBazar: String(registration.bazar_queue_number || ""),
     });
 
     void loadEditFamilyContext(registration.id);
@@ -886,7 +904,14 @@ export default function VaccinationRegisterPage() {
       const json = await fetch("/api/vaccination/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update-products", registrationId: edit.registration.id, items: edit.items, changeNote: edit.changeNote }),
+        body: JSON.stringify({
+          action: "update-products",
+          registrationId: edit.registration.id,
+          items: edit.items,
+          changeNote: edit.changeNote,
+          vendorQueueHealthday: edit.vendorQueueHealthday,
+          vendorQueueBazar: edit.vendorQueueBazar,
+        }),
       }).then((r) => r.json());
       if (!json.ok) { setError(json.message || "Gagal mengubah produk."); return; }
       setMessage(json.message || "Produk berhasil diubah.");
@@ -1770,6 +1795,39 @@ export default function VaccinationRegisterPage() {
                     </button>
                   </div>
                 </div>
+
+                {((editHasHealthday && !editHealthdayQueueEnabled) || (editHasBazar && !editBazarQueueEnabled)) ? (
+                  <div className="mb-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
+                    <div className="text-xs font-black uppercase tracking-wide text-cyan-800">Nomor Antrean Vendor</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-600">
+                      Isi nomor antrean dari sistem vendor untuk layanan yang tidak menggunakan antrean internal.
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {editHasHealthday && !editHealthdayQueueEnabled ? (
+                        <label className="text-xs font-black text-slate-700">
+                          Healthday
+                          <input
+                            value={edit.vendorQueueHealthday}
+                            onChange={(event) => setEdit({ ...edit, vendorQueueHealthday: event.target.value })}
+                            placeholder="Contoh: HD-014 / 014"
+                            className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-black text-slate-900"
+                          />
+                        </label>
+                      ) : null}
+                      {editHasBazar && !editBazarQueueEnabled ? (
+                        <label className="text-xs font-black text-slate-700">
+                          Bazar
+                          <input
+                            value={edit.vendorQueueBazar}
+                            onChange={(event) => setEdit({ ...edit, vendorQueueBazar: event.target.value })}
+                            placeholder="Contoh: BZ-014 / 014"
+                            className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-black text-slate-900"
+                          />
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="space-y-3">
                   {edit.items.map((item, index) => (

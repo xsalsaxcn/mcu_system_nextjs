@@ -1382,6 +1382,12 @@ export async function POST(req: NextRequest) {
       .single();
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
     const allowBazar = isHealthdayBazarSession(sessionResult.data);
+    const vendorQueueHealthdayInput = clean(
+      body.vendorQueueHealthday || body.vendor_queue_healthday,
+    );
+    const vendorQueueBazarInput = clean(
+      body.vendorQueueBazar || body.vendor_queue_bazar,
+    );
 
     const items = normalizeItems(body.items || [], {
       paymentMethod: body.paymentMethod,
@@ -1458,6 +1464,32 @@ export async function POST(req: NextRequest) {
             : { queue_status: "PENDING_VALIDATION" });
     } catch (error: any) {
       return fail(error?.message || "Gagal menyesuaikan antrian A/B setelah edit produk.", 500);
+    }
+
+    const hasHealthdayTrack = serviceHasTrack(serviceStatus, "A");
+    const hasBazarTrack = serviceHasTrack(serviceStatus, "B");
+    if (hasHealthdayTrack && !usesInternalQueue(sessionResult.data, "HEALTHDAY")) {
+      const vendorNumber = vendorQueueHealthdayInput || clean(registration.queue_number);
+      if (!vendorNumber) {
+        return fail("Nomor Antrean Vendor Healthday wajib diisi untuk layanan tanpa antrean internal.");
+      }
+      serviceQueueUpdate.queue_number = vendorNumber;
+      const current = String(registration.queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current) && current !== "CANCELLED") {
+        serviceQueueUpdate.queue_status = "PENDING_VALIDATION";
+      }
+    }
+    if (hasBazarTrack && !usesInternalQueue(sessionResult.data, "BAZAR")) {
+      const vendorNumber = vendorQueueBazarInput || clean(registration.bazar_queue_number);
+      if (!vendorNumber) {
+        return fail("Nomor Antrean Vendor Bazar wajib diisi untuk layanan tanpa antrean internal.");
+      }
+      serviceQueueUpdate.bazar_queue_number = vendorNumber;
+      serviceQueueUpdate.bazar_queue_sequence = null;
+      const current = String(registration.bazar_queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current) && current !== "CANCELLED") {
+        serviceQueueUpdate.bazar_queue_status = "PENDING_VALIDATION";
+      }
     }
 
     const updateResult = await supabase
