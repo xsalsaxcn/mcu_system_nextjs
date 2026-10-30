@@ -1,5 +1,7 @@
 "use client";
 
+// V520_SERVICE_SPECIFIC_QUEUE_BULK_SESSION_FLOW
+
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_ONSITE_QUEUE_FORM_CONFIG,
@@ -47,6 +49,8 @@ type EditSessionDraft = {
   printLabelHandler: "MEDIS" | "VALIDASI";
   existingQueueProfile: "LEGACY" | "HEALTHDAY_BAZAR";
   existingFlowQueueEnabled: boolean;
+  existingFlowHealthdayQueueEnabled: boolean;
+  existingFlowBazarQueueEnabled: boolean;
   existingFlowDoctorEnabled: boolean;
   existingNotificationEnabled: boolean;
   existingNotificationRepeat: number;
@@ -81,6 +85,8 @@ const emptyEditSession: EditSessionDraft = {
   printLabelHandler: "MEDIS",
   existingQueueProfile: "LEGACY",
   existingFlowQueueEnabled: true,
+  existingFlowHealthdayQueueEnabled: true,
+  existingFlowBazarQueueEnabled: true,
   existingFlowDoctorEnabled: true,
   existingNotificationEnabled: false,
   existingNotificationRepeat: 3,
@@ -183,8 +189,13 @@ export default function VaccinationSessionPage() {
     sessionDate: "",
     timeSlot: "",
     existingFlowQueueEnabled: true,
+    existingFlowHealthdayQueueEnabled: true,
+    existingFlowBazarQueueEnabled: true,
     existingFlowDoctorEnabled: false,
   });
+
+  const [selectedSessionIds, setSelectedSessionIds] = useState<number[]>([]);
+  const [bulkApplyingFlow, setBulkApplyingFlow] = useState(false);
 
   const [message, setMessage] = useState(
     "Pilih database vaksinasi, lalu generate session berdasarkan lokasi dan tanggal yang tersedia dari file import.",
@@ -702,6 +713,14 @@ export default function VaccinationSessionPage() {
           : "LEGACY",
       existingFlowQueueEnabled:
         session?.existing_flow_config?.queue !== false,
+      existingFlowHealthdayQueueEnabled:
+        session?.existing_flow_config?.queue_healthday === undefined
+          ? session?.existing_flow_config?.queue !== false
+          : session?.existing_flow_config?.queue_healthday !== false,
+      existingFlowBazarQueueEnabled:
+        session?.existing_flow_config?.queue_bazar === undefined
+          ? session?.existing_flow_config?.queue !== false
+          : session?.existing_flow_config?.queue_bazar !== false,
       existingFlowDoctorEnabled:
         session?.existing_flow_config?.doctor !== false,
       existingNotificationEnabled:
@@ -841,7 +860,11 @@ export default function VaccinationSessionPage() {
           existingQueueProfile: editSessionForm.existingQueueProfile,
           existingFlowConfig: {
             registration: true,
-            queue: editSessionForm.existingFlowQueueEnabled,
+            queue:
+              editSessionForm.existingFlowHealthdayQueueEnabled ||
+              editSessionForm.existingFlowBazarQueueEnabled,
+            queue_healthday: editSessionForm.existingFlowHealthdayQueueEnabled,
+            queue_bazar: editSessionForm.existingFlowBazarQueueEnabled,
             doctor: editSessionForm.existingFlowDoctorEnabled,
           },
           existingNotificationConfig: {
@@ -894,6 +917,41 @@ export default function VaccinationSessionPage() {
       setMessage("Edit session belum selesai.");
     } finally {
       setSavingEditSession(false);
+    }
+  }
+
+  async function applyBulkFlowToSelectedSessions() {
+    if (!selectedSessionIds.length || bulkApplyingFlow) return;
+    setBulkApplyingFlow(true);
+    setError("");
+    setMessage(`Menerapkan flow ke ${selectedSessionIds.length} Session...`);
+    try {
+      const res = await fetch("/api/vaccination/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk-update-flow",
+          sessionIds: selectedSessionIds,
+          existingFlowConfig: {
+            registration: true,
+            queue:
+              form.existingFlowHealthdayQueueEnabled ||
+              form.existingFlowBazarQueueEnabled,
+            queue_healthday: form.existingFlowHealthdayQueueEnabled,
+            queue_bazar: form.existingFlowBazarQueueEnabled,
+            doctor: form.existingFlowDoctorEnabled,
+          },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.message || "Gagal menerapkan flow massal.");
+      setMessage(json.message || "Flow massal berhasil diterapkan.");
+      setSelectedSessionIds([]);
+      await loadSessions();
+    } catch (err: any) {
+      setError(err?.message || "Gagal menerapkan flow massal.");
+    } finally {
+      setBulkApplyingFlow(false);
     }
   }
 
@@ -1000,7 +1058,11 @@ export default function VaccinationSessionPage() {
               json.source?.name || json.source?.institution_name || "",
             existingFlowConfig: {
               registration: true,
-              queue: form.existingFlowQueueEnabled,
+              queue:
+                form.existingFlowHealthdayQueueEnabled ||
+                form.existingFlowBazarQueueEnabled,
+              queue_healthday: form.existingFlowHealthdayQueueEnabled,
+              queue_bazar: form.existingFlowBazarQueueEnabled,
               doctor: form.existingFlowDoctorEnabled,
             },
           }),
@@ -1137,7 +1199,11 @@ export default function VaccinationSessionPage() {
         participantCountPlanned: selectedLocation?.participantCount || 0,
         existingFlowConfig: {
           registration: true,
-          queue: form.existingFlowQueueEnabled,
+          queue:
+            form.existingFlowHealthdayQueueEnabled ||
+            form.existingFlowBazarQueueEnabled,
+          queue_healthday: form.existingFlowHealthdayQueueEnabled,
+          queue_bazar: form.existingFlowBazarQueueEnabled,
           doctor: form.existingFlowDoctorEnabled,
         },
       }),
@@ -1158,7 +1224,10 @@ export default function VaccinationSessionPage() {
       location: "",
       sessionDate: "",
       timeSlot: "",
-      existingFlowQueueEnabled: form.existingFlowQueueEnabled,
+      existingFlowQueueEnabled:
+        form.existingFlowHealthdayQueueEnabled || form.existingFlowBazarQueueEnabled,
+      existingFlowHealthdayQueueEnabled: form.existingFlowHealthdayQueueEnabled,
+      existingFlowBazarQueueEnabled: form.existingFlowBazarQueueEnabled,
       existingFlowDoctorEnabled: form.existingFlowDoctorEnabled,
     });
     setSessionVaccines([]);
@@ -1394,57 +1463,69 @@ export default function VaccinationSessionPage() {
           </div>
 
           <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
-            <div className="text-sm font-black text-slate-900">Flow Session Baru / Auto-generated</div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
-              <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
-                1. Registrasi
-              </span>
-              <span>→</span>
-              <label
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
-                  form.existingFlowQueueEnabled
-                    ? "bg-emerald-100 text-emerald-700"
-                    : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={form.existingFlowQueueEnabled}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      existingFlowQueueEnabled: e.target.checked,
-                    }))
-                  }
-                />
-                2. Antrian
-              </label>
-              <span>→</span>
-              <label
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
-                  form.existingFlowDoctorEnabled
-                    ? "bg-blue-100 text-blue-700"
-                    : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={form.existingFlowDoctorEnabled}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      existingFlowDoctorEnabled: e.target.checked,
-                    }))
-                  }
-                />
-                3. Alur Dokter
-              </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-black text-slate-900">Flow Session Baru / Auto-generated</div>
+                <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                  Satu Session dapat memakai flow berbeda untuk Healthday dan Bazar.
+                </div>
+              </div>
+              <div className="rounded-full border border-sky-200 bg-white px-3 py-1 text-[11px] font-black text-sky-700">
+                1 Session · 2 Flow Layanan
+              </div>
             </div>
-            <p className="mt-2 text-xs font-semibold text-slate-600">
-              Antrian default ON. Matikan Antrian jika event memakai nomor antrean vendor / hanya pencatatan.
-              Saat Antrian OFF, registrasi meminta Nomor Antrean Vendor dan peserta langsung masuk ke Tim Validasi.
-              Alur Dokter tetap dapat diatur terpisah.
-            </p>
+
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              {([
+                ["HEALTHDAY", "Healthday", form.existingFlowHealthdayQueueEnabled],
+                ["BAZAR", "Bazar", form.existingFlowBazarQueueEnabled],
+              ] as const).map(([mode, label, enabled]) => (
+                <div key={mode} className={`rounded-xl border p-3 ${mode === "BAZAR" ? "border-violet-200 bg-violet-50/60" : "border-blue-200 bg-blue-50/60"}`}>
+                  <div className={`text-xs font-black uppercase ${mode === "BAZAR" ? "text-violet-700" : "text-blue-700"}`}>{label}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+                    <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">1. Registrasi</span>
+                    <span>→</span>
+                    <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            existingFlowQueueEnabled:
+                              mode === "HEALTHDAY"
+                                ? e.target.checked || prev.existingFlowBazarQueueEnabled
+                                : prev.existingFlowHealthdayQueueEnabled || e.target.checked,
+                            ...(mode === "HEALTHDAY"
+                              ? { existingFlowHealthdayQueueEnabled: e.target.checked }
+                              : { existingFlowBazarQueueEnabled: e.target.checked }),
+                          }))
+                        }
+                      />
+                      2. Antrian Internal
+                    </label>
+                    <span>→</span>
+                    <span className={form.existingFlowDoctorEnabled ? "rounded-lg bg-blue-100 px-2.5 py-1 text-blue-700" : "rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500"}>
+                      3. Dokter {form.existingFlowDoctorEnabled ? "ON" : "OFF"}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[11px] font-semibold text-slate-500">
+                    {enabled
+                      ? "Nomor antrean dibuat oleh inHarmony untuk layanan ini."
+                      : "Tanpa antrean internal: input Nomor Antrean Vendor lalu masuk Tim Validasi."}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <label className="mt-3 inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-bold text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.existingFlowDoctorEnabled}
+                onChange={(e) => setForm((prev) => ({ ...prev, existingFlowDoctorEnabled: e.target.checked }))}
+              />
+              Aktifkan Alur Dokter untuk Session ini
+            </label>
           </div>
 
           {form.sourceId && !loadingLocations && !locations.length ? (
@@ -1737,12 +1818,36 @@ export default function VaccinationSessionPage() {
               <div className="font-black text-slate-900">Daftar Session</div>
               <div className="text-xs text-slate-500">Produk dipisahkan per layanan agar Healthday dan Bazar tidak tercampur.</div>
             </div>
-            <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{sessions.length} session</div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedSessionIds.length ? (
+                <>
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{selectedSessionIds.length} Session dipilih</span>
+                  <button
+                    type="button"
+                    onClick={applyBulkFlowToSelectedSessions}
+                    disabled={bulkApplyingFlow}
+                    className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                  >
+                    {bulkApplyingFlow ? "Menerapkan..." : "Terapkan Flow di Atas"}
+                  </button>
+                  <button type="button" onClick={() => setSelectedSessionIds([])} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold">Batal Pilih</button>
+                </>
+              ) : null}
+              <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{sessions.length} session</div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[1180px] w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
+                  <th className="w-[48px] p-3 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Pilih semua Session"
+                      checked={sessions.length > 0 && selectedSessionIds.length === sessions.length}
+                      onChange={(e) => setSelectedSessionIds(e.target.checked ? sessions.map((item: any) => Number(item.id)).filter(Boolean) : [])}
+                    />
+                  </th>
                   <th className="w-[260px] p-3 text-left">Session</th>
                   <th className="w-[210px] p-3 text-left">Lokasi / Tanggal</th>
                   <th className="min-w-[420px] p-3 text-left">Produk Session</th>
@@ -1793,11 +1898,45 @@ export default function VaccinationSessionPage() {
 
                   return (
                     <tr key={session.id} className="align-top hover:bg-slate-50/60">
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Pilih Session ${session.session_name || session.id}`}
+                          checked={selectedSessionIds.includes(Number(session.id))}
+                          onChange={(e) => setSelectedSessionIds((prev) => e.target.checked
+                            ? Array.from(new Set([...prev, Number(session.id)]))
+                            : prev.filter((id) => id !== Number(session.id)))}
+                        />
+                      </td>
                       <td className="p-3">
                         <div className="max-w-[250px] font-black leading-snug text-slate-900" title={session.session_name || ""}>
                           {session.session_name || "-"}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">{session.source_name || session.source_id || "-"}</div>
+                        <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-black">
+                          <span className={`rounded-full px-2 py-0.5 ${
+                            (session?.existing_flow_config?.queue_healthday === undefined
+                              ? session?.existing_flow_config?.queue !== false
+                              : session?.existing_flow_config?.queue_healthday !== false)
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}>
+                            HD: {(session?.existing_flow_config?.queue_healthday === undefined
+                              ? session?.existing_flow_config?.queue !== false
+                              : session?.existing_flow_config?.queue_healthday !== false) ? "Internal" : "Vendor"}
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 ${
+                            (session?.existing_flow_config?.queue_bazar === undefined
+                              ? session?.existing_flow_config?.queue !== false
+                              : session?.existing_flow_config?.queue_bazar !== false)
+                              ? "bg-violet-100 text-violet-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}>
+                            Bazar: {(session?.existing_flow_config?.queue_bazar === undefined
+                              ? session?.existing_flow_config?.queue !== false
+                              : session?.existing_flow_config?.queue_bazar !== false) ? "Internal" : "Vendor"}
+                          </span>
+                        </div>
                       </td>
                       <td className="p-3">
                         <div className="font-bold text-slate-800">{session.location || "-"}</div>
@@ -1998,54 +2137,52 @@ export default function VaccinationSessionPage() {
                   </label>
 
                   <div className="rounded-xl border bg-white p-3">
-                    <div className="text-xs font-black uppercase tracking-wide text-slate-500">
-                      Flow Session
+                    <div className="text-xs font-black uppercase tracking-wide text-slate-500">Flow per Layanan</div>
+                    <div className="mt-3 grid gap-3">
+                      {([
+                        ["HEALTHDAY", "Healthday", editSessionForm.existingFlowHealthdayQueueEnabled],
+                        ["BAZAR", "Bazar", editSessionForm.existingFlowBazarQueueEnabled],
+                      ] as const).map(([mode, label, enabled]) => (
+                        <div key={mode} className={`rounded-xl border p-3 ${mode === "BAZAR" ? "border-violet-200 bg-violet-50/50" : "border-blue-200 bg-blue-50/50"}`}>
+                          <div className={`text-xs font-black uppercase ${mode === "BAZAR" ? "text-violet-700" : "text-blue-700"}`}>{label}</div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+                            <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">1. Registrasi</span>
+                            <span>→</span>
+                            <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={(e) => setEditSessionForm((prev) => ({
+                                  ...prev,
+                                  existingFlowQueueEnabled:
+                                    mode === "HEALTHDAY"
+                                      ? e.target.checked || prev.existingFlowBazarQueueEnabled
+                                      : prev.existingFlowHealthdayQueueEnabled || e.target.checked,
+                                  ...(mode === "HEALTHDAY"
+                                    ? { existingFlowHealthdayQueueEnabled: e.target.checked }
+                                    : { existingFlowBazarQueueEnabled: e.target.checked }),
+                                }))}
+                              />
+                              2. Antrian Internal
+                            </label>
+                            <span>→</span>
+                            <span className={editSessionForm.existingFlowDoctorEnabled ? "rounded-lg bg-blue-100 px-2.5 py-1 text-blue-700" : "rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500"}>
+                              3. Dokter {editSessionForm.existingFlowDoctorEnabled ? "ON" : "OFF"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
-                      <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
-                        1. Registrasi
-                      </span>
-                      <span>→</span>
-                      <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
-                        editSessionForm.existingFlowQueueEnabled
-                          ? "bg-emerald-100 text-emerald-700"
-                          : "bg-slate-100 text-slate-500"
-                      }`}>
-                        <input
-                          type="checkbox"
-                          checked={editSessionForm.existingFlowQueueEnabled}
-                          onChange={(e) =>
-                            setEditSessionForm((prev) => ({
-                              ...prev,
-                              existingFlowQueueEnabled: e.target.checked,
-                            }))
-                          }
-                        />
-                        2. Antrian
-                      </label>
-                      <span>→</span>
-                      <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
-                        editSessionForm.existingFlowDoctorEnabled
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-slate-100 text-slate-500"
-                      }`}>
-                        <input
-                          type="checkbox"
-                          checked={editSessionForm.existingFlowDoctorEnabled}
-                          onChange={(e) =>
-                            setEditSessionForm((prev) => ({
-                              ...prev,
-                              existingFlowDoctorEnabled: e.target.checked,
-                            }))
-                          }
-                        />
-                        3. Alur Dokter
-                      </label>
-                    </div>
+                    <label className="mt-3 inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold">
+                      <input
+                        type="checkbox"
+                        checked={editSessionForm.existingFlowDoctorEnabled}
+                        onChange={(e) => setEditSessionForm((prev) => ({ ...prev, existingFlowDoctorEnabled: e.target.checked }))}
+                      />
+                      Aktifkan Alur Dokter
+                    </label>
                     <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-500">
-                      Antrian OFF = mode pencatatan / antrean vendor. Sistem tidak membuat nomor antrean internal;
-                      Nomor Antrean Vendor diinput saat registrasi dan peserta masuk langsung ke Tim Validasi.
-                      Alur Dokter dapat tetap ON/OFF secara terpisah.
+                      Contoh kombinasi: Healthday OFF = nomor vendor/pencatatan; Bazar ON = tetap rilis nomor B internal.
                     </p>
                   </div>
 

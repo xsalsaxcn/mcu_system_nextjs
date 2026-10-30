@@ -1,4 +1,5 @@
 "use client";
+// V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
 // V518_INVENTORY_INITIAL_STOCK_BUCKET_SYNC_PAYMENT_METHOD
@@ -106,17 +107,35 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
   }, [rows, transferSessions]);
 
+  function rowMatchesService(row: any, requestedMode: string) {
+    if (requestedMode === "ALL") return true;
+    const catalog = Array.isArray(row?.service_catalog) ? row.service_catalog : [];
+    const allocations = Array.isArray(row?.service_allocations) ? row.service_allocations : [];
+    const mode = clean(requestedMode).toUpperCase();
+
+    if (catalog.length) {
+      return catalog.some((item: any) =>
+        clean(item?.service_mode).toUpperCase() === mode &&
+        (sessionFilter === "ALL" || String(item?.session_id || "") === sessionFilter)
+      );
+    }
+
+    // Legacy fallback only when catalog assignment is unavailable. Zero-only
+    // allocations do not classify a product into a service.
+    return allocations.some((item: any) =>
+      clean(item?.service_mode).toUpperCase() === mode &&
+      (sessionFilter === "ALL" || String(item?.session_id || "") === sessionFilter) &&
+      (Number(item?.allocated_qty || 0) > 0 || Number(item?.used_qty || 0) > 0)
+    );
+  }
+
   const productOptions = useMemo(() => {
     const map = new Map<string, { id: string; name: string; brand: string }>();
     for (const row of rows) {
       const allocations = Array.isArray(row?.service_allocations) ? row.service_allocations : [];
       if (companyFilter !== "ALL" && clean(row?.stock_company_name) !== companyFilter && !allocations.some((item: any) => clean(item?.company_name) === companyFilter)) continue;
       if (sessionFilter !== "ALL" && String(row?.stock_session_id || "") !== sessionFilter && !allocations.some((item: any) => String(item?.session_id || "") === sessionFilter)) continue;
-      if (serviceFilter !== "ALL") {
-        const hasRequestedBucket = allocations.some((item: any) => clean(item?.service_mode).toUpperCase() === serviceFilter);
-        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
-        if (!hasRequestedBucket && !exactSessionOwner) continue;
-      }
+      if (!rowMatchesService(row, serviceFilter)) continue;
       const id = String(row?.vaccine_id || row?.vaccine?.id || "");
       if (!id) continue;
       map.set(id, { id, name: clean(row?.vaccine?.name) || `Produk ${id}`, brand: clean(row?.vaccine?.brand) });
@@ -142,11 +161,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       if (keyword && !haystack.includes(keyword)) return false;
       if (companyFilter !== "ALL" && clean(row?.stock_company_name) !== companyFilter && !allocations.some((item: any) => clean(item?.company_name) === companyFilter)) return false;
       if (sessionFilter !== "ALL" && String(row?.stock_session_id || "") !== sessionFilter && !allocations.some((item: any) => String(item?.session_id || "") === sessionFilter)) return false;
-      if (serviceFilter !== "ALL") {
-        const hasRequestedBucket = allocations.some((item: any) => clean(item?.service_mode).toUpperCase() === serviceFilter);
-        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
-        if (!hasRequestedBucket && !exactSessionOwner) return false;
-      }
+      if (!rowMatchesService(row, serviceFilter)) return false;
       if (productFilter !== "ALL" && String(row?.vaccine_id || row?.vaccine?.id || "") !== productFilter) return false;
       return true;
     });

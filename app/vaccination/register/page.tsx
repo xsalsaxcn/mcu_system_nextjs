@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
+// V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
 // VACCINATION_REGISTER_MASTER_SEARCH_V153_0_1
 import VaccinationParticipantMasterSearch from "@/components/VaccinationParticipantMasterSearch";
@@ -181,7 +182,16 @@ export default function VaccinationRegisterPage() {
 
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
   const healthdayBazarEnabled = String(selectedSession?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
-  const internalQueueEnabled = selectedSession?.existing_flow_config?.queue !== false;
+  const legacyQueueEnabled = selectedSession?.existing_flow_config?.queue !== false;
+  const healthdayQueueEnabled = selectedSession?.existing_flow_config?.queue_healthday === undefined
+    ? legacyQueueEnabled
+    : selectedSession?.existing_flow_config?.queue_healthday !== false;
+  const bazarQueueEnabled = selectedSession?.existing_flow_config?.queue_bazar === undefined
+    ? legacyQueueEnabled
+    : selectedSession?.existing_flow_config?.queue_bazar !== false;
+  const internalQueueEnabled = String(form.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR"
+    ? bazarQueueEnabled
+    : healthdayQueueEnabled;
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
 
   useEffect(() => {

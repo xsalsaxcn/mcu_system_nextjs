@@ -13,6 +13,7 @@ import {
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
+// V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
 
 function userLabel(user: any) {
@@ -25,8 +26,20 @@ function isHealthdayBazarSession(session: any) {
   return String(session?.existing_queue_profile || "LEGACY").trim().toUpperCase() === "HEALTHDAY_BAZAR";
 }
 
-function usesInternalQueue(session: any) {
-  return session?.existing_flow_config?.queue !== false;
+function usesInternalQueue(session: any, serviceMode?: "HEALTHDAY" | "BAZAR") {
+  const config = session?.existing_flow_config || {};
+  const legacyQueue = config?.queue !== false;
+  if (serviceMode === "HEALTHDAY") {
+    return config?.queue_healthday === undefined
+      ? legacyQueue
+      : config?.queue_healthday !== false;
+  }
+  if (serviceMode === "BAZAR") {
+    return config?.queue_bazar === undefined
+      ? legacyQueue
+      : config?.queue_bazar !== false;
+  }
+  return legacyQueue;
 }
 
 function normalizeServiceMode(value: any, allowBazar: boolean) {
@@ -744,6 +757,80 @@ async function buildServiceQueueUpdate(
   return update;
 }
 
+// V520: build A/B queue state independently. This allows one Session to run
+// Healthday as vendor/record-only while Bazar keeps the internal B queue (or vice versa).
+async function buildConfiguredServiceQueueUpdate(
+  supabase: any,
+  session: any,
+  registration: any,
+  serviceStatus: string,
+  opts: {
+    waitingWithNote?: boolean;
+    externalQueueNumber?: string;
+    requestedServiceMode?: "HEALTHDAY" | "BAZAR";
+  } = {},
+) {
+  const update: Record<string, any> = {};
+  const sessionId = Number(registration?.session_id || session?.id || 0);
+  const externalQueueNumber = clean(opts.externalQueueNumber);
+  const requestedMode = opts.requestedServiceMode || "HEALTHDAY";
+  const hasA = serviceHasTrack(serviceStatus, "A");
+  const hasB = serviceHasTrack(serviceStatus, "B");
+
+  if (hasA) {
+    const internalA = usesInternalQueue(session, "HEALTHDAY");
+    if (internalA) {
+      let queueNumber = clean(registration?.queue_number);
+      if (!queueNumber) queueNumber = await getNextQueueNumber(supabase, sessionId);
+      update.queue_number = queueNumber;
+      const current = String(registration?.queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current)) {
+        update.queue_status = opts.waitingWithNote
+          ? "WAITING_WITH_NOTE"
+          : (["WAITING", "WAITING_WITH_NOTE", "CALLED", "IN_PROGRESS", "SKIPPED"].includes(current) ? current : "WAITING");
+      }
+    } else {
+      const vendorNumber = requestedMode === "HEALTHDAY" && externalQueueNumber
+        ? externalQueueNumber
+        : clean(registration?.queue_number);
+      if (vendorNumber) update.queue_number = vendorNumber;
+      const current = String(registration?.queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current) && current !== "CANCELLED") update.queue_status = "PENDING_VALIDATION";
+    }
+  }
+
+  if (hasB) {
+    const internalB = usesInternalQueue(session, "BAZAR");
+    if (internalB) {
+      let bazarNumber = clean(registration?.bazar_queue_number);
+      let bazarSequence = Number(registration?.bazar_queue_sequence || 0) || null;
+      if (!bazarNumber) {
+        const next = await getNextBazarQueue(supabase, sessionId);
+        bazarNumber = next.number;
+        bazarSequence = next.sequence;
+      }
+      update.bazar_queue_number = bazarNumber;
+      update.bazar_queue_sequence = bazarSequence;
+      const current = String(registration?.bazar_queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current)) {
+        update.bazar_queue_status = opts.waitingWithNote
+          ? "WAITING_WITH_NOTE"
+          : (["WAITING", "WAITING_WITH_NOTE", "CALLED", "IN_PROGRESS", "SKIPPED"].includes(current) ? current : "WAITING");
+      }
+    } else {
+      const vendorNumber = requestedMode === "BAZAR" && externalQueueNumber
+        ? externalQueueNumber
+        : clean(registration?.bazar_queue_number);
+      if (vendorNumber) update.bazar_queue_number = vendorNumber;
+      update.bazar_queue_sequence = null;
+      const current = String(registration?.bazar_queue_status || "").toUpperCase();
+      if (!isDoneQueueStatus(current) && current !== "CANCELLED") update.bazar_queue_status = "PENDING_VALIDATION";
+    }
+  }
+
+  return update;
+}
+
 function normalizeItems(rawItems: any[], fallback: Record<string, any> = {}, allowBazar = false) {
   return (Array.isArray(rawItems) ? rawItems : [])
     .map((item: any) => ({
@@ -1295,7 +1382,6 @@ export async function POST(req: NextRequest) {
       .single();
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
     const allowBazar = isHealthdayBazarSession(sessionResult.data);
-    const internalQueueEnabled = usesInternalQueue(sessionResult.data);
 
     const items = normalizeItems(body.items || [], {
       paymentMethod: body.paymentMethod,
@@ -1357,15 +1443,21 @@ export async function POST(req: NextRequest) {
     const combinedItems = [...preservedAdministered, ...insertedItems];
     const serviceStatus = patientServiceStatus(combinedItems);
     const bazarBilling = bazarBillingSummary(combinedItems);
-    let serviceQueueUpdate: Record<string, any> = internalQueueEnabled
-      ? { queue_status: newStatus }
-      : { queue_status: "PENDING_VALIDATION", bazar_queue_status: null };
-    if (allowBazar && internalQueueEnabled) {
-      try {
-        serviceQueueUpdate = await buildServiceQueueUpdate(supabase, registration, serviceStatus, { waitingWithNote: editableItems.length > 0 });
-      } catch (error: any) {
-        return fail(error?.message || "Gagal menyesuaikan antrian A/B setelah edit produk.", 500);
-      }
+    let serviceQueueUpdate: Record<string, any> = {};
+    try {
+      serviceQueueUpdate = allowBazar
+        ? await buildConfiguredServiceQueueUpdate(
+            supabase,
+            sessionResult.data,
+            registration,
+            serviceStatus,
+            { waitingWithNote: editableItems.length > 0 },
+          )
+        : (usesInternalQueue(sessionResult.data, "HEALTHDAY")
+            ? { queue_status: newStatus }
+            : { queue_status: "PENDING_VALIDATION" });
+    } catch (error: any) {
+      return fail(error?.message || "Gagal menyesuaikan antrian A/B setelah edit produk.", 500);
     }
 
     const updateResult = await supabase
@@ -1405,14 +1497,14 @@ export async function POST(req: NextRequest) {
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const session = sessionResult.data || {};
   const allowBazar = isHealthdayBazarSession(session);
-  const internalQueueEnabled = usesInternalQueue(session);
+  const requestedServiceMode = normalizeServiceMode(body.serviceMode || body.service_mode, allowBazar);
+  const internalQueueEnabled = usesInternalQueue(session, requestedServiceMode);
   const externalQueueNumber = clean(
     body.externalQueueNumber || body.external_queue_number || body.vendorQueueNumber || body.queueNumber,
   );
   if (!internalQueueEnabled && !externalQueueNumber) {
-    return fail("Nomor Antrean Vendor wajib diisi untuk Session tanpa antrean internal.");
+    return fail(`Nomor Antrean Vendor wajib diisi untuk ${requestedServiceMode === "BAZAR" ? "Bazar" : "Healthday"} tanpa antrean internal.`);
   }
-  const requestedServiceMode = normalizeServiceMode(body.serviceMode || body.service_mode, allowBazar);
 
   const moveFromRegistrationId = toInt(body.moveFromRegistrationId || body.move_from_registration_id, 0);
   let moveSourceRegistration: any = null;
@@ -1476,22 +1568,26 @@ export async function POST(req: NextRequest) {
   }
 
   const initialServiceStatus = allowBazar ? patientServiceStatus(items.length ? items : [{ service_mode: requestedServiceMode }]) : "HEALTHDAY";
-  let queueNumber: string | null = null;
-  let bazarQueueNumber: string | null = null;
-  let bazarQueueSequence: number | null = null;
-
-  if (!internalQueueEnabled) {
-    queueNumber = externalQueueNumber;
-  } else {
-    if (!allowBazar || serviceHasTrack(initialServiceStatus, "A")) {
-      queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
-    }
-    if (allowBazar && serviceHasTrack(initialServiceStatus, "B")) {
-      const nextBazar = await getNextBazarQueue(supabase, sessionId);
-      bazarQueueNumber = nextBazar.number;
-      bazarQueueSequence = nextBazar.sequence;
-    }
-  }
+  const initialQueueUpdate = allowBazar
+    ? await buildConfiguredServiceQueueUpdate(
+        supabase,
+        session,
+        { session_id: sessionId },
+        initialServiceStatus,
+        { externalQueueNumber, requestedServiceMode },
+      )
+    : (internalQueueEnabled
+        ? {
+            queue_number: clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId),
+            queue_status: "WAITING",
+          }
+        : {
+            queue_number: externalQueueNumber,
+            queue_status: "PENDING_VALIDATION",
+          });
+  const queueNumber: string | null = clean(initialQueueUpdate.queue_number) || null;
+  const bazarQueueNumber: string | null = clean(initialQueueUpdate.bazar_queue_number) || null;
+  const bazarQueueSequence: number | null = Number(initialQueueUpdate.bazar_queue_sequence || 0) || null;
 
   try {
     const bazarValidation = await validateBazarItems(supabase, items, allowBazar);
@@ -1558,30 +1654,29 @@ export async function POST(req: NextRequest) {
       : "HEALTHDAY";
 
     let queueUpdate: Record<string, any> = {};
-    if (!internalQueueEnabled) {
-      queueUpdate = {
-        queue_number: externalQueueNumber || clean(reusableRegistration.queue_number),
-        queue_status: "PENDING_VALIDATION",
-        bazar_queue_number: null,
-        bazar_queue_sequence: null,
-        bazar_queue_status: null,
-      };
-    } else {
-      try {
-        queueUpdate = await buildServiceQueueUpdate(
-          supabase,
-          reusableRegistration,
-          serviceStatus,
-        );
-      } catch (error: any) {
-        if (insertedItems.length) {
-          await supabase
-            .from("vaccination_registration_items")
-            .delete()
-            .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
-        }
-        return fail(error?.message || "Gagal membuat nomor antrean track yang belum ada.", 500);
+    try {
+      queueUpdate = allowBazar
+        ? await buildConfiguredServiceQueueUpdate(
+            supabase,
+            session,
+            reusableRegistration,
+            serviceStatus,
+            { externalQueueNumber, requestedServiceMode },
+          )
+        : (internalQueueEnabled
+            ? await buildServiceQueueUpdate(supabase, reusableRegistration, serviceStatus)
+            : {
+                queue_number: externalQueueNumber || clean(reusableRegistration.queue_number),
+                queue_status: "PENDING_VALIDATION",
+              });
+    } catch (error: any) {
+      if (insertedItems.length) {
+        await supabase
+          .from("vaccination_registration_items")
+          .delete()
+          .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
       }
+      return fail(error?.message || "Gagal membuat nomor antrean track yang belum ada.", 500);
     }
 
     const billing = bazarBillingSummary(combinedItems);
@@ -1677,15 +1772,11 @@ export async function POST(req: NextRequest) {
     payment_method: clean(body.paymentMethod) || null,
     payment_note: clean(body.paymentNote) || null,
     queue_number: queueNumber,
-    queue_status: internalQueueEnabled
-      ? (queueNumber ? "WAITING" : "REGISTERED")
-      : "PENDING_VALIDATION",
+    queue_status: clean(initialQueueUpdate.queue_status) || (queueNumber ? "WAITING" : "REGISTERED"),
     ...(allowBazar ? {
-      bazar_queue_number: internalQueueEnabled ? bazarQueueNumber : null,
-      bazar_queue_sequence: internalQueueEnabled ? bazarQueueSequence : null,
-      bazar_queue_status: internalQueueEnabled
-        ? (bazarQueueNumber ? "WAITING" : null)
-        : null,
+      bazar_queue_number: bazarQueueNumber,
+      bazar_queue_sequence: bazarQueueSequence,
+      bazar_queue_status: clean(initialQueueUpdate.bazar_queue_status) || null,
     } : {}),
     registered_by: userLabel(user),
     ...(allowBazar ? { patient_service_status: initialServiceStatus } : {}),

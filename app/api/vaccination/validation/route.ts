@@ -4,6 +4,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
 import { syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
+// V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // VACCINATION_ROLE_GUARD_V150
 // V148_VALIDATION_DETAIL_API
@@ -63,6 +64,7 @@ function itemDetail(item: any) {
     administered_by: "-",
     note: "",
     status: clean(item?.status) || "ADMINISTERED",
+    service_mode: clean(item?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
   };
 }
 
@@ -78,14 +80,25 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
       ? `${products.length} vaksin / layanan`
       : (row.product_name || row.vaccine_name || row.vaccine || row.batch_name || row.batchname || row.layanan || row.service_name || "Vaksin");
 
+  const flow = row.session?.existing_flow_config || {};
+  const legacyQueue = flow?.queue !== false;
+  const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
+  const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
+  const pendingBazar = clean(row.bazar_queue_status).toUpperCase() === "PENDING_VALIDATION";
+  const pendingHealthday = clean(row.queue_status || row.status).toUpperCase() === "PENDING_VALIDATION";
+  const validationServiceMode = pendingBazar && !pendingHealthday ? "BAZAR" : "HEALTHDAY";
+
   return {
     id: row.id,
     session_id: row.session_id,
-    queue_number: row.queue_number || row.queue_no || parseQueueNumber(row.queue_label),
+    queue_number: validationServiceMode === "BAZAR"
+      ? (row.bazar_queue_number || "")
+      : (row.queue_number || row.queue_no || parseQueueNumber(row.queue_label)),
     employee_id: clean(row.employee_id || row.mcu_id),
     payment_method: clean(row.payment_method),
     company_name: clean(row.session?.company_name || row.company_name),
-    internal_queue_enabled: row.session?.existing_flow_config?.queue !== false,
+    internal_queue_enabled: validationServiceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled,
+    validation_service_mode: validationServiceMode,
     patient_name: row.patient_name || row.participant_name || row.name || row.full_name || row.nama || row.nama_peserta || "-",
     doctor_name: clean(firstRecord?.administered_by) || row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
     product_name: productName,
@@ -129,7 +142,7 @@ async function loadItemsForRegistrations(supabase: any, registrationIds: number[
 
   const result = await supabase
     .from("vaccination_registration_items")
-    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,administered_record_id,administered_at,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
     .in("registration_id", registrationIds)
     .eq("active", true)
     .order("id", { ascending: true });
@@ -161,7 +174,7 @@ export async function GET(req: NextRequest) {
       .limit(1000);
 
     if (sessionId) query = query.eq("session_id", sessionId);
-    query = query.or("queue_status.eq.PENDING_VALIDATION,validation_status.eq.PENDING");
+    query = query.or("queue_status.eq.PENDING_VALIDATION,bazar_queue_status.eq.PENDING_VALIDATION,validation_status.eq.PENDING");
 
     let result = await query;
     if (result.error && missingColumn(result.error)) {
@@ -181,7 +194,8 @@ export async function GET(req: NextRequest) {
     const pendingRegistrations = (result.data || []).filter((row: any) => {
       const queueStatus = clean(row.queue_status || row.status).toUpperCase();
       const validationStatus = clean(row.validation_status).toUpperCase();
-      return queueStatus === "PENDING_VALIDATION" || validationStatus === "PENDING";
+      const bazarQueueStatus = clean(row.bazar_queue_status).toUpperCase();
+      return queueStatus === "PENDING_VALIDATION" || bazarQueueStatus === "PENDING_VALIDATION" || validationStatus === "PENDING";
     });
 
     const registrationIds = pendingRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
@@ -429,7 +443,7 @@ export async function POST(req: NextRequest) {
     if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
       const registrationModeResult = await supabase
         .from("vaccination_registrations")
-        .select("id,session_id")
+        .select("id,session_id,patient_service_status,queue_status,bazar_queue_status")
         .eq("id", rowId)
         .maybeSingle();
       if (registrationModeResult.error || !registrationModeResult.data) {
@@ -443,16 +457,25 @@ export async function POST(req: NextRequest) {
       if (sessionModeResult.error) {
         return json({ ok: false, message: sessionModeResult.error.message || "Gagal membaca mode Session." }, 500);
       }
-      if (sessionModeResult.data?.existing_flow_config?.queue === false) {
-        try {
+      const flow = sessionModeResult.data?.existing_flow_config || {};
+      const legacyQueue = flow?.queue !== false;
+      const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
+      const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
+      const serviceStatus = clean(registrationModeResult.data?.patient_service_status || "HEALTHDAY").toUpperCase();
+      const hasHealthday = serviceStatus === "HEALTHDAY" || serviceStatus === "COMBINATION";
+      const hasBazar = serviceStatus === "BAZAR" || serviceStatus === "COMBINATION";
+      try {
+        if (hasHealthday && !healthdayQueueEnabled) {
           await syncRegistrationTrackDone(supabase, rowId, "HEALTHDAY", actor);
-          await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
-        } catch (syncError: any) {
-          return json({
-            ok: false,
-            message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok.",
-          }, 409);
         }
+        if (hasBazar && !bazarQueueEnabled) {
+          await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+        }
+      } catch (syncError: any) {
+        return json({
+          ok: false,
+          message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok.",
+        }, 409);
       }
     }
 

@@ -1,3 +1,4 @@
+// V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
@@ -31,11 +32,12 @@ export async function buildVaccinationInventorySnapshot() {
   const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
 
   let allocations: any[] = [];
+  let serviceAssignments: any[] = [];
   let salesOptions: any[] = [];
   let movementRows: any[] = [];
 
   if (lotIds.length) {
-    const [recordsResult, movementsResult, allocationsResult, itemsResult, salesResult] = await Promise.all([
+    const [recordsResult, movementsResult, allocationsResult, assignmentsResult, itemsResult, salesResult] = await Promise.all([
       supabase
         .from("vaccination_records")
         .select("id,lot_id,status")
@@ -51,6 +53,12 @@ export async function buildVaccinationInventorySnapshot() {
       supabase
         .from("vaccination_session_stock_allocations")
         .select("id,session_id,vaccine_id,lot_id,allocated_qty,low_stock_threshold,dedicated,active,service_mode,notes,updated_at")
+        .in("lot_id", lotIds)
+        .eq("active", true)
+        .limit(20000),
+      supabase
+        .from("vaccination_session_vaccine_assignments")
+        .select("id,session_id,vaccine_id,lot_id,service_mode,active")
         .in("lot_id", lotIds)
         .eq("active", true)
         .limit(20000),
@@ -74,6 +82,7 @@ export async function buildVaccinationInventorySnapshot() {
       ["record pemakaian", recordsResult],
       ["movement inventory", movementsResult],
       ["alokasi Healthday/Bazar", allocationsResult],
+      ["assignment katalog Healthday/Bazar", assignmentsResult],
       ["item registrasi", itemsResult],
       ["harga Paket/Non Paket", salesResult],
     ] as Array<[string, any]>) {
@@ -81,6 +90,7 @@ export async function buildVaccinationInventorySnapshot() {
     }
 
     allocations = allocationsResult.data || [];
+    serviceAssignments = assignmentsResult.data || [];
     salesOptions = salesResult.data || [];
     movementRows = movementsResult.data || [];
 
@@ -117,6 +127,7 @@ export async function buildVaccinationInventorySnapshot() {
     new Set<number>([
       ...lots.map((lot: any) => Number(lot.stock_session_id || 0)),
       ...allocations.map((row: any) => Number(row.session_id || 0)),
+      ...serviceAssignments.map((row: any) => Number(row.session_id || 0)),
     ].filter((id: number) => id > 0)),
   );
 
@@ -156,6 +167,25 @@ export async function buildVaccinationInventorySnapshot() {
     allocationsByLot.get(lotId)!.push(enriched);
   }
 
+  const serviceCatalogByLot = new Map<number, any[]>();
+  for (const assignment of serviceAssignments) {
+    const lotId = Number(assignment.lot_id || 0);
+    const sessionId = Number(assignment.session_id || 0);
+    const serviceMode = clean(assignment.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    const session = sessionMap.get(sessionId) || null;
+    const enriched = {
+      ...assignment,
+      service_mode: serviceMode,
+      session,
+      session_name: clean(session?.session_name),
+      company_name: clean(session?.company_name),
+      location: clean(session?.location),
+      session_date: session?.session_date || null,
+    };
+    if (!serviceCatalogByLot.has(lotId)) serviceCatalogByLot.set(lotId, []);
+    serviceCatalogByLot.get(lotId)!.push(enriched);
+  }
+
   const salesByVaccine = new Map<number, any[]>();
   for (const option of salesOptions) {
     const vaccineId = Number(option.vaccine_id || 0);
@@ -193,6 +223,7 @@ export async function buildVaccinationInventorySnapshot() {
       stock_difference: difference,
       stock_session: stockSession,
       service_allocations: lotAllocations,
+      service_catalog: serviceCatalogByLot.get(Number(lot.id)) || [],
       service_modes: serviceModes,
       non_package_price: nonPackage?.price ?? lot.vaccine?.price ?? null,
       package_price: packageOption?.price ?? null,
@@ -210,12 +241,12 @@ export async function buildVaccinationInventorySnapshot() {
   // opening stock. Real participant usage / explicit movements from every alias are
   // still consolidated so no historical trace is lost.
   function canonicalLotKey(row: any) {
-    const scope = clean(row?.stock_scope || "GENERAL").toUpperCase() || "GENERAL";
-    const company = clean(row?.stock_company_name).toLowerCase();
-    const sessionId = Number(row?.stock_session_id || 0);
     const vaccineId = Number(row?.vaccine_id || row?.vaccine?.id || 0);
     const lotNumber = clean(row?.lot_number).toLowerCase();
-    return [vaccineId, lotNumber, scope, company, sessionId].join("|");
+    // Catalog duplication can create multiple ownership rows for the same physical
+    // product+lot. Inventory presents one canonical row; Session/service separation
+    // is preserved by service_catalog + service_allocations below.
+    return [vaccineId, lotNumber].join("|");
   }
 
   function canonicalSignal(row: any) {
@@ -309,7 +340,17 @@ export async function buildVaccinationInventorySnapshot() {
       };
     });
 
-    const serviceModes = Array.from(new Set(mergedAllocations.map((item: any) => item.service_mode))).sort();
+    const mergedServiceCatalogMap = new Map<string, any>();
+    for (const row of group) {
+      for (const item of row?.service_catalog || []) {
+        const sessionId = Number(item?.session_id || 0);
+        const mode = clean(item?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        if (!sessionId) continue;
+        mergedServiceCatalogMap.set(`${sessionId}:${mode}`, { ...item, service_mode: mode });
+      }
+    }
+    const mergedServiceCatalog = Array.from(mergedServiceCatalogMap.values());
+    const serviceModes = Array.from(new Set(mergedServiceCatalog.map((item: any) => item.service_mode))).sort();
     const movementCount = sourceLotIds.reduce((sum, lotId) => sum + (movementCountByLot.get(lotId) || 0), 0);
     const movementCandidates = sourceLotIds
       .map((lotId) => lastMovementByLot.get(lotId))
@@ -330,6 +371,7 @@ export async function buildVaccinationInventorySnapshot() {
       stock_physical_count: physical,
       stock_difference: difference,
       service_allocations: mergedAllocations,
+      service_catalog: mergedServiceCatalog,
       service_modes: serviceModes,
       movement_count: movementCount,
       last_movement_at: lastMovement?.created_at || canonical?.last_movement_at || null,

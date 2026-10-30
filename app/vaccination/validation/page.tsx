@@ -1,5 +1,6 @@
 "use client";
 
+// V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // V148_VALIDATION_DETAIL_AND_STICKER_PRINT
 // V148_5_LOCATION_DATE_SEARCH_AND_EXACT_ADMINISTERED_LABEL
@@ -48,7 +49,7 @@ type SessionOption = {
   company_name?: string;
   location?: string;
   session_date?: string | null;
-  existing_flow_config?: { registration?: boolean; queue?: boolean; doctor?: boolean } | null;
+  existing_flow_config?: { registration?: boolean; queue?: boolean; queue_healthday?: boolean; queue_bazar?: boolean; doctor?: boolean } | null;
   status?: string;
 };
 
@@ -159,7 +160,15 @@ export default function VaccinationValidationPage() {
   const selectedSession = useMemo(() =>
     sessionOptions.find((item) => String(item.session_id) === String(sessionFilter)) || null,
   [sessionFilter, sessionOptions]);
-  const recordOnlyMode = selectedSession?.existing_flow_config?.queue === false;
+  const selectedFlow = selectedSession?.existing_flow_config || null;
+  const selectedLegacyQueue = selectedFlow?.queue !== false;
+  const selectedHealthdayQueue = selectedFlow?.queue_healthday === undefined
+    ? selectedLegacyQueue
+    : selectedFlow?.queue_healthday !== false;
+  const selectedBazarQueue = selectedFlow?.queue_bazar === undefined
+    ? selectedLegacyQueue
+    : selectedFlow?.queue_bazar !== false;
+  const recordOnlyMode = Boolean(selectedSession) && (!selectedHealthdayQueue || !selectedBazarQueue);
 
   const locations = useMemo(() => {
     return Array.from(

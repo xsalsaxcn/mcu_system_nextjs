@@ -1,5 +1,6 @@
 "use client";
 
+// V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
 
 // VACCINATION_MANUAL_PRODUCT_QUEUE_PRINT_V153_89
@@ -85,12 +86,19 @@ export default function VaccinationManualWalkInController({
   const healthdayBazarEnabled =
     String(session?.existing_queue_profile || "LEGACY").toUpperCase() ===
     "HEALTHDAY_BAZAR";
-  const internalQueueEnabled = session?.existing_flow_config?.queue !== false;
   const serviceMode: QueueMode =
     healthdayBazarEnabled &&
     String(form?.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR"
       ? "BAZAR"
       : "HEALTHDAY";
+  const legacyQueueEnabled = session?.existing_flow_config?.queue !== false;
+  const internalQueueEnabled = serviceMode === "BAZAR"
+    ? (session?.existing_flow_config?.queue_bazar === undefined
+        ? legacyQueueEnabled
+        : session?.existing_flow_config?.queue_bazar !== false)
+    : (session?.existing_flow_config?.queue_healthday === undefined
+        ? legacyQueueEnabled
+        : session?.existing_flow_config?.queue_healthday !== false);
   const bazarPaymentMethod = clean(
     form?.paymentMethod || form?.payment_method,
   ).toUpperCase();

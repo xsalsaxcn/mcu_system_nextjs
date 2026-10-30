@@ -1,3 +1,4 @@
+// V520_SERVICE_SPECIFIC_QUEUE_BULK_SESSION_FLOW
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
@@ -41,9 +42,22 @@ function sanitizeExistingFlowConfig(value: any) {
     ? value
     : {};
 
+  const legacyQueue = raw.queue !== false;
+  const queueHealthday = raw.queue_healthday === undefined
+    ? legacyQueue
+    : raw.queue_healthday !== false;
+  const queueBazar = raw.queue_bazar === undefined
+    ? legacyQueue
+    : raw.queue_bazar !== false;
+
   return {
     registration: true,
-    queue: raw.queue !== false,
+    // Compatibility flag for older queue/public code: true whenever at least one
+    // service still uses the internal queue. Per-service behavior is controlled
+    // by queue_healthday / queue_bazar.
+    queue: queueHealthday || queueBazar,
+    queue_healthday: queueHealthday,
+    queue_bazar: queueBazar,
     doctor: raw.doctor !== false,
   };
 }
@@ -731,6 +745,33 @@ export async function POST(req: NextRequest) {
       existing,
       updated,
       sessions: inserted,
+    });
+  }
+
+  // V520: apply one flow configuration to many Sessions without touching
+  // products, lots, stock, queue numbers, print settings, or participant data.
+  if (action === "bulk-update-flow") {
+    const sessionIds = Array.from(
+      new Set<number>(
+        (Array.isArray(body.sessionIds) ? body.sessionIds : [])
+          .map((value: any) => toInt(value, 0))
+          .filter((value: number) => value > 0),
+      ),
+    );
+    if (!sessionIds.length) return fail("Pilih minimal satu Session.");
+
+    const flowConfig = sanitizeExistingFlowConfig(body.existingFlowConfig || {});
+    const result = await supabase
+      .from("vaccination_sessions")
+      .update({ existing_flow_config: flowConfig })
+      .in("id", sessionIds)
+      .select("id,session_name,existing_flow_config");
+    if (result.error) return fail(result.error.message, 500);
+
+    return ok({
+      message: `Flow berhasil diterapkan ke ${(result.data || []).length} Session.`,
+      sessions: result.data || [],
+      flow: flowConfig,
     });
   }
 
