@@ -1981,7 +1981,7 @@ export default function VaccinationSessionPage() {
                           >
                             Public Queue
                           </a>
-                          {bazarItems.length ? (
+                          {(bazarItems.length > 0 || String(session?.existing_queue_profile || "").toUpperCase() === "HEALTHDAY_BAZAR") ? (
                             <button
                               type="button"
                               onClick={() => void openBazarPublicPortal(session)}

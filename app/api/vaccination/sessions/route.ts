@@ -83,7 +83,7 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
 
   const sessionIds = sessions.map((session) => session.id);
 
-  const [svResult, mappingResult, assignmentResult, allocationResult] = await Promise.all([
+  const [svResult, mappingResult, assignmentResult, allocationResult, bazarSessionLotsResult, salesOptionsResult] = await Promise.all([
     supabase
       .from("vaccination_session_vaccines")
       .select(
@@ -114,6 +114,21 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
       .select("session_id,vaccine_id,lot_id,service_mode,active")
       .in("session_id", sessionIds)
       .eq("active", true),
+    // V527: Session list must see the same effective Bazar catalog as Register.
+    // Legacy Bazar products can exist as Session-scoped lots even when the newer
+    // product-assignment table was not backfilled yet.
+    supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_used,stock_added,active,stock_scope,stock_session_id,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
+      .in("stock_session_id", sessionIds)
+      .eq("stock_scope", "SESSION")
+      .eq("active", true)
+      .limit(20000),
+    supabase
+      .from("vaccination_vaccine_sales_options")
+      .select("vaccine_id,price,active")
+      .eq("active", true)
+      .limit(20000),
   ]);
 
   const normalizeMode = (value: any) =>
@@ -137,6 +152,32 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
     }
   }
 
+  const pricedVaccineIds = new Set<number>();
+  if (!salesOptionsResult.error) {
+    for (const row of salesOptionsResult.data || []) {
+      const vaccineId = Number((row as any).vaccine_id || 0);
+      if (vaccineId && Number((row as any).price || 0) > 0) pricedVaccineIds.add(vaccineId);
+    }
+  }
+
+  const sessionsWithExplicitBazar = new Set<number>();
+  if (!assignmentResult.error) {
+    for (const row of assignmentResult.data || []) {
+      if (normalizeMode((row as any).service_mode) === "BAZAR") {
+        const sessionId = Number((row as any).session_id || 0);
+        if (sessionId) sessionsWithExplicitBazar.add(sessionId);
+      }
+    }
+  }
+  if (!allocationResult.error) {
+    for (const row of allocationResult.data || []) {
+      if (normalizeMode((row as any).service_mode) === "BAZAR") {
+        const sessionId = Number((row as any).session_id || 0);
+        if (sessionId) sessionsWithExplicitBazar.add(sessionId);
+      }
+    }
+  }
+
   const vaccineGrouped = new Map<number, any[]>();
   if (!svResult.error) {
     for (const item of svResult.data || []) {
@@ -150,6 +191,63 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
       const decorated = { ...item, service_modes: serviceModes };
       if (!vaccineGrouped.has(sessionId)) vaccineGrouped.set(sessionId, []);
       vaccineGrouped.get(sessionId)!.push(decorated);
+    }
+  }
+
+  // V527: merge effective Bazar catalog into Session presentation without
+  // creating/copying stock or writing new rows. This mirrors Register's legacy
+  // compatibility: Session-scoped priced lots remain valid Bazar catalog even
+  // if vaccination_session_product_assignments is incomplete.
+  if (!bazarSessionLotsResult.error) {
+    for (const lotRow of bazarSessionLotsResult.data || []) {
+      const sessionId = Number((lotRow as any).stock_session_id || 0);
+      const vaccineId = Number((lotRow as any).vaccine_id || 0);
+      const lotId = Number((lotRow as any).id || 0);
+      if (!sessionId || !vaccineId || !lotId) continue;
+
+      const vaccine: any = Array.isArray((lotRow as any).vaccine)
+        ? (lotRow as any).vaccine[0]
+        : (lotRow as any).vaccine;
+      if (!vaccine || vaccine.active === false) continue;
+
+      const lotModes = allocationModes.get(`${sessionId}:${lotId}`);
+      const vaccineModes = assignmentModes.get(`${sessionId}:${vaccineId}`);
+      const explicitlyBazar = lotModes?.has("BAZAR") || vaccineModes?.has("BAZAR");
+      const namedBazar = /(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(String(vaccine?.name || ""));
+      const pricedBazar = Number(vaccine?.price || 0) > 0 || pricedVaccineIds.has(vaccineId);
+      const legacyPricedFallback = !sessionsWithExplicitBazar.has(sessionId) && pricedBazar;
+      if (!explicitlyBazar && !namedBazar && !legacyPricedFallback) continue;
+
+      if (!vaccineGrouped.has(sessionId)) vaccineGrouped.set(sessionId, []);
+      const rows = vaccineGrouped.get(sessionId)!;
+      const existing = rows.find(
+        (row: any) =>
+          Number(row?.vaccine_id || 0) === vaccineId &&
+          Number(row?.lot_id || row?.lot?.id || 0) === lotId,
+      );
+
+      if (existing) {
+        const modes = new Set<string>(
+          Array.isArray(existing.service_modes) ? existing.service_modes : ["HEALTHDAY"],
+        );
+        modes.add("BAZAR");
+        existing.service_modes = Array.from(modes).sort((a, b) =>
+          a === b ? 0 : a === "HEALTHDAY" ? -1 : 1,
+        );
+      } else {
+        rows.push({
+          id: `bazar-catalog-${sessionId}-${vaccineId}-${lotId}`,
+          session_id: sessionId,
+          vaccine_id: vaccineId,
+          lot_id: lotId,
+          dose_number: 1,
+          active: true,
+          vaccine,
+          lot: lotRow,
+          service_modes: ["BAZAR"],
+          option_source: "BAZAR_SESSION_CATALOG_FALLBACK",
+        });
+      }
     }
   }
 

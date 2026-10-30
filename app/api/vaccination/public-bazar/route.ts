@@ -108,7 +108,7 @@ async function loadServiceStockRemaining(supabase: any, sessionId: number) {
 }
 
 async function loadBazarCatalog(supabase: any, sessionId: number): Promise<CatalogItem[]> {
-  const [assignmentResult, sessionVaccinesResult, stock] = await Promise.all([
+  const [assignmentResult, sessionLotsResult, stock] = await Promise.all([
     supabase
       .from("vaccination_session_product_assignments")
       .select("vaccine_id")
@@ -116,21 +116,37 @@ async function loadBazarCatalog(supabase: any, sessionId: number): Promise<Catal
       .eq("service_mode", "BAZAR")
       .eq("active", true)
       .limit(10000),
+    // V527: same effective source used by Register for legacy Bazar catalog:
+    // active lot owned by this Session + active priced product.
     supabase
-      .from("vaccination_session_vaccines")
-      .select("id,vaccine_id,lot_id,active,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active),lot:vaccination_vaccine_lots(id,lot_number,expiry_date,active,stock_scope,stock_session_id)")
-      .eq("session_id", sessionId)
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,lot_number,expiry_date,active,stock_scope,stock_session_id,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
+      .eq("stock_scope", "SESSION")
+      .eq("stock_session_id", sessionId)
       .eq("active", true)
-      .order("id", { ascending: true }),
+      .order("expiry_date", { ascending: true, nullsFirst: false })
+      .order("id", { ascending: true })
+      .limit(10000),
     loadServiceStockRemaining(supabase, sessionId),
   ]);
   if (assignmentResult.error) throw new Error(assignmentResult.error.message);
-  if (sessionVaccinesResult.error) throw new Error(sessionVaccinesResult.error.message);
+  if (sessionLotsResult.error) throw new Error(sessionLotsResult.error.message);
 
-  const assignedIds = new Set<number>((assignmentResult.data || []).map((row: any) => Number(row.vaccine_id || 0)).filter((id: number) => id > 0));
-  if (!assignedIds.size) return [];
+  const assignedIds = new Set<number>(
+    (assignmentResult.data || [])
+      .map((row: any) => Number(row.vaccine_id || 0))
+      .filter((id: number) => id > 0),
+  );
 
-  const vaccineIds = Array.from(assignedIds);
+  const vaccineIds = Array.from(
+    new Set<number>(
+      (sessionLotsResult.data || [])
+        .map((row: any) => Number(row.vaccine_id || 0))
+        .filter((id: number) => id > 0),
+    ),
+  );
+  if (!vaccineIds.length) return [];
+
   const offersResult = await supabase
     .from("vaccination_vaccine_sales_options")
     .select("id,vaccine_id,sale_mode,package_dose_count,price,label,active")
@@ -149,19 +165,34 @@ async function loadBazarCatalog(supabase: any, sessionId: number): Promise<Catal
 
   const catalog: CatalogItem[] = [];
   const seen = new Set<string>();
-  for (const row of sessionVaccinesResult.data || []) {
+  for (const row of sessionLotsResult.data || []) {
     const vaccineId = Number((row as any).vaccine_id || 0);
-    const lotId = Number((row as any).lot_id || 0);
-    if (!vaccineId || !lotId || !assignedIds.has(vaccineId)) continue;
-    const vaccine: any = Array.isArray((row as any).vaccine) ? (row as any).vaccine[0] : (row as any).vaccine;
-    const lot: any = Array.isArray((row as any).lot) ? (row as any).lot[0] : (row as any).lot;
-    if (!vaccine || vaccine.active === false || !lot || lot.active === false) continue;
+    const lotId = Number((row as any).id || 0);
+    if (!vaccineId || !lotId) continue;
+
+    const vaccine: any = Array.isArray((row as any).vaccine)
+      ? (row as any).vaccine[0]
+      : (row as any).vaccine;
+    if (!vaccine || vaccine.active === false) continue;
+
+    const rawOffers = offersByVaccine.get(vaccineId) || [];
+    const masterPrice = vaccine.price == null ? null : money(vaccine.price);
+    const hasPricedOffer = rawOffers.some((offer: any) => money(offer?.price) > 0);
+    const namedBazar = /(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(clean(vaccine.name));
+    const assignedBazar = assignedIds.has(vaccineId);
+    const allocatedBazar = stock.map.has(lotId);
+
+    // If explicit Bazar metadata exists, respect it. Legacy named/allocated rows are
+    // also valid. When the Session has no Bazar assignments at all, preserve the
+    // Register compatibility rule: a priced Session-scoped lot is Bazar-capable.
+    const legacyPricedFallback = assignedIds.size === 0 && (Number(masterPrice || 0) > 0 || hasPricedOffer);
+    if (!assignedBazar && !allocatedBazar && !namedBazar && !legacyPricedFallback) continue;
+
     const key = `${vaccineId}:${lotId}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const masterPrice = vaccine.price == null ? null : money(vaccine.price);
-    const salesOptions = (offersByVaccine.get(vaccineId) || [])
+    const salesOptions = rawOffers
       .map((offer: any) => ({
         id: Number(offer.id),
         saleMode: normalizeSaleMode(offer.sale_mode),
@@ -184,8 +215,8 @@ async function loadBazarCatalog(supabase: any, sessionId: number): Promise<Catal
       lotId,
       vaccineName: clean(vaccine.name) || "Produk Bazar",
       brand: clean(vaccine.brand),
-      lotNumber: clean(lot.lot_number) || "-",
-      expiryDate: lot.expiry_date || null,
+      lotNumber: clean((row as any).lot_number) || "-",
+      expiryDate: (row as any).expiry_date || null,
       stockRemaining: remaining,
       masterPrice,
       salesOptions,

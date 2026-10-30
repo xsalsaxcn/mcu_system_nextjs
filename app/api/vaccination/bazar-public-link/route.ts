@@ -25,15 +25,9 @@ export async function GET(req: NextRequest) {
     return fail("Session sudah dibatalkan.", 409);
   }
 
-  const assignment = await supabase
-    .from("vaccination_session_product_assignments")
-    .select("vaccine_id")
-    .eq("session_id", sessionId)
-    .eq("service_mode", "BAZAR")
-    .eq("active", true)
-    .limit(1);
-  if (assignment.error) return fail(assignment.error.message, 500);
-  if (!(assignment.data || []).length) return fail("Session ini belum memiliki produk Bazar aktif.", 409);
+  // V527: Link Bazar belongs to the Session flow, not to a fragile assignment count.
+  // The public catalog itself resolves assignments + legacy Session-scoped Bazar lots.
+  // This keeps the link available while older catalog rows are being reconciled.
 
   const token = getVaccinationBazarPublicToken(sessionId);
   const path = `/vaccination/public/bazar/${encodeURIComponent(token)}`;
