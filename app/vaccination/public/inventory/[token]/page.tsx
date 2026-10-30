@@ -336,13 +336,13 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       <section className="mx-auto max-w-[1800px] rounded-3xl border bg-white p-5 shadow-sm md:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Portal Tim Inventory · Operational</div>
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Portal Inventory</div>
             <h1 className="mt-1 text-2xl font-black text-slate-900">Inventory Vaksin</h1>
-            <p className="mt-1 text-sm font-semibold text-slate-500">Bisa filter, Movement, export, serta Edit Stok: Tambah, Kurangi, dan Transfer.</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Pantau dan kelola stok vaksin berdasarkan produk, lot, lokasi, dan layanan.</p>
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={() => void load()} className="rounded-xl border bg-white px-4 py-2.5 text-sm font-black">Refresh</button>
-            <span className="rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-800">OPERASIONAL</span>
+            <span className="rounded-xl bg-emerald-100 px-4 py-2.5 text-sm font-black text-emerald-800">Operasional</span>
           </div>
         </div>
 
@@ -369,7 +369,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
             <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => { setServiceFilter(e.target.value); setProductFilter("ALL"); }}><option value="ALL">Healthday + Bazar</option><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option></select>
             <input type="date" className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             <input type="date" className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            <div className="flex gap-2"><button type="button" onClick={() => exportFilter()} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white">Export Filter</button><button type="button" onClick={() => void openMovement()} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white">Semua Movement</button></div>
+            <div className="flex gap-2"><button type="button" onClick={() => exportFilter()} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white">Export Filter</button><button type="button" onClick={() => void openMovement()} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white">Semua Riwayat</button></div>
           </div>
         </div>
 
@@ -377,10 +377,10 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
           <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3"><div className="font-black">Inventory per Produk & Lot</div><div className="rounded-full border bg-white px-3 py-1 text-xs font-bold">{filteredRows.length} lot</div></div>
           <div className="overflow-x-auto">
             <table className={`${serviceFilter === "ALL" ? "min-w-[1380px]" : "min-w-[1180px]"} w-full text-sm`}>
-              <thead className="bg-slate-100 text-[10px] uppercase text-slate-600"><tr><th className="p-3 text-left">Produk & Lot</th><th className="p-3 text-left">Harga</th>{showHealthday ? <th className="p-3 text-left">Healthday</th> : null}{showBazar ? <th className="p-3 text-left">Bazar</th> : null}<th className="p-3">Awal</th><th className="p-3">Tambah</th><th className="p-3">Terpakai</th><th className="p-3">Sisa</th><th className="p-3 text-left">Movement</th><th className="p-3 text-left">Audit</th><th className="p-3 text-left">Aksi</th></tr></thead>
+              <thead className="bg-slate-100 text-[10px] uppercase text-slate-600"><tr><th className="p-3 text-left">Produk & Lot</th><th className="p-3 text-left">Harga</th>{showHealthday ? <th className="p-3 text-left">Healthday</th> : null}{showBazar ? <th className="p-3 text-left">Bazar</th> : null}<th className="p-3">Awal</th><th className="p-3">Tambah</th><th className="p-3">Terpakai</th><th className="p-3">Sisa</th><th className="p-3 text-left">Riwayat Stok</th><th className="p-3 text-left">Audit</th><th className="p-3 text-left">Aksi</th></tr></thead>
               <tbody className="divide-y">
                 {filteredRows.map((row: any) => <tr key={row.id} className="align-top hover:bg-slate-50">
-                  <td className="p-3"><div className="font-black">{row?.vaccine?.name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row?.vaccine?.brand || "-"}</div><div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black">Lot {row?.lot_number || "-"}</div>{Number(row?.duplicate_count || 1) > 1 ? <div className="mt-1 text-[10px] font-semibold text-slate-400">{row.duplicate_count} row lama digabung · 1 saldo canonical</div> : null}</td>
+                  <td className="p-3"><div className="font-black">{row?.vaccine?.name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row?.vaccine?.brand || "-"}</div><div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black">Lot {row?.lot_number || "-"}</div></td>
                   <td className="p-3 text-xs"><div>Non Paket <b>{money(row?.non_package_price)}</b></div><div className="mt-1">Paket <b className="text-emerald-700">{money(row?.package_price)}</b></div>{row?.package_dose_count ? <div className="mt-1 text-[10px] text-emerald-700">{row.package_dose_count} dosis/paket</div> : null}</td>
                   {showHealthday ? <td className="p-3">{allocationBucket(row, "HEALTHDAY")}</td> : null}{showBazar ? <td className="p-3">{allocationBucket(row, "BAZAR")}</td> : null}
                   <td className="p-3 text-center font-black">{Number(row?.stock_initial || 0)}</td><td className="p-3 text-center font-bold">{Number(row?.stock_added || 0)}</td><td className="p-3 text-center font-black">{Number(row?.stock_used || 0)}</td><td className="p-3 text-center font-black text-emerald-700">{Number(row?.stock_system_remaining || 0)}</td>
@@ -402,7 +402,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
           <div className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
               <div>
-                <div className="text-xs font-black uppercase tracking-wide text-amber-700">Edit Stok · Portal Inventory</div>
+                <div className="text-xs font-black uppercase tracking-wide text-amber-700">Edit Stok</div>
                 <div className="mt-1 text-xl font-black">{editing?.vaccine?.name || "Vaksin"} · Lot {editing?.lot_number || "-"}</div>
                 <div className="mt-1 text-sm text-slate-500">Sisa sistem saat ini: <b>{Number(editing?.stock_system_remaining || 0)}</b></div>
               </div>
@@ -442,7 +442,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
                       <option value="BAZAR">Bazar</option>
                     </select>
                   </label>
-                  <div className="md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Transfer mengikuti rule Master: <b>seluruh sisa stok lot</b> dipindahkan ke Session dan bucket tujuan. Riwayat pemakaian lama tetap tersimpan.</div>
+                  <div className="md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Seluruh sisa stok lot akan dipindahkan ke session dan layanan tujuan. Riwayat transaksi sebelumnya tetap tersimpan.</div>
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">

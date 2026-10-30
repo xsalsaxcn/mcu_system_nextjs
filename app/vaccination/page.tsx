@@ -22,7 +22,7 @@ const stageNotes: Record<MenuItem["stage"], string> = {
 
 const menuItems: MenuItem[] = [
   { title: "Master Vaksin & Lot", href: "/vaccination/master", desc: "Input master vaksin, harga produk, kategori harga, stok, dan lot number.", tag: "Master", stage: "Persiapan" },
-  { title: "Session Vaksin", href: "/vaccination/session", desc: "Buat event perusahaan, pilih database corporate/vaksinasi, dan set multi-vaksin.", tag: "Setup", stage: "Persiapan" },
+  { title: "Session Vaksin", href: "/vaccination/session", desc: "Atur session, lokasi, alur layanan, dan produk vaksin.", tag: "Setup", stage: "Persiapan" },
   { title: "Registrasi Vaksin", href: "/vaccination/register", desc: "Check-in peserta, rilis nomor antrian, NIK, payment note, dan export per stage.", tag: "Frontdesk", stage: "Pelaksanaan" },
   { title: "Antrian Vaksin", href: "/vaccination/queue", desc: "Panggil nomor antrian berjalan dan monitor status menunggu/dokter/selesai.", tag: "Queue", stage: "Pelaksanaan" },
   { title: "Administered / Medis", href: "/vaccination/administer", desc: "Input dokter, vaksin, lot number, Done, dan print sticker label.", tag: "Medis", stage: "Pelaksanaan" },
@@ -53,7 +53,7 @@ export default function VaccinationPage() {
             <div className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-600 text-sm font-black text-white shadow-sm">H</div>
             <div>
               <div className="text-lg font-black tracking-tight text-slate-900">Harmony Health App</div>
-              <div className="text-xs font-semibold text-slate-500">Vaccination Operational Workspace</div>
+              <div className="text-xs font-semibold text-slate-500">Manajemen Vaksinasi</div>
             </div>
           </div>
           <VaccinationWorkspaceMenu />
@@ -65,10 +65,10 @@ export default function VaccinationPage() {
           <div className="border-b border-slate-200 px-6 py-5 lg:px-8">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Operational Overview</div>
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Ringkasan Operasional</div>
                 <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Vaksinasi Perusahaan</h1>
                 <p className="mt-1 text-sm font-medium text-slate-500">
-                  Klik Stage di bawah atau gunakan hamburger Menu Vaksinasi. Keduanya membuka menu existing yang sama; workflow dan fungsi tetap sama.
+                  Pilih menu sesuai kebutuhan untuk mengelola operasional vaksinasi.
                 </p>
               </div>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-700">

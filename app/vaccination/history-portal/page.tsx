@@ -467,7 +467,7 @@ export default function VaccinationHistoryPortalPage() {
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#1189A7]"><LockIcon /></span>
                 <div>
                   <div className="text-[13px] font-black">Akses aman & terbatas</div>
-                  <p className="mt-1 text-[12px] font-semibold leading-5 text-slate-600">Portal ini bersifat read-only untuk melihat riwayat layanan. Perubahan data dilakukan melalui Admin inHARMONY.</p>
+                  <p className="mt-1 text-[12px] font-semibold leading-5 text-slate-600">Portal ini digunakan untuk melihat riwayat layanan. Perubahan data dilakukan oleh tim yang berwenang.</p>
                 </div>
               </div>
             </div>
@@ -608,7 +608,7 @@ export default function VaccinationHistoryPortalPage() {
                   <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-cyan-200 bg-white text-cyan-700">
                     <span className="text-sm font-black">i</span>
                   </span>
-                  <p className="text-[11px] font-semibold leading-5 text-slate-600">Data pada portal ini bersifat read-only. Perbaikan data dilakukan melalui Admin inHARMONY.</p>
+                  <p className="text-[11px] font-semibold leading-5 text-slate-600">Portal ini menampilkan data riwayat layanan. Hubungi tim yang berwenang jika terdapat data yang perlu diperbarui.</p>
                 </div>
               </div>
             ) : (

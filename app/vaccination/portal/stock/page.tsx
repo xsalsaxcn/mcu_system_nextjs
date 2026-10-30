@@ -89,7 +89,7 @@ export default function VaccinationStockAllocationPage() {
           <div>
             <div className="text-xs font-black uppercase tracking-[0.16em] text-blue-100">Vaccination Portal</div>
             <h1 className="mt-1 text-2xl font-black">Alokasi Stock per Session</h1>
-            <p className="mt-1 text-sm text-blue-100">Lot dedicated tidak boleh dipakai oleh session lain. Guard juga dijalankan di API Administer.</p>
+            <p className="mt-1 text-sm text-blue-100">Lot khusus hanya dapat digunakan oleh session yang dipilih.</p>
           </div>
           <a href="/vaccination/portal" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-900">Kembali ke Portal</a>
         </div>
@@ -121,7 +121,7 @@ export default function VaccinationStockAllocationPage() {
           </div>
           <label className="mt-4 flex items-center gap-2 text-sm font-bold text-slate-700">
             <input type="checkbox" checked={form.dedicated} onChange={(e) => setForm({ ...form, dedicated: e.target.checked })} />
-            Dedicated untuk session ini. Session lain tidak boleh menggunakan lot ini.
+            Khusus untuk session ini. Session lain tidak dapat menggunakan lot tersebut.
           </label>
           <button type="button" onClick={save} className="mt-4 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white hover:bg-blue-800">Simpan Alokasi</button>
         </section>
@@ -155,7 +155,7 @@ export default function VaccinationStockAllocationPage() {
                     <td className="p-3 text-right">{row.used_qty}</td>
                     <td className={`p-3 text-right font-black ${Number(row.remaining_qty) <= Number(row.low_stock_threshold) ? "text-red-600" : "text-emerald-700"}`}>{row.remaining_qty}</td>
                     <td className="p-3 text-right">{row.low_stock_threshold}</td>
-                    <td className="p-3">{row.dedicated ? "Dedicated" : "Shared"}</td>
+                    <td className="p-3">{row.dedicated ? "Khusus Session" : "Berbagi"}</td>
                     <td className="p-3"><button type="button" onClick={() => disable(row.id)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700">Nonaktifkan</button></td>
                   </tr>
                 ))}

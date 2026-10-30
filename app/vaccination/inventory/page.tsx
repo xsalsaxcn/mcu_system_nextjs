@@ -75,9 +75,9 @@ export default function VaccinationInventoryPage() {
       if (!url) throw new Error("URL Portal Inventory tidak terbentuk.");
       setPublicPortalUrl(url);
       try { await navigator.clipboard.writeText(url); } catch {}
-      setMessage("Link Portal Tim Inventory operational dibuat dan disalin. Portal dapat filter, Movement, export, Tambah/Kurangi/Transfer stok tanpa login.");
+      setMessage("Link Portal Inventory berhasil dibuat dan disalin.");
     } catch (e: any) {
-      setError(String(e?.message || e || "Gagal membuat Portal Inventory public."));
+      setError(String(e?.message || e || "Gagal membuat link Portal Inventory."));
     }
   }
 
@@ -250,13 +250,13 @@ export default function VaccinationInventoryPage() {
 
         {publicPortalUrl ? (
           <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Link Portal Inventory · Operational</div>
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Link Portal Inventory</div>
             <div className="mt-2 flex flex-col gap-2 lg:flex-row">
               <input readOnly value={publicPortalUrl} className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm font-semibold" />
               <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(publicPortalUrl); setMessage("Link Portal Inventory disalin."); } catch { setError("Browser tidak mengizinkan copy otomatis."); } }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Salin Link</button>
               <a href={publicPortalUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-blue-700 px-4 py-2 text-center text-sm font-black text-white">Buka Portal</a>
             </div>
-            <div className="mt-2 text-xs font-semibold text-blue-800">Tidak perlu account. Bisa view, filter, Movement, export, serta Edit Stok (Tambah / Kurangi / Transfer). Simpan link ini sebagai link operasional rahasia.</div>
+            <div className="mt-2 text-xs font-semibold text-blue-800">Link ini memberikan akses operasional Inventory tanpa login. Bagikan hanya kepada tim yang berwenang.</div>
           </div>
         ) : null}
 
@@ -274,8 +274,8 @@ export default function VaccinationInventoryPage() {
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <div className="mb-3">
-            <div className="text-sm font-black text-slate-900">Pelaporan Inventory mengikuti rule Master Produk & Lot</div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">Tujuan stok Perusahaan/Session, bucket Healthday/Bazar, harga Paket/Non Paket, pemakaian peserta, dan movement dibaca dari sumber data yang sama dengan Master.</div>
+            <div className="text-sm font-black text-slate-900">Ringkasan Inventory Vaksin</div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">Pantau stok per perusahaan, session, layanan, produk, dan lot dalam satu tampilan.</div>
           </div>
           <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_210px_250px_210px_170px_auto]">
             <input className="rounded-xl border px-3 py-2.5" placeholder="Cari produk, lot, session, perusahaan..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -347,8 +347,8 @@ export default function VaccinationInventoryPage() {
         <section className="mt-6 overflow-hidden rounded-2xl border bg-white">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
             <div>
-              <div className="font-black text-slate-900">Inventory per Produk & Lot</div>
-              <div className="text-xs text-slate-500">Healthday dan Bazar dipisahkan per bucket. Detail transaksi tetap tersedia lewat Movement.</div>
+              <div className="font-black text-slate-900">Stok per Produk & Lot</div>
+              <div className="text-xs text-slate-500">Stok Healthday dan Bazar ditampilkan sesuai layanan. Detail transaksi tersedia melalui Riwayat Stok.</div>
             </div>
             <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{filteredRows.length} lot</div>
           </div>
@@ -366,7 +366,7 @@ export default function VaccinationInventoryPage() {
                   <th className="w-[90px] p-3 text-left">Terpakai</th>
                   <th className="w-[90px] p-3 text-left">Sisa Sistem</th>
                   <th className="w-[180px] p-3 text-left">Arus Stok</th>
-                  <th className="w-[130px] p-3 text-left">Movement</th>
+                  <th className="w-[130px] p-3 text-left">Riwayat Stok</th>
                   <th className="w-[145px] p-3 text-left">Audit / Aksi</th>
                 </tr>
               </thead>
@@ -424,7 +424,7 @@ export default function VaccinationInventoryPage() {
                         <div className="font-black text-slate-900">{row.vaccine?.name || "-"}</div>
                         <div className="mt-1 text-xs text-slate-500">{row.vaccine?.brand || "-"}</div>
                         <div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black text-slate-700">Lot {row.lot_number || "-"}</div>
-                        {Number(row.duplicate_count || 1) > 1 ? <div className="mt-1 text-[10px] font-semibold text-slate-400">{row.duplicate_count} row lama digabung · 1 saldo canonical</div> : null}
+
                       </td>
                       <td className="p-3">
                         <div className="space-y-1 text-xs">

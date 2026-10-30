@@ -177,9 +177,9 @@ export default function VaccinationHistoryPage() {
         setMessage(`Header terbaca: ${json.headers?.length || 0} kolom. Template: ${json.template}. Atur mapping bila nama header berbeda.`);
       } else if (mode === "preview") {
         setPreview(json);
-        setMessage("Preview berhasil. Periksa mapping, jumlah baris, peserta anak, dan contoh data sebelum Import.");
+        setMessage("Pratinjau siap. Periksa pemetaan, jumlah data, peserta anak, dan contoh data sebelum mengimpor.");
       } else {
-        setMessage(json.message || "Import history selesai.");
+        setMessage(json.message || "Impor riwayat selesai.");
         await loadBatches();
       }
     } catch {
@@ -198,10 +198,10 @@ export default function VaccinationHistoryPage() {
         <section className="rounded-3xl border bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <div className="text-xs font-black uppercase tracking-wide text-emerald-700">Vaccination History V151</div>
-              <h1 className="mt-1 text-3xl font-black text-slate-900">Import History Layanan</h1>
+              <div className="text-xs font-black uppercase tracking-wide text-emerald-700">Riwayat Vaksinasi</div>
+              <h1 className="mt-1 text-3xl font-black text-slate-900">Impor Riwayat Layanan</h1>
               <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">
-                Import riwayat lama tanpa memasukkannya ke vaccination_records. History anak disimpan sebagai pasien tersendiri dan diikat ke parent melalui NIK / NIP / Employee ID / Email.
+                Impor riwayat layanan lama dan hubungkan data anak/tanggungan dengan Parent menggunakan identitas yang tersedia.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -225,11 +225,11 @@ export default function VaccinationHistoryPage() {
               {companySourceError ? <div className="mt-2 text-xs font-bold text-red-600">{companySourceError}</div> : null}
               {selectedCompanySource ? (
                 <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
-                  Perusahaan History: {companyName} · {selectedCompanySource.databaseCount} database vaksinasi terhubung
+                  Perusahaan: {companyName} · {selectedCompanySource.databaseCount} sumber data tersedia
                 </div>
               ) : null}
               {!selectedCompanySource && !loadingCompanySources ? (
-                <div className="mt-2 text-xs font-semibold text-slate-500">Daftar diambil dari field Nama Instansi / Source yang disetting saat Import Database.</div>
+                <div className="mt-2 text-xs font-semibold text-slate-500">Daftar perusahaan mengikuti sumber data peserta yang tersedia.</div>
               ) : null}
             </label>
             <label className="block">
@@ -244,28 +244,28 @@ export default function VaccinationHistoryPage() {
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" disabled={loading || !selectedCompanySourceId || !file} onClick={() => void send("headers")} className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memproses..." : "1. Baca Header & Mapping"}</button>
-            <button type="button" disabled={loading || !canPreview} onClick={() => void send("preview")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">2. Preview File</button>
-            <button type="button" disabled={loading || !canImport} onClick={() => void send("import")} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">3. Import History</button>
+            <button type="button" disabled={loading || !canPreview} onClick={() => void send("preview")} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">2. Pratinjau File</button>
+            <button type="button" disabled={loading || !canImport} onClick={() => void send("import")} className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">3. Impor Riwayat</button>
           </div>
 
           {headerInfo ? (
             <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <div className="text-xs font-black uppercase text-blue-700">Menu Mapping Header</div>
-                  <h2 className="mt-1 text-lg font-black text-slate-900">Cocokkan kolom Excel ke field History</h2>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">Nama header tidak harus sama antar perusahaan. Kosongkan pilihan untuk memakai Auto Detect; pilih header secara manual bila berbeda.</p>
+                  <div className="text-xs font-black uppercase text-blue-700">Pemetaan Kolom</div>
+                  <h2 className="mt-1 text-lg font-black text-slate-900">Cocokkan kolom Excel</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Nama kolom dapat berbeda antar perusahaan. Gunakan saran otomatis atau pilih kolom secara manual bila diperlukan.</p>
                   <div className="mt-2 text-xs font-bold text-slate-500">{headerInfo.fileName} · {headerInfo.sheetName} · Deteksi: {headerInfo.template} · {headerInfo.headers.length} header</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => { setMapping(headerInfo.suggestedMapping || {}); setPreview(null); }} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-800 hover:bg-blue-100">Gunakan Saran Otomatis</button>
-                  <button type="button" onClick={() => { setMapping({}); setPreview(null); }} className="rounded-xl border bg-white px-3 py-2 text-xs font-black hover:bg-slate-50">Reset ke Auto</button>
+                  <button type="button" onClick={() => { setMapping({}); setPreview(null); }} className="rounded-xl border bg-white px-3 py-2 text-xs font-black hover:bg-slate-50">Reset Otomatis</button>
                 </div>
               </div>
 
               <div className="mt-4 max-w-md">
                 <label className="block">
-                  <span className="text-xs font-black uppercase text-slate-500">Default Tipe Peserta bila tidak ada kolom tipe</span>
+                  <span className="text-xs font-black uppercase text-slate-500">Tipe peserta jika tidak tersedia di file</span>
                   <select value={defaultParticipantType} onChange={(e) => { setDefaultParticipantType(e.target.value === "DEPENDENT" ? "DEPENDENT" : "EMPLOYEE"); setPreview(null); }} className="mt-2 w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-bold">
                     <option value="EMPLOYEE">Karyawan / Dewasa</option>
                     <option value="DEPENDENT">Anak / Tanggungan</option>
@@ -281,7 +281,7 @@ export default function VaccinationHistoryPage() {
                       <label key={field.key} className="rounded-xl border bg-white p-3">
                         <span className="text-xs font-black text-slate-600">{field.label}{field.required ? " *" : ""}</span>
                         <select value={mapping[field.key] || ""} onChange={(e) => changeMapping(field.key, e.target.value)} className="mt-2 w-full rounded-lg border px-2 py-2 text-sm">
-                          <option value="">Auto Detect / tidak dipaksa</option>
+                          <option value="">Deteksi Otomatis</option>
                           {headerInfo.headers.map((header) => <option key={`${field.key}-${header}`} value={header}>{header}</option>)}
                         </select>
                         <div className="mt-1 truncate text-[11px] font-semibold text-slate-400">Saran: {headerInfo.suggestedMapping?.[field.key] || "belum terdeteksi"}</div>
@@ -292,13 +292,13 @@ export default function VaccinationHistoryPage() {
               ))}
 
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-900">
-                Wajib pastikan Nama Peserta terdeteksi. Untuk anak/tanggungan, map Nama Anak serta minimal salah satu NIK/NIP/Email Parent. Preview ulang setiap kali mapping diubah.
+                Pastikan Nama Peserta terdeteksi. Untuk anak/tanggungan, lengkapi Nama Anak dan minimal satu identitas Parent, lalu periksa kembali pratinjau.
               </div>
             </div>
           ) : null}
 
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-            Safety: preview tidak menulis database. Import file yang sama bersifat idempotent berdasarkan hash file + sheet + row. File 2024 Dewasa dipakai sebagai identity enrichment bila tidak memiliki tanggal/jenis layanan.
+            Pratinjau tidak mengubah data. Periksa hasil terlebih dahulu sebelum mengimpor.
           </div>
         </section>
 
@@ -306,20 +306,20 @@ export default function VaccinationHistoryPage() {
           <section className="rounded-3xl border bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <h2 className="text-xl font-black">Preview Import</h2>
+                <h2 className="text-xl font-black">Pratinjau Impor</h2>
                 <div className="mt-1 text-sm font-semibold text-slate-500">{preview.fileName} · {preview.sheetName} · {preview.template}</div>
               </div>
-              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">Belum diimport</span>
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">Belum diimpor</span>
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               {[
                 ["Total Baris", preview.summary.totalRows],
-                ["History Layanan", preview.summary.serviceRows],
-                ["Identity Only", preview.summary.identityOnlyRows],
+                ["Riwayat Layanan", preview.summary.serviceRows],
+                ["Data Identitas", preview.summary.identityOnlyRows],
                 ["Karyawan", preview.summary.employeeRows],
                 ["Anak", preview.summary.dependentRows],
-                ["Tanpa Strong ID", preview.summary.missingStrongIdRows],
+                ["Identitas Belum Lengkap", preview.summary.missingStrongIdRows],
               ].map(([label, value]) => (
                 <div key={String(label)} className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-xs font-black uppercase text-slate-500">{label}</div>
@@ -376,14 +376,14 @@ export default function VaccinationHistoryPage() {
         <section className="rounded-3xl border bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-black">Data History Tersimpan</h2>
+              <h2 className="text-xl font-black">Data Riwayat Tersimpan</h2>
               <p className="mt-1 text-sm font-semibold text-slate-500">Ringkasan master orang, anak/tanggungan, layanan, dan batch import.</p>
             </div>
             <button type="button" onClick={() => void loadBatches()} className="rounded-xl border bg-white px-4 py-2 text-sm font-black hover:bg-slate-50">Refresh</button>
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-3">
-            {[["Master Orang", stats.persons], ["Anak / Tanggungan", stats.dependents], ["History Layanan", stats.services]].map(([label, value]) => (
+            {[["Peserta", stats.persons], ["Anak / Tanggungan", stats.dependents], ["Riwayat Layanan", stats.services]].map(([label, value]) => (
               <div key={String(label)} className="rounded-2xl border bg-slate-50 p-4">
                 <div className="text-xs font-black uppercase text-slate-500">{label}</div>
                 <div className="mt-2 text-2xl font-black">{number(value)}</div>
@@ -399,7 +399,7 @@ export default function VaccinationHistoryPage() {
                   <th className="p-3 text-left">File</th>
                   <th className="p-3 text-left">Template</th>
                   <th className="p-3 text-left">Baris</th>
-                  <th className="p-3 text-left">History</th>
+                  <th className="p-3 text-left">Riwayat</th>
                   <th className="p-3 text-left">Anak</th>
                   <th className="p-3 text-left">Status</th>
                 </tr>

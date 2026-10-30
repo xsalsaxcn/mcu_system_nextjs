@@ -96,7 +96,7 @@ export default function VaccinationMedisReportPanel({ mode }: { mode: ViewMode }
             {mode === "rekap" ? "Rekap Peserta Medis" : "Laporan Medis"}
           </h1>
           <p className="mt-2 text-sm font-semibold text-blue-100">
-            Mirror read-only dari modul vaksinasi. Halaman ini hanya dapat dikonsumsi role Vaccination Medis.
+            Laporan ini menampilkan data vaksinasi dan hanya tersedia untuk tim Medis.
           </p>
         </div>
       </section>
@@ -180,7 +180,7 @@ export default function VaccinationMedisReportPanel({ mode }: { mode: ViewMode }
         </div>
 
         <div className="mt-3 rounded-xl bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
-          Source: {data.source || "vaccination_records + completed registration fallback"}
+          Sumber data: Vaksinasi
         </div>
         {error ? (
           <div className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700">

@@ -309,7 +309,7 @@ export default function VaccinationValidationPage() {
             <h1 className="text-3xl font-black tracking-tight text-slate-950">Tim Validasi</h1>
             <p className="mt-2 text-sm font-semibold text-slate-500">
               {recordOnlyMode
-                ? "Mode pencatatan: peserta dari meja registrasi dengan nomor antrean vendor. Done / Edit / Cancel dilakukan di sini."
+                ? "Validasi peserta yang menggunakan nomor antrean vendor. Perbarui status peserta melalui aksi yang tersedia."
                 : "Peserta yang sudah selesai tindakan dokter dan menunggu print label/final validasi."}
             </p>
           </div>
@@ -378,7 +378,7 @@ export default function VaccinationValidationPage() {
           <div className="flex items-center justify-between gap-3 border-b bg-cyan-50 px-5 py-4">
             <div>
               <div className="font-black text-slate-900">Pencatatan Registrasi · Antrean Vendor</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Nomor antrean berasal dari vendor. Tidak ada panggilan/print antrean internal.</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Nomor antrean mengikuti sistem vendor untuk layanan ini.</div>
             </div>
             <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-cyan-700">{shown.length} peserta</div>
           </div>

@@ -46,7 +46,7 @@ export default function VaccinationPortalPage() {
       setUser(me.user);
       const alertJson = await fetch("/api/vaccination/stock-alerts", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
       setAlerts(alertJson.alerts || []);
-      setMessage(alertJson.migration_required ? "Portal aktif. Jalankan SQL V150 untuk mengaktifkan dedicated stock dan bell low-stock." : "Portal Vaksinasi siap digunakan.");
+      setMessage(alertJson.migration_required ? "Portal aktif. Beberapa fitur stok belum tersedia; hubungi administrator untuk pemeriksaan lebih lanjut." : "Portal Vaksinasi siap digunakan.");
     } finally {
       setLoading(false);
     }
@@ -75,7 +75,7 @@ export default function VaccinationPortalPage() {
           <div>
             <div className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-100">Harmony Health - Vaccination Portal</div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Portal Operasional Vaksinasi</h1>
-            <p className="mt-2 max-w-2xl text-sm font-semibold text-blue-100">Dedicated workspace untuk Session, Frontdesk, Medis, Tim Validasi, Inventory dan Reporting.</p>
+            <p className="mt-2 max-w-2xl text-sm font-semibold text-blue-100">Akses terpusat untuk Session, Frontdesk, Medis, Tim Validasi, Inventory, dan Pelaporan.</p>
             <div className="mt-4 inline-flex rounded-full bg-white/15 px-3 py-1.5 text-xs font-black">{clean(user.name || user.username)} - {vaccinationRoleLabel(user)}</div>
           </div>
 

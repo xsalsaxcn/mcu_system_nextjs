@@ -60,7 +60,7 @@ export default function VaccinationAdministerPage() {
   const [doctorNames, setDoctorNames] = useState<string[]>([]);
   const [doctorFilter, setDoctorFilter] = useState("all");
   const [searchDone, setSearchDone] = useState("");
-  const [message, setMessage] = useState("Pilih antrian. Daftar vaksin session otomatis menjadi daftar sticker.");
+  const [message, setMessage] = useState("Pilih peserta dari antrean untuk melanjutkan proses layanan.");
   const [error, setError] = useState("");
   const [processingIndex, setProcessingIndex] = useState<number | "all" | null>(null);
   const [printLabelHandler, setPrintLabelHandler] = useState<"MEDIS" | "VALIDASI">("MEDIS");

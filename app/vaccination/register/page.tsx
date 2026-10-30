@@ -808,7 +808,7 @@ export default function VaccinationRegisterPage() {
     }
 
     if (edit.familyRole === "DEPENDENT" && !edit.parentHistoryPersonId) {
-      setError("Untuk Child / Family, pilih Parent existing terlebih dahulu.");
+      setError("Untuk Child / Family, pilih data Parent yang sudah terdaftar terlebih dahulu.");
       return;
     }
 
@@ -909,18 +909,18 @@ export default function VaccinationRegisterPage() {
   async function importCorporate() {
     if (!form.sessionId) { setError("Pilih session terlebih dahulu."); return; }
     const sourceId = selectedSourceId;
-    if (!sourceId) { setError("Session belum terhubung ke database corporate/vaksinasi. Pilih database corporate/vaksinasi dulu."); return; }
+    if (!sourceId) { setError("Session belum memiliki sumber data peserta. Pilih sumber data terlebih dahulu."); return; }
     setImporting(true);
     setError("");
-    setMessage("Mengimport peserta dari database corporate/vaksinasi...");
+    setMessage("Memuat peserta...");
     try {
       const json = await fetch("/api/vaccination/import-corporate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: Number(form.sessionId), sourceId: Number(sourceId), defaultVaccineId: Number(form.vaccineId || 0), defaultLotId: Number(form.lotId || 0), defaultVaccineIds: selectedVaccineIds.map((id) => Number(id)).filter(Boolean) }),
       }).then((r) => r.json());
-      if (!json.ok) { setError(json.message || "Import database gagal."); return; }
-      setMessage(json.message || "Import database berhasil. Nomor antrian belum dirilis.");
+      if (!json.ok) { setError(json.message || "Gagal memuat peserta."); return; }
+      setMessage(json.message || "Peserta berhasil dimuat. Nomor antrean belum dirilis.");
       await loadRegistrations(form.sessionId, String(sourceId));
     } finally {
       setImporting(false);
@@ -1087,7 +1087,7 @@ export default function VaccinationRegisterPage() {
             <p className="mt-2 text-sm text-slate-600">Dashboard antrian registrasi, edit produk layanan, harga/payment note, dan export per stage.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a href="/vaccination/history" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-100">History Layanan</a>
+            <a href="/vaccination/history" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-100">Riwayat Layanan</a>
             <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
           </div>
         </div>
@@ -1123,7 +1123,7 @@ export default function VaccinationRegisterPage() {
               type="button"
               onClick={() => saveContextLock(!contextLocked)}
               className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-black ${contextLocked ? "border-amber-200 bg-amber-50 text-amber-800" : "bg-white text-slate-700 hover:bg-slate-50"}`}
-              title={contextLocked ? "Klik untuk membuka kunci pilihan" : "Klik untuk mengunci pilihan session, database, dan vaksin"}
+              title={contextLocked ? "Klik untuk membuka kunci pilihan" : "Klik untuk mengunci pilihan session, sumber data, dan vaksin"}
             >
               <span>{contextLocked ? "🔒" : "🔓"}</span>
               <span>{contextLocked ? "Pilihan Terkunci" : "Kunci Pilihan"}</span>
@@ -1135,7 +1135,7 @@ export default function VaccinationRegisterPage() {
               {sessions.map((session) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
             </select>
             <select disabled={contextLocked} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={selectedSourceId} onChange={(e) => setForm({ ...form, sourceId: e.target.value })}>
-              <option value="">Pilih database corporate/vaksinasi</option>
+              <option value="">Pilih sumber data peserta</option>
               {sources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.institution_name ? ` · ${source.institution_name}` : ""}</option>)}
             </select>
             <div className={`rounded-xl border bg-white p-3 ${contextLocked ? "bg-slate-100" : ""}`}>
@@ -1164,14 +1164,14 @@ export default function VaccinationRegisterPage() {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={importCorporate} disabled={importing || !form.sessionId || !selectedSourceId} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{importing ? "Importing..." : "Import Peserta dari Database"}</button>
-            <a href="/vaccination/session" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">Setup Session</a>
+            <button type="button" onClick={importCorporate} disabled={importing || !form.sessionId || !selectedSourceId} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{importing ? "Memuat..." : "Muat Peserta"}</button>
+            <a href="/vaccination/session" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">Atur Session</a>
           </div>
         </section>
 
         <section className="mt-6 rounded-2xl border bg-slate-50 p-5">
           <h2 className="text-2xl font-black">2. Registrasi Ulang Manual / Walk-in</h2>
-          <p className="mt-1 text-sm text-slate-500">Pilih peserta dari lokasi saat ini atau cek peserta walk-in dari database / history. Setelah itu lengkapi data dan layanan sampai nomor antrean tercetak.</p>
+          <p className="mt-1 text-sm text-slate-500">Pilih peserta yang terdaftar atau cari peserta lain, lalu lengkapi layanan sesuai kebutuhan.</p>
 
           <div className="mt-4 space-y-4">
             {healthdayBazarEnabled ? (
@@ -1344,7 +1344,7 @@ export default function VaccinationRegisterPage() {
                           </button>
                         </div>
                         <div className="mt-2 text-[11px] font-semibold leading-5 text-violet-800">
-                          NIP yang sama tidak otomatis dianggap satu keluarga. Untuk Child / Family, pilih parent existing agar relasinya terkunci dengan benar.
+                          Untuk Child / Family, pilih Parent yang sesuai agar hubungan keluarga tercatat dengan benar.
                         </div>
 
                         {form.familyRole === "DEPENDENT" ? (
@@ -1361,7 +1361,7 @@ export default function VaccinationRegisterPage() {
                                   <div className="mt-1 text-xs font-semibold text-emerald-800">
                                     {[form.parentEmployeeId, form.parentNik, form.parentEmail]
                                       .filter(Boolean)
-                                      .join(" · ") || "Identitas parent tersimpan di History"}
+                                      .join(" · ") || "Identitas Parent tersimpan"}
                                   </div>
                                 </div>
                                 <button
@@ -1428,7 +1428,7 @@ export default function VaccinationRegisterPage() {
                                           <div className="mt-1 text-[11px] font-semibold text-slate-500">
                                             {[row.employeeId, row.nik, row.email]
                                               .filter(Boolean)
-                                              .join(" · ") || "History Company"}
+                                              .join(" · ") || "Riwayat Perusahaan"}
                                           </div>
                                         </div>
                                         <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">
@@ -1443,7 +1443,7 @@ export default function VaccinationRegisterPage() {
                                 parentQuery.trim().length >= 2 &&
                                 !parentResults.length ? (
                                   <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
-                                    Parent existing belum ditemukan di History Company. Pilih parent yang sudah terdaftar agar relasi tidak salah.
+                                    Data Parent belum ditemukan. Pilih Parent yang sudah terdaftar agar hubungan keluarga tercatat dengan benar.
                                   </div>
                                 ) : null}
                               </>
@@ -1521,7 +1521,7 @@ export default function VaccinationRegisterPage() {
                         Parent / Child-Family
                       </div>
                       <div className="mt-1 text-xs font-semibold leading-5 text-violet-800">
-                        Relasi keluarga disimpan eksplisit. NIP yang sama tidak otomatis dianggap satu keluarga.
+                        Pastikan Parent dan Child/Family yang dipilih sudah sesuai.
                       </div>
                     </div>
                     <div className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-800">
@@ -1589,7 +1589,7 @@ export default function VaccinationRegisterPage() {
                   {edit.familyRole === "PARENT" ? (
                     <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3">
                       <div className="text-xs font-black text-slate-800">
-                        Hubungkan Parent ke data History existing
+                        Hubungkan Parent ke data yang sudah terdaftar
                       </div>
                       <div className="mt-1 text-[11px] font-semibold text-slate-500">
                         Disarankan untuk Parent agar Family Queue bisa menemukan semua anggota keluarga.
@@ -1599,10 +1599,10 @@ export default function VaccinationRegisterPage() {
                         <div className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="text-sm font-black text-emerald-950">
-                              {edit.historyPersonName || edit.registration.participant_name || "Parent existing"}
+                              {edit.historyPersonName || edit.registration.participant_name || "Parent terdaftar"}
                             </div>
                             <div className="mt-1 text-xs font-semibold text-emerald-800">
-                              History Person #{edit.historyPersonId}
+                              ID Riwayat #{edit.historyPersonId}
                             </div>
                           </div>
                           <button
@@ -1634,7 +1634,7 @@ export default function VaccinationRegisterPage() {
                           />
                           {!editFamilyQuery.trim() ? (
                             <div className="mt-2 text-[11px] font-semibold text-amber-700">
-                              Parent tetap bisa disimpan tanpa History Person, tetapi Family Queue baru bisa mengelompokkan keluarga setelah Parent terhubung ke History existing.
+                              Parent tetap dapat disimpan. Untuk pengelompokan keluarga, hubungkan Parent ke data yang sudah terdaftar.
                             </div>
                           ) : null}
                         </>
@@ -1652,12 +1652,12 @@ export default function VaccinationRegisterPage() {
                         <div className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="text-sm font-black text-emerald-950">
-                              {edit.parentName || "Parent existing"}
+                              {edit.parentName || "Parent terdaftar"}
                             </div>
                             <div className="mt-1 text-xs font-semibold text-emerald-800">
                               {[edit.parentEmployeeId, edit.parentNik, edit.parentEmail]
                                 .filter(Boolean)
-                                .join(" · ") || `History Person #${edit.parentHistoryPersonId}`}
+                                .join(" · ") || `ID Riwayat #${edit.parentHistoryPersonId}`}
                             </div>
                           </div>
                           <button
@@ -1695,7 +1695,7 @@ export default function VaccinationRegisterPage() {
 
                   {editFamilySearching ? (
                     <div className="mt-3 rounded-xl border bg-white px-3 py-2 text-xs font-bold text-slate-500">
-                      Mencari data History...
+                      Mencari data riwayat...
                     </div>
                   ) : null}
 
@@ -1741,7 +1741,7 @@ export default function VaccinationRegisterPage() {
                             <div className="mt-1 text-[11px] font-semibold text-slate-500">
                               {[row.employeeId, row.nik, row.email]
                                 .filter(Boolean)
-                                .join(" · ") || "History Company"}
+                                .join(" · ") || "Riwayat Perusahaan"}
                             </div>
                           </div>
                           <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">

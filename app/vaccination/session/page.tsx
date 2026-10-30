@@ -1040,7 +1040,7 @@ export default function VaccinationSessionPage() {
       if (!json.locations?.length) {
         setMessage(
           json.message ||
-            "Belum ada metadata lokasi. Jalankan SQL v55 dan re-import data vaksinasi agar lokasi/tanggal/jam bisa dibuat otomatis.",
+            "Informasi lokasi belum tersedia. Periksa kembali sumber data peserta atau hubungi administrator.",
         );
       } else {
         // VACCINATION_AUTO_PERSIST_DETECTED_SESSIONS_V153_31
@@ -1129,7 +1129,7 @@ export default function VaccinationSessionPage() {
 
     if (autoGenerateFromLocations && !locations.length) {
       setError(
-        "Rincian lokasi belum tersedia. Jalankan SQL v55 lalu re-import data vaksinasi.",
+        "Rincian lokasi belum tersedia. Periksa kembali sumber data peserta atau hubungi administrator.",
       );
       return;
     }
@@ -1292,7 +1292,7 @@ export default function VaccinationSessionPage() {
         companyName: String(selectedExistingSession.company_name || prev.companyName),
       }));
       setMessage(
-        `Session existing ditemukan. ${loadedVaccines.length} vaksin/lot dan mapping sebelumnya dimuat untuk dilanjutkan.`,
+        `Data session ditemukan. ${loadedVaccines.length} vaksin/lot dan pengaturan sebelumnya siap digunakan.`,
       );
       return;
     }
@@ -1338,7 +1338,7 @@ export default function VaccinationSessionPage() {
           <div>
             <h1 className="text-2xl font-bold">Session Vaksinasi</h1>
             <p className="mt-2 text-sm text-slate-600">
-              Session sekarang bisa dibuat otomatis dari lokasi dan tanggal yang tersedia di database vaksinasi.
+              Kelola jadwal, alur layanan, petugas, serta produk vaksin untuk setiap session.
             </p>
           </div>
           <a
@@ -1369,7 +1369,7 @@ export default function VaccinationSessionPage() {
               value={form.sourceId}
               onChange={(e) => setForm({ ...form, sourceId: e.target.value })}
             >
-              <option value="">Pilih database corporate/vaksinasi</option>
+              <option value="">Pilih sumber data peserta</option>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>
                   {source.name}
@@ -1386,10 +1386,10 @@ export default function VaccinationSessionPage() {
               onChange={(e) => applyLocation(e.target.value)}
               disabled={!form.sourceId || loadingLocations}
             >
-              <option value="">Manual / pilih lokasi dari database</option>
+              <option value="">Pilih lokasi / isi manual</option>
               {locations.length ? (
                 <option value={allLocationsKey}>
-                  Konfigurasi semua Session dari database ({locations.length})
+                  Atur semua lokasi sekaligus ({locations.length})
                 </option>
               ) : null}
               {locations.map((item) => (
@@ -1465,13 +1465,13 @@ export default function VaccinationSessionPage() {
           <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-black text-slate-900">Flow Session Baru / Auto-generated</div>
+                <div className="text-sm font-black text-slate-900">Alur Layanan</div>
                 <div className="mt-1 text-[11px] font-semibold text-slate-500">
-                  Satu Session dapat memakai flow berbeda untuk Healthday dan Bazar.
+                  Atur alur Healthday dan Bazar sesuai kebutuhan operasional event.
                 </div>
               </div>
               <div className="rounded-full border border-sky-200 bg-white px-3 py-1 text-[11px] font-black text-sky-700">
-                1 Session · 2 Flow Layanan
+                Pengaturan per layanan
               </div>
             </div>
 
@@ -1502,17 +1502,17 @@ export default function VaccinationSessionPage() {
                           }))
                         }
                       />
-                      2. Antrian Internal
+                      2. Antrean inHarmony
                     </label>
                     <span>→</span>
                     <span className={form.existingFlowDoctorEnabled ? "rounded-lg bg-blue-100 px-2.5 py-1 text-blue-700" : "rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500"}>
-                      3. Dokter {form.existingFlowDoctorEnabled ? "ON" : "OFF"}
+                      3. Dokter {form.existingFlowDoctorEnabled ? "Aktif" : "Nonaktif"}
                     </span>
                   </div>
                   <div className="mt-2 text-[11px] font-semibold text-slate-500">
                     {enabled
-                      ? "Nomor antrean dibuat oleh inHarmony untuk layanan ini."
-                      : "Tanpa antrean internal: input Nomor Antrean Vendor lalu masuk Tim Validasi."}
+                      ? "Nomor antrean dibuat otomatis oleh inHarmony."
+                      : "Gunakan nomor antrean dari vendor, lalu lanjutkan proses melalui Tim Validasi."}
                   </div>
                 </div>
               ))}
@@ -1524,15 +1524,13 @@ export default function VaccinationSessionPage() {
                 checked={form.existingFlowDoctorEnabled}
                 onChange={(e) => setForm((prev) => ({ ...prev, existingFlowDoctorEnabled: e.target.checked }))}
               />
-              Aktifkan Alur Dokter untuk Session ini
+              Aktifkan tahap Dokter
             </label>
           </div>
 
           {form.sourceId && !loadingLocations && !locations.length ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-              Belum ada rincian lokasi dari database ini. Untuk data seperti
-              BINUS, jalankan SQL v55 lalu re-import Excel agar kolom
-              TimeAreaName dan TimeName tersimpan.
+              Belum ada lokasi yang tersedia pada sumber data ini. Periksa kembali data peserta atau hubungi administrator.
             </div>
           ) : null}
 
@@ -1543,7 +1541,7 @@ export default function VaccinationSessionPage() {
                 {selectedLocation.locationName} · {selectedLocation.sessionDate || "Tanpa tanggal"}
               </div>
               <div>
-                Estimasi peserta dari database:{" "}
+                Estimasi peserta:{" "}
                 <b>{selectedLocation.participantCount}</b>
               </div>
             </div>
@@ -1561,17 +1559,17 @@ export default function VaccinationSessionPage() {
           </p>
 
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-            Daftar vaksin mengikuti assignment di <b>Master Produk & Lot</b> untuk Session/Lokasi ini. Produk yang sudah di-assign tetap terbaca walaupun Lot belum tersedia; ketika Lot ditambahkan kemudian, Session akan membaca Lot tersebut otomatis saat halaman kembali aktif/di-refresh.
+            Daftar vaksin mengikuti pengaturan di <b>Master Produk & Lot</b> untuk session ini. Produk tetap dapat disiapkan meskipun lot belum tersedia.
           </div>
 
           {!sessionProductAssignmentReady ? (
             <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-              {sessionProductAssignmentMessage || "Assignment produk per Session belum aktif. Jalankan SQL V499 terlebih dahulu."}
+              {sessionProductAssignmentMessage || "Pengaturan produk untuk session ini belum tersedia. Hubungi administrator jika kondisi ini berlanjut."}
             </div>
           ) : null}
 
           <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-            Session aktif: <b>{currentCompanyName || "perusahaan belum dipilih"}</b>{currentSessionId ? ` · Session ID ${currentSessionId}` : " · session belum tersimpan"}. Produk existing yang sudah pernah aktif di Session tetap dipertahankan sebagai grandfathered; produk baru hanya berasal dari assignment Session ini.
+            Produk untuk <b>{currentCompanyName || "perusahaan belum dipilih"}</b> mengikuti pengaturan session yang dipilih. Produk yang pernah digunakan tetap ditampilkan agar riwayat layanan tetap utuh.
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_120px_auto]">
@@ -1621,7 +1619,7 @@ export default function VaccinationSessionPage() {
 
             {selectedVaccineHasNoActiveLot ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 md:col-span-2">
-                Produk ini sudah boleh berada di Session, tetapi belum memiliki Lot aktif yang sesuai. Lot Number boleh ditambahkan belakangan di <a href="/vaccination/master" className="font-bold underline">Master Produk & Lot</a>; setelah itu kembali ke halaman ini dan Lot akan terbaca otomatis.
+                Produk tersedia untuk session ini, tetapi belum memiliki lot aktif. Tambahkan lot melalui <a href="/vaccination/master" className="font-bold underline">Master Produk & Lot</a> sebelum digunakan.
               </div>
             ) : null}
 
@@ -1688,7 +1686,7 @@ export default function VaccinationSessionPage() {
                       <td className="p-3">
                         <div className="font-bold">{vaccineName(vaccineId)}</div>
                         <div className="mt-1 text-[11px] font-semibold text-amber-700">
-                          Assigned dari Master · {row.modes
+                          Tersedia untuk · {row.modes
                             .map((mode: string) => (mode === "BAZAR" ? "Bazar" : "Healthday"))
                             .join(" + ") || "Session"}
                         </div>
@@ -1745,7 +1743,7 @@ export default function VaccinationSessionPage() {
                 {!sessionVaccines.length && !pendingAssignedProducts.length ? (
                   <tr>
                     <td colSpan={4} className="p-5 text-center text-slate-500">
-                      Belum ada produk yang di-assign ke Session ini. Assign produk dari Master Produk & Lot terlebih dahulu.
+                      Belum ada produk untuk session ini. Tambahkan produk melalui Master Produk & Lot.
                     </td>
                   </tr>
                 ) : null}
@@ -1756,21 +1754,21 @@ export default function VaccinationSessionPage() {
 
           {availableBatchNames.length ? (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-              <div className="font-black text-amber-900">3. Mapping Manual Vaksin dari Database</div>
+              <div className="font-black text-amber-900">3. Pemetaan Produk Peserta</div>
               <p className="mt-1 text-sm text-amber-800">
-                Mapping existing tetap dipertahankan. Opsi mapping hanya berasal dari produk Session ini yang sudah memiliki Lot aktif. Produk assigned tanpa Lot tetap tercatat sebagai Menunggu Lot; setelah Lot ditambahkan di Master dan di-set pada daftar di atas, opsi mapping otomatis ikut tersedia.
+                Pengaturan yang sudah tersimpan tetap dipertahankan. Pilihan hanya menampilkan produk session yang sudah memiliki lot aktif.
               </p>
               {!sessionVaccines.length ? (
                 <div className="mt-3 rounded-xl bg-white p-3 text-sm font-bold text-red-700">
-                  Belum ada produk Session yang memiliki Lot aktif. Produk assigned tanpa Lot tetap aman; tambahkan Lot di Master, lalu Set Lot pada daftar di atas.
+                  Belum ada produk dengan lot aktif untuk session ini. Tambahkan lot di Master Produk & Lot terlebih dahulu.
                 </div>
               ) : null}
               <div className="mt-3 overflow-x-auto rounded-xl border bg-white">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                     <tr>
-                      <th className="p-3 text-left">BatchName di Database</th>
-                      <th className="p-3 text-left">Map ke Vaksin / Lot Session</th>
+                      <th className="p-3 text-left">Nama Batch / Layanan</th>
+                      <th className="p-3 text-left">Vaksin / Lot</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -1921,7 +1919,7 @@ export default function VaccinationSessionPage() {
                               ? "bg-blue-100 text-blue-700"
                               : "bg-slate-100 text-slate-600"
                           }`}>
-                            HD: {(session?.existing_flow_config?.queue_healthday === undefined
+                            Healthday: {(session?.existing_flow_config?.queue_healthday === undefined
                               ? session?.existing_flow_config?.queue !== false
                               : session?.existing_flow_config?.queue_healthday !== false) ? "Internal" : "Vendor"}
                           </span>
@@ -1998,7 +1996,7 @@ export default function VaccinationSessionPage() {
                 <div>
                   <h2 className="text-xl font-black">Edit Session</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Edit informasi session sekaligus layanan/vaksin, lot, dan dosis. Source database, registrasi, antrean, dan record vaksinasi yang sudah terjadi tidak diubah.
+                    Perbarui informasi session, produk, lot, dan dosis. Data registrasi serta riwayat layanan yang sudah tercatat tetap dipertahankan.
                   </p>
                 </div>
                 <button
@@ -2163,7 +2161,7 @@ export default function VaccinationSessionPage() {
                                     : { existingFlowBazarQueueEnabled: e.target.checked }),
                                 }))}
                               />
-                              2. Antrian Internal
+                              2. Antrean inHarmony
                             </label>
                             <span>→</span>
                             <span className={editSessionForm.existingFlowDoctorEnabled ? "rounded-lg bg-blue-100 px-2.5 py-1 text-blue-700" : "rounded-lg bg-slate-100 px-2.5 py-1 text-slate-500"}>
@@ -2182,7 +2180,7 @@ export default function VaccinationSessionPage() {
                       Aktifkan Alur Dokter
                     </label>
                     <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-500">
-                      Contoh kombinasi: Healthday OFF = nomor vendor/pencatatan; Bazar ON = tetap rilis nomor B internal.
+                      Atur metode antrean Healthday dan Bazar sesuai kebutuhan operasional event.
                     </p>
                   </div>
 

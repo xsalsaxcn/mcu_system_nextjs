@@ -106,12 +106,12 @@ export default function VaccinationPortalUsersPage() {
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-blue-950 via-blue-800 to-emerald-600 p-6 text-white shadow-lg md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="text-xs font-black uppercase tracking-[0.16em] text-blue-100">Vaccination Portal</div>
-            <h1 className="mt-1 text-2xl font-black">User & Role Tim Vaksinasi</h1>
-            <p className="mt-1 text-sm text-blue-100">Dedicated user vaksinasi saja. Add, remove, role, dan setup password hanya tersedia untuk Admin Vaksinasi.</p>
+            <div className="text-xs font-black uppercase tracking-[0.16em] text-blue-100">Portal Vaksinasi</div>
+            <h1 className="mt-1 text-2xl font-black">Pengguna & Akses Tim Vaksinasi</h1>
+            <p className="mt-1 text-sm text-blue-100">Kelola pengguna, peran, dan akses khusus modul Vaksinasi.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setShowAdd((value) => !value)} className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-black text-emerald-950">+ Add User</button>
+            <button type="button" onClick={() => setShowAdd((value) => !value)} className="rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-black text-emerald-950">+ Tambah Pengguna</button>
             <a href="/vaccination/portal" className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-blue-900">Kembali ke Portal</a>
           </div>
         </div>
@@ -121,15 +121,15 @@ export default function VaccinationPortalUsersPage() {
 
         {showAdd ? (
           <section className="mt-5 rounded-3xl border bg-white p-5 shadow-sm">
-            <div className="text-lg font-black text-slate-900">Tambah User Vaksinasi</div>
+            <div className="text-lg font-black text-slate-900">Tambah Pengguna Vaksinasi</div>
             <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nama<input className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.name} onChange={(e) => setAddForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
-              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Username<input className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.username} onChange={(e) => setAddForm((prev) => ({ ...prev, username: e.target.value }))} /></label>
-              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Password<input type="password" className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder="Minimal 6 karakter" value={addForm.password} onChange={(e) => setAddForm((prev) => ({ ...prev, password: e.target.value }))} /></label>
-              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Role<select className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.role} onChange={(e) => setAddForm((prev) => ({ ...prev, role: e.target.value }))}>{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nama Pengguna<input className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.username} onChange={(e) => setAddForm((prev) => ({ ...prev, username: e.target.value }))} /></label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Kata Sandi<input type="password" className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder="Minimal 6 karakter" value={addForm.password} onChange={(e) => setAddForm((prev) => ({ ...prev, password: e.target.value }))} /></label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Peran<select className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.role} onChange={(e) => setAddForm((prev) => ({ ...prev, role: e.target.value }))}>{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
             </div>
             <div className="mt-4 flex gap-2">
-              <button type="button" disabled={saving === "create"} onClick={createUser} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">{saving === "create" ? "Menyimpan..." : "Simpan User"}</button>
+              <button type="button" disabled={saving === "create"} onClick={createUser} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">{saving === "create" ? "Menyimpan..." : "Simpan Pengguna"}</button>
               <button type="button" onClick={() => setShowAdd(false)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button>
             </div>
           </section>
@@ -137,13 +137,13 @@ export default function VaccinationPortalUsersPage() {
 
         <section className="mt-5 overflow-hidden rounded-3xl border bg-white shadow-sm">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <div><div className="font-black text-slate-900">Dedicated Vaccination Users</div><div className="text-xs text-slate-500">{users.length} user aktif</div></div>
-            <button type="button" onClick={load} className="rounded-xl border px-3 py-2 text-xs font-black">Refresh</button>
+            <div><div className="font-black text-slate-900">Pengguna Vaksinasi</div><div className="text-xs text-slate-500">{users.length} pengguna aktif</div></div>
+            <button type="button" onClick={load} className="rounded-xl border px-3 py-2 text-xs font-black">Muat Ulang</button>
           </div>
           <div className="overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                <tr><th className="p-3 text-left">Nama</th><th className="p-3 text-left">Username</th><th className="p-3 text-left">Role Vaksinasi</th><th className="p-3 text-left">Program</th><th className="p-3 text-left">Aksi Admin</th></tr>
+                <tr><th className="p-3 text-left">Nama</th><th className="p-3 text-left">Nama Pengguna</th><th className="p-3 text-left">Peran Vaksinasi</th><th className="p-3 text-left">Modul</th><th className="p-3 text-left">Aksi</th></tr>
               </thead>
               <tbody className="divide-y">
                 {users.map((user) => (
@@ -158,13 +158,13 @@ export default function VaccinationPortalUsersPage() {
                     <td className="p-3">vaccination</td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => { setPasswordTarget(user); setNewPassword(""); }} className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Setup Password</button>
-                        <button type="button" disabled={saving === `remove-${user.id}`} onClick={() => removeUser(user)} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50">Remove</button>
+                        <button type="button" onClick={() => { setPasswordTarget(user); setNewPassword(""); }} className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Atur Kata Sandi</button>
+                        <button type="button" disabled={saving === `remove-${user.id}`} onClick={() => removeUser(user)} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50">Hapus</button>
                       </div>
                     </td>
                   </tr>
                 ))}
-                {!users.length ? <tr><td colSpan={5} className="p-8 text-center text-slate-500">Belum ada dedicated user vaksinasi. Klik + Add User.</td></tr> : null}
+                {!users.length ? <tr><td colSpan={5} className="p-8 text-center text-slate-500">Belum ada pengguna Vaksinasi. Klik + Tambah Pengguna untuk menambahkan.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -174,11 +174,11 @@ export default function VaccinationPortalUsersPage() {
       {passwordTarget ? (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setPasswordTarget(null); }}>
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="text-lg font-black">Setup Password</div>
+            <div className="text-lg font-black">Atur Kata Sandi</div>
             <div className="mt-1 text-sm text-slate-500">{passwordTarget.name} · {passwordTarget.username}</div>
-            <label className="mt-4 grid gap-1 text-xs font-black uppercase text-slate-500">Password Baru<input type="password" autoFocus className="rounded-xl border px-3 py-3 text-sm font-semibold normal-case text-slate-900" placeholder="Minimal 6 karakter" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
+            <label className="mt-4 grid gap-1 text-xs font-black uppercase text-slate-500">Kata Sandi Baru<input type="password" autoFocus className="rounded-xl border px-3 py-3 text-sm font-semibold normal-case text-slate-900" placeholder="Minimal 6 karakter" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} /></label>
             <div className="mt-4 flex gap-2">
-              <button type="button" disabled={saving === `password-${passwordTarget.id}`} onClick={savePassword} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">Simpan Password</button>
+              <button type="button" disabled={saving === `password-${passwordTarget.id}`} onClick={savePassword} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">Simpan Kata Sandi</button>
               <button type="button" onClick={() => setPasswordTarget(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button>
             </div>
           </div>

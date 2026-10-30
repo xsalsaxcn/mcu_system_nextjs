@@ -408,14 +408,14 @@ export default function VaccinationReminderPage() {
               <div className="text-xs font-bold text-slate-500">SCHEDULER</div>
               <div className="mt-1 flex items-center gap-2 text-sm font-black">
                 <span className={`h-2.5 w-2.5 rounded-full ${data?.automation?.cronConfigured ? "bg-emerald-500" : "bg-rose-500"}`} />
-                {data?.automation?.cronConfigured ? "08:00 WIB · Otomatis aktif" : "CRON_SECRET belum aktif"}
+                {data?.automation?.cronConfigured ? "08:00 WIB · Otomatis aktif" : "Pengiriman otomatis belum aktif"}
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-bold text-slate-500">CHANNEL STATUS</div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm font-black">
-                <span className={data?.automation?.smtpConfigured ? "text-emerald-700" : "text-rose-700"}>Email {data?.automation?.smtpConfigured ? "READY" : "OFF"}</span>
-                <span className={data?.automation?.whatsappConfigured ? "text-emerald-700" : "text-rose-700"}>WA {data?.automation?.whatsappConfigured ? "READY" : "OFF"}</span>
+                <span className={data?.automation?.smtpConfigured ? "text-emerald-700" : "text-rose-700"}>Email {data?.automation?.smtpConfigured ? "Siap" : "Nonaktif"}</span>
+                <span className={data?.automation?.whatsappConfigured ? "text-emerald-700" : "text-rose-700"}>WhatsApp {data?.automation?.whatsappConfigured ? "Siap" : "Nonaktif"}</span>
               </div>
             </div>
           </div>
@@ -506,7 +506,7 @@ export default function VaccinationReminderPage() {
                       <td className="break-words px-3 py-3">
                         <div className="font-bold">{row.vaccine_name || "-"}</div>
                         <div className="mt-1 text-[11px] font-semibold text-slate-400">
-                          {row.source_type === "HISTORY_SERVICE" ? "History Service" : "Current Record"}
+                          {row.source_type === "HISTORY_SERVICE" ? "Riwayat Layanan" : "Layanan Saat Ini"}
                         </div>
                       </td>
                       <td className="px-4 py-3 font-semibold">{fmtDate(row.next_due_date)}</td>
@@ -634,7 +634,7 @@ export default function VaccinationReminderPage() {
           <h2 className="text-lg font-black">Cara Kerja Otomatis</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             {[
-              ["1", "Baca Next Dose", "Current vaccination dan History Service dibaca otomatis setiap hari."],
+              ["1", "Baca jadwal dosis berikutnya", "Data layanan saat ini dan riwayat diperiksa setiap hari."],
               ["2", "Buat Jadwal", "Email mengikuti H-7, H-3, H-1, Hari H. WhatsApp otomatis khusus H-3 dan H-1."],
               ["3", "Kirim Otomatis", "Email dan WhatsApp berjalan independen; kegagalan salah satu channel tidak memblokir channel lain."],
               ["4", "Audit Status", "Status Email dan WhatsApp, waktu kirim, message ID, serta alasan gagal dicatat terpisah."],

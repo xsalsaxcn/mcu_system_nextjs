@@ -315,7 +315,7 @@ export default function VaccinationManualWalkInController({
     }
     const externalQueueNumber = clean(form?.vendorQueueNumber || form?.externalQueueNumber);
     if (!internalQueueEnabled && !externalQueueNumber) {
-      setError("Nomor Antrean Vendor wajib diisi untuk Session tanpa antrean internal.");
+      setError("Nomor antrean vendor wajib diisi untuk layanan ini.");
       return;
     }
     if (
@@ -335,7 +335,7 @@ export default function VaccinationManualWalkInController({
         return !selectedOffer(item, bazarSaleModeByKey[key] || "NON_PACKAGE");
       })
     ) {
-      setError("Ada layanan Bazar yang belum memiliki harga Paket/Non Paket aktif pada Master Produk.");
+      setError("Harga Paket/Non Paket untuk salah satu produk Bazar belum tersedia. Periksa Master Produk.");
       return;
     }
 
@@ -519,11 +519,11 @@ export default function VaccinationManualWalkInController({
           json?.movedFrom
             ? "Pindah lokasi berhasil"
             : json?.reusedRegistration
-              ? "Registrasi existing digunakan"
+              ? "Registrasi diperbarui"
               : "Registrasi berhasil"
         } · ${
           internalQueueEnabled
-            ? queueLabels.join(" + ") || "nomor antrian tersedia"
+            ? queueLabels.join(" + ") || "nomor antrean tersedia"
             : `No. vendor ${queueLabels[0] || "tersimpan"} · masuk Tim Validasi`
         } · ${
           json?.insertedItemCount != null
@@ -842,7 +842,7 @@ export default function VaccinationManualWalkInController({
         <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
           <div className="text-xs font-black uppercase tracking-wide text-cyan-800">Mode Pencatatan · Antrean Vendor</div>
           <div className="mt-1 text-xs font-semibold text-slate-600">
-            Sistem tidak membuat atau mencetak nomor antrean internal. Masukkan nomor dari sistem vendor; peserta akan langsung masuk ke Tim Validasi.
+            Masukkan nomor antrean dari vendor. Peserta akan dilanjutkan ke Tim Validasi.
           </div>
           <label className="mt-3 block text-xs font-black text-slate-700">
             Nomor Antrean Vendor

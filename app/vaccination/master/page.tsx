@@ -501,14 +501,14 @@ export default function VaccinationMasterPage() {
       lotForm.stockScope === "SESSION" &&
       !cleanText(lotForm.stockSessionId)
     ) {
-      setError("Pilih Session/Lokasi untuk assignment Produk/Stock Session.");
+      setError("Pilih Session/Lokasi untuk menentukan produk dan stok.");
       return;
     }
     if (
       lotForm.stockScope === "SESSION" &&
       !sessionProductAssignmentReady
     ) {
-      setError(sessionProductAssignmentMessage || "Assignment produk ke Session belum aktif.");
+      setError(sessionProductAssignmentMessage || "Pengaturan produk untuk session belum tersedia.");
       return;
     }
     if (
@@ -1190,7 +1190,7 @@ export default function VaccinationMasterPage() {
   async function submitStockImport() {
     setError("");
     if (!mappingReady) {
-      setError(mappingMessage || "Mapping produk belum aktif. Jalankan SQL V153.18 terlebih dahulu.");
+      setError(mappingMessage || "Pemetaan produk belum tersedia. Hubungi administrator jika kondisi ini berlanjut.");
       return;
     }
     if (!importRows.length) {
@@ -1997,12 +1997,12 @@ export default function VaccinationMasterPage() {
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
         {!mappingReady ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-            {mappingMessage || "Mapping produk import belum aktif. Jalankan SQL V153.18 terlebih dahulu."}
+            {mappingMessage || "Pemetaan produk belum tersedia. Hubungi administrator jika kondisi ini berlanjut."}
           </div>
         ) : null}
         {!companyStockReady ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-            {companyStockMessage || "Scope stok perusahaan belum aktif. Jalankan SQL ownership stok perusahaan terlebih dahulu."}
+            {companyStockMessage || "Pengaturan stok perusahaan belum tersedia. Hubungi administrator jika kondisi ini berlanjut."}
           </div>
         ) : null}
 
@@ -2069,7 +2069,7 @@ export default function VaccinationMasterPage() {
                             value={importMappingSelections[product.key] || ""}
                             onChange={(e) => setImportMappingSelections((prev) => ({ ...prev, [product.key]: e.target.value }))}
                           >
-                            <option value="">Auto: pakai mapping lama / cocok nama / buat master baru</option>
+                            <option value="">Otomatis: gunakan data yang sesuai atau buat produk baru</option>
                             {activeVaccines.map((vaccine) => (
                               <option key={vaccine.id} value={vaccine.id}>
                                 {vaccine.name}{vaccine.brand ? ` · ${vaccine.brand}` : ""}
@@ -2084,7 +2084,7 @@ export default function VaccinationMasterPage() {
               </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border bg-white">
-                <div className="border-b bg-slate-50 px-4 py-3 text-sm font-bold">Preview Lot yang Akan Di-import</div>
+                <div className="border-b bg-slate-50 px-4 py-3 text-sm font-bold">Pratinjau Lot yang Akan Diimpor</div>
                 <div className="max-h-[240px] overflow-auto">
                   <table className="min-w-full text-sm">
                     <thead className="bg-slate-100 text-xs uppercase text-slate-600">
@@ -2092,7 +2092,7 @@ export default function VaccinationMasterPage() {
                         <th className="p-3 text-left">Produk</th>
                         <th className="p-3 text-left">Lokasi</th>
                         <th className="p-3 text-left">Lot</th>
-                        <th className="p-3 text-left">Available</th>
+                        <th className="p-3 text-left">Tersedia</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -2115,7 +2115,7 @@ export default function VaccinationMasterPage() {
                 onClick={submitStockImport}
                 className="mt-4 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {importing ? "Mengimport..." : "Import Produk, Lot & Mapping"}
+                {importing ? "Mengimport..." : "Impor Produk & Lot"}
               </button>
             </>
           ) : null}
@@ -2126,19 +2126,19 @@ export default function VaccinationMasterPage() {
             <div>
               <h2 className="text-lg font-bold">Master Vaksin / Produk & Lot</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Produk dan lot dikelola dalam satu form. Klik produk dari hasil import agar Nama Produk, Lot Number, dan stok import otomatis terisi.
+                Kelola informasi produk, harga, lot, dan stok dalam satu halaman.
               </p>
             </div>
             {selectedImportProductKey ? (
               <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                Produk import dipilih
+                Produk dipilih
               </span>
             ) : null}
           </div>
 
           {selectedImportProductKey ? (
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
-              Data produk + lot sudah diambil dari file import. Lanjutkan isi Produsen, Harga Perusahaan, Jumlah Dosis, Next Dose, lalu simpan.
+              Data produk dan lot sudah terisi. Lengkapi informasi yang diperlukan, lalu simpan.
             </div>
           ) : null}
 
@@ -2196,7 +2196,7 @@ export default function VaccinationMasterPage() {
                 <input
                   type="number"
                   className="rounded-xl border px-3 py-2"
-                  placeholder="Next dose hari"
+                  placeholder="Jeda dosis berikutnya (hari)"
                   value={vaccineForm.defaultNextDoseDays}
                   onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })}
                 />
@@ -2311,7 +2311,7 @@ export default function VaccinationMasterPage() {
                       }))
                     }
                   >
-                    <option value="GENERAL">Global — lintas perusahaan</option>
+                    <option value="GENERAL">Semua perusahaan</option>
                     <option value="COMPANY">Semua Session Perusahaan</option>
                     <option value="SESSION">Session / Lokasi Spesifik</option>
                   </select>
@@ -2335,7 +2335,7 @@ export default function VaccinationMasterPage() {
                   >
                     <option value="">
                       {lotForm.stockScope === "GENERAL"
-                        ? "Tidak diperlukan untuk General"
+                        ? "Tidak diperlukan"
                         : "Pilih perusahaan"}
                     </option>
                     {companyOptions.map((company) => (

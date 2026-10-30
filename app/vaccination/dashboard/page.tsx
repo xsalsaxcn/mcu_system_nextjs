@@ -230,7 +230,7 @@ export default function VaccinationDashboardPage() {
             </select>
 
             <select className="rounded-xl border px-3 py-2.5" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
-              <option value="">Semua database corporate/vaksinasi</option>
+              <option value="">Semua sumber data peserta</option>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>
                   {source.name}
@@ -345,7 +345,7 @@ export default function VaccinationDashboardPage() {
                 <div>
                   <h3 className="font-black text-violet-900">Export iServe per Layanan / Benefit</h3>
                   <p className="mt-1 text-xs text-slate-600">
-                    Satu peserta dapat memiliki lebih dari 1 benefit. Pilih kombinasi layanan dari dropdown yang terdeteksi otomatis.
+                    Satu peserta dapat memiliki lebih dari satu layanan. Pilih kombinasi layanan yang sesuai.
                     Export membuat 1 row per peserta; Product, Lot, Dose, dan Quantity ditulis per layanan dalam baris yang sejajar.
                   </p>
                 </div>
