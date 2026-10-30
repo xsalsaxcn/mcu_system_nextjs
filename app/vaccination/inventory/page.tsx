@@ -167,7 +167,9 @@ export default function VaccinationInventoryPage() {
       }
 
       if (serviceFilter !== "ALL") {
-        if (!allocations.some((a: any) => clean(a?.service_mode).toUpperCase() === serviceFilter)) return false;
+        const hasRequestedBucket = allocations.some((a: any) => clean(a?.service_mode).toUpperCase() === serviceFilter);
+        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
+        if (!hasRequestedBucket && !exactSessionOwner) return false;
       }
 
       return true;
@@ -329,7 +331,22 @@ export default function VaccinationInventoryPage() {
                   const renderBucket = (mode: "HEALTHDAY" | "BAZAR") => {
                     const items = modeRows(mode);
                     const shell = mode === "BAZAR" ? "border-violet-200 bg-violet-50 text-violet-900" : "border-blue-200 bg-blue-50 text-blue-900";
-                    if (!items.length) return <span className="text-xs font-semibold text-slate-400">-</span>;
+                    if (!items.length) {
+                      if (sessionFilter !== "ALL") {
+                        const selected = sessionOptions.find((item) => item.id === sessionFilter);
+                        return (
+                          <div className={`rounded-xl border px-2.5 py-2 ${shell}`}>
+                            <div className="truncate text-xs font-black">{selected?.name || "Session dipilih"}</div>
+                            <div className="mt-1 grid gap-1 text-[10px] font-bold sm:grid-cols-3">
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Alokasi 0</span>
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Terpakai 0</span>
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Sisa 0</span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return <span className="text-xs font-semibold text-slate-400">-</span>;
+                    }
                     return (
                       <div className="space-y-1.5">
                         {items.map((allocation: any) => (

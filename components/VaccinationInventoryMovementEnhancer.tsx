@@ -33,6 +33,7 @@ type DetailRow = {
   sale_mode?: string;
   package_dose_count?: number | null;
   sales_price_snapshot?: number | null;
+  payment_method?: string;
   doctor: string;
   qty: number;
   print_status: string;
@@ -458,6 +459,7 @@ export default function VaccinationInventoryMovementEnhancer() {
                     <th className="p-3">Layanan</th>
                     <th className="p-3">Jenis Harga</th>
                     <th className="p-3">Harga</th>
+                    <th className="p-3">Payment Method</th>
                     <th className="p-3 text-right">Qty</th>
                     <th className="p-3">Perusahaan / Sumber</th>
                     <th className="p-3">Peserta</th>
@@ -494,6 +496,7 @@ export default function VaccinationInventoryMovementEnhancer() {
                         <td className="p-3">{serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : "-"}</td>
                         <td className="p-3 font-bold">{pricingLabel}</td>
                         <td className="p-3">{priceLabel}</td>
+                        <td className="p-3">{row.payment_method || "-"}</td>
                         <td className="p-3 text-right font-black">{row.qty}</td>
                         <td className="p-3 font-bold">{row.company || "-"}</td>
                         <td className="p-3">{row.participant || "-"}</td>
@@ -503,7 +506,7 @@ export default function VaccinationInventoryMovementEnhancer() {
                       </tr>
                     );
                   })}
-                  {!activeRows.length ? <tr><td colSpan={14} className="p-8 text-center text-slate-500">Belum ada detail pada filter ini.</td></tr> : null}
+                  {!activeRows.length ? <tr><td colSpan={15} className="p-8 text-center text-slate-500">Belum ada detail pada filter ini.</td></tr> : null}
                 </tbody>
               </table>
             </div>

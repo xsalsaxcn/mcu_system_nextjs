@@ -46,6 +46,7 @@ type EditSessionDraft = {
   participantCountPlanned: string;
   printLabelHandler: "MEDIS" | "VALIDASI";
   existingQueueProfile: "LEGACY" | "HEALTHDAY_BAZAR";
+  existingFlowQueueEnabled: boolean;
   existingFlowDoctorEnabled: boolean;
   existingNotificationEnabled: boolean;
   existingNotificationRepeat: number;
@@ -79,6 +80,7 @@ const emptyEditSession: EditSessionDraft = {
   participantCountPlanned: "",
   printLabelHandler: "MEDIS",
   existingQueueProfile: "LEGACY",
+  existingFlowQueueEnabled: true,
   existingFlowDoctorEnabled: true,
   existingNotificationEnabled: false,
   existingNotificationRepeat: 3,
@@ -180,6 +182,7 @@ export default function VaccinationSessionPage() {
     location: "",
     sessionDate: "",
     timeSlot: "",
+    existingFlowQueueEnabled: true,
     existingFlowDoctorEnabled: false,
   });
 
@@ -697,6 +700,8 @@ export default function VaccinationSessionPage() {
         "HEALTHDAY_BAZAR"
           ? "HEALTHDAY_BAZAR"
           : "LEGACY",
+      existingFlowQueueEnabled:
+        session?.existing_flow_config?.queue !== false,
       existingFlowDoctorEnabled:
         session?.existing_flow_config?.doctor !== false,
       existingNotificationEnabled:
@@ -836,7 +841,7 @@ export default function VaccinationSessionPage() {
           existingQueueProfile: editSessionForm.existingQueueProfile,
           existingFlowConfig: {
             registration: true,
-            queue: true,
+            queue: editSessionForm.existingFlowQueueEnabled,
             doctor: editSessionForm.existingFlowDoctorEnabled,
           },
           existingNotificationConfig: {
@@ -995,7 +1000,7 @@ export default function VaccinationSessionPage() {
               json.source?.name || json.source?.institution_name || "",
             existingFlowConfig: {
               registration: true,
-              queue: true,
+              queue: form.existingFlowQueueEnabled,
               doctor: form.existingFlowDoctorEnabled,
             },
           }),
@@ -1132,7 +1137,7 @@ export default function VaccinationSessionPage() {
         participantCountPlanned: selectedLocation?.participantCount || 0,
         existingFlowConfig: {
           registration: true,
-          queue: true,
+          queue: form.existingFlowQueueEnabled,
           doctor: form.existingFlowDoctorEnabled,
         },
       }),
@@ -1153,6 +1158,7 @@ export default function VaccinationSessionPage() {
       location: "",
       sessionDate: "",
       timeSlot: "",
+      existingFlowQueueEnabled: form.existingFlowQueueEnabled,
       existingFlowDoctorEnabled: form.existingFlowDoctorEnabled,
     });
     setSessionVaccines([]);
@@ -1394,9 +1400,25 @@ export default function VaccinationSessionPage() {
                 1. Registrasi
               </span>
               <span>→</span>
-              <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+              <label
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
+                  form.existingFlowQueueEnabled
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.existingFlowQueueEnabled}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      existingFlowQueueEnabled: e.target.checked,
+                    }))
+                  }
+                />
                 2. Antrian
-              </span>
+              </label>
               <span>→</span>
               <label
                 className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
@@ -1419,8 +1441,9 @@ export default function VaccinationSessionPage() {
               </label>
             </div>
             <p className="mt-2 text-xs font-semibold text-slate-600">
-              Default session baru: Alur Dokter OFF. Jika dimatikan, flow berhenti setelah Antrian.
-              Session existing tidak diubah otomatis dan tetap dapat diatur lewat Edit Session.
+              Antrian default ON. Matikan Antrian jika event memakai nomor antrean vendor / hanya pencatatan.
+              Saat Antrian OFF, registrasi meminta Nomor Antrean Vendor dan peserta langsung masuk ke Tim Validasi.
+              Alur Dokter tetap dapat diatur terpisah.
             </p>
           </div>
 
@@ -1983,9 +2006,23 @@ export default function VaccinationSessionPage() {
                         1. Registrasi
                       </span>
                       <span>→</span>
-                      <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-emerald-700">
+                      <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
+                        editSessionForm.existingFlowQueueEnabled
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-500"
+                      }`}>
+                        <input
+                          type="checkbox"
+                          checked={editSessionForm.existingFlowQueueEnabled}
+                          onChange={(e) =>
+                            setEditSessionForm((prev) => ({
+                              ...prev,
+                              existingFlowQueueEnabled: e.target.checked,
+                            }))
+                          }
+                        />
                         2. Antrian
-                      </span>
+                      </label>
                       <span>→</span>
                       <label className={`flex items-center gap-2 rounded-lg px-2.5 py-1 ${
                         editSessionForm.existingFlowDoctorEnabled
@@ -2006,8 +2043,9 @@ export default function VaccinationSessionPage() {
                       </label>
                     </div>
                     <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-500">
-                      Jika Alur Dokter dimatikan, pada implementasi antrean A/B
-                      peserta akan selesai setelah dipanggil tim antrean.
+                      Antrian OFF = mode pencatatan / antrean vendor. Sistem tidak membuat nomor antrean internal;
+                      Nomor Antrean Vendor diinput saat registrasi dan peserta masuk langsung ke Tim Validasi.
+                      Alur Dokter dapat tetap ON/OFF secara terpisah.
                     </p>
                   </div>
 

@@ -13,6 +13,8 @@ import {
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
+// V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
+
 function userLabel(user: any) {
   return user?.email || user?.name || user?.id || "system";
 }
@@ -21,6 +23,10 @@ const BAZAR_PAYMENT_METHODS = new Set(["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER
 
 function isHealthdayBazarSession(session: any) {
   return String(session?.existing_queue_profile || "LEGACY").trim().toUpperCase() === "HEALTHDAY_BAZAR";
+}
+
+function usesInternalQueue(session: any) {
+  return session?.existing_flow_config?.queue !== false;
 }
 
 function normalizeServiceMode(value: any, allowBazar: boolean) {
@@ -970,12 +976,15 @@ export async function POST(req: NextRequest) {
 
     const sessionResult = await supabase
       .from("vaccination_sessions")
-      .select("id,existing_queue_profile")
+      .select("id,existing_queue_profile,existing_flow_config")
       .eq("id", reg.session_id)
       .single();
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
 
     const allowBazar = isHealthdayBazarSession(sessionResult.data);
+    if (!usesInternalQueue(sessionResult.data)) {
+      return fail("Session ini memakai mode pencatatan / antrean vendor. Nomor antrean internal tidak diaktifkan.", 409);
+    }
     if (!allowBazar) {
       if (clean(reg.queue_number)) {
         return ok({ message: `Nomor antrian sudah dirilis: ${reg.queue_number}`, registration: reg });
@@ -1281,11 +1290,12 @@ export async function POST(req: NextRequest) {
 
     const sessionResult = await supabase
       .from("vaccination_sessions")
-      .select("id,existing_queue_profile")
+      .select("id,existing_queue_profile,existing_flow_config")
       .eq("id", registration.session_id)
       .single();
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
     const allowBazar = isHealthdayBazarSession(sessionResult.data);
+    const internalQueueEnabled = usesInternalQueue(sessionResult.data);
 
     const items = normalizeItems(body.items || [], {
       paymentMethod: body.paymentMethod,
@@ -1347,8 +1357,10 @@ export async function POST(req: NextRequest) {
     const combinedItems = [...preservedAdministered, ...insertedItems];
     const serviceStatus = patientServiceStatus(combinedItems);
     const bazarBilling = bazarBillingSummary(combinedItems);
-    let serviceQueueUpdate: Record<string, any> = { queue_status: newStatus };
-    if (allowBazar) {
+    let serviceQueueUpdate: Record<string, any> = internalQueueEnabled
+      ? { queue_status: newStatus }
+      : { queue_status: "PENDING_VALIDATION", bazar_queue_status: null };
+    if (allowBazar && internalQueueEnabled) {
       try {
         serviceQueueUpdate = await buildServiceQueueUpdate(supabase, registration, serviceStatus, { waitingWithNote: editableItems.length > 0 });
       } catch (error: any) {
@@ -1393,6 +1405,13 @@ export async function POST(req: NextRequest) {
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const session = sessionResult.data || {};
   const allowBazar = isHealthdayBazarSession(session);
+  const internalQueueEnabled = usesInternalQueue(session);
+  const externalQueueNumber = clean(
+    body.externalQueueNumber || body.external_queue_number || body.vendorQueueNumber || body.queueNumber,
+  );
+  if (!internalQueueEnabled && !externalQueueNumber) {
+    return fail("Nomor Antrean Vendor wajib diisi untuk Session tanpa antrean internal.");
+  }
   const requestedServiceMode = normalizeServiceMode(body.serviceMode || body.service_mode, allowBazar);
 
   const moveFromRegistrationId = toInt(body.moveFromRegistrationId || body.move_from_registration_id, 0);
@@ -1461,13 +1480,17 @@ export async function POST(req: NextRequest) {
   let bazarQueueNumber: string | null = null;
   let bazarQueueSequence: number | null = null;
 
-  if (!allowBazar || serviceHasTrack(initialServiceStatus, "A")) {
-    queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
-  }
-  if (allowBazar && serviceHasTrack(initialServiceStatus, "B")) {
-    const nextBazar = await getNextBazarQueue(supabase, sessionId);
-    bazarQueueNumber = nextBazar.number;
-    bazarQueueSequence = nextBazar.sequence;
+  if (!internalQueueEnabled) {
+    queueNumber = externalQueueNumber;
+  } else {
+    if (!allowBazar || serviceHasTrack(initialServiceStatus, "A")) {
+      queueNumber = clean(body.queueNumber) || await getNextQueueNumber(supabase, sessionId);
+    }
+    if (allowBazar && serviceHasTrack(initialServiceStatus, "B")) {
+      const nextBazar = await getNextBazarQueue(supabase, sessionId);
+      bazarQueueNumber = nextBazar.number;
+      bazarQueueSequence = nextBazar.sequence;
+    }
   }
 
   try {
@@ -1535,20 +1558,30 @@ export async function POST(req: NextRequest) {
       : "HEALTHDAY";
 
     let queueUpdate: Record<string, any> = {};
-    try {
-      queueUpdate = await buildServiceQueueUpdate(
-        supabase,
-        reusableRegistration,
-        serviceStatus,
-      );
-    } catch (error: any) {
-      if (insertedItems.length) {
-        await supabase
-          .from("vaccination_registration_items")
-          .delete()
-          .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
+    if (!internalQueueEnabled) {
+      queueUpdate = {
+        queue_number: externalQueueNumber || clean(reusableRegistration.queue_number),
+        queue_status: "PENDING_VALIDATION",
+        bazar_queue_number: null,
+        bazar_queue_sequence: null,
+        bazar_queue_status: null,
+      };
+    } else {
+      try {
+        queueUpdate = await buildServiceQueueUpdate(
+          supabase,
+          reusableRegistration,
+          serviceStatus,
+        );
+      } catch (error: any) {
+        if (insertedItems.length) {
+          await supabase
+            .from("vaccination_registration_items")
+            .delete()
+            .in("id", insertedItems.map((item: any) => Number(item.id)).filter(Boolean));
+        }
+        return fail(error?.message || "Gagal membuat nomor antrean track yang belum ada.", 500);
       }
-      return fail(error?.message || "Gagal membuat nomor antrean track yang belum ada.", 500);
     }
 
     const billing = bazarBillingSummary(combinedItems);
@@ -1644,11 +1677,15 @@ export async function POST(req: NextRequest) {
     payment_method: clean(body.paymentMethod) || null,
     payment_note: clean(body.paymentNote) || null,
     queue_number: queueNumber,
-    queue_status: queueNumber ? "WAITING" : "REGISTERED",
+    queue_status: internalQueueEnabled
+      ? (queueNumber ? "WAITING" : "REGISTERED")
+      : "PENDING_VALIDATION",
     ...(allowBazar ? {
-      bazar_queue_number: bazarQueueNumber,
-      bazar_queue_sequence: bazarQueueSequence,
-      bazar_queue_status: bazarQueueNumber ? "WAITING" : null,
+      bazar_queue_number: internalQueueEnabled ? bazarQueueNumber : null,
+      bazar_queue_sequence: internalQueueEnabled ? bazarQueueSequence : null,
+      bazar_queue_status: internalQueueEnabled
+        ? (bazarQueueNumber ? "WAITING" : null)
+        : null,
     } : {}),
     registered_by: userLabel(user),
     ...(allowBazar ? { patient_service_status: initialServiceStatus } : {}),

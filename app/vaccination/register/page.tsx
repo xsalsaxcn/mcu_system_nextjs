@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import VaccinationParticipantHistoryModal from "@/components/VaccinationParticipantHistoryModal";
 
+// V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
 // VACCINATION_REGISTER_MASTER_SEARCH_V153_0_1
 import VaccinationParticipantMasterSearch from "@/components/VaccinationParticipantMasterSearch";
 // VACCINATION_REGISTER_PRODUCT_QUEUE_PRINT_V153_1_1
@@ -38,6 +39,7 @@ const stageMap: Record<string, { label: string; cls: string }> = {
   IN_PROGRESS: { label: "Dokter", cls: "bg-blue-100 text-blue-700" },
   ADMINISTERED: { label: "Selesai", cls: "bg-emerald-100 text-emerald-700" },
   DONE: { label: "Selesai", cls: "bg-emerald-100 text-emerald-700" },
+  PENDING_VALIDATION: { label: "Menunggu Validasi", cls: "bg-cyan-100 text-cyan-700" },
 };
 
 function statusInfo(status: string) {
@@ -179,6 +181,7 @@ export default function VaccinationRegisterPage() {
 
   const selectedSession = sessions.find((session) => String(session.id) === String(form.sessionId));
   const healthdayBazarEnabled = String(selectedSession?.existing_queue_profile || "LEGACY").toUpperCase() === "HEALTHDAY_BAZAR";
+  const internalQueueEnabled = selectedSession?.existing_flow_config?.queue !== false;
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
 
   useEffect(() => {
@@ -1821,7 +1824,11 @@ export default function VaccinationRegisterPage() {
         <section className="mt-6 overflow-hidden rounded-2xl border">
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <div className="font-bold">{healthdayBazarEnabled ? `Antrean ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta` : `Registrasi Session Ini · ${registrations.length} peserta`}</div>
+              <div className="font-bold">{internalQueueEnabled
+                ? (healthdayBazarEnabled
+                    ? `Antrean ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta`
+                    : `Registrasi Session Ini · ${registrations.length} peserta`)
+                : `Pencatatan Session Ini · ${registrations.length} peserta`}</div>
               <input
                 className="mt-3 w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-80"
                 placeholder="Cari nama / Employee ID / NIK..."
@@ -1841,7 +1848,7 @@ export default function VaccinationRegisterPage() {
           <div className="max-h-[560px] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-600">
-                {healthdayBazarEnabled ? (
+                {healthdayBazarEnabled && internalQueueEnabled ? (
                   <tr>
                     <th className="p-3 text-left">{activeQueueView === "BAZAR" ? sortButton("Antrean Bazar", "bazarQueue") : sortButton("Antrean Healthday", "queue")}</th>
                     <th className="p-3 text-left">{activeQueueView === "BAZAR" ? "Aksi Bazar" : "Aksi Healthday"}</th>
@@ -1853,7 +1860,7 @@ export default function VaccinationRegisterPage() {
                   </tr>
                 ) : (
                   <tr>
-                    <th className="p-3 text-left">{sortButton("Antrian", "queue")}</th>
+                    <th className="p-3 text-left">{sortButton(internalQueueEnabled ? "Antrian" : "No. Antrean Vendor", "queue")}</th>
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
@@ -1876,11 +1883,11 @@ export default function VaccinationRegisterPage() {
                   const hasB = healthdayBazarEnabled && serviceHasTrack(serviceStatus, "B");
                   const hasANumber = hasA && Boolean(String(registration.queue_number || "").trim());
                   const hasBNumber = hasB && Boolean(String(registration.bazar_queue_number || "").trim());
-                  const needsQueueRelease = !healthdayBazarEnabled && hasA && !hasANumber;
+                  const needsQueueRelease = internalQueueEnabled && !healthdayBazarEnabled && hasA && !hasANumber;
                   const aCancelKey = `${registration?.id || ""}-A`;
                   const bCancelKey = `${registration?.id || ""}-B`;
 
-                  if (healthdayBazarEnabled) {
+                  if (healthdayBazarEnabled && internalQueueEnabled) {
                     return (
                       <tr key={registration.id}>
                         <td className="p-3 align-top">
@@ -2021,7 +2028,7 @@ export default function VaccinationRegisterPage() {
                         <div className="flex flex-wrap gap-2">
                           {needsQueueRelease ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
-                          {String(registration?.queue_number || "").trim() && hasA ? (
+                          {internalQueueEnabled && String(registration?.queue_number || "").trim() && hasA ? (
                             <button
                               type="button"
                               title="Print ulang nomor antrian"
@@ -2052,8 +2059,12 @@ export default function VaccinationRegisterPage() {
                 })}
                 {!visibleRegistrations.length ? (
                   <tr>
-                    <td colSpan={healthdayBazarEnabled ? 9 : 7} className="p-5 text-center text-slate-500">
-                      {healthdayBazarEnabled ? "Belum ada peserta yang sudah memiliki nomor antrean." : "Belum ada peserta untuk session ini."}
+                    <td colSpan={healthdayBazarEnabled && internalQueueEnabled ? 9 : 7} className="p-5 text-center text-slate-500">
+                      {internalQueueEnabled && healthdayBazarEnabled
+                        ? "Belum ada peserta yang sudah memiliki nomor antrean."
+                        : internalQueueEnabled
+                          ? "Belum ada peserta untuk session ini."
+                          : "Belum ada peserta tercatat untuk session ini."}
                     </td>
                   </tr>
                 ) : null}

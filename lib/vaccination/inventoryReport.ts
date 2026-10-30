@@ -54,6 +54,7 @@ function movementSource(row: any) {
   return note;
 }
 
+// V518_INVENTORY_PAYMENT_METHOD_TRACE
 export type InventoryReportFilters = {
   vaccineIds?: number[];
   lotIds?: number[];
@@ -98,7 +99,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   if (registrationIds.length) {
     const result = await supabase
       .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,mcu_id,company_name,department,queue_number,queue_status,print_status,validation_status")
+      .select("id,session_id,participant_name,employee_id,nik,mcu_id,company_name,department,queue_number,queue_status,print_status,validation_status,payment_method")
       .in("id", registrationIds);
     if (!result.error) registrations = result.data || [];
   }
@@ -110,7 +111,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   if (allowedLotIds.size) {
     const result = await supabase
       .from("vaccination_registration_items")
-      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,active")
+      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,payment_method,active")
       .not("administered_record_id", "is", null)
       .eq("active", true)
       .limit(20000);
@@ -357,6 +358,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         sale_mode: saleMode,
         package_dose_count: saleMode === "PACKAGE" ? Math.max(1, Number(registrationItem?.package_dose_count || 1)) : null,
         sales_price_snapshot: registrationItem?.sales_price_snapshot == null ? null : num(registrationItem.sales_price_snapshot),
+        payment_method: clean(registrationItem?.payment_method || registration?.payment_method),
         doctor: clean(record.administered_by),
         qty: 1,
         print_status: clean(registration.print_status) || (record.sticker_printed_at ? "PRINTED" : ""),

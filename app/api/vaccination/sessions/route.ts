@@ -6,6 +6,7 @@ import {
   sanitizeOnsiteQueueFormConfig,
 } from "@/lib/vaccination/onsiteQueueForm";
 
+// V518_SESSION_OPTIONAL_INTERNAL_QUEUE
 // VACCINATION_SESSION_STOCK_OWNERSHIP_V2
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ function sanitizeExistingFlowConfig(value: any) {
 
   return {
     registration: true,
-    queue: true,
+    queue: raw.queue !== false,
     doctor: raw.doctor !== false,
   };
 }

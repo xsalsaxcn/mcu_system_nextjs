@@ -1,5 +1,7 @@
 "use client";
 
+// V518_OPTIONAL_INTERNAL_QUEUE_VENDOR_NUMBER
+
 // VACCINATION_MANUAL_PRODUCT_QUEUE_PRINT_V153_89
 import { useEffect, useMemo, useState } from "react";
 
@@ -83,6 +85,7 @@ export default function VaccinationManualWalkInController({
   const healthdayBazarEnabled =
     String(session?.existing_queue_profile || "LEGACY").toUpperCase() ===
     "HEALTHDAY_BAZAR";
+  const internalQueueEnabled = session?.existing_flow_config?.queue !== false;
   const serviceMode: QueueMode =
     healthdayBazarEnabled &&
     String(form?.serviceMode || "HEALTHDAY").toUpperCase() === "BAZAR"
@@ -302,6 +305,11 @@ export default function VaccinationManualWalkInController({
       setError("Pilih minimal 1 produk / vaksin untuk peserta ini.");
       return;
     }
+    const externalQueueNumber = clean(form?.vendorQueueNumber || form?.externalQueueNumber);
+    if (!internalQueueEnabled && !externalQueueNumber) {
+      setError("Nomor Antrean Vendor wajib diisi untuk Session tanpa antrean internal.");
+      return;
+    }
     if (
       bazarSelected.length &&
       !["QRIS", "DEBIT", "CREDIT_CARD", "TRANSFER"].includes(
@@ -334,7 +342,7 @@ export default function VaccinationManualWalkInController({
     const needBTicket = bazarSelected.length > 0;
     const requestedTicketTrack: "A" | "B" | "AB" =
       needATicket && needBTicket ? "AB" : needATicket ? "A" : "B";
-    const ticketWindow = popupPlaceholder(requestedTicketTrack);
+    const ticketWindow = internalQueueEnabled ? popupPlaceholder(requestedTicketTrack) : null;
 
     try {
       const healthdayItems = healthdaySelected.map((item: any) => ({
@@ -436,6 +444,9 @@ export default function VaccinationManualWalkInController({
             : clean(form?.paymentNote || form?.payment_note),
         vaccineId: first?.vaccineId || null,
         lotId: first?.lotId || null,
+        externalQueueNumber: internalQueueEnabled
+          ? ""
+          : clean(form?.vendorQueueNumber || form?.externalQueueNumber),
         items,
       };
 
@@ -462,34 +473,38 @@ export default function VaccinationManualWalkInController({
       const queueNumberA = clean(json?.registration?.queue_number);
       const queueNumberB = clean(json?.registration?.bazar_queue_number);
 
-      const missingTracks = [
-        needATicket && !queueNumberA ? "A / Healthday" : "",
-        needBTicket && !queueNumberB ? "B / Bazar" : "",
-      ].filter(Boolean);
+      if (internalQueueEnabled) {
+        const missingTracks = [
+          needATicket && !queueNumberA ? "A / Healthday" : "",
+          needBTicket && !queueNumberB ? "B / Bazar" : "",
+        ].filter(Boolean);
 
-      if (missingTracks.length) {
-        showTicketWindowError(
-          ticketWindow,
-          `Nomor antrean ${missingTracks.join(" + ")} tidak terbentuk. Registrasi tersimpan, tetapi nomor tersebut perlu dicek dari daftar registrasi.`,
-        );
-      } else {
-        const ticketUrl =
-          `/vaccination/queue-ticket/${registrationId}` +
-          `?track=${requestedTicketTrack}&session_id=${encodeURIComponent(
-            String(sessionId),
-          )}&autoprint=1`;
-
-        if (ticketWindow && !ticketWindow.closed) {
-          ticketWindow.location.replace(ticketUrl);
+        if (missingTracks.length) {
+          showTicketWindowError(
+            ticketWindow,
+            `Nomor antrean ${missingTracks.join(" + ")} tidak terbentuk. Registrasi tersimpan, tetapi nomor tersebut perlu dicek dari daftar registrasi.`,
+          );
         } else {
-          window.open(ticketUrl, "_blank");
+          const ticketUrl =
+            `/vaccination/queue-ticket/${registrationId}` +
+            `?track=${requestedTicketTrack}&session_id=${encodeURIComponent(
+              String(sessionId),
+            )}&autoprint=1`;
+
+          if (ticketWindow && !ticketWindow.closed) {
+            ticketWindow.location.replace(ticketUrl);
+          } else {
+            window.open(ticketUrl, "_blank");
+          }
         }
       }
 
-      const queueLabels = [
-        healthdayItems.length ? clean(json?.registration?.queue_number) : "",
-        bazarItems.length ? clean(json?.registration?.bazar_queue_number) : "",
-      ].filter(Boolean);
+      const queueLabels = internalQueueEnabled
+        ? [
+            healthdayItems.length ? queueNumberA : "",
+            bazarItems.length ? queueNumberB : "",
+          ].filter(Boolean)
+        : [queueNumberA].filter(Boolean);
 
       setMessage(
         `${
@@ -498,7 +513,11 @@ export default function VaccinationManualWalkInController({
             : json?.reusedRegistration
               ? "Registrasi existing digunakan"
               : "Registrasi berhasil"
-        } · ${queueLabels.join(" + ") || "nomor antrian tersedia"} · ${
+        } · ${
+          internalQueueEnabled
+            ? queueLabels.join(" + ") || "nomor antrian tersedia"
+            : `No. vendor ${queueLabels[0] || "tersimpan"} · masuk Tim Validasi`
+        } · ${
           json?.insertedItemCount != null
             ? `${json.insertedItemCount} produk baru`
             : `${totalSelected} produk`
@@ -811,6 +830,26 @@ export default function VaccinationManualWalkInController({
         </div>
       )}
 
+      {!internalQueueEnabled ? (
+        <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
+          <div className="text-xs font-black uppercase tracking-wide text-cyan-800">Mode Pencatatan · Antrean Vendor</div>
+          <div className="mt-1 text-xs font-semibold text-slate-600">
+            Sistem tidak membuat atau mencetak nomor antrean internal. Masukkan nomor dari sistem vendor; peserta akan langsung masuk ke Tim Validasi.
+          </div>
+          <label className="mt-3 block text-xs font-black text-slate-700">
+            Nomor Antrean Vendor
+            <input
+              value={form?.vendorQueueNumber || form?.externalQueueNumber || ""}
+              onChange={(e) =>
+                setForm((previous: any) => ({ ...previous, vendorQueueNumber: e.target.value }))
+              }
+              placeholder="Contoh: 014 / A-014 / V014"
+              className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-black text-slate-900"
+            />
+          </label>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
           {error}
@@ -834,12 +873,16 @@ export default function VaccinationManualWalkInController({
         }`}
       >
         {submitting
-          ? "Memproses Registrasi + Tiket..."
-          : healthdayBazarEnabled && serviceMode === "HEALTHDAY"
-            ? "Registrasi Ulang & Rilis Nomor Antrian"
-            : healthdayBazarEnabled && serviceMode === "BAZAR"
-              ? "Registrasi Ulang & Rilis Nomor Antrian Bazar"
-              : "Registrasi Ulang + Rilis & Print Nomor Antrian"}
+          ? internalQueueEnabled
+            ? "Memproses Registrasi + Tiket..."
+            : "Menyimpan Registrasi..."
+          : !internalQueueEnabled
+            ? "Registrasi Ulang & Simpan ke Validasi"
+            : healthdayBazarEnabled && serviceMode === "HEALTHDAY"
+              ? "Registrasi Ulang & Rilis Nomor Antrian"
+              : healthdayBazarEnabled && serviceMode === "BAZAR"
+                ? "Registrasi Ulang & Rilis Nomor Antrian Bazar"
+                : "Registrasi Ulang + Rilis & Print Nomor Antrian"}
       </button>
     </div>
   );

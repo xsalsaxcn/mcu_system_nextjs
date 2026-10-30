@@ -1,5 +1,6 @@
 "use client";
 
+// V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // V148_VALIDATION_DETAIL_AND_STICKER_PRINT
 // V148_5_LOCATION_DATE_SEARCH_AND_EXACT_ADMINISTERED_LABEL
 // V148_6_RECOVER_PRINT_AND_SESSION_LOCATIONS
@@ -21,6 +22,10 @@ type Row = {
   id: number;
   session_id?: number | string;
   queue_number?: string;
+  employee_id?: string;
+  payment_method?: string;
+  company_name?: string;
+  internal_queue_enabled?: boolean;
   patient_name?: string;
   doctor_name?: string;
   product_name?: string;
@@ -35,6 +40,16 @@ type Row = {
   products?: ProductDetail[];
   record_ids?: number[];
   raw?: any;
+};
+
+type SessionOption = {
+  session_id: number;
+  session_name: string;
+  company_name?: string;
+  location?: string;
+  session_date?: string | null;
+  existing_flow_config?: { registration?: boolean; queue?: boolean; doctor?: boolean } | null;
+  status?: string;
 };
 
 function clean(value: any) {
@@ -80,6 +95,11 @@ function stickerUrlFor(row: Row) {
 export default function VaccinationValidationPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [sessionLocations, setSessionLocations] = useState<string[]>([]);
+  const [sessionOptions, setSessionOptions] = useState<SessionOption[]>([]);
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [sessionFilter, setSessionFilter] = useState("all");
+  const [contextLocked, setContextLocked] = useState(false);
+  const [cancelRowId, setCancelRowId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
@@ -94,10 +114,13 @@ export default function VaccinationValidationPage() {
     setLoading(true);
     setMessage("Memuat data validasi...");
     try {
-      const res = await fetch("/api/vaccination/validation", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (sessionFilter !== "all") params.set("session_id", sessionFilter);
+      const res = await fetch(`/api/vaccination/validation${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat validasi.");
       setRows(json.rows || []);
+      setSessionOptions(Array.isArray(json.sessions) ? json.sessions : []);
       setSessionLocations(
         Array.from(
           new Set(
@@ -117,7 +140,26 @@ export default function VaccinationValidationPage() {
 
   useEffect(() => {
     loadRows();
-  }, []);
+  }, [sessionFilter]);
+
+  const companyOptions = useMemo<string[]>(() =>
+    Array.from(
+      new Set<string>(
+        sessionOptions.map((item) => clean(item.company_name)).filter((value): value is string => Boolean(value)),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "id")),
+  [sessionOptions]);
+
+  const visibleSessionOptions = useMemo(() =>
+    sessionOptions
+      .filter((item) => companyFilter === "all" || clean(item.company_name) === companyFilter)
+      .sort((a, b) => `${b.session_date || ""}${b.session_id}`.localeCompare(`${a.session_date || ""}${a.session_id}`)),
+  [companyFilter, sessionOptions]);
+
+  const selectedSession = useMemo(() =>
+    sessionOptions.find((item) => String(item.session_id) === String(sessionFilter)) || null,
+  [sessionFilter, sessionOptions]);
+  const recordOnlyMode = selectedSession?.existing_flow_config?.queue === false;
 
   const locations = useMemo(() => {
     return Array.from(
@@ -139,6 +181,9 @@ export default function VaccinationValidationPage() {
         row.patient_name,
         row.doctor_name,
         row.queue_number,
+        row.employee_id,
+        row.payment_method,
+        row.company_name,
         row.product_name,
         row.lot_number,
         row.note,
@@ -149,15 +194,17 @@ export default function VaccinationValidationPage() {
         productText,
       ].map((value) => clean(value).toLowerCase()).join(" ");
 
+      const companyOk = companyFilter === "all" || clean(row.company_name) === companyFilter;
+      const sessionOk = sessionFilter === "all" || String(row.session_id || "") === sessionFilter;
       const locationOk = locationFilter === "all" || clean(row.location) === locationFilter;
       const effectiveDate = dateKey(row.session_date || row.products?.[0]?.administered_at);
       const fromOk = !dateFrom || (effectiveDate && effectiveDate >= dateFrom);
       const toOk = !dateTo || (effectiveDate && effectiveDate <= dateTo);
       const searchOk = !keyword || haystack.includes(keyword);
 
-      return locationOk && fromOk && toOk && searchOk;
+      return companyOk && sessionOk && locationOk && fromOk && toOk && searchOk;
     });
-  }, [dateFrom, dateTo, filter, locationFilter, rows]);
+  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, sessionFilter]);
 
   async function update(row: Row, action: string, note?: string) {
     setMessage("Mengubah status...");
@@ -252,10 +299,48 @@ export default function VaccinationValidationPage() {
           <div>
             <h1 className="text-3xl font-black tracking-tight text-slate-950">Tim Validasi</h1>
             <p className="mt-2 text-sm font-semibold text-slate-500">
-              Peserta yang sudah selesai tindakan dokter dan menunggu print label/final validasi.
+              {recordOnlyMode
+                ? "Mode pencatatan: peserta dari meja registrasi dengan nomor antrean vendor. Done / Edit / Cancel dilakukan di sini."
+                : "Peserta yang sudah selesai tindakan dokter dan menunggu print label/final validasi."}
             </p>
           </div>
           <a href="/vaccination" className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800">☰ Menu Vaksinasi</a>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-cyan-100 bg-cyan-50/50 p-4">
+          <div className="grid gap-3 lg:grid-cols-[220px_minmax(280px,1fr)_auto]">
+            <select
+              className="rounded-xl border bg-white px-3 py-3 text-sm font-black"
+              value={companyFilter}
+              disabled={contextLocked}
+              onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("all"); }}
+            >
+              <option value="all">Semua Perusahaan</option>
+              {companyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
+            </select>
+            <select
+              className="rounded-xl border bg-white px-3 py-3 text-sm font-black"
+              value={sessionFilter}
+              disabled={contextLocked}
+              onChange={(e) => setSessionFilter(e.target.value)}
+            >
+              <option value="all">Semua Session</option>
+              {visibleSessionOptions.map((session) => (
+                <option key={session.session_id} value={session.session_id}>
+                  {session.session_name}{session.location ? ` · ${session.location}` : ""}{session.session_date ? ` · ${session.session_date}` : ""}
+                </option>
+              ))}
+            </select>
+            <label className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black ${contextLocked ? "border-amber-200 bg-amber-50 text-amber-800" : "bg-white text-slate-700"}`}>
+              <input type="checkbox" checked={contextLocked} onChange={(e) => setContextLocked(e.target.checked)} />
+              Kunci Pilihan
+            </label>
+          </div>
+          <div className="mt-2 text-xs font-bold text-slate-600">
+            {selectedSession
+              ? `${recordOnlyMode ? "Pencatatan / Antrean Vendor" : "Antrean Internal"} · ${selectedSession.session_name}`
+              : "Pilih Session untuk mengunci meja validasi pada satu event."}
+          </div>
         </div>
 
         <div className="mt-6 grid gap-3 lg:grid-cols-6">
@@ -279,6 +364,63 @@ export default function VaccinationValidationPage() {
         {message ? <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm font-bold text-blue-700">{message}</div> : null}
       </section>
 
+      {recordOnlyMode ? (
+        <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-cyan-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b bg-cyan-50 px-5 py-4">
+            <div>
+              <div className="font-black text-slate-900">Pencatatan Registrasi · Antrean Vendor</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Nomor antrean berasal dari vendor. Tidak ada panggilan/print antrean internal.</div>
+            </div>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-cyan-700">{shown.length} peserta</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">No. Antrean Vendor</th>
+                  <th className="px-4 py-3">Peserta</th>
+                  <th className="px-4 py-3">NIK Karyawan / BINUSIAN ID</th>
+                  <th className="px-4 py-3">Layanan / Produk</th>
+                  <th className="px-4 py-3">Payment Method</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {shown.map((row) => (
+                  <tr key={row.id} className="align-top hover:bg-slate-50">
+                    <td className="px-4 py-4"><span className="rounded-xl bg-cyan-50 px-3 py-2 font-black text-cyan-800">{row.queue_number || "-"}</span></td>
+                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
+                    <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
+                    <td className="px-4 py-4">
+                      <div className="space-y-1">{(row.products || []).map((item, index) => <div key={`${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div>
+                    </td>
+                    <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                    <td className="px-4 py-4"><span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-black text-cyan-700">{row.validation_status || row.queue_status || "PENDING"}</span></td>
+                    <td className="px-4 py-4">
+                      <div className="flex min-w-[250px] flex-wrap gap-2">
+                        <button type="button" onClick={() => void update(row, "DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
+                        <a href={`/vaccination/register?edit_registration_id=${row.id}`} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit</a>
+                        <button type="button" onClick={() => setCancelRowId(cancelRowId === row.id ? null : row.id)} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Cancel</button>
+                      </div>
+                      {cancelRowId === row.id ? (
+                        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
+                          <textarea className="min-h-20 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold" placeholder="Alasan cancel wajib diisi" value={notes[row.id] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [row.id]: e.target.value }))} />
+                          <div className="mt-2 flex justify-end gap-2">
+                            <button type="button" onClick={() => setCancelRowId(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-black">Tutup</button>
+                            <button type="button" onClick={() => { if (!clean(notes[row.id])) { setMessage("Alasan Cancel wajib diisi."); return; } void update(row, "BATAL", notes[row.id]); setCancelRowId(null); }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white">Simpan Cancel</button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {!shown.length ? <tr><td colSpan={7} className="p-8 text-center font-bold text-slate-500">Belum ada peserta menunggu validasi pada Session ini.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
       <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1180px] border-collapse text-left">
@@ -365,6 +507,7 @@ export default function VaccinationValidationPage() {
           </table>
         </div>
       </section>
+      )}
     </main>
   );
 }

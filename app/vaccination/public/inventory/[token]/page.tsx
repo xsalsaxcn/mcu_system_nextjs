@@ -1,5 +1,7 @@
 "use client";
 
+// V518_INVENTORY_INITIAL_STOCK_BUCKET_SYNC_PAYMENT_METHOD
+
 import { useEffect, useMemo, useState } from "react";
 
 function clean(value: any) {
@@ -45,6 +47,8 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     action: "ADD_STOCK",
     quantity: "",
     notes: "",
+    sourceSessionId: "",
+    sourceServiceMode: "HEALTHDAY",
     targetCompanyName: "",
     targetSessionId: "",
     targetServiceMode: "HEALTHDAY",
@@ -115,7 +119,11 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       if (keyword && !haystack.includes(keyword)) return false;
       if (companyFilter !== "ALL" && clean(row?.stock_company_name) !== companyFilter && !allocations.some((item: any) => clean(item?.company_name) === companyFilter)) return false;
       if (sessionFilter !== "ALL" && String(row?.stock_session_id || "") !== sessionFilter && !allocations.some((item: any) => String(item?.session_id || "") === sessionFilter)) return false;
-      if (serviceFilter !== "ALL" && !allocations.some((item: any) => clean(item?.service_mode).toUpperCase() === serviceFilter)) return false;
+      if (serviceFilter !== "ALL") {
+        const hasRequestedBucket = allocations.some((item: any) => clean(item?.service_mode).toUpperCase() === serviceFilter);
+        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
+        if (!hasRequestedBucket && !exactSessionOwner) return false;
+      }
       return true;
     });
   }, [rows, search, companyFilter, sessionFilter, serviceFilter]);
@@ -169,7 +177,20 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       .filter((item: any) => clean(item?.service_mode).toUpperCase() === mode)
       .filter((item: any) => companyFilter === "ALL" || clean(item?.company_name) === companyFilter)
       .filter((item: any) => sessionFilter === "ALL" || String(item?.session_id || "") === sessionFilter);
-    if (!allocations.length) return <span className="text-xs text-slate-400">-</span>;
+    if (!allocations.length) {
+      if (sessionFilter !== "ALL") {
+        const selected = sessionOptions.find((item) => item.id === sessionFilter);
+        return <div className={`rounded-xl border px-2.5 py-2 ${mode === "BAZAR" ? "border-violet-200 bg-violet-50" : "border-blue-200 bg-blue-50"}`}>
+          <div className="truncate text-xs font-black">{selected?.name || "Session dipilih"}</div>
+          <div className="mt-1 grid gap-1 text-[10px] font-bold sm:grid-cols-3">
+            <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Alokasi 0</span>
+            <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Terpakai 0</span>
+            <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Sisa 0</span>
+          </div>
+        </div>;
+      }
+      return <span className="text-xs text-slate-400">-</span>;
+    }
     return <div className="space-y-1.5">{allocations.map((item: any) => (
       <div key={`${mode}-${item.id}`} className={`rounded-xl border px-2.5 py-2 ${mode === "BAZAR" ? "border-violet-200 bg-violet-50" : "border-blue-200 bg-blue-50"}`}>
         <div className="truncate text-xs font-black" title={clean(item?.location) || clean(item?.session_name)}>{clean(item?.location) || clean(item?.session_name) || "Session"}</div>
@@ -185,10 +206,20 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
   function startEdit(row: any) {
     const defaultCompany = clean(row?.stock_company_name) || clean(row?.service_allocations?.[0]?.company_name);
     setEditing(row);
+    const fallbackSessionId = sessionFilter !== "ALL"
+      ? sessionFilter
+      : String(row?.stock_session_id || row?.service_allocations?.[0]?.session_id || "");
+    const fallbackServiceMode = serviceFilter !== "ALL"
+      ? serviceFilter
+      : clean(row?.service_allocations?.[0]?.service_mode).toUpperCase() === "BAZAR"
+        ? "BAZAR"
+        : "HEALTHDAY";
     setEditForm({
       action: "ADD_STOCK",
       quantity: "",
       notes: "",
+      sourceSessionId: fallbackSessionId,
+      sourceServiceMode: fallbackServiceMode,
       targetCompanyName: defaultCompany,
       targetSessionId: "",
       targetServiceMode: "HEALTHDAY",
@@ -220,6 +251,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       const isTransfer = editForm.action === "TRANSFER_STOCK";
       const quantity = Math.max(0, Number(editForm.quantity || 0));
       if (!isTransfer && !quantity) throw new Error("Jumlah stok wajib lebih dari 0.");
+      if (!isTransfer && !editForm.sourceSessionId) throw new Error("Pilih Session/Lokasi untuk transaksi stok.");
       if (isTransfer && (!editForm.targetCompanyName || !editForm.targetSessionId)) throw new Error("Perusahaan dan Session tujuan wajib dipilih.");
 
       const payload = isTransfer
@@ -238,6 +270,8 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
             stockAction: editForm.action,
             quantity,
             inventoryNotes: editForm.notes,
+            sessionId: Number(editForm.sourceSessionId || 0),
+            serviceMode: editForm.sourceServiceMode,
           };
 
       const response = await fetch("/api/vaccination/public-inventory", {
@@ -337,6 +371,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
                 Aksi
                 <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.action} onChange={(e) => setEditForm({ ...editForm, action: e.target.value, quantity: "", targetSessionId: "" })}>
+                  <option value="SET_INITIAL_STOCK">Stok Awal</option>
                   <option value="ADD_STOCK">Tambah Stok</option>
                   <option value="REMOVE_STOCK">Kurangi Stok</option>
                   <option value="TRANSFER_STOCK">Transfer Stok</option>
@@ -371,13 +406,28 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                    {editForm.action === "REMOVE_STOCK" ? "Jumlah Stok Dikurangi" : "Jumlah Stok Ditambah"}
+                    Session / Lokasi
+                    <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.sourceSessionId} onChange={(e) => setEditForm({ ...editForm, sourceSessionId: e.target.value })}>
+                      <option value="">Pilih Session</option>
+                      {sessionOptions.map((session) => <option key={session.id} value={session.id}>{session.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                    Jenis Stok
+                    <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.sourceServiceMode} onChange={(e) => setEditForm({ ...editForm, sourceServiceMode: e.target.value })}>
+                      <option value="HEALTHDAY">Healthday</option>
+                      <option value="BAZAR">Bazar</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                    {editForm.action === "SET_INITIAL_STOCK" ? "Jumlah Stok Awal" : editForm.action === "REMOVE_STOCK" ? "Jumlah Stok Dikurangi" : "Jumlah Stok Ditambah"}
                     <input type="number" min={1} step={1} className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} placeholder="Jumlah" />
                   </label>
                   <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
                     Catatan
                     <input className="rounded-xl border bg-white px-3 py-3 text-sm font-semibold normal-case text-slate-900" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Contoh: stock opname / retur vendor" />
                   </label>
+                  {editForm.action === "SET_INITIAL_STOCK" ? <div className="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-800">Stok Awal hanya dapat diisi jika stok awal lot masih 0. Nilai masuk ke <b>Jumlah Awal</b>, bukan Tambahan Stok.</div> : null}
                   {editForm.action === "REMOVE_STOCK" ? <div className="md:col-span-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">Kurangi Stok dicatat sebagai koreksi keluar inventory, <b>bukan</b> sebagai pemakaian peserta.</div> : null}
                 </div>
               )}
@@ -392,7 +442,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
       ) : null}
       {detail ? <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setDetail(null); }}><div className="max-h-[90vh] w-full max-w-7xl overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between gap-3 border-b px-5 py-4"><div><div className="text-lg font-black">{detail.label}</div><div className="text-xs text-slate-500">{detail?.details?.length || 0} baris · audit movement</div></div><div className="flex gap-2"><button type="button" onClick={() => exportFilter(detail?.lotId || undefined)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Export Detail</button><button type="button" onClick={() => setDetail(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button></div></div>
         <div className="grid gap-3 border-b bg-slate-50 p-4 sm:grid-cols-5">{[["Peserta",detail?.summary?.participantRows || 0],["Healthday",detail?.summary?.healthday || 0],["Bazar",detail?.summary?.bazar || 0],["Paket",detail?.summary?.package || 0],["Non Paket",detail?.summary?.nonPackage || 0]].map(([label,value]) => <div key={String(label)} className="rounded-xl border bg-white p-3"><div className="text-[10px] font-black uppercase text-slate-500">{label}</div><div className="mt-1 text-2xl font-black">{value}</div></div>)}</div>
-        <div className="max-h-[65vh] overflow-auto"><table className="min-w-[1550px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100 text-[10px] uppercase"><tr><th className="p-3">Tanggal</th><th className="p-3">Transaksi</th><th className="p-3">Peserta</th><th className="p-3">Employee ID</th><th className="p-3">Vaksin/Lot</th><th className="p-3">Layanan</th><th className="p-3">Paket</th><th className="p-3">Harga</th><th className="p-3">Session</th><th className="p-3">Perusahaan</th><th className="p-3">Qty</th><th className="p-3">Petugas</th><th className="p-3">Catatan</th></tr></thead><tbody className="divide-y">{(detail?.details || []).map((row: any, index: number) => <tr key={`${row?.record_id || row?.reference || index}-${index}`}><td className="p-3">{dateLabel(row?.date)}</td><td className="p-3 font-bold">{row?.movement_type || "-"}</td><td className="p-3 font-bold">{row?.participant || "-"}</td><td className="p-3">{row?.employee_id || "-"}</td><td className="p-3">{row?.vaccine || "-"}<div className="text-[10px] text-slate-500">Lot {row?.lot || "-"}</div></td><td className="p-3">{row?.service_mode || "-"}</td><td className="p-3">{row?.sale_mode || "-"}{row?.package_dose_count ? ` · ${row.package_dose_count} dosis` : ""}</td><td className="p-3">{money(row?.sales_price_snapshot)}</td><td className="p-3">{row?.session || row?.location || "-"}</td><td className="p-3">{row?.company || "-"}</td><td className="p-3 font-black">{row?.qty ?? "-"}</td><td className="p-3">{row?.doctor || "-"}</td><td className="p-3">{row?.note || "-"}</td></tr>)}{!(detail?.details || []).length ? <tr><td colSpan={13} className="p-8 text-center text-slate-500">Belum ada detail sesuai filter.</td></tr> : null}</tbody></table></div></div></div> : null}
+        <div className="max-h-[65vh] overflow-auto"><table className="min-w-[1550px] w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100 text-[10px] uppercase"><tr><th className="p-3">Tanggal</th><th className="p-3">Transaksi</th><th className="p-3">Peserta</th><th className="p-3">Employee ID</th><th className="p-3">Vaksin/Lot</th><th className="p-3">Layanan</th><th className="p-3">Paket</th><th className="p-3">Harga</th><th className="p-3">Payment Method</th><th className="p-3">Session</th><th className="p-3">Perusahaan</th><th className="p-3">Qty</th><th className="p-3">Petugas</th><th className="p-3">Catatan</th></tr></thead><tbody className="divide-y">{(detail?.details || []).map((row: any, index: number) => <tr key={`${row?.record_id || row?.reference || index}-${index}`}><td className="p-3">{dateLabel(row?.date)}</td><td className="p-3 font-bold">{row?.movement_type || "-"}</td><td className="p-3 font-bold">{row?.participant || "-"}</td><td className="p-3">{row?.employee_id || "-"}</td><td className="p-3">{row?.vaccine || "-"}<div className="text-[10px] text-slate-500">Lot {row?.lot || "-"}</div></td><td className="p-3">{row?.service_mode || "-"}</td><td className="p-3">{row?.sale_mode || "-"}{row?.package_dose_count ? ` · ${row.package_dose_count} dosis` : ""}</td><td className="p-3">{money(row?.sales_price_snapshot)}</td><td className="p-3">{row?.payment_method || "-"}</td><td className="p-3">{row?.session || row?.location || "-"}</td><td className="p-3">{row?.company || "-"}</td><td className="p-3 font-black">{row?.qty ?? "-"}</td><td className="p-3">{row?.doctor || "-"}</td><td className="p-3">{row?.note || "-"}</td></tr>)}{!(detail?.details || []).length ? <tr><td colSpan={14} className="p-8 text-center text-slate-500">Belum ada detail sesuai filter.</td></tr> : null}</tbody></table></div></div></div> : null}
       {detailLoading ? <div className="fixed bottom-5 right-5 z-[10000] rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white shadow-xl">Memuat Movement...</div> : null}
     </main>
   );

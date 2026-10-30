@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
+import { syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
+// V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // VACCINATION_ROLE_GUARD_V150
 // V148_VALIDATION_DETAIL_API
 // V148_5_VALIDATION_FILTERS_AND_EXACT_STICKER
@@ -80,6 +82,10 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
     id: row.id,
     session_id: row.session_id,
     queue_number: row.queue_number || row.queue_no || parseQueueNumber(row.queue_label),
+    employee_id: clean(row.employee_id || row.mcu_id),
+    payment_method: clean(row.payment_method),
+    company_name: clean(row.session?.company_name || row.company_name),
+    internal_queue_enabled: row.session?.existing_flow_config?.queue !== false,
     patient_name: row.patient_name || row.participant_name || row.name || row.full_name || row.nama || row.nama_peserta || "-",
     doctor_name: clean(firstRecord?.administered_by) || row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
     product_name: productName,
@@ -150,7 +156,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from("vaccination_registrations")
-      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,existing_flow_config)")
       .order("id", { ascending: false })
       .limit(1000);
 
@@ -161,7 +167,7 @@ export async function GET(req: NextRequest) {
     if (result.error && missingColumn(result.error)) {
       let fallback = supabase
         .from("vaccination_registrations")
-        .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+        .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,existing_flow_config)")
         .order("id", { ascending: false })
         .limit(1000);
       if (sessionId) fallback = fallback.eq("session_id", sessionId);
@@ -199,7 +205,7 @@ export async function GET(req: NextRequest) {
     // V148.6: pilihan lokasi berasal dari vaccination_sessions, bukan hanya peserta pending.
     let sessionLocationQuery = supabase
       .from("vaccination_sessions")
-      .select("id,session_name,company_name,location,session_date")
+      .select("id,session_name,company_name,location,session_date,existing_flow_config,status")
       .order("session_date", { ascending: false })
       .order("id", { ascending: false })
       .limit(2000);
@@ -216,10 +222,17 @@ export async function GET(req: NextRequest) {
             company_name: clean(session.company_name),
             location: clean(session.location),
             session_date: session.session_date || null,
+            existing_flow_config: session.existing_flow_config || null,
+            status: clean(session.status),
           }))
           .filter((session: any) => session.location);
 
-    return json({ ok: true, rows, session_locations: sessionLocations });
+    return json({
+      ok: true,
+      rows,
+      session_locations: sessionLocations,
+      sessions: sessionLocations,
+    });
   } catch (error: any) {
     return json({ ok: false, message: error?.message || "Gagal membaca validasi.", rows: [] }, 500);
   }
@@ -411,6 +424,36 @@ export async function POST(req: NextRequest) {
       payload = { queue_status: "CANCELLED", validation_status: "CANCELLED", cancelled_by: actor, cancelled_at: now, cancelled_note: note, updated_at: now };
     } else {
       return json({ ok: false, message: "Action tidak dikenali." }, 400);
+    }
+
+    if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
+      const registrationModeResult = await supabase
+        .from("vaccination_registrations")
+        .select("id,session_id")
+        .eq("id", rowId)
+        .maybeSingle();
+      if (registrationModeResult.error || !registrationModeResult.data) {
+        return json({ ok: false, message: registrationModeResult.error?.message || "Registrasi tidak ditemukan." }, 404);
+      }
+      const sessionModeResult = await supabase
+        .from("vaccination_sessions")
+        .select("id,existing_flow_config")
+        .eq("id", registrationModeResult.data.session_id)
+        .maybeSingle();
+      if (sessionModeResult.error) {
+        return json({ ok: false, message: sessionModeResult.error.message || "Gagal membaca mode Session." }, 500);
+      }
+      if (sessionModeResult.data?.existing_flow_config?.queue === false) {
+        try {
+          await syncRegistrationTrackDone(supabase, rowId, "HEALTHDAY", actor);
+          await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+        } catch (syncError: any) {
+          return json({
+            ok: false,
+            message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok.",
+          }, 409);
+        }
+      }
     }
 
     let result = await supabase

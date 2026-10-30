@@ -6,6 +6,8 @@ import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
+// V518_INVENTORY_INITIAL_STOCK_BUCKET_SYNC_PAYMENT_METHOD
+
 function clean(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -136,6 +138,7 @@ export async function GET(req: NextRequest) {
         "JENIS_HARGA",
         "DOSIS_PAKET",
         "HARGA_SNAPSHOT",
+        "PAYMENT_METHOD",
         "DOSE",
         "DOKTER_PETUGAS",
         "QTY",
@@ -163,6 +166,7 @@ export async function GET(req: NextRequest) {
           row.sale_mode || "",
           row.package_dose_count || "",
           row.sales_price_snapshot ?? "",
+          row.payment_method || "",
           row.dose,
           row.doctor,
           row.qty,
@@ -218,14 +222,21 @@ export async function POST(req: NextRequest) {
       const stockAction = clean(body?.stockAction).toUpperCase();
       const quantity = Math.max(0, toInt(body?.quantity, 0));
       const note = clean(body?.inventoryNotes || body?.notes);
+      const sourceSessionId = toInt(body?.sessionId || body?.sourceSessionId, 0);
+      const sourceServiceMode = clean(body?.serviceMode || body?.sourceServiceMode).toUpperCase() === "BAZAR"
+        ? "BAZAR"
+        : "HEALTHDAY";
 
       if (!lotId) return fail("Lot wajib dipilih.");
-      if (!["ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) {
-        return fail("Pilih aksi Tambah Stok, Return Stok, atau Kurangi Stok.");
+      if (!["SET_INITIAL_STOCK", "ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) {
+        return fail("Pilih aksi Stok Awal, Tambah Stok, Return Stok, atau Kurangi Stok.");
       }
       if (!quantity) return fail("Jumlah stok wajib lebih dari 0.");
+      if (!sourceSessionId) {
+        return fail("Pilih Session/Lokasi terlebih dahulu agar Alokasi, Terpakai, dan Sisa tercatat pada bucket yang benar.", 400);
+      }
 
-      const [lotResult, recordsResult, movementsResult] = await Promise.all([
+      const [lotResult, recordsResult, movementsResult, sessionResult, allocationResult, usedItemsResult] = await Promise.all([
         supabase
           .from("vaccination_vaccine_lots")
           .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes")
@@ -242,12 +253,37 @@ export async function POST(req: NextRequest) {
           .select("id,movement_type,qty")
           .eq("lot_id", lotId)
           .limit(20000),
+        supabase
+          .from("vaccination_sessions")
+          .select("id,session_name,company_name,location,status")
+          .eq("id", sourceSessionId)
+          .maybeSingle(),
+        supabase
+          .from("vaccination_session_stock_allocations")
+          .select("*")
+          .eq("session_id", sourceSessionId)
+          .eq("lot_id", lotId)
+          .eq("service_mode", sourceServiceMode)
+          .maybeSingle(),
+        supabase
+          .from("vaccination_registration_items")
+          .select("id,status")
+          .eq("session_id", sourceSessionId)
+          .eq("lot_id", lotId)
+          .eq("service_mode", sourceServiceMode)
+          .eq("active", true)
+          .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
+          .limit(20000),
       ]);
 
       if (lotResult.error) return fail(lotResult.error.message, 500);
       if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
       if (recordsResult.error) return fail(recordsResult.error.message, 500);
       if (movementsResult.error) return fail(movementsResult.error.message, 500);
+      if (sessionResult.error) return fail(sessionResult.error.message, 500);
+      if (!sessionResult.data) return fail("Session/Lokasi tidak ditemukan.", 404);
+      if (allocationResult.error && String(allocationResult.error.code || "") !== "PGRST116") return fail(allocationResult.error.message, 500);
+      if (usedItemsResult.error) return fail(usedItemsResult.error.message, 500);
 
       const lot = lotResult.data as any;
       const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
@@ -264,15 +300,20 @@ export async function POST(req: NextRequest) {
       const beforeAdded = Math.max(Number(lot.stock_added || 0), movementAdded);
       const used = Math.max(Number(lot.stock_used || 0), (recordsResult.data || []).length);
       const beforeRemaining = initial + beforeAdded - used - movementOut;
+      const isInitial = stockAction === "SET_INITIAL_STOCK";
       const isRemove = stockAction === "REMOVE_STOCK";
 
+      if (isInitial && initial > 0) {
+        return fail(`Stok awal Lot ${lot.lot_number || lotId} sudah ${initial}. Gunakan Tambah Stok atau Kurangi Stok agar histori tidak berubah.`, 409);
+      }
       if (isRemove && quantity > beforeRemaining) {
         return fail(`Stok tidak cukup. Sisa saat ini ${beforeRemaining}, tidak bisa dikurangi ${quantity}.`, 409);
       }
 
-      const nextAdded = isRemove ? beforeAdded : beforeAdded + quantity;
+      const nextInitial = isInitial ? quantity : initial;
+      const nextAdded = isRemove || isInitial ? beforeAdded : beforeAdded + quantity;
       const nextMovementOut = movementOut + (isRemove ? quantity : 0);
-      const nextRemaining = initial + nextAdded - used - nextMovementOut;
+      const nextRemaining = nextInitial + nextAdded - used - nextMovementOut;
       if (nextRemaining < 0) return fail("Sisa stok tidak boleh negatif.", 409);
 
       const physicalBefore = lot.stock_physical_count === null || lot.stock_physical_count === undefined
@@ -283,12 +324,26 @@ export async function POST(req: NextRequest) {
         : isRemove
           ? Math.max(0, physicalBefore - quantity)
           : physicalBefore + quantity;
-      const label = isRemove ? "Kurangi Stok" : stockAction === "RETURN_STOCK" ? "Return Stok" : "Tambah Stok";
-      const nextNotes = `[Portal Inventory] ${note || label}`;
+      const label = isInitial
+        ? "Stok Awal"
+        : isRemove
+          ? "Kurangi Stok"
+          : stockAction === "RETURN_STOCK"
+            ? "Return Stok"
+            : "Tambah Stok";
+      const nextNotes = `[Portal Inventory] ${label} · ${clean(sessionResult.data.location) || clean(sessionResult.data.session_name) || `Session ${sourceSessionId}`} · ${sourceServiceMode} · ${note || "-"}`;
+
+      const previousAllocation = allocationResult.data || null;
+      const allocatedBefore = Math.max(0, Number(previousAllocation?.allocated_qty || 0));
+      const usedInBucket = (usedItemsResult.data || []).length;
+      const allocatedAfter = isRemove
+        ? Math.max(usedInBucket, allocatedBefore - quantity)
+        : allocatedBefore + quantity;
 
       const updateResult = await supabase
         .from("vaccination_vaccine_lots")
         .update({
+          stock_initial: nextInitial,
           stock_added: nextAdded,
           stock_physical_count: physicalAfter,
           inventory_notes: nextNotes,
@@ -299,12 +354,37 @@ export async function POST(req: NextRequest) {
         .single();
       if (updateResult.error) return fail(updateResult.error.message, 500);
 
+      const allocationWrite = await supabase
+        .from("vaccination_session_stock_allocations")
+        .upsert({
+          session_id: sourceSessionId,
+          vaccine_id: lot.vaccine_id,
+          lot_id: lotId,
+          allocated_qty: allocatedAfter,
+          low_stock_threshold: Math.min(5, Math.max(0, allocatedAfter - usedInBucket)),
+          dedicated: true,
+          active: true,
+          service_mode: sourceServiceMode,
+          notes: `[Portal Inventory] ${label}`,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "session_id,lot_id,service_mode" });
+      if (allocationWrite.error) {
+        await supabase.from("vaccination_vaccine_lots").update({
+          stock_initial: initial,
+          stock_added: beforeAdded,
+          stock_physical_count: lot.stock_physical_count,
+          inventory_notes: lot.inventory_notes,
+          updated_at: new Date().toISOString(),
+        }).eq("id", lotId);
+        return fail(allocationWrite.error.message, 500);
+      }
+
       const movementResult = await supabase.from("vaccination_inventory_movements").insert({
         vaccine_id: lot.vaccine_id,
         lot_id: lotId,
-        movement_type: isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
+        movement_type: isInitial ? "initial" : isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
         qty: quantity,
-        reference_type: isRemove ? "public_inventory_adjustment_out" : "public_inventory_system",
+        reference_type: isInitial ? "public_inventory_initial" : isRemove ? "public_inventory_adjustment_out" : "public_inventory_system",
         reference_id: lotId,
         notes: nextNotes,
         created_by: createdBy,
@@ -313,19 +393,30 @@ export async function POST(req: NextRequest) {
         await supabase
           .from("vaccination_vaccine_lots")
           .update({
+            stock_initial: initial,
             stock_added: beforeAdded,
             stock_physical_count: lot.stock_physical_count,
             inventory_notes: lot.inventory_notes,
             updated_at: new Date().toISOString(),
           })
           .eq("id", lotId);
+        if (previousAllocation) {
+          await supabase.from("vaccination_session_stock_allocations").upsert(previousAllocation, { onConflict: "session_id,lot_id,service_mode" });
+        } else {
+          await supabase.from("vaccination_session_stock_allocations")
+            .delete()
+            .eq("session_id", sourceSessionId)
+            .eq("lot_id", lotId)
+            .eq("service_mode", sourceServiceMode);
+        }
         return fail(movementResult.error.message, 500);
       }
 
       return ok({
-        message: `${label} ${quantity} berhasil. Sisa stok ${nextRemaining}.`,
+        message: `${label} ${quantity} berhasil untuk ${sourceServiceMode === "BAZAR" ? "Bazar" : "Healthday"}. Sisa stok ${nextRemaining}.`,
         stockSystemRemaining: nextRemaining,
         stockPhysicalCount: physicalAfter,
+        allocation: { sessionId: sourceSessionId, serviceMode: sourceServiceMode, allocatedQty: allocatedAfter, usedQty: usedInBucket },
       });
     }
 
