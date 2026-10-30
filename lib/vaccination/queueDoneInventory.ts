@@ -1,3 +1,4 @@
+// V531_PRODUCT_SERIES_NEXT_DUE
 // V511_QUEUE_DONE_INVENTORY_SYNC
 // Vaccination-only helper. Keeps queue DONE, registration item status, vaccination record,
 // lot stock_used, and inventory movement aligned without touching queue UI/print/sticker.
@@ -80,6 +81,26 @@ async function validateSessionStockAccess(
   }
 }
 
+
+async function nextDueDateForSeries(supabase: any, vaccine: any, doseNumber: number, administeredAtIso: string) {
+  let days: number | null = null;
+  const setting = await supabase
+    .from("vaccination_vaccine_series_settings")
+    .select("is_series,schedule")
+    .eq("vaccine_id", Number(vaccine?.id || 0))
+    .maybeSingle();
+  if (!setting.error && setting.data?.is_series === true && Array.isArray(setting.data.schedule)) {
+    const row = setting.data.schedule.find((item: any) => Number(item?.dose_number) === Number(doseNumber));
+    if (row && Number(row.next_due_days) > 0) days = Number(row.next_due_days);
+  }
+  if (days == null && Number(vaccine?.default_next_dose_days) > 0) days = Number(vaccine.default_next_dose_days);
+  if (days == null || days <= 0) return null;
+  const date = new Date(administeredAtIso);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function syncRegistrationTrackDone(
   supabase: any,
   registrationId: number,
@@ -153,6 +174,8 @@ export async function syncRegistrationTrackDone(
       if (!record) {
         await validateSessionStockAccess(supabase, Number(registration.session_id || 0), lot, serviceMode);
 
+        const doseNumber = Math.max(1, Number(item.dose_number || 1));
+        const nextDueDate = await nextDueDateForSeries(supabase, vaccine, doseNumber, now);
         const recordResult = await supabase
           .from("vaccination_records")
           .insert({
@@ -163,9 +186,10 @@ export async function syncRegistrationTrackDone(
             lot_id: lotId,
             vaccine_name: vaccine.name,
             lot_number: lot.lot_number,
-            dose_number: Math.max(1, Number(item.dose_number || 1)),
+            dose_number: doseNumber,
             administered_at: now,
             administered_by: actor,
+            next_due_date: nextDueDate,
             notes: marker(serviceMode),
             status: "ADMINISTERED",
           })

@@ -1,5 +1,6 @@
 "use client";
 
+// V531_VALIDATION_BULK_ACTION_COLLAPSIBLE_DONE
 // V530_VALIDATION_SERVICE_STATE_ISOLATION
 // V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_RECORD_ONLY_VALIDATION_WORKFLOW
@@ -159,6 +160,9 @@ export default function VaccinationValidationPage() {
   const [actor, setActor] = useState("Tim Validasi");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [doneOpen, setDoneOpen] = useState(false);
 
   async function loadRows() {
     setLoading(true);
@@ -286,6 +290,53 @@ export default function VaccinationValidationPage() {
       await loadRows();
     } catch (error: any) {
       setMessage(error?.message || "Gagal update status.");
+    }
+  }
+
+  function toggleSelected(row: Row) {
+    const key = rowStateKey(row);
+    setSelectedRows((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  }
+
+  function toggleAllPending() {
+    const keys = pendingShown.map(rowStateKey);
+    const allSelected = keys.length > 0 && keys.every((key) => selectedRows.includes(key));
+    setSelectedRows(allSelected ? selectedRows.filter((key) => !keys.includes(key)) : Array.from(new Set([...selectedRows, ...keys])));
+  }
+
+  async function bulkUpdate(action: "DONE" | "BATAL") {
+    const targets = pendingShown.filter((row) => selectedRows.includes(rowStateKey(row)));
+    if (!targets.length) {
+      setMessage("Pilih minimal satu peserta terlebih dahulu.");
+      return;
+    }
+    let note = "";
+    if (action === "BATAL") {
+      note = clean(window.prompt(`Alasan cancel untuk ${targets.length} peserta:`) || "");
+      if (!note) return;
+    }
+    if (!window.confirm(`${action === "DONE" ? "Tandai Done" : "Cancel"} ${targets.length} peserta terpilih?`)) return;
+    setBulkBusy(true);
+    setMessage(`Memproses ${targets.length} peserta...`);
+    try {
+      for (const row of targets) {
+        const res = await fetch("/api/vaccination/validation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ id: row.id, action, actor, note, service_mode: row.validation_service_mode }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) throw new Error(`${row.patient_name || "Peserta"}: ${json.message || "Gagal update status."}`);
+      }
+      setSelectedRows([]);
+      await loadRows();
+      setMessage(`${targets.length} peserta berhasil diperbarui.`);
+    } catch (error: any) {
+      setMessage(error?.message || "Bulk action gagal.");
+      await loadRows();
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -447,7 +498,15 @@ export default function VaccinationValidationPage() {
               <div className="font-black text-slate-900">Menunggu Validasi</div>
               <div className="mt-1 text-xs font-semibold text-slate-500">Peserta yang masih membutuhkan tindakan dari Tim Validasi.</div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {selectedRows.length ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-cyan-200 bg-white p-2">
+                  <span className="px-2 text-xs font-black text-cyan-800">{selectedRows.length} dipilih</span>
+                  <button disabled={bulkBusy} type="button" onClick={() => void bulkUpdate("DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">Done</button>
+                  <button disabled={bulkBusy} type="button" onClick={() => void bulkUpdate("BATAL")} className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 disabled:opacity-50">Cancel</button>
+                  <button disabled={bulkBusy} type="button" onClick={() => setSelectedRows([])} className="rounded-xl border px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear</button>
+                </div>
+              ) : null}
               <button type="button" onClick={() => runExport(pendingShown, "menunggu")} className="rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-black text-cyan-700">Export Menunggu</button>
               <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-cyan-700">{pendingShown.length} peserta</div>
             </div>
@@ -456,6 +515,7 @@ export default function VaccinationValidationPage() {
             <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
                 <tr>
+                  <th className="w-12 px-4 py-3"><input aria-label="Pilih semua peserta" type="checkbox" checked={pendingShown.length > 0 && pendingShown.every((row) => selectedRows.includes(rowStateKey(row)))} onChange={toggleAllPending} /></th>
                   <th className="px-4 py-3">No. Antrean Vendor</th>
                   <th className="px-4 py-3">Peserta</th>
                   <th className="px-4 py-3">NIK Karyawan / BINUSIAN ID</th>
@@ -468,6 +528,7 @@ export default function VaccinationValidationPage() {
               <tbody className="divide-y">
                 {pendingShown.map((row) => (
                   <tr key={rowStateKey(row)} className="align-top hover:bg-slate-50">
+                    <td className="px-4 py-4"><input aria-label={`Pilih ${row.patient_name || "peserta"}`} type="checkbox" checked={selectedRows.includes(rowStateKey(row))} onChange={() => toggleSelected(row)} /></td>
                     <td className="px-4 py-4"><span className="rounded-xl bg-cyan-50 px-3 py-2 font-black text-cyan-800">{row.queue_number || "-"}</span></td>
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
@@ -494,24 +555,24 @@ export default function VaccinationValidationPage() {
                     </td>
                   </tr>
                 ))}
-                {!pendingShown.length ? <tr><td colSpan={7} className="p-8 text-center font-bold text-slate-500">Belum ada peserta menunggu validasi pada Session ini.</td></tr> : null}
+                {!pendingShown.length ? <tr><td colSpan={8} className="p-8 text-center font-bold text-slate-500">Belum ada peserta menunggu validasi pada Session ini.</td></tr> : null}
               </tbody>
             </table>
           </div>
         </section>
 
         <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-emerald-100 bg-white shadow-sm">
-          <div className="flex items-center justify-between gap-3 border-b bg-emerald-50 px-5 py-4">
-            <div>
-              <div className="font-black text-slate-900">Sudah Selesai</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Riwayat peserta yang sudah diselesaikan oleh Tim Validasi.</div>
-            </div>
+          <div className="flex items-center justify-between gap-3 bg-emerald-50 px-5 py-4">
+            <button type="button" onClick={() => setDoneOpen((value) => !value)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="text-lg font-black text-emerald-700">{doneOpen ? "▾" : "▸"}</span>
+              <span><span className="block font-black text-slate-900">Sudah Selesai</span><span className="mt-1 block text-xs font-semibold text-slate-500">{doneOpen ? "Klik untuk menutup riwayat selesai." : "Klik untuk melihat riwayat peserta yang sudah selesai."}</span></span>
+            </button>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => runExport(doneShown, "selesai")} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700">Export Selesai</button>
               <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-emerald-700">{doneShown.length} peserta</div>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          {doneOpen ? <div className="overflow-x-auto border-t">
             <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
                 <tr>
@@ -541,7 +602,7 @@ export default function VaccinationValidationPage() {
                 {!doneShown.length ? <tr><td colSpan={8} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta selesai sesuai filter.</td></tr> : null}
               </tbody>
             </table>
-          </div>
+          </div> : null}
         </section>
         </>
       ) : (

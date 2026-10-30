@@ -1,3 +1,4 @@
+// V531_PRODUCT_SERIES_GLOBAL_RULE
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
 // V501_PLANNED_INITIAL_STOCK_AND_SERVICE_FILTER
@@ -145,6 +146,36 @@ async function lotHasOperationalReferences(supabase: any, lotId: number) {
   );
 }
 
+
+function normalizeSeriesSchedule(value: any) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row: any, index: number) => ({
+      dose_number: Math.max(1, toInt(row?.dose_number ?? row?.doseNumber ?? index + 1, index + 1)),
+      next_due_days: Math.max(0, toInt(row?.next_due_days ?? row?.nextDueDays, 0)),
+    }))
+    .filter((row: any) => row.next_due_days > 0)
+    .sort((a: any, b: any) => a.dose_number - b.dose_number)
+    .map((row: any, index: number) => ({ dose_number: index + 1, next_due_days: row.next_due_days }));
+}
+
+async function saveSeriesSetting(supabase: any, vaccineId: number, body: any) {
+  const isSeries = body?.isSeries === true || String(body?.isSeries || "").toLowerCase() === "true";
+  const schedule = isSeries ? normalizeSeriesSchedule(body?.seriesSchedule) : [];
+  if (isSeries && !schedule.length) throw new Error("Vaksin Series membutuhkan minimal satu jeda dosis berikutnya.");
+  const result = await supabase
+    .from("vaccination_vaccine_series_settings")
+    .upsert({ vaccine_id: vaccineId, is_series: isSeries, schedule, updated_at: new Date().toISOString() }, { onConflict: "vaccine_id" })
+    .select("vaccine_id,is_series,schedule,updated_at")
+    .single();
+  if (result.error) {
+    const message = String(result.error?.message || "");
+    const missing = String(result.error?.code || "") === "42P01" || message.toLowerCase().includes("vaccination_vaccine_series_settings");
+    if (isSeries || !missing) throw new Error(missing ? "Tabel Vaksin Series belum aktif. Jalankan SQL V531 terlebih dahulu." : message);
+    return null;
+  }
+  return result.data;
+}
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
@@ -374,6 +405,21 @@ export async function GET(req: NextRequest) {
 
   if (vaccinesResult.error) return fail(vaccinesResult.error.message, 500);
 
+  const seriesSettingsResult = await supabase
+    .from("vaccination_vaccine_series_settings")
+    .select("vaccine_id,is_series,schedule,updated_at")
+    .limit(10000);
+  const seriesReady = !seriesSettingsResult.error;
+  const seriesByVaccine = new Map<number, any>((seriesSettingsResult.data || []).map((row: any) => [Number(row.vaccine_id), row]));
+  const vaccinesWithSeries = (vaccinesResult.data || []).map((vaccine: any) => {
+    const setting = seriesByVaccine.get(Number(vaccine.id));
+    return {
+      ...vaccine,
+      is_series: setting?.is_series === true,
+      series_schedule: Array.isArray(setting?.schedule) ? setting.schedule : [],
+    };
+  });
+
   const lotsResult = await supabase
     .from("vaccination_vaccine_lots")
     .select("*, vaccine:vaccination_vaccines(id,name,brand,default_next_dose_days)")
@@ -472,7 +518,9 @@ export async function GET(req: NextRequest) {
     : "Mapping import belum aktif. Jalankan sql_vaccination_v153_18_product_import_mapping.sql di Supabase.";
 
   return ok({
-    vaccines: vaccinesResult.data || [],
+    vaccines: vaccinesWithSeries,
+    seriesReady,
+    seriesMessage: seriesReady ? "" : "Fitur Vaksin Series belum aktif. Jalankan SQL V531.",
     lots: lotsResult.data || [],
     productMappings: mappingReady ? mappingResult.data || [] : [],
     mappingReady,
@@ -1686,8 +1734,12 @@ export async function POST(req: NextRequest) {
         description: clean(body.description) || null,
         price: body.price === "" || body.price == null ? null : Number(body.price),
         price_category: clean(body.priceCategory) || clean(body.price_category) || null,
-        dose_count: Math.max(1, toInt(body.doseCount, 1)),
-        default_next_dose_days: body.defaultNextDoseDays === "" || body.defaultNextDoseDays == null ? null : toInt(body.defaultNextDoseDays, 0),
+        dose_count: (body.isSeries === true || String(body.isSeries || "").toLowerCase() === "true")
+          ? normalizeSeriesSchedule(body.seriesSchedule).length + 1
+          : Math.max(1, toInt(body.doseCount, 1)),
+        default_next_dose_days: (body.isSeries === true || String(body.isSeries || "").toLowerCase() === "true")
+          ? (normalizeSeriesSchedule(body.seriesSchedule)[0]?.next_due_days ?? null)
+          : (body.defaultNextDoseDays === "" || body.defaultNextDoseDays == null ? null : toInt(body.defaultNextDoseDays, 0)),
         active: body.active !== false,
         updated_at: new Date().toISOString(),
       })
@@ -1696,7 +1748,12 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (result.error) return fail(result.error.message, 500);
-    return ok({ message: "Master vaksin berhasil diperbarui.", vaccine: result.data });
+    try {
+      const seriesSetting = await saveSeriesSetting(supabase, Number(result.data.id), body);
+      return ok({ message: "Master vaksin berhasil diperbarui. Rule series berlaku ke semua Session produk ini.", vaccine: { ...result.data, is_series: seriesSetting?.is_series === true, series_schedule: seriesSetting?.schedule || [] } });
+    } catch (seriesError: any) {
+      return fail(seriesError?.message || "Gagal menyimpan rule Vaksin Series.", 500);
+    }
   }
 
   if (action === "create-vaccine") {
@@ -1711,15 +1768,24 @@ export async function POST(req: NextRequest) {
         description: clean(body.description) || null,
         price: body.price === "" || body.price == null ? null : Number(body.price),
         price_category: clean(body.priceCategory) || clean(body.price_category) || null,
-        dose_count: Math.max(1, toInt(body.doseCount, 1)),
-        default_next_dose_days: body.defaultNextDoseDays === "" || body.defaultNextDoseDays == null ? null : toInt(body.defaultNextDoseDays, 0),
+        dose_count: (body.isSeries === true || String(body.isSeries || "").toLowerCase() === "true")
+          ? normalizeSeriesSchedule(body.seriesSchedule).length + 1
+          : Math.max(1, toInt(body.doseCount, 1)),
+        default_next_dose_days: (body.isSeries === true || String(body.isSeries || "").toLowerCase() === "true")
+          ? (normalizeSeriesSchedule(body.seriesSchedule)[0]?.next_due_days ?? null)
+          : (body.defaultNextDoseDays === "" || body.defaultNextDoseDays == null ? null : toInt(body.defaultNextDoseDays, 0)),
         active: body.active !== false,
       })
       .select("*")
       .single();
 
     if (result.error) return fail(result.error.message, 500);
-    return ok({ message: "Master vaksin berhasil dibuat.", vaccine: result.data });
+    try {
+      const seriesSetting = await saveSeriesSetting(supabase, Number(result.data.id), body);
+      return ok({ message: "Master vaksin berhasil dibuat.", vaccine: { ...result.data, is_series: seriesSetting?.is_series === true, series_schedule: seriesSetting?.schedule || [] } });
+    } catch (seriesError: any) {
+      return fail(seriesError?.message || "Gagal menyimpan rule Vaksin Series.", 500);
+    }
   }
 
   if (action === "create-lot") {

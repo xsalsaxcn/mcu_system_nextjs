@@ -41,6 +41,20 @@ function cleanText(value: any) {
   return String(value ?? "").trim();
 }
 
+function seriesScheduleFromVaccine(vaccine: any) {
+  const rows = Array.isArray(vaccine?.series_schedule) ? vaccine.series_schedule : [];
+  const normalized = rows
+    .map((row: any, index: number) => ({
+      doseNumber: Math.max(1, Number(row?.dose_number || index + 1)),
+      nextDueDays: row?.next_due_days == null ? "" : String(row.next_due_days),
+    }))
+    .filter((row: any) => Number(row.doseNumber) > 0)
+    .sort((a: any, b: any) => Number(a.doseNumber) - Number(b.doseNumber));
+  if (normalized.length) return normalized;
+  const fallback = vaccine?.default_next_dose_days;
+  return fallback == null || fallback === "" ? [{ doseNumber: 1, nextDueDays: "" }] : [{ doseNumber: 1, nextDueDays: String(fallback) }];
+}
+
 function normalizeName(value: any) {
   return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -134,6 +148,8 @@ export default function VaccinationMasterPage() {
     price: "",
     doseCount: 1,
     defaultNextDoseDays: "",
+    isSeries: false,
+    seriesSchedule: [{ doseNumber: 1, nextDueDays: "" }],
   });
   const [lotForm, setLotForm] = useState({
     vaccineId: "",
@@ -153,7 +169,8 @@ export default function VaccinationMasterPage() {
   const [packageDoseCount, setPackageDoseCount] = useState("3");
   const [packagePrice, setPackagePrice] = useState("");
   const [savingInlinePricing, setSavingInlinePricing] = useState(false);
-  // V511_DUPLICATE_SESSION_CATALOG_NO_STOCK
+  // V531_PRODUCT_SERIES_GLOBAL_RULE
+// V511_DUPLICATE_SESSION_CATALOG_NO_STOCK
   const [catalogDuplicateOpen, setCatalogDuplicateOpen] = useState(false);
   const [catalogSourceSessionId, setCatalogSourceSessionId] = useState("");
   const [catalogTargetSessionIds, setCatalogTargetSessionIds] = useState<string[]>([]);
@@ -173,6 +190,8 @@ export default function VaccinationMasterPage() {
       price: "",
       doseCount: 1,
       defaultNextDoseDays: "",
+      isSeries: false,
+      seriesSchedule: [{ doseNumber: 1, nextDueDays: "" }],
     });
     setLotForm({
       vaccineId: "",
@@ -359,6 +378,8 @@ export default function VaccinationMasterPage() {
       price: existingVaccine?.price == null ? "" : String(existingVaccine.price),
       doseCount: Math.max(1, Number(existingVaccine?.dose_count || 1)),
       defaultNextDoseDays: existingVaccine?.default_next_dose_days == null ? "" : String(existingVaccine.default_next_dose_days),
+      isSeries: existingVaccine?.is_series === true,
+      seriesSchedule: seriesScheduleFromVaccine(existingVaccine),
     });
 
     if (firstRow) applyImportLot(product.key, firstRow.lotNumber, masterId);
@@ -403,7 +424,10 @@ export default function VaccinationMasterPage() {
       Math.max(1, Number(vaccineForm.doseCount || 1)) ===
         Math.max(1, Number(vaccine.dose_count || 1)) &&
       comparableDays(vaccineForm.defaultNextDoseDays) ===
-        comparableDays(vaccine.default_next_dose_days)
+        comparableDays(vaccine.default_next_dose_days) &&
+      Boolean(vaccineForm.isSeries) === Boolean(vaccine.is_series) &&
+      JSON.stringify((vaccineForm.seriesSchedule || []).map((row: any) => ({ dose_number: Number(row.doseNumber), next_due_days: Number(row.nextDueDays || 0) }))) ===
+        JSON.stringify((Array.isArray(vaccine.series_schedule) ? vaccine.series_schedule : []).map((row: any) => ({ dose_number: Number(row.dose_number), next_due_days: Number(row.next_due_days || 0) })))
     );
   }
 
@@ -424,6 +448,8 @@ export default function VaccinationMasterPage() {
         target.default_next_dose_days == null
           ? ""
           : String(target.default_next_dose_days),
+      isSeries: target?.is_series === true,
+      seriesSchedule: seriesScheduleFromVaccine(target),
     });
   }
 
@@ -786,6 +812,8 @@ export default function VaccinationMasterPage() {
       price: vaccine.price == null ? "" : String(vaccine.price),
       doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
       defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
+      isSeries: vaccine?.is_series === true,
+      seriesSchedule: seriesScheduleFromVaccine(vaccine),
     });
     const packageOffer = salesOffers.find(
       (offer) =>
@@ -839,6 +867,8 @@ export default function VaccinationMasterPage() {
       price: vaccine.price == null ? "" : String(vaccine.price),
       doseCount: Math.max(1, Number(vaccine.dose_count || 1)),
       defaultNextDoseDays: vaccine.default_next_dose_days == null ? "" : String(vaccine.default_next_dose_days),
+      isSeries: vaccine?.is_series === true,
+      seriesSchedule: seriesScheduleFromVaccine(vaccine),
     });
     const packageOffer = salesOffers.find(
       (offer) =>
@@ -890,7 +920,7 @@ export default function VaccinationMasterPage() {
       setMessage(json.message || `Produk ${vaccine.name} dihapus.`);
       if (String(selectedMasterVaccineId) === String(vaccine.id)) {
         setSelectedMasterVaccineId("");
-        setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "" });
+        setVaccineForm({ name: "", brand: "", description: "", priceCategory: "Harga Perusahaan", price: "", doseCount: 1, defaultNextDoseDays: "", isSeries: false, seriesSchedule: [{ doseNumber: 1, nextDueDays: "" }] });
         setLotForm({ vaccineId: "", lotNumber: "", expiryDate: "", stockInitial: 0, stockAdded: 0, stockPhysicalCount: "", inventoryNotes: "", stockScope: "GENERAL", stockCompanyName: "", stockSessionId: "", healthdayStockQty: 0, bazarStockQty: 0 });
       }
       await loadData();
@@ -2185,22 +2215,40 @@ export default function VaccinationMasterPage() {
                 value={vaccineForm.description}
                 onChange={(e) => setVaccineForm({ ...vaccineForm, description: e.target.value })}
               />
-              <div className="grid gap-3 md:grid-cols-2">
-                <input
-                  type="number"
-                  className="rounded-xl border px-3 py-2"
-                  placeholder="Jumlah dosis"
-                  value={vaccineForm.doseCount}
-                  onChange={(e) => setVaccineForm({ ...vaccineForm, doseCount: Number(e.target.value || 1) })}
-                />
-                <input
-                  type="number"
-                  className="rounded-xl border px-3 py-2"
-                  placeholder="Jeda dosis berikutnya (hari)"
-                  value={vaccineForm.defaultNextDoseDays}
-                  onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })}
-                />
+              <div className="rounded-2xl border bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-wide text-slate-500">Vaksin Series?</div>
+                    <div className="mt-1 text-xs font-semibold text-slate-500">Rule ini berlaku otomatis untuk produk yang sama di seluruh Session.</div>
+                  </div>
+                  <button type="button" onClick={() => setVaccineForm((current: any) => ({ ...current, isSeries: !current.isSeries, seriesSchedule: current.seriesSchedule?.length ? current.seriesSchedule : [{ doseNumber: 1, nextDueDays: "" }] }))} className={`rounded-full px-4 py-2 text-xs font-black ${vaccineForm.isSeries ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>{vaccineForm.isSeries ? "Ya · Series" : "Tidak"}</button>
+                </div>
               </div>
+              {!vaccineForm.isSeries ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input type="number" className="rounded-xl border px-3 py-2" placeholder="Jumlah dosis" value={vaccineForm.doseCount} onChange={(e) => setVaccineForm({ ...vaccineForm, doseCount: Number(e.target.value || 1) })} />
+                  <input type="number" className="rounded-xl border px-3 py-2" placeholder="Jeda dosis berikutnya (hari)" value={vaccineForm.defaultNextDoseDays} onChange={(e) => setVaccineForm({ ...vaccineForm, defaultNextDoseDays: e.target.value })} />
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div><div className="font-black text-emerald-900">Jadwal Series Produk</div><div className="mt-1 text-xs font-semibold text-emerald-700">Contoh: Dose 1 → 30 hari, Dose 2 → 90 hari. Berlaku ke semua Session produk ini.</div></div>
+                    <button type="button" onClick={() => setVaccineForm((current: any) => { const rows = Array.isArray(current.seriesSchedule) ? current.seriesSchedule : []; return { ...current, seriesSchedule: [...rows, { doseNumber: rows.length + 1, nextDueDays: "" }], doseCount: rows.length + 2 }; })} className="rounded-xl bg-white px-3 py-2 text-xs font-black text-emerald-700 shadow-sm">+ Add Dose</button>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {(vaccineForm.seriesSchedule || []).map((row: any, index: number) => (
+                      <div key={`series-${index}`} className="flex items-center gap-2 rounded-xl bg-white p-3">
+                        <div className="min-w-20 text-sm font-black text-slate-700">Dose {index + 1}</div><span className="text-xs font-bold text-slate-400">→</span>
+                        <input type="number" min={1} placeholder="Hari" value={row.nextDueDays} onChange={(e) => setVaccineForm((current: any) => { const rows = [...(current.seriesSchedule || [])]; rows[index] = { doseNumber: index + 1, nextDueDays: e.target.value }; return { ...current, seriesSchedule: rows, doseCount: rows.length + 1, defaultNextDoseDays: index === 0 ? e.target.value : current.defaultNextDoseDays }; })} className="min-w-0 flex-1 rounded-xl border px-3 py-2" />
+                        <span className="text-xs font-bold text-slate-500">hari</span>
+                        {index > 0 ? <button type="button" onClick={() => setVaccineForm((current: any) => { const rows = (current.seriesSchedule || []).filter((_: any, rowIndex: number) => rowIndex !== index).map((item: any, rowIndex: number) => ({ ...item, doseNumber: rowIndex + 1 })); return { ...current, seriesSchedule: rows, doseCount: rows.length + 1 }; })} className="rounded-lg px-2 py-1 text-xs font-black text-rose-600">Hapus</button> : null}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs font-bold text-emerald-800">Total dosis terencana: {(vaccineForm.seriesSchedule || []).length + 1}. Reminder mengikuti tanggal dosis berikutnya dari rule ini.</div>
+                </div>
+              )}
+
               <div id="vaccination-pricing-inline" className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
                 <div className="text-sm font-black text-emerald-900">Paket / Non Paket</div>
                 <div className="mt-1 text-xs text-emerald-800">

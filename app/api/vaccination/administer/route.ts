@@ -568,7 +568,18 @@ export async function POST(req: NextRequest) {
     );
     if (!stockAccess.ok) return fail(stockAccess.message || "Stock session tidak dapat digunakan.", 409);
 
-    const nextDueDate = addDays(administeredAt, vaccine.default_next_dose_days);
+    // V531_PRODUCT_SERIES_ADMINISTER
+    let nextDueDays = Number(vaccine.default_next_dose_days || 0) || null;
+    const seriesSetting = await supabase
+      .from("vaccination_vaccine_series_settings")
+      .select("is_series,schedule")
+      .eq("vaccine_id", Number(item.vaccineId))
+      .maybeSingle();
+    if (!seriesSetting.error && seriesSetting.data?.is_series === true && Array.isArray(seriesSetting.data.schedule)) {
+      const seriesRow = seriesSetting.data.schedule.find((row: any) => Number(row?.dose_number) === Number(item.doseNumber));
+      if (seriesRow && Number(seriesRow.next_due_days) > 0) nextDueDays = Number(seriesRow.next_due_days);
+    }
+    const nextDueDate = nextDueDays ? addDays(administeredAt, nextDueDays) : null;
 
     const recordPayload = {
       registration_id: registrationId,
