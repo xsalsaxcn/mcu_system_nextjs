@@ -72,7 +72,7 @@ export default function VaccinationInventoryPage() {
       if (!url) throw new Error("URL Portal Inventory tidak terbentuk.");
       setPublicPortalUrl(url);
       try { await navigator.clipboard.writeText(url); } catch {}
-      setMessage("Link Portal Tim Inventory read-only dibuat dan disalin. Portal dapat filter, buka Movement, dan export tanpa login; tidak ada aksi Edit.");
+      setMessage("Link Portal Tim Inventory operational dibuat dan disalin. Portal dapat filter, Movement, export, Tambah/Kurangi/Transfer stok tanpa login.");
     } catch (e: any) {
       setError(String(e?.message || e || "Gagal membuat Portal Inventory public."));
     }
@@ -180,10 +180,11 @@ export default function VaccinationInventoryPage() {
       acc.initial += Number(row.stock_initial || 0);
       acc.added += Number(row.stock_added || 0);
       acc.used += Number(row.stock_used || 0);
+      acc.adjustmentOut += Number(row.stock_adjustment_out || 0);
       acc.remaining += Number(row.stock_system_remaining || 0);
       if (row.stock_difference !== null && row.stock_difference !== undefined) acc.diff += Number(row.stock_difference || 0);
       return acc;
-    }, { initial: 0, added: 0, used: 0, remaining: 0, diff: 0 });
+    }, { initial: 0, added: 0, used: 0, adjustmentOut: 0, remaining: 0, diff: 0 });
   }, [rows]);
 
   return (
@@ -192,7 +193,7 @@ export default function VaccinationInventoryPage() {
         <div className="flex flex-col gap-3 md:flex-row md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Inventory Vaksin</h1>
-            <p className="mt-2 text-sm text-slate-600">Sisa Sistem = Jumlah Awal + Tambahan Stok - Terpakai. Selisih = Sisa Fisik - Sisa Sistem.</p>
+            <p className="mt-2 text-sm text-slate-600">Sisa Sistem = Jumlah Awal + Tambahan Stok - Terpakai Peserta - Koreksi Keluar. Selisih = Sisa Fisik - Sisa Sistem.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={generatePublicPortal} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 hover:bg-blue-100">🔗 Portal Tim Inventory</button>
@@ -202,21 +203,21 @@ export default function VaccinationInventoryPage() {
 
         {publicPortalUrl ? (
           <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Link Public Inventory · Read Only</div>
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Link Portal Inventory · Operational</div>
             <div className="mt-2 flex flex-col gap-2 lg:flex-row">
               <input readOnly value={publicPortalUrl} className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm font-semibold" />
               <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(publicPortalUrl); setMessage("Link Portal Inventory disalin."); } catch { setError("Browser tidak mengizinkan copy otomatis."); } }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Salin Link</button>
               <a href={publicPortalUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-blue-700 px-4 py-2 text-center text-sm font-black text-white">Buka Portal</a>
             </div>
-            <div className="mt-2 text-xs font-semibold text-blue-800">Tidak perlu account. Bisa view, filter, klik Movement, dan export. Tidak bisa Edit.</div>
+            <div className="mt-2 text-xs font-semibold text-blue-800">Tidak perlu account. Bisa view, filter, Movement, export, serta Edit Stok (Tambah / Kurangi / Transfer). Simpan link ini sebagai link operasional rahasia.</div>
           </div>
         ) : null}
 
         {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
 
-        <section className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          {[{ label: "Jumlah Awal", value: summary.initial }, { label: "Tambahan Stok", value: summary.added }, { label: "Terpakai", value: summary.used }, { label: "Sisa Sistem", value: summary.remaining }, { label: "Total Selisih", value: summary.diff }].map((card) => (
+        <section className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          {[{ label: "Jumlah Awal", value: summary.initial }, { label: "Tambahan Stok", value: summary.added }, { label: "Terpakai Peserta", value: summary.used }, { label: "Koreksi Keluar", value: summary.adjustmentOut }, { label: "Sisa Sistem", value: summary.remaining }, { label: "Total Selisih", value: summary.diff }].map((card) => (
             <div key={card.label} className="rounded-2xl border bg-slate-50 p-4">
               <div className="text-xs font-black uppercase text-slate-500">{card.label}</div>
               <div className="mt-2 text-3xl font-black text-slate-900">{card.value}</div>
@@ -258,6 +259,7 @@ export default function VaccinationInventoryPage() {
                 <select disabled={form.inventoryTarget === "PHYSICAL"} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={form.stockAction} onChange={(e) => setForm({ ...form, stockAction: e.target.value })}>
                   <option value="ADD_STOCK">Tambah Stock</option>
                   <option value="RETURN_STOCK">Return Stock</option>
+                  <option value="REMOVE_STOCK">Kurangi Stock</option>
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
@@ -268,7 +270,7 @@ export default function VaccinationInventoryPage() {
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : "Jumlah Stock Masuk"}
+                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : form.stockAction === "REMOVE_STOCK" ? "Jumlah Stock Keluar" : "Jumlah Stock Masuk"}
                 <input type="number" min={form.inventoryTarget === "PHYSICAL" ? 0 : 1} step={1} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder={form.inventoryTarget === "PHYSICAL" ? "Harus sama dengan Sisa Sistem" : "Jumlah stok"} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
               </label>
               <div className="rounded-xl border bg-white px-3 py-2.5">
@@ -277,7 +279,7 @@ export default function VaccinationInventoryPage() {
               </div>
               <div className="rounded-xl border bg-white px-3 py-2.5">
                 <div className="text-xs font-black uppercase text-slate-500">Sisa Setelah Simpan</div>
-                <div className="mt-1 text-lg font-black text-emerald-700">{form.inventoryTarget === "PHYSICAL" ? Number(editing.stock_system_remaining || 0) : Number(editing.stock_system_remaining || 0) + Math.max(0, Number(form.quantity || 0))}</div>
+                <div className="mt-1 text-lg font-black text-emerald-700">{form.inventoryTarget === "PHYSICAL" ? Number(editing.stock_system_remaining || 0) : form.stockAction === "REMOVE_STOCK" ? Math.max(0, Number(editing.stock_system_remaining || 0) - Math.max(0, Number(form.quantity || 0))) : Number(editing.stock_system_remaining || 0) + Math.max(0, Number(form.quantity || 0))}</div>
               </div>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -320,7 +322,9 @@ export default function VaccinationInventoryPage() {
               <tbody className="divide-y">
                 {filteredRows.map((row) => {
                   const target = stockTarget(row);
-                  const allocations = (row?.service_allocations || []).filter((allocation: any) => serviceFilter === "ALL" || clean(allocation?.service_mode).toUpperCase() === serviceFilter);
+                  const allocations = (row?.service_allocations || [])
+                    .filter((allocation: any) => serviceFilter === "ALL" || clean(allocation?.service_mode).toUpperCase() === serviceFilter)
+                    .filter((allocation: any) => sessionFilter === "ALL" || String(allocation?.session_id || "") === sessionFilter);
                   const modeRows = (mode: "HEALTHDAY" | "BAZAR") => allocations.filter((allocation: any) => clean(allocation?.service_mode).toUpperCase() === mode);
                   const renderBucket = (mode: "HEALTHDAY" | "BAZAR") => {
                     const items = modeRows(mode);
@@ -333,10 +337,10 @@ export default function VaccinationInventoryPage() {
                             <div className="truncate text-xs font-black" title={clean(allocation.location) || clean(allocation.session_name) || "Session"}>
                               {clean(allocation.location) || clean(allocation.session_name) || "Session"}
                             </div>
-                            <div className="mt-1 grid grid-cols-3 gap-1 text-center text-[10px] font-bold">
-                              <span className="rounded-md bg-white/80 px-1 py-1">A {Number(allocation.allocated_qty || 0)}</span>
-                              <span className="rounded-md bg-white/80 px-1 py-1">P {Number(allocation.used_qty || 0)}</span>
-                              <span className="rounded-md bg-white/80 px-1 py-1">S {Number(allocation.remaining_qty || 0)}</span>
+                            <div className="mt-1 grid gap-1 text-[10px] font-bold sm:grid-cols-3">
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Alokasi {Number(allocation.allocated_qty || 0)}</span>
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Terpakai {Number(allocation.used_qty || 0)}</span>
+                              <span className="rounded-md bg-white/80 px-1.5 py-1 text-center">Sisa {Number(allocation.remaining_qty || 0)}</span>
                             </div>
                           </div>
                         ))}

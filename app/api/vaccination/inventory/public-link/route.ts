@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
       token,
       path,
       url: `${req.nextUrl.origin}${path}`,
-      mode: "READ_ONLY",
-      capabilities: ["view", "filter", "movement-detail", "export"],
+      mode: "OPERATIONAL",
+      capabilities: ["view", "filter", "movement-detail", "export", "add-stock", "remove-stock", "transfer-stock"],
     });
   } catch (error: any) {
     return fail(error?.message || "Gagal membuat link Portal Inventory.", 500);

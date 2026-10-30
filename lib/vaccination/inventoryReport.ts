@@ -42,6 +42,10 @@ function isStockIn(type: any) {
   return ["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"].includes(clean(type).toUpperCase());
 }
 
+function isAdjustmentOut(type: any) {
+  return ["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"].includes(clean(type).toUpperCase());
+}
+
 function movementSource(row: any) {
   const note = clean(row?.notes);
   if (!note || ["jumlah awal lot", "tambahan stok", "initial stock", "stock in"].includes(note.toLowerCase())) {
@@ -378,9 +382,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       } else if (type === "PHYSICAL_CHECK") {
         direction = "AUDIT";
         label = "Stock Opname Fisik";
-      } else if (type === "ADJUSTMENT_MINUS") {
+      } else if (type === "ADJUSTMENT_MINUS" || isAdjustmentOut(type)) {
         direction = "OUT";
-        label = "Koreksi Stok Minus";
+        label = "Kurangi Stok / Koreksi Keluar";
       } else if (type === "QUEUE_DONE_REVERSAL_AUDIT") {
         direction = "AUDIT";
         label = "Undo Done / Reversal Audit";
@@ -457,7 +461,11 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       ? filteredMovementAdded
       : Math.max(num(lot.stock_added), stockInMovementTotalAll, filteredMovementAdded);
     const filteredInitial = num(lot.stock_initial);
-    const remaining = filteredInitial + filteredAdded - filteredUsed;
+    const filteredAdjustmentOut = lotMovements
+      .filter((movement: any) => isAdjustmentOut(movement.movement_type))
+      .filter((movement: any) => !hasDateFilter || inRange(movement.created_at, from, to))
+      .reduce((sum: number, movement: any) => sum + Math.abs(num(movement.qty)), 0);
+    const remaining = filteredInitial + filteredAdded - filteredUsed - filteredAdjustmentOut;
     const outCompanies = uniq(lotRecords.map((row: any) => {
       const reg = registrationMap.get(Number(row.registration_id)) || {};
       const session = sessionMap.get(Number(row.session_id || reg.session_id)) || {};
@@ -474,6 +482,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       initial: filteredInitial,
       added: filteredAdded,
       used: filteredUsed,
+      adjustment_out: filteredAdjustmentOut,
       remaining,
       physical: lot.stock_physical_count == null ? null : num(lot.stock_physical_count),
       diff: lot.stock_physical_count == null ? null : num(lot.stock_physical_count) - remaining,

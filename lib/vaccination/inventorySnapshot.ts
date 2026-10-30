@@ -22,10 +22,12 @@ export async function buildVaccinationInventorySnapshot() {
 
   const usedByLot = new Map<number, number>();
   const inboundByLot = new Map<number, number>();
+  const adjustmentOutByLot = new Map<number, number>();
   const movementCountByLot = new Map<number, number>();
   const lastMovementByLot = new Map<number, any>();
   const serviceUsed = new Map<string, number>();
   const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
+  const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
 
   let allocations: any[] = [];
   let salesOptions: any[] = [];
@@ -91,8 +93,12 @@ export async function buildVaccinationInventorySnapshot() {
       const type = clean(movement.movement_type).toUpperCase();
       movementCountByLot.set(lotId, (movementCountByLot.get(lotId) || 0) + 1);
       if (!lastMovementByLot.has(lotId)) lastMovementByLot.set(lotId, movement);
-      if (!inboundTypes.has(type)) continue;
-      inboundByLot.set(lotId, (inboundByLot.get(lotId) || 0) + Math.abs(Number(movement.qty || 0)));
+      if (inboundTypes.has(type)) {
+        inboundByLot.set(lotId, (inboundByLot.get(lotId) || 0) + Math.abs(Number(movement.qty || 0)));
+      }
+      if (adjustmentOutTypes.has(type)) {
+        adjustmentOutByLot.set(lotId, (adjustmentOutByLot.get(lotId) || 0) + Math.abs(Number(movement.qty || 0)));
+      }
     }
 
     for (const item of itemsResult.data || []) {
@@ -163,7 +169,8 @@ export async function buildVaccinationInventorySnapshot() {
     const added = Math.max(addedFromField, addedFromMovements);
     const usedFromRecords = usedByLot.get(Number(lot.id)) || 0;
     const used = Math.max(Number(lot.stock_used || 0), usedFromRecords);
-    const systemRemaining = initial + added - used;
+    const adjustmentOut = adjustmentOutByLot.get(Number(lot.id)) || 0;
+    const systemRemaining = initial + added - used - adjustmentOut;
     const physicalRaw = lot.stock_physical_count;
     const physical = physicalRaw === null || physicalRaw === undefined || physicalRaw === "" ? null : Number(physicalRaw);
     const difference = physical === null || Number.isNaN(physical) ? null : physical - systemRemaining;
@@ -179,6 +186,7 @@ export async function buildVaccinationInventorySnapshot() {
       ...lot,
       stock_added: added,
       stock_used: used,
+      stock_adjustment_out: adjustmentOut,
       stock_system_remaining: systemRemaining,
       stock_physical_count: physical,
       stock_difference: difference,
@@ -194,5 +202,15 @@ export async function buildVaccinationInventorySnapshot() {
     };
   });
 
-  return { rows, sessions };
+  const allSessionsResult = await supabase
+    .from("vaccination_sessions")
+    .select("id,session_name,company_name,location,session_date,status")
+    .order("session_date", { ascending: false })
+    .limit(5000);
+  if (allSessionsResult.error) throw new Error(allSessionsResult.error.message);
+  const transferSessions = (allSessionsResult.data || []).filter(
+    (row: any) => clean(row?.status).toUpperCase() !== "CANCELLED",
+  );
+
+  return { rows, sessions, transferSessions };
 }

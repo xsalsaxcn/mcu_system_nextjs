@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-const INVENTORY_PUBLIC_SCOPE = "vaccination-inventory-readonly-v1";
+const INVENTORY_PUBLIC_SCOPE = "vaccination-inventory-operational-v2";
 
 function clean(value: any) {
   return String(value ?? "").trim();
@@ -20,7 +20,7 @@ function signature() {
 }
 
 export function getVaccinationInventoryPublicToken() {
-  return `v1.${signature()}`;
+  return `v2.${signature()}`;
 }
 
 export function verifyVaccinationInventoryPublicToken(value: any) {

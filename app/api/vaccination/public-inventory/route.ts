@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildVaccinationInventoryReport } from "@/lib/vaccination/inventoryReport";
 import { buildVaccinationInventorySnapshot } from "@/lib/vaccination/inventorySnapshot";
 import { verifyVaccinationInventoryPublicToken } from "@/lib/vaccination/inventoryPublicPortal";
+import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
 function clean(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function toInt(value: any, fallback = 0) {
+  const number = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function ids(value: string | null) {
@@ -20,6 +26,33 @@ function csv(value: any) {
 
 function normalized(value: any) {
   return clean(value).toLowerCase();
+}
+
+function normalizeCompanyName(value: any) {
+  return normalized(value).replace(/\s+/g, " ");
+}
+
+function normalizeServiceMode(value: any) {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+function sanitizeStockScope(value: any) {
+  const normalizedScope = clean(value).toUpperCase();
+  if (normalizedScope === "SESSION") return "SESSION";
+  if (normalizedScope === "COMPANY") return "COMPANY";
+  return "GENERAL";
+}
+
+function fail(message: string, status = 400) {
+  return NextResponse.json({ ok: false, message }, { status });
+}
+
+function ok(payload: any = {}) {
+  return NextResponse.json({ ok: true, ...payload }, { headers: { "Cache-Control": "no-store" } });
+}
+
+function tokenFromRequest(req: NextRequest, body?: any) {
+  return clean(body?.token || req.nextUrl.searchParams.get("token"));
 }
 
 function filterDetailRows(rows: any[], req: NextRequest) {
@@ -68,13 +101,13 @@ export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
   try {
     if (!verifyVaccinationInventoryPublicToken(token)) {
-      return NextResponse.json({ ok: false, message: "Link Portal Inventory tidak valid." }, { status: 403 });
+      return fail("Link Portal Inventory tidak valid.", 403);
     }
 
     const action = clean(req.nextUrl.searchParams.get("action") || "snapshot").toLowerCase();
     if (action === "snapshot") {
       const payload = await buildVaccinationInventorySnapshot();
-      return NextResponse.json({ ok: true, readOnly: true, ...payload }, { headers: { "Cache-Control": "no-store" } });
+      return ok({ operational: true, capabilities: ["view", "filter", "movement-detail", "export", "add-stock", "remove-stock", "transfer-stock"], ...payload });
     }
 
     const report = await buildVaccinationInventoryReport({
@@ -152,19 +185,319 @@ export async function GET(req: NextRequest) {
     }
 
     if (action !== "report") {
-      return NextResponse.json({ ok: false, message: "Action tidak dikenali." }, { status: 400 });
+      return fail("Action tidak dikenali.", 400);
     }
 
-    return NextResponse.json({
-      ok: true,
-      readOnly: true,
+    return ok({
+      operational: true,
       filters: report.filters,
       products: report.products,
       summary: detailSummary(details),
       lotSummaries: report.lotSummaries,
       details,
-    }, { headers: { "Cache-Control": "no-store" } });
+    });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, message: error?.message || "Portal Inventory gagal memuat data." }, { status: 500 });
+    return fail(error?.message || "Portal Inventory gagal memuat data.", 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const token = tokenFromRequest(req, body);
+  if (!verifyVaccinationInventoryPublicToken(token)) {
+    return fail("Link Portal Inventory tidak valid atau sudah tidak berlaku.", 403);
+  }
+
+  const action = clean(body?.action).toLowerCase();
+  const supabase = getSupabaseAdmin();
+  const createdBy = "Public Inventory Portal";
+
+  try {
+    if (action === "stock-transaction") {
+      const lotId = toInt(body?.lotId || body?.id, 0);
+      const stockAction = clean(body?.stockAction).toUpperCase();
+      const quantity = Math.max(0, toInt(body?.quantity, 0));
+      const note = clean(body?.inventoryNotes || body?.notes);
+
+      if (!lotId) return fail("Lot wajib dipilih.");
+      if (!["ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) {
+        return fail("Pilih aksi Tambah Stok, Return Stok, atau Kurangi Stok.");
+      }
+      if (!quantity) return fail("Jumlah stok wajib lebih dari 0.");
+
+      const [lotResult, recordsResult, movementsResult] = await Promise.all([
+        supabase
+          .from("vaccination_vaccine_lots")
+          .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes")
+          .eq("id", lotId)
+          .maybeSingle(),
+        supabase
+          .from("vaccination_records")
+          .select("id,status")
+          .eq("lot_id", lotId)
+          .neq("status", "VOIDED")
+          .limit(20000),
+        supabase
+          .from("vaccination_inventory_movements")
+          .select("id,movement_type,qty")
+          .eq("lot_id", lotId)
+          .limit(20000),
+      ]);
+
+      if (lotResult.error) return fail(lotResult.error.message, 500);
+      if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+      if (recordsResult.error) return fail(recordsResult.error.message, 500);
+      if (movementsResult.error) return fail(movementsResult.error.message, 500);
+
+      const lot = lotResult.data as any;
+      const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
+      const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+      const movementAdded = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+        const type = clean(movement?.movement_type).toUpperCase();
+        return inboundTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
+      }, 0);
+      const movementOut = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+        const type = clean(movement?.movement_type).toUpperCase();
+        return adjustmentOutTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
+      }, 0);
+      const initial = Number(lot.stock_initial || 0);
+      const beforeAdded = Math.max(Number(lot.stock_added || 0), movementAdded);
+      const used = Math.max(Number(lot.stock_used || 0), (recordsResult.data || []).length);
+      const beforeRemaining = initial + beforeAdded - used - movementOut;
+      const isRemove = stockAction === "REMOVE_STOCK";
+
+      if (isRemove && quantity > beforeRemaining) {
+        return fail(`Stok tidak cukup. Sisa saat ini ${beforeRemaining}, tidak bisa dikurangi ${quantity}.`, 409);
+      }
+
+      const nextAdded = isRemove ? beforeAdded : beforeAdded + quantity;
+      const nextMovementOut = movementOut + (isRemove ? quantity : 0);
+      const nextRemaining = initial + nextAdded - used - nextMovementOut;
+      if (nextRemaining < 0) return fail("Sisa stok tidak boleh negatif.", 409);
+
+      const physicalBefore = lot.stock_physical_count === null || lot.stock_physical_count === undefined
+        ? null
+        : Number(lot.stock_physical_count);
+      const physicalAfter = physicalBefore === null
+        ? nextRemaining
+        : isRemove
+          ? Math.max(0, physicalBefore - quantity)
+          : physicalBefore + quantity;
+      const label = isRemove ? "Kurangi Stok" : stockAction === "RETURN_STOCK" ? "Return Stok" : "Tambah Stok";
+      const nextNotes = `[Portal Inventory] ${note || label}`;
+
+      const updateResult = await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          stock_added: nextAdded,
+          stock_physical_count: physicalAfter,
+          inventory_notes: nextNotes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId)
+        .select("*")
+        .single();
+      if (updateResult.error) return fail(updateResult.error.message, 500);
+
+      const movementResult = await supabase.from("vaccination_inventory_movements").insert({
+        vaccine_id: lot.vaccine_id,
+        lot_id: lotId,
+        movement_type: isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
+        qty: quantity,
+        reference_type: isRemove ? "public_inventory_adjustment_out" : "public_inventory_system",
+        reference_id: lotId,
+        notes: nextNotes,
+        created_by: createdBy,
+      });
+      if (movementResult.error) {
+        await supabase
+          .from("vaccination_vaccine_lots")
+          .update({
+            stock_added: beforeAdded,
+            stock_physical_count: lot.stock_physical_count,
+            inventory_notes: lot.inventory_notes,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", lotId);
+        return fail(movementResult.error.message, 500);
+      }
+
+      return ok({
+        message: `${label} ${quantity} berhasil. Sisa stok ${nextRemaining}.`,
+        stockSystemRemaining: nextRemaining,
+        stockPhysicalCount: physicalAfter,
+      });
+    }
+
+    if (action === "transfer-stock") {
+      const lotId = toInt(body?.lotId || body?.id, 0);
+      const targetCompanyName = clean(body?.targetCompanyName);
+      const targetSessionId = toInt(body?.targetSessionId, 0);
+      const targetServiceMode = normalizeServiceMode(body?.targetServiceMode || body?.serviceMode);
+
+      if (!lotId) return fail("Lot wajib dipilih.");
+      if (!targetCompanyName) return fail("Perusahaan tujuan wajib dipilih.");
+      if (!targetSessionId) return fail("Session / Lokasi tujuan wajib dipilih.");
+
+      const [lotResult, sessionResult, recordsResult, movementsResult] = await Promise.all([
+        supabase
+          .from("vaccination_vaccine_lots")
+          .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,stock_scope,stock_company_name,stock_session_id,inventory_notes")
+          .eq("id", lotId)
+          .maybeSingle(),
+        supabase
+          .from("vaccination_sessions")
+          .select("id,session_name,company_name,location,session_date,status")
+          .eq("id", targetSessionId)
+          .maybeSingle(),
+        supabase
+          .from("vaccination_records")
+          .select("id,status")
+          .eq("lot_id", lotId)
+          .limit(20000),
+        supabase
+          .from("vaccination_inventory_movements")
+          .select("id,movement_type,qty")
+          .eq("lot_id", lotId)
+          .limit(20000),
+      ]);
+
+      if (lotResult.error) return fail(lotResult.error.message, 500);
+      if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
+      if (sessionResult.error) return fail(sessionResult.error.message, 500);
+      if (!sessionResult.data) return fail("Session / Lokasi tujuan tidak ditemukan.", 404);
+      if (recordsResult.error) return fail(recordsResult.error.message, 500);
+      if (movementsResult.error) return fail(movementsResult.error.message, 500);
+
+      const targetSession = sessionResult.data as any;
+      const canonicalCompany = clean(targetSession.company_name);
+      if (!canonicalCompany) return fail("Session tujuan belum memiliki perusahaan.", 409);
+      if (normalizeCompanyName(targetCompanyName) !== normalizeCompanyName(canonicalCompany)) {
+        return fail(`Session yang dipilih milik ${canonicalCompany}, bukan ${targetCompanyName}.`, 409);
+      }
+      if (clean(targetSession.status).toUpperCase() === "CANCELLED") {
+        return fail("Session tujuan sudah dibatalkan.", 409);
+      }
+
+      const lot = lotResult.data as any;
+      if (sanitizeStockScope(lot.stock_scope) === "SESSION" && Number(lot.stock_session_id || 0) === targetSessionId) {
+        return fail("Lot ini sudah dimiliki oleh Session tujuan tersebut.", 409);
+      }
+
+      const activeRecordCount = (recordsResult.data || []).filter((row: any) =>
+        !["CANCELLED", "CANCELED", "VOID", "VOIDED", "BATAL"].includes(clean(row?.status).toUpperCase()),
+      ).length;
+      const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+      const adjustmentOut = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+        const type = clean(movement?.movement_type).toUpperCase();
+        return adjustmentOutTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
+      }, 0);
+      const used = Math.max(Number(lot.stock_used || 0), activeRecordCount);
+      const remaining = Number(lot.stock_initial || 0) + Number(lot.stock_added || 0) - used - adjustmentOut;
+      if (remaining <= 0) return fail("Tidak ada sisa stok yang dapat ditransfer.", 409);
+
+      const previousOwnership = {
+        stock_scope: sanitizeStockScope(lot.stock_scope),
+        stock_company_name: lot.stock_company_name ?? null,
+        stock_session_id: lot.stock_session_id ?? null,
+      };
+      const previousAllocationResult = await supabase
+        .from("vaccination_session_stock_allocations")
+        .select("*")
+        .eq("lot_id", lotId)
+        .eq("active", true)
+        .limit(100);
+      if (previousAllocationResult.error) return fail(previousAllocationResult.error.message, 500);
+
+      const targetLabel = [
+        clean(targetSession.session_name),
+        clean(targetSession.location),
+        clean(targetSession.session_date),
+      ].filter(Boolean).join(" · ");
+      const sourceOwner = previousOwnership.stock_scope === "SESSION"
+        ? `${clean(previousOwnership.stock_company_name) || "Perusahaan"} · Session ${previousOwnership.stock_session_id || "-"}`
+        : previousOwnership.stock_scope === "COMPANY"
+          ? clean(previousOwnership.stock_company_name) || "Perusahaan"
+          : "Global";
+
+      const updateResult = await supabase
+        .from("vaccination_vaccine_lots")
+        .update({
+          stock_scope: "SESSION",
+          stock_company_name: canonicalCompany,
+          stock_session_id: Number(targetSession.id),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", lotId)
+        .select("*")
+        .single();
+      if (updateResult.error) return fail(updateResult.error.message, 500);
+
+      const deactivateResult = await supabase
+        .from("vaccination_session_stock_allocations")
+        .update({ active: false, updated_at: new Date().toISOString() })
+        .eq("lot_id", lotId)
+        .eq("active", true);
+      if (deactivateResult.error) {
+        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
+        return fail(deactivateResult.error.message, 500);
+      }
+
+      const targetAllocationResult = await supabase
+        .from("vaccination_session_stock_allocations")
+        .upsert({
+          session_id: Number(targetSession.id),
+          vaccine_id: Number(lot.vaccine_id),
+          lot_id: lotId,
+          allocated_qty: remaining,
+          low_stock_threshold: Math.min(5, remaining),
+          dedicated: true,
+          active: true,
+          service_mode: targetServiceMode,
+          notes: `[Portal Inventory] Transfer sisa stok ke ${targetServiceMode === "BAZAR" ? "Bazar" : "Healthday"}`,
+          created_by: createdBy,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "session_id,lot_id,service_mode" })
+        .select("*")
+        .single();
+
+      if (targetAllocationResult.error) {
+        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
+        if ((previousAllocationResult.data || []).length) {
+          await supabase.from("vaccination_session_stock_allocations").upsert(previousAllocationResult.data, { onConflict: "session_id,lot_id,service_mode" });
+        }
+        return fail(targetAllocationResult.error.message, 500);
+      }
+
+      const note = `[Portal Inventory] Transfer sisa stok ${remaining} · ${sourceOwner} -> ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`} · ${targetServiceMode}`;
+      const movementResult = await supabase.from("vaccination_inventory_movements").insert({
+        vaccine_id: lot.vaccine_id,
+        lot_id: lotId,
+        movement_type: "stock_transfer",
+        qty: remaining,
+        reference_type: "public_inventory_transfer_session",
+        reference_id: Number(targetSession.id),
+        notes: note,
+        created_by: createdBy,
+      });
+
+      if (movementResult.error) {
+        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
+        await supabase.from("vaccination_session_stock_allocations").update({ active: false, updated_at: new Date().toISOString() }).eq("lot_id", lotId);
+        if ((previousAllocationResult.data || []).length) {
+          await supabase.from("vaccination_session_stock_allocations").upsert(previousAllocationResult.data, { onConflict: "session_id,lot_id,service_mode" });
+        }
+        return fail(movementResult.error.message, 500);
+      }
+
+      return ok({
+        message: `Sisa stok ${remaining} Lot ${lot.lot_number} berhasil ditransfer ke ${canonicalCompany} · ${clean(targetSession.location) || clean(targetSession.session_name) || `Session ${targetSession.id}`} · ${targetServiceMode === "BAZAR" ? "Bazar" : "Healthday"}.`,
+        transferredQty: remaining,
+      });
+    }
+
+    return fail("Action Portal Inventory tidak dikenali.", 400);
+  } catch (error: any) {
+    return fail(error?.message || "Aksi Portal Inventory gagal.", 500);
   }
 }

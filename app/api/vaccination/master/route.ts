@@ -1250,7 +1250,7 @@ export async function POST(req: NextRequest) {
     if (!targetCompanyName) return fail("Perusahaan tujuan wajib dipilih.");
     if (!targetSessionId) return fail("Session / Lokasi tujuan wajib dipilih.");
 
-    const [lotResult, sessionResult, recordsResult] = await Promise.all([
+    const [lotResult, sessionResult, recordsResult, movementsResult] = await Promise.all([
       supabase
         .from("vaccination_vaccine_lots")
         .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,stock_scope,stock_company_name,stock_session_id,inventory_notes")
@@ -1266,6 +1266,11 @@ export async function POST(req: NextRequest) {
         .select("id,status")
         .eq("lot_id", lotId)
         .limit(20000),
+      supabase
+        .from("vaccination_inventory_movements")
+        .select("id,movement_type,qty")
+        .eq("lot_id", lotId)
+        .limit(20000),
     ]);
 
     if (lotResult.error) return fail(lotResult.error.message, 500);
@@ -1273,6 +1278,7 @@ export async function POST(req: NextRequest) {
     if (sessionResult.error) return fail(sessionResult.error.message, 500);
     if (!sessionResult.data) return fail("Session / Lokasi tujuan tidak ditemukan.", 404);
     if (recordsResult.error) return fail(recordsResult.error.message, 500);
+    if (movementsResult.error) return fail(movementsResult.error.message, 500);
 
     const targetSession = sessionResult.data as any;
     const canonicalCompany = clean(targetSession.company_name);
@@ -1307,10 +1313,16 @@ export async function POST(req: NextRequest) {
         ),
     ).length;
     const used = Math.max(Number(lot.stock_used || 0), activeRecordCount);
+    const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+    const adjustmentOut = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+      const type = clean(movement?.movement_type).toUpperCase();
+      return adjustmentOutTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
+    }, 0);
     const remaining =
       Number(lot.stock_initial || 0) +
       Number(lot.stock_added || 0) -
-      used;
+      used -
+      adjustmentOut;
 
     if (remaining <= 0) {
       return fail("Tidak ada sisa stok yang dapat ditransfer.", 409);

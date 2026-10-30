@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     const inventoryTarget = clean(body.inventoryTarget).toUpperCase();
     const quantity = Math.max(0, toInt(body.quantity, 0));
 
-    if (!["ADD_STOCK", "RETURN_STOCK"].includes(stockAction)) return fail("Pilih Stok: Tambah Stock atau Return Stock.");
+    if (!["ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) return fail("Pilih Stok: Tambah Stock, Return Stock, atau Kurangi Stock.");
     if (!["SYSTEM", "PHYSICAL"].includes(inventoryTarget)) return fail("Pilih Inventory: Sistem atau Fisik.");
     if (inventoryTarget === "SYSTEM" && !quantity) return fail("Jumlah stok wajib lebih dari 0.");
 
@@ -65,13 +65,18 @@ export async function POST(req: NextRequest) {
     const lot = beforeResult.data as any;
     const initial = Number(lot.stock_initial || 0);
     const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
+    const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
     const movementAdded = (movementsResult.data || []).reduce((sum: number, movement: any) => {
       const type = clean(movement.movement_type).toUpperCase();
       return inboundTypes.has(type) ? sum + Math.abs(Number(movement.qty || 0)) : sum;
     }, 0);
+    const movementOut = (movementsResult.data || []).reduce((sum: number, movement: any) => {
+      const type = clean(movement.movement_type).toUpperCase();
+      return adjustmentOutTypes.has(type) ? sum + Math.abs(Number(movement.qty || 0)) : sum;
+    }, 0);
     const beforeAdded = Math.max(Number(lot.stock_added || 0), movementAdded);
     const used = Math.max(Number(lot.stock_used || 0), (recordsResult.data || []).length);
-    const beforeRemaining = initial + beforeAdded - used;
+    const beforeRemaining = initial + beforeAdded - used - movementOut;
     const physicalBefore = lot.stock_physical_count === null || lot.stock_physical_count === undefined ? null : Number(lot.stock_physical_count);
     const note = clean(body.inventoryNotes);
     const createdBy = (user as any).email || (user as any).name || (user as any).id || "system";
@@ -114,25 +119,31 @@ export async function POST(req: NextRequest) {
       return ok({ message: `Sisa Fisik berhasil disamakan dengan Sisa Sistem: ${beforeRemaining}.`, lot: updateResult.data, stockSystemRemaining: beforeRemaining, stockPhysicalCount: beforeRemaining });
     }
 
-    const nextAdded = beforeAdded + quantity;
-    const nextRemaining = initial + nextAdded - used;
-    if (nextRemaining < 0) {
-      const minimum = Math.max(1, -beforeRemaining);
-      return fail(`Sisa Sistem masih akan negatif (${nextRemaining}). Tambah/return minimal ${minimum}.`);
+    const isRemove = stockAction === "REMOVE_STOCK";
+    if (isRemove && quantity > beforeRemaining) {
+      return fail(`Stok tidak cukup. Sisa Sistem saat ini ${beforeRemaining}, tidak bisa dikurangi ${quantity}.`, 409);
     }
 
-    if (physicalBefore !== null && physicalBefore !== nextRemaining) {
-      const needed = physicalBefore - beforeRemaining;
-      if (needed > 0) return fail(`Sisa Sistem setelah transaksi harus match Sisa Fisik (${physicalBefore}). Jumlah stock masuk yang diperlukan: ${needed}.`);
-      return fail(`Sisa Sistem setelah transaksi (${nextRemaining}) tidak match Sisa Fisik (${physicalBefore}). Gunakan Inventory Fisik untuk stock opname atau lakukan koreksi stock-out yang sesuai.`);
-    }
+    const nextAdded = isRemove ? beforeAdded : beforeAdded + quantity;
+    const nextMovementOut = movementOut + (isRemove ? quantity : 0);
+    const nextRemaining = initial + nextAdded - used - nextMovementOut;
+    if (nextRemaining < 0) return fail(`Sisa Sistem tidak boleh negatif (${nextRemaining}).`, 409);
 
-    const label = stockAction === "RETURN_STOCK" ? "Return Stock" : "Tambah Stock";
+    const label = isRemove ? "Kurangi Stock" : stockAction === "RETURN_STOCK" ? "Return Stock" : "Tambah Stock";
     const nextNotes = note || `${label} - Inventory Sistem`;
-    const physicalAfter = physicalBefore === null ? nextRemaining : physicalBefore;
+    const physicalAfter = physicalBefore === null
+      ? nextRemaining
+      : isRemove
+        ? Math.max(0, physicalBefore - quantity)
+        : physicalBefore + quantity;
     const updateResult = await supabase
       .from("vaccination_vaccine_lots")
-      .update({ stock_added: nextAdded, stock_physical_count: physicalAfter, inventory_notes: nextNotes, updated_at: new Date().toISOString() })
+      .update({
+        stock_added: nextAdded,
+        stock_physical_count: physicalAfter,
+        inventory_notes: nextNotes,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", lotId)
       .select("*")
       .single();
@@ -141,9 +152,9 @@ export async function POST(req: NextRequest) {
     const movementResult = await supabase.from("vaccination_inventory_movements").insert({
       vaccine_id: lot.vaccine_id,
       lot_id: lotId,
-      movement_type: stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
+      movement_type: isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
       qty: quantity,
-      reference_type: "inventory_system",
+      reference_type: isRemove ? "inventory_adjustment_out" : "inventory_system",
       reference_id: lotId,
       notes: nextNotes,
       created_by: createdBy,
@@ -151,12 +162,22 @@ export async function POST(req: NextRequest) {
     if (movementResult.error) {
       await supabase
         .from("vaccination_vaccine_lots")
-        .update({ stock_added: beforeAdded, stock_physical_count: lot.stock_physical_count, inventory_notes: lot.inventory_notes, updated_at: new Date().toISOString() })
+        .update({
+          stock_added: beforeAdded,
+          stock_physical_count: lot.stock_physical_count,
+          inventory_notes: lot.inventory_notes,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", lotId);
       return fail(movementResult.error.message, 500);
     }
 
-    return ok({ message: `${label} ${quantity} berhasil. Sisa Sistem = Sisa Fisik = ${nextRemaining}.`, lot: updateResult.data, stockSystemRemaining: nextRemaining, stockPhysicalCount: physicalAfter });
+    return ok({
+      message: `${label} ${quantity} berhasil. Sisa Sistem ${nextRemaining}.`,
+      lot: updateResult.data,
+      stockSystemRemaining: nextRemaining,
+      stockPhysicalCount: physicalAfter,
+    });
   }
 
   const result = await supabase
