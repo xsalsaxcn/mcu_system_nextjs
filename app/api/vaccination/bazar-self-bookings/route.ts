@@ -87,78 +87,121 @@ async function loadBazarStockRemaining(supabase: any, sessionId: number, lotIds:
   return { enabled: true, map };
 }
 
-async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: any[], paymentMethod: string) {
-  const selectedItems = Array.isArray(selectedItemsRaw) ? selectedItemsRaw : [];
-  if (!selectedItems.length) throw new Error("Self Booking tidak memiliki produk Bazar.");
-
-  const vaccineIds = Array.from(new Set<number>(selectedItems.map((item: any) => Number(item?.vaccineId || 0)).filter((id: number) => id > 0)));
-  const lotIds = Array.from(new Set<number>(selectedItems.map((item: any) => Number(item?.lotId || 0)).filter((id: number) => id > 0)));
-  if (!vaccineIds.length || !lotIds.length) throw new Error("Produk Self Booking tidak valid.");
-
-  const [assignments, sessionLots, offers, vaccines, stock] = await Promise.all([
+async function loadEffectiveBazarCatalog(supabase: any, sessionId: number) {
+  const [assignmentResult, sessionLotsResult] = await Promise.all([
     supabase
       .from("vaccination_session_product_assignments")
       .select("vaccine_id")
       .eq("session_id", sessionId)
       .eq("service_mode", "BAZAR")
       .eq("active", true)
-      .in("vaccine_id", vaccineIds),
+      .limit(10000),
     supabase
-      .from("vaccination_session_vaccines")
-      .select("vaccine_id,lot_id,active,lot:vaccination_vaccine_lots(id,lot_number,active)")
-      .eq("session_id", sessionId)
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,lot_number,expiry_date,active,stock_scope,stock_session_id,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
+      .eq("stock_scope", "SESSION")
+      .eq("stock_session_id", sessionId)
       .eq("active", true)
-      .in("vaccine_id", vaccineIds)
-      .in("lot_id", lotIds),
-    supabase
-      .from("vaccination_vaccine_sales_options")
-      .select("id,vaccine_id,sale_mode,package_dose_count,price,active")
-      .in("vaccine_id", vaccineIds)
-      .eq("active", true),
-    supabase
-      .from("vaccination_vaccines")
-      .select("id,name,brand,price,active")
-      .in("id", vaccineIds),
-    loadBazarStockRemaining(supabase, sessionId, lotIds),
+      .order("expiry_date", { ascending: true, nullsFirst: false })
+      .order("id", { ascending: true })
+      .limit(10000),
   ]);
-  for (const result of [assignments, sessionLots, offers, vaccines]) {
-    if (result.error) throw new Error(result.error.message);
+  if (assignmentResult.error) throw new Error(assignmentResult.error.message);
+  if (sessionLotsResult.error) throw new Error(sessionLotsResult.error.message);
+
+  const assignedIds = new Set<number>(
+    (assignmentResult.data || [])
+      .map((row: any) => Number(row.vaccine_id || 0))
+      .filter((id: number) => id > 0),
+  );
+  const lotIds = (sessionLotsResult.data || []).map((row: any) => Number(row.id || 0)).filter((id: number) => id > 0);
+  const actualStock = await loadBazarStockRemaining(supabase, sessionId, lotIds);
+  const vaccineIds = Array.from(new Set<number>((sessionLotsResult.data || []).map((row: any) => Number(row.vaccine_id || 0)).filter((id: number) => id > 0)));
+  if (!vaccineIds.length) return [];
+
+  const offersResult = await supabase
+    .from("vaccination_vaccine_sales_options")
+    .select("id,vaccine_id,sale_mode,package_dose_count,price,label,active")
+    .in("vaccine_id", vaccineIds)
+    .eq("active", true)
+    .order("vaccine_id", { ascending: true });
+  if (offersResult.error) throw new Error(offersResult.error.message);
+
+  const offersByVaccine = new Map<number, any[]>();
+  for (const offer of offersResult.data || []) {
+    const vaccineId = Number((offer as any).vaccine_id || 0);
+    if (!vaccineId) continue;
+    if (!offersByVaccine.has(vaccineId)) offersByVaccine.set(vaccineId, []);
+    offersByVaccine.get(vaccineId)!.push(offer);
   }
 
-  const assignmentSet = new Set<number>((assignments.data || []).map((row: any) => Number(row.vaccine_id || 0)));
-  const sessionLotSet = new Set<string>();
-  const lotNumberById = new Map<number, string>();
-  for (const row of sessionLots.data || []) {
-    const lot: any = Array.isArray((row as any).lot) ? (row as any).lot[0] : (row as any).lot;
-    if (!lot || lot.active === false) continue;
+  const catalog: any[] = [];
+  const seen = new Set<string>();
+  for (const row of sessionLotsResult.data || []) {
     const vaccineId = Number((row as any).vaccine_id || 0);
-    const lotId = Number((row as any).lot_id || 0);
-    if (vaccineId && lotId) sessionLotSet.add(`${vaccineId}:${lotId}`);
-    if (lotId) lotNumberById.set(lotId, clean(lot.lot_number) || "-");
+    const lotId = Number((row as any).id || 0);
+    if (!vaccineId || !lotId) continue;
+    const vaccine: any = Array.isArray((row as any).vaccine) ? (row as any).vaccine[0] : (row as any).vaccine;
+    if (!vaccine || vaccine.active === false) continue;
+
+    const rawOffers = offersByVaccine.get(vaccineId) || [];
+    const masterPrice = vaccine.price == null ? 0 : money(vaccine.price);
+    const hasPricedOffer = rawOffers.some((offer: any) => money(offer?.price) > 0);
+    const namedBazar = /(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(clean(vaccine.name));
+    const assignedBazar = assignedIds.has(vaccineId);
+    const allocatedBazar = actualStock.map.has(lotId);
+    const legacyPricedFallback = assignedIds.size === 0 && (masterPrice > 0 || hasPricedOffer);
+    if (!assignedBazar && !allocatedBazar && !namedBazar && !legacyPricedFallback) continue;
+
+    const key = `${vaccineId}:${lotId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const salesOptions = rawOffers
+      .map((offer: any) => ({
+        id: Number(offer.id || 0) || null,
+        saleMode: normalizeSaleMode(offer.sale_mode),
+        packageDoseCount: Math.max(1, Number(offer.package_dose_count || 1)),
+        price: money(offer.price),
+        label: clean(offer.label) || (normalizeSaleMode(offer.sale_mode) === "PACKAGE" ? "Paket" : "Non Paket"),
+      }))
+      .filter((offer: any) => offer.price > 0);
+    if (masterPrice > 0 && !salesOptions.some((offer: any) => offer.saleMode === "NON_PACKAGE")) {
+      salesOptions.unshift({ id: null, saleMode: "NON_PACKAGE", packageDoseCount: 1, price: masterPrice, label: "Non Paket" });
+    }
+    if (!salesOptions.length) continue;
+    const remaining = actualStock.enabled ? Number(actualStock.map.get(lotId) || 0) : null;
+    if (actualStock.enabled && remaining <= 0) continue;
+    catalog.push({
+      vaccineId,
+      lotId,
+      vaccineName: clean(vaccine.name) || "Produk Bazar",
+      brand: clean(vaccine.brand),
+      lotNumber: clean((row as any).lot_number) || "-",
+      expiryDate: (row as any).expiry_date || null,
+      stockRemaining: remaining,
+      salesOptions,
+    });
   }
-  const vaccineById = new Map<number, any>((vaccines.data || []).map((row: any) => [Number(row.id), row]));
-  const offerByKey = new Map<string, any>();
-  for (const row of offers.data || []) {
-    offerByKey.set(`${Number((row as any).vaccine_id || 0)}:${normalizeSaleMode((row as any).sale_mode)}`, row);
-  }
+  return catalog.sort((a, b) => `${a.vaccineName} ${a.brand}`.localeCompare(`${b.vaccineName} ${b.brand}`, "id"));
+}
+
+async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: any[], paymentMethod: string) {
+  const selectedItems = Array.isArray(selectedItemsRaw) ? selectedItemsRaw : [];
+  if (!selectedItems.length) throw new Error("Self Booking tidak memiliki produk Bazar.");
+  const catalog = await loadEffectiveBazarCatalog(supabase, sessionId);
+  const catalogMap = new Map<string, any>(catalog.map((item: any) => [`${item.vaccineId}:${item.lotId}`, item]));
 
   const rows: any[] = [];
   let total = 0;
   for (const selected of selectedItems) {
-    const vaccineId = Number(selected?.vaccineId || 0);
-    const lotId = Number(selected?.lotId || 0);
-    const saleMode = normalizeSaleMode(selected?.saleMode);
-    if (!assignmentSet.has(vaccineId) || !sessionLotSet.has(`${vaccineId}:${lotId}`)) {
-      throw new Error("Ada produk Self Booking yang sudah tidak aktif pada Session Bazar ini.");
-    }
-    if (stock.enabled && Number(stock.map.get(lotId) || 0) <= 0) {
-      throw new Error(`Stok ${clean(selected?.vaccineName) || "produk"} sudah habis pada Session Bazar ini.`);
-    }
-    const vaccine = vaccineById.get(vaccineId);
-    if (!vaccine || vaccine.active === false) throw new Error("Produk Bazar sudah tidak aktif.");
-    const offer = offerByKey.get(`${vaccineId}:${saleMode}`);
-    const unitPrice = money(offer?.price ?? (saleMode === "NON_PACKAGE" ? vaccine.price : 0));
-    if (unitPrice <= 0) throw new Error(saleMode === "PACKAGE" ? "Harga Paket sudah tidak tersedia." : "Harga Non Paket sudah tidak tersedia.");
+    const vaccineId = Number(selected?.vaccineId || selected?.vaccine_id || 0);
+    const lotId = Number(selected?.lotId || selected?.lot_id || 0);
+    const saleMode = normalizeSaleMode(selected?.saleMode || selected?.sale_mode);
+    const option = catalogMap.get(`${vaccineId}:${lotId}`);
+    if (!option) throw new Error("Ada produk Self Booking yang sudah tidak aktif atau stoknya tidak tersedia pada Session Bazar ini.");
+    const offer = (option.salesOptions || []).find((row: any) => normalizeSaleMode(row.saleMode) === saleMode);
+    if (!offer) throw new Error(saleMode === "PACKAGE" ? "Harga Paket sudah tidak tersedia." : "Harga Non Paket sudah tidak tersedia.");
+    const unitPrice = money(offer.price);
     const surchargePercent = paymentMethod === "CREDIT_CARD" ? 3 : 0;
     const surchargeAmount = money(unitPrice * surchargePercent / 100);
     const paymentTotal = money(unitPrice + surchargeAmount);
@@ -166,12 +209,12 @@ async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: 
     rows.push({
       vaccineId,
       lotId,
-      vaccineName: clean(vaccine.name) || clean(selected?.vaccineName) || "Produk Bazar",
-      brand: clean(vaccine.brand),
-      lotNumber: lotNumberById.get(lotId) || clean(selected?.lotNumber) || "-",
+      vaccineName: option.vaccineName,
+      brand: option.brand,
+      lotNumber: option.lotNumber,
       saleMode,
-      salesOptionId: Number(offer?.id || 0) || null,
-      packageDoseCount: Math.max(1, Number(offer?.package_dose_count || selected?.packageDoseCount || 1)),
+      salesOptionId: Number(offer.id || 0) || null,
+      packageDoseCount: Math.max(1, Number(offer.packageDoseCount || 1)),
       unitPrice,
       surchargePercent,
       surchargeAmount,
@@ -179,6 +222,53 @@ async function prepareItems(supabase: any, sessionId: number, selectedItemsRaw: 
     });
   }
   return { rows, total };
+}
+
+async function enrichSelfBookings(supabase: any, rows: any[], sessionId: number) {
+  if (!rows.length) return rows;
+  const participantIds = Array.from(new Set<number>(rows.map((row: any) => Number(row.participant_id || 0)).filter((id: number) => id > 0)));
+  const historyIds = Array.from(new Set<number>(rows.map((row: any) => Number(row.history_person_id || 0)).filter((id: number) => id > 0)));
+  const employeeIds = Array.from(new Set<string>(rows.map((row: any) => clean(row.employee_id)).filter(Boolean)));
+
+  const participantResult = participantIds.length
+    ? await supabase.from("participants").select("*").in("id", participantIds)
+    : { data: [], error: null };
+  const historyResult = historyIds.length
+    ? await supabase.from("vaccination_persons").select("id,participant_name,employee_id,nik,email,phone,birth_date,gender").in("id", historyIds)
+    : { data: [], error: null };
+  const registrationResult = employeeIds.length
+    ? await supabase
+        .from("vaccination_registrations")
+        .select("id,employee_id,participant_name,nik,email,phone")
+        .eq("session_id", sessionId)
+        .in("employee_id", employeeIds)
+        .order("id", { ascending: false })
+        .limit(5000)
+    : { data: [], error: null };
+  for (const result of [participantResult, historyResult, registrationResult]) {
+    if ((result as any).error) throw new Error((result as any).error.message);
+  }
+
+  const participantMap = new Map<number, any>((participantResult.data || []).map((row: any) => [Number(row.id), row]));
+  const historyMap = new Map<number, any>((historyResult.data || []).map((row: any) => [Number(row.id), row]));
+  const registrationMap = new Map<string, any>();
+  for (const row of registrationResult.data || []) {
+    const key = clean((row as any).employee_id);
+    if (key && !registrationMap.has(key)) registrationMap.set(key, row);
+  }
+
+  return rows.map((row: any) => {
+    const participant = participantMap.get(Number(row.participant_id || 0));
+    const history = historyMap.get(Number(row.history_person_id || 0));
+    const registration = registrationMap.get(clean(row.employee_id));
+    return {
+      ...row,
+      participant_name: clean(row.participant_name) || clean(participant?.name || participant?.participant_name) || clean(history?.participant_name) || clean(registration?.participant_name),
+      nik: clean(row.nik) || clean(participant?.nik || participant?.ktp || participant?.nik_ktp) || clean(history?.nik) || clean(registration?.nik),
+      email: clean(row.email) || clean(participant?.email || participant?.email_company || participant?.company_email) || clean(history?.email) || clean(registration?.email),
+      phone: clean(row.phone) || clean(participant?.phone || participant?.no_hp || participant?.mobile || participant?.phone_number) || clean(history?.phone) || clean(registration?.phone),
+    };
+  });
 }
 
 function activeBazarRegistration(row: any) {
@@ -206,7 +296,9 @@ export async function GET(req: NextRequest) {
     }
     return fail(result.error.message, 500);
   }
-  return ok({ bookings: result.data || [] });
+  const bookings = await enrichSelfBookings(supabase, result.data || [], sessionId);
+  const catalog = await loadEffectiveBazarCatalog(supabase, sessionId);
+  return ok({ bookings, catalog });
 }
 
 export async function POST(req: NextRequest) {
@@ -225,7 +317,7 @@ export async function POST(req: NextRequest) {
     .eq("id", bookingId)
     .single();
   if (bookingResult.error) return fail(bookingResult.error.message, 404);
-  const booking = bookingResult.data;
+  const booking = (await enrichSelfBookings(supabase, [bookingResult.data], Number(bookingResult.data?.session_id || 0)))[0];
 
   if (action === "CANCEL") {
     if (clean(booking.booking_status).toUpperCase() === "PROCESSED") return fail("Self Booking yang sudah diproses tidak dapat dibatalkan dari penampungan.", 409);
@@ -239,6 +331,51 @@ export async function POST(req: NextRequest) {
       .single();
     if (update.error) return fail(update.error.message, 500);
     return ok({ message: "Self Booking dibatalkan.", booking: update.data });
+  }
+
+  if (action === "UPDATE") {
+    if (clean(booking.booking_status).toUpperCase() !== "PENDING") return fail("Hanya Self Booking yang masih menunggu proses yang dapat diedit.", 409);
+    const participantName = clean(body.participantName || body.participant_name || booking.participant_name);
+    const nik = clean(body.nik ?? booking.nik);
+    const email = clean(body.email ?? booking.email);
+    const phone = clean(body.phone ?? booking.phone);
+    if (!participantName) return fail("Nama peserta wajib diisi.");
+    const selectedItems = Array.isArray(body.selectedItems) ? body.selectedItems : booking.selected_items;
+    let prepared: { rows: any[]; total: number };
+    try {
+      prepared = await prepareItems(supabase, Number(booking.session_id || 0), selectedItems || [], "QRIS");
+    } catch (error: any) {
+      return fail(error?.message || "Perubahan produk Self Booking tidak valid.", 409);
+    }
+    const snapshots = prepared.rows.map((item: any) => ({
+      vaccineId: item.vaccineId,
+      lotId: item.lotId,
+      vaccineName: item.vaccineName,
+      brand: item.brand,
+      lotNumber: item.lotNumber,
+      saleMode: item.saleMode,
+      salesOptionId: item.salesOptionId,
+      packageDoseCount: item.packageDoseCount,
+      unitPrice: item.unitPrice,
+    }));
+    const updated = await supabase
+      .from("vaccination_bazar_self_bookings")
+      .update({
+        participant_name: participantName,
+        nik: nik || null,
+        email: email || null,
+        phone: phone || null,
+        selected_items: snapshots,
+        estimated_total: prepared.total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", bookingId)
+      .eq("booking_status", "PENDING")
+      .select("*")
+      .single();
+    if (updated.error) return fail(updated.error.message, 500);
+    const enriched = (await enrichSelfBookings(supabase, [updated.data], Number(booking.session_id || 0)))[0];
+    return ok({ message: "Self Booking berhasil diperbarui.", booking: enriched });
   }
 
   if (action !== "PROCESS") return fail("Aksi Self Booking tidak dikenali.");

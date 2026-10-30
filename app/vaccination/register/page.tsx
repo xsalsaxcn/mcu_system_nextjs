@@ -127,6 +127,10 @@ export default function VaccinationRegisterPage() {
   const [bookingPaymentMethod, setBookingPaymentMethod] = useState("QRIS");
   const [bookingPaymentValidated, setBookingPaymentValidated] = useState(false);
   const [bookingProcessing, setBookingProcessing] = useState(false);
+  const [bookingProcessError, setBookingProcessError] = useState("");
+  const [selfBookingCatalog, setSelfBookingCatalog] = useState<any[]>([]);
+  const [editingSelfBooking, setEditingSelfBooking] = useState<any | null>(null);
+  const [selfBookingEditSaving, setSelfBookingEditSaving] = useState(false);
 
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
   const [error, setError] = useState("");
@@ -583,6 +587,7 @@ export default function VaccinationRegisterPage() {
         return;
       }
       setSelfBookings(Array.isArray(json.bookings) ? json.bookings : []);
+      setSelfBookingCatalog(Array.isArray(json.catalog) ? json.catalog : []);
     } finally {
       setSelfBookingLoading(false);
     }
@@ -590,9 +595,9 @@ export default function VaccinationRegisterPage() {
 
   async function processSelfBooking() {
     if (!processingBooking) return;
-    if (!bookingPaymentValidated) { setError("Centang Validasi Pembayaran sebelum memproses Self Booking."); return; }
+    if (!bookingPaymentValidated) { setBookingProcessError("Centang Validasi Pembayaran sebelum memproses Self Booking."); return; }
     setBookingProcessing(true);
-    setError("");
+    setBookingProcessError("");
     try {
       const response = await fetch("/api/vaccination/bazar-self-bookings", {
         method: "POST",
@@ -605,13 +610,92 @@ export default function VaccinationRegisterPage() {
         }),
       });
       const json = await response.json().catch(() => ({}));
-      if (!json.ok) { setError(json.message || "Self Booking gagal diproses."); return; }
+      if (!json.ok) { setBookingProcessError(json.message || `Self Booking gagal diproses (${response.status}).`); return; }
       setMessage(json.message || "Self Booking berhasil diproses.");
       setProcessingBooking(null);
       setBookingPaymentValidated(false);
+      setBookingProcessError("");
       await Promise.all([loadSelfBookings(form.sessionId), loadRegistrations(form.sessionId, selectedSourceId)]);
+    } catch (error: any) {
+      setBookingProcessError(error?.message || "Tidak dapat menghubungi server. Coba lagi.");
     } finally {
       setBookingProcessing(false);
+    }
+  }
+
+  function openSelfBookingEdit(booking: any) {
+    const selectedItems = (Array.isArray(booking?.selected_items) ? booking.selected_items : []).map((item: any) => ({
+      vaccineId: Number(item?.vaccineId || 0),
+      lotId: Number(item?.lotId || 0),
+      vaccineName: item?.vaccineName || "Produk Bazar",
+      lotNumber: item?.lotNumber || "-",
+      saleMode: String(item?.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+    }));
+    setEditingSelfBooking({
+      id: Number(booking?.id || 0),
+      participantName: booking?.participant_name || "",
+      employeeId: booking?.employee_id || "",
+      nik: booking?.nik || "",
+      email: booking?.email || "",
+      phone: booking?.phone || "",
+      selectedItems,
+      addKey: "",
+    });
+  }
+
+  function selfBookingCatalogItem(vaccineId: any, lotId: any) {
+    return selfBookingCatalog.find((item: any) => Number(item?.vaccineId || 0) === Number(vaccineId || 0) && Number(item?.lotId || 0) === Number(lotId || 0));
+  }
+
+  function addSelfBookingEditItem() {
+    if (!editingSelfBooking?.addKey) return;
+    const [vaccineIdRaw, lotIdRaw] = String(editingSelfBooking.addKey).split(":");
+    const item = selfBookingCatalogItem(Number(vaccineIdRaw), Number(lotIdRaw));
+    if (!item) return;
+    if ((editingSelfBooking.selectedItems || []).some((row: any) => Number(row.vaccineId) === Number(item.vaccineId) && Number(row.lotId) === Number(item.lotId))) return;
+    const nonPackage = (item.salesOptions || []).find((option: any) => String(option?.saleMode || "").toUpperCase() === "NON_PACKAGE");
+    const first = nonPackage || (item.salesOptions || [])[0];
+    setEditingSelfBooking({
+      ...editingSelfBooking,
+      addKey: "",
+      selectedItems: [...(editingSelfBooking.selectedItems || []), {
+        vaccineId: Number(item.vaccineId),
+        lotId: Number(item.lotId),
+        vaccineName: item.vaccineName || "Produk Bazar",
+        lotNumber: item.lotNumber || "-",
+        saleMode: String(first?.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+      }],
+    });
+  }
+
+  async function saveSelfBookingEdit() {
+    if (!editingSelfBooking?.id) return;
+    if (!(editingSelfBooking.selectedItems || []).length) { setError("Self Booking harus memiliki minimal satu produk Bazar."); return; }
+    setSelfBookingEditSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/bazar-self-bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "UPDATE",
+          bookingId: Number(editingSelfBooking.id),
+          participantName: editingSelfBooking.participantName,
+          nik: editingSelfBooking.nik,
+          email: editingSelfBooking.email,
+          phone: editingSelfBooking.phone,
+          selectedItems: editingSelfBooking.selectedItems,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!json.ok) { setError(json.message || "Self Booking gagal diperbarui."); return; }
+      setMessage(json.message || "Self Booking berhasil diperbarui.");
+      setEditingSelfBooking(null);
+      await loadSelfBookings(form.sessionId);
+    } catch (error: any) {
+      setError(error?.message || "Tidak dapat menyimpan perubahan Self Booking.");
+    } finally {
+      setSelfBookingEditSaving(false);
     }
   }
 
@@ -1175,11 +1259,11 @@ export default function VaccinationRegisterPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const previousOverflow = document.body.style.overflow;
-    if (edit || processingBooking) document.body.style.overflow = "hidden";
+    if (edit || processingBooking || editingSelfBooking) document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [edit, processingBooking]);
+  }, [edit, processingBooking, editingSelfBooking]);
 
   return (
     <main className="p-6">
@@ -2005,7 +2089,7 @@ export default function VaccinationRegisterPage() {
                         </td>
                         <td className="p-3 font-black text-violet-700">{money(booking.estimated_total)}</td>
                         <td className="p-3"><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Menunggu Proses</span></td>
-                        <td className="p-3"><button type="button" onClick={() => { setProcessingBooking(booking); setBookingPaymentMethod("QRIS"); setBookingPaymentValidated(false); setError(""); }} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700">Process</button></td>
+                        <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => openSelfBookingEdit(booking)} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-50">Edit</button><button type="button" onClick={() => { setProcessingBooking(booking); setBookingPaymentMethod("QRIS"); setBookingPaymentValidated(false); setBookingProcessError(""); }} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700">Process</button></div></td>
                       </tr>
                     );
                   })}
@@ -2052,8 +2136,7 @@ export default function VaccinationRegisterPage() {
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
-                    <th className="p-3 text-left">Payment Method</th>
-                    <th className="p-3 text-left">Jenis Pendaftaran</th>
+                    {activeQueueView === "BAZAR" ? <><th className="p-3 text-left">Payment Method</th><th className="p-3 text-left">Jenis Pendaftaran</th></> : null}
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
                     <th className="p-3 text-left">Aksi Data</th>
                   </tr>
@@ -2063,8 +2146,7 @@ export default function VaccinationRegisterPage() {
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
-                    <th className="p-3 text-left">Payment Method</th>
-                    <th className="p-3 text-left">Jenis Pendaftaran</th>
+                    {activeQueueView === "BAZAR" ? <><th className="p-3 text-left">Payment Method</th><th className="p-3 text-left">Jenis Pendaftaran</th></> : null}
                     <th className="p-3 text-left">{sortButton("Status", "status")}</th>
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
                     <th className="p-3 text-left">Aksi</th>
@@ -2201,8 +2283,7 @@ export default function VaccinationRegisterPage() {
                             )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                           </div>
                         </td>
-                        <td className="p-3 align-top font-bold">{paymentMethodLabel(activePaymentMethod)}</td>
-                        <td className="p-3 align-top"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td>
+                        {activeQueueView === "BAZAR" ? <><td className="p-3 align-top font-bold">{paymentMethodLabel(activePaymentMethod)}</td><td className="p-3 align-top"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td></> : null}
                         <td className="p-3 align-top text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                         <td className="p-3 align-top">
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
@@ -2231,8 +2312,7 @@ export default function VaccinationRegisterPage() {
                           )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                         </div>
                       </td>
-                      <td className="p-3 font-bold">{paymentMethodLabel(activePaymentMethod)}</td>
-                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td>
+                      {activeQueueView === "BAZAR" ? <><td className="p-3 font-bold">{paymentMethodLabel(activePaymentMethod)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td></> : null}
                       <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${activeTrackInfo.cls}`}>{activeTrackInfo.label}</span></td>
                       <td className="p-3 text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                       <td className="p-3">
@@ -2270,7 +2350,7 @@ export default function VaccinationRegisterPage() {
                 })}
                 {!visibleRegistrations.length ? (
                   <tr>
-                    <td colSpan={healthdayBazarEnabled && internalQueueEnabled ? 9 : 9} className="p-5 text-center text-slate-500">
+                    <td colSpan={activeQueueView === "BAZAR" ? 9 : 7} className="p-5 text-center text-slate-500">
                       {internalQueueEnabled && healthdayBazarEnabled
                         ? "Belum ada peserta yang sudah memiliki nomor antrean."
                         : internalQueueEnabled
@@ -2284,6 +2364,48 @@ export default function VaccinationRegisterPage() {
           </div>
         </section>
       </div>
+      {editingSelfBooking ? (
+        <div className="fixed inset-0 z-[96] flex items-center justify-center bg-slate-950/55 p-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-violet-100 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b p-5">
+              <div><div className="text-xs font-black uppercase tracking-wide text-violet-600">Edit Self Booking Bazar</div><h3 className="mt-1 text-2xl font-black text-slate-950">{editingSelfBooking.participantName || "Peserta"}</h3><div className="mt-1 text-sm font-semibold text-slate-500">{editingSelfBooking.employeeId || "-"} · ID peserta tidak diubah dari admin edit.</div></div>
+              <button type="button" onClick={() => setEditingSelfBooking(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
+            </div>
+            <div className="grid gap-3 p-5 md:grid-cols-2">
+              <label className="text-xs font-black text-slate-600">Nama Peserta<input value={editingSelfBooking.participantName} onChange={(event) => setEditingSelfBooking({ ...editingSelfBooking, participantName: event.target.value })} className="mt-1 block w-full rounded-xl border px-3 py-2.5 text-sm font-bold text-slate-900" /></label>
+              <label className="text-xs font-black text-slate-600">NIK KTP<input value={editingSelfBooking.nik} onChange={(event) => setEditingSelfBooking({ ...editingSelfBooking, nik: event.target.value })} className="mt-1 block w-full rounded-xl border px-3 py-2.5 text-sm font-bold text-slate-900" /></label>
+              <label className="text-xs font-black text-slate-600">Email<input type="email" value={editingSelfBooking.email} onChange={(event) => setEditingSelfBooking({ ...editingSelfBooking, email: event.target.value })} className="mt-1 block w-full rounded-xl border px-3 py-2.5 text-sm font-bold text-slate-900" /></label>
+              <label className="text-xs font-black text-slate-600">No. HP<input value={editingSelfBooking.phone} onChange={(event) => setEditingSelfBooking({ ...editingSelfBooking, phone: event.target.value })} className="mt-1 block w-full rounded-xl border px-3 py-2.5 text-sm font-bold text-slate-900" /></label>
+            </div>
+            <div className="border-t px-5 py-4">
+              <div className="text-xs font-black uppercase tracking-wide text-slate-500">Produk Bazar</div>
+              <div className="mt-3 space-y-2">
+                {(editingSelfBooking.selectedItems || []).map((item: any, index: number) => {
+                  const catalogItem = selfBookingCatalogItem(item.vaccineId, item.lotId);
+                  return <div key={`edit-booking-${item.vaccineId}-${item.lotId}-${index}`} className="grid gap-2 rounded-2xl border p-3 md:grid-cols-[1fr_170px_auto] md:items-center">
+                    <div><div className="font-black">{item.vaccineName}</div><div className="text-xs font-semibold text-slate-500">Lot {item.lotNumber || "-"}</div></div>
+                    <select value={item.saleMode} onChange={(event) => { const next = [...editingSelfBooking.selectedItems]; next[index] = { ...next[index], saleMode: event.target.value === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE" }; setEditingSelfBooking({ ...editingSelfBooking, selectedItems: next }); }} className="rounded-xl border px-3 py-2 text-sm font-bold">
+                      {(catalogItem?.salesOptions || []).map((option: any) => <option key={`${item.vaccineId}-${item.lotId}-${option.saleMode}`} value={option.saleMode}>{String(option.saleMode).toUpperCase() === "PACKAGE" ? `Paket · ${money(option.price)}` : `Non Paket · ${money(option.price)}`}</option>)}
+                    </select>
+                    <button type="button" onClick={() => setEditingSelfBooking({ ...editingSelfBooking, selectedItems: editingSelfBooking.selectedItems.filter((_: any, rowIndex: number) => rowIndex !== index) })} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700">Hapus</button>
+                  </div>;
+                })}
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <select value={editingSelfBooking.addKey} onChange={(event) => setEditingSelfBooking({ ...editingSelfBooking, addKey: event.target.value })} className="min-w-0 flex-1 rounded-xl border px-3 py-2.5 text-sm font-bold">
+                  <option value="">Tambah produk Bazar...</option>
+                  {selfBookingCatalog.map((item: any) => <option key={`${item.vaccineId}:${item.lotId}`} value={`${item.vaccineId}:${item.lotId}`}>{item.vaccineName} · Lot {item.lotNumber} {item.stockRemaining == null ? "" : `· Sisa ${item.stockRemaining}`}</option>)}
+                </select>
+                <button type="button" onClick={addSelfBookingEditItem} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-black text-violet-700">+ Tambah</button>
+              </div>
+            </div>
+            <div className="flex flex-col-reverse gap-3 border-t bg-slate-50 p-5 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setEditingSelfBooking(null)} className="rounded-2xl border bg-white px-5 py-3 text-sm font-black">Batal</button>
+              <button type="button" onClick={() => void saveSelfBookingEdit()} disabled={selfBookingEditSaving} className="rounded-2xl bg-violet-600 px-6 py-3 text-sm font-black text-white disabled:opacity-40">{selfBookingEditSaving ? "Menyimpan..." : "Simpan Perubahan"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {processingBooking ? (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/55 p-4">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-violet-100 bg-white shadow-2xl">
@@ -2295,6 +2417,8 @@ export default function VaccinationRegisterPage() {
               </div>
               <button type="button" onClick={() => setProcessingBooking(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
             </div>
+
+            {bookingProcessError ? <div className="mx-5 mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{bookingProcessError}</div> : null}
 
             <div className="grid gap-4 p-5 md:grid-cols-3">
               <div className="rounded-2xl bg-slate-50 p-4"><div className="text-[10px] font-black uppercase text-slate-400">NIK KTP</div><div className="mt-1 font-black">{processingBooking.nik || "-"}</div></div>
