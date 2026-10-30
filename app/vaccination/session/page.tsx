@@ -196,6 +196,7 @@ export default function VaccinationSessionPage() {
 
   const [selectedSessionIds, setSelectedSessionIds] = useState<number[]>([]);
   const [bulkApplyingFlow, setBulkApplyingFlow] = useState(false);
+  const [bazarLinkLoadingId, setBazarLinkLoadingId] = useState<number | null>(null);
 
   const [message, setMessage] = useState(
     "Pilih database vaksinasi, lalu generate session berdasarkan lokasi dan tanggal yang tersedia dari file import.",
@@ -917,6 +918,30 @@ export default function VaccinationSessionPage() {
       setMessage("Edit session belum selesai.");
     } finally {
       setSavingEditSession(false);
+    }
+  }
+
+  async function openBazarPublicPortal(session: any) {
+    const sessionId = Number(session?.id || 0);
+    if (!sessionId || bazarLinkLoadingId) return;
+    const popup = window.open("about:blank", "_blank");
+    setBazarLinkLoadingId(sessionId);
+    setError("");
+    try {
+      const res = await fetch(`/api/vaccination/bazar-public-link?session_id=${encodeURIComponent(String(sessionId))}`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.message || "Gagal membuat link Portal Bazar.");
+      const url = String(json.url || "");
+      if (!url) throw new Error("URL Portal Bazar tidak terbaca.");
+      try { await navigator.clipboard.writeText(url); } catch {}
+      if (popup && !popup.closed) popup.location.replace(url);
+      else window.open(url, "_blank");
+      setMessage("Link Portal Bazar berhasil dibuat dan disalin. Portal dibuka di tab baru.");
+    } catch (err: any) {
+      if (popup && !popup.closed) popup.close();
+      setError(err?.message || "Gagal membuat link Portal Bazar.");
+    } finally {
+      setBazarLinkLoadingId(null);
     }
   }
 
@@ -1948,13 +1973,26 @@ export default function VaccinationSessionPage() {
                       </td>
                       <td className="p-3 font-black text-slate-800">{session.participant_count_planned ?? "-"}</td>
                       <td className="p-3 whitespace-nowrap">
-                        <a
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700"
-                          href={`/vaccination/public/queue/${session.public_queue_token}`}
-                          target="_blank"
-                        >
-                          Public Queue
-                        </a>
+                        <div className="flex flex-col items-start gap-2">
+                          <a
+                            className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700"
+                            href={`/vaccination/public/queue/${session.public_queue_token}`}
+                            target="_blank"
+                          >
+                            Public Queue
+                          </a>
+                          {bazarItems.length ? (
+                            <button
+                              type="button"
+                              onClick={() => void openBazarPublicPortal(session)}
+                              disabled={bazarLinkLoadingId === Number(session.id)}
+                              className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-bold text-violet-700 disabled:opacity-50"
+                              title="Buat link pendaftaran Bazar Mandiri untuk Session ini"
+                            >
+                              {bazarLinkLoadingId === Number(session.id) ? "Membuat..." : "Link Bazar"}
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">

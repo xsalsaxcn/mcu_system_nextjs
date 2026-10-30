@@ -53,6 +53,19 @@ function money(value: any) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
+function registrationTypeLabel(registration: any) {
+  return String(registration?.registered_by || "").toUpperCase().startsWith("SELF_BOOKING")
+    ? "SELF BOOKING"
+    : "ADMIN BOOKING";
+}
+
+function paymentMethodLabel(value: any) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "-";
+  if (raw === "CREDIT_CARD") return "Credit Card";
+  return raw.charAt(0) + raw.slice(1).toLowerCase();
+}
+
 function sessionLabel(session: any) {
   return String(session?.session_name || session?.location || `Session ${session?.id || ""}`).trim();
 }
@@ -108,6 +121,12 @@ export default function VaccinationRegisterPage() {
   const [lots, setLots] = useState<any[]>([]);
   const [salesOffers, setSalesOffers] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
+  const [selfBookings, setSelfBookings] = useState<any[]>([]);
+  const [selfBookingLoading, setSelfBookingLoading] = useState(false);
+  const [processingBooking, setProcessingBooking] = useState<any | null>(null);
+  const [bookingPaymentMethod, setBookingPaymentMethod] = useState("QRIS");
+  const [bookingPaymentValidated, setBookingPaymentValidated] = useState(false);
+  const [bookingProcessing, setBookingProcessing] = useState(false);
 
   const [message, setMessage] = useState("Import peserta corporate/vaksinasi lebih dulu. Nomor antrian dirilis saat peserta datang registrasi ulang.");
   const [error, setError] = useState("");
@@ -425,12 +444,19 @@ export default function VaccinationRegisterPage() {
 
   const queueReadyRegistrations = useMemo(() => {
     if (!healthdayBazarEnabled) return sortedRegistrations;
-    return sortedRegistrations.filter((registration: any) =>
-      activeQueueView === "BAZAR"
+    return sortedRegistrations.filter((registration: any) => {
+      const serviceStatus = String(registration?.patient_service_status || "HEALTHDAY").toUpperCase();
+      const hasTrack = activeQueueView === "BAZAR"
+        ? serviceHasTrack(serviceStatus, "B")
+        : serviceHasTrack(serviceStatus, "A");
+      if (!hasTrack) return false;
+      const trackUsesInternalQueue = activeQueueView === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled;
+      if (!trackUsesInternalQueue) return true;
+      return activeQueueView === "BAZAR"
         ? Boolean(String(registration?.bazar_queue_number || "").trim())
-        : Boolean(String(registration?.queue_number || "").trim()),
-    );
-  }, [sortedRegistrations, healthdayBazarEnabled, activeQueueView]);
+        : Boolean(String(registration?.queue_number || "").trim());
+    });
+  }, [sortedRegistrations, healthdayBazarEnabled, activeQueueView, bazarQueueEnabled, healthdayQueueEnabled]);
 
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -448,6 +474,11 @@ export default function VaccinationRegisterPage() {
       return haystack.includes(keyword);
     });
   }, [queueReadyRegistrations, search]);
+
+  const pendingSelfBookings = useMemo(
+    () => selfBookings.filter((booking: any) => String(booking?.booking_status || "").toUpperCase() === "PENDING"),
+    [selfBookings],
+  );
 
   const productSummary = useMemo(() => {
     const map = new Map<string, { name: string; count: number }>();
@@ -539,6 +570,49 @@ export default function VaccinationRegisterPage() {
     const json = await fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
     if (json.ok) setRegistrations(json.registrations || []);
     else setError(json.message || "Gagal memuat registrasi.");
+  }
+
+  async function loadSelfBookings(sessionId = form.sessionId) {
+    if (!sessionId) { setSelfBookings([]); return; }
+    setSelfBookingLoading(true);
+    try {
+      const response = await fetch(`/api/vaccination/bazar-self-bookings?session_id=${encodeURIComponent(String(sessionId))}`, { cache: "no-store" });
+      const json = await response.json().catch(() => ({}));
+      if (!json.ok) {
+        setSelfBookings([]);
+        return;
+      }
+      setSelfBookings(Array.isArray(json.bookings) ? json.bookings : []);
+    } finally {
+      setSelfBookingLoading(false);
+    }
+  }
+
+  async function processSelfBooking() {
+    if (!processingBooking) return;
+    if (!bookingPaymentValidated) { setError("Centang Validasi Pembayaran sebelum memproses Self Booking."); return; }
+    setBookingProcessing(true);
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/bazar-self-bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "PROCESS",
+          bookingId: Number(processingBooking.id),
+          paymentMethod: bookingPaymentMethod,
+          paymentValidated: true,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!json.ok) { setError(json.message || "Self Booking gagal diproses."); return; }
+      setMessage(json.message || "Self Booking berhasil diproses.");
+      setProcessingBooking(null);
+      setBookingPaymentValidated(false);
+      await Promise.all([loadSelfBookings(form.sessionId), loadRegistrations(form.sessionId, selectedSourceId)]);
+    } finally {
+      setBookingProcessing(false);
+    }
   }
 
   async function cancelRegistrationTrack(registration: any, track: "A" | "B") {
@@ -928,6 +1002,7 @@ export default function VaccinationRegisterPage() {
     params.set("status", status);
     if (form.sessionId) params.set("session_id", form.sessionId);
     if (selectedSourceId) params.set("source_id", String(selectedSourceId));
+    if (healthdayBazarEnabled) params.set("service_mode", activeQueueView);
     window.open(`/api/vaccination/dashboard?${params.toString()}`, "_blank");
   }
 
@@ -1081,7 +1156,10 @@ export default function VaccinationRegisterPage() {
     }));
   }, [contextLocked, form.sessionId, selectedSourceId, selectedVaccineIds, form.vaccineId, form.lotId, form.companyName]);
 
-  useEffect(() => { loadRegistrations(form.sessionId, selectedSourceId); }, [form.sessionId, selectedSourceId]);
+  useEffect(() => {
+    loadRegistrations(form.sessionId, selectedSourceId);
+    loadSelfBookings(form.sessionId);
+  }, [form.sessionId, selectedSourceId]);
 
   useEffect(() => {
     if (deepLinkEditHandled.current || typeof window === "undefined" || !registrations.length) return;
@@ -1097,11 +1175,11 @@ export default function VaccinationRegisterPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const previousOverflow = document.body.style.overflow;
-    if (edit) document.body.style.overflow = "hidden";
+    if (edit || processingBooking) document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [edit]);
+  }, [edit, processingBooking]);
 
   return (
     <main className="p-6">
@@ -1889,6 +1967,55 @@ export default function VaccinationRegisterPage() {
           </div>
         ) : null}
 
+        {healthdayBazarEnabled && activeQueueView === "BAZAR" ? (
+          <section className="mt-6 overflow-hidden rounded-2xl border border-violet-200 bg-white">
+            <div className="flex flex-col gap-3 border-b border-violet-100 bg-violet-50/70 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-black text-violet-900">Penampungan Self Booking Bazar</div>
+                <div className="mt-1 text-xs font-semibold text-violet-700">Pendaftaran mandiri belum masuk Registrasi sampai pembayaran divalidasi oleh tim.</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-violet-700">{pendingSelfBookings.length} menunggu</span>
+                <button type="button" onClick={() => void loadSelfBookings(form.sessionId)} className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-xs font-black text-violet-700">{selfBookingLoading ? "Memuat..." : "Refresh"}</button>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-[980px] w-full text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="p-3 text-left">Waktu</th>
+                    <th className="p-3 text-left">Peserta</th>
+                    <th className="p-3 text-left">NIK Karyawan / BINUSIAN ID</th>
+                    <th className="p-3 text-left">Produk Bazar</th>
+                    <th className="p-3 text-left">Estimasi</th>
+                    <th className="p-3 text-left">Status</th>
+                    <th className="p-3 text-left">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {pendingSelfBookings.map((booking: any) => {
+                    const items = Array.isArray(booking?.selected_items) ? booking.selected_items : [];
+                    return (
+                      <tr key={`self-booking-${booking.id}`} className="align-top hover:bg-violet-50/30">
+                        <td className="p-3 text-xs font-semibold text-slate-500">{booking.submitted_at ? new Date(booking.submitted_at).toLocaleString("id-ID") : "-"}</td>
+                        <td className="p-3"><div className="font-black text-slate-900">{booking.participant_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{booking.company_name || "-"}</div></td>
+                        <td className="p-3 font-bold">{booking.employee_id || "-"}</td>
+                        <td className="p-3">
+                          <div className="space-y-1">{items.map((item: any, index: number) => <div key={`${booking.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccineName || "Produk"} · Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "Paket" : "Non Paket"}</div>)}</div>
+                        </td>
+                        <td className="p-3 font-black text-violet-700">{money(booking.estimated_total)}</td>
+                        <td className="p-3"><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Menunggu Proses</span></td>
+                        <td className="p-3"><button type="button" onClick={() => { setProcessingBooking(booking); setBookingPaymentMethod("QRIS"); setBookingPaymentValidated(false); setError(""); }} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-black text-white hover:bg-violet-700">Process</button></td>
+                      </tr>
+                    );
+                  })}
+                  {!pendingSelfBookings.length ? <tr><td colSpan={7} className="p-5 text-center text-sm font-semibold text-slate-500">Belum ada Self Booking Bazar yang menunggu diproses.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
         <section className="mt-6 overflow-hidden rounded-2xl border">
           <div className="flex flex-col gap-3 border-b bg-slate-50 p-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -1896,7 +2023,9 @@ export default function VaccinationRegisterPage() {
                 ? (healthdayBazarEnabled
                     ? `Antrean ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta`
                     : `Registrasi Session Ini · ${registrations.length} peserta`)
-                : `Pencatatan Session Ini · ${registrations.length} peserta`}</div>
+                : (healthdayBazarEnabled
+                    ? `Pencatatan ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta`
+                    : `Pencatatan Session Ini · ${registrations.length} peserta`)}</div>
               <input
                 className="mt-3 w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-80"
                 placeholder="Cari nama / Employee ID / NIK..."
@@ -1923,6 +2052,8 @@ export default function VaccinationRegisterPage() {
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
+                    <th className="p-3 text-left">Payment Method</th>
+                    <th className="p-3 text-left">Jenis Pendaftaran</th>
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
                     <th className="p-3 text-left">Aksi Data</th>
                   </tr>
@@ -1932,6 +2063,8 @@ export default function VaccinationRegisterPage() {
                     <th className="p-3 text-left">{sortButton("Nama", "name")}</th>
                     <th className="p-3 text-left">{sortButton("NIK Karyawan / BINUSIAN ID", "identity")}</th>
                     <th className="p-3 text-left">{sortButton("Produk / Harga", "product")}</th>
+                    <th className="p-3 text-left">Payment Method</th>
+                    <th className="p-3 text-left">Jenis Pendaftaran</th>
                     <th className="p-3 text-left">{sortButton("Status", "status")}</th>
                     <th className="p-3 text-left">{sortButton("Note", "note")}</th>
                     <th className="p-3 text-left">Aksi</th>
@@ -1954,6 +2087,12 @@ export default function VaccinationRegisterPage() {
                   const needsQueueRelease = internalQueueEnabled && !healthdayBazarEnabled && hasA && !hasANumber;
                   const aCancelKey = `${registration?.id || ""}-A`;
                   const bCancelKey = `${registration?.id || ""}-B`;
+                  const activeTrackNumber = healthdayBazarEnabled && activeQueueView === "BAZAR"
+                    ? String(registration?.bazar_queue_number || "").trim()
+                    : String(registration?.queue_number || "").trim();
+                  const activeTrackInfo = healthdayBazarEnabled && activeQueueView === "BAZAR" ? bazarInfo : info;
+                  const activePaymentMethod = items.find((item: any) => String(item?.payment_method || "").trim())?.payment_method || (activeQueueView === "BAZAR" ? registration?.payment_method : "");
+                  const registrationType = registrationTypeLabel(registration);
 
                   if (healthdayBazarEnabled && internalQueueEnabled) {
                     return (
@@ -2062,6 +2201,8 @@ export default function VaccinationRegisterPage() {
                             )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                           </div>
                         </td>
+                        <td className="p-3 align-top font-bold">{paymentMethodLabel(activePaymentMethod)}</td>
+                        <td className="p-3 align-top"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td>
                         <td className="p-3 align-top text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                         <td className="p-3 align-top">
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
@@ -2073,7 +2214,7 @@ export default function VaccinationRegisterPage() {
                   return (
                     <tr key={registration.id}>
                       <td className="p-3">
-                        <div className="text-xl font-black">{registration.queue_number || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum rilis</span>}</div>
+                        <div className="text-xl font-black">{activeTrackNumber || <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">Belum isi No. Vendor</span>}</div>
                       </td>
                       <td className="p-3 font-bold">
                         <button type="button" onClick={() => setHistoryRegistration(registration)} className="text-left font-black text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-900" title="Lihat riwayat layanan peserta">
@@ -2090,7 +2231,9 @@ export default function VaccinationRegisterPage() {
                           )) : <span>{registration.vaccine?.name || "Sesuai session"}</span>}
                         </div>
                       </td>
-                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${info.cls}`}>{info.label}</span></td>
+                      <td className="p-3 font-bold">{paymentMethodLabel(activePaymentMethod)}</td>
+                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-[11px] font-black ${registrationType === "SELF BOOKING" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-700"}`}>{registrationType}</span></td>
+                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${activeTrackInfo.cls}`}>{activeTrackInfo.label}</span></td>
                       <td className="p-3 text-xs text-slate-600">{registration.status_note || registration.payment_note || "-"}</td>
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">
@@ -2127,7 +2270,7 @@ export default function VaccinationRegisterPage() {
                 })}
                 {!visibleRegistrations.length ? (
                   <tr>
-                    <td colSpan={healthdayBazarEnabled && internalQueueEnabled ? 9 : 7} className="p-5 text-center text-slate-500">
+                    <td colSpan={healthdayBazarEnabled && internalQueueEnabled ? 9 : 9} className="p-5 text-center text-slate-500">
                       {internalQueueEnabled && healthdayBazarEnabled
                         ? "Belum ada peserta yang sudah memiliki nomor antrean."
                         : internalQueueEnabled
@@ -2141,6 +2284,70 @@ export default function VaccinationRegisterPage() {
           </div>
         </section>
       </div>
+      {processingBooking ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/55 p-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-violet-100 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b p-5">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wide text-violet-600">Process Self Booking Bazar</div>
+                <h3 className="mt-1 text-2xl font-black text-slate-950">{processingBooking.participant_name || "Peserta"}</h3>
+                <div className="mt-1 text-sm font-semibold text-slate-500">{processingBooking.employee_id || "-"} · {processingBooking.company_name || "-"}</div>
+              </div>
+              <button type="button" onClick={() => setProcessingBooking(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
+            </div>
+
+            <div className="grid gap-4 p-5 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-[10px] font-black uppercase text-slate-400">NIK KTP</div><div className="mt-1 font-black">{processingBooking.nik || "-"}</div></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-[10px] font-black uppercase text-slate-400">Email</div><div className="mt-1 font-black break-all">{processingBooking.email || "-"}</div></div>
+              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-[10px] font-black uppercase text-slate-400">No. HP</div><div className="mt-1 font-black">{processingBooking.phone || "-"}</div></div>
+            </div>
+
+            <div className="px-5 pb-2">
+              <div className="text-xs font-black uppercase tracking-wide text-slate-500">Produk yang dipilih</div>
+              <div className="mt-3 space-y-2">
+                {(Array.isArray(processingBooking.selected_items) ? processingBooking.selected_items : []).map((item: any, index: number) => (
+                  <div key={`process-${processingBooking.id}-${index}`} className="flex flex-col gap-2 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="font-black">{item.vaccineName || "Produk Bazar"}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">Lot {item.lotNumber || "-"} · {String(item.saleMode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? `Paket ${Number(item.packageDoseCount || 1)} dosis` : "Non Paket"}</div>
+                    </div>
+                    <div className="font-black text-violet-700">{money(item.unitPrice)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 p-5 md:grid-cols-[1fr_auto] md:items-end">
+              <label>
+                <span className="text-xs font-black uppercase tracking-wide text-slate-500">Metode Pembayaran</span>
+                <select value={bookingPaymentMethod} onChange={(event) => { setBookingPaymentMethod(event.target.value); setBookingPaymentValidated(false); }} className="mt-2 w-full rounded-2xl border px-4 py-3 font-black">
+                  <option value="QRIS">QRIS</option>
+                  <option value="DEBIT">Debit</option>
+                  <option value="CREDIT_CARD">Credit Card</option>
+                  <option value="TRANSFER">Transfer</option>
+                </select>
+              </label>
+              <div className="rounded-2xl bg-violet-50 px-5 py-3 text-right">
+                <div className="text-[10px] font-black uppercase text-violet-500">Estimasi</div>
+                <div className="text-xl font-black text-violet-800">{money(processingBooking.estimated_total)}</div>
+                {bookingPaymentMethod === "CREDIT_CARD" ? <div className="mt-1 text-[11px] font-bold text-violet-600">Total final akan termasuk CC +3%</div> : null}
+              </div>
+            </div>
+
+            <div className="px-5 pb-5">
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <input type="checkbox" checked={bookingPaymentValidated} onChange={(event) => setBookingPaymentValidated(event.target.checked)} className="mt-1 h-4 w-4" />
+                <span><span className="font-black text-emerald-800">Validasi Pembayaran</span><span className="mt-1 block text-xs font-semibold leading-5 text-emerald-700">Saya sudah memeriksa metode dan status pembayaran peserta. Setelah diproses, data masuk ke Registrasi Bazar.</span></span>
+              </label>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t bg-slate-50 p-5 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setProcessingBooking(null)} className="rounded-2xl border bg-white px-5 py-3 text-sm font-black">Batal</button>
+              <button type="button" onClick={() => void processSelfBooking()} disabled={bookingProcessing || !bookingPaymentValidated} className="rounded-2xl bg-violet-600 px-6 py-3 text-sm font-black text-white disabled:opacity-40">{bookingProcessing ? "Memproses..." : "Validasi Pembayaran & Masukkan ke Registrasi"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {historyRegistration ? <VaccinationParticipantHistoryModal registration={historyRegistration} onClose={() => setHistoryRegistration(null)} /> : null}
     </main>
   );

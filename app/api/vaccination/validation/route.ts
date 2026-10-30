@@ -69,16 +69,9 @@ function itemDetail(item: any) {
 }
 
 function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
-  const products = (recordRows || []).length
-    ? (recordRows || []).map(productDetail)
-    : (itemRows || []).map(itemDetail);
+  const recordProducts = (recordRows || []).map(productDetail);
+  const itemProducts = (itemRows || []).map(itemDetail);
   const firstRecord = recordRows?.[0] || null;
-  const recordIds = products.map((item) => item.record_id).filter(Boolean);
-  const productName = products.length === 1
-    ? products[0].vaccine_name
-    : products.length > 1
-      ? `${products.length} vaksin / layanan`
-      : (row.product_name || row.vaccine_name || row.vaccine || row.batch_name || row.batchname || row.layanan || row.service_name || "Vaksin");
 
   const flow = row.session?.existing_flow_config || {};
   const legacyQueue = flow?.queue !== false;
@@ -94,6 +87,19 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
     else if (!healthdayQueueEnabled && bazarQueueEnabled) validationServiceMode = "HEALTHDAY";
     else if (healthdayQueueEnabled && !bazarQueueEnabled) validationServiceMode = "BAZAR";
   }
+
+  // Validation is service-specific: only show products that belong to the track
+  // being validated. This keeps Healthday and Bazar examination lists separate.
+  const serviceItemProducts = itemProducts.filter((item: any) => clean(item?.service_mode).toUpperCase() === validationServiceMode);
+  const products = serviceItemProducts.length
+    ? serviceItemProducts
+    : (recordProducts.length ? recordProducts : itemProducts);
+  const recordIds = products.map((item) => item.record_id).filter(Boolean);
+  const productName = products.length === 1
+    ? products[0].vaccine_name
+    : products.length > 1
+      ? `${products.length} vaksin / layanan`
+      : (row.product_name || row.vaccine_name || row.vaccine || row.batch_name || row.batchname || row.layanan || row.service_name || "Vaksin");
 
   return {
     id: row.id,

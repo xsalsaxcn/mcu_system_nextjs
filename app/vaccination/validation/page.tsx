@@ -17,6 +17,7 @@ type ProductDetail = {
   administered_by?: string;
   note?: string;
   status?: string;
+  service_mode?: string;
 };
 
 type Row = {
@@ -146,6 +147,7 @@ export default function VaccinationValidationPage() {
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("all");
+  const [serviceFilter, setServiceFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [actor, setActor] = useState("Tim Validasi");
@@ -247,14 +249,15 @@ export default function VaccinationValidationPage() {
       const companyOk = companyFilter === "all" || clean(row.company_name) === companyFilter;
       const sessionOk = sessionFilter === "all" || String(row.session_id || "") === sessionFilter;
       const locationOk = locationFilter === "all" || clean(row.location) === locationFilter;
+      const serviceOk = serviceFilter === "all" || clean(row.validation_service_mode).toUpperCase() === serviceFilter;
       const effectiveDate = dateKey(row.session_date || row.products?.[0]?.administered_at);
       const fromOk = !dateFrom || (effectiveDate && effectiveDate >= dateFrom);
       const toOk = !dateTo || (effectiveDate && effectiveDate <= dateTo);
       const searchOk = !keyword || haystack.includes(keyword);
 
-      return companyOk && sessionOk && locationOk && fromOk && toOk && searchOk;
+      return companyOk && sessionOk && locationOk && serviceOk && fromOk && toOk && searchOk;
     });
-  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, sessionFilter]);
+  }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, serviceFilter, sessionFilter]);
 
   const pendingShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() !== "DONE"), [shown]);
   const doneShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() === "DONE"), [shown]);
@@ -400,11 +403,16 @@ export default function VaccinationValidationPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 lg:grid-cols-6">
+        <div className="mt-6 grid gap-3 lg:grid-cols-7">
           <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none lg:col-span-2" placeholder="Cari pasien / dokter / produk / lot / lokasi" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <select className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
             <option value="all">Semua Lokasi</option>
             {locations.map((location) => <option key={location} value={location}>{location}</option>)}
+          </select>
+          <select className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)}>
+            <option value="all">Healthday + Bazar</option>
+            <option value="HEALTHDAY">Healthday</option>
+            <option value="BAZAR">Bazar</option>
           </select>
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Tanggal mulai" />
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Tanggal akhir" />

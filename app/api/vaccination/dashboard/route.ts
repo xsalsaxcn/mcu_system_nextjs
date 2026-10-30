@@ -20,6 +20,7 @@ function toCsv(rows: any[]) {
     "ANTRIAN",
     "TRACK",
     "JENIS_LAYANAN",
+    "JENIS_PENDAFTARAN",
     "NAMA",
     "FAMILY_ROLE",
     "MCU_ID",
@@ -61,6 +62,7 @@ function toCsv(rows: any[]) {
       row.queue_number || "",
       row.track || "",
       row.service_mode || "",
+      row.registration_type || "ADMIN BOOKING",
       row.participant_name || "",
       row.family_role || "",
       row.mcu_id || "",
@@ -107,6 +109,12 @@ function doneStatus(value: any) {
 
 function normalizeServiceMode(value: any) {
   return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
+
+function registrationType(registration: any) {
+  return clean(registration?.registered_by).toUpperCase().startsWith("SELF_BOOKING")
+    ? "SELF BOOKING"
+    : "ADMIN BOOKING";
 }
 
 function registrationTrackStatus(registration: any, track: "A" | "B") {
@@ -212,6 +220,7 @@ function buildCompleteExportRows(
         registration?.created_at
       ),
       status_note: clean(registration?.status_note),
+      registration_type: registrationType(registration),
     };
 
     for (const item of items) {
@@ -615,6 +624,8 @@ export async function GET(req: NextRequest) {
   const format = clean(req.nextUrl.searchParams.get("format")).toLowerCase();
   const dateFrom = clean(req.nextUrl.searchParams.get("date_from"));
   const dateTo = clean(req.nextUrl.searchParams.get("date_to"));
+  const requestedServiceMode = clean(req.nextUrl.searchParams.get("service_mode")).toUpperCase();
+  const serviceModeFilter = ["HEALTHDAY", "BAZAR"].includes(requestedServiceMode) ? requestedServiceMode : "";
   const selectedBenefitKeys = req.nextUrl.searchParams
     .getAll("benefit")
     .map((value) => clean(value))
@@ -766,8 +777,11 @@ export async function GET(req: NextRequest) {
       recordsByReg,
       status
     );
+    const serviceRows = serviceModeFilter
+      ? completeRows.filter((row: any) => clean(row?.service_mode).toUpperCase() === serviceModeFilter)
+      : completeRows;
     const exportRows = filterRowsForExport(
-      completeRows,
+      serviceRows,
       dateFrom,
       dateTo
     );

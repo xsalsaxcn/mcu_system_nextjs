@@ -636,7 +636,15 @@ async function findSameSessionRegistrationForReuse(
   supabase: any,
   sessionId: number,
   body: any,
+  options: { requestedServiceMode?: "HEALTHDAY" | "BAZAR"; separateServiceTrack?: boolean } = {},
 ) {
+  const requestedServiceMode = options.requestedServiceMode || "HEALTHDAY";
+  const separateServiceTrack = options.separateServiceTrack === true;
+  const serviceMatches = (registration: any) => {
+    if (!separateServiceTrack) return true;
+    return clean(registration?.patient_service_status).toUpperCase() === requestedServiceMode;
+  };
+
   const explicitId = toInt(body.existingRegistrationId || body.existing_registration_id, 0);
   if (explicitId) {
     const explicit = await supabase
@@ -647,6 +655,7 @@ async function findSameSessionRegistrationForReuse(
       .maybeSingle();
     if (explicit.error) throw new Error(explicit.error.message);
     if (!explicit.data) throw new Error("Registrasi existing pada Session ini tidak ditemukan. Refresh lalu pilih peserta lagi.");
+    if (!serviceMatches(explicit.data)) return null;
     if (!sameSessionPerson(explicit.data, body)) {
       throw new Error("Registrasi existing tidak cocok dengan identitas peserta yang dipilih.");
     }
@@ -663,6 +672,7 @@ async function findSameSessionRegistrationForReuse(
 
   const candidates = (candidatesResult.data || [])
     .filter((row: any) => sameSessionPerson(row, body))
+    .filter((row: any) => serviceMatches(row))
     .filter((row: any) => !registrationFullyCancelled(row))
     .sort((a: any, b: any) => reusePriority(b) - reusePriority(a));
 
@@ -1413,6 +1423,19 @@ export async function POST(req: NextRequest) {
 
     if (!editableItems.length && !preservedAdministered.length) return fail("Minimal satu produk/vaksin wajib dipilih.");
 
+    if (allowBazar) {
+      const existingService = clean(registration.patient_service_status || "HEALTHDAY").toUpperCase();
+      if (["HEALTHDAY", "BAZAR"].includes(existingService)) {
+        const nextModes = new Set<string>([...preservedAdministered, ...editableItems].map((item: any) => normalizeServiceMode(item?.service_mode, true)));
+        const crossesService = Array.from(nextModes).some((mode) => mode !== existingService);
+        const externalFlowInvolved = !usesInternalQueue(sessionResult.data, existingService as "HEALTHDAY" | "BAZAR")
+          || Array.from(nextModes).some((mode) => !usesInternalQueue(sessionResult.data, mode as "HEALTHDAY" | "BAZAR"));
+        if (crossesService && externalFlowInvolved) {
+          return fail("Healthday dan Bazar pada flow tanpa antrean disimpan sebagai registrasi terpisah. Tambahkan layanan dari tab layanan yang sesuai, bukan dari Edit Produk registrasi ini.");
+        }
+      }
+    }
+
     try {
       const bazarValidation = await validateBazarItems(supabase, editableItems, allowBazar);
       if (bazarValidation) return fail(bazarValidation);
@@ -1638,14 +1661,20 @@ export async function POST(req: NextRequest) {
     return fail("Untuk Child / Family, parent existing wajib dipilih pada Step 1.");
   }
 
-  // V512: one person + one Session = one active registration.
-  // Reuse the existing registration and create ONLY the missing A/B queue track.
+  // Internal queue keeps the existing combination rule.
+  // Record-only/vendor flow keeps Healthday and Bazar as separate registration rows.
   let reusableRegistration: any = null;
   try {
     reusableRegistration = await findSameSessionRegistrationForReuse(
       supabase,
       sessionId,
       { ...body, familyRole, historyPersonId: requestedHistoryPersonId, parentHistoryPersonId: requestedParentHistoryPersonId },
+      {
+        requestedServiceMode,
+        // Flow tanpa antrean harus menjadi track registrasi terpisah per layanan.
+        // Flow antrean internal tetap memakai rule kombinasi existing.
+        separateServiceTrack: allowBazar && !internalQueueEnabled,
+      },
     );
   } catch (error: any) {
     return fail(error?.message || "Gagal memeriksa registrasi existing pada Session ini.", 409);
