@@ -3,6 +3,7 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { buildVaccinationInventorySnapshot } from "@/lib/vaccination/inventorySnapshot";
 
+// V522_INVENTORY_SAFE_ARCHIVE
 // VACCINATION_ROLE_GUARD_V150
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,71 @@ export async function POST(req: NextRequest) {
   if (!lotId) return fail("Lot wajib dipilih.");
 
   const supabase = supabaseAdmin();
+
+  if (clean(body.action).toLowerCase() === "archive-lot") {
+    const primaryLotId = toInt(body.lotId || body.id, 0);
+    const reason = clean(body.reason);
+    if (!primaryLotId) return fail("Lot wajib dipilih.");
+    if (!reason) return fail("Alasan hapus wajib diisi.");
+
+    const snapshot = await buildVaccinationInventorySnapshot();
+    const canonicalRow = (snapshot.rows || []).find((row: any) => {
+      const ids = Array.isArray(row?.source_lot_ids) && row.source_lot_ids.length
+        ? row.source_lot_ids.map(Number)
+        : [Number(row?.id || 0)];
+      return ids.includes(primaryLotId);
+    });
+    if (!canonicalRow) return fail("Produk/Lot tidak ditemukan pada Inventory aktif.", 404);
+
+    const remaining = Number(canonicalRow?.stock_system_remaining || 0);
+    if (remaining !== 0) return fail(`Produk/Lot masih memiliki Sisa Sistem ${remaining}. Kurangi atau transfer stok sampai 0 sebelum dihapus dari Inventory.`, 409);
+
+    const lotIds = Array.from(new Set<number>(
+      (Array.isArray(canonicalRow?.source_lot_ids) && canonicalRow.source_lot_ids.length
+        ? canonicalRow.source_lot_ids
+        : [canonicalRow?.id])
+        .map(Number)
+        .filter((id: number) => id > 0),
+    ));
+    const [lotsResult, allocationsResult] = await Promise.all([
+      supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,active").in("id", lotIds),
+      supabase.from("vaccination_session_stock_allocations").select("id,lot_id,active").in("lot_id", lotIds).eq("active", true),
+    ]);
+    if (lotsResult.error) return fail(lotsResult.error.message, 500);
+    if (allocationsResult.error) return fail(allocationsResult.error.message, 500);
+
+    const lotUpdate = await supabase.from("vaccination_vaccine_lots").update({ active: false, updated_at: new Date().toISOString() }).in("id", lotIds);
+    if (lotUpdate.error) return fail(lotUpdate.error.message, 500);
+
+    const allocationIds = (allocationsResult.data || []).map((row: any) => Number(row?.id || 0)).filter(Boolean);
+    if (allocationIds.length) {
+      const allocationUpdate = await supabase.from("vaccination_session_stock_allocations").update({ active: false, updated_at: new Date().toISOString() }).in("id", allocationIds);
+      if (allocationUpdate.error) {
+        await supabase.from("vaccination_vaccine_lots").update({ active: true, updated_at: new Date().toISOString() }).in("id", lotIds);
+        return fail(allocationUpdate.error.message, 500);
+      }
+    }
+
+    const createdBy = (user as any).email || (user as any).name || (user as any).id || "system";
+    const movementRows = (lotsResult.data || []).map((lot: any) => ({
+      vaccine_id: Number(lot?.vaccine_id || 0),
+      lot_id: Number(lot?.id || 0),
+      movement_type: "inventory_archive",
+      qty: 0,
+      reference_type: "inventory_archive",
+      reference_id: Number(lot?.id || 0),
+      notes: `[Inventory] Hapus dari Inventory aktif · ${reason}`,
+      created_by: createdBy,
+    }));
+    const movementResult = movementRows.length ? await supabase.from("vaccination_inventory_movements").insert(movementRows) : { error: null };
+    if (movementResult.error) {
+      await supabase.from("vaccination_vaccine_lots").update({ active: true, updated_at: new Date().toISOString() }).in("id", lotIds);
+      if (allocationIds.length) await supabase.from("vaccination_session_stock_allocations").update({ active: true, updated_at: new Date().toISOString() }).in("id", allocationIds);
+      return fail(`Hapus dibatalkan karena audit gagal disimpan: ${movementResult.error.message}`, 500);
+    }
+
+    return ok({ message: `${clean(canonicalRow?.vaccine?.name) || "Produk"} · Lot ${clean(canonicalRow?.lot_number) || "-"} berhasil dihapus dari Inventory aktif. Riwayat transaksi tetap tersimpan.` });
+  }
 
   if (clean(body.action).toLowerCase() === "stock-transaction") {
     const stockAction = clean(body.stockAction).toUpperCase();

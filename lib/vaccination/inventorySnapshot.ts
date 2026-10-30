@@ -1,3 +1,4 @@
+// V522_INVENTORY_ASSIGNMENT_FALLBACK_ACTIVE_LOTS
 // V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
@@ -11,7 +12,7 @@ export async function buildVaccinationInventorySnapshot() {
   const result = await supabase
     .from("vaccination_vaccine_lots")
     .select("*, vaccine:vaccination_vaccines(id,name,brand,price,price_category)")
-    .order("active", { ascending: false })
+    .eq("active", true)
     .order("id", { ascending: false });
 
   if (result.error) throw new Error(result.error.message);
@@ -56,12 +57,14 @@ export async function buildVaccinationInventorySnapshot() {
         .in("lot_id", lotIds)
         .eq("active", true)
         .limit(20000),
-      supabase
-        .from("vaccination_session_vaccine_assignments")
-        .select("id,session_id,vaccine_id,lot_id,service_mode,active")
-        .in("lot_id", lotIds)
-        .eq("active", true)
-        .limit(20000),
+      vaccineIds.length
+        ? supabase
+            .from("vaccination_session_product_assignments")
+            .select("id,session_id,vaccine_id,service_mode,active")
+            .in("vaccine_id", vaccineIds)
+            .eq("active", true)
+            .limit(20000)
+        : Promise.resolve({ data: [], error: null }),
       supabase
         .from("vaccination_registration_items")
         .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,active")
@@ -82,15 +85,17 @@ export async function buildVaccinationInventorySnapshot() {
       ["record pemakaian", recordsResult],
       ["movement inventory", movementsResult],
       ["alokasi Healthday/Bazar", allocationsResult],
-      ["assignment katalog Healthday/Bazar", assignmentsResult],
       ["item registrasi", itemsResult],
       ["harga Paket/Non Paket", salesResult],
     ] as Array<[string, any]>) {
       if (queryResult?.error) throw new Error(`Gagal membaca ${label}: ${queryResult.error.message}`);
     }
 
+    // Assignment katalog hanya metadata klasifikasi layanan. Bila schema metadata
+    // sedang tidak tersedia, Inventory tetap harus memuat stok dan memakai alokasi
+    // sebagai fallback agar portal operasional tidak jatuh menjadi 0 semua.
     allocations = allocationsResult.data || [];
-    serviceAssignments = assignmentsResult.data || [];
+    serviceAssignments = assignmentsResult?.error ? [] : assignmentsResult.data || [];
     salesOptions = salesResult.data || [];
     movementRows = movementsResult.data || [];
 
@@ -167,10 +172,11 @@ export async function buildVaccinationInventorySnapshot() {
     allocationsByLot.get(lotId)!.push(enriched);
   }
 
-  const serviceCatalogByLot = new Map<number, any[]>();
+  const serviceCatalogByVaccine = new Map<number, any[]>();
   for (const assignment of serviceAssignments) {
-    const lotId = Number(assignment.lot_id || 0);
+    const vaccineId = Number(assignment.vaccine_id || 0);
     const sessionId = Number(assignment.session_id || 0);
+    if (!vaccineId || !sessionId) continue;
     const serviceMode = clean(assignment.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
     const session = sessionMap.get(sessionId) || null;
     const enriched = {
@@ -182,8 +188,8 @@ export async function buildVaccinationInventorySnapshot() {
       location: clean(session?.location),
       session_date: session?.session_date || null,
     };
-    if (!serviceCatalogByLot.has(lotId)) serviceCatalogByLot.set(lotId, []);
-    serviceCatalogByLot.get(lotId)!.push(enriched);
+    if (!serviceCatalogByVaccine.has(vaccineId)) serviceCatalogByVaccine.set(vaccineId, []);
+    serviceCatalogByVaccine.get(vaccineId)!.push(enriched);
   }
 
   const salesByVaccine = new Map<number, any[]>();
@@ -223,7 +229,7 @@ export async function buildVaccinationInventorySnapshot() {
       stock_difference: difference,
       stock_session: stockSession,
       service_allocations: lotAllocations,
-      service_catalog: serviceCatalogByLot.get(Number(lot.id)) || [],
+      service_catalog: serviceCatalogByVaccine.get(Number(lot.vaccine_id || lot.vaccine?.id || 0)) || [],
       service_modes: serviceModes,
       non_package_price: nonPackage?.price ?? lot.vaccine?.price ?? null,
       package_price: packageOption?.price ?? null,

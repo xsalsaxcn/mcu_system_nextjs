@@ -1,4 +1,5 @@
 "use client";
+// V522_INVENTORY_SAFE_ARCHIVE_BUTTON
 // V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
@@ -53,6 +54,8 @@ export default function VaccinationInventoryPage() {
   const [serviceFilter, setServiceFilter] = useState("ALL");
   const [productFilter, setProductFilter] = useState("ALL");
   const [editing, setEditing] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState<any | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
   const [form, setForm] = useState({ stockAction: "ADD_STOCK", inventoryTarget: "SYSTEM", quantity: "", inventoryNotes: "" });
   const [message, setMessage] = useState("Inventory membaca stok terpakai dari data dokter/Administered yang sudah Done.");
   const [error, setError] = useState("");
@@ -116,6 +119,16 @@ export default function VaccinationInventoryPage() {
     setEditing(null);
     await load();
     window.dispatchEvent(new Event("vaccination-inventory-updated"));
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    setError("");
+    if (Number(deleting?.stock_system_remaining || 0) !== 0) { setError(`Produk/Lot masih memiliki Sisa Sistem ${Number(deleting?.stock_system_remaining || 0)}. Kurangi atau transfer stok sampai 0 sebelum dihapus dari Inventory.`); return; }
+    if (!clean(deleteReason)) { setError("Alasan hapus wajib diisi."); return; }
+    const json = await fetch("/api/vaccination/inventory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "archive-lot", lotId: Number(deleting?.id || 0), reason: deleteReason }) }).then((r) => r.json());
+    if (!json.ok) { setError(json.message || "Gagal menghapus Produk/Lot dari Inventory."); return; }
+    setMessage(json.message || "Produk/Lot berhasil dihapus dari Inventory aktif."); setDeleting(null); setDeleteReason(""); await load(); window.dispatchEvent(new Event("vaccination-inventory-updated"));
   }
 
   useEffect(() => { load(); }, []);
@@ -478,7 +491,7 @@ export default function VaccinationInventoryPage() {
                         <div className="space-y-2">
                           <div className="text-xs"><span className="text-slate-500">Fisik:</span> <b>{row.stock_physical_count ?? "-"}</b></div>
                           <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
-                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button>
+                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button><button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">Hapus</button>
                         </div>
                       </td>
                     </tr>
@@ -490,6 +503,8 @@ export default function VaccinationInventoryPage() {
           </div>
         </section>
       </div>
+
+      {deleting ? <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setDeleting(null); }}><div className="w-full max-w-xl rounded-3xl bg-white shadow-2xl"><div className="flex items-start justify-between gap-3 border-b px-5 py-4"><div><div className="text-xs font-black uppercase tracking-wide text-red-700">Hapus dari Inventory</div><div className="mt-1 text-xl font-black">{deleting?.vaccine?.name || "Produk"} · Lot {deleting?.lot_number || "-"}</div></div><button type="button" onClick={() => setDeleting(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button></div><div className="space-y-4 p-5"><div className={`rounded-2xl border p-4 text-sm font-semibold ${Number(deleting?.stock_system_remaining || 0) === 0 ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"}`}>Sisa Sistem: <b>{Number(deleting?.stock_system_remaining || 0)}</b>. Hapus hanya dapat dilakukan ketika sisa stok sudah 0. Riwayat transaksi tetap tersimpan.</div><label className="block"><span className="text-xs font-black uppercase text-slate-500">Alasan Hapus</span><textarea rows={3} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" placeholder="Contoh: duplikat lot / tidak digunakan pada event ini" value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setDeleting(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button><button type="button" disabled={Number(deleting?.stock_system_remaining || 0) !== 0} onClick={() => void confirmDelete()} className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-40">Hapus dari Inventory</button></div></div></div></div> : null}
 
       {/* VACCINATION_INVENTORY_MOVEMENT_AUDIT_V149 */}
       <VaccinationInventoryMovementEnhancer />
