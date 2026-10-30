@@ -86,7 +86,14 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
   const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
   const pendingBazar = clean(row.bazar_queue_status).toUpperCase() === "PENDING_VALIDATION";
   const pendingHealthday = clean(row.queue_status || row.status).toUpperCase() === "PENDING_VALIDATION";
-  const validationServiceMode = pendingBazar && !pendingHealthday ? "BAZAR" : "HEALTHDAY";
+  const serviceStatus = clean(row.patient_service_status || "HEALTHDAY").toUpperCase();
+  let validationServiceMode = pendingBazar && !pendingHealthday ? "BAZAR" : "HEALTHDAY";
+  if (!pendingBazar && !pendingHealthday && clean(row.validation_status).toUpperCase() === "DONE") {
+    if (serviceStatus === "BAZAR") validationServiceMode = "BAZAR";
+    else if (serviceStatus === "HEALTHDAY") validationServiceMode = "HEALTHDAY";
+    else if (!healthdayQueueEnabled && bazarQueueEnabled) validationServiceMode = "HEALTHDAY";
+    else if (healthdayQueueEnabled && !bazarQueueEnabled) validationServiceMode = "BAZAR";
+  }
 
   return {
     id: row.id,
@@ -106,6 +113,8 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
     note: row.note || row.notes || row.status_note || firstRecord?.notes || row.payment_note || row.product_note || row.keterangan || "",
     print_status: row.print_status || "NOT_PRINTED",
     validation_status: row.validation_status || "PENDING",
+    validated_at: row.validated_at || null,
+    validated_by: clean(row.validated_by),
     queue_status: row.queue_status || row.status || "",
     location: clean(row.session?.location || row.location) || "-",
     session_date: row.session?.session_date || row.session_date || null,
@@ -174,7 +183,7 @@ export async function GET(req: NextRequest) {
       .limit(1000);
 
     if (sessionId) query = query.eq("session_id", sessionId);
-    query = query.or("queue_status.eq.PENDING_VALIDATION,bazar_queue_status.eq.PENDING_VALIDATION,validation_status.eq.PENDING");
+    query = query.or("queue_status.eq.PENDING_VALIDATION,bazar_queue_status.eq.PENDING_VALIDATION,validation_status.eq.PENDING,validation_status.eq.DONE");
 
     let result = await query;
     if (result.error && missingColumn(result.error)) {
@@ -191,14 +200,14 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, message: result.error.message || "Gagal membaca daftar validasi.", rows: [] }, 500);
     }
 
-    const pendingRegistrations = (result.data || []).filter((row: any) => {
+    const validationRegistrations = (result.data || []).filter((row: any) => {
       const queueStatus = clean(row.queue_status || row.status).toUpperCase();
       const validationStatus = clean(row.validation_status).toUpperCase();
       const bazarQueueStatus = clean(row.bazar_queue_status).toUpperCase();
-      return queueStatus === "PENDING_VALIDATION" || bazarQueueStatus === "PENDING_VALIDATION" || validationStatus === "PENDING";
+      return queueStatus === "PENDING_VALIDATION" || bazarQueueStatus === "PENDING_VALIDATION" || validationStatus === "PENDING" || validationStatus === "DONE";
     });
 
-    const registrationIds = pendingRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
+    const registrationIds = validationRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
     let recordsByRegistration = new Map<number, any[]>();
     let itemsByRegistration = new Map<number, any[]>();
     try {
@@ -208,7 +217,7 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, message: error?.message || "Gagal membaca detail layanan vaksin.", rows: [] }, 500);
     }
 
-    const rows = pendingRegistrations.map((row: any) =>
+    const rows = validationRegistrations.map((row: any) =>
       display(
         row,
         recordsByRegistration.get(Number(row.id)) || [],

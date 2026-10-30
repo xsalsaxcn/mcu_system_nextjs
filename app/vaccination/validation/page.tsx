@@ -34,6 +34,9 @@ type Row = {
   note?: string;
   print_status?: string;
   validation_status?: string;
+  validation_service_mode?: string;
+  validated_at?: string | null;
+  validated_by?: string;
   queue_status?: string;
   location?: string;
   session_date?: string | null;
@@ -83,6 +86,44 @@ function recordIds(row: Row) {
     ? row.products.map((item) => Number(item.record_id)).filter((id) => Number.isFinite(id) && id > 0)
     : [];
   return Array.from(new Set([...fromRow, ...fromProducts].map(Number).filter((id) => Number.isFinite(id) && id > 0)));
+}
+
+
+function csvCell(value: any) {
+  const text = String(value ?? "").replace(/\r?\n/g, " ").trim();
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportValidationRows(rows: Row[], label: string) {
+  if (!rows.length) return false;
+  const header = [
+    "Status", "No. Antrean Vendor", "Nama Peserta", "NIK Karyawan / BINUSIAN ID",
+    "Perusahaan", "Session", "Lokasi", "Tanggal Session", "Layanan", "Produk / Lot",
+    "Payment Method", "Petugas Validasi", "Waktu Selesai", "Catatan",
+  ];
+  const body = rows.map((row) => {
+    const products = (row.products || [])
+      .map((item) => `${clean(item.vaccine_name) || "Vaksin"} / Lot ${clean(item.lot_number) || "-"}`)
+      .join(" | ");
+    return [
+      clean(row.validation_status || row.queue_status || "PENDING"),
+      clean(row.queue_number), clean(row.patient_name), clean(row.employee_id),
+      clean(row.company_name), clean(row.session_name), clean(row.location), dateKey(row.session_date),
+      clean(row.validation_service_mode), products || clean(row.product_name), clean(row.payment_method),
+      clean(row.validated_by), fmtDate(row.validated_at), clean(row.note),
+    ].map(csvCell).join(",");
+  });
+  const csv = `\uFEFF${[header.map(csvCell).join(","), ...body].join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `validasi-vaksin-${label}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return true;
 }
 
 function stickerUrlFor(row: Row) {
@@ -214,6 +255,13 @@ export default function VaccinationValidationPage() {
       return companyOk && sessionOk && locationOk && fromOk && toOk && searchOk;
     });
   }, [companyFilter, dateFrom, dateTo, filter, locationFilter, rows, sessionFilter]);
+
+  const pendingShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() !== "DONE"), [shown]);
+  const doneShown = useMemo(() => shown.filter((row) => clean(row.validation_status).toUpperCase() === "DONE"), [shown]);
+
+  function runExport(targetRows: Row[], label: string) {
+    if (!exportValidationRows(targetRows, label)) setMessage("Tidak ada data sesuai filter untuk diekspor.");
+  }
 
   async function update(row: Row, action: string, note?: string) {
     setMessage("Mengubah status...");
@@ -360,13 +408,16 @@ export default function VaccinationValidationPage() {
           </select>
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Tanggal mulai" />
           <input type="date" className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Tanggal akhir" />
-          <button type="button" onClick={loadRows} className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={loadRows} className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-black text-white">{loading ? "Memuat..." : "Refresh"}</button>
+            <button type="button" onClick={() => runExport(shown, "filter")} className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">Export Filter</button>
+          </div>
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
           <input className="rounded-2xl border border-slate-200 px-4 py-3 font-bold outline-none" placeholder="Nama petugas validasi" value={actor} onChange={(e) => setActor(e.target.value)} />
           <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black text-slate-700">
-            Tampil {shown.length} dari {rows.length} peserta
+            Menunggu {pendingShown.length} · Selesai {doneShown.length} · Total {shown.length}
           </div>
         </div>
 
@@ -374,13 +425,17 @@ export default function VaccinationValidationPage() {
       </section>
 
       {recordOnlyMode ? (
+        <>
         <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-cyan-100 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b bg-cyan-50 px-5 py-4">
             <div>
-              <div className="font-black text-slate-900">Pencatatan Registrasi · Antrean Vendor</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">Nomor antrean mengikuti sistem vendor untuk layanan ini.</div>
+              <div className="font-black text-slate-900">Menunggu Validasi</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Peserta yang masih membutuhkan tindakan dari Tim Validasi.</div>
             </div>
-            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-cyan-700">{shown.length} peserta</div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => runExport(pendingShown, "menunggu")} className="rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-black text-cyan-700">Export Menunggu</button>
+              <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-cyan-700">{pendingShown.length} peserta</div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
@@ -396,7 +451,7 @@ export default function VaccinationValidationPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {shown.map((row) => (
+                {pendingShown.map((row) => (
                   <tr key={row.id} className="align-top hover:bg-slate-50">
                     <td className="px-4 py-4"><span className="rounded-xl bg-cyan-50 px-3 py-2 font-black text-cyan-800">{row.queue_number || "-"}</span></td>
                     <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
@@ -424,11 +479,56 @@ export default function VaccinationValidationPage() {
                     </td>
                   </tr>
                 ))}
-                {!shown.length ? <tr><td colSpan={7} className="p-8 text-center font-bold text-slate-500">Belum ada peserta menunggu validasi pada Session ini.</td></tr> : null}
+                {!pendingShown.length ? <tr><td colSpan={7} className="p-8 text-center font-bold text-slate-500">Belum ada peserta menunggu validasi pada Session ini.</td></tr> : null}
               </tbody>
             </table>
           </div>
         </section>
+
+        <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-emerald-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b bg-emerald-50 px-5 py-4">
+            <div>
+              <div className="font-black text-slate-900">Sudah Selesai</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">Riwayat peserta yang sudah diselesaikan oleh Tim Validasi.</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => runExport(doneShown, "selesai")} className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-black text-emerald-700">Export Selesai</button>
+              <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-emerald-700">{doneShown.length} peserta</div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">No. Antrean Vendor</th>
+                  <th className="px-4 py-3">Peserta</th>
+                  <th className="px-4 py-3">NIK Karyawan / BINUSIAN ID</th>
+                  <th className="px-4 py-3">Layanan / Produk</th>
+                  <th className="px-4 py-3">Payment Method</th>
+                  <th className="px-4 py-3">Selesai</th>
+                  <th className="px-4 py-3">Petugas</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {doneShown.map((row) => (
+                  <tr key={`done-${row.id}`} className="align-top hover:bg-slate-50">
+                    <td className="px-4 py-4"><span className="rounded-xl bg-slate-100 px-3 py-2 font-black text-slate-700">{row.queue_number || "-"}</span></td>
+                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
+                    <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
+                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                    <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                    <td className="px-4 py-4"><div className="font-bold">{fmtDate(row.validated_at) || "-"}</div></td>
+                    <td className="px-4 py-4 font-bold">{row.validated_by || "-"}</td>
+                    <td className="px-4 py-4"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai</span></td>
+                  </tr>
+                ))}
+                {!doneShown.length ? <tr><td colSpan={8} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta selesai sesuai filter.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </>
       ) : (
       <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
@@ -445,11 +545,11 @@ export default function VaccinationValidationPage() {
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 ? (
+              {pendingShown.length === 0 ? (
                 <tr>
                   <td className="px-5 py-8 text-center text-sm font-bold text-slate-500" colSpan={7}>Belum ada data pending validasi.</td>
                 </tr>
-              ) : shown.map((row) => {
+              ) : pendingShown.map((row) => {
                 const products = Array.isArray(row.products) ? row.products : [];
                 const labelCount = recordIds(row).length;
                 const canPrepareLabel = labelCount > 0 || products.length > 0;
