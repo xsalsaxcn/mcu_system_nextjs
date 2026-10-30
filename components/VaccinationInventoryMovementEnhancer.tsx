@@ -1,4 +1,5 @@
 "use client";
+// V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -113,6 +114,7 @@ export default function VaccinationInventoryMovementEnhancer() {
   const [dateTo, setDateTo] = useState("");
   const [activeBucket, setActiveBucket] = useState("");
   const [activeLotId, setActiveLotId] = useState(0);
+  const [activeLotIds, setActiveLotIds] = useState<number[]>([]);
   const [activeLotLabel, setActiveLotLabel] = useState("");
 
   const queryString = useMemo(() => {
@@ -152,8 +154,9 @@ export default function VaccinationInventoryMovementEnhancer() {
 
   const activeRows = useMemo(() => {
     if (activeBucket === "lot" && activeLotId) {
+      const ids = new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number));
       return details
-        .filter((row) => Number(row.lot_id || 0) === activeLotId)
+        .filter((row) => ids.has(Number(row.lot_id || 0)))
         .sort((a, b) => {
           const at = a.date ? new Date(a.date).getTime() : 0;
           const bt = b.date ? new Date(b.date).getTime() : 0;
@@ -222,7 +225,7 @@ export default function VaccinationInventoryMovementEnhancer() {
       } as DetailRow));
     }
     return [];
-  }, [activeBucket, activeLotId, details, summaries]);
+  }, [activeBucket, activeLotId, activeLotIds, details, summaries]);
 
   const activeParticipantRows = useMemo(
     () => activeRows.filter((row) => row.direction === "OUT" && clean(row.participant)),
@@ -331,6 +334,7 @@ export default function VaccinationInventoryMovementEnhancer() {
       const card = (event.target as HTMLElement)?.closest<HTMLElement>("[data-inventory-card-v150]");
       if (card?.dataset.inventoryCardV150) {
         setActiveLotId(0);
+        setActiveLotIds([]);
         setActiveLotLabel("");
         setActiveBucket(card.dataset.inventoryCardV150);
       }
@@ -341,6 +345,7 @@ export default function VaccinationInventoryMovementEnhancer() {
       if (card?.dataset.inventoryCardV150) {
         event.preventDefault();
         setActiveLotId(0);
+        setActiveLotIds([]);
         setActiveLotLabel("");
         setActiveBucket(card.dataset.inventoryCardV150);
       }
@@ -358,9 +363,12 @@ export default function VaccinationInventoryMovementEnhancer() {
     function openLot(event: Event) {
       const detail = (event as CustomEvent)?.detail || {};
       const lotId = Number(detail?.lotId || 0);
-      if (!lotId) return;
-      setActiveLotId(lotId);
-      setActiveLotLabel(clean(detail?.label || `Lot ${detail?.lotNumber || lotId}`));
+      const lotIds = Array.from(new Set<number>((Array.isArray(detail?.lotIds) ? detail.lotIds : [lotId]).map(Number).filter((id: number) => id > 0)));
+      if (!lotId && !lotIds.length) return;
+      const primary = lotId || lotIds[0];
+      setActiveLotId(primary);
+      setActiveLotIds(lotIds.length ? lotIds : [primary]);
+      setActiveLotLabel(clean(detail?.label || `Lot ${detail?.lotNumber || primary}`));
       setActiveBucket("lot");
     }
     window.addEventListener("vaccination-inventory-open-lot", openLot as EventListener);
@@ -385,7 +393,7 @@ export default function VaccinationInventoryMovementEnhancer() {
     if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
     if (dateFrom) params.set("from", dateFrom);
     if (dateTo) params.set("to", dateTo);
-    if (activeBucket === "lot" && activeLotId) params.set("lot_id", String(activeLotId));
+    if (activeBucket === "lot" && activeLotId) params.set("lot_ids", (activeLotIds.length ? activeLotIds : [activeLotId]).join(","));
     window.location.href = `/api/vaccination/inventory/export${params.toString() ? `?${params.toString()}` : ""}`;
   }
 
@@ -413,7 +421,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={load} disabled={loading} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memuat..." : "Terapkan Filter"}</button>
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
-          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
+          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotIds([]); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
         </div>
         <div className="mt-3 text-xs text-slate-500">Card dan angka tabel mengikuti filter yang sama. Tanpa date range, Terpakai memakai saldo kumulatif canonical Inventory (termasuk rekonsiliasi legacy bila ada). Dengan date range, Terpakai memakai record bertanggal yang dapat ditelusuri. Export mengikuti filter yang sama.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}

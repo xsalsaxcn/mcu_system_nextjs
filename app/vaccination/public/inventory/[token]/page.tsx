@@ -1,4 +1,5 @@
 "use client";
+// V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
 // V518_INVENTORY_INITIAL_STOCK_BUCKET_SYNC_PAYMENT_METHOD
 
@@ -35,6 +36,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [sessionFilter, setSessionFilter] = useState("ALL");
   const [serviceFilter, setServiceFilter] = useState("ALL");
+  const [productFilter, setProductFilter] = useState("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [detail, setDetail] = useState<any | null>(null);
@@ -104,6 +106,27 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
   }, [rows, transferSessions]);
 
+  const productOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; brand: string }>();
+    for (const row of rows) {
+      const allocations = Array.isArray(row?.service_allocations) ? row.service_allocations : [];
+      if (companyFilter !== "ALL" && clean(row?.stock_company_name) !== companyFilter && !allocations.some((item: any) => clean(item?.company_name) === companyFilter)) continue;
+      if (sessionFilter !== "ALL" && String(row?.stock_session_id || "") !== sessionFilter && !allocations.some((item: any) => String(item?.session_id || "") === sessionFilter)) continue;
+      if (serviceFilter !== "ALL") {
+        const hasRequestedBucket = allocations.some((item: any) => clean(item?.service_mode).toUpperCase() === serviceFilter);
+        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
+        if (!hasRequestedBucket && !exactSessionOwner) continue;
+      }
+      const id = String(row?.vaccine_id || row?.vaccine?.id || "");
+      if (!id) continue;
+      map.set(id, { id, name: clean(row?.vaccine?.name) || `Produk ${id}`, brand: clean(row?.vaccine?.brand) });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "id"));
+  }, [rows, companyFilter, sessionFilter, serviceFilter]);
+
+  const showHealthday = serviceFilter !== "BAZAR";
+  const showBazar = serviceFilter !== "HEALTHDAY";
+
   const filteredRows = useMemo(() => {
     const keyword = clean(search).toLowerCase();
     return rows.filter((row: any) => {
@@ -124,9 +147,10 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
         const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
         if (!hasRequestedBucket && !exactSessionOwner) return false;
       }
+      if (productFilter !== "ALL" && String(row?.vaccine_id || row?.vaccine?.id || "") !== productFilter) return false;
       return true;
     });
-  }, [rows, search, companyFilter, sessionFilter, serviceFilter]);
+  }, [rows, search, companyFilter, sessionFilter, serviceFilter, productFilter]);
 
   const summary = useMemo(() => filteredRows.reduce((acc: any, row: any) => {
     acc.initial += Number(row?.stock_initial || 0);
@@ -138,13 +162,14 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     return acc;
   }, { initial: 0, added: 0, used: 0, adjustmentOut: 0, remaining: 0, diff: 0 }), [filteredRows]);
 
-  function reportParams(lotId?: number, action = "report") {
+  function reportParams(lotIds?: number[], action = "report") {
     const query = new URLSearchParams({ token, action });
-    if (lotId) query.set("lot_id", String(lotId));
+    if (lotIds?.length) query.set("lot_ids", Array.from(new Set(lotIds.map(Number).filter(Boolean))).join(","));
     if (dateFrom) query.set("from", dateFrom);
     if (dateTo) query.set("to", dateTo);
     if (companyFilter !== "ALL") query.set("company", companyFilter);
     if (serviceFilter !== "ALL") query.set("service_mode", serviceFilter);
+    if (productFilter !== "ALL") query.set("vaccine_ids", productFilter);
     if (search.trim()) query.set("q", search.trim());
     if (sessionFilter !== "ALL") {
       const session = sessionOptions.find((item) => item.id === sessionFilter);
@@ -153,14 +178,14 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     return query;
   }
 
-  async function openMovement(lotId?: number, label?: string) {
+  async function openMovement(lotIds?: number[], label?: string) {
     setDetailLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/vaccination/public-inventory?${reportParams(lotId).toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/vaccination/public-inventory?${reportParams(lotIds).toString()}`, { cache: "no-store" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.ok === false) throw new Error(json?.message || `HTTP ${response.status}`);
-      setDetail({ ...json, label: label || (lotId ? `Lot ${lotId}` : "Semua Movement"), lotId: lotId || 0 });
+      setDetail({ ...json, label: label || (lotIds?.length ? `Lot ${lotIds[0]}` : "Semua Movement"), lotIds: lotIds || [] });
     } catch (e: any) {
       setError(String(e?.message || e || "Gagal memuat Movement."));
     } finally {
@@ -168,8 +193,8 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     }
   }
 
-  function exportFilter(lotId?: number) {
-    window.location.href = `/api/vaccination/public-inventory?${reportParams(lotId, "export").toString()}`;
+  function exportFilter(lotIds?: number[]) {
+    window.location.href = `/api/vaccination/public-inventory?${reportParams(lotIds, "export").toString()}`;
   }
 
   function allocationBucket(row: any, mode: "HEALTHDAY" | "BAZAR") {
@@ -321,11 +346,12 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
         </div>
 
         <div className="mt-5 rounded-2xl border bg-slate-50 p-4">
-          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_260px_180px_160px_160px_auto]">
+          <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_200px_230px_210px_170px_150px_150px_auto]">
             <input className="rounded-xl border bg-white px-3 py-2.5 text-sm" placeholder="Cari produk, lot, peserta, session..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("ALL"); }}><option value="ALL">Semua Perusahaan</option>{companyOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}><option value="ALL">Semua Session</option>{sessionOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)}><option value="ALL">Healthday + Bazar</option><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option></select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("ALL"); setProductFilter("ALL"); }}><option value="ALL">Semua Perusahaan</option>{companyOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={sessionFilter} onChange={(e) => { setSessionFilter(e.target.value); setProductFilter("ALL"); }}><option value="ALL">Semua Session</option>{sessionOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="ALL">Semua Produk</option>{productOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.brand ? ` · ${item.brand}` : ""}</option>)}</select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => { setServiceFilter(e.target.value); setProductFilter("ALL"); }}><option value="ALL">Healthday + Bazar</option><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option></select>
             <input type="date" className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             <input type="date" className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
             <div className="flex gap-2"><button type="button" onClick={() => exportFilter()} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white">Export Filter</button><button type="button" onClick={() => void openMovement()} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-black text-white">Semua Movement</button></div>
@@ -335,20 +361,20 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
         <div className="mt-5 overflow-hidden rounded-2xl border bg-white">
           <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3"><div className="font-black">Inventory per Produk & Lot</div><div className="rounded-full border bg-white px-3 py-1 text-xs font-bold">{filteredRows.length} lot</div></div>
           <div className="overflow-x-auto">
-            <table className="min-w-[1380px] w-full text-sm">
-              <thead className="bg-slate-100 text-[10px] uppercase text-slate-600"><tr><th className="p-3 text-left">Produk & Lot</th><th className="p-3 text-left">Harga</th><th className="p-3 text-left">Healthday</th><th className="p-3 text-left">Bazar</th><th className="p-3">Awal</th><th className="p-3">Tambah</th><th className="p-3">Terpakai</th><th className="p-3">Sisa</th><th className="p-3 text-left">Movement</th><th className="p-3 text-left">Audit</th><th className="p-3 text-left">Aksi</th></tr></thead>
+            <table className={`${serviceFilter === "ALL" ? "min-w-[1380px]" : "min-w-[1180px]"} w-full text-sm`}>
+              <thead className="bg-slate-100 text-[10px] uppercase text-slate-600"><tr><th className="p-3 text-left">Produk & Lot</th><th className="p-3 text-left">Harga</th>{showHealthday ? <th className="p-3 text-left">Healthday</th> : null}{showBazar ? <th className="p-3 text-left">Bazar</th> : null}<th className="p-3">Awal</th><th className="p-3">Tambah</th><th className="p-3">Terpakai</th><th className="p-3">Sisa</th><th className="p-3 text-left">Movement</th><th className="p-3 text-left">Audit</th><th className="p-3 text-left">Aksi</th></tr></thead>
               <tbody className="divide-y">
                 {filteredRows.map((row: any) => <tr key={row.id} className="align-top hover:bg-slate-50">
-                  <td className="p-3"><div className="font-black">{row?.vaccine?.name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row?.vaccine?.brand || "-"}</div><div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black">Lot {row?.lot_number || "-"}</div></td>
+                  <td className="p-3"><div className="font-black">{row?.vaccine?.name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row?.vaccine?.brand || "-"}</div><div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black">Lot {row?.lot_number || "-"}</div>{Number(row?.duplicate_count || 1) > 1 ? <div className="mt-1 text-[10px] font-semibold text-slate-400">{row.duplicate_count} row lama digabung · 1 saldo canonical</div> : null}</td>
                   <td className="p-3 text-xs"><div>Non Paket <b>{money(row?.non_package_price)}</b></div><div className="mt-1">Paket <b className="text-emerald-700">{money(row?.package_price)}</b></div>{row?.package_dose_count ? <div className="mt-1 text-[10px] text-emerald-700">{row.package_dose_count} dosis/paket</div> : null}</td>
-                  <td className="p-3">{allocationBucket(row, "HEALTHDAY")}</td><td className="p-3">{allocationBucket(row, "BAZAR")}</td>
+                  {showHealthday ? <td className="p-3">{allocationBucket(row, "HEALTHDAY")}</td> : null}{showBazar ? <td className="p-3">{allocationBucket(row, "BAZAR")}</td> : null}
                   <td className="p-3 text-center font-black">{Number(row?.stock_initial || 0)}</td><td className="p-3 text-center font-bold">{Number(row?.stock_added || 0)}</td><td className="p-3 text-center font-black">{Number(row?.stock_used || 0)}</td><td className="p-3 text-center font-black text-emerald-700">{Number(row?.stock_system_remaining || 0)}</td>
-                  <td className="p-3"><button type="button" onClick={() => void openMovement(Number(row?.id || 0), `${row?.vaccine?.name || "Vaksin"} · Lot ${row?.lot_number || "-"}`)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-left"><div className="text-xs font-black text-blue-700 underline">{Number(row?.movement_count || 0)} transaksi</div><div className="mt-1 text-[10px] text-slate-500">Klik detail</div></button></td>
+                  <td className="p-3"><button type="button" onClick={() => void openMovement(Array.isArray(row?.source_lot_ids) ? row.source_lot_ids : [Number(row?.id || 0)], `${row?.vaccine?.name || "Vaksin"} · Lot ${row?.lot_number || "-"}`)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-left"><div className="text-xs font-black text-blue-700 underline">{Number(row?.movement_count || 0)} transaksi</div><div className="mt-1 text-[10px] text-slate-500">Klik detail</div></button></td>
                   <td className="p-3 text-xs"><div>Fisik <b>{row?.stock_physical_count ?? "-"}</b></div><div className="mt-1">Selisih <b>{row?.stock_difference ?? "Belum audit"}</b></div></td>
                   <td className="p-3"><button type="button" onClick={() => startEdit(row)} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 hover:bg-amber-100">Edit Stok</button></td>
                 </tr>)}
-                {!loading && !filteredRows.length ? <tr><td colSpan={11} className="p-8 text-center text-slate-500">Tidak ada inventory sesuai filter.</td></tr> : null}
-                {loading ? <tr><td colSpan={11} className="p-8 text-center text-slate-500">Memuat inventory...</td></tr> : null}
+                {!loading && !filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 11 : 10} className="p-8 text-center text-slate-500">Tidak ada inventory sesuai filter.</td></tr> : null}
+                {loading ? <tr><td colSpan={serviceFilter === "ALL" ? 11 : 10} className="p-8 text-center text-slate-500">Memuat inventory...</td></tr> : null}
               </tbody>
             </table>
           </div>

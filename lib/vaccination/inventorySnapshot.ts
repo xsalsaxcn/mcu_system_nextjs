@@ -1,3 +1,4 @@
+// V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
 
 function clean(value: any) {
@@ -162,7 +163,7 @@ export async function buildVaccinationInventorySnapshot() {
     salesByVaccine.get(vaccineId)!.push(option);
   }
 
-  const rows = lots.map((lot: any) => {
+  const rawRows = lots.map((lot: any) => {
     const initial = Number(lot.stock_initial || 0);
     const addedFromField = Number(lot.stock_added || 0);
     const addedFromMovements = inboundByLot.get(Number(lot.id)) || 0;
@@ -199,6 +200,140 @@ export async function buildVaccinationInventorySnapshot() {
       movement_count: movementCountByLot.get(Number(lot.id)) || 0,
       last_movement_at: lastMovement?.created_at || null,
       last_movement_type: clean(lastMovement?.movement_type),
+    };
+  });
+
+
+  // V519: collapse accidental duplicate lot rows for Inventory display/reporting.
+  // Identity = same product + lot number + stock ownership target. We DO NOT sum
+  // stock_initial across aliases because duplicated catalog rows can carry the same
+  // opening stock. Real participant usage / explicit movements from every alias are
+  // still consolidated so no historical trace is lost.
+  function canonicalLotKey(row: any) {
+    const scope = clean(row?.stock_scope || "GENERAL").toUpperCase() || "GENERAL";
+    const company = clean(row?.stock_company_name).toLowerCase();
+    const sessionId = Number(row?.stock_session_id || 0);
+    const vaccineId = Number(row?.vaccine_id || row?.vaccine?.id || 0);
+    const lotNumber = clean(row?.lot_number).toLowerCase();
+    return [vaccineId, lotNumber, scope, company, sessionId].join("|");
+  }
+
+  function canonicalSignal(row: any) {
+    const allocationSignal = (row?.service_allocations || []).reduce(
+      (sum: number, item: any) => sum + Math.max(0, Number(item?.allocated_qty || 0)),
+      0,
+    );
+    return (
+      Number(row?.movement_count || 0) * 1_000_000 +
+      Number(row?.stock_used || 0) * 100_000 +
+      allocationSignal * 1_000 +
+      Number(row?.stock_added || 0) * 100 +
+      Number(row?.stock_initial || 0) * 10 +
+      (row?.active === false ? 0 : 1)
+    );
+  }
+
+  const duplicateGroups = new Map<string, any[]>();
+  for (const row of rawRows) {
+    const key = canonicalLotKey(row);
+    if (!duplicateGroups.has(key)) duplicateGroups.set(key, []);
+    duplicateGroups.get(key)!.push(row);
+  }
+
+  const rows = Array.from(duplicateGroups.values()).map((group) => {
+    const ranked = [...group].sort((a: any, b: any) => {
+      const scoreDiff = canonicalSignal(b) - canonicalSignal(a);
+      if (scoreDiff) return scoreDiff;
+      return Number(a?.id || 0) - Number(b?.id || 0);
+    });
+    const canonical = ranked[0];
+    const sourceLotIds = Array.from(
+      new Set<number>(group.map((row: any) => Number(row?.id || 0)).filter((id: number) => id > 0)),
+    ).sort((a, b) => a - b);
+
+    const initial = Math.max(0, ...group.map((row: any) => Number(row?.stock_initial || 0)));
+    const addedFromFields = Math.max(0, ...group.map((row: any) => Number(row?.stock_added || 0)));
+    const addedFromMovements = sourceLotIds.reduce((sum, lotId) => sum + (inboundByLot.get(lotId) || 0), 0);
+    const added = Math.max(addedFromFields, addedFromMovements);
+    const usedFromRecords = sourceLotIds.reduce((sum, lotId) => sum + (usedByLot.get(lotId) || 0), 0);
+    const usedFromLegacy = Math.max(0, ...group.map((row: any) => Number(row?.stock_used || 0)));
+    const used = Math.max(usedFromLegacy, usedFromRecords);
+    const adjustmentOut = sourceLotIds.reduce((sum, lotId) => sum + (adjustmentOutByLot.get(lotId) || 0), 0);
+    const systemRemaining = initial + added - used - adjustmentOut;
+
+    const physicalCandidates = [canonical, ...group]
+      .map((row: any) => row?.stock_physical_count)
+      .filter((value: any) => value !== null && value !== undefined && value !== "")
+      .map(Number)
+      .filter((value: number) => Number.isFinite(value));
+    const physical = physicalCandidates.length ? physicalCandidates[0] : null;
+    const difference = physical === null ? null : physical - systemRemaining;
+
+    const allocationGroups = new Map<string, any[]>();
+    for (const row of group) {
+      for (const allocation of row?.service_allocations || []) {
+        const sessionId = Number(allocation?.session_id || 0);
+        const mode = clean(allocation?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        const key = `${sessionId}:${mode}`;
+        if (!allocationGroups.has(key)) allocationGroups.set(key, []);
+        allocationGroups.get(key)!.push(allocation);
+      }
+    }
+
+    const mergedAllocations = Array.from(allocationGroups.entries()).map(([key, values]) => {
+      const [sessionText, mode] = key.split(":");
+      const sessionId = Number(sessionText || 0);
+      const base = [...values].sort((a: any, b: any) => Number(b?.allocated_qty || 0) - Number(a?.allocated_qty || 0))[0] || {};
+      const allocated = Math.max(0, ...values.map((item: any) => Number(item?.allocated_qty || 0)));
+      const aliasLotIds = new Set<number>();
+      for (const row of group) {
+        const matches = (row?.service_allocations || []).some(
+          (item: any) => Number(item?.session_id || 0) === sessionId &&
+            (clean(item?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY") === mode,
+        );
+        if (matches) aliasLotIds.add(Number(row?.id || 0));
+      }
+      const usedQty = Array.from(aliasLotIds).reduce(
+        (sum, lotId) => sum + (serviceUsed.get(`${sessionId}:${lotId}:${mode}`) || 0),
+        0,
+      );
+      return {
+        ...base,
+        id: `canonical-${canonical.id}-${sessionId}-${mode}`,
+        lot_id: Number(canonical.id),
+        service_mode: mode,
+        allocated_qty: allocated,
+        used_qty: usedQty,
+        remaining_qty: allocated - usedQty,
+        source_allocation_ids: values.map((item: any) => item?.id).filter(Boolean),
+      };
+    });
+
+    const serviceModes = Array.from(new Set(mergedAllocations.map((item: any) => item.service_mode))).sort();
+    const movementCount = sourceLotIds.reduce((sum, lotId) => sum + (movementCountByLot.get(lotId) || 0), 0);
+    const movementCandidates = sourceLotIds
+      .map((lotId) => lastMovementByLot.get(lotId))
+      .filter(Boolean)
+      .sort((a: any, b: any) => new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime());
+    const lastMovement = movementCandidates[0] || null;
+
+    return {
+      ...canonical,
+      source_lot_ids: sourceLotIds,
+      duplicate_count: sourceLotIds.length,
+      duplicate_lot_ids: sourceLotIds.filter((id) => id !== Number(canonical?.id || 0)),
+      stock_initial: initial,
+      stock_added: added,
+      stock_used: used,
+      stock_adjustment_out: adjustmentOut,
+      stock_system_remaining: systemRemaining,
+      stock_physical_count: physical,
+      stock_difference: difference,
+      service_allocations: mergedAllocations,
+      service_modes: serviceModes,
+      movement_count: movementCount,
+      last_movement_at: lastMovement?.created_at || canonical?.last_movement_at || null,
+      last_movement_type: clean(lastMovement?.movement_type) || clean(canonical?.last_movement_type),
     };
   });
 

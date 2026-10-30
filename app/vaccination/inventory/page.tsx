@@ -1,4 +1,5 @@
 "use client";
+// V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
 import VaccinationInventoryMovementEnhancer from "@/components/VaccinationInventoryMovementEnhancer";
 // VACCINATION_INVENTORY_MOVEMENT_ENHANCER_V149
@@ -49,6 +50,7 @@ export default function VaccinationInventoryPage() {
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [sessionFilter, setSessionFilter] = useState("ALL");
   const [serviceFilter, setServiceFilter] = useState("ALL");
+  const [productFilter, setProductFilter] = useState("ALL");
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ stockAction: "ADD_STOCK", inventoryTarget: "SYSTEM", quantity: "", inventoryNotes: "" });
   const [message, setMessage] = useState("Inventory membaca stok terpakai dari data dokter/Administered yang sudah Done.");
@@ -141,6 +143,33 @@ export default function VaccinationInventoryPage() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
   }, [rows]);
 
+  const productOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; brand: string }>();
+    for (const row of rows) {
+      const allocations = Array.isArray(row?.service_allocations) ? row.service_allocations : [];
+      if (companyFilter !== "ALL") {
+        const companyMatch = clean(row?.stock_company_name) === companyFilter || allocations.some((a: any) => clean(a?.company_name) === companyFilter);
+        if (!companyMatch) continue;
+      }
+      if (sessionFilter !== "ALL") {
+        const sessionMatch = String(row?.stock_session_id || "") === sessionFilter || allocations.some((a: any) => String(a?.session_id || "") === sessionFilter);
+        if (!sessionMatch) continue;
+      }
+      if (serviceFilter !== "ALL") {
+        const hasRequestedBucket = allocations.some((a: any) => clean(a?.service_mode).toUpperCase() === serviceFilter);
+        const exactSessionOwner = sessionFilter !== "ALL" && String(row?.stock_session_id || "") === sessionFilter;
+        if (!hasRequestedBucket && !exactSessionOwner) continue;
+      }
+      const id = String(row?.vaccine_id || row?.vaccine?.id || "");
+      if (!id) continue;
+      map.set(id, { id, name: clean(row?.vaccine?.name) || `Produk ${id}`, brand: clean(row?.vaccine?.brand) });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "id"));
+  }, [rows, companyFilter, sessionFilter, serviceFilter]);
+
+  const showHealthday = serviceFilter !== "BAZAR";
+  const showBazar = serviceFilter !== "HEALTHDAY";
+
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -172,9 +201,10 @@ export default function VaccinationInventoryPage() {
         if (!hasRequestedBucket && !exactSessionOwner) return false;
       }
 
+      if (productFilter !== "ALL" && String(row?.vaccine_id || row?.vaccine?.id || "") !== productFilter) return false;
       return true;
     });
-  }, [rows, search, companyFilter, sessionFilter, serviceFilter]);
+  }, [rows, search, companyFilter, sessionFilter, serviceFilter, productFilter]);
 
 
   const summary = useMemo(() => {
@@ -232,17 +262,21 @@ export default function VaccinationInventoryPage() {
             <div className="text-sm font-black text-slate-900">Pelaporan Inventory mengikuti rule Master Produk & Lot</div>
             <div className="mt-1 text-xs font-semibold text-slate-500">Tujuan stok Perusahaan/Session, bucket Healthday/Bazar, harga Paket/Non Paket, pemakaian peserta, dan movement dibaca dari sumber data yang sama dengan Master.</div>
           </div>
-          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_280px_180px_auto]">
+          <div className="grid gap-3 xl:grid-cols-[minmax(240px,1fr)_210px_250px_210px_170px_auto]">
             <input className="rounded-xl border px-3 py-2.5" placeholder="Cari produk, lot, session, perusahaan..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("ALL"); }}>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={companyFilter} onChange={(e) => { setCompanyFilter(e.target.value); setSessionFilter("ALL"); setProductFilter("ALL"); }}>
               <option value="ALL">Semua Perusahaan</option>
               {companyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
             </select>
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)}>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={sessionFilter} onChange={(e) => { setSessionFilter(e.target.value); setProductFilter("ALL"); }}>
               <option value="ALL">Semua Session</option>
               {sessionOptions.map((session) => <option key={session.id} value={session.id}>{session.name}</option>)}
             </select>
-            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)}>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+              <option value="ALL">Semua Produk</option>
+              {productOptions.map((product) => <option key={product.id} value={product.id}>{product.name}{product.brand ? ` · ${product.brand}` : ""}</option>)}
+            </select>
+            <select className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold" value={serviceFilter} onChange={(e) => { setServiceFilter(e.target.value); setProductFilter("ALL"); }}>
               <option value="ALL">Healthday + Bazar</option>
               <option value="HEALTHDAY">Healthday</option>
               <option value="BAZAR">Bazar</option>
@@ -304,14 +338,14 @@ export default function VaccinationInventoryPage() {
             <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{filteredRows.length} lot</div>
           </div>
           <div className="overflow-x-auto">
-            <table data-inventory-canonical-table="1" className="min-w-[1550px] w-full text-sm">
+            <table data-inventory-canonical-table="1" className={`${serviceFilter === "ALL" ? "min-w-[1550px]" : "min-w-[1350px]"} w-full text-sm`}>
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
                   <th className="w-[260px] p-3 text-left">Produk & Lot</th>
                   <th className="w-[180px] p-3 text-left">Harga</th>
                   <th className="w-[210px] p-3 text-left">Tujuan Stok</th>
-                  <th className="w-[175px] p-3 text-left">Healthday</th>
-                  <th className="w-[175px] p-3 text-left">Bazar</th>
+                  {showHealthday ? <th className="w-[220px] p-3 text-left">Healthday</th> : null}
+                  {showBazar ? <th className="w-[220px] p-3 text-left">Bazar</th> : null}
                   <th className="w-[90px] p-3 text-left">Jumlah Awal</th>
                   <th className="w-[90px] p-3 text-left">Tambahan Stok</th>
                   <th className="w-[90px] p-3 text-left">Terpakai</th>
@@ -375,6 +409,7 @@ export default function VaccinationInventoryPage() {
                         <div className="font-black text-slate-900">{row.vaccine?.name || "-"}</div>
                         <div className="mt-1 text-xs text-slate-500">{row.vaccine?.brand || "-"}</div>
                         <div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black text-slate-700">Lot {row.lot_number || "-"}</div>
+                        {Number(row.duplicate_count || 1) > 1 ? <div className="mt-1 text-[10px] font-semibold text-slate-400">{row.duplicate_count} row lama digabung · 1 saldo canonical</div> : null}
                       </td>
                       <td className="p-3">
                         <div className="space-y-1 text-xs">
@@ -390,8 +425,8 @@ export default function VaccinationInventoryPage() {
                           <div className="mt-1 truncate text-xs text-slate-600" title={target.session}>{target.session}</div>
                         </div>
                       </td>
-                      <td className="p-3">{renderBucket("HEALTHDAY")}</td>
-                      <td className="p-3">{renderBucket("BAZAR")}</td>
+                      {showHealthday ? <td className="p-3">{renderBucket("HEALTHDAY")}</td> : null}
+                      {showBazar ? <td className="p-3">{renderBucket("BAZAR")}</td> : null}
                       <td className="p-3 text-center font-black">{row.stock_initial || 0}</td>
                       <td className="p-3 text-center font-bold">{row.stock_added || 0}</td>
                       <td className="p-3 text-center font-black">{row.stock_used || 0}</td>
@@ -410,6 +445,7 @@ export default function VaccinationInventoryPage() {
                               new CustomEvent("vaccination-inventory-open-lot", {
                                 detail: {
                                   lotId: Number(row.id || 0),
+                                  lotIds: Array.isArray(row.source_lot_ids) ? row.source_lot_ids : [Number(row.id || 0)],
                                   lotNumber: row.lot_number || "",
                                   label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
                                 },
@@ -433,7 +469,7 @@ export default function VaccinationInventoryPage() {
                     </tr>
                   );
                 })}
-                {!filteredRows.length ? <tr><td colSpan={12} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
+                {!filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 12 : 11} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
               </tbody>
             </table>
           </div>
