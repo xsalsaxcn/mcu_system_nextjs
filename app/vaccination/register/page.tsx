@@ -193,6 +193,8 @@ export default function VaccinationRegisterPage() {
   const [contextLocked, setContextLocked] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: "queue", direction: "asc" });
   const [search, setSearch] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [registeringExternalId, setRegisteringExternalId] = useState<number | null>(null);
   const [historyRegistration, setHistoryRegistration] = useState<any | null>(null);
   const [walkinModalOpen, setWalkinModalOpen] = useState(false);
   const [walkinModalStep, setWalkinModalStep] = useState<1 | 2>(1);
@@ -462,10 +464,34 @@ export default function VaccinationRegisterPage() {
     });
   }, [sortedRegistrations, healthdayBazarEnabled, activeQueueView, bazarQueueEnabled, healthdayQueueEnabled]);
 
+  const registrationProductOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const registration of queueReadyRegistrations) {
+      const items = Array.isArray(registration?.items) ? registration.items : [];
+      for (const item of items) {
+        const mode = String(item?.service_mode || "HEALTHDAY").toUpperCase();
+        if (healthdayBazarEnabled && mode !== activeQueueView) continue;
+        const vaccineId = String(item?.vaccine_id || "");
+        const name = String(item?.vaccine?.name || "Produk").trim();
+        if (vaccineId && name && !map.has(vaccineId)) map.set(vaccineId, name);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
+  }, [queueReadyRegistrations, healthdayBazarEnabled, activeQueueView]);
+
+  useEffect(() => {
+    setProductFilter("");
+  }, [activeQueueView, form.sessionId]);
+
   const visibleRegistrations = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return queueReadyRegistrations;
     return queueReadyRegistrations.filter((registration: any) => {
+      const serviceItems = (Array.isArray(registration.items) ? registration.items : []).filter((item: any) => {
+        if (!healthdayBazarEnabled) return true;
+        return String(item?.service_mode || "HEALTHDAY").toUpperCase() === activeQueueView;
+      });
+      if (productFilter && !serviceItems.some((item: any) => String(item?.vaccine_id || "") === productFilter)) return false;
+      if (!keyword) return true;
       const haystack = [
         registration.participant_name,
         registration.employee_id,
@@ -473,11 +499,11 @@ export default function VaccinationRegisterPage() {
         registration.nik,
         registration.email,
         registration.phone,
-        ...(Array.isArray(registration.items) ? registration.items.map((item: any) => item?.vaccine?.name) : []),
+        ...serviceItems.map((item: any) => item?.vaccine?.name),
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [queueReadyRegistrations, search]);
+  }, [queueReadyRegistrations, search, productFilter, healthdayBazarEnabled, activeQueueView]);
 
   const pendingSelfBookings = useMemo(
     () => selfBookings.filter((booking: any) => String(booking?.booking_status || "").toUpperCase() === "PENDING"),
@@ -610,7 +636,12 @@ export default function VaccinationRegisterPage() {
         }),
       });
       const json = await response.json().catch(() => ({}));
-      if (!json.ok) { setBookingProcessError(json.message || `Self Booking gagal diproses (${response.status}).`); return; }
+      if (!json.ok) {
+        const messageText = json.message || `Self Booking gagal diproses (${response.status}).`;
+        setBookingProcessError(messageText);
+        if (response.status === 409 && String(messageText).toLowerCase().includes("produk bazar")) window.alert(messageText);
+        return;
+      }
       setMessage(json.message || "Self Booking berhasil diproses.");
       setProcessingBooking(null);
       setBookingPaymentValidated(false);
@@ -696,6 +727,32 @@ export default function VaccinationRegisterPage() {
       setError(error?.message || "Tidak dapat menyimpan perubahan Self Booking.");
     } finally {
       setSelfBookingEditSaving(false);
+    }
+  }
+
+  async function registerExternalParticipant(registration: any) {
+    const registrationId = Number(registration?.id || 0);
+    if (!registrationId) return;
+    setRegisteringExternalId(registrationId);
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "mark-external-arrived",
+          registrationId,
+          serviceMode: activeQueueView,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!json.ok) { setError(json.message || "Peserta gagal didaftarkan ke Tim Validasi."); return; }
+      setMessage(json.message || `${registration?.participant_name || "Peserta"} masuk Menunggu Validasi.`);
+      await loadRegistrations(form.sessionId, selectedSourceId);
+    } catch (err: any) {
+      setError(err?.message || "Peserta gagal didaftarkan ke Tim Validasi.");
+    } finally {
+      setRegisteringExternalId(null);
     }
   }
 
@@ -2110,12 +2167,22 @@ export default function VaccinationRegisterPage() {
                 : (healthdayBazarEnabled
                     ? `Pencatatan ${activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} · ${queueReadyRegistrations.length} peserta`
                     : `Pencatatan Session Ini · ${registrations.length} peserta`)}</div>
-              <input
-                className="mt-3 w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-80"
-                placeholder="Cari nama / Employee ID / NIK..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm xl:w-72"
+                  placeholder="Cari nama / Employee ID / NIK..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <select
+                  value={productFilter}
+                  onChange={(e) => setProductFilter(e.target.value)}
+                  className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-bold sm:w-64"
+                >
+                  <option value="">Semua Produk {activeQueueView === "BAZAR" ? "Bazar" : "Healthday"}</option>
+                  {registrationProductOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                </select>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => exportStage("all")} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Export Semua Stage</button>
@@ -2318,6 +2385,11 @@ export default function VaccinationRegisterPage() {
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">
                           {needsQueueRelease ? <button onClick={() => releaseQueue(registration)} disabled={releasingId === registration.id} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-60">{releasingId === registration.id ? "Proses..." : "Rilis Antrian"}</button> : null}
+                          {!internalQueueEnabled && ["IMPORTED", "REGISTERED", ""].includes(String(activeQueueView === "BAZAR" ? registration?.bazar_queue_status : registration?.queue_status || "").toUpperCase()) ? (
+                            <button type="button" onClick={() => void registerExternalParticipant(registration)} disabled={registeringExternalId === Number(registration.id)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-50">
+                              {registeringExternalId === Number(registration.id) ? "Mendaftarkan..." : "Daftarkan"}
+                            </button>
+                          ) : null}
                           <button onClick={() => openEditProducts(registration)} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit Produk</button>
                           {internalQueueEnabled && String(registration?.queue_number || "").trim() && hasA ? (
                             <button

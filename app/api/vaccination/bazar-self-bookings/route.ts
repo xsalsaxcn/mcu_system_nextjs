@@ -394,17 +394,28 @@ export async function POST(req: NextRequest) {
   if (sessionResult.error) return fail(sessionResult.error.message, 500);
   const session = sessionResult.data;
 
-  const duplicates = await supabase
-    .from("vaccination_registrations")
-    .select("id,patient_service_status,bazar_queue_status,bazar_queue_number")
-    .eq("session_id", sessionId)
-    .eq("employee_id", clean(booking.employee_id))
-    .order("id", { ascending: false })
-    .limit(50);
-  if (duplicates.error) return fail(duplicates.error.message, 500);
-  const activeBazar = (duplicates.data || []).find(activeBazarRegistration);
-  if (activeBazar) {
-    return fail(`Peserta sudah memiliki pendaftaran Bazar aktif pada Session ini${clean(activeBazar.bazar_queue_number) ? ` (${clean(activeBazar.bazar_queue_number)})` : ""}.`, 409);
+  // A participant may register Bazar more than once in the same Session,
+  // but the same Bazar product must not be registered twice.
+  const selectedVaccineIds = Array.from(new Set((booking.selected_items || []).map((item: any) => Number(item?.vaccine_id || item?.vaccineId || 0)).filter(Boolean)));
+  if (selectedVaccineIds.length) {
+    const existingItems = await supabase
+      .from("vaccination_registration_items")
+      .select("vaccine_id,active,status,vaccine:vaccination_vaccines(id,name),registration:vaccination_registrations!inner(id,session_id,employee_id,bazar_queue_status)")
+      .eq("registration.session_id", sessionId)
+      .eq("registration.employee_id", clean(booking.employee_id))
+      .eq("service_mode", "BAZAR")
+      .eq("active", true)
+      .in("vaccine_id", selectedVaccineIds);
+    if (existingItems.error) return fail(existingItems.error.message, 500);
+    const duplicateRows = (existingItems.data || []).filter((row: any) => {
+      const itemStatus = clean(row?.status).toUpperCase();
+      const registrationStatus = clean(row?.registration?.bazar_queue_status).toUpperCase();
+      return !["CANCELLED", "CANCELED"].includes(itemStatus) && !["CANCELLED", "CANCELED"].includes(registrationStatus);
+    });
+    if (duplicateRows.length) {
+      const names = Array.from(new Set(duplicateRows.map((row: any) => clean(row?.vaccine?.name) || `Produk #${row?.vaccine_id}`).filter(Boolean)));
+      return fail(`Produk Bazar berikut sudah pernah didaftarkan peserta pada Session ini: ${names.join(", ")}. Pilih produk lain.`, 409);
+    }
   }
 
   let prepared: { rows: any[]; total: number };
@@ -440,8 +451,8 @@ export async function POST(req: NextRequest) {
     queue_status: "REGISTERED",
     bazar_queue_number: nextQueue?.number || null,
     bazar_queue_sequence: nextQueue?.sequence || null,
-    bazar_queue_status: internalQueue ? "WAITING" : "REGISTERED",
-    validation_status: null,
+    bazar_queue_status: internalQueue ? "WAITING" : "PENDING_VALIDATION",
+    validation_status: internalQueue ? null : "PENDING",
     patient_service_status: "BAZAR",
     registered_by: `SELF_BOOKING · ${actor}`,
     registered_at: now,
@@ -510,12 +521,12 @@ export async function POST(req: NextRequest) {
   return ok({
     message: internalQueue
       ? `Pembayaran tervalidasi. Self Booking diproses ke Registrasi Bazar ${nextQueue?.number || ""}.`
-      : "Pembayaran tervalidasi. Self Booking masuk ke Registrasi Bazar dan menunggu nomor antrean vendor.",
+      : "Pembayaran tervalidasi. Self Booking masuk ke Registrasi Bazar dan Menunggu Validasi.",
     booking: bookingUpdate.data,
     registration: {
       id: Number(registration.id),
       bazarQueueNumber: nextQueue?.number || "",
-      bazarQueueStatus: internalQueue ? "WAITING" : "REGISTERED",
+      bazarQueueStatus: internalQueue ? "WAITING" : "PENDING_VALIDATION",
       registrationType: "SELF BOOKING",
       paymentMethod,
     },

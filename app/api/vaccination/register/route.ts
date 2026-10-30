@@ -1058,6 +1058,45 @@ export async function POST(req: NextRequest) {
   const action = clean(body.action);
   const supabase = supabaseAdmin();
 
+  if (action === "mark-external-arrived") {
+    const registrationId = toInt(body.registrationId || body.registration_id, 0);
+    const requestedServiceMode = clean(body.serviceMode || body.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
+
+    const regResult = await supabase
+      .from("vaccination_registrations")
+      .select("*")
+      .eq("id", registrationId)
+      .single();
+    if (regResult.error) return fail(regResult.error.message, 500);
+
+    const sessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,existing_queue_profile,existing_flow_config")
+      .eq("id", regResult.data.session_id)
+      .single();
+    if (sessionResult.error) return fail(sessionResult.error.message, 500);
+    if (usesInternalQueue(sessionResult.data, requestedServiceMode)) {
+      return fail(`Layanan ${requestedServiceMode === "BAZAR" ? "Bazar" : "Healthday"} memakai antrean internal. Gunakan flow antrean standard.`, 409);
+    }
+
+    const serviceStatus = clean(regResult.data.patient_service_status || "HEALTHDAY").toUpperCase();
+    if (requestedServiceMode === "BAZAR" && !serviceHasTrack(serviceStatus, "B")) return fail("Peserta tidak memiliki layanan Bazar pada registrasi ini.", 409);
+    if (requestedServiceMode === "HEALTHDAY" && !serviceHasTrack(serviceStatus, "A")) return fail("Peserta tidak memiliki layanan Healthday pada registrasi ini.", 409);
+
+    const update = requestedServiceMode === "BAZAR"
+      ? { bazar_queue_status: "PENDING_VALIDATION", validation_status: "PENDING", updated_at: new Date().toISOString() }
+      : { queue_status: "PENDING_VALIDATION", validation_status: "PENDING", updated_at: new Date().toISOString() };
+    const updateResult = await supabase
+      .from("vaccination_registrations")
+      .update(update)
+      .eq("id", registrationId)
+      .select("*")
+      .single();
+    if (updateResult.error) return fail(updateResult.error.message, 500);
+    return ok({ message: `${requestedServiceMode === "BAZAR" ? "Bazar" : "Healthday"} peserta masuk Menunggu Validasi.`, registration: updateResult.data });
+  }
+
   if (action === "release-queue") {
     const registrationId = toInt(body.registrationId || body.registration_id, 0);
     if (!registrationId) return fail("Peserta registrasi wajib dipilih.");
