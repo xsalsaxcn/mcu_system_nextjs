@@ -1368,6 +1368,37 @@ export default function VaccinationMasterPage() {
     [vaccines, catalogSourceVaccineIds],
   );
 
+  const catalogModesByVaccine = useMemo(() => {
+    const sourceId = Number(catalogSourceSessionId || 0);
+    const map = new Map<number, Set<string>>();
+    const add = (vaccineIdInput: any, modeInput: any) => {
+      const vaccineId = Number(vaccineIdInput || 0);
+      if (!vaccineId) return;
+      const mode = String(modeInput || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      if (!map.has(vaccineId)) map.set(vaccineId, new Set<string>());
+      map.get(vaccineId)!.add(mode);
+    };
+    for (const row of sessionProductAssignments) {
+      if (row.active === false || Number(row.session_id || 0) !== sourceId) continue;
+      add(row.vaccine_id, row.service_mode);
+    }
+    for (const row of serviceStockAllocations) {
+      if (row.active === false || Number(row.session_id || 0) !== sourceId) continue;
+      add(row.vaccine_id, row.service_mode);
+    }
+    return map;
+  }, [catalogSourceSessionId, sessionProductAssignments, serviceStockAllocations]);
+
+  const catalogHealthdayVaccines = useMemo(
+    () => catalogSourceVaccines.filter((vaccine) => (catalogModesByVaccine.get(Number(vaccine.id || 0)) || new Set(["HEALTHDAY"])).has("HEALTHDAY")),
+    [catalogSourceVaccines, catalogModesByVaccine],
+  );
+
+  const catalogBazarVaccines = useMemo(
+    () => catalogSourceVaccines.filter((vaccine) => (catalogModesByVaccine.get(Number(vaccine.id || 0)) || new Set<string>()).has("BAZAR")),
+    [catalogSourceVaccines, catalogModesByVaccine],
+  );
+
   const catalogTargetSessions = useMemo(() => {
     const source = catalogSourceSession;
     if (!source) return [];
@@ -3081,20 +3112,35 @@ export default function VaccinationMasterPage() {
                       {catalogSourceVaccines.length > 0 && catalogVaccineIds.length === catalogSourceVaccines.length ? "Clear" : "Pilih Semua Produk"}
                     </button>
                   </div>
-                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
-                    {catalogSourceVaccines.map((vaccine) => {
-                      const id = String(vaccine.id);
-                      const checked = catalogVaccineIds.includes(id);
-                      return (
-                        <label key={id} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-slate-50 p-3">
-                          <input type="checkbox" checked={checked} onChange={() => setCatalogVaccineIds((prev) => checked ? prev.filter((value) => value !== id) : [...prev, id])} />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-black text-slate-900">{vaccine.name}</span>
-                            <span className="block truncate text-xs text-slate-500">{vaccine.brand || "-"}</span>
-                          </span>
-                        </label>
-                      );
-                    })}
+                  <div className="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1">
+                    {[
+                      { key: "HEALTHDAY", label: "Healthday", items: catalogHealthdayVaccines, shell: "border-blue-200 bg-blue-50/60", badge: "bg-blue-100 text-blue-800" },
+                      { key: "BAZAR", label: "Bazar", items: catalogBazarVaccines, shell: "border-violet-200 bg-violet-50/60", badge: "bg-violet-100 text-violet-800" },
+                    ].map((group) => (
+                      <div key={group.key} className={`rounded-2xl border p-3 ${group.shell}`}>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-black uppercase tracking-wide text-slate-700">{group.label}</div>
+                          <div className={`rounded-full px-2 py-0.5 text-[10px] font-black ${group.badge}`}>{group.items.length} produk</div>
+                        </div>
+                        <div className="space-y-2">
+                          {group.items.length ? group.items.map((vaccine) => {
+                            const id = String(vaccine.id);
+                            const checked = catalogVaccineIds.includes(id);
+                            const modes = Array.from(catalogModesByVaccine.get(Number(vaccine.id || 0)) || new Set<string>(["HEALTHDAY"]));
+                            return (
+                              <label key={`${group.key}-${id}`} className="flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-2.5">
+                                <input type="checkbox" checked={checked} onChange={() => setCatalogVaccineIds((prev) => checked ? prev.filter((value) => value !== id) : [...prev, id])} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-black text-slate-900">{vaccine.name}</span>
+                                  <span className="block truncate text-xs text-slate-500">{vaccine.brand || "-"}</span>
+                                </span>
+                                {modes.length > 1 ? <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-700">2 layanan</span> : null}
+                              </label>
+                            );
+                          }) : <div className="rounded-xl border border-dashed border-white bg-white/70 p-3 text-center text-xs font-semibold text-slate-400">Tidak ada produk {group.label}.</div>}
+                        </div>
+                      </div>
+                    ))}
                     {!catalogSourceVaccines.length ? <div className="rounded-xl border border-dashed p-5 text-center text-sm font-semibold text-slate-500">Belum ada katalog produk pada Session sumber.</div> : null}
                   </div>
                 </section>
@@ -3126,7 +3172,7 @@ export default function VaccinationMasterPage() {
               </div>
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
-                Yang diduplikat hanya katalog produk, lot, dan jenis layanan. Stok awal, stok tambahan, stok terpakai, serta riwayat transaksi TIDAK disalin.
+                Healthday dan Bazar mengikuti klasifikasi Session sumber secara terpisah. Yang diduplikat hanya katalog produk + lot; stok awal, tambahan, terpakai, dan riwayat transaksi TIDAK disalin.
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" disabled={catalogDuplicating} onClick={() => setCatalogDuplicateOpen(false)} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button>

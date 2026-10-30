@@ -577,10 +577,67 @@ export async function POST(req: NextRequest) {
       if (!modesByVaccine.get(Number(vaccineId))?.size) addMode(vaccineId, "HEALTHDAY");
     }
 
+    const sourceAllocationKeys = new Set<string>();
+    for (const row of sourceAllocations) {
+      const vaccineId = Number(row.vaccine_id || 0);
+      const lotId = Number(row.lot_id || 0);
+      if (!vaccineId || !lotId) continue;
+      const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      sourceAllocationKeys.add(`${vaccineId}:${lotId}:${mode}`);
+    }
+
     const actor = (user as any)?.email || (user as any)?.name || (user as any)?.id || "system";
     let assignmentCount = 0;
     let lotCatalogCount = 0;
+    let staleCatalogRowsDisabled = 0;
+    let staleAssignmentRowsDisabled = 0;
     for (const targetSessionId of targetSessionIds) {
+      // V515: mirror klasifikasi Healthday/Bazar dari Session sumber. Hanya row katalog
+      // hasil duplikasi lama yang boleh dinonaktifkan otomatis; stok riil/manual tetap aman.
+      const oldCatalogResult = await supabase
+        .from("vaccination_session_stock_allocations")
+        .select("id,vaccine_id,lot_id,service_mode,allocated_qty,notes,active")
+        .eq("session_id", targetSessionId)
+        .eq("active", true)
+        .in("vaccine_id", requestedVaccineIds)
+        .ilike("notes", "Catalog only from Session %");
+      if (oldCatalogResult.error) return fail(oldCatalogResult.error.message, 500);
+
+      for (const row of oldCatalogResult.data || []) {
+        const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        const key = `${Number(row.vaccine_id || 0)}:${Number(row.lot_id || 0)}:${mode}`;
+        if (sourceAllocationKeys.has(key)) continue;
+        const disableResult = await supabase
+          .from("vaccination_session_stock_allocations")
+          .update({ active: false, updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (disableResult.error) return fail(disableResult.error.message, 500);
+        staleCatalogRowsDisabled += 1;
+      }
+
+      const targetAssignmentResult = await supabase
+        .from("vaccination_session_product_assignments")
+        .select("id,vaccine_id,service_mode,planned_stock_initial,active")
+        .eq("session_id", targetSessionId)
+        .eq("active", true)
+        .in("vaccine_id", requestedVaccineIds);
+      if (targetAssignmentResult.error) return fail(targetAssignmentResult.error.message, 500);
+
+      for (const row of targetAssignmentResult.data || []) {
+        const vaccineId = Number(row.vaccine_id || 0);
+        const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        const allowedModes = modesByVaccine.get(vaccineId) || new Set<string>(["HEALTHDAY"]);
+        if (allowedModes.has(mode)) continue;
+        // Hanya assignment zero-stock yang cocok dengan jejak katalog duplikasi V510/V511.
+        // Assignment yang punya planned stock tidak pernah disentuh otomatis.
+        if (Number(row.planned_stock_initial || 0) !== 0) continue;
+        const disableResult = await supabase
+          .from("vaccination_session_product_assignments")
+          .update({ active: false, updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (disableResult.error) return fail(disableResult.error.message, 500);
+        staleAssignmentRowsDisabled += 1;
+      }
       for (const vaccineId of requestedVaccineIds) {
         for (const mode of Array.from(modesByVaccine.get(Number(vaccineId)) || new Set<string>(["HEALTHDAY"]))) {
           const assignmentUpsert = await supabase
@@ -642,6 +699,9 @@ export async function POST(req: NextRequest) {
       assignmentCount,
       lotCatalogCount,
       stockCopied: 0,
+      staleCatalogRowsDisabled,
+      staleAssignmentRowsDisabled,
+      classificationMirrored: true,
     });
   }
 

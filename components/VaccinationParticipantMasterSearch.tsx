@@ -423,6 +423,25 @@ export default function VaccinationParticipantMasterSearch({
     void loadParticipantContext(row);
   }
 
+  function openRelatedPerson(member: any, relationshipLabel: "Parent" | "Child" | "Sibling") {
+    if (!member?.id) return;
+    const fallbackType = relationshipLabel === "Parent" ? "EMPLOYEE" : "DEPENDENT";
+    void loadParticipantContext({
+      sourceType: "HISTORY_COMPANY",
+      historyPersonId: Number(member.id || 0) || null,
+      name: clean(member.name),
+      employeeId: clean(member.employeeId),
+      nik: clean(member.nik),
+      email: clean(member.email),
+      phone: clean(member.phone),
+      participantType: clean(member.participantType) || fallbackType,
+      companyName:
+        clean(pending?.row?.companyName || pending?.row?.company_name) ||
+        clean(company?.name) ||
+        clean(session?.company_name),
+    });
+  }
+
   function continueFromPopup(mode: "CURRENT" | "MOVE" | "NEW") {
     if (!pending) return;
     const row = pending.row || {};
@@ -747,6 +766,7 @@ export default function VaccinationParticipantMasterSearch({
               {!searching && companyKey && query.trim().length >= 2 && results.length ? (
                 <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                   {results.map((row: any) => {
+                    const isMerged = Number(row?.mergedSourceCount || 0) > 1;
                     const isHistory = row.sourceType === "HISTORY_COMPANY";
                     return (
                       <button
@@ -763,8 +783,8 @@ export default function VaccinationParticipantMasterSearch({
                             {row.email ? <span>{row.email}</span> : null}
                           </div>
                         </div>
-                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${isHistory ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
-                          {isHistory ? "History" : "Database"}
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${isMerged ? "bg-emerald-100 text-emerald-700" : isHistory ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
+                          {isMerged ? "Database + History" : isHistory ? "History" : "Database"}
                         </span>
                       </button>
                     );
@@ -1034,12 +1054,19 @@ export default function VaccinationParticipantMasterSearch({
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Parent</div>
                     {family?.parent ? (
-                      <div className="mt-1">
-                        <div className="text-sm font-black text-slate-900">{family.parent.name || "-"}</div>
+                      <button
+                        type="button"
+                        onClick={() => openRelatedPerson(family.parent, "Parent")}
+                        disabled={loadingContext}
+                        className="mt-1 w-full rounded-lg bg-slate-50 px-3 py-2 text-left transition hover:bg-blue-50 disabled:opacity-60"
+                        title="Klik untuk buka data Parent"
+                      >
+                        <div className="text-sm font-black text-slate-900">{family.parent.name || "-"} <span className="font-bold text-blue-700">(Parent)</span></div>
                         <div className="mt-1 text-xs font-semibold text-slate-500">
                           {[family.parent.employeeId ? `ID ${family.parent.employeeId}` : "", family.parent.nik ? `NIK ${family.parent.nik}` : "", family.parent.phone || ""].filter(Boolean).join(" · ") || "-"}
                         </div>
-                      </div>
+                        <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-blue-600">Klik lihat data</div>
+                      </button>
                     ) : (
                       <div className="mt-1 text-sm font-semibold text-slate-500">
                         {String(family?.role || contextPerson?.participantType || "").toUpperCase() === "DEPENDENT" ? "Parent belum terhubung" : "Peserta adalah Parent / tidak ada Parent"}
@@ -1051,14 +1078,22 @@ export default function VaccinationParticipantMasterSearch({
                     {familyDisplayRows.length ? (
                       <div className="mt-2 space-y-2">
                         {familyDisplayRows.map((member: any) => (
-                          <div key={member.id || `${member.name}-${member.nik}`} className="rounded-lg bg-slate-50 px-3 py-2">
+                          <button
+                            type="button"
+                            key={member.id || `${member.name}-${member.nik}`}
+                            onClick={() => openRelatedPerson(member, member.relationshipLabel === "Sibling" ? "Sibling" : "Child")}
+                            disabled={loadingContext}
+                            className="w-full rounded-lg bg-slate-50 px-3 py-2 text-left transition hover:bg-violet-50 disabled:opacity-60"
+                            title={`Klik untuk buka data ${member.relationshipLabel || "family"}`}
+                          >
                             <div className="text-sm font-black text-slate-900">
                               {member.name || "-"} <span className="font-bold text-violet-700">({member.relationshipLabel})</span>
                             </div>
                             <div className="mt-0.5 text-[11px] font-semibold text-slate-500">
                               {[member.employeeId ? `ID ${member.employeeId}` : "", member.nik ? `NIK ${member.nik}` : "", member.phone || ""].filter(Boolean).join(" · ") || "-"}
                             </div>
-                          </div>
+                            <div className="mt-1 text-[10px] font-black uppercase tracking-wide text-violet-600">Klik lihat data</div>
+                          </button>
                         ))}
                       </div>
                     ) : (

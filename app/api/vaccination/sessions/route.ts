@@ -68,7 +68,7 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
 
   const sessionIds = sessions.map((session) => session.id);
 
-  const [svResult, mappingResult] = await Promise.all([
+  const [svResult, mappingResult, assignmentResult, allocationResult] = await Promise.all([
     supabase
       .from("vaccination_session_vaccines")
       .select(
@@ -89,14 +89,52 @@ async function attachSessionVaccines(supabase: any, sessions: any[]) {
       .in("session_id", sessionIds)
       .eq("active", true)
       .order("id", { ascending: true }),
+    supabase
+      .from("vaccination_session_product_assignments")
+      .select("session_id,vaccine_id,service_mode,active")
+      .in("session_id", sessionIds)
+      .eq("active", true),
+    supabase
+      .from("vaccination_session_stock_allocations")
+      .select("session_id,vaccine_id,lot_id,service_mode,active")
+      .in("session_id", sessionIds)
+      .eq("active", true),
   ]);
+
+  const normalizeMode = (value: any) =>
+    clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+
+  const assignmentModes = new Map<string, Set<string>>();
+  if (!assignmentResult.error) {
+    for (const row of assignmentResult.data || []) {
+      const key = `${Number(row.session_id)}:${Number(row.vaccine_id)}`;
+      if (!assignmentModes.has(key)) assignmentModes.set(key, new Set<string>());
+      assignmentModes.get(key)!.add(normalizeMode(row.service_mode));
+    }
+  }
+
+  const allocationModes = new Map<string, Set<string>>();
+  if (!allocationResult.error) {
+    for (const row of allocationResult.data || []) {
+      const key = `${Number(row.session_id)}:${Number(row.lot_id)}`;
+      if (!allocationModes.has(key)) allocationModes.set(key, new Set<string>());
+      allocationModes.get(key)!.add(normalizeMode(row.service_mode));
+    }
+  }
 
   const vaccineGrouped = new Map<number, any[]>();
   if (!svResult.error) {
     for (const item of svResult.data || []) {
-      const key = Number(item.session_id);
-      if (!vaccineGrouped.has(key)) vaccineGrouped.set(key, []);
-      vaccineGrouped.get(key)!.push(item);
+      const sessionId = Number(item.session_id);
+      const vaccineId = Number(item.vaccine_id);
+      const lotId = Number(item.lot_id);
+      const lotModes = allocationModes.get(`${sessionId}:${lotId}`);
+      const vaccineModes = assignmentModes.get(`${sessionId}:${vaccineId}`);
+      const serviceModes = Array.from(lotModes?.size ? lotModes : vaccineModes?.size ? vaccineModes : new Set<string>(["HEALTHDAY"]))
+        .sort((a, b) => (a === b ? 0 : a === "HEALTHDAY" ? -1 : 1));
+      const decorated = { ...item, service_modes: serviceModes };
+      if (!vaccineGrouped.has(sessionId)) vaccineGrouped.set(sessionId, []);
+      vaccineGrouped.get(sessionId)!.push(decorated);
     }
   }
 

@@ -41,17 +41,32 @@ function first(...values: any[]) {
   return "";
 }
 
-function personKey(row: any) {
-  const nik = normalized(row?.nik);
-  const employeeId = normalized(row?.employeeId);
-  const personEmail = email(row?.email);
+function identityKeys(row: any) {
+  return [
+    normalized(row?.nik) ? `nik:${normalized(row?.nik)}` : "",
+    normalized(row?.employeeId) ? `emp:${normalized(row?.employeeId)}` : "",
+    email(row?.email) ? `email:${email(row?.email)}` : "",
+  ].filter(Boolean);
+}
 
-  if (nik) return `nik:${nik}`;
-  if (employeeId) return `emp:${employeeId}`;
-  if (personEmail) return `email:${personEmail}`;
+function normalizedParticipantRole(value: any) {
+  const role = clean(value).toUpperCase();
+  if (["DEPENDENT", "CHILD", "FAMILY"].includes(role)) return "DEPENDENT";
+  if (["EMPLOYEE", "PARENT"].includes(role)) return "EMPLOYEE";
+  return role;
+}
 
-  // Name-only matching is deliberately NOT used across sources.
-  return `${row?.sourceType || "source"}:${row?.sourceId || row?.historyPersonId || "x"}:${normalized(row?.name)}`;
+function samePersonStrongMatch(left: any, right: any) {
+  const leftName = normalized(left?.name);
+  const rightName = normalized(right?.name);
+  if (!leftName || leftName !== rightName) return false;
+
+  const leftRole = normalizedParticipantRole(left?.participantType);
+  const rightRole = normalizedParticipantRole(right?.participantType);
+  if (leftRole && rightRole && leftRole !== rightRole) return false;
+
+  const rightKeys = new Set(identityKeys(right));
+  return identityKeys(left).some((key) => rightKeys.has(key));
 }
 
 function mergePerson(existing: any, incoming: any) {
@@ -338,15 +353,67 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const merged = new Map<string, any>();
+    // V516: merge duplicate search hits across Database + History when they are
+    // clearly the same person. Matching requires the SAME normalized name plus at
+    // least one shared strong identity (NIK / Employee ID / email). This avoids
+    // accidentally merging a Parent and Child who may share an employee ID/NIK.
+    const mergedGroups: Array<{ person: any; keys: Set<string>; sourceRows: any[] }> = [];
     for (const row of [...mappedOperational, ...mappedHistory]) {
       if (!clean(row.name)) continue;
-      const key = personKey(row);
-      const current = merged.get(key);
-      merged.set(key, current ? mergePerson(current, row) : row);
+      const rowKeys = new Set(identityKeys(row));
+      let matchIndex = mergedGroups.findIndex((candidateGroup) =>
+        samePersonStrongMatch(candidateGroup.person, row) ||
+        (normalized(candidateGroup.person?.name) === normalized(row?.name) &&
+          Array.from(rowKeys).some((key) => candidateGroup.keys.has(key)) &&
+          (!normalizedParticipantRole(candidateGroup.person?.participantType) ||
+            !normalizedParticipantRole(row?.participantType) ||
+            normalizedParticipantRole(candidateGroup.person?.participantType) === normalizedParticipantRole(row?.participantType))),
+      );
+
+      if (matchIndex < 0) {
+        mergedGroups.push({ person: row, keys: rowKeys, sourceRows: [row] });
+        continue;
+      }
+
+      const mergedGroup = mergedGroups[matchIndex];
+      mergedGroup.person = mergePerson(mergedGroup.person, row);
+      for (const key of rowKeys) mergedGroup.keys.add(key);
+      mergedGroup.sourceRows.push(row);
+
+      // Collapse any transitive duplicate group that now shares a strong key.
+      for (let index = mergedGroups.length - 1; index >= 0; index -= 1) {
+        if (index === matchIndex) continue;
+        const candidate = mergedGroups[index];
+        const sameName = normalized(candidate.person?.name) === normalized(mergedGroup.person?.name);
+        const sameRole =
+          !normalizedParticipantRole(candidate.person?.participantType) ||
+          !normalizedParticipantRole(mergedGroup.person?.participantType) ||
+          normalizedParticipantRole(candidate.person?.participantType) === normalizedParticipantRole(mergedGroup.person?.participantType);
+        const overlaps = Array.from(candidate.keys).some((key) => mergedGroup.keys.has(key));
+        if (!sameName || !sameRole || !overlaps) continue;
+        mergedGroup.person = mergePerson(mergedGroup.person, candidate.person);
+        for (const key of candidate.keys) mergedGroup.keys.add(key);
+        mergedGroup.sourceRows.push(...candidate.sourceRows);
+        mergedGroups.splice(index, 1);
+        if (index < matchIndex) matchIndex -= 1;
+      }
     }
 
-    const results = Array.from(merged.values())
+    const results = mergedGroups
+      .map((merged) => ({
+        ...merged.person,
+        mergedSourceCount: merged.sourceRows.length,
+        mergedSources: merged.sourceRows.map((row) => ({
+          sourceType: row.sourceType,
+          participantId: row.participantId || null,
+          historyPersonId: row.historyPersonId || null,
+          employeeId: row.employeeId || "",
+          nik: row.nik || "",
+          email: row.email || "",
+          phone: row.phone || "",
+          sourceLabel: row.sourceLabel || "",
+        })),
+      }))
       .sort((a: any, b: any) => clean(a.name).localeCompare(clean(b.name), "id"))
       .slice(0, 50);
 

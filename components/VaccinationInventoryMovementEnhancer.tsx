@@ -283,8 +283,8 @@ export default function VaccinationInventoryMovementEnhancer() {
       for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))) {
         const cells = Array.from(row.querySelectorAll<HTMLTableCellElement>("td"));
         if (cells.length < 2) continue;
-        const vaccineName = clean(cells[0]?.textContent);
-        const lotNumber = clean(cells[2]?.textContent);
+        const vaccineName = clean(row.dataset.inventoryVaccineName || cells[0]?.textContent);
+        const lotNumber = clean(row.dataset.inventoryLotNumber || "");
         if (!vaccineName || !lotNumber) continue;
 
         const selectedIds = new Set(selectedProducts.map(Number));
@@ -299,8 +299,8 @@ export default function VaccinationInventoryMovementEnhancer() {
         }
         row.style.display = "";
 
-        const inCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-in-v150="1"]');
-        const outCell = row.querySelector<HTMLTableCellElement>('td[data-inventory-out-v150="1"]');
+        const inCell = row.querySelector<HTMLElement>('[data-inventory-in-v150="1"]');
+        const outCell = row.querySelector<HTMLElement>('[data-inventory-out-v150="1"]');
         if (inCell) inCell.textContent = lotSummary?.in_sources?.join(", ") || "-";
         if (outCell) outCell.textContent = lotSummary?.out_companies?.join(", ") || "-";
 

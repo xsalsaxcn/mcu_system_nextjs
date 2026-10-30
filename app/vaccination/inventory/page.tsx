@@ -25,7 +25,7 @@ function money(value: any) {
 }
 
 function sessionName(session: any) {
-  return clean(session?.session_name) || clean(session?.location) || (session?.id ? `Session ${session.id}` : "-");
+  return clean(session?.location) || clean(session?.session_name) || (session?.id ? `Session ${session.id}` : "-");
 }
 
 function stockTarget(row: any) {
@@ -53,12 +53,29 @@ export default function VaccinationInventoryPage() {
   const [form, setForm] = useState({ stockAction: "ADD_STOCK", inventoryTarget: "SYSTEM", quantity: "", inventoryNotes: "" });
   const [message, setMessage] = useState("Inventory membaca stok terpakai dari data dokter/Administered yang sudah Done.");
   const [error, setError] = useState("");
+  const [publicPortalUrl, setPublicPortalUrl] = useState("");
 
   async function load() {
     setError("");
     const json = await fetch("/api/vaccination/inventory", { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Gagal mengambil inventory."); return; }
     setRows(json.rows || []);
+  }
+
+  async function generatePublicPortal() {
+    setError("");
+    try {
+      const response = await fetch("/api/vaccination/inventory/public-link", { cache: "no-store" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.ok === false) throw new Error(json?.message || `HTTP ${response.status}`);
+      const url = clean(json?.url || json?.path);
+      if (!url) throw new Error("URL Portal Inventory tidak terbentuk.");
+      setPublicPortalUrl(url);
+      try { await navigator.clipboard.writeText(url); } catch {}
+      setMessage("Link Portal Tim Inventory read-only dibuat dan disalin. Portal dapat filter, buka Movement, dan export tanpa login; tidak ada aksi Edit.");
+    } catch (e: any) {
+      setError(String(e?.message || e || "Gagal membuat Portal Inventory public."));
+    }
   }
 
   function startEdit(row: any) {
@@ -177,8 +194,23 @@ export default function VaccinationInventoryPage() {
             <h1 className="text-2xl font-bold">Inventory Vaksin</h1>
             <p className="mt-2 text-sm text-slate-600">Sisa Sistem = Jumlah Awal + Tambahan Stok - Terpakai. Selisih = Sisa Fisik - Sisa Sistem.</p>
           </div>
-          <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={generatePublicPortal} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 hover:bg-blue-100">🔗 Portal Tim Inventory</button>
+            <a href="/vaccination" className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50">☰ Menu Vaksinasi</a>
+          </div>
         </div>
+
+        {publicPortalUrl ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <div className="text-xs font-black uppercase tracking-wide text-blue-700">Link Public Inventory · Read Only</div>
+            <div className="mt-2 flex flex-col gap-2 lg:flex-row">
+              <input readOnly value={publicPortalUrl} className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm font-semibold" />
+              <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(publicPortalUrl); setMessage("Link Portal Inventory disalin."); } catch { setError("Browser tidak mengizinkan copy otomatis."); } }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Salin Link</button>
+              <a href={publicPortalUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-blue-700 px-4 py-2 text-center text-sm font-black text-white">Buka Portal</a>
+            </div>
+            <div className="mt-2 text-xs font-semibold text-blue-800">Tidak perlu account. Bisa view, filter, klik Movement, dan export. Tidak bisa Edit.</div>
+          </div>
+        ) : null}
 
         {error ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
         {message ? <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{message}</div> : null}
@@ -259,69 +291,96 @@ export default function VaccinationInventoryPage() {
           </section>
         ) : null}
 
-        <section className="mt-6 overflow-hidden rounded-2xl border">
+        <section className="mt-6 overflow-hidden rounded-2xl border bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+            <div>
+              <div className="font-black text-slate-900">Inventory per Produk & Lot</div>
+              <div className="text-xs text-slate-500">Healthday dan Bazar dipisahkan per bucket. Detail transaksi tetap tersedia lewat Movement.</div>
+            </div>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{filteredRows.length} lot</div>
+          </div>
           <div className="overflow-x-auto">
-            <table data-inventory-canonical-table="1" className="min-w-[2200px] text-sm">
+            <table data-inventory-canonical-table="1" className="min-w-[1550px] w-full text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
-                  <th className="p-3 text-left">Nama Vaksin / Produk</th>
-                  <th className="p-3 text-left">Brand</th>
-                  <th className="p-3 text-left">Lot Number</th>
-                  <th className="p-3 text-left">Non Paket</th>
-                  <th className="p-3 text-left">Paket</th>
-                  <th className="p-3 text-left">Dosis Paket</th>
-                  <th className="p-3 text-left">Tujuan Stok</th>
-                  <th className="p-3 text-left">Jenis Stok / Alokasi</th>
-                  <th className="p-3 text-left">Jumlah Awal</th>
-                  <th className="p-3 text-left">Tambahan Stok</th>
-                  <th className="p-3 text-left">Terpakai</th>
-                  <th className="p-3 text-left">IN Dari / Sumber</th>
-                  <th className="p-3 text-left">OUT Ke / Perusahaan</th>
-                  <th className="p-3 text-left">Sisa Sistem</th>
-                  <th className="p-3 text-left">Sisa Fisik</th>
-                  <th className="p-3 text-left">Selisih</th>
-                  <th className="p-3 text-left">Movement</th>
-                  <th className="p-3 text-left">Keterangan</th>
-                  <th className="p-3 text-left">Aksi</th>
+                  <th className="w-[260px] p-3 text-left">Produk & Lot</th>
+                  <th className="w-[180px] p-3 text-left">Harga</th>
+                  <th className="w-[210px] p-3 text-left">Tujuan Stok</th>
+                  <th className="w-[175px] p-3 text-left">Healthday</th>
+                  <th className="w-[175px] p-3 text-left">Bazar</th>
+                  <th className="w-[90px] p-3 text-left">Jumlah Awal</th>
+                  <th className="w-[90px] p-3 text-left">Tambahan Stok</th>
+                  <th className="w-[90px] p-3 text-left">Terpakai</th>
+                  <th className="w-[90px] p-3 text-left">Sisa Sistem</th>
+                  <th className="w-[180px] p-3 text-left">Arus Stok</th>
+                  <th className="w-[130px] p-3 text-left">Movement</th>
+                  <th className="w-[145px] p-3 text-left">Audit / Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {filteredRows.map((row) => {
                   const target = stockTarget(row);
                   const allocations = (row?.service_allocations || []).filter((allocation: any) => serviceFilter === "ALL" || clean(allocation?.service_mode).toUpperCase() === serviceFilter);
-                  return (
-                    <tr key={row.id} className="align-top">
-                      <td className="p-3 font-bold">{row.vaccine?.name || "-"}</td>
-                      <td className="p-3">{row.vaccine?.brand || "-"}</td>
-                      <td className="p-3 font-semibold">{row.lot_number || "-"}</td>
-                      <td className="p-3 font-bold">{money(row.non_package_price)}</td>
-                      <td className="p-3 font-bold text-emerald-700">{money(row.package_price)}</td>
-                      <td className="p-3">{row.package_dose_count ? `${row.package_dose_count}x` : "-"}</td>
-                      <td className="p-3">
-                        <div className="max-w-[260px] rounded-xl border bg-slate-50 px-3 py-2">
-                          <div className="text-[10px] font-black uppercase text-slate-500">{target.scope}</div>
-                          <div className="mt-1 text-xs font-black text-slate-900">{target.company}</div>
-                          <div className="mt-0.5 text-xs text-slate-600">{target.session}</div>
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="min-w-[300px] space-y-1.5">
-                          {allocations.length ? allocations.map((allocation: any) => (
-                            <div key={`${allocation.id}-${allocation.service_mode}`} className={`rounded-lg px-2.5 py-2 text-xs font-bold ${clean(allocation.service_mode).toUpperCase() === "BAZAR" ? "bg-violet-50 text-violet-800" : "bg-blue-50 text-blue-800"}`}>
-                              <div>{clean(allocation.service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {clean(allocation.session_name) || "Session"}</div>
-                              <div className="mt-0.5 font-semibold opacity-80">Alokasi {Number(allocation.allocated_qty || 0)} · Terpakai {Number(allocation.used_qty || 0)} · Sisa {Number(allocation.remaining_qty || 0)}</div>
+                  const modeRows = (mode: "HEALTHDAY" | "BAZAR") => allocations.filter((allocation: any) => clean(allocation?.service_mode).toUpperCase() === mode);
+                  const renderBucket = (mode: "HEALTHDAY" | "BAZAR") => {
+                    const items = modeRows(mode);
+                    const shell = mode === "BAZAR" ? "border-violet-200 bg-violet-50 text-violet-900" : "border-blue-200 bg-blue-50 text-blue-900";
+                    if (!items.length) return <span className="text-xs font-semibold text-slate-400">-</span>;
+                    return (
+                      <div className="space-y-1.5">
+                        {items.map((allocation: any) => (
+                          <div key={`${allocation.id}-${mode}`} className={`rounded-xl border px-2.5 py-2 ${shell}`}>
+                            <div className="truncate text-xs font-black" title={clean(allocation.location) || clean(allocation.session_name) || "Session"}>
+                              {clean(allocation.location) || clean(allocation.session_name) || "Session"}
                             </div>
-                          )) : <span className="text-xs text-slate-400">Belum ada alokasi Healthday/Bazar</span>}
+                            <div className="mt-1 grid grid-cols-3 gap-1 text-center text-[10px] font-bold">
+                              <span className="rounded-md bg-white/80 px-1 py-1">A {Number(allocation.allocated_qty || 0)}</span>
+                              <span className="rounded-md bg-white/80 px-1 py-1">P {Number(allocation.used_qty || 0)}</span>
+                              <span className="rounded-md bg-white/80 px-1 py-1">S {Number(allocation.remaining_qty || 0)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  };
+                  return (
+                    <tr
+                      key={row.id}
+                      className="align-top hover:bg-slate-50/60"
+                      data-inventory-vaccine-name={row.vaccine?.name || ""}
+                      data-inventory-lot-number={row.lot_number || ""}
+                    >
+                      <td className="p-3">
+                        <div className="font-black text-slate-900">{row.vaccine?.name || "-"}</div>
+                        <div className="mt-1 text-xs text-slate-500">{row.vaccine?.brand || "-"}</div>
+                        <div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black text-slate-700">Lot {row.lot_number || "-"}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Non Paket</span><span className="font-black">{money(row.non_package_price)}</span></div>
+                          <div className="flex items-center justify-between gap-2"><span className="text-slate-500">Paket</span><span className="font-black text-emerald-700">{money(row.package_price)}</span></div>
+                          {row.package_dose_count ? <div className="rounded-md bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{row.package_dose_count} dosis / paket</div> : null}
                         </div>
                       </td>
-                      <td className="p-3 font-black">{row.stock_initial || 0}</td>
-                      <td className="p-3">{row.stock_added || 0}</td>
-                      <td className="p-3 font-bold">{row.stock_used || 0}</td>
-                      <td data-inventory-in-v150="1" className="p-3">-</td>
-                      <td data-inventory-out-v150="1" className="p-3">-</td>
-                      <td className="p-3 font-black text-emerald-700">{row.stock_system_remaining}</td>
-                      <td className="p-3">{row.stock_physical_count ?? "-"}</td>
-                      <td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span></td>
+                      <td className="p-3">
+                        <div className="rounded-xl border bg-slate-50 px-3 py-2">
+                          <div className="text-[10px] font-black uppercase text-slate-500">{target.scope}</div>
+                          <div className="mt-1 truncate text-xs font-black text-slate-900" title={target.company}>{target.company}</div>
+                          <div className="mt-1 truncate text-xs text-slate-600" title={target.session}>{target.session}</div>
+                        </div>
+                      </td>
+                      <td className="p-3">{renderBucket("HEALTHDAY")}</td>
+                      <td className="p-3">{renderBucket("BAZAR")}</td>
+                      <td className="p-3 text-center font-black">{row.stock_initial || 0}</td>
+                      <td className="p-3 text-center font-bold">{row.stock_added || 0}</td>
+                      <td className="p-3 text-center font-black">{row.stock_used || 0}</td>
+                      <td className="p-3 text-center font-black text-emerald-700">{row.stock_system_remaining}</td>
+                      <td className="p-3">
+                        <div className="space-y-1 text-xs">
+                          <div className="rounded-lg bg-emerald-50 px-2 py-1.5"><span className="font-black text-emerald-700">IN</span> <span data-inventory-in-v150="1" className="text-slate-600">-</span></div>
+                          <div className="rounded-lg bg-rose-50 px-2 py-1.5"><span className="font-black text-rose-700">OUT</span> <span data-inventory-out-v150="1" className="text-slate-600">-</span></div>
+                        </div>
+                      </td>
                       <td className="p-3">
                         <button
                           type="button"
@@ -336,19 +395,24 @@ export default function VaccinationInventoryPage() {
                               }),
                             );
                           }}
-                          className="rounded-lg px-2 py-1 text-left hover:bg-blue-50"
+                          className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-left hover:bg-blue-100"
                           title="Klik untuk lihat detail transaksi lot"
                         >
                           <div className="text-xs font-black text-blue-700 underline underline-offset-2">{Number(row.movement_count || 0)} transaksi</div>
-                          <div className="mt-1 text-[11px] text-slate-500">{row.last_movement_type || "-"}</div>
+                          <div className="mt-1 max-w-[110px] truncate text-[10px] text-slate-500">{row.last_movement_type || "-"}</div>
                         </button>
                       </td>
-                      <td className="p-3">{row.inventory_notes || "-"}</td>
-                      <td className="p-3"><button onClick={() => startEdit(row)} className="rounded-xl border px-3 py-2 text-xs font-bold hover:bg-slate-50">Edit</button></td>
+                      <td className="p-3">
+                        <div className="space-y-2">
+                          <div className="text-xs"><span className="text-slate-500">Fisik:</span> <b>{row.stock_physical_count ?? "-"}</b></div>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
+                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
-                {!filteredRows.length ? <tr><td colSpan={19} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
+                {!filteredRows.length ? <tr><td colSpan={12} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
               </tbody>
             </table>
           </div>

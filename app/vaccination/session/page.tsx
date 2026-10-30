@@ -1708,97 +1708,125 @@ export default function VaccinationSessionPage() {
           </button>
         </section>
 
-        <section className="mt-6 overflow-x-auto rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">
-            Daftar Session
+        <section className="mt-6 overflow-hidden rounded-2xl border bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+            <div>
+              <div className="font-black text-slate-900">Daftar Session</div>
+              <div className="text-xs text-slate-500">Produk dipisahkan per layanan agar Healthday dan Bazar tidak tercampur.</div>
+            </div>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{sessions.length} session</div>
           </div>
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-              <tr>
-                <th className="w-[190px] p-3 text-left">Session</th>
-                <th className="w-[200px] p-3 text-left">Database</th>
-                <th className="w-[200px] p-3 text-left">Lokasi</th>
-                <th className="w-[250px] p-3 text-left">Vaksin Session</th>
-                <th className="w-[130px] p-3 text-left">Tanggal</th>
-                <th className="w-[140px] p-3 text-left">Peserta Rencana</th>
-                <th className="w-[120px] p-3 text-left">Public</th>
-                <th className="p-3 text-left">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {sessions.map((session) => (
-                <tr key={session.id}>
-                  <td className="p-3 align-top font-bold break-words">{session.session_name}</td>
-                  <td className="p-3 align-top break-words">
-                    {session.source_name || session.source_id || "-"}
-                  </td>
-                  <td className="p-3 align-top break-words">
-                    <div className="font-semibold">
-                      {session.location || "-"}
-                    </div>
-                    <div className="text-xs text-slate-500">Tanggal: {session.session_date || "-"}</div>
-                  </td>
-                  <td className="p-3 align-top">
-                    {session.session_vaccines?.length ? (
-                      <div className="space-y-1">
-                        {session.session_vaccines.map((item: any) => (
-                          <div
-                            key={item.id}
-                            className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700"
-                          >
-                            {item.vaccine?.name || "Vaksin"} · Lot{" "}
-                            {item.lot?.lot_number || "-"}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="p-3 align-top whitespace-nowrap">{session.session_date || "-"}</td>
-                  <td className="p-3 align-top">
-                    {session.participant_count_planned ?? "-"}
-                  </td>
-                  <td className="p-3 align-top whitespace-nowrap">
-                    <a
-                      className="font-bold text-blue-600"
-                      href={`/vaccination/public/queue/${session.public_queue_token}`}
-                      target="_blank"
-                    >
-                      Public Queue
-                    </a>
-                  </td>
-                  <td className="p-3 align-top">
-                    <div className="flex flex-nowrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEditSession(session)}
-                        className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100"
-                        title="Edit session"
-                      >
-                        ✏ Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteSession(session)}
-                        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100"
-                        title="Hapus session"
-                      >
-                        🗑 Hapus
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!sessions.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-[1180px] w-full text-sm">
+              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
-                  <td colSpan={9} className="p-5 text-center text-slate-500">
-                    Belum ada session.
-                  </td>
+                  <th className="w-[260px] p-3 text-left">Session</th>
+                  <th className="w-[210px] p-3 text-left">Lokasi / Tanggal</th>
+                  <th className="min-w-[420px] p-3 text-left">Produk Session</th>
+                  <th className="w-[110px] p-3 text-left">Peserta</th>
+                  <th className="w-[120px] p-3 text-left">Public</th>
+                  <th className="w-[150px] p-3 text-left">Aksi</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y">
+                {sessions.map((session) => {
+                  const allItems = Array.isArray(session.session_vaccines) ? session.session_vaccines : [];
+                  const itemsForMode = (mode: "HEALTHDAY" | "BAZAR") =>
+                    allItems.filter((item: any) => {
+                      const modes = Array.isArray(item?.service_modes) && item.service_modes.length
+                        ? item.service_modes.map((value: any) => String(value || "").toUpperCase())
+                        : ["HEALTHDAY"];
+                      return modes.includes(mode);
+                    });
+                  const healthdayItems = itemsForMode("HEALTHDAY");
+                  const bazarItems = itemsForMode("BAZAR");
+                  const renderModeGroup = (
+                    label: string,
+                    mode: "HEALTHDAY" | "BAZAR",
+                    items: any[],
+                  ) => (
+                    <details
+                      open={mode === "HEALTHDAY"}
+                      className={`rounded-xl border ${mode === "BAZAR" ? "border-violet-200 bg-violet-50/60" : "border-blue-200 bg-blue-50/60"}`}
+                    >
+                      <summary className={`cursor-pointer list-none px-3 py-2 text-xs font-black ${mode === "BAZAR" ? "text-violet-800" : "text-blue-800"}`}>
+                        <span className="inline-flex items-center gap-2">
+                          <span>{label}</span>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] text-slate-600">{items.length} produk</span>
+                        </span>
+                      </summary>
+                      <div className="max-h-36 space-y-1 overflow-y-auto border-t border-white/80 px-2 py-2">
+                        {items.length ? items.map((item: any) => (
+                          <div key={`${mode}-${item.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-sm">
+                            <span className="min-w-0 truncate font-bold text-slate-800">{item.vaccine?.name || "Vaksin"}</span>
+                            <span className="shrink-0 text-[11px] font-semibold text-slate-500">Lot {item.lot?.lot_number || "-"}</span>
+                          </div>
+                        )) : (
+                          <div className="px-2 py-1 text-xs font-semibold text-slate-400">Tidak ada produk {label}.</div>
+                        )}
+                      </div>
+                    </details>
+                  );
+
+                  return (
+                    <tr key={session.id} className="align-top hover:bg-slate-50/60">
+                      <td className="p-3">
+                        <div className="max-w-[250px] font-black leading-snug text-slate-900" title={session.session_name || ""}>
+                          {session.session_name || "-"}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">{session.source_name || session.source_id || "-"}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-bold text-slate-800">{session.location || "-"}</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-500">{session.session_date || "-"}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="grid gap-2 lg:grid-cols-2">
+                          {renderModeGroup("Healthday", "HEALTHDAY", healthdayItems)}
+                          {renderModeGroup("Bazar", "BAZAR", bazarItems)}
+                        </div>
+                      </td>
+                      <td className="p-3 font-black text-slate-800">{session.participant_count_planned ?? "-"}</td>
+                      <td className="p-3 whitespace-nowrap">
+                        <a
+                          className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700"
+                          href={`/vaccination/public/queue/${session.public_queue_token}`}
+                          target="_blank"
+                        >
+                          Public Queue
+                        </a>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditSession(session)}
+                            className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                            title="Edit session"
+                          >
+                            ✏ Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteSession(session)}
+                            className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100"
+                            title="Hapus session"
+                          >
+                            🗑 Hapus
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!sessions.length ? (
+                  <tr>
+                    <td colSpan={6} className="p-5 text-center text-slate-500">Belum ada session.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         {editingSession ? (
