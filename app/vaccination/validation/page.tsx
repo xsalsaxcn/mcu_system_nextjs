@@ -1,5 +1,6 @@
 "use client";
 
+// V530_VALIDATION_SERVICE_STATE_ISOLATION
 // V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // V148_VALIDATION_DETAIL_AND_STICKER_PRINT
@@ -22,6 +23,7 @@ type ProductDetail = {
 
 type Row = {
   id: number;
+  row_key?: string;
   session_id?: number | string;
   queue_number?: string;
   employee_id?: string;
@@ -89,6 +91,10 @@ function recordIds(row: Row) {
   return Array.from(new Set([...fromRow, ...fromProducts].map(Number).filter((id) => Number.isFinite(id) && id > 0)));
 }
 
+function rowStateKey(row: Row) {
+  return clean(row.row_key) || `${row.id}:${clean(row.validation_service_mode).toUpperCase() || "LEGACY"}`;
+}
+
 
 function csvCell(value: any) {
   const text = String(value ?? "").replace(/\r?\n/g, " ").trim();
@@ -142,7 +148,7 @@ export default function VaccinationValidationPage() {
   const [companyFilter, setCompanyFilter] = useState("all");
   const [sessionFilter, setSessionFilter] = useState("all");
   const [contextLocked, setContextLocked] = useState(false);
-  const [cancelRowId, setCancelRowId] = useState<number | null>(null);
+  const [cancelRowId, setCancelRowId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("");
@@ -151,8 +157,8 @@ export default function VaccinationValidationPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [actor, setActor] = useState("Tim Validasi");
-  const [draft, setDraft] = useState<Record<number, string>>({});
-  const [notes, setNotes] = useState<Record<number, string>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   async function loadRows() {
     setLoading(true);
@@ -174,7 +180,7 @@ export default function VaccinationValidationPage() {
           )
         ) as string[]
       );
-      setMessage(`Data validasi dimuat: ${(json.rows || []).length} peserta.`);
+      setMessage(`Data validasi dimuat: ${(json.rows || []).length} layanan.`);
     } catch (error: any) {
       setMessage(error?.message || "Gagal memuat validasi.");
     } finally {
@@ -273,7 +279,7 @@ export default function VaccinationValidationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ id: row.id, action, actor, note }),
+        body: JSON.stringify({ id: row.id, action, actor, note, service_mode: row.validation_service_mode }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.message || "Gagal update status.");
@@ -340,16 +346,17 @@ export default function VaccinationValidationPage() {
   }
 
   async function saveStatus(row: Row) {
-    const status = draft[row.id] || "";
+    const key = rowStateKey(row);
+    const status = draft[key] || "";
     if (!status) {
       setMessage("Pilih status dulu: Selesai atau Batal.");
       return;
     }
-    if (status === "BATAL" && !clean(notes[row.id])) {
+    if (status === "BATAL" && !clean(notes[key])) {
       setMessage("Note wajib diisi jika status Batal.");
       return;
     }
-    await update(row, status, notes[row.id]);
+    await update(row, status, notes[key]);
   }
 
   return (
@@ -460,9 +467,9 @@ export default function VaccinationValidationPage() {
               </thead>
               <tbody className="divide-y">
                 {pendingShown.map((row) => (
-                  <tr key={row.id} className="align-top hover:bg-slate-50">
+                  <tr key={rowStateKey(row)} className="align-top hover:bg-slate-50">
                     <td className="px-4 py-4"><span className="rounded-xl bg-cyan-50 px-3 py-2 font-black text-cyan-800">{row.queue_number || "-"}</span></td>
-                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
+                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
                     <td className="px-4 py-4">
                       <div className="space-y-1">{(row.products || []).map((item, index) => <div key={`${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div>
@@ -473,14 +480,14 @@ export default function VaccinationValidationPage() {
                       <div className="flex min-w-[250px] flex-wrap gap-2">
                         <button type="button" onClick={() => void update(row, "DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
                         <a href={`/vaccination/register?edit_registration_id=${row.id}`} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit</a>
-                        <button type="button" onClick={() => setCancelRowId(cancelRowId === row.id ? null : row.id)} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Cancel</button>
+                        <button type="button" onClick={() => setCancelRowId(cancelRowId === rowStateKey(row) ? null : rowStateKey(row))} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Cancel</button>
                       </div>
-                      {cancelRowId === row.id ? (
+                      {cancelRowId === rowStateKey(row) ? (
                         <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
-                          <textarea className="min-h-20 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold" placeholder="Alasan cancel wajib diisi" value={notes[row.id] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [row.id]: e.target.value }))} />
+                          <textarea className="min-h-20 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold" placeholder="Alasan cancel wajib diisi" value={notes[rowStateKey(row)] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [rowStateKey(row)]: e.target.value }))} />
                           <div className="mt-2 flex justify-end gap-2">
                             <button type="button" onClick={() => setCancelRowId(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-black">Tutup</button>
-                            <button type="button" onClick={() => { if (!clean(notes[row.id])) { setMessage("Alasan Cancel wajib diisi."); return; } void update(row, "BATAL", notes[row.id]); setCancelRowId(null); }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white">Simpan Cancel</button>
+                            <button type="button" onClick={() => { if (!clean(notes[rowStateKey(row)])) { setMessage("Alasan Cancel wajib diisi."); return; } void update(row, "BATAL", notes[rowStateKey(row)]); setCancelRowId(null); }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white">Simpan Cancel</button>
                           </div>
                         </div>
                       ) : null}
@@ -520,11 +527,11 @@ export default function VaccinationValidationPage() {
               </thead>
               <tbody className="divide-y">
                 {doneShown.map((row) => (
-                  <tr key={`done-${row.id}`} className="align-top hover:bg-slate-50">
+                  <tr key={`done-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
                     <td className="px-4 py-4"><span className="rounded-xl bg-slate-100 px-3 py-2 font-black text-slate-700">{row.queue_number || "-"}</span></td>
-                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
+                    <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-[11px] font-black text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.company_name || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
-                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${row.id}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                    <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`done-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
                     <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
                     <td className="px-4 py-4"><div className="font-bold">{fmtDate(row.validated_at) || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.validated_by || "-"}</td>
@@ -562,7 +569,7 @@ export default function VaccinationValidationPage() {
                 const labelCount = recordIds(row).length;
                 const canPrepareLabel = labelCount > 0 || products.length > 0;
                 return (
-                  <tr key={row.id} className="border-t border-slate-100 align-top">
+                  <tr key={rowStateKey(row)} className="border-t border-slate-100 align-top">
                     <td className="px-5 py-4">
                       <div className="font-black text-slate-900">{row.doctor_name || "-"}</div>
                       <div className="mt-1 text-xs font-bold text-slate-500">#{row.id}</div>
@@ -606,13 +613,13 @@ export default function VaccinationValidationPage() {
                                 ? `Print ${labelCount} Label`
                                 : "Print Label"}
                         </button>
-                        <select className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black" value={draft[row.id] || ""} onChange={(e) => setDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}>
+                        <select className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black" value={draft[rowStateKey(row)] || ""} onChange={(e) => setDraft((prev) => ({ ...prev, [rowStateKey(row)]: e.target.value }))}>
                           <option value="">Ubah Status</option>
                           <option value="SELESAI">Selesai</option>
                           <option value="BATAL">Batal</option>
                         </select>
-                        {draft[row.id] === "BATAL" ? (
-                          <textarea className="min-h-20 rounded-2xl border border-rose-200 px-4 py-3 text-sm font-bold outline-none" placeholder="Note wajib jika batal" value={notes[row.id] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [row.id]: e.target.value }))} />
+                        {draft[rowStateKey(row)] === "BATAL" ? (
+                          <textarea className="min-h-20 rounded-2xl border border-rose-200 px-4 py-3 text-sm font-bold outline-none" placeholder="Note wajib jika batal" value={notes[rowStateKey(row)] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [rowStateKey(row)]: e.target.value }))} />
                         ) : null}
                         <button type="button" onClick={() => saveStatus(row)} className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Simpan Status</button>
                       </div>

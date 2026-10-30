@@ -4,6 +4,7 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
 import { syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
+// V530_VALIDATION_SERVICE_STATE_ISOLATION
 // V520_SERVICE_SPECIFIC_QUEUE_MODE
 // V518_RECORD_ONLY_VALIDATION_WORKFLOW
 // VACCINATION_ROLE_GUARD_V150
@@ -68,32 +69,54 @@ function itemDetail(item: any) {
   };
 }
 
-function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
-  const recordProducts = (recordRows || []).map(productDetail);
-  const itemProducts = (itemRows || []).map(itemDetail);
-  const firstRecord = recordRows?.[0] || null;
+function normalizeServiceMode(value: any): "HEALTHDAY" | "BAZAR" {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
 
+function queueFlags(row: any) {
   const flow = row.session?.existing_flow_config || {};
   const legacyQueue = flow?.queue !== false;
-  const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
-  const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
-  const pendingBazar = clean(row.bazar_queue_status).toUpperCase() === "PENDING_VALIDATION";
-  const pendingHealthday = clean(row.queue_status || row.status).toUpperCase() === "PENDING_VALIDATION";
-  const serviceStatus = clean(row.patient_service_status || "HEALTHDAY").toUpperCase();
-  let validationServiceMode = pendingBazar && !pendingHealthday ? "BAZAR" : "HEALTHDAY";
-  if (!pendingBazar && !pendingHealthday && clean(row.validation_status).toUpperCase() === "DONE") {
-    if (serviceStatus === "BAZAR") validationServiceMode = "BAZAR";
-    else if (serviceStatus === "HEALTHDAY") validationServiceMode = "HEALTHDAY";
-    else if (!healthdayQueueEnabled && bazarQueueEnabled) validationServiceMode = "HEALTHDAY";
-    else if (healthdayQueueEnabled && !bazarQueueEnabled) validationServiceMode = "BAZAR";
-  }
+  return {
+    healthdayQueueEnabled: flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false,
+    bazarQueueEnabled: flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false,
+  };
+}
 
-  // Validation is service-specific: only show products that belong to the track
-  // being validated. This keeps Healthday and Bazar examination lists separate.
-  const serviceItemProducts = itemProducts.filter((item: any) => clean(item?.service_mode).toUpperCase() === validationServiceMode);
-  const products = serviceItemProducts.length
-    ? serviceItemProducts
-    : (recordProducts.length ? recordProducts : itemProducts);
+function isDoneTrackStatus(value: any) {
+  return ["DONE", "FINISHED", "ADMINISTERED", "SELESAI"].includes(clean(value).toUpperCase());
+}
+
+function isPendingTrackStatus(value: any) {
+  return ["PENDING_VALIDATION", "PENDING"].includes(clean(value).toUpperCase());
+}
+
+function serviceTrackStatus(row: any, serviceMode: "HEALTHDAY" | "BAZAR") {
+  return clean(serviceMode === "BAZAR" ? row.bazar_queue_status : (row.queue_status || row.status)).toUpperCase();
+}
+
+function hasServiceTrack(row: any, itemRows: any[], serviceMode: "HEALTHDAY" | "BAZAR") {
+  const itemExists = (itemRows || []).some((item: any) => normalizeServiceMode(item?.service_mode) === serviceMode);
+  if (itemExists) return true;
+
+  const serviceStatus = clean(row.patient_service_status || "").toUpperCase();
+  if (serviceStatus === "COMBINATION" || serviceStatus === serviceMode) return true;
+
+  if (serviceMode === "BAZAR") {
+    return Boolean(clean(row.bazar_queue_number) || clean(row.bazar_queue_status));
+  }
+  return Boolean(clean(row.queue_number || row.queue_no || row.queue_label) || clean(row.queue_status || row.status));
+}
+
+function displayForService(
+  row: any,
+  serviceMode: "HEALTHDAY" | "BAZAR",
+  recordRows: any[] = [],
+  itemRows: any[] = [],
+) {
+  const recordProducts = (recordRows || []).map(productDetail);
+  const itemProducts = (itemRows || []).map(itemDetail);
+  const serviceItemProducts = itemProducts.filter((item: any) => normalizeServiceMode(item?.service_mode) === serviceMode);
+  const products = serviceItemProducts.length ? serviceItemProducts : recordProducts;
   const recordIds = products.map((item) => item.record_id).filter(Boolean);
   const productName = products.length === 1
     ? products[0].vaccine_name
@@ -101,33 +124,57 @@ function display(row: any, recordRows: any[] = [], itemRows: any[] = []) {
       ? `${products.length} vaksin / layanan`
       : (row.product_name || row.vaccine_name || row.vaccine || row.batch_name || row.batchname || row.layanan || row.service_name || "Vaksin");
 
+  const { healthdayQueueEnabled, bazarQueueEnabled } = queueFlags(row);
+  const trackStatus = serviceTrackStatus(row, serviceMode);
+  const done = isDoneTrackStatus(trackStatus);
+  const serviceAdministeredAt = serviceItemProducts
+    .map((item: any) => item?.administered_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || null;
+
   return {
     id: row.id,
+    row_key: `${row.id}:${serviceMode}`,
     session_id: row.session_id,
-    queue_number: validationServiceMode === "BAZAR"
+    queue_number: serviceMode === "BAZAR"
       ? (row.bazar_queue_number || "")
       : (row.queue_number || row.queue_no || parseQueueNumber(row.queue_label)),
     employee_id: clean(row.employee_id || row.mcu_id),
-    payment_method: clean(row.payment_method),
+    payment_method: serviceMode === "BAZAR" ? clean(row.payment_method) : "",
     company_name: clean(row.session?.company_name || row.company_name),
-    internal_queue_enabled: validationServiceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled,
-    validation_service_mode: validationServiceMode,
+    internal_queue_enabled: serviceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled,
+    validation_service_mode: serviceMode,
     patient_name: row.patient_name || row.participant_name || row.name || row.full_name || row.nama || row.nama_peserta || "-",
-    doctor_name: clean(firstRecord?.administered_by) || row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
+    doctor_name: row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
     product_name: productName,
     lot_number: products.length === 1 ? products[0].lot_number : "",
-    note: row.note || row.notes || row.status_note || firstRecord?.notes || row.payment_note || row.product_note || row.keterangan || "",
+    note: row.note || row.notes || row.status_note || row.payment_note || row.product_note || row.keterangan || "",
     print_status: row.print_status || "NOT_PRINTED",
-    validation_status: row.validation_status || "PENDING",
-    validated_at: row.validated_at || null,
-    validated_by: clean(row.validated_by),
-    queue_status: row.queue_status || row.status || "",
+    validation_status: done ? "DONE" : (isPendingTrackStatus(trackStatus) ? "PENDING" : trackStatus || "PENDING"),
+    validated_at: serviceAdministeredAt || (done ? row.validated_at : null) || null,
+    validated_by: done ? clean(row.validated_by) : "",
+    queue_status: trackStatus,
     location: clean(row.session?.location || row.location) || "-",
     session_date: row.session?.session_date || row.session_date || null,
     session_name: clean(row.session?.session_name || row.session_name) || "-",
     products,
     record_ids: recordIds,
     raw: row,
+  };
+}
+
+function displayLegacy(row: any, recordRows: any[] = [], itemRows: any[] = []) {
+  const serviceStatus = clean(row.patient_service_status || "HEALTHDAY").toUpperCase();
+  const mode: "HEALTHDAY" | "BAZAR" = serviceStatus === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+  const displayed = displayForService(row, mode, recordRows, itemRows);
+  return {
+    ...displayed,
+    row_key: `${row.id}:LEGACY`,
+    payment_method: clean(row.payment_method),
+    validation_status: clean(row.validation_status) || displayed.validation_status,
+    validated_at: row.validated_at || displayed.validated_at,
+    validated_by: clean(row.validated_by) || displayed.validated_by,
   };
 }
 
@@ -223,13 +270,34 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, message: error?.message || "Gagal membaca detail layanan vaksin.", rows: [] }, 500);
     }
 
-    const rows = validationRegistrations.map((row: any) =>
-      display(
-        row,
-        recordsByRegistration.get(Number(row.id)) || [],
-        itemsByRegistration.get(Number(row.id)) || []
-      )
-    );
+    const rows: any[] = [];
+    for (const row of validationRegistrations) {
+      const recordRows = recordsByRegistration.get(Number(row.id)) || [];
+      const itemRows = itemsByRegistration.get(Number(row.id)) || [];
+      const { healthdayQueueEnabled, bazarQueueEnabled } = queueFlags(row);
+
+      // Standard/internal workflow keeps legacy validation behavior untouched.
+      if (healthdayQueueEnabled && bazarQueueEnabled) {
+        const validationStatus = clean(row.validation_status).toUpperCase();
+        if (["PENDING", "DONE"].includes(validationStatus)) {
+          rows.push(displayLegacy(row, recordRows, itemRows));
+        }
+        continue;
+      }
+
+      // Vendor/record-only workflow is isolated per service track.
+      // One registration can therefore surface as two independent rows when
+      // Healthday and Bazar are both external and both need validation.
+      for (const serviceMode of ["HEALTHDAY", "BAZAR"] as const) {
+        const queueEnabled = serviceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled;
+        if (queueEnabled) continue;
+        if (!hasServiceTrack(row, itemRows, serviceMode)) continue;
+
+        const trackStatus = serviceTrackStatus(row, serviceMode);
+        if (!isPendingTrackStatus(trackStatus) && !isDoneTrackStatus(trackStatus)) continue;
+        rows.push(displayForService(row, serviceMode, recordRows, itemRows));
+      }
+    }
 
     // V148.6: pilihan lokasi berasal dari vaccination_sessions, bukan hanya peserta pending.
     let sessionLocationQuery = supabase
@@ -279,6 +347,12 @@ export async function POST(req: NextRequest) {
     const queueNumber = clean(body.queue_number ?? body.queueNumber);
     const actor = clean(body.actor || body.petugas || body.user || "Tim Validasi");
     const note = clean(body.note || body.cancelled_note || body.reason);
+    const requestedServiceMode = clean(body.service_mode || body.serviceMode).toUpperCase();
+    const serviceMode: "HEALTHDAY" | "BAZAR" | null = requestedServiceMode === "BAZAR"
+      ? "BAZAR"
+      : requestedServiceMode === "HEALTHDAY"
+        ? "HEALTHDAY"
+        : null;
     const supabase = supabaseAdmin();
 
     let rowId = id;
@@ -442,55 +516,117 @@ export async function POST(req: NextRequest) {
     }
     let payload: any = {};
 
-    if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
-      payload = { queue_status: "PENDING_VALIDATION", validation_status: "PENDING", print_status: "NOT_PRINTED", updated_at: now };
-    } else if (action === "PRINTED") {
-      payload = { print_status: "PRINTED", printed_by: actor, printed_at: now, updated_at: now };
-    } else if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
-      payload = { queue_status: "DONE", validation_status: "DONE", validated_by: actor, validated_at: now, updated_at: now };
-    } else if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") {
-      if (!note) return json({ ok: false, message: "Note wajib diisi jika status Batal." }, 400);
-      payload = { queue_status: "CANCELLED", validation_status: "CANCELLED", cancelled_by: actor, cancelled_at: now, cancelled_note: note, updated_at: now };
-    } else {
-      return json({ ok: false, message: "Action tidak dikenali." }, 400);
+    const registrationStateResult = await supabase
+      .from("vaccination_registrations")
+      .select("id,session_id,patient_service_status,queue_status,bazar_queue_status,validation_status")
+      .eq("id", rowId)
+      .maybeSingle();
+    if (registrationStateResult.error || !registrationStateResult.data) {
+      return json({ ok: false, message: registrationStateResult.error?.message || "Registrasi tidak ditemukan." }, 404);
     }
+    const registrationState = registrationStateResult.data;
 
-    if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
-      const registrationModeResult = await supabase
-        .from("vaccination_registrations")
-        .select("id,session_id,patient_service_status,queue_status,bazar_queue_status")
-        .eq("id", rowId)
-        .maybeSingle();
-      if (registrationModeResult.error || !registrationModeResult.data) {
-        return json({ ok: false, message: registrationModeResult.error?.message || "Registrasi tidak ditemukan." }, 404);
-      }
-      const sessionModeResult = await supabase
-        .from("vaccination_sessions")
-        .select("id,existing_flow_config")
-        .eq("id", registrationModeResult.data.session_id)
-        .maybeSingle();
-      if (sessionModeResult.error) {
-        return json({ ok: false, message: sessionModeResult.error.message || "Gagal membaca mode Session." }, 500);
-      }
-      const flow = sessionModeResult.data?.existing_flow_config || {};
-      const legacyQueue = flow?.queue !== false;
-      const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
-      const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
-      const serviceStatus = clean(registrationModeResult.data?.patient_service_status || "HEALTHDAY").toUpperCase();
-      const hasHealthday = serviceStatus === "HEALTHDAY" || serviceStatus === "COMBINATION";
-      const hasBazar = serviceStatus === "BAZAR" || serviceStatus === "COMBINATION";
-      try {
-        if (hasHealthday && !healthdayQueueEnabled) {
-          await syncRegistrationTrackDone(supabase, rowId, "HEALTHDAY", actor);
+    const sessionModeResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,existing_flow_config")
+      .eq("id", registrationState.session_id)
+      .maybeSingle();
+    if (sessionModeResult.error) {
+      return json({ ok: false, message: sessionModeResult.error.message || "Gagal membaca mode Session." }, 500);
+    }
+    const flow = sessionModeResult.data?.existing_flow_config || {};
+    const legacyQueue = flow?.queue !== false;
+    const healthdayQueueEnabled = flow?.queue_healthday === undefined ? legacyQueue : flow?.queue_healthday !== false;
+    const bazarQueueEnabled = flow?.queue_bazar === undefined ? legacyQueue : flow?.queue_bazar !== false;
+    const serviceSpecificExternal = Boolean(
+      serviceMode &&
+      ((serviceMode === "HEALTHDAY" && !healthdayQueueEnabled) || (serviceMode === "BAZAR" && !bazarQueueEnabled))
+    );
+
+    const aggregateValidationStatus = (nextHealthdayStatus: string, nextBazarStatus: string) => {
+      const externalStatuses: string[] = [];
+      if (!healthdayQueueEnabled && hasServiceTrack(registrationState, [], "HEALTHDAY")) externalStatuses.push(clean(nextHealthdayStatus).toUpperCase());
+      if (!bazarQueueEnabled && hasServiceTrack(registrationState, [], "BAZAR")) externalStatuses.push(clean(nextBazarStatus).toUpperCase());
+      if (!externalStatuses.length) return clean(registrationState.validation_status) || null;
+      if (externalStatuses.some((status) => isPendingTrackStatus(status))) return "PENDING";
+      if (externalStatuses.every((status) => isDoneTrackStatus(status))) return "DONE";
+      if (externalStatuses.every((status) => ["CANCELLED", "CANCELED"].includes(status))) return "CANCELLED";
+      if (externalStatuses.some((status) => isDoneTrackStatus(status))) return "DONE";
+      return clean(registrationState.validation_status) || null;
+    };
+
+    if (serviceSpecificExternal) {
+      const currentHealthdayStatus = clean(registrationState.queue_status).toUpperCase();
+      const currentBazarStatus = clean(registrationState.bazar_queue_status).toUpperCase();
+      let nextHealthdayStatus = currentHealthdayStatus;
+      let nextBazarStatus = currentBazarStatus;
+
+      if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
+        if (serviceMode === "BAZAR") nextBazarStatus = "PENDING_VALIDATION";
+        else nextHealthdayStatus = "PENDING_VALIDATION";
+        payload = {
+          ...(serviceMode === "BAZAR" ? { bazar_queue_status: nextBazarStatus } : { queue_status: nextHealthdayStatus }),
+          validation_status: "PENDING",
+          print_status: "NOT_PRINTED",
+          updated_at: now,
+        };
+      } else if (action === "PRINTED") {
+        payload = { print_status: "PRINTED", printed_by: actor, printed_at: now, updated_at: now };
+      } else if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
+        try {
+          await syncRegistrationTrackDone(supabase, rowId, serviceMode, actor);
+        } catch (syncError: any) {
+          return json({ ok: false, message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok." }, 409);
         }
-        if (hasBazar && !bazarQueueEnabled) {
-          await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+        if (serviceMode === "BAZAR") nextBazarStatus = "DONE";
+        else nextHealthdayStatus = "DONE";
+        payload = {
+          ...(serviceMode === "BAZAR" ? { bazar_queue_status: nextBazarStatus } : { queue_status: nextHealthdayStatus }),
+          validation_status: aggregateValidationStatus(nextHealthdayStatus, nextBazarStatus),
+          validated_by: actor,
+          validated_at: now,
+          updated_at: now,
+        };
+      } else if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") {
+        if (!note) return json({ ok: false, message: "Alasan Cancel wajib diisi." }, 400);
+        if (serviceMode === "BAZAR") nextBazarStatus = "CANCELLED";
+        else nextHealthdayStatus = "CANCELLED";
+        payload = {
+          ...(serviceMode === "BAZAR" ? { bazar_queue_status: nextBazarStatus } : { queue_status: nextHealthdayStatus }),
+          validation_status: aggregateValidationStatus(nextHealthdayStatus, nextBazarStatus),
+          cancelled_by: actor,
+          cancelled_at: now,
+          cancelled_note: note,
+          updated_at: now,
+        };
+      } else {
+        return json({ ok: false, message: "Action tidak dikenali." }, 400);
+      }
+    } else {
+      // Preserve standard/internal validation workflow exactly as before.
+      if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
+        payload = { queue_status: "PENDING_VALIDATION", validation_status: "PENDING", print_status: "NOT_PRINTED", updated_at: now };
+      } else if (action === "PRINTED") {
+        payload = { print_status: "PRINTED", printed_by: actor, printed_at: now, updated_at: now };
+      } else if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
+        payload = { queue_status: "DONE", validation_status: "DONE", validated_by: actor, validated_at: now, updated_at: now };
+      } else if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") {
+        if (!note) return json({ ok: false, message: "Note wajib diisi jika status Batal." }, 400);
+        payload = { queue_status: "CANCELLED", validation_status: "CANCELLED", cancelled_by: actor, cancelled_at: now, cancelled_note: note, updated_at: now };
+      } else {
+        return json({ ok: false, message: "Action tidak dikenali." }, 400);
+      }
+
+      if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
+        const serviceStatus = clean(registrationState.patient_service_status || "HEALTHDAY").toUpperCase();
+        const hasHealthday = serviceStatus === "HEALTHDAY" || serviceStatus === "COMBINATION";
+        const hasBazar = serviceStatus === "BAZAR" || serviceStatus === "COMBINATION";
+        try {
+          if (hasHealthday && !healthdayQueueEnabled) await syncRegistrationTrackDone(supabase, rowId, "HEALTHDAY", actor);
+          if (hasBazar && !bazarQueueEnabled) await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+        } catch (syncError: any) {
+          return json({ ok: false, message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok." }, 409);
         }
-      } catch (syncError: any) {
-        return json({
-          ok: false,
-          message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok.",
-        }, 409);
       }
     }
 
@@ -518,7 +654,7 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, message: result.error.message || "Gagal update status validasi." }, 500);
     }
 
-    return json({ ok: true, row: result.data ? display(result.data) : null });
+    return json({ ok: true, row: result.data || null });
   } catch (error: any) {
     return json({ ok: false, message: error?.message || "Gagal update validasi." }, 500);
   }
