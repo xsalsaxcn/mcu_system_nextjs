@@ -5,6 +5,9 @@ import { canVaccinationAccess } from "@/lib/vaccination/access";
 
 // V502_ISERVE_EXACT_COMBINATION_BATCH_EXPORT
 // V507_ISERVE_PRICING_METADATA
+// V534_R2_ISERVE_DONE_ONLY_PER_ITEM
+// iServe hanya menghitung/export vaccination item yang benar-benar final:
+// ADMINISTERED / DONE / FINISHED. Pending/Waiting/Validation/Cancelled tidak boleh masuk.
 export const dynamic = "force-dynamic";
 
 const ISERVE_HEADERS = [
@@ -59,7 +62,8 @@ function buildCombination(items: any[]) {
   const byKey = new Map<string, any>();
   for (const item of items) {
     if (item?.active === false) continue;
-    if (["CANCELLED", "VOID"].includes(clean(item?.status).toUpperCase())) continue;
+    const itemStatus = clean(item?.status).toUpperCase();
+    if (!["ADMINISTERED", "DONE", "FINISHED"].includes(itemStatus)) continue;
     const benefit = itemBenefit(item);
     if (!benefit) continue;
     if (!byKey.has(benefit.key)) byKey.set(benefit.key, benefit);
@@ -151,6 +155,7 @@ async function loadSessionBatchData(supabase: any, sessionId: number) {
       )
       .in("registration_id", registrationIds)
       .eq("active", true)
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
       .order("id", { ascending: true })
       .limit(50000);
 
@@ -168,10 +173,21 @@ async function loadSessionBatchData(supabase: any, sessionId: number) {
     itemsByRegistration.get(registrationId)!.push(item);
   }
 
+  // Hanya registration yang punya minimal satu item final boleh masuk iServe.
+  // Waiting / Belum Datang / Menunggu Validasi tidak ikut count maupun export.
+  const finalRegistrationIds = new Set(
+    items
+      .map((item: any) => Number(item?.registration_id || 0))
+      .filter(Boolean),
+  );
+  const doneRegistrations = registrations.filter((registration: any) =>
+    finalRegistrationIds.has(Number(registration?.id || 0)),
+  );
+
   const groups = new Map<string, any>();
   const skipped: any[] = [];
 
-  for (const registration of registrations) {
+  for (const registration of doneRegistrations) {
     const registrationId = Number(registration.id || 0);
     const combo = buildCombination(itemsByRegistration.get(registrationId) || []);
     if (!combo.key) {
