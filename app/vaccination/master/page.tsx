@@ -796,6 +796,49 @@ export default function VaccinationMasterPage() {
     return Array.from(ids).filter((id) => id > 0);
   }
 
+// V533: Session assignments stay visible even when stock/lot is still 0.
+  function seriesRuleSessions(vaccineId: any) {
+    const vaccineKey = String(vaccineId || "");
+    if (!vaccineKey) return [] as any[];
+
+    const companyKey =
+      stockFilter !== "ALL" && stockFilter !== "GENERAL"
+        ? normalizeCompany(stockFilter)
+        : "";
+    const seen = new Set<number>();
+    const result: any[] = [];
+
+    for (const assignment of sessionProductAssignments) {
+      if (assignment.active === false || String(assignment.vaccine_id || "") !== vaccineKey) continue;
+      const sessionId = Number(assignment.session_id || 0);
+      if (!sessionId || seen.has(sessionId)) continue;
+      const session = sessionMap.get(sessionId);
+      if (!session) continue;
+      if (companyKey && normalizeCompany(session?.company_name) !== companyKey) continue;
+      seen.add(sessionId);
+      result.push(session);
+    }
+
+    // Legacy fallback: a Session lot also means the product has been used by that Session.
+    // Assignment remains the primary source, so no-stock Session assignments stay visible.
+    for (const lot of lots) {
+      if (lotScope(lot) !== "SESSION" || String(lot.vaccine_id || lot.vaccine?.id || "") !== vaccineKey) continue;
+      const sessionId = Number(lot.stock_session_id || 0);
+      if (!sessionId || seen.has(sessionId)) continue;
+      const session = sessionMap.get(sessionId);
+      if (!session) continue;
+      if (companyKey && normalizeCompany(session?.company_name) !== companyKey) continue;
+      seen.add(sessionId);
+      result.push(session);
+    }
+
+    return result.sort((a, b) => {
+      const dateCompare = cleanText(a?.session_date).localeCompare(cleanText(b?.session_date));
+      if (dateCompare !== 0) return dateCompare;
+      return sessionLabel(a).localeCompare(sessionLabel(b));
+    });
+  }
+
   async function applySeriesRuleToCompany() {
     setError("");
     const vaccineId = String(selectedMasterVaccineId || "");
@@ -2303,6 +2346,7 @@ export default function VaccinationMasterPage() {
                   <button type="button" onClick={() => setVaccineForm((current: any) => ({ ...current, isSeries: !current.isSeries, seriesSchedule: current.seriesSchedule?.length ? current.seriesSchedule : [{ doseNumber: 1, nextDueDays: "" }] }))} className={`rounded-full px-4 py-2 text-xs font-black ${vaccineForm.isSeries ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>{vaccineForm.isSeries ? "Ya · Series" : "Tidak"}</button>
                 </div>
               </div>
+              {/* V533_SERIES_DOSE_SEMANTICS_AND_SESSION_VISIBILITY */}
               {!vaccineForm.isSeries ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <input type="number" className="rounded-xl border px-3 py-2" placeholder="Jumlah dosis" value={vaccineForm.doseCount} onChange={(e) => setVaccineForm({ ...vaccineForm, doseCount: Number(e.target.value || 1) })} />
@@ -2311,20 +2355,20 @@ export default function VaccinationMasterPage() {
               ) : (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div><div className="font-black text-emerald-900">Jadwal Series Produk</div><div className="mt-1 text-xs font-semibold text-emerald-700">Contoh: Dose 1 → 30 hari, Dose 2 → 90 hari. Berlaku ke semua Session produk ini.</div></div>
-                    <button type="button" onClick={() => setVaccineForm((current: any) => { const rows = Array.isArray(current.seriesSchedule) ? current.seriesSchedule : []; return { ...current, seriesSchedule: [...rows, { doseNumber: rows.length + 1, nextDueDays: "" }], doseCount: rows.length + 2 }; })} className="rounded-xl bg-white px-3 py-2 text-xs font-black text-emerald-700 shadow-sm">+ Add Dose</button>
+                    <div><div className="font-black text-emerald-900">Jadwal Series Produk</div><div className="mt-1 text-xs font-semibold text-emerald-700">Dosis 1 diberikan pada Hari H. Atur jeda untuk Dosis 2, Dosis 3, dan seterusnya. Berlaku ke semua Session produk ini.</div></div>
+                    <button type="button" onClick={() => setVaccineForm((current: any) => { const rows = Array.isArray(current.seriesSchedule) ? current.seriesSchedule : []; return { ...current, seriesSchedule: [...rows, { doseNumber: rows.length + 1, nextDueDays: "" }], doseCount: rows.length + 2 }; })} className="rounded-xl bg-white px-3 py-2 text-xs font-black text-emerald-700 shadow-sm">+ Tambah Dosis Berikutnya</button>
                   </div>
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
                     {(vaccineForm.seriesSchedule || []).map((row: any, index: number) => (
                       <div key={`series-${index}`} className="flex items-center gap-2 rounded-xl bg-white p-3">
-                        <div className="min-w-20 text-sm font-black text-slate-700">Dose {index + 1}</div><span className="text-xs font-bold text-slate-400">→</span>
+                        <div className="min-w-20 text-sm font-black text-slate-700">Dosis {index + 2}</div><span className="text-xs font-bold text-slate-400">→</span>
                         <input type="number" min={1} placeholder="Hari" value={row.nextDueDays} onChange={(e) => setVaccineForm((current: any) => { const rows = [...(current.seriesSchedule || [])]; rows[index] = { doseNumber: index + 1, nextDueDays: e.target.value }; return { ...current, seriesSchedule: rows, doseCount: rows.length + 1, defaultNextDoseDays: index === 0 ? e.target.value : current.defaultNextDoseDays }; })} className="min-w-0 flex-1 rounded-xl border px-3 py-2" />
                         <span className="text-xs font-bold text-slate-500">hari</span>
                         {index > 0 ? <button type="button" onClick={() => setVaccineForm((current: any) => { const rows = (current.seriesSchedule || []).filter((_: any, rowIndex: number) => rowIndex !== index).map((item: any, rowIndex: number) => ({ ...item, doseNumber: rowIndex + 1 })); return { ...current, seriesSchedule: rows, doseCount: rows.length + 1 }; })} className="rounded-lg px-2 py-1 text-xs font-black text-rose-600">Hapus</button> : null}
                       </div>
                     ))}
                   </div>
-                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs font-bold text-emerald-800">Total dosis terencana: {(vaccineForm.seriesSchedule || []).length + 1}. Reminder mengikuti tanggal dosis berikutnya dari rule ini.</div>
+                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs font-bold text-emerald-800">Total series: {(vaccineForm.seriesSchedule || []).length + 1}x (Hari H + {(vaccineForm.seriesSchedule || []).length} dosis lanjutan). Reminder mengikuti tanggal dosis berikutnya dari rule ini.</div>
                 </div>
               )}
 
@@ -3012,7 +3056,7 @@ export default function VaccinationMasterPage() {
             </div>
           </div>
           <div className="max-h-[320px] overflow-auto">
-            <table className="min-w-[1720px] text-sm">
+            <table className="min-w-[1960px] text-sm">
               <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
                   <th className="p-3 text-left">Produk</th>
@@ -3020,6 +3064,7 @@ export default function VaccinationMasterPage() {
                   <th className="p-3 text-left">Non Paket</th>
                   <th className="p-3 text-left">Paket</th>
                   <th className="p-3 text-left">Dosis Paket</th>
+                  <th className="p-3 text-left">Series</th>
                   <th className="p-3 text-left">Tujuan Stok</th>
                   <th className="p-3 text-left">Jenis Stok</th>
                   <th className="p-3 text-left">Stok Awal</th>
@@ -3039,6 +3084,10 @@ export default function VaccinationMasterPage() {
                   const stock = productStockSummary(v.id);
                   const target = compactStockTarget(v.id);
                   const modes = vaccineServiceModes(v.id);
+                  const seriesSessions = v.is_series === true ? seriesRuleSessions(v.id) : [];
+                  const seriesDoseCount = v.is_series === true
+                    ? Math.max(2, Number(v.dose_count || 0), (Array.isArray(v.series_schedule) ? v.series_schedule.length : 0) + 1)
+                    : 0;
 
                   return (
                     <tr key={v.id} className="align-top">
@@ -3054,6 +3103,30 @@ export default function VaccinationMasterPage() {
                         {packageOffer
                           ? `${Math.max(2, Number(packageOffer.package_dose_count || 2))}x`
                           : "-"}
+                      </td>
+                      <td className="p-3">
+                        {v.is_series === true ? (
+                          <div className="min-w-[220px] rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-black text-white">Series {seriesDoseCount}x</span>
+                              <span className="text-[11px] font-bold text-emerald-700">{seriesSessions.length} Session</span>
+                            </div>
+                            {seriesSessions.length ? (
+                              <div className="mt-2 max-h-24 space-y-1 overflow-auto pr-1">
+                                {seriesSessions.map((session: any) => (
+                                  <div key={`series-session-${v.id}-${session.id}`} className="rounded-lg bg-white px-2 py-1.5 text-[11px] leading-tight text-slate-700">
+                                    <div className="font-bold">{cleanText(session.location) || cleanText(session.session_name) || `Session ${session.id}`}</div>
+                                    {cleanText(session.session_date) ? <div className="mt-0.5 text-slate-400">{cleanText(session.session_date)}</div> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="mt-2 text-[11px] font-semibold text-emerald-700">Belum ada Session yang memakai produk ini.</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
                       </td>
                       <td className="p-3">
                         <div className="max-w-[250px] rounded-xl border bg-slate-50 px-3 py-2">
@@ -3128,7 +3201,7 @@ export default function VaccinationMasterPage() {
                 })}
                 {!filteredVaccines.length ? (
                   <tr>
-                    <td colSpan={15} className="p-6 text-center text-sm text-slate-500">
+                    <td colSpan={16} className="p-6 text-center text-sm text-slate-500">
                       Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, Session/Lokasi, atau Jenis Stok.
                     </td>
                   </tr>
