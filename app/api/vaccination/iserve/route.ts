@@ -430,14 +430,10 @@ export async function GET(req: NextRequest) {
         participant.name,
         participant.participant_name,
       ),
-      street: firstValue(
-        registration.street,
-        registration.address,
-        registration.alamat,
-        participant.street,
-        participant.address,
-        participant.alamat,
-      ),
+      // V535_ISERVE_STREET_USE_SESSION_NAME
+      // iServe memakai kolom street sebagai label Session untuk seluruh peserta batch.
+      // Data alamat peserta di database tidak diubah.
+      street: firstValue(data.session?.session_name, data.session?.location),
       nik: firstValue(
         registration.nik,
         participant.nik,
