@@ -170,6 +170,8 @@ export default function VaccinationMasterPage() {
   const [packagePrice, setPackagePrice] = useState("");
   const [savingInlinePricing, setSavingInlinePricing] = useState(false);
   const [applyingSeriesCompany, setApplyingSeriesCompany] = useState(false);
+  // V537_SERIES_EDIT_STOCK_LOT
+  const [seriesStockEditorOpen, setSeriesStockEditorOpen] = useState(false);
   // V531_PRODUCT_SERIES_GLOBAL_RULE
   // V532_SERIES_RULE_FOCUSED_EDITOR
 // V511_DUPLICATE_SESSION_CATALOG_NO_STOCK
@@ -184,6 +186,7 @@ export default function VaccinationMasterPage() {
     setSelectedMasterVaccineId("");
     setMasterEditMode("CREATE");
     setEditingLotId("");
+    setSeriesStockEditorOpen(false);
     setVaccineForm({
       name: "",
       brand: "",
@@ -624,7 +627,7 @@ export default function VaccinationMasterPage() {
 
       // V532: when Edit Produk is used to configure a Series rule, Lot & Stok are intentionally
       // out of scope. Save only product/pricing/series data and never mutate Session stock here.
-      if (masterEditMode === "PRODUCT" && vaccineForm.isSeries) {
+      if (masterEditMode === "PRODUCT" && vaccineForm.isSeries && !seriesStockEditorOpen) {
         setMessage(`Rule Series ${vaccineForm.name || "produk"} berhasil disimpan. Lot dan stok tidak diubah.`);
         await loadData();
         resetProductLotEditor();
@@ -894,6 +897,7 @@ export default function VaccinationMasterPage() {
     setSelectedMasterVaccineId(String(vaccine.id || ""));
     setMasterEditMode("PRODUCT");
     setEditingLotId("");
+    setSeriesStockEditorOpen(false);
 
     const filteredSessionId =
       stockSessionFilter !== "ALL" ? String(stockSessionFilter) : "";
@@ -981,6 +985,7 @@ export default function VaccinationMasterPage() {
     setSelectedMasterVaccineId(vaccineId);
     setMasterEditMode("LOT");
     setEditingLotId(String(lot.id || ""));
+    setSeriesStockEditorOpen(false);
     setVaccineForm({
       name: cleanText(vaccine.name),
       brand: cleanText(vaccine.brand),
@@ -2417,7 +2422,7 @@ export default function VaccinationMasterPage() {
               </div>
             </fieldset>
 
-            {masterEditMode === "PRODUCT" && vaccineForm.isSeries ? (
+            {masterEditMode === "PRODUCT" && vaccineForm.isSeries && !seriesStockEditorOpen ? (
               <div className="grid content-start gap-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
                 <div>
                   <div className="text-sm font-black text-emerald-900">Penerapan Rule Series</div>
@@ -2461,13 +2466,42 @@ export default function VaccinationMasterPage() {
                     : `Apply Rules Series ke Semua Session Perusahaan ${cleanText(lotForm.stockCompanyName) || "Terpilih"}`}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSeriesStockEditorOpen(true);
+                    setError("");
+                    setMessage(`Edit Stok & Lot ${vaccineForm.name || "produk"}. Rule Series tetap aktif.`);
+                  }}
+                  className="rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-black text-emerald-800 hover:bg-emerald-100"
+                >
+                  Edit Stok & Lot
+                </button>
+
                 <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-xs font-semibold text-blue-800">
                   Rule disimpan satu kali pada Master Produk. Semua Session yang memakai produk ini membaca rule yang sama; tidak ada duplikasi rule, Lot, atau stok.
                 </div>
               </div>
             ) : (
             <div className="grid content-start gap-3">
-              <div className="text-sm font-bold text-slate-700">Lot & Stok</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-bold text-slate-700">Lot & Stok</div>
+                {masterEditMode === "PRODUCT" && vaccineForm.isSeries && seriesStockEditorOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setSeriesStockEditorOpen(false)}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800 hover:bg-emerald-100"
+                  >
+                    Kembali ke Rule Series
+                  </button>
+                ) : null}
+              </div>
+
+              {masterEditMode === "PRODUCT" && vaccineForm.isSeries && seriesStockEditorOpen ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-semibold text-emerald-800">
+                  Produk tetap berstatus Series. Perubahan di bawah hanya untuk Lot dan stok produk ini.
+                </div>
+              ) : null}
 
               {masterEditMode === "LOT" ? (
                 <label className="grid gap-1 text-xs font-semibold text-slate-600">
@@ -2895,8 +2929,10 @@ export default function VaccinationMasterPage() {
               ? "Menyimpan Produk, Lot & Harga..."
               : masterEditMode === "LOT"
                 ? "Simpan Perubahan Lot & Produk Ini"
-                : masterEditMode === "PRODUCT" && vaccineForm.isSeries
-                  ? "Simpan Data Produk & Rule Series"
+                : masterEditMode === "PRODUCT" && vaccineForm.isSeries && seriesStockEditorOpen
+                  ? "Simpan Produk, Rule Series, Stok & Lot"
+                  : masterEditMode === "PRODUCT" && vaccineForm.isSeries
+                    ? "Simpan Data Produk & Rule Series"
                   : masterEditMode === "PRODUCT"
                     ? "Simpan Perubahan Produk & Lot"
                     : "Simpan Produk & Lot"}

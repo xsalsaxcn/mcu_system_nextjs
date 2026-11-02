@@ -163,6 +163,8 @@ export default function VaccinationSessionPage() {
   const [loadingEditPrintMode, setLoadingEditPrintMode] = useState(false);
   const [editPrintModeReady, setEditPrintModeReady] = useState(false);
   const [savingEditSession, setSavingEditSession] = useState(false);
+  // V537_SESSION_TEST_RESET_UI
+  const [resettingSessionId, setResettingSessionId] = useState<number | null>(null);
   const [editSessionVaccines, setEditSessionVaccines] = useState<(SessionVaccineDraft & {
     vaccineLabel?: string;
     lotLabel?: string;
@@ -977,6 +979,51 @@ export default function VaccinationSessionPage() {
       setError(err?.message || "Gagal menerapkan flow massal.");
     } finally {
       setBulkApplyingFlow(false);
+    }
+  }
+
+
+  async function resetSessionTestingData(session: any) {
+    const sessionName = String(session?.session_name || "").trim();
+    const typed = window.prompt(
+      `RESET DATA TESTING\n\nSession: ${sessionName}\n\nYang dibersihkan: Registrasi, item/tindakan, Validasi/Antrian, Self Booking, dan pemakaian stok dari transaksi Done pada Session ini.\n\nYang TETAP: Session, Master Produk, Lot, stok awal/tambahan, Rule Series, assignment produk.\n\nKetik RESET untuk melanjutkan.`,
+      "",
+    );
+    if (typed !== "RESET") return;
+
+    const confirmed = window.confirm(
+      `Yakin reset data testing Session "${sessionName}"?\n\nTindakan ini tidak dapat di-undo dari UI.`,
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setMessage("Mereset data testing Session...");
+    setResettingSessionId(Number(session.id));
+
+    try {
+      const res = await fetch("/api/vaccination/session-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: Number(session.id),
+          sessionName,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        throw new Error(json.message || "Reset data testing gagal.");
+      }
+
+      const reset = json.reset || {};
+      setMessage(
+        `${json.message || "Reset selesai"} Registrasi: ${Number(reset.registrations || 0)} · Done direverse: ${Number(reset.reversedDone || 0)}.`,
+      );
+      await loadSessions();
+    } catch (err: any) {
+      setError(err?.message || "Reset data testing gagal.");
+      setMessage("");
+    } finally {
+      setResettingSessionId(null);
     }
   }
 
@@ -2003,6 +2050,15 @@ export default function VaccinationSessionPage() {
                             title="Edit session"
                           >
                             ✏ Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => resetSessionTestingData(session)}
+                            disabled={resettingSessionId === Number(session.id)}
+                            className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Reset hanya data transaksi/testing Session; Master dan rule tetap"
+                          >
+                            {resettingSessionId === Number(session.id) ? "Reset..." : "↺ Reset Testing"}
                           </button>
                           <button
                             type="button"
