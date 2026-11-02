@@ -1,26 +1,47 @@
-// V537_SESSION_TEST_DATA_RESET
+// V539_SESSION_TEST_RESET_RESIDUAL_CLEANUP
 import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
-import { reverseQueueDoneTrack } from "@/lib/vaccination/queueDoneInventory";
 
 export const dynamic = "force-dynamic";
-
-function isFinalItemStatus(value: any) {
-  return ["ADMINISTERED", "DONE", "FINISHED"].includes(clean(value).toUpperCase());
-}
-
-function recordTrack(notes: any): "HEALTHDAY" | "BAZAR" | null {
-  const value = clean(notes).toUpperCase();
-  if (value.includes("QUEUE_DONE_SYNC:HEALTHDAY")) return "HEALTHDAY";
-  if (value.includes("QUEUE_DONE_SYNC:BAZAR")) return "BAZAR";
-  return null;
-}
 
 function missingTable(error: any, table: string) {
   const code = clean(error?.code);
   const message = clean(error?.message).toLowerCase();
   return code === "42P01" || message.includes(table.toLowerCase());
+}
+
+async function deleteOptional(
+  supabase: any,
+  table: string,
+  builder: (query: any) => any,
+) {
+  const result = await builder(supabase.from(table).delete());
+  if (result.error && !missingTable(result.error, table)) {
+    throw new Error(result.error.message || `Gagal membersihkan ${table}.`);
+  }
+  return !result.error;
+}
+
+async function recomputeLotStockUsed(supabase: any, lotId: number) {
+  const remaining = await supabase
+    .from("vaccination_records")
+    .select("id", { count: "exact", head: true })
+    .eq("lot_id", lotId)
+    .in("status", ["ADMINISTERED", "DONE", "FINISHED"]);
+
+  if (remaining.error) throw new Error(remaining.error.message);
+
+  const update = await supabase
+    .from("vaccination_vaccine_lots")
+    .update({
+      stock_used: Math.max(0, Number(remaining.count || 0)),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", lotId);
+
+  if (update.error) throw new Error(update.error.message);
+  return Math.max(0, Number(remaining.count || 0));
 }
 
 export async function POST(req: NextRequest) {
@@ -36,137 +57,238 @@ export async function POST(req: NextRequest) {
   if (!sessionId) return fail("Session tidak valid.");
 
   const supabase = supabaseAdmin();
+
   const sessionResult = await supabase
     .from("vaccination_sessions")
     .select("id,session_name,company_name,location,session_date")
     .eq("id", sessionId)
     .single();
-  if (sessionResult.error) return fail(sessionResult.error.message, 404);
+
+  if (sessionResult.error || !sessionResult.data) {
+    return fail(sessionResult.error?.message || "Session tidak ditemukan.", 404);
+  }
 
   const session = sessionResult.data;
   if (expectedName && clean(session.session_name) !== expectedName) {
     return fail("Nama Session berubah. Refresh halaman sebelum melakukan reset.", 409);
   }
 
-  const registrationResult = await supabase
-    .from("vaccination_registrations")
-    .select("id")
-    .eq("session_id", sessionId);
-  if (registrationResult.error) return fail(registrationResult.error.message, 500);
+  try {
+    // 1) Collect all operational rows first. No destructive action before this preflight completes.
+    const registrationsResult = await supabase
+      .from("vaccination_registrations")
+      .select("id")
+      .eq("session_id", sessionId);
+    if (registrationsResult.error) throw new Error(registrationsResult.error.message);
 
-  const registrationIds = (registrationResult.data || [])
-    .map((row: any) => Number(row.id || 0))
-    .filter(Boolean);
+    const registrationIds = (registrationsResult.data || [])
+      .map((row: any) => Number(row.id || 0))
+      .filter(Boolean);
 
-  const recordsResult = await supabase
-    .from("vaccination_records")
-    .select("id,registration_id,notes,status")
-    .eq("session_id", sessionId);
-  if (recordsResult.error) return fail(recordsResult.error.message, 500);
-  const records = recordsResult.data || [];
+    const recordsResult = await supabase
+      .from("vaccination_records")
+      .select("id,registration_id,lot_id,status")
+      .eq("session_id", sessionId);
+    if (recordsResult.error) throw new Error(recordsResult.error.message);
 
-  let items: any[] = [];
-  if (registrationIds.length) {
-    const itemResult = await supabase
-      .from("vaccination_registration_items")
-      .select("id,registration_id,status,service_mode,administered_record_id")
-      .in("registration_id", registrationIds);
-    if (itemResult.error) return fail(itemResult.error.message, 500);
-    items = itemResult.data || [];
-  }
+    const records = recordsResult.data || [];
+    const recordIds = records
+      .map((row: any) => Number(row.id || 0))
+      .filter(Boolean);
 
-  const itemByRecordId = new Map<number, any>();
-  for (const item of items) {
-    const recordId = Number(item?.administered_record_id || 0);
-    if (recordId) itemByRecordId.set(recordId, item);
-  }
-
-  // Safety: only auto-reset records made by Registration/Validation DONE sync.
-  const unsafeRecords = records.filter((record: any) => {
-    const track = recordTrack(record?.notes);
-    const item = itemByRecordId.get(Number(record?.id || 0));
-    return (
-      !track ||
-      !item ||
-      Number(item.registration_id || 0) !== Number(record.registration_id || 0) ||
-      !isFinalItemStatus(item.status)
+    const affectedLotIds = Array.from(
+      new Set(
+        records
+          .map((row: any) => Number(row.lot_id || 0))
+          .filter(Boolean),
+      ),
     );
-  });
 
-  if (unsafeRecords.length) {
-    return fail(
-      `Reset dihentikan: ada ${unsafeRecords.length} record vaksin pada Session ini yang bukan berasal dari flow Registrasi/Validasi otomatis. Data tersebut tidak diubah agar stok tetap aman.`,
-      409,
-    );
-  }
+    let itemCount = 0;
+    if (registrationIds.length) {
+      const itemsResult = await supabase
+        .from("vaccination_registration_items")
+        .select("id,lot_id")
+        .in("registration_id", registrationIds);
+      if (itemsResult.error) throw new Error(itemsResult.error.message);
 
-  let reversedDone = 0;
-  for (const registrationId of registrationIds) {
-    const healthday = await reverseQueueDoneTrack(
-      supabase,
-      registrationId,
-      "HEALTHDAY",
-      "session-test-reset",
-    );
-    const bazar = await reverseQueueDoneTrack(
-      supabase,
-      registrationId,
-      "BAZAR",
-      "session-test-reset",
-    );
-    reversedDone += Number(healthday?.reversed || 0) + Number(bazar?.reversed || 0);
-  }
+      itemCount = (itemsResult.data || []).length;
+      for (const item of itemsResult.data || []) {
+        const lotId = Number(item?.lot_id || 0);
+        if (lotId && !affectedLotIds.includes(lotId)) affectedLotIds.push(lotId);
+      }
+    }
 
-  const remainingRecords = await supabase
-    .from("vaccination_records")
-    .select("id")
-    .eq("session_id", sessionId)
-    .limit(20);
-  if (remainingRecords.error) return fail(remainingRecords.error.message, 500);
-  if ((remainingRecords.data || []).length) {
-    return fail(
-      "Reset dihentikan karena masih ada record vaksin yang belum dapat direverse. Registrasi belum dihapus.",
-      409,
-    );
-  }
-
-  const selfBookingDelete = await supabase
-    .from("vaccination_bazar_self_bookings")
-    .delete()
-    .eq("session_id", sessionId);
-  if (selfBookingDelete.error && !missingTable(selfBookingDelete.error, "vaccination_bazar_self_bookings")) {
-    return fail(selfBookingDelete.error.message, 500);
-  }
-
-  if (registrationIds.length) {
-    const auditDelete = await supabase
-      .from("vaccination_inventory_movements")
+    // 2) Remove dependent operational data first.
+    let selfBookingCleared = false;
+    const selfBookingDelete = await supabase
+      .from("vaccination_bazar_self_bookings")
       .delete()
-      .eq("movement_type", "queue_done_reversal_audit")
-      .eq("reference_type", "registration")
-      .in("reference_id", registrationIds);
-    if (auditDelete.error) return fail(auditDelete.error.message, 500);
+      .eq("session_id", sessionId);
+    if (selfBookingDelete.error) {
+      if (!missingTable(selfBookingDelete.error, "vaccination_bazar_self_bookings")) {
+        throw new Error(selfBookingDelete.error.message);
+      }
+    } else {
+      selfBookingCleared = true;
+    }
 
-    const itemDelete = await supabase
-      .from("vaccination_registration_items")
-      .delete()
-      .in("registration_id", registrationIds);
-    if (itemDelete.error) return fail(itemDelete.error.message, 500);
+    let onsiteEntriesCleared = 0;
+    let onsiteEventsCleared = 0;
+    const onsiteEvents = await supabase
+      .from("vaccination_onsite_queue_events")
+      .select("id")
+      .eq("session_id", sessionId);
+
+    if (onsiteEvents.error) {
+      if (!missingTable(onsiteEvents.error, "vaccination_onsite_queue_events")) {
+        throw new Error(onsiteEvents.error.message);
+      }
+    } else {
+      const eventIds = (onsiteEvents.data || [])
+        .map((row: any) => Number(row.id || 0))
+        .filter(Boolean);
+
+      if (eventIds.length) {
+        const entries = await supabase
+          .from("vaccination_onsite_queue_entries")
+          .select("id")
+          .in("event_id", eventIds);
+
+        if (entries.error) {
+          if (!missingTable(entries.error, "vaccination_onsite_queue_entries")) {
+            throw new Error(entries.error.message);
+          }
+        } else {
+          onsiteEntriesCleared = (entries.data || []).length;
+          const deleteEntries = await supabase
+            .from("vaccination_onsite_queue_entries")
+            .delete()
+            .in("event_id", eventIds);
+          if (deleteEntries.error && !missingTable(deleteEntries.error, "vaccination_onsite_queue_entries")) {
+            throw new Error(deleteEntries.error.message);
+          }
+        }
+
+        onsiteEventsCleared = eventIds.length;
+        const deleteEvents = await supabase
+          .from("vaccination_onsite_queue_events")
+          .delete()
+          .in("id", eventIds);
+        if (deleteEvents.error) throw new Error(deleteEvents.error.message);
+      }
+    }
+
+    if (recordIds.length) {
+      const remindersDelete = await supabase
+        .from("vaccination_reminders")
+        .delete()
+        .in("record_id", recordIds);
+      if (remindersDelete.error && !missingTable(remindersDelete.error, "vaccination_reminders")) {
+        throw new Error(remindersDelete.error.message);
+      }
+
+      const recordMovementDelete = await supabase
+        .from("vaccination_inventory_movements")
+        .delete()
+        .eq("reference_type", "vaccination_record")
+        .in("reference_id", recordIds);
+      if (recordMovementDelete.error) throw new Error(recordMovementDelete.error.message);
+    }
+
+    if (registrationIds.length) {
+      // Remove reset/reversal audit and any operational movement tied directly to these test registrations.
+      const registrationMovementDelete = await supabase
+        .from("vaccination_inventory_movements")
+        .delete()
+        .eq("reference_type", "registration")
+        .in("reference_id", registrationIds);
+      if (registrationMovementDelete.error) throw new Error(registrationMovementDelete.error.message);
+
+      // Break item -> record link before removing records.
+      const unlinkItems = await supabase
+        .from("vaccination_registration_items")
+        .update({
+          administered_record_id: null,
+          administered_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in("registration_id", registrationIds);
+      if (unlinkItems.error) throw new Error(unlinkItems.error.message);
+    }
+
+    // 3) Remove session records and operational registration items.
+    if (recordIds.length) {
+      const recordDelete = await supabase
+        .from("vaccination_records")
+        .delete()
+        .in("id", recordIds);
+      if (recordDelete.error) throw new Error(recordDelete.error.message);
+    }
+
+    if (registrationIds.length) {
+      const itemDelete = await supabase
+        .from("vaccination_registration_items")
+        .delete()
+        .in("registration_id", registrationIds);
+      if (itemDelete.error) throw new Error(itemDelete.error.message);
+
+      const registrationDelete = await supabase
+        .from("vaccination_registrations")
+        .delete()
+        .eq("session_id", sessionId);
+      if (registrationDelete.error) throw new Error(registrationDelete.error.message);
+    }
+
+    // 4) Recompute stock_used from surviving administered records.
+    // This avoids blind subtraction and preserves usage from every other Session.
+    const stockAfter: Record<string, number> = {};
+    for (const lotId of affectedLotIds) {
+      stockAfter[String(lotId)] = await recomputeLotStockUsed(supabase, lotId);
+    }
+
+    // 5) Final verification: the reset is only successful if no operational registration remains.
+    const verifyRegs = await supabase
+      .from("vaccination_registrations")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId);
+    if (verifyRegs.error) throw new Error(verifyRegs.error.message);
+
+    const verifyRecords = await supabase
+      .from("vaccination_records")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId);
+    if (verifyRecords.error) throw new Error(verifyRecords.error.message);
+
+    if (Number(verifyRegs.count || 0) !== 0 || Number(verifyRecords.count || 0) !== 0) {
+      throw new Error(
+        `Reset belum bersih. Sisa registrasi: ${Number(verifyRegs.count || 0)}, sisa record: ${Number(verifyRecords.count || 0)}.`,
+      );
+    }
+
+    return ok({
+      message: `Data testing Session "${clean(session.session_name)}" berhasil dibersihkan tanpa menghapus Master/Rule.`,
+      reset: {
+        sessionId,
+        registrations: registrationIds.length,
+        items: itemCount,
+        records: recordIds.length,
+        affectedLots: affectedLotIds.length,
+        selfBookingCleared,
+        onsiteEntriesCleared,
+        onsiteEventsCleared,
+      },
+      preserved: {
+        session: true,
+        masterProducts: true,
+        lots: true,
+        stockInitialAndAdded: true,
+        seriesRules: true,
+        productAssignments: true,
+      },
+      stockUsedAfter: stockAfter,
+    });
+  } catch (error: any) {
+    return fail(error?.message || "Reset data testing gagal.", 500);
   }
-
-  const registrationDelete = await supabase
-    .from("vaccination_registrations")
-    .delete()
-    .eq("session_id", sessionId);
-  if (registrationDelete.error) return fail(registrationDelete.error.message, 500);
-
-  return ok({
-    message: `Data testing Session "${clean(session.session_name)}" berhasil direset.`,
-    reset: {
-      sessionId,
-      registrations: registrationIds.length,
-      reversedDone,
-      selfBookingCleared: !selfBookingDelete.error,
-    },
-  });
 }
