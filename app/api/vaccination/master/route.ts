@@ -1,3 +1,4 @@
+// V542_SESSION_STOCK_ISOLATION
 // V540_INITIAL_STOCK_EDIT_AND_DELETE_GUARD
 // V531_PRODUCT_SERIES_GLOBAL_RULE
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
@@ -604,6 +605,18 @@ export async function POST(req: NextRequest) {
     const requestedSet = new Set<number>(requestedVaccineIds);
     const sourceAssignments = (assignmentResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
     const sourceAllocations = (allocationResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
+    const sourceLotIds = Array.from(
+      new Set<number>(sourceAllocations.map((row: any) => Number(row.lot_id || 0)).filter((id: number) => id > 0)),
+    );
+    const sourceLotsResult = sourceLotIds.length
+      ? await supabase
+          .from("vaccination_vaccine_lots")
+          .select("id,vaccine_id,lot_number,expiry_date,active,stock_scope,stock_company_name,stock_session_id")
+          .in("id", sourceLotIds)
+      : { data: [], error: null } as any;
+    if (sourceLotsResult.error) return fail(sourceLotsResult.error.message, 500);
+    const sourceLotMap = new Map<number, any>((sourceLotsResult.data || []).map((row: any) => [Number(row.id), row]));
+
     const sourceCatalogVaccineIds = new Set<number>();
     for (const row of sourceAssignments) sourceCatalogVaccineIds.add(Number(row.vaccine_id || 0));
     for (const row of sourceAllocations) sourceCatalogVaccineIds.add(Number(row.vaccine_id || 0));
@@ -626,59 +639,48 @@ export async function POST(req: NextRequest) {
       if (!modesByVaccine.get(Number(vaccineId))?.size) addMode(vaccineId, "HEALTHDAY");
     }
 
-    const sourceAllocationKeys = new Set<string>();
+    const sourceCatalogKeys = new Set<string>();
     for (const row of sourceAllocations) {
       const vaccineId = Number(row.vaccine_id || 0);
-      const lotId = Number(row.lot_id || 0);
-      if (!vaccineId || !lotId) continue;
+      const sourceLot = sourceLotMap.get(Number(row.lot_id || 0));
+      const lotNumberKey = clean(sourceLot?.lot_number).toLowerCase();
+      if (!vaccineId || !lotNumberKey) continue;
       const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
-      sourceAllocationKeys.add(`${vaccineId}:${lotId}:${mode}`);
+      sourceCatalogKeys.add(`${vaccineId}:${lotNumberKey}:${mode}`);
     }
 
     const actor = (user as any)?.email || (user as any)?.name || (user as any)?.id || "system";
     let assignmentCount = 0;
     let lotCatalogCount = 0;
+    let catalogLotCreatedCount = 0;
+    let existingTargetStockPreserved = 0;
     let staleCatalogRowsDisabled = 0;
     let staleAssignmentRowsDisabled = 0;
+
     for (const targetSessionId of targetSessionIds) {
-      // V515: mirror klasifikasi Healthday/Bazar dari Session sumber. Hanya row katalog
-      // hasil duplikasi lama yang boleh dinonaktifkan otomatis; stok riil/manual tetap aman.
-      const oldCatalogResult = await supabase
-        .from("vaccination_session_stock_allocations")
-        .select("id,vaccine_id,lot_id,service_mode,allocated_qty,notes,active")
-        .eq("session_id", targetSessionId)
-        .eq("active", true)
-        .in("vaccine_id", requestedVaccineIds)
-        .ilike("notes", "Catalog only from Session %");
-      if (oldCatalogResult.error) return fail(oldCatalogResult.error.message, 500);
+      const targetSession = sessionMap.get(targetSessionId);
+      if (!targetSession) return fail(`Session tujuan ID ${targetSessionId} tidak ditemukan.`, 404);
 
-      for (const row of oldCatalogResult.data || []) {
-        const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
-        const key = `${Number(row.vaccine_id || 0)}:${Number(row.lot_id || 0)}:${mode}`;
-        if (sourceAllocationKeys.has(key)) continue;
-        const disableResult = await supabase
-          .from("vaccination_session_stock_allocations")
-          .update({ active: false, updated_at: new Date().toISOString() })
-          .eq("id", row.id);
-        if (disableResult.error) return fail(disableResult.error.message, 500);
-        staleCatalogRowsDisabled += 1;
-      }
-
+      // V542: mirror klasifikasi Healthday/Bazar tanpa pernah menimpa planned stock target.
       const targetAssignmentResult = await supabase
         .from("vaccination_session_product_assignments")
         .select("id,vaccine_id,service_mode,planned_stock_initial,active")
         .eq("session_id", targetSessionId)
-        .eq("active", true)
         .in("vaccine_id", requestedVaccineIds);
       if (targetAssignmentResult.error) return fail(targetAssignmentResult.error.message, 500);
+      const targetAssignmentByKey = new Map<string, any>();
+      for (const row of targetAssignmentResult.data || []) {
+        const key = `${Number(row.vaccine_id || 0)}:${normalizeServiceMode(row.service_mode)}`;
+        targetAssignmentByKey.set(key, row);
+      }
 
       for (const row of targetAssignmentResult.data || []) {
+        if (row.active === false) continue;
         const vaccineId = Number(row.vaccine_id || 0);
-        const mode = String(row.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        const mode = normalizeServiceMode(row.service_mode);
         const allowedModes = modesByVaccine.get(vaccineId) || new Set<string>(["HEALTHDAY"]);
         if (allowedModes.has(mode)) continue;
-        // Hanya assignment zero-stock yang cocok dengan jejak katalog duplikasi V510/V511.
-        // Assignment yang punya planned stock tidak pernah disentuh otomatis.
+        // Hanya assignment zero-stock legacy duplicate yang boleh dinonaktifkan otomatis.
         if (Number(row.planned_stock_initial || 0) !== 0) continue;
         const disableResult = await supabase
           .from("vaccination_session_product_assignments")
@@ -687,70 +689,199 @@ export async function POST(req: NextRequest) {
         if (disableResult.error) return fail(disableResult.error.message, 500);
         staleAssignmentRowsDisabled += 1;
       }
+
       for (const vaccineId of requestedVaccineIds) {
         for (const mode of Array.from(modesByVaccine.get(Number(vaccineId)) || new Set<string>(["HEALTHDAY"]))) {
-          const assignmentUpsert = await supabase
-            .from("vaccination_session_product_assignments")
-            .upsert({
-              session_id: targetSessionId,
-              vaccine_id: Number(vaccineId),
-              service_mode: mode,
-              planned_stock_initial: 0,
-              active: true,
-              updated_at: new Date().toISOString(),
-            }, { onConflict: "session_id,vaccine_id,service_mode" });
-          if (assignmentUpsert.error) return fail(assignmentUpsert.error.message, 500);
+          const key = `${Number(vaccineId)}:${mode}`;
+          const existingAssignment = targetAssignmentByKey.get(key);
+          if (existingAssignment) {
+            // Non-destructive: planned_stock_initial target dipertahankan persis.
+            if (existingAssignment.active === false) {
+              const reenable = await supabase
+                .from("vaccination_session_product_assignments")
+                .update({ active: true, updated_at: new Date().toISOString() })
+                .eq("id", existingAssignment.id);
+              if (reenable.error) return fail(reenable.error.message, 500);
+            } else if (Number(existingAssignment.planned_stock_initial || 0) > 0) {
+              existingTargetStockPreserved += 1;
+            }
+          } else {
+            const insertAssignment = await supabase
+              .from("vaccination_session_product_assignments")
+              .insert({
+                session_id: targetSessionId,
+                vaccine_id: Number(vaccineId),
+                service_mode: mode,
+                planned_stock_initial: 0,
+                active: true,
+                updated_at: new Date().toISOString(),
+              });
+            if (insertAssignment.error) return fail(insertAssignment.error.message, 500);
+          }
           assignmentCount += 1;
         }
       }
 
+      // Disable only stale catalog-generated zero-stock rows. Real/manual target stock is never touched.
+      const oldCatalogResult = await supabase
+        .from("vaccination_session_stock_allocations")
+        .select("id,vaccine_id,lot_id,service_mode,allocated_qty,notes,active,lot:vaccination_vaccine_lots(id,lot_number)")
+        .eq("session_id", targetSessionId)
+        .eq("active", true)
+        .in("vaccine_id", requestedVaccineIds)
+        .ilike("notes", "Catalog only from Session %");
+      if (oldCatalogResult.error) return fail(oldCatalogResult.error.message, 500);
+      for (const row of oldCatalogResult.data || []) {
+        if (Number(row.allocated_qty || 0) !== 0) continue;
+        const lotNumberKey = clean((row as any)?.lot?.lot_number).toLowerCase();
+        const mode = normalizeServiceMode(row.service_mode);
+        const key = `${Number(row.vaccine_id || 0)}:${lotNumberKey}:${mode}`;
+        if (sourceCatalogKeys.has(key)) continue;
+        const disableResult = await supabase
+          .from("vaccination_session_stock_allocations")
+          .update({ active: false, updated_at: new Date().toISOString() })
+          .eq("id", row.id);
+        if (disableResult.error) return fail(disableResult.error.message, 500);
+        staleCatalogRowsDisabled += 1;
+      }
+
       for (const sourceRow of sourceAllocations) {
         const vaccineId = Number(sourceRow.vaccine_id || 0);
-        const lotId = Number(sourceRow.lot_id || 0);
-        if (!vaccineId || !lotId || !requestedSet.has(vaccineId)) continue;
-        const mode = String(sourceRow.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
-        const allocationUpsert = await supabase
-          .from("vaccination_session_stock_allocations")
-          .upsert({
-            session_id: targetSessionId,
-            vaccine_id: vaccineId,
-            lot_id: lotId,
-            service_mode: mode,
-            allocated_qty: 0,
-            low_stock_threshold: 5,
-            dedicated: true,
-            active: true,
-            notes: `Catalog only from Session ${sourceSessionId}; stock not copied`,
-            created_by: actor,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "session_id,lot_id,service_mode" });
-        if (allocationUpsert.error) return fail(allocationUpsert.error.message, 500);
+        const sourceLotId = Number(sourceRow.lot_id || 0);
+        if (!vaccineId || !sourceLotId || !requestedSet.has(vaccineId)) continue;
+        const sourceLot = sourceLotMap.get(sourceLotId);
+        if (!sourceLot) return fail(`Lot sumber ID ${sourceLotId} tidak ditemukan. Refresh Master lalu coba lagi.`, 409);
+        const lotNumber = clean(sourceLot.lot_number);
+        if (!lotNumber) return fail(`Lot sumber ID ${sourceLotId} tidak memiliki Lot Number.`, 409);
+        const mode = normalizeServiceMode(sourceRow.service_mode);
 
-        const sessionVaccineUpsert = await supabase
+        // V542 core isolation: target Session must own its own Lot row even when Lot Number is identical.
+        const targetLotResult = await supabase
+          .from("vaccination_vaccine_lots")
+          .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_company_name,stock_session_id,active")
+          .eq("vaccine_id", vaccineId)
+          .eq("lot_number", lotNumber)
+          .eq("stock_scope", "SESSION")
+          .eq("stock_session_id", targetSessionId)
+          .limit(2);
+        if (targetLotResult.error) return fail(targetLotResult.error.message, 500);
+        if ((targetLotResult.data || []).length > 1) {
+          return fail(`Data Lot ${lotNumber} pada Session ${targetSession.session_name || targetSessionId} duplikat. Safety stop sebelum duplikasi.`, 409);
+        }
+
+        let targetLot = (targetLotResult.data || [])[0] || null;
+        if (!targetLot) {
+          const createTargetLot = await supabase
+            .from("vaccination_vaccine_lots")
+            .insert({
+              vaccine_id: vaccineId,
+              lot_number: lotNumber,
+              expiry_date: sourceLot.expiry_date || null,
+              stock_initial: 0,
+              stock_added: 0,
+              stock_used: 0,
+              stock_physical_count: null,
+              inventory_notes: `Catalog only from Session ${sourceSessionId}; stock not copied`,
+              stock_scope: "SESSION",
+              stock_company_name: clean(targetSession.company_name) || null,
+              stock_session_id: targetSessionId,
+              active: true,
+            })
+            .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_company_name,stock_session_id,active")
+            .single();
+          if (createTargetLot.error) {
+            if (String(createTargetLot.error.code || "") === "23505") {
+              return fail("Schema Lot masih memakai UNIQUE(vaccine_id, lot_number). Jalankan SQL V542 Session Stock Isolation terlebih dahulu, lalu ulangi Duplikat Katalog.", 409);
+            }
+            return fail(createTargetLot.error.message, 500);
+          }
+          targetLot = createTargetLot.data;
+          catalogLotCreatedCount += 1;
+        } else if (
+          Number(targetLot.stock_initial || 0) > 0 ||
+          Number(targetLot.stock_added || 0) > 0 ||
+          Number(targetLot.stock_used || 0) > 0
+        ) {
+          existingTargetStockPreserved += 1;
+        }
+
+        const targetLotId = Number(targetLot?.id || 0);
+        if (!targetLotId) return fail(`Gagal menentukan Lot target untuk ${lotNumber}.`, 500);
+
+        const existingAllocationResult = await supabase
+          .from("vaccination_session_stock_allocations")
+          .select("id,allocated_qty,active,notes")
+          .eq("session_id", targetSessionId)
+          .eq("lot_id", targetLotId)
+          .eq("service_mode", mode)
+          .maybeSingle();
+        if (existingAllocationResult.error) return fail(existingAllocationResult.error.message, 500);
+        if (!existingAllocationResult.data) {
+          const allocationInsert = await supabase
+            .from("vaccination_session_stock_allocations")
+            .insert({
+              session_id: targetSessionId,
+              vaccine_id: vaccineId,
+              lot_id: targetLotId,
+              service_mode: mode,
+              allocated_qty: 0,
+              low_stock_threshold: 5,
+              dedicated: true,
+              active: true,
+              notes: `Catalog only from Session ${sourceSessionId}; stock not copied`,
+              created_by: actor,
+              updated_at: new Date().toISOString(),
+            });
+          if (allocationInsert.error) return fail(allocationInsert.error.message, 500);
+        } else if (Number(existingAllocationResult.data.allocated_qty || 0) > 0) {
+          existingTargetStockPreserved += 1;
+        }
+
+        const sessionVaccineResult = await supabase
           .from("vaccination_session_vaccines")
-          .upsert({
-            session_id: targetSessionId,
-            vaccine_id: vaccineId,
-            lot_id: lotId,
-            dose_number: 1,
-            active: true,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "session_id,vaccine_id,lot_id,dose_number" });
-        if (sessionVaccineUpsert.error) return fail(sessionVaccineUpsert.error.message, 500);
+          .select("id,active")
+          .eq("session_id", targetSessionId)
+          .eq("vaccine_id", vaccineId)
+          .eq("lot_id", targetLotId)
+          .eq("dose_number", 1)
+          .maybeSingle();
+        if (sessionVaccineResult.error) return fail(sessionVaccineResult.error.message, 500);
+        if (!sessionVaccineResult.data) {
+          const sessionVaccineInsert = await supabase
+            .from("vaccination_session_vaccines")
+            .insert({
+              session_id: targetSessionId,
+              vaccine_id: vaccineId,
+              lot_id: targetLotId,
+              dose_number: 1,
+              active: true,
+              updated_at: new Date().toISOString(),
+            });
+          if (sessionVaccineInsert.error) return fail(sessionVaccineInsert.error.message, 500);
+        } else if (sessionVaccineResult.data.active === false) {
+          const sessionVaccineEnable = await supabase
+            .from("vaccination_session_vaccines")
+            .update({ active: true, updated_at: new Date().toISOString() })
+            .eq("id", sessionVaccineResult.data.id);
+          if (sessionVaccineEnable.error) return fail(sessionVaccineEnable.error.message, 500);
+        }
         lotCatalogCount += 1;
       }
     }
 
     return ok({
-      message: `Katalog berhasil diduplikat ke ${targetSessionIds.length} Session tanpa stok.`,
+      message: `Katalog berhasil diduplikat ke ${targetSessionIds.length} Session. Hanya produk + Lot Number yang ikut; stok target tidak disalin dan stok target yang sudah ada tidak diubah.`,
       targetSessionCount: targetSessionIds.length,
       productCount: requestedVaccineIds.length,
       assignmentCount,
       lotCatalogCount,
+      catalogLotCreatedCount,
+      existingTargetStockPreserved,
       stockCopied: 0,
       staleCatalogRowsDisabled,
       staleAssignmentRowsDisabled,
       classificationMirrored: true,
+      sessionStockIsolation: true,
     });
   }
 
@@ -836,8 +967,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // V542: stock.quant is global/GENERAL inventory. Never let a SESSION/COMPANY Lot
+    // with the same Product + Lot Number become the import target after Session isolation.
     const lotsByKey = new Map<string, any>();
     for (const lot of lots) {
+      if (sanitizeStockScope(lot.stock_scope) !== "GENERAL") continue;
       lotsByKey.set(`${Number(lot.vaccine_id)}|${clean(lot.lot_number)}`, lot);
     }
 
@@ -988,6 +1122,8 @@ export async function POST(req: NextRequest) {
         if (!existingLot) {
           const staleCandidates = lots.filter((lot: any) => {
             if (lot.active === false || !isStockQuantImportedLot(lot)) return false;
+            // V542: repair stock.quant links only inside GENERAL scope.
+            if (sanitizeStockScope(lot.stock_scope) !== "GENERAL") return false;
             if (clean(lot.lot_number) !== item.lotNumber) return false;
 
             const currentVaccineId = Number(lot.vaccine_id || 0);
@@ -1068,6 +1204,10 @@ export async function POST(req: NextRequest) {
               stock_physical_count: physicalCount,
               inventory_notes: importNote,
               stock_used: 0,
+              // V542: stock.quant import is always isolated as GENERAL stock.
+              stock_scope: "GENERAL",
+              stock_company_name: null,
+              stock_session_id: null,
               active: true,
             })
             .select("*")
@@ -1353,6 +1493,38 @@ export async function POST(req: NextRequest) {
       Number(lot.stock_session_id || 0) === Number(targetSessionId)
     ) {
       return fail("Lot ini sudah dimiliki oleh Session / Lokasi tujuan tersebut.", 409);
+    }
+
+    // V542 compatibility guard: after Session isolation, target may already own a
+    // zero-stock catalog clone with the same Product + Lot Number. Do not let the
+    // transfer mutate this source Lot into a duplicate target owner row. The user
+    // can stock the target-owned catalog Lot directly; real target stock is never merged silently.
+    const targetSameLotResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,stock_initial,stock_added,stock_used,stock_physical_count,active")
+      .eq("vaccine_id", Number(lot.vaccine_id))
+      .eq("lot_number", clean(lot.lot_number))
+      .eq("stock_scope", "SESSION")
+      .eq("stock_session_id", Number(targetSessionId))
+      .neq("id", lotId)
+      .limit(2);
+    if (targetSameLotResult.error) return fail(targetSameLotResult.error.message, 500);
+    if ((targetSameLotResult.data || []).length > 1) {
+      return fail("Safety stop V542: Session tujuan memiliki lebih dari satu Lot yang sama. Audit data dulu sebelum transfer.", 409);
+    }
+    const targetSameLot = (targetSameLotResult.data || [])[0];
+    if (targetSameLot) {
+      const targetHasStock =
+        Number(targetSameLot.stock_initial || 0) > 0 ||
+        Number(targetSameLot.stock_added || 0) > 0 ||
+        Number(targetSameLot.stock_used || 0) > 0 ||
+        Number(targetSameLot.stock_physical_count || 0) > 0;
+      return fail(
+        targetHasStock
+          ? `Session tujuan sudah memiliki Lot ${lot.lot_number} dengan stok sendiri. V542 tidak akan merge dua stok Session secara otomatis.`
+          : `Session tujuan sudah memiliki Lot katalog ${lot.lot_number} dengan stok 0. Isi/atur stok pada Lot milik Session tujuan tersebut; V542 tidak akan memindahkan ownership Lot sumber melewati isolasi Session.`,
+        409,
+      );
     }
 
     const activeRecordCount = (recordsResult.data || []).filter(
@@ -1679,9 +1851,13 @@ export async function POST(req: NextRequest) {
       ? "BAZAR"
       : "HEALTHDAY";
     const plannedStockInitial = Math.max(0, toInt(body.plannedStockInitial, 0));
+    const expectedStockSessionId = toInt(body.expectedStockSessionId || body.expected_stock_session_id, 0);
 
     if (!vaccineId) return fail("Master vaksin / produk wajib dipilih.");
     if (!sessionId) return fail("Session / Lokasi wajib dipilih.");
+    if (expectedStockSessionId && sessionId !== expectedStockSessionId) {
+      return fail("Safety stop V542: assignment produk tidak boleh ditulis ke Session lain dari filter Master aktif.", 409);
+    }
 
     const [vaccineResult, sessionResult] = await Promise.all([
       supabase
@@ -1828,6 +2004,13 @@ export async function POST(req: NextRequest) {
       return fail(error?.message || "Scope stok tidak valid.");
     }
 
+    const expectedStockSessionId = toInt(body.expectedStockSessionId || body.expected_stock_session_id, 0);
+    if (expectedStockSessionId) {
+      if (ownership.stock_scope !== "SESSION" || Number(ownership.stock_session_id || 0) !== expectedStockSessionId) {
+        return fail("Safety stop V542: target stok berbeda dengan Session yang sedang dipilih pada filter Master. Refresh halaman lalu edit dari Session tujuan yang benar.", 409);
+      }
+    }
+
     const result = await supabase
       .from("vaccination_vaccine_lots")
       .insert({
@@ -1868,7 +2051,7 @@ export async function POST(req: NextRequest) {
     const [lotResult, vaccineResult] = await Promise.all([
       supabase
         .from("vaccination_vaccine_lots")
-        .select("id,vaccine_id,lot_number")
+        .select("id,vaccine_id,lot_number,stock_scope,stock_company_name,stock_session_id")
         .eq("id", lotId)
         .maybeSingle(),
       supabase
@@ -1904,15 +2087,32 @@ export async function POST(req: NextRequest) {
 
     const duplicateResult = await supabase
       .from("vaccination_vaccine_lots")
-      .select("id")
+      .select("id,stock_scope,stock_company_name,stock_session_id")
       .eq("vaccine_id", targetVaccineId)
       .eq("lot_number", lotResult.data.lot_number)
       .neq("id", lotId)
-      .limit(1);
+      .limit(100);
     if (duplicateResult.error) return fail(duplicateResult.error.message, 500);
-    if ((duplicateResult.data || []).length > 0) {
+
+    // V542: the same Product + Lot Number is valid in another stock owner.
+    // Only block a duplicate inside the exact same owner scope.
+    const currentScope = sanitizeStockScope((lotResult.data as any).stock_scope);
+    const currentCompany = normalizeCompanyName((lotResult.data as any).stock_company_name);
+    const currentSessionId = Number((lotResult.data as any).stock_session_id || 0);
+    const sameOwnerDuplicate = (duplicateResult.data || []).find((row: any) => {
+      const rowScope = sanitizeStockScope(row.stock_scope);
+      if (rowScope !== currentScope) return false;
+      if (currentScope === "SESSION") {
+        return Number(row.stock_session_id || 0) === currentSessionId;
+      }
+      if (currentScope === "COMPANY") {
+        return normalizeCompanyName(row.stock_company_name) === currentCompany;
+      }
+      return true;
+    });
+    if (sameOwnerDuplicate) {
       return fail(
-        `Produk ${vaccineResult.data.name} sudah memiliki Lot ${lotResult.data.lot_number}.`,
+        `Produk ${vaccineResult.data.name} sudah memiliki Lot ${lotResult.data.lot_number} pada tujuan stok yang sama.`,
         409,
       );
     }
@@ -2004,6 +2204,22 @@ export async function POST(req: NextRequest) {
       ownership = await stockOwnershipFromBody(supabase, body, beforeResult.data);
     } catch (error: any) {
       return fail(error?.message || "Scope stok tidak valid.");
+    }
+
+    const expectedStockSessionId = toInt(body.expectedStockSessionId || body.expected_stock_session_id, 0);
+    if (expectedStockSessionId) {
+      if (ownership.stock_scope !== "SESSION" || Number(ownership.stock_session_id || 0) !== expectedStockSessionId) {
+        return fail("Safety stop V542: target stok berbeda dengan Session yang sedang dipilih pada filter Master. Refresh halaman lalu edit dari Session tujuan yang benar.", 409);
+      }
+    }
+
+    const beforeScope = sanitizeStockScope(beforeResult.data.stock_scope);
+    const beforeSessionId = Number(beforeResult.data.stock_session_id || 0);
+    if (beforeScope === "SESSION" && beforeSessionId) {
+      const nextSessionId = Number(ownership.stock_session_id || 0);
+      if (ownership.stock_scope !== "SESSION" || nextSessionId !== beforeSessionId) {
+        return fail("Lot yang sudah dimiliki suatu Session tidak boleh dipindah ke Session/scope lain lewat Edit Produk. Gunakan Lot milik Session tujuan agar stok antar lokasi tetap terisolasi.", 409);
+      }
     }
 
     const result = await supabase

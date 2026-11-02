@@ -1,4 +1,5 @@
 "use client";
+// V542_SESSION_STOCK_ISOLATION
 // V540_INITIAL_STOCK_EDIT_AND_DELETE_GUARD
 
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
@@ -335,8 +336,13 @@ export default function VaccinationMasterPage() {
     );
 
     const masterId = vaccineId || selectedMasterVaccineId || findMappedVaccineId(productKey, row.externalProductName);
+    // V542: stock.quant import maps only to GENERAL inventory. A Session-owned
+    // Lot with the same Product + Lot Number must never be pulled into this editor.
     const existingLot = lots.find(
-      (lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(masterId || "") && cleanText(lot.lot_number) === row.lotNumber,
+      (lot) =>
+        String(lot.vaccine_id || lot.vaccine?.id || "") === String(masterId || "") &&
+        cleanText(lot.lot_number) === row.lotNumber &&
+        lotScope(lot) === "GENERAL",
     );
 
     setLotForm({
@@ -636,6 +642,14 @@ export default function VaccinationMasterPage() {
       }
 
       if (
+        stockSessionFilter !== "ALL" &&
+        lotForm.stockScope === "SESSION" &&
+        String(lotForm.stockSessionId || "") !== String(stockSessionFilter)
+      ) {
+        throw new Error("Safety stop V542: Session stok editor berbeda dengan filter Session aktif. Refresh halaman lalu edit ulang dari Session yang benar.");
+      }
+
+      if (
         lotForm.stockScope === "SESSION" &&
         cleanText(lotForm.stockSessionId)
       ) {
@@ -646,6 +660,8 @@ export default function VaccinationMasterPage() {
           companyName: lotForm.stockCompanyName,
           serviceMode: serviceStockEditorMode,
           plannedStockInitial: Math.max(0, Number(lotForm.stockInitial || 0)),
+          expectedStockSessionId:
+            stockSessionFilter !== "ALL" ? Number(stockSessionFilter) : undefined,
         });
       }
 
@@ -664,11 +680,25 @@ export default function VaccinationMasterPage() {
         const existingLot =
           masterEditMode === "LOT" && editingLotId
             ? lots.find((lot) => String(lot.id || "") === String(editingLotId))
-            : lots.find(
-                (lot) =>
-                  String(lot.vaccine_id || lot.vaccine?.id || "") === vaccineId &&
-                  cleanText(lot.lot_number) === lotNumber,
-              );
+            : lots.find((lot) => {
+                if (String(lot.vaccine_id || lot.vaccine?.id || "") !== vaccineId) return false;
+                if (cleanText(lot.lot_number) !== lotNumber) return false;
+                const scope = lotScope(lot);
+                if (lotForm.stockScope === "SESSION") {
+                  return (
+                    scope === "SESSION" &&
+                    String(lot.stock_session_id || "") === String(lotForm.stockSessionId || "")
+                  );
+                }
+                if (lotForm.stockScope === "COMPANY") {
+                  return (
+                    scope === "COMPANY" &&
+                    normalizeCompany(lot.stock_company_name) ===
+                      normalizeCompany(lotForm.stockCompanyName)
+                  );
+                }
+                return scope === "GENERAL";
+              });
 
         if (existingLot?.id) {
           if (
@@ -694,6 +724,8 @@ export default function VaccinationMasterPage() {
             stockScope: lotForm.stockScope,
             stockCompanyName: lotForm.stockCompanyName,
             stockSessionId: lotForm.stockSessionId,
+            expectedStockSessionId:
+              stockSessionFilter !== "ALL" ? Number(stockSessionFilter) : undefined,
           });
           savedLotId = String(lotJson.lot?.id || existingLot.id || "");
         } else {
@@ -702,6 +734,8 @@ export default function VaccinationMasterPage() {
             ...lotForm,
             vaccineId,
             lotNumber,
+            expectedStockSessionId:
+              stockSessionFilter !== "ALL" ? Number(stockSessionFilter) : undefined,
           });
           savedLotId = String(lotJson.lot?.id || "");
         }
@@ -718,6 +752,8 @@ export default function VaccinationMasterPage() {
             companyName: lotForm.stockCompanyName,
             serviceMode: serviceStockEditorMode,
             plannedStockInitial: 0,
+            expectedStockSessionId:
+              stockSessionFilter !== "ALL" ? Number(stockSessionFilter) : undefined,
           });
 
           // V509: a newly saved exact-Session Lot must immediately belong to
@@ -903,32 +939,41 @@ export default function VaccinationMasterPage() {
 
     const filteredSessionId =
       stockSessionFilter !== "ALL" ? String(stockSessionFilter) : "";
+    const exactFilteredAssignment = sessionProductAssignments.find(
+      (assignment) =>
+        assignment.active !== false &&
+        String(assignment.vaccine_id || "") === String(vaccine.id || "") &&
+        (!filteredSessionId ||
+          String(assignment.session_id || "") === filteredSessionId) &&
+        (productServiceFilter === "ALL" ||
+          String(assignment.service_mode || "HEALTHDAY").toUpperCase() ===
+            productServiceFilter),
+    );
+    // V542: saat filter Session spesifik aktif, DILARANG fallback ke assignment Session lain.
     const preferredAssignment =
-      sessionProductAssignments.find(
-        (assignment) =>
-          assignment.active !== false &&
-          String(assignment.vaccine_id || "") === String(vaccine.id || "") &&
-          (!filteredSessionId ||
-            String(assignment.session_id || "") === filteredSessionId) &&
-          (productServiceFilter === "ALL" ||
-            String(assignment.service_mode || "HEALTHDAY").toUpperCase() ===
-              productServiceFilter),
-      ) ||
-      sessionProductAssignments.find(
-        (assignment) =>
-          assignment.active !== false &&
-          String(assignment.vaccine_id || "") === String(vaccine.id || ""),
-      );
+      exactFilteredAssignment ||
+      (!filteredSessionId
+        ? sessionProductAssignments.find(
+            (assignment) =>
+              assignment.active !== false &&
+              String(assignment.vaccine_id || "") === String(vaccine.id || ""),
+          )
+        : null);
+    const filteredSession = filteredSessionId
+      ? sessionMap.get(Number(filteredSessionId))
+      : null;
     const assignedSession = preferredAssignment
       ? sessionMap.get(Number(preferredAssignment.session_id || 0))
-      : null;
-    const assignedServiceMode =
-      String(preferredAssignment?.service_mode || "HEALTHDAY").toUpperCase() ===
-      "BAZAR"
+      : filteredSession;
+    const assignedServiceMode = preferredAssignment
+      ? String(preferredAssignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+        ? "BAZAR"
+        : "HEALTHDAY"
+      : productServiceFilter === "BAZAR"
         ? "BAZAR"
         : "HEALTHDAY";
 
-    if (preferredAssignment) {
+    if (preferredAssignment || filteredSessionId) {
       setServiceStockEditorMode(assignedServiceMode);
     }
 
@@ -963,13 +1008,13 @@ export default function VaccinationMasterPage() {
       stockAdded: 0,
       stockPhysicalCount: "",
       inventoryNotes: "",
-      stockScope: preferredAssignment ? "SESSION" : "GENERAL",
-      stockCompanyName: preferredAssignment
+      stockScope: preferredAssignment || filteredSessionId ? "SESSION" : "GENERAL",
+      stockCompanyName: preferredAssignment || filteredSessionId
         ? cleanText(assignedSession?.company_name)
         : "",
       stockSessionId: preferredAssignment
         ? String(preferredAssignment.session_id || "")
-        : "",
+        : filteredSessionId,
       healthdayStockQty: 0,
       bazarStockQty: 0,
     });
@@ -2610,7 +2655,8 @@ export default function VaccinationMasterPage() {
                     disabled={
                       !companyStockReady ||
                       lotForm.stockScope !== "SESSION" ||
-                      !lotForm.stockCompanyName
+                      !lotForm.stockCompanyName ||
+                      stockSessionFilter !== "ALL"
                     }
                     onChange={(e) => {
                       const nextSessionId = e.target.value;
@@ -2618,7 +2664,9 @@ export default function VaccinationMasterPage() {
                         const currentLot = lots.find(
                           (lot) =>
                             String(lot.vaccine_id || lot.vaccine?.id || "") === String(current.vaccineId || "") &&
-                            cleanText(lot.lot_number) === cleanText(current.lotNumber),
+                            cleanText(lot.lot_number) === cleanText(current.lotNumber) &&
+                            lotScope(lot) === "SESSION" &&
+                            String(lot.stock_session_id || "") === String(nextSessionId || ""),
                         );
                         const fallbackRemaining = currentLot
                           ? Math.max(
