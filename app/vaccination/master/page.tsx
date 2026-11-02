@@ -1,4 +1,5 @@
 "use client";
+// V540_INITIAL_STOCK_EDIT_AND_DELETE_GUARD
 
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V507_PRICING_LINK
@@ -686,6 +687,7 @@ export default function VaccinationMasterPage() {
             lotId: existingLot.id,
             lotNumber,
             expiryDate: lotForm.expiryDate,
+            stockInitial: lotForm.stockInitial,
             stockAdded: lotForm.stockAdded,
             stockPhysicalCount: lotForm.stockPhysicalCount,
             inventoryNotes: lotForm.inventoryNotes,
@@ -1041,7 +1043,7 @@ export default function VaccinationMasterPage() {
 
   async function deleteVaccine(vaccine: any) {
     setError("");
-    if (!window.confirm(`Hapus produk ${vaccine.name}? Produk hanya bisa dihapus jika belum pernah dipakai pada registrasi/session/administrasi.`)) return;
+    if (!window.confirm(`Hapus produk ${vaccine.name}? Jika produk hanya masih terpasang di Session tetapi belum punya transaksi peserta, assignment Session akan dilepas otomatis. Produk yang sudah punya registrasi/administrasi nyata tetap tidak bisa dihapus.`)) return;
     try {
       const json = await postMaster({ action: "delete-vaccine", id: vaccine.id });
       setMessage(json.message || `Produk ${vaccine.name} dihapus.`);
@@ -1058,7 +1060,7 @@ export default function VaccinationMasterPage() {
 
   async function deleteLot(lot: any) {
     setError("");
-    if (!window.confirm(`Hapus lot ${lot.lot_number} dari ${lot.vaccine?.name || "produk"}? Lot hanya bisa dihapus jika belum pernah dipakai.`)) return;
+    if (!window.confirm(`Hapus lot ${lot.lot_number} dari ${lot.vaccine?.name || "produk"}? Jika Lot hanya masih terpasang di Session tetapi belum punya transaksi peserta, assignment/alokasi Session akan dilepas otomatis. Lot yang sudah dipakai pada transaksi nyata tetap tidak bisa dihapus.`)) return;
     try {
       const json = await postMaster({ action: "delete-lot", id: lot.id });
       setMessage(json.message || `Lot ${lot.lot_number} dihapus.`);

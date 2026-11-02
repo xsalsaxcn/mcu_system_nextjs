@@ -1,3 +1,4 @@
+// V540_INITIAL_STOCK_EDIT_AND_DELETE_GUARD
 // V531_PRODUCT_SERIES_GLOBAL_RULE
 // V504_EDIT_LOT_PRODUCT_FIELDS_ACTIVE_SAFE_DETACH
 // V499_SESSION_PRODUCT_ASSIGNMENT_WITHOUT_LOT
@@ -1588,13 +1589,26 @@ export async function POST(req: NextRequest) {
     const references = [
       await supabase.from("vaccination_records").select("id").eq("lot_id", id).limit(1),
       await supabase.from("vaccination_registration_items").select("id").eq("lot_id", id).limit(1),
-      await supabase.from("vaccination_session_vaccines").select("id").eq("lot_id", id).limit(1),
     ];
     const referenceError = references.find((item) => item.error)?.error;
     if (referenceError) return fail(referenceError.message, 500);
     if (references.some((item) => (item.data || []).length > 0)) {
-      return fail(`Lot ${lotResult.data.lot_number} sudah pernah dipakai pada data operasional, sehingga tidak aman untuk dihapus.`);
+      return fail(`Lot ${lotResult.data.lot_number} sudah pernah dipakai pada transaksi peserta/administrasi nyata, sehingga tidak aman untuk dihapus.`);
     }
+
+    // V540: assignment/alokasi Session adalah konfigurasi, bukan riwayat peserta.
+    // Lepas hanya konfigurasi produk/lot; flow Session Dokter/Antrean/Registrasi tidak disentuh.
+    const detachAllocation = await supabase
+      .from("vaccination_session_stock_allocations")
+      .delete()
+      .eq("lot_id", id);
+    if (detachAllocation.error) return fail(detachAllocation.error.message, 500);
+
+    const detachSessionVaccine = await supabase
+      .from("vaccination_session_vaccines")
+      .delete()
+      .eq("lot_id", id);
+    if (detachSessionVaccine.error) return fail(detachSessionVaccine.error.message, 500);
 
     const deleteResult = await supabase
       .from("vaccination_vaccine_lots")
@@ -1624,13 +1638,26 @@ export async function POST(req: NextRequest) {
       await supabase.from("vaccination_records").select("id").eq("vaccine_id", id).limit(1),
       await supabase.from("vaccination_registrations").select("id").eq("vaccine_id", id).limit(1),
       await supabase.from("vaccination_registration_items").select("id").eq("vaccine_id", id).limit(1),
-      await supabase.from("vaccination_session_vaccines").select("id").eq("vaccine_id", id).limit(1),
     ];
     const referenceError = references.find((item) => item.error)?.error;
     if (referenceError) return fail(referenceError.message, 500);
     if (references.some((item) => (item.data || []).length > 0)) {
-      return fail(`Produk ${vaccineResult.data.name} sudah pernah dipakai pada registrasi/session/administrasi, sehingga tidak aman untuk dihapus.`);
+      return fail(`Produk ${vaccineResult.data.name} sudah pernah dipakai pada transaksi peserta/administrasi nyata, sehingga tidak aman untuk dihapus.`);
     }
+
+    // V540: assignment/alokasi Session saja tidak dianggap sebagai transaksi pasien.
+    // Lepas konfigurasi produk; existing_flow_config Session sama sekali tidak diubah.
+    const detachAllocation = await supabase
+      .from("vaccination_session_stock_allocations")
+      .delete()
+      .eq("vaccine_id", id);
+    if (detachAllocation.error) return fail(detachAllocation.error.message, 500);
+
+    const detachSessionVaccine = await supabase
+      .from("vaccination_session_vaccines")
+      .delete()
+      .eq("vaccine_id", id);
+    if (detachSessionVaccine.error) return fail(detachSessionVaccine.error.message, 500);
 
     const deleteResult = await supabase
       .from("vaccination_vaccines")
@@ -1960,14 +1987,16 @@ export async function POST(req: NextRequest) {
 
     const beforeResult = await supabase
       .from("vaccination_vaccine_lots")
-      .select("id,vaccine_id,stock_added,stock_scope,stock_company_name,stock_session_id")
+      .select("id,vaccine_id,stock_initial,stock_added,stock_scope,stock_company_name,stock_session_id")
       .eq("id", lotId)
       .maybeSingle();
 
     if (beforeResult.error) return fail(beforeResult.error.message, 500);
     if (!beforeResult.data) return fail("Lot tidak ditemukan.", 404);
 
+    const beforeInitial = Number(beforeResult.data.stock_initial || 0);
     const beforeAdded = Number(beforeResult.data.stock_added || 0);
+    const nextInitial = Math.max(0, toInt(body.stockInitial, beforeInitial));
     const nextAdded = Math.max(0, toInt(body.stockAdded, beforeAdded));
 
     let ownership: Record<string, any>;
@@ -1982,6 +2011,7 @@ export async function POST(req: NextRequest) {
       .update({
         lot_number: lotNumber,
         expiry_date: clean(body.expiryDate) || null,
+        stock_initial: nextInitial,
         stock_added: nextAdded,
         stock_physical_count: body.stockPhysicalCount === "" || body.stockPhysicalCount == null
           ? null
@@ -1996,16 +2026,30 @@ export async function POST(req: NextRequest) {
 
     if (result.error) return fail(result.error.message, 500);
 
-    const delta = nextAdded - beforeAdded;
-    if (delta !== 0) {
+    const initialDelta = nextInitial - beforeInitial;
+    if (initialDelta !== 0) {
       await supabase.from("vaccination_inventory_movements").insert({
         vaccine_id: beforeResult.data.vaccine_id || result.data.vaccine_id,
         lot_id: lotId,
-        movement_type: delta > 0 ? "stock_in" : "adjustment_minus",
-        qty: delta,
+        movement_type: initialDelta > 0 ? "initial" : "adjustment_minus",
+        qty: initialDelta,
         reference_type: "vaccine_lot",
         reference_id: lotId,
-        notes: clean(body.inventoryNotes) || "Update detail lot",
+        notes: clean(body.inventoryNotes) || "Update jumlah awal lot",
+        created_by: (user as any).email || (user as any).name || (user as any).id || "system",
+      });
+    }
+
+    const addedDelta = nextAdded - beforeAdded;
+    if (addedDelta !== 0) {
+      await supabase.from("vaccination_inventory_movements").insert({
+        vaccine_id: beforeResult.data.vaccine_id || result.data.vaccine_id,
+        lot_id: lotId,
+        movement_type: addedDelta > 0 ? "stock_in" : "adjustment_minus",
+        qty: addedDelta,
+        reference_type: "vaccine_lot",
+        reference_id: lotId,
+        notes: clean(body.inventoryNotes) || "Update tambahan stok",
         created_by: (user as any).email || (user as any).name || (user as any).id || "system",
       });
     }
