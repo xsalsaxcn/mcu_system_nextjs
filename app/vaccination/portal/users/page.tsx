@@ -10,6 +10,7 @@ function roleLabel(role: string) {
   const labels: Record<string, string> = {
     vaccination_admin: "Admin Vaksinasi",
     vaccination_frontdesk: "Frontdesk",
+    vaccination_freelance: "Admin Freelance",
     vaccination_medis: "Medis",
     vaccination_validation: "Tim Validasi",
     vaccination_inventory: "Inventory",

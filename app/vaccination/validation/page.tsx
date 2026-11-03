@@ -162,6 +162,8 @@ function stickerUrlFor(row: Row) {
 
 export default function VaccinationValidationPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [movedHistoryRows, setMovedHistoryRows] = useState<Row[]>([]);
+  const [cancelledHistoryRows, setCancelledHistoryRows] = useState<Row[]>([]);
   const [sessionLocations, setSessionLocations] = useState<string[]>([]);
   const [sessionOptions, setSessionOptions] = useState<SessionOption[]>([]);
   const [companyFilter, setCompanyFilter] = useState("all");
@@ -181,6 +183,8 @@ export default function VaccinationValidationPage() {
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [movedOpen, setMovedOpen] = useState(false);
+  const [cancelledOpen, setCancelledOpen] = useState(false);
   const [editingStageRow, setEditingStageRow] = useState<Row | null>(null);
   const [editingStageValue, setEditingStageValue] = useState("PENDING_VALIDATION");
   const [editingStageNote, setEditingStageNote] = useState("");
@@ -200,6 +204,8 @@ export default function VaccinationValidationPage() {
       const json = await res.json();
       if (!json.ok) throw new Error(json.message || "Gagal memuat validasi.");
       setRows(json.rows || []);
+      setMovedHistoryRows(Array.isArray(json.moved_rows) ? json.moved_rows : []);
+      setCancelledHistoryRows(Array.isArray(json.cancelled_rows) ? json.cancelled_rows : []);
       setSessionOptions(Array.isArray(json.sessions) ? json.sessions : []);
       setSessionLocations(
         Array.from(
@@ -800,6 +806,58 @@ export default function VaccinationValidationPage() {
                   </tr>
                 ))}
                 {!doneShown.length ? <tr><td colSpan={9} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta selesai sesuai filter.</td></tr> : null}
+              </tbody>
+            </table>
+          </div> : null}
+        </section>
+
+        <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-blue-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 bg-blue-50 px-5 py-4">
+            <button type="button" onClick={() => setMovedOpen((value) => !value)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="text-lg font-black text-blue-700">{movedOpen ? "▾" : "▸"}</span>
+              <span><span className="block font-black text-slate-900">Peserta Pindah Lokasi</span><span className="mt-1 block text-xs font-semibold text-slate-500">{movedOpen ? "Klik untuk menutup riwayat pindah lokasi." : "Klik untuk melihat peserta yang dipindahkan ke Session/lokasi lain atau Klinik."}</span></span>
+            </button>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-blue-700">{movedHistoryRows.length} peserta</div>
+          </div>
+          {movedOpen ? <div className="overflow-x-auto border-t">
+            <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Peserta</th><th className="px-4 py-3">NIK / BINUSIAN ID</th><th className="px-4 py-3">Layanan / Produk</th><th className="px-4 py-3">Lokasi Asal</th><th className="px-4 py-3">Riwayat Pindah</th><th className="px-4 py-3">Aksi</th></tr></thead>
+              <tbody className="divide-y">
+                {movedHistoryRows.map((row) => <tr key={`moved-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
+                  <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
+                  <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
+                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`moved-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                  <td className="px-4 py-4"><div className="font-bold">{row.location || "-"}</div><div className="mt-1 text-xs text-slate-500">{row.session_name || "-"}</div></td>
+                  <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">{row.note || "Riwayat pindah lokasi"}</div></td>
+                  <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
+                </tr>)}
+                {!movedHistoryRows.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta pindah lokasi pada Session/filter ini.</td></tr> : null}
+              </tbody>
+            </table>
+          </div> : null}
+        </section>
+
+        <section className="mx-auto mt-6 max-w-7xl overflow-hidden rounded-[28px] border border-rose-100 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 bg-rose-50 px-5 py-4">
+            <button type="button" onClick={() => setCancelledOpen((value) => !value)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="text-lg font-black text-rose-700">{cancelledOpen ? "▾" : "▸"}</span>
+              <span><span className="block font-black text-slate-900">Peserta Cancel</span><span className="mt-1 block text-xs font-semibold text-slate-500">{cancelledOpen ? "Klik untuk menutup riwayat cancel." : "Klik untuk melihat peserta yang dibatalkan beserta alasannya."}</span></span>
+            </button>
+            <div className="rounded-full border bg-white px-3 py-1 text-xs font-black text-rose-700">{cancelledHistoryRows.length} peserta</div>
+          </div>
+          {cancelledOpen ? <div className="overflow-x-auto border-t">
+            <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+              <thead className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Peserta</th><th className="px-4 py-3">NIK / BINUSIAN ID</th><th className="px-4 py-3">Layanan / Produk</th><th className="px-4 py-3">Payment</th><th className="px-4 py-3">Alasan Cancel</th><th className="px-4 py-3">Aksi</th></tr></thead>
+              <tbody className="divide-y">
+                {cancelledHistoryRows.map((row) => <tr key={`cancel-${rowStateKey(row)}`} className="align-top hover:bg-slate-50">
+                  <td className="px-4 py-4"><div className="font-black">{row.patient_name || "-"}</div><div className="mt-1 text-xs font-bold text-slate-500">{clean(row.validation_service_mode).toUpperCase() || "-"}</div></td>
+                  <td className="px-4 py-4 font-bold">{row.employee_id || "-"}</td>
+                  <td className="px-4 py-4"><div className="space-y-1">{(row.products || []).map((item, index) => <div key={`cancel-item-${rowStateKey(row)}-${index}`} className="rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{item.vaccine_name || "Vaksin"} · Lot {item.lot_number || "-"}</div>)}</div></td>
+                  <td className="px-4 py-4 font-bold">{row.payment_method || "-"}</td>
+                  <td className="px-4 py-4"><div className="max-w-[360px] rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">{row.note || "-"}</div></td>
+                  <td className="px-4 py-4"><button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button></td>
+                </tr>)}
+                {!cancelledHistoryRows.length ? <tr><td colSpan={6} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta Cancel pada Session/filter ini.</td></tr> : null}
               </tbody>
             </table>
           </div> : null}

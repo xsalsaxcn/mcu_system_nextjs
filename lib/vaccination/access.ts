@@ -17,6 +17,7 @@ export type VaccinationPermission =
 export const VACCINATION_ROLES = [
   "vaccination_admin",
   "vaccination_frontdesk",
+  "vaccination_freelance",
   "vaccination_medis",
   "vaccination_validation",
   "vaccination_inventory",
@@ -28,6 +29,7 @@ export const VACCINATION_ROLES = [
 const ROLE_PERMISSIONS: Record<string, VaccinationPermission[]> = {
   vaccination_admin: ["portal", "register", "queue", "administer", "validation", "inventory", "inventory_return", "master", "session", "dashboard", "export", "users"],
   vaccination_frontdesk: ["portal", "register", "queue"],
+  vaccination_freelance: ["portal", "register", "validation"],
   vaccination_medis: ["portal", "administer"],
   vaccination_validation: ["portal", "validation"],
   vaccination_inventory: ["portal", "inventory", "inventory_return", "master", "session", "export"],
@@ -49,6 +51,7 @@ export function vaccinationRoleLabel(user: Partial<SessionUser> | null | undefin
   const labels: Record<string, string> = {
     vaccination_admin: "Admin Vaksinasi",
     vaccination_frontdesk: "Vaccination Frontdesk",
+    vaccination_freelance: "Admin Freelance",
     vaccination_medis: "Vaccination Medis",
     vaccination_validation: "Vaccination Validation",
     vaccination_inventory: "Vaccination Inventory",

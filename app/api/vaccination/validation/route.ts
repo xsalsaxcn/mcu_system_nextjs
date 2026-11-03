@@ -158,7 +158,7 @@ function displayForService(
     doctor_name: row.doctor_name || row.doctor || row.petugas_name || row.staff_name || row.administered_by || row.updated_by || "-",
     product_name: productName,
     lot_number: products.length === 1 ? products[0].lot_number : "",
-    note: row.note || row.notes || row.status_note || row.payment_note || row.product_note || row.keterangan || "",
+    note: row.cancelled_note || row.status_note || row.note || row.notes || row.payment_note || row.product_note || row.keterangan || "",
     print_status: row.print_status || "NOT_PRINTED",
     validation_status: done ? "DONE" : (isPendingTrackStatus(trackStatus) ? "PENDING" : trackStatus || "PENDING"),
     validated_at: serviceAdministeredAt || (done ? row.validated_at : null) || null,
@@ -517,9 +517,67 @@ export async function GET(req: NextRequest) {
           }))
           .filter((session: any) => session.location);
 
+    // V548: expose cancelled/moved history separately without mixing it back into active validation rows.
+    let cancelledQuery = supabase
+      .from("vaccination_registrations")
+      .select("*, session:vaccination_sessions(id,session_name,company_name,location,session_date,existing_flow_config)")
+      .order("id", { ascending: false })
+      .limit(1000);
+    if (sessionId) cancelledQuery = cancelledQuery.eq("session_id", sessionId);
+    const cancelledResult = await cancelledQuery;
+
+    const cancelledSource = cancelledResult.error ? [] : (cancelledResult.data || []).filter((row: any) => {
+      const statuses = [row.validation_status, row.queue_status, row.bazar_queue_status]
+        .map((value) => clean(value).toUpperCase());
+      return statuses.some((status) => ["CANCELLED", "CANCELED"].includes(status));
+    });
+
+    const cancelledIds = cancelledSource.map((row: any) => Number(row.id)).filter(Boolean);
+    const cancelledRecordsByRegistration = await loadRecordsForRegistrations(supabase, cancelledIds);
+    const cancelledItemsByRegistration = await loadItemsForRegistrations(supabase, cancelledIds);
+    const cancelledRows: any[] = [];
+
+    for (const row of cancelledSource) {
+      const recordRows = cancelledRecordsByRegistration.get(Number(row.id)) || [];
+      const itemRows = cancelledItemsByRegistration.get(Number(row.id)) || [];
+      const { healthdayQueueEnabled, bazarQueueEnabled } = queueFlags(row);
+
+      if (healthdayQueueEnabled && bazarQueueEnabled) {
+        const displayed = displayLegacy(row, recordRows, itemRows);
+        displayed.validation_status = "CANCELLED";
+        cancelledRows.push(displayed);
+        continue;
+      }
+
+      let pushed = false;
+      for (const serviceMode of ["HEALTHDAY", "BAZAR"] as const) {
+        const queueEnabled = serviceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled;
+        if (queueEnabled) continue;
+        if (!hasServiceTrack(row, itemRows, serviceMode)) continue;
+        const trackStatus = clean(serviceTrackStatus(row, serviceMode)).toUpperCase();
+        if (!["CANCELLED", "CANCELED"].includes(trackStatus)) continue;
+        const displayed = displayForService(row, serviceMode, recordRows, itemRows);
+        displayed.validation_status = "CANCELLED";
+        cancelledRows.push(displayed);
+        pushed = true;
+      }
+
+      // Defensive fallback for older records whose per-service columns were not populated.
+      if (!pushed && ["CANCELLED", "CANCELED"].includes(clean(row.validation_status).toUpperCase())) {
+        const displayed = displayLegacy(row, recordRows, itemRows);
+        displayed.validation_status = "CANCELLED";
+        cancelledRows.push(displayed);
+      }
+    }
+
+    const movedRows = cancelledRows.filter((row: any) => /pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
+    const plainCancelledRows = cancelledRows.filter((row: any) => !/pindah\s+lokasi\s+layanan/i.test(clean(row.note)));
+
     return json({
       ok: true,
       rows,
+      moved_rows: movedRows,
+      cancelled_rows: plainCancelledRows,
       session_locations: sessionLocations,
       sessions: sessionLocations,
     });
