@@ -55,10 +55,17 @@ function normalizeRowFromParticipant(row: any) {
     nik: firstNonEmpty(row.nik),
     mcu_id: firstNonEmpty(row.mcu_id, row.external_id),
     email: "",
-    phone: "",
-    department: firstNonEmpty(row.exam_type),
+    phone: firstNonEmpty(row.phone),
+    department: firstNonEmpty(row.department),
     company_name: "",
+    // V566: database BINUS yang sudah pernah di-import menyimpan
+    // jenis vaksin / BatchName di exam_type.
     vaccine_batch_name: firstNonEmpty(row.exam_type),
+    location_name: firstNonEmpty(row.province),
+    session_date: firstNonEmpty(row.service_date, row.mcu_date),
+    time_slot: "",
+    time_area_name: firstNonEmpty(row.province),
+    import_location_key: "",
   };
 }
 
@@ -456,10 +463,29 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
   }
   if (vaccinationImportResult.error) errors.push(`vaccination_import_rows: ${vaccinationImportResult.error.message}`);
 
+  // V566_EXISTING_PARTICIPANT_DATABASE_SOURCE_OF_TRUTH:
+  // Data peserta BINUS seluruh lokasi sudah ada di tabel participants.
+  // Jangan import ulang dan jangan tarik semua source. Ambil hanya peserta
+  // milik Session aktif berdasarkan lokasi + tanggal.
+  let participantQuery = supabase
+    .from("participants")
+    .select("id,name,external_id,mcu_id,nik,source_id,exam_type,province,service_date,mcu_date,department,phone")
+    .eq("source_id", sourceId);
+
+  const participantSessionLocation = clean(session?.location);
+  const participantSessionDate = clean(session?.session_date);
+
+  if (participantSessionLocation) {
+    participantQuery = participantQuery.eq("province", participantSessionLocation);
+  }
+  if (participantSessionDate) {
+    participantQuery = participantQuery.eq("service_date", participantSessionDate);
+  }
+
   const attempts = [
     {
       table: "participants",
-      query: () => supabase.from("participants").select("id,name,external_id,mcu_id,nik,source_id,exam_type").eq("source_id", sourceId).limit(5000),
+      query: () => participantQuery.limit(5000),
       mapper: normalizeRowFromParticipant,
     },
     {
@@ -472,7 +498,18 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
   for (const attempt of attempts) {
     const result = await attempt.query();
     if (!result.error && Array.isArray(result.data) && result.data.length) {
-      const rows = result.data.map(attempt.mapper).filter((row: any) => clean(row.participant_name));
+      const normalizedRows = result.data
+        .map(attempt.mapper)
+        .filter((row: any) => clean(row.participant_name));
+
+      // participants menyimpan exam_type per row sebagai jenis vaksin source.
+      // Bungkus menjadi source_vaccine_rows supaya mekanisme mapping Session
+      // yang sudah terbentuk dari Duplicate Katalog dipakai persis seperti
+      // vaccination_import_rows.
+      const rows = attempt.table === "participants"
+        ? groupVaccinationImportRows(normalizedRows)
+        : normalizedRows;
+
       return { rows, sourceTable: attempt.table, errors };
     }
     if (result.error) errors.push(`${attempt.table}: ${result.error.message}`);
