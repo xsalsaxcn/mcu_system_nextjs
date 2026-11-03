@@ -3,6 +3,7 @@ import { buildVaccinationInventoryReport } from "@/lib/vaccination/inventoryRepo
 import { buildVaccinationInventorySnapshot } from "@/lib/vaccination/inventorySnapshot";
 import { verifyVaccinationInventoryPublicToken } from "@/lib/vaccination/inventoryPublicPortal";
 import { getSupabaseAdmin } from "@/lib/server/supabaseAdmin";
+import { transferVaccinationSessionStock } from "@/lib/vaccination/stockTransfer";
 
 export const dynamic = "force-dynamic";
 
@@ -287,8 +288,8 @@ export async function POST(req: NextRequest) {
       if (usedItemsResult.error) return fail(usedItemsResult.error.message, 500);
 
       const lot = lotResult.data as any;
-      const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
-      const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+      const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
+      const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
       const movementAdded = (movementsResult.data || []).reduce((sum: number, movement: any) => {
         const type = clean(movement?.movement_type).toUpperCase();
         return inboundTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
@@ -502,169 +503,32 @@ export async function POST(req: NextRequest) {
 
     if (action === "transfer-stock") {
       const lotId = toInt(body?.lotId || body?.id, 0);
-      const targetCompanyName = clean(body?.targetCompanyName);
+      const sourceSessionId = toInt(body?.sourceSessionId || body?.sessionId, 0);
       const targetSessionId = toInt(body?.targetSessionId, 0);
+      const quantity = toInt(body?.quantity, 0);
+      const sourceServiceMode = normalizeServiceMode(body?.sourceServiceMode || body?.serviceMode);
       const targetServiceMode = normalizeServiceMode(body?.targetServiceMode || body?.serviceMode);
 
-      if (!lotId) return fail("Lot wajib dipilih.");
-      if (!targetCompanyName) return fail("Perusahaan tujuan wajib dipilih.");
-      if (!targetSessionId) return fail("Session / Lokasi tujuan wajib dipilih.");
+      if (!lotId) return fail("Lot sumber wajib dipilih.");
+      if (!sourceSessionId) return fail("Session sumber wajib dipilih.");
+      if (!targetSessionId) return fail("Session tujuan wajib dipilih.");
+      if (!quantity || quantity <= 0) return fail("Jumlah transfer wajib lebih dari 0.");
 
-      const [lotResult, sessionResult, recordsResult, movementsResult] = await Promise.all([
-        supabase
-          .from("vaccination_vaccine_lots")
-          .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_physical_count,stock_scope,stock_company_name,stock_session_id,inventory_notes")
-          .eq("id", lotId)
-          .maybeSingle(),
-        supabase
-          .from("vaccination_sessions")
-          .select("id,session_name,company_name,location,session_date,status")
-          .eq("id", targetSessionId)
-          .maybeSingle(),
-        supabase
-          .from("vaccination_records")
-          .select("id,status")
-          .eq("lot_id", lotId)
-          .limit(20000),
-        supabase
-          .from("vaccination_inventory_movements")
-          .select("id,movement_type,qty")
-          .eq("lot_id", lotId)
-          .limit(20000),
-      ]);
-
-      if (lotResult.error) return fail(lotResult.error.message, 500);
-      if (!lotResult.data) return fail("Lot tidak ditemukan.", 404);
-      if (sessionResult.error) return fail(sessionResult.error.message, 500);
-      if (!sessionResult.data) return fail("Session / Lokasi tujuan tidak ditemukan.", 404);
-      if (recordsResult.error) return fail(recordsResult.error.message, 500);
-      if (movementsResult.error) return fail(movementsResult.error.message, 500);
-
-      const targetSession = sessionResult.data as any;
-      const canonicalCompany = clean(targetSession.company_name);
-      if (!canonicalCompany) return fail("Session tujuan belum memiliki perusahaan.", 409);
-      if (normalizeCompanyName(targetCompanyName) !== normalizeCompanyName(canonicalCompany)) {
-        return fail(`Session yang dipilih milik ${canonicalCompany}, bukan ${targetCompanyName}.`, 409);
+      try {
+        const transferred = await transferVaccinationSessionStock({
+          supabase,
+          lotId,
+          sourceSessionId,
+          sourceServiceMode,
+          targetSessionId,
+          targetServiceMode,
+          quantity,
+          actor: createdBy,
+        });
+        return ok(transferred);
+      } catch (error: any) {
+        return fail(error?.message || "Transfer stok gagal.", 409);
       }
-      if (clean(targetSession.status).toUpperCase() === "CANCELLED") {
-        return fail("Session tujuan sudah dibatalkan.", 409);
-      }
-
-      const lot = lotResult.data as any;
-      if (sanitizeStockScope(lot.stock_scope) === "SESSION" && Number(lot.stock_session_id || 0) === targetSessionId) {
-        return fail("Lot ini sudah dimiliki oleh Session tujuan tersebut.", 409);
-      }
-
-      const activeRecordCount = (recordsResult.data || []).filter((row: any) =>
-        !["CANCELLED", "CANCELED", "VOID", "VOIDED", "BATAL"].includes(clean(row?.status).toUpperCase()),
-      ).length;
-      const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
-      const adjustmentOut = (movementsResult.data || []).reduce((sum: number, movement: any) => {
-        const type = clean(movement?.movement_type).toUpperCase();
-        return adjustmentOutTypes.has(type) ? sum + Math.abs(Number(movement?.qty || 0)) : sum;
-      }, 0);
-      const used = Math.max(Number(lot.stock_used || 0), activeRecordCount);
-      const remaining = Number(lot.stock_initial || 0) + Number(lot.stock_added || 0) - used - adjustmentOut;
-      if (remaining <= 0) return fail("Tidak ada sisa stok yang dapat ditransfer.", 409);
-
-      const previousOwnership = {
-        stock_scope: sanitizeStockScope(lot.stock_scope),
-        stock_company_name: lot.stock_company_name ?? null,
-        stock_session_id: lot.stock_session_id ?? null,
-      };
-      const previousAllocationResult = await supabase
-        .from("vaccination_session_stock_allocations")
-        .select("*")
-        .eq("lot_id", lotId)
-        .eq("active", true)
-        .limit(100);
-      if (previousAllocationResult.error) return fail(previousAllocationResult.error.message, 500);
-
-      const targetLabel = [
-        clean(targetSession.session_name),
-        clean(targetSession.location),
-        clean(targetSession.session_date),
-      ].filter(Boolean).join(" · ");
-      const sourceOwner = previousOwnership.stock_scope === "SESSION"
-        ? `${clean(previousOwnership.stock_company_name) || "Perusahaan"} · Session ${previousOwnership.stock_session_id || "-"}`
-        : previousOwnership.stock_scope === "COMPANY"
-          ? clean(previousOwnership.stock_company_name) || "Perusahaan"
-          : "Global";
-
-      const updateResult = await supabase
-        .from("vaccination_vaccine_lots")
-        .update({
-          stock_scope: "SESSION",
-          stock_company_name: canonicalCompany,
-          stock_session_id: Number(targetSession.id),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", lotId)
-        .select("*")
-        .single();
-      if (updateResult.error) return fail(updateResult.error.message, 500);
-
-      const deactivateResult = await supabase
-        .from("vaccination_session_stock_allocations")
-        .update({ active: false, updated_at: new Date().toISOString() })
-        .eq("lot_id", lotId)
-        .eq("active", true);
-      if (deactivateResult.error) {
-        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
-        return fail(deactivateResult.error.message, 500);
-      }
-
-      const targetAllocationResult = await supabase
-        .from("vaccination_session_stock_allocations")
-        .upsert({
-          session_id: Number(targetSession.id),
-          vaccine_id: Number(lot.vaccine_id),
-          lot_id: lotId,
-          allocated_qty: remaining,
-          low_stock_threshold: Math.min(5, remaining),
-          dedicated: true,
-          active: true,
-          service_mode: targetServiceMode,
-          notes: `[Portal Inventory] Transfer sisa stok ke ${targetServiceMode === "BAZAR" ? "Bazar" : "Healthday"}`,
-          created_by: createdBy,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "session_id,lot_id,service_mode" })
-        .select("*")
-        .single();
-
-      if (targetAllocationResult.error) {
-        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
-        if ((previousAllocationResult.data || []).length) {
-          await supabase.from("vaccination_session_stock_allocations").upsert(previousAllocationResult.data, { onConflict: "session_id,lot_id,service_mode" });
-        }
-        return fail(targetAllocationResult.error.message, 500);
-      }
-
-      const note = `[Portal Inventory] Transfer sisa stok ${remaining} · ${sourceOwner} -> ${canonicalCompany} · ${targetLabel || `Session ${targetSession.id}`} · ${targetServiceMode}`;
-      const movementResult = await supabase.from("vaccination_inventory_movements").insert({
-        vaccine_id: lot.vaccine_id,
-        lot_id: lotId,
-        movement_type: "stock_transfer",
-        qty: remaining,
-        reference_type: "public_inventory_transfer_session",
-        reference_id: Number(targetSession.id),
-        notes: note,
-        created_by: createdBy,
-      });
-
-      if (movementResult.error) {
-        await supabase.from("vaccination_vaccine_lots").update({ ...previousOwnership, updated_at: new Date().toISOString() }).eq("id", lotId);
-        await supabase.from("vaccination_session_stock_allocations").update({ active: false, updated_at: new Date().toISOString() }).eq("lot_id", lotId);
-        if ((previousAllocationResult.data || []).length) {
-          await supabase.from("vaccination_session_stock_allocations").upsert(previousAllocationResult.data, { onConflict: "session_id,lot_id,service_mode" });
-        }
-        return fail(movementResult.error.message, 500);
-      }
-
-      return ok({
-        message: `Sisa stok ${remaining} Lot ${lot.lot_number} berhasil ditransfer ke ${canonicalCompany} · ${clean(targetSession.location) || clean(targetSession.session_name) || `Session ${targetSession.id}`} · ${targetServiceMode === "BAZAR" ? "Bazar" : "Healthday"}.`,
-        transferredQty: remaining,
-      });
     }
 
     return fail("Action Portal Inventory tidak dikenali.", 400);

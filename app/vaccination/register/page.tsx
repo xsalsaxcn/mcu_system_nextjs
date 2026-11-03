@@ -122,6 +122,7 @@ export default function VaccinationRegisterPage() {
   const [salesOffers, setSalesOffers] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
   const [locationStockSummary, setLocationStockSummary] = useState<Record<string, any>>({});
+  const [selectedStockProductId, setSelectedStockProductId] = useState("");
   const [selfBookings, setSelfBookings] = useState<any[]>([]);
   const [selfBookingLoading, setSelfBookingLoading] = useState(false);
   const [processingBooking, setProcessingBooking] = useState<any | null>(null);
@@ -516,6 +517,8 @@ export default function VaccinationRegisterPage() {
     for (const registration of registrations) {
       const items = Array.isArray(registration.items) ? registration.items : [];
       for (const item of items) {
+        const itemMode = String(item?.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+        if (itemMode !== activeQueueView) continue;
         const name = item?.vaccine?.name || "Produk";
         const key = String(item?.vaccine_id || name);
         const stock = locationStockSummary[key] || {};
@@ -545,7 +548,22 @@ export default function VaccinationRegisterPage() {
       });
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "id"));
-  }, [registrations, locationStockSummary]);
+  }, [registrations, locationStockSummary, activeQueueView]);
+
+  const selectedStockSummary = useMemo(
+    () => productSummary.find((item) => item.id === selectedStockProductId) || productSummary[0] || null,
+    [productSummary, selectedStockProductId],
+  );
+
+  useEffect(() => {
+    if (!productSummary.length) {
+      if (selectedStockProductId) setSelectedStockProductId("");
+      return;
+    }
+    if (!productSummary.some((item) => item.id === selectedStockProductId)) {
+      setSelectedStockProductId(productSummary[0].id);
+    }
+  }, [productSummary, selectedStockProductId]);
 
   const summary = useMemo(() => {
     const stats = { total: registrations.length, current: "-", notArrived: 0, waiting: 0, doctor: 0, done: 0 };
@@ -621,7 +639,7 @@ export default function VaccinationRegisterPage() {
     if (sourceId) params.set("source_id", String(sourceId));
     const [json, stockJson] = await Promise.all([
       fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json()),
-      fetch(`/api/vaccination/register-stock-summary?session_id=${encodeURIComponent(String(sessionId))}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, rows: [] })),
+      fetch(`/api/vaccination/register-stock-summary?session_id=${encodeURIComponent(String(sessionId))}&service_mode=${encodeURIComponent(activeQueueView)}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, rows: [] })),
     ]);
     if (json.ok) setRegistrations(json.registrations || []);
     else setError(json.message || "Gagal memuat registrasi.");
@@ -1335,6 +1353,11 @@ export default function VaccinationRegisterPage() {
   }, [form.sessionId, selectedSourceId]);
 
   useEffect(() => {
+    if (!form.sessionId) return;
+    void loadRegistrations(form.sessionId, selectedSourceId);
+  }, [activeQueueView]);
+
+  useEffect(() => {
     if (deepLinkEditHandled.current || typeof window === "undefined" || !registrations.length) return;
     const params = new URLSearchParams(window.location.search);
     const editRegistrationId = Number(params.get("edit_registration_id") || 0);
@@ -1381,20 +1404,29 @@ export default function VaccinationRegisterPage() {
         </section>
 
         {productSummary.length ? (
-          <section className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-            {productSummary.map((item) => (
-              <div key={item.id} className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
-                <div className="text-xs font-black uppercase text-blue-700">{item.name}</div>
-                <div className="mt-2 text-2xl font-black text-blue-900">{item.count}</div>
-                <div className="text-xs text-blue-700">produk terdaftar</div>
-                <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px] font-black">
-                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Stok {item.stockLocation}</span>
-                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Terdaftar {item.registered}</span>
-                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Datang {item.arrived}</span>
-                  <span className={`rounded-lg px-2 py-1.5 ${item.available > 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-700"}`}>Sisa {item.available}</span>
-                </div>
+          <section className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wide text-blue-700">Ringkasan Stok {activeQueueView === "BAZAR" ? "Bazar" : "Healthday"}</div>
+                <div className="mt-1 text-xs font-semibold text-slate-500">Hanya produk {activeQueueView === "BAZAR" ? "Bazar" : "Healthday"} pada Session yang dipilih.</div>
               </div>
-            ))}
+              <select
+                className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-sm font-black text-slate-800 lg:max-w-md"
+                value={selectedStockSummary?.id || ""}
+                onChange={(e) => setSelectedStockProductId(e.target.value)}
+              >
+                {productSummary.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+            {selectedStockSummary ? (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Terdaftar</div><div className="mt-1 text-xl font-black">{selectedStockSummary.registered}</div></div>
+                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Sudah Datang</div><div className="mt-1 text-xl font-black">{selectedStockSummary.arrived}</div></div>
+                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Stok Lokasi</div><div className="mt-1 text-xl font-black">{selectedStockSummary.stockLocation}</div></div>
+                <div className={`rounded-xl px-3 py-2 ${selectedStockSummary.available > 0 ? "bg-emerald-100" : "bg-rose-100"}`}><div className="text-[10px] font-black uppercase text-slate-600">Sisa Bisa Didaftarkan</div><div className={`mt-1 text-xl font-black ${selectedStockSummary.available > 0 ? "text-emerald-800" : "text-rose-700"}`}>{selectedStockSummary.available}</div></div>
+                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Total Data Produk</div><div className="mt-1 text-xl font-black">{selectedStockSummary.count}</div></div>
+              </div>
+            ) : null}
           </section>
         ) : null}
 

@@ -1052,10 +1052,21 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = requireUser(req);
   if (!user) return fail("Unauthorized", 401);
-  if (!canVaccinationAccess(user, "register")) return fail("Akses modul vaksinasi ditolak untuk role ini.", 403);
 
   const body = await req.json().catch(() => ({}));
+  const validationMove =
+    body?.validationMove === true &&
+    toInt(body?.moveFromRegistrationId || body?.move_from_registration_id, 0) > 0;
+  const canRegister = canVaccinationAccess(user, "register");
+  const canValidationMove = validationMove && canVaccinationAccess(user, "validation");
+  if (!canRegister && !canValidationMove) {
+    return fail("Akses modul vaksinasi ditolak untuk role ini.", 403);
+  }
+
   const action = clean(body.action);
+  if (!canRegister && canValidationMove && action) {
+    return fail("Akun Tim Validasi hanya boleh memakai endpoint Registrasi untuk Pindah Lokasi.", 403);
+  }
   const supabase = supabaseAdmin();
 
   if (action === "mark-external-arrived") {
@@ -1955,11 +1966,17 @@ export async function POST(req: NextRequest) {
   if (moveSourceRegistration) {
     const now = new Date().toISOString();
     const sourceHasB = serviceHasTrack(moveSourceRegistration.patient_service_status, "B");
-    const sourceLocation = clean(moveSourceRegistration.company_name) || `registration #${moveSourceRegistration.id}`;
+    const sourceSessionResult = await supabase
+      .from("vaccination_sessions")
+      .select("id,session_name,location,company_name")
+      .eq("id", Number(moveSourceRegistration.session_id || 0))
+      .maybeSingle();
+    const sourceLocation = clean(sourceSessionResult.data?.location || sourceSessionResult.data?.session_name) || `session #${moveSourceRegistration.session_id}`;
     const targetLabel = clean(session.location || session.session_name) || `session #${sessionId}`;
+    const moveHistoryNote = `Pindah Lokasi Layanan dari ${sourceLocation} ke ${targetLabel}`;
     const moveUpdate: Record<string, any> = {
       queue_status: "CANCELLED",
-      status_note: `Pindah lokasi ke ${targetLabel} · registrasi baru #${result.data.id}`,
+      status_note: `${moveHistoryNote} · registrasi baru #${result.data.id}`,
       updated_at: now,
     };
     if (sourceHasB || clean(moveSourceRegistration.bazar_queue_number)) {
@@ -1979,10 +1996,17 @@ export async function POST(req: NextRequest) {
       return fail(`Pindah lokasi dibatalkan karena pendaftaran lama gagal ditutup: ${moveUpdateResult.error.message}`, 500);
     }
 
+    const newRegistrationNote = await supabase
+      .from("vaccination_registrations")
+      .update({ status_note: moveHistoryNote, updated_at: now })
+      .eq("id", Number(result.data.id));
+    if (!newRegistrationNote.error) result.data.status_note = moveHistoryNote;
+
     movedFrom = {
       registrationId: Number(moveSourceRegistration.id),
       sessionId: Number(moveSourceRegistration.session_id),
       label: sourceLocation,
+      historyNote: moveHistoryNote,
     };
   }
 

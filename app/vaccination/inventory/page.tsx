@@ -48,6 +48,9 @@ function stockTarget(row: any) {
 
 export default function VaccinationInventoryPage() {
   const [rows, setRows] = useState<any[]>([]);
+  const [transferSessions, setTransferSessions] = useState<any[]>([]);
+  const [transferring, setTransferring] = useState<any | null>(null);
+  const [transferForm, setTransferForm] = useState({ sourceSessionId: "", sourceServiceMode: "HEALTHDAY", targetSessionId: "", targetServiceMode: "HEALTHDAY", quantity: "" });
   const [search, setSearch] = useState("");
   const [companyFilter, setCompanyFilter] = useState("ALL");
   const [sessionFilter, setSessionFilter] = useState("ALL");
@@ -66,6 +69,7 @@ export default function VaccinationInventoryPage() {
     const json = await fetch("/api/vaccination/inventory", { cache: "no-store" }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Gagal mengambil inventory."); return; }
     setRows(json.rows || []);
+    setTransferSessions(Array.isArray(json.transferSessions) ? json.transferSessions : []);
   }
 
   async function generatePublicPortal() {
@@ -92,6 +96,44 @@ export default function VaccinationInventoryPage() {
       quantity: "",
       inventoryNotes: row.inventory_notes || "",
     });
+  }
+
+  function startTransfer(row: any) {
+    const allocations = (Array.isArray(row?.service_allocations) ? row.service_allocations : []).filter((a: any) => Number(a?.remaining_qty || 0) > 0);
+    const first = allocations[0] || null;
+    setTransferring(row);
+    setTransferForm({
+      sourceSessionId: String(first?.session_id || row?.stock_session_id || ""),
+      sourceServiceMode: clean(first?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
+      targetSessionId: "",
+      targetServiceMode: "HEALTHDAY",
+      quantity: "",
+    });
+    setError("");
+  }
+
+  async function saveTransfer() {
+    if (!transferring) return;
+    setError("");
+    const quantity = Math.max(0, Math.floor(Number(transferForm.quantity || 0)));
+    if (!transferForm.sourceSessionId) { setError("Pilih Session/Lokasi sumber."); return; }
+    if (!transferForm.targetSessionId) { setError("Pilih Session/Lokasi tujuan."); return; }
+    if (!quantity) { setError("Jumlah transfer wajib lebih dari 0."); return; }
+    if (Number(transferForm.sourceSessionId) === Number(transferForm.targetSessionId) && transferForm.sourceServiceMode === transferForm.targetServiceMode) { setError("Sumber dan tujuan transfer tidak boleh sama persis."); return; }
+    const response = await fetch("/api/vaccination/inventory", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "transfer-stock", lotId: Number(transferring.id || 0), quantity,
+        sourceSessionId: Number(transferForm.sourceSessionId), sourceServiceMode: transferForm.sourceServiceMode,
+        targetSessionId: Number(transferForm.targetSessionId), targetServiceMode: transferForm.targetServiceMode,
+      }),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.ok === false) { setError(json?.message || "Transfer stok gagal."); return; }
+    setMessage(json?.message || `Transfer ${quantity} stok berhasil.`);
+    setTransferring(null);
+    await load();
+    window.dispatchEvent(new Event("vaccination-inventory-updated"));
   }
 
   async function saveInventory() {
@@ -156,6 +198,37 @@ export default function VaccinationInventoryPage() {
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "id"));
   }, [rows]);
+
+  const transferSourceSessions = useMemo(() => {
+    if (!transferring) return [];
+    const map = new Map<number, any>();
+    for (const a of Array.isArray(transferring?.service_allocations) ? transferring.service_allocations : []) {
+      if (Number(a?.remaining_qty || 0) <= 0) continue;
+      const id = Number(a?.session_id || 0);
+      if (id) map.set(id, { id, name: clean(a?.location) || clean(a?.session_name) || `Session ${id}` });
+    }
+    return Array.from(map.values()).sort((a: any,b: any)=>a.name.localeCompare(b.name,"id"));
+  }, [transferring]);
+
+  const transferSourceServices = useMemo(() => {
+    if (!transferring || !transferForm.sourceSessionId) return [];
+    const map = new Map<string, number>();
+    for (const a of Array.isArray(transferring?.service_allocations) ? transferring.service_allocations : []) {
+      if (String(a?.session_id || "") !== transferForm.sourceSessionId) continue;
+      const mode = clean(a?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      const remaining = Math.max(0, Number(a?.remaining_qty || 0));
+      if (remaining > 0) map.set(mode, Math.max(map.get(mode) || 0, remaining));
+    }
+    return Array.from(map.entries()).map(([mode, remaining]) => ({ mode, remaining }));
+  }, [transferring, transferForm.sourceSessionId]);
+
+  const transferTargetSessions = useMemo(() => {
+    if (!transferring) return [];
+    const sourceCompany = clean(transferring?.stock_company_name || transferring?.stock_session?.company_name || (transferring?.service_allocations || [])[0]?.company_name);
+    return transferSessions
+      .filter((s: any) => clean(s?.company_name) === sourceCompany)
+      .sort((a: any,b: any)=>sessionName(a).localeCompare(sessionName(b),"id"));
+  }, [transferSessions, transferring]);
 
   function rowMatchesService(row: any, requestedMode: string) {
     if (requestedMode === "ALL") return true;
@@ -490,7 +563,9 @@ export default function VaccinationInventoryPage() {
                         <div className="space-y-2">
                           <div className="text-xs"><span className="text-slate-500">Fisik:</span> <b>{row.stock_physical_count ?? "-"}</b></div>
                           <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
-                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button><button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">Hapus</button>
+                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button>
+                          <button onClick={() => startTransfer(row)} className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100">Transfer Stok</button>
+                          <button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">Hapus</button>
                         </div>
                       </td>
                     </tr>
@@ -502,6 +577,8 @@ export default function VaccinationInventoryPage() {
           </div>
         </section>
       </div>
+
+      {transferring ? <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setTransferring(null); }}><div className="w-full max-w-3xl rounded-3xl bg-white shadow-2xl"><div className="flex items-start justify-between gap-3 border-b px-5 py-4"><div><div className="text-xs font-black uppercase tracking-wide text-amber-700">Transfer Stok</div><div className="mt-1 text-xl font-black">{transferring?.vaccine?.name || "Produk"} · Lot {transferring?.lot_number || "-"}</div></div><button type="button" onClick={() => setTransferring(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button></div><div className="space-y-4 p-5"><div className="grid gap-4 md:grid-cols-2"><div className="rounded-2xl border bg-slate-50 p-4"><div className="mb-3 text-xs font-black uppercase text-slate-600">Dari Stok</div><div className="space-y-3"><label className="grid gap-1 text-xs font-black uppercase text-slate-500">Session / Lokasi Sumber<select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={transferForm.sourceSessionId} onChange={(e) => { const sid=e.target.value; const first=(transferring?.service_allocations||[]).find((a:any)=>String(a?.session_id||"")===sid && Number(a?.remaining_qty||0)>0); setTransferForm({...transferForm,sourceSessionId:sid,sourceServiceMode:clean(first?.service_mode).toUpperCase()==="BAZAR"?"BAZAR":"HEALTHDAY"}); }}><option value="">Pilih Session sumber</option>{transferSourceSessions.map((s:any)=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label className="grid gap-1 text-xs font-black uppercase text-slate-500">Stok Sumber<select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={transferForm.sourceServiceMode} onChange={(e)=>setTransferForm({...transferForm,sourceServiceMode:e.target.value})}>{transferSourceServices.length?transferSourceServices.map((x)=><option key={x.mode} value={x.mode}>{x.mode==="BAZAR"?"Bazar":"Healthday"} · Sisa {x.remaining}</option>):<option value={transferForm.sourceServiceMode}>Tidak ada stok tersedia</option>}</select></label></div></div><div className="rounded-2xl border border-blue-200 bg-blue-50 p-4"><div className="mb-3 text-xs font-black uppercase text-blue-700">Ke Stok</div><div className="space-y-3"><label className="grid gap-1 text-xs font-black uppercase text-slate-500">Session / Lokasi Tujuan<select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={transferForm.targetSessionId} onChange={(e)=>setTransferForm({...transferForm,targetSessionId:e.target.value})}><option value="">Pilih Session tujuan</option>{transferTargetSessions.map((s:any)=><option key={s.id} value={s.id}>{sessionName(s)}</option>)}</select></label><label className="grid gap-1 text-xs font-black uppercase text-slate-500">Stok Tujuan<select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={transferForm.targetServiceMode} onChange={(e)=>setTransferForm({...transferForm,targetServiceMode:e.target.value})}><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option></select></label></div></div></div><label className="grid gap-1 text-xs font-black uppercase text-slate-500">Jumlah Transfer<input type="number" min={1} step={1} className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={transferForm.quantity} onChange={(e)=>setTransferForm({...transferForm,quantity:e.target.value})} placeholder="Jumlah" /></label><div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Sumber dan tujuan dikunci ke Session + Healthday/Bazar yang dipilih. Lot sumber tidak dipindahkan ownership-nya.</div><div className="flex justify-end gap-2"><button type="button" onClick={()=>setTransferring(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button><button type="button" onClick={()=>void saveTransfer()} className="rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-black text-white">Transfer {transferForm.quantity || ""} Stok</button></div></div></div></div> : null}
 
       {deleting ? <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setDeleting(null); }}><div className="w-full max-w-xl rounded-3xl bg-white shadow-2xl"><div className="flex items-start justify-between gap-3 border-b px-5 py-4"><div><div className="text-xs font-black uppercase tracking-wide text-red-700">Hapus dari Inventory</div><div className="mt-1 text-xl font-black">{deleting?.vaccine?.name || "Produk"} · Lot {deleting?.lot_number || "-"}</div></div><button type="button" onClick={() => setDeleting(null)} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button></div><div className="space-y-4 p-5"><div className={`rounded-2xl border p-4 text-sm font-semibold ${Number(deleting?.stock_system_remaining || 0) === 0 ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-800"}`}>Sisa Sistem: <b>{Number(deleting?.stock_system_remaining || 0)}</b>. Hapus hanya dapat dilakukan ketika sisa stok sudah 0. Riwayat transaksi tetap tersimpan.</div><label className="block"><span className="text-xs font-black uppercase text-slate-500">Alasan Hapus</span><textarea rows={3} className="mt-1 w-full rounded-xl border px-3 py-2 text-sm" placeholder="Contoh: duplikat lot / tidak digunakan pada event ini" value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setDeleting(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button><button type="button" disabled={Number(deleting?.stock_system_remaining || 0) !== 0} onClick={() => void confirmDelete()} className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-40">Hapus dari Inventory</button></div></div></div></div> : null}
 

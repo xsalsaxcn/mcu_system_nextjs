@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/server/session";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { supabaseAdmin } from "../_utils";
-import { syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
+import { reverseQueueDoneTrack, syncRegistrationTrackDone } from "@/lib/vaccination/queueDoneInventory";
 
 // V530_VALIDATION_SERVICE_STATE_ISOLATION
 // V520_SERVICE_SPECIFIC_QUEUE_MODE
@@ -45,6 +45,8 @@ function parseQueueNumber(text: any) {
 function productDetail(record: any) {
   return {
     record_id: toId(record?.id),
+    vaccine_id: toId(record?.vaccine_id),
+    lot_id: toId(record?.lot_id),
     vaccine_name: clean(record?.vaccine_name) || "Vaksin",
     lot_number: clean(record?.lot_number) || "-",
     dose_number: Number(record?.dose_number || 1),
@@ -58,6 +60,8 @@ function productDetail(record: any) {
 function itemDetail(item: any) {
   return {
     record_id: toId(item?.administered_record_id),
+    vaccine_id: toId(item?.vaccine_id),
+    lot_id: toId(item?.lot_id),
     vaccine_name: clean(item?.vaccine?.name || item?.vaccine_name) || "Vaksin",
     lot_number: clean(item?.lot?.lot_number || item?.lot_number) || "-",
     dose_number: Number(item?.dose_number || 1),
@@ -66,6 +70,11 @@ function itemDetail(item: any) {
     note: "",
     status: clean(item?.status) || "ADMINISTERED",
     service_mode: clean(item?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY",
+    sale_mode: clean(item?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+    package_dose_count: Math.max(1, Number(item?.package_dose_count || 1)),
+    sales_price_snapshot: item?.sales_price_snapshot ?? null,
+    payment_method: clean(item?.payment_method),
+    payment_note: clean(item?.payment_note),
   };
 }
 
@@ -183,7 +192,7 @@ async function loadRecordsForRegistrations(supabase: any, registrationIds: numbe
 
   const result = await supabase
     .from("vaccination_records")
-    .select("id,registration_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,notes,status")
+    .select("id,registration_id,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,notes,status")
     .in("registration_id", registrationIds)
     .order("administered_at", { ascending: true })
     .order("id", { ascending: true });
@@ -199,12 +208,139 @@ async function loadRecordsForRegistrations(supabase: any, registrationIds: numbe
   return byRegistration;
 }
 
+type ValidationRemainderBackup = {
+  item: any;
+  record: any;
+  lotId: number;
+  lotStockUsed: number;
+};
+
+async function reverseValidationAdministeredRemainder(
+  supabase: any,
+  registrationId: number,
+  serviceModeInput: any,
+  actorInput: any,
+) {
+  const serviceMode = normalizeServiceMode(serviceModeInput);
+  const actor = clean(actorInput) || "Tim Validasi";
+  const now = new Date().toISOString();
+  const itemResult = await supabase
+    .from("vaccination_registration_items")
+    .select("id,registration_id,vaccine_id,lot_id,status,service_mode,administered_record_id,administered_at,active")
+    .eq("registration_id", registrationId)
+    .eq("service_mode", serviceMode)
+    .eq("active", true)
+    .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
+    .limit(1000);
+  if (itemResult.error) throw new Error(itemResult.error.message);
+
+  const backups: ValidationRemainderBackup[] = [];
+  try {
+    for (const item of itemResult.data || []) {
+      const recordId = Number(item.administered_record_id || 0);
+      const lotId = Number(item.lot_id || 0);
+      if (!recordId || !lotId) continue;
+      const [recordResult, lotResult] = await Promise.all([
+        supabase.from("vaccination_records").select("*").eq("id", recordId).eq("registration_id", registrationId).maybeSingle(),
+        supabase.from("vaccination_vaccine_lots").select("id,stock_used").eq("id", lotId).maybeSingle(),
+      ]);
+      if (recordResult.error) throw new Error(recordResult.error.message);
+      if (lotResult.error) throw new Error(lotResult.error.message);
+      if (!recordResult.data || !lotResult.data) continue;
+      if (["VOIDED", "CANCELLED", "CANCELED"].includes(clean(recordResult.data.status).toUpperCase())) continue;
+
+      const backup: ValidationRemainderBackup = {
+        item: { ...item },
+        record: { ...recordResult.data },
+        lotId,
+        lotStockUsed: Number(lotResult.data.stock_used || 0),
+      };
+
+      const lotUpdate = await supabase
+        .from("vaccination_vaccine_lots")
+        .update({ stock_used: Math.max(0, backup.lotStockUsed - 1), updated_at: now })
+        .eq("id", lotId);
+      if (lotUpdate.error) throw new Error(lotUpdate.error.message);
+
+      const recordUpdate = await supabase
+        .from("vaccination_records")
+        .update({
+          status: "VOIDED",
+          notes: `${clean(recordResult.data.notes)}${clean(recordResult.data.notes) ? " · " : ""}VALIDATION_CANCEL_REVERSAL:${serviceMode}:${actor}`,
+        })
+        .eq("id", recordId)
+        .eq("registration_id", registrationId);
+      if (recordUpdate.error) {
+        await supabase.from("vaccination_vaccine_lots").update({ stock_used: backup.lotStockUsed, updated_at: new Date().toISOString() }).eq("id", lotId);
+        throw new Error(recordUpdate.error.message);
+      }
+
+      const itemUpdate = await supabase
+        .from("vaccination_registration_items")
+        .update({ status: "WAITING", administered_record_id: null, administered_at: null, updated_at: now })
+        .eq("id", Number(item.id))
+        .eq("registration_id", registrationId);
+      if (itemUpdate.error) {
+        await supabase.from("vaccination_records").update({ status: backup.record.status, notes: backup.record.notes }).eq("id", recordId);
+        await supabase.from("vaccination_vaccine_lots").update({ stock_used: backup.lotStockUsed, updated_at: new Date().toISOString() }).eq("id", lotId);
+        throw new Error(itemUpdate.error.message);
+      }
+      backups.push(backup);
+    }
+  } catch (error) {
+    for (const backup of [...backups].reverse()) {
+      await supabase.from("vaccination_vaccine_lots").update({ stock_used: backup.lotStockUsed, updated_at: new Date().toISOString() }).eq("id", backup.lotId);
+      await supabase.from("vaccination_records").update({ status: backup.record.status, notes: backup.record.notes }).eq("id", Number(backup.record.id));
+      await supabase.from("vaccination_registration_items").update({
+        status: backup.item.status,
+        administered_record_id: backup.item.administered_record_id,
+        administered_at: backup.item.administered_at,
+        updated_at: new Date().toISOString(),
+      }).eq("id", Number(backup.item.id));
+    }
+    throw error;
+  }
+  return backups;
+}
+
+async function restoreValidationAdministeredRemainder(supabase: any, backups: ValidationRemainderBackup[]) {
+  for (const backup of [...backups].reverse()) {
+    await supabase.from("vaccination_vaccine_lots").update({ stock_used: backup.lotStockUsed, updated_at: new Date().toISOString() }).eq("id", backup.lotId);
+    await supabase.from("vaccination_records").update({ status: backup.record.status, notes: backup.record.notes }).eq("id", Number(backup.record.id));
+    await supabase.from("vaccination_registration_items").update({
+      status: backup.item.status,
+      administered_record_id: backup.item.administered_record_id,
+      administered_at: backup.item.administered_at,
+      updated_at: new Date().toISOString(),
+    }).eq("id", Number(backup.item.id));
+  }
+}
+
+async function finalizeValidationAdministeredRemainder(supabase: any, backups: ValidationRemainderBackup[], registrationId: number, serviceModeInput: any, actorInput: any) {
+  if (!backups.length) return;
+  const serviceMode = normalizeServiceMode(serviceModeInput);
+  const actor = clean(actorInput) || "Tim Validasi";
+  const recordIds = backups.map((backup) => Number(backup.record.id)).filter(Boolean);
+  if (recordIds.length) await supabase.from("vaccination_reminders").delete().in("record_id", recordIds);
+  const auditRows = backups.map((backup) => ({
+    vaccine_id: Number(backup.record.vaccine_id || backup.item.vaccine_id || 0) || null,
+    lot_id: Number(backup.record.lot_id || backup.item.lot_id || 0) || null,
+    movement_type: "validation_done_reversal_audit",
+    qty: 0,
+    reference_type: "registration",
+    reference_id: registrationId,
+    notes: `Validation Done reversed · ${serviceMode} · record ${Number(backup.record.id)} · by ${actor}`,
+    created_by: actor,
+  }));
+  if (auditRows.length) await supabase.from("vaccination_inventory_movements").insert(auditRows);
+}
+
 async function loadItemsForRegistrations(supabase: any, registrationIds: number[]) {
   if (!registrationIds.length) return new Map<number, any[]>();
 
   const result = await supabase
     .from("vaccination_registration_items")
-    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+    .select("id,registration_id,vaccine_id,lot_id,dose_number,status,service_mode,administered_record_id,administered_at,active,sale_mode,package_dose_count,sales_price_snapshot,payment_method,payment_note,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
     .in("registration_id", registrationIds)
     .eq("active", true)
     .order("id", { ascending: true });
@@ -227,7 +363,63 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const sessionId = clean(url.searchParams.get("session_id"));
+    const getAction = clean(url.searchParams.get("action")).toLowerCase();
     const supabase = supabaseAdmin();
+
+    if (getAction === "move-options") {
+      const targetSessionId = toId(sessionId);
+      const serviceMode = normalizeServiceMode(url.searchParams.get("service_mode"));
+      if (!targetSessionId) return json({ ok: false, message: "Session tujuan wajib dipilih." }, 400);
+
+      const [sessionResult, assignmentResult, allocationResult] = await Promise.all([
+        supabase.from("vaccination_sessions").select("id,session_name,company_name,location,session_date,existing_flow_config,status").eq("id", targetSessionId).maybeSingle(),
+        supabase.from("vaccination_session_product_assignments").select("vaccine_id,service_mode,active").eq("session_id", targetSessionId).eq("service_mode", serviceMode).eq("active", true).limit(10000),
+        supabase.from("vaccination_session_stock_allocations").select("id,session_id,vaccine_id,lot_id,allocated_qty,service_mode,active").eq("session_id", targetSessionId).eq("service_mode", serviceMode).eq("active", true).limit(10000),
+      ]);
+      if (sessionResult.error) return json({ ok: false, message: sessionResult.error.message }, 500);
+      if (!sessionResult.data) return json({ ok: false, message: "Session tujuan tidak ditemukan." }, 404);
+      if (assignmentResult.error) return json({ ok: false, message: assignmentResult.error.message }, 500);
+      if (allocationResult.error) return json({ ok: false, message: allocationResult.error.message }, 500);
+
+      const assigned = new Set<number>((assignmentResult.data || []).map((row: any) => Number(row.vaccine_id || 0)).filter(Boolean));
+      const allocations = allocationResult.data || [];
+      const lotIds = Array.from(new Set<number>(allocations.map((row: any) => Number(row.lot_id || 0)).filter(Boolean)));
+      const lotsResult = lotIds.length
+        ? await supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,stock_scope,stock_session_id,active,vaccine:vaccination_vaccines(id,name,brand)").in("id", lotIds).eq("active", true)
+        : { data: [], error: null } as any;
+      if (lotsResult.error) return json({ ok: false, message: lotsResult.error.message }, 500);
+      const usedResult = lotIds.length
+        ? await supabase.from("vaccination_registration_items").select("lot_id,status").eq("session_id", targetSessionId).eq("service_mode", serviceMode).eq("active", true).in("lot_id", lotIds).limit(20000)
+        : { data: [], error: null } as any;
+      if (usedResult.error) return json({ ok: false, message: usedResult.error.message }, 500);
+      const used = new Map<number, number>();
+      for (const item of usedResult.data || []) {
+        if (!["ADMINISTERED", "DONE", "FINISHED"].includes(clean(item.status).toUpperCase())) continue;
+        const lotId = Number(item.lot_id || 0);
+        used.set(lotId, (used.get(lotId) || 0) + 1);
+      }
+      const lotMap = new Map<number, any>((lotsResult.data || []).map((row: any) => [Number(row.id), row]));
+      const options = allocations.map((allocation: any) => {
+        const lot = lotMap.get(Number(allocation.lot_id || 0));
+        if (!lot) return null;
+        const vaccineId = Number(allocation.vaccine_id || lot.vaccine_id || 0);
+        if (assigned.size && !assigned.has(vaccineId)) return null;
+        if (clean(lot.stock_scope).toUpperCase() === "SESSION" && Number(lot.stock_session_id || 0) !== targetSessionId) return null;
+        const remaining = Math.max(0, Number(allocation.allocated_qty || 0) - (used.get(Number(lot.id)) || 0));
+        if (remaining <= 0) return null;
+        return {
+          vaccine_id: vaccineId,
+          vaccine_name: clean(lot.vaccine?.name) || `Produk ${vaccineId}`,
+          brand: clean(lot.vaccine?.brand),
+          lot_id: Number(lot.id),
+          lot_number: clean(lot.lot_number),
+          remaining,
+          service_mode: serviceMode,
+        };
+      }).filter(Boolean);
+
+      return json({ ok: true, session: sessionResult.data, serviceMode, options });
+    }
 
     let query = supabase
       .from("vaccination_registrations")
@@ -542,6 +734,23 @@ export async function POST(req: NextRequest) {
       serviceMode &&
       ((serviceMode === "HEALTHDAY" && !healthdayQueueEnabled) || (serviceMode === "BAZAR" && !bazarQueueEnabled))
     );
+    const reversedModes: Array<"HEALTHDAY" | "BAZAR"> = [];
+    const remainderBackups = new Map<"HEALTHDAY" | "BAZAR", ValidationRemainderBackup[]>();
+    const reverseDoneMode = async (mode: "HEALTHDAY" | "BAZAR") => {
+      const state = clean(mode === "BAZAR" ? registrationState.bazar_queue_status : registrationState.queue_status).toUpperCase();
+      const validationDone = clean(registrationState.validation_status).toUpperCase() === "DONE";
+      if (!isDoneTrackStatus(state) && !validationDone) return;
+      const reversed = await reverseQueueDoneTrack(supabase, rowId!, mode, actor);
+      if (Number(reversed?.reversed || 0) > 0) reversedModes.push(mode);
+      try {
+        const backups = await reverseValidationAdministeredRemainder(supabase, rowId!, mode, actor);
+        if (backups.length) remainderBackups.set(mode, backups);
+      } catch (error) {
+        if (Number(reversed?.reversed || 0) > 0) { try { await syncRegistrationTrackDone(supabase, rowId!, mode, actor); } catch {} }
+        throw error;
+      }
+    };
+    const cancelAction = ["BATAL", "CANCELLED", "CANCELED", "MOVE_TO_CLINIC"].includes(action);
 
     const aggregateValidationStatus = (nextHealthdayStatus: string, nextBazarStatus: string) => {
       const externalStatuses: string[] = [];
@@ -562,6 +771,7 @@ export async function POST(req: NextRequest) {
       let nextBazarStatus = currentBazarStatus;
 
       if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
+        try { await reverseDoneMode(serviceMode!); } catch (reverseError: any) { return json({ ok: false, message: reverseError?.message || "Gagal mengembalikan stok saat mengubah stage." }, 409); }
         if (serviceMode === "BAZAR") nextBazarStatus = "PENDING_VALIDATION";
         else nextHealthdayStatus = "PENDING_VALIDATION";
         payload = {
@@ -587,8 +797,9 @@ export async function POST(req: NextRequest) {
           validated_at: now,
           updated_at: now,
         };
-      } else if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") {
+      } else if (cancelAction) {
         if (!note) return json({ ok: false, message: "Alasan Cancel wajib diisi." }, 400);
+        try { await reverseDoneMode(serviceMode!); } catch (reverseError: any) { return json({ ok: false, message: reverseError?.message || "Gagal mengembalikan stok saat Cancel." }, 409); }
         if (serviceMode === "BAZAR") nextBazarStatus = "CANCELLED";
         else nextHealthdayStatus = "CANCELLED";
         payload = {
@@ -597,6 +808,7 @@ export async function POST(req: NextRequest) {
           cancelled_by: actor,
           cancelled_at: now,
           cancelled_note: note,
+          ...(action === "MOVE_TO_CLINIC" ? { status_note: note } : {}),
           updated_at: now,
         };
       } else {
@@ -605,14 +817,30 @@ export async function POST(req: NextRequest) {
     } else {
       // Preserve standard/internal validation workflow exactly as before.
       if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") {
+        try {
+          if (serviceMode) await reverseDoneMode(serviceMode);
+          else {
+            const serviceStatus = clean(registrationState.patient_service_status || "HEALTHDAY").toUpperCase();
+            if (serviceStatus === "BAZAR") await reverseDoneMode("BAZAR");
+            else await reverseDoneMode("HEALTHDAY");
+          }
+        } catch (reverseError: any) { return json({ ok: false, message: reverseError?.message || "Gagal mengembalikan stok saat mengubah stage." }, 409); }
         payload = { queue_status: "PENDING_VALIDATION", validation_status: "PENDING", print_status: "NOT_PRINTED", updated_at: now };
       } else if (action === "PRINTED") {
         payload = { print_status: "PRINTED", printed_by: actor, printed_at: now, updated_at: now };
       } else if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") {
         payload = { queue_status: "DONE", validation_status: "DONE", validated_by: actor, validated_at: now, updated_at: now };
-      } else if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") {
+      } else if (cancelAction) {
         if (!note) return json({ ok: false, message: "Note wajib diisi jika status Batal." }, 400);
-        payload = { queue_status: "CANCELLED", validation_status: "CANCELLED", cancelled_by: actor, cancelled_at: now, cancelled_note: note, updated_at: now };
+        try {
+          if (serviceMode) await reverseDoneMode(serviceMode);
+          else {
+            const serviceStatus = clean(registrationState.patient_service_status || "HEALTHDAY").toUpperCase();
+            if (serviceStatus === "BAZAR") await reverseDoneMode("BAZAR");
+            else await reverseDoneMode("HEALTHDAY");
+          }
+        } catch (reverseError: any) { return json({ ok: false, message: reverseError?.message || "Gagal mengembalikan stok saat Cancel." }, 409); }
+        payload = { queue_status: "CANCELLED", validation_status: "CANCELLED", cancelled_by: actor, cancelled_at: now, cancelled_note: note, ...(action === "MOVE_TO_CLINIC" ? { status_note: note } : {}), updated_at: now };
       } else {
         return json({ ok: false, message: "Action tidak dikenali." }, 400);
       }
@@ -641,7 +869,7 @@ export async function POST(req: NextRequest) {
       const fallback: any = { updated_at: now };
       if (action === "SEND_TO_VALIDATION" || action === "PENDING_VALIDATION") fallback.queue_status = "PENDING_VALIDATION";
       if (action === "SELESAI" || action === "DONE" || action === "VALIDATED") fallback.queue_status = "DONE";
-      if (action === "BATAL" || action === "CANCELLED" || action === "CANCELED") fallback.queue_status = "CANCELLED";
+      if (cancelAction) fallback.queue_status = "CANCELLED";
       result = await supabase
         .from("vaccination_registrations")
         .update(fallback)
@@ -651,7 +879,19 @@ export async function POST(req: NextRequest) {
     }
 
     if (result.error) {
+      for (const backups of remainderBackups.values()) {
+        try { await restoreValidationAdministeredRemainder(supabase, backups); } catch {}
+      }
+      if (reversedModes.length) {
+        for (const reversedMode of reversedModes) {
+          try { await syncRegistrationTrackDone(supabase, rowId, reversedMode, actor); } catch {}
+        }
+      }
       return json({ ok: false, message: result.error.message || "Gagal update status validasi." }, 500);
+    }
+
+    for (const [mode, backups] of remainderBackups.entries()) {
+      try { await finalizeValidationAdministeredRemainder(supabase, backups, rowId!, mode, actor); } catch {}
     }
 
     return json({ ok: true, row: result.data || null });

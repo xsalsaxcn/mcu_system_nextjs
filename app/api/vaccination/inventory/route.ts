@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 import { canVaccinationAccess } from "@/lib/vaccination/access";
 import { buildVaccinationInventorySnapshot } from "@/lib/vaccination/inventorySnapshot";
+import { transferVaccinationSessionStock } from "@/lib/vaccination/stockTransfer";
 
 // V522_INVENTORY_SAFE_ARCHIVE
 // VACCINATION_ROLE_GUARD_V150
@@ -95,6 +96,30 @@ export async function POST(req: NextRequest) {
     return ok({ message: `${clean(canonicalRow?.vaccine?.name) || "Produk"} · Lot ${clean(canonicalRow?.lot_number) || "-"} berhasil dihapus dari Inventory aktif. Riwayat transaksi tetap tersimpan.` });
   }
 
+  if (clean(body.action).toLowerCase() === "transfer-stock") {
+    const sourceSessionId = toInt(body.sourceSessionId || body.sessionId, 0);
+    const targetSessionId = toInt(body.targetSessionId, 0);
+    const quantity = toInt(body.quantity, 0);
+    const sourceServiceMode = clean(body.sourceServiceMode || body.serviceMode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    const targetServiceMode = clean(body.targetServiceMode || body.serviceMode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    const actor = (user as any).email || (user as any).name || (user as any).id || "system";
+    try {
+      const transferred = await transferVaccinationSessionStock({
+        supabase,
+        lotId,
+        sourceSessionId,
+        sourceServiceMode,
+        targetSessionId,
+        targetServiceMode,
+        quantity,
+        actor,
+      });
+      return ok(transferred);
+    } catch (error: any) {
+      return fail(error?.message || "Transfer stok gagal.", 409);
+    }
+  }
+
   if (clean(body.action).toLowerCase() === "stock-transaction") {
     const stockAction = clean(body.stockAction).toUpperCase();
     const inventoryTarget = clean(body.inventoryTarget).toUpperCase();
@@ -130,8 +155,8 @@ export async function POST(req: NextRequest) {
 
     const lot = beforeResult.data as any;
     const initial = Number(lot.stock_initial || 0);
-    const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
-    const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+    const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
+    const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
     const movementAdded = (movementsResult.data || []).reduce((sum: number, movement: any) => {
       const type = clean(movement.movement_type).toUpperCase();
       return inboundTypes.has(type) ? sum + Math.abs(Number(movement.qty || 0)) : sum;

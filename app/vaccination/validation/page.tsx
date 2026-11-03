@@ -12,6 +12,8 @@ import { useEffect, useMemo, useState } from "react";
 
 type ProductDetail = {
   record_id?: number | null;
+  vaccine_id?: number | null;
+  lot_id?: number | null;
   vaccine_name?: string;
   lot_number?: string;
   dose_number?: number;
@@ -20,6 +22,11 @@ type ProductDetail = {
   note?: string;
   status?: string;
   service_mode?: string;
+  sale_mode?: string;
+  package_dose_count?: number;
+  sales_price_snapshot?: number | null;
+  payment_method?: string;
+  payment_note?: string;
 };
 
 type Row = {
@@ -163,6 +170,13 @@ export default function VaccinationValidationPage() {
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [editingStageRow, setEditingStageRow] = useState<Row | null>(null);
+  const [editingStageValue, setEditingStageValue] = useState("PENDING_VALIDATION");
+  const [editingStageNote, setEditingStageNote] = useState("");
+  const [moveRow, setMoveRow] = useState<Row | null>(null);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [moveVendorQueue, setMoveVendorQueue] = useState("");
+  const [moveBusy, setMoveBusy] = useState(false);
 
   async function loadRows() {
     setLoading(true);
@@ -290,6 +304,144 @@ export default function VaccinationValidationPage() {
       await loadRows();
     } catch (error: any) {
       setMessage(error?.message || "Gagal update status.");
+    }
+  }
+
+  function openStageEdit(row: Row) {
+    setEditingStageRow(row);
+    setEditingStageValue(clean(row.validation_status).toUpperCase() === "DONE" ? "DONE" : "PENDING_VALIDATION");
+    setEditingStageNote("");
+  }
+
+  async function saveStageEdit() {
+    if (!editingStageRow) return;
+    const target = editingStageValue;
+    if (target === "CANCELLED" && !clean(editingStageNote)) {
+      setMessage("Alasan Cancel wajib diisi.");
+      return;
+    }
+    const action = target === "DONE" ? "DONE" : target === "CANCELLED" ? "BATAL" : "PENDING_VALIDATION";
+    await update(editingStageRow, action, editingStageNote);
+    setEditingStageRow(null);
+    setEditingStageNote("");
+  }
+
+  function openMove(row: Row) {
+    setMoveRow(row);
+    setMoveTarget("");
+    setMoveVendorQueue("");
+    setMessage("");
+  }
+
+  function targetQueueEnabled(session: SessionOption | null, serviceMode: string) {
+    if (!session) return true;
+    const flow = session.existing_flow_config || {};
+    const legacy = flow?.queue !== false;
+    return serviceMode === "BAZAR"
+      ? (flow?.queue_bazar === undefined ? legacy : flow?.queue_bazar !== false)
+      : (flow?.queue_healthday === undefined ? legacy : flow?.queue_healthday !== false);
+  }
+
+  async function submitMove() {
+    if (!moveRow || moveBusy) return;
+    if (!moveTarget) { setMessage("Pilih tujuan pindah lokasi terlebih dahulu."); return; }
+    const serviceMode = clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+    setMoveBusy(true);
+    setMessage("Memproses pindah lokasi layanan...");
+    try {
+      if (moveTarget === "CLINIC") {
+        const note = `Pindah lokasi layanan dari ${clean(moveRow.location) || clean(moveRow.session_name) || "Session lama"} ke Vaksin di Klinik`;
+        const res = await fetch("/api/vaccination/validation", {
+          method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+          body: JSON.stringify({ id: moveRow.id, action: "MOVE_TO_CLINIC", actor, note, service_mode: serviceMode }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) throw new Error(json.message || "Gagal memindahkan layanan ke Klinik.");
+        setMoveRow(null);
+        await loadRows();
+        setMessage(note);
+        return;
+      }
+
+      const targetSession = sessionOptions.find((item) => String(item.session_id) === String(moveTarget)) || null;
+      if (!targetSession) throw new Error("Session tujuan tidak ditemukan.");
+      if (clean(targetSession.company_name) && clean(moveRow.company_name) && clean(targetSession.company_name) !== clean(moveRow.company_name)) {
+        throw new Error("Session tujuan harus berada pada perusahaan yang sama.");
+      }
+      if (!targetQueueEnabled(targetSession, serviceMode) && !clean(moveVendorQueue)) {
+        throw new Error(`Nomor Antrean Vendor ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} wajib diisi untuk Session tujuan ini.`);
+      }
+
+      const optionsRes = await fetch(`/api/vaccination/validation?action=move-options&session_id=${encodeURIComponent(String(targetSession.session_id))}&service_mode=${encodeURIComponent(serviceMode)}`, { cache: "no-store" });
+      const optionsJson = await optionsRes.json().catch(() => ({}));
+      if (!optionsRes.ok || !optionsJson.ok) throw new Error(optionsJson.message || "Gagal membaca stok Session tujuan.");
+      const targetOptions = Array.isArray(optionsJson.options) ? optionsJson.options : [];
+      const sourceProducts = (moveRow.products || []).filter((item) => Number(item.vaccine_id || 0) > 0);
+      if (!sourceProducts.length) throw new Error("Produk peserta tidak memiliki Vaccine ID yang dapat dipindahkan.");
+
+      const targetItems = sourceProducts.map((item) => {
+        const candidates = targetOptions.filter((option: any) => Number(option.vaccine_id || 0) === Number(item.vaccine_id || 0) && Number(option.remaining || 0) > 0);
+        const exact = candidates.find((option: any) => clean(option.lot_number).toLowerCase() === clean(item.lot_number).toLowerCase());
+        const selected = exact || candidates.sort((a: any, b: any) => Number(b.remaining || 0) - Number(a.remaining || 0))[0];
+        if (!selected) throw new Error(`${item.vaccine_name || "Produk"} tidak memiliki stok ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} di Session tujuan.`);
+        return {
+          vaccineId: Number(item.vaccine_id),
+          lotId: Number(selected.lot_id),
+          doseNumber: Math.max(1, Number(item.dose_number || 1)),
+          serviceMode,
+          saleMode: clean(item.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+          packageDoseCount: Math.max(1, Number(item.package_dose_count || 1)),
+          salesPriceSnapshot: item.sales_price_snapshot ?? null,
+          paymentMethod: clean(item.payment_method || moveRow.payment_method),
+          paymentNote: clean(item.payment_note),
+        };
+      });
+
+      if (clean(moveRow.validation_status).toUpperCase() === "DONE") {
+        const reopenRes = await fetch("/api/vaccination/validation", {
+          method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+          body: JSON.stringify({ id: moveRow.id, action: "PENDING_VALIDATION", actor, note: "Persiapan pindah lokasi", service_mode: serviceMode }),
+        });
+        const reopenJson = await reopenRes.json().catch(() => ({}));
+        if (!reopenRes.ok || !reopenJson.ok) throw new Error(reopenJson.message || "Gagal mengembalikan stok sebelum pindah lokasi.");
+      }
+
+      const raw: any = moveRow.raw || {};
+      const moveRes = await fetch("/api/vaccination/register", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({
+          validationMove: true,
+          moveFromRegistrationId: moveRow.id,
+          sessionId: Number(targetSession.session_id),
+          participantName: moveRow.patient_name,
+          participantId: raw.participant_id || null,
+          historyPersonId: raw.history_person_id || null,
+          parentHistoryPersonId: raw.parent_history_person_id || null,
+          familyRole: raw.family_role || "PARENT",
+          employeeId: moveRow.employee_id || raw.employee_id || "",
+          nik: raw.nik || "",
+          email: raw.email || "",
+          phone: raw.phone || "",
+          department: raw.department || "",
+          companyName: targetSession.company_name || moveRow.company_name || "",
+          serviceMode,
+          externalQueueNumber: clean(moveVendorQueue),
+          paymentMethod: clean(moveRow.payment_method),
+          items: targetItems,
+        }),
+      });
+      const moveJson = await moveRes.json().catch(() => ({}));
+      if (!moveRes.ok || !moveJson.ok) throw new Error(moveJson.message || "Pindah lokasi gagal.");
+      const oldLocation = clean(moveRow.location) || clean(moveRow.session_name) || "Session lama";
+      const newLocation = clean(targetSession.location) || clean(targetSession.session_name) || `Session ${targetSession.session_id}`;
+      setMoveRow(null);
+      await loadRows();
+      setMessage(`Pindah Lokasi Layanan dari ${oldLocation} ke ${newLocation} berhasil.`);
+    } catch (error: any) {
+      setMessage(error?.message || "Pindah lokasi gagal.");
+      await loadRows();
+    } finally {
+      setMoveBusy(false);
     }
   }
 
@@ -540,7 +692,8 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4">
                       <div className="flex min-w-[250px] flex-wrap gap-2">
                         <button type="button" onClick={() => void update(row, "DONE")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Done</button>
-                        <a href={`/vaccination/register?edit_registration_id=${row.id}`} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit</a>
+                        <button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
+                        <button type="button" onClick={() => openMove(row)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Pindah Lokasi</button>
                         <button type="button" onClick={() => setCancelRowId(cancelRowId === rowStateKey(row) ? null : rowStateKey(row))} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Cancel</button>
                       </div>
                       {cancelRowId === rowStateKey(row) ? (
@@ -584,6 +737,7 @@ export default function VaccinationValidationPage() {
                   <th className="px-4 py-3">Selesai</th>
                   <th className="px-4 py-3">Petugas</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -597,9 +751,22 @@ export default function VaccinationValidationPage() {
                     <td className="px-4 py-4"><div className="font-bold">{fmtDate(row.validated_at) || "-"}</div></td>
                     <td className="px-4 py-4 font-bold">{row.validated_by || "-"}</td>
                     <td className="px-4 py-4"><span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Selesai</span></td>
+                    <td className="px-4 py-4">
+                      <div className="flex min-w-[210px] flex-wrap gap-2">
+                        <button type="button" onClick={() => openStageEdit(row)} className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700">Edit Stage</button>
+                        <button type="button" onClick={() => openMove(row)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">Pindah Lokasi</button>
+                        <button type="button" onClick={() => setCancelRowId(cancelRowId === rowStateKey(row) ? null : rowStateKey(row))} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700">Cancel</button>
+                      </div>
+                      {cancelRowId === rowStateKey(row) ? (
+                        <div className="mt-2 rounded-2xl border border-rose-200 bg-rose-50 p-3">
+                          <textarea className="min-h-20 w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-bold outline-none" placeholder="Alasan cancel wajib diisi. Jika stok sudah terpotong, stok akan dikembalikan." value={notes[rowStateKey(row)] || ""} onChange={(e) => setNotes((prev) => ({ ...prev, [rowStateKey(row)]: e.target.value }))} />
+                          <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setCancelRowId(null)} className="rounded-lg border bg-white px-3 py-2 text-xs font-black">Tutup</button><button type="button" onClick={() => { if (!clean(notes[rowStateKey(row)])) { setMessage("Alasan Cancel wajib diisi."); return; } void update(row, "BATAL", notes[rowStateKey(row)]); setCancelRowId(null); }} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white">Simpan Cancel</button></div>
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
-                {!doneShown.length ? <tr><td colSpan={8} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta selesai sesuai filter.</td></tr> : null}
+                {!doneShown.length ? <tr><td colSpan={9} className="px-4 py-8 text-center font-bold text-slate-400">Belum ada peserta selesai sesuai filter.</td></tr> : null}
               </tbody>
             </table>
           </div> : null}
@@ -693,6 +860,34 @@ export default function VaccinationValidationPage() {
         </div>
       </section>
       )}
+      {editingStageRow ? (
+        <div className="fixed inset-0 z-[10040] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingStageRow(null); }}>
+          <div className="w-full max-w-lg rounded-3xl bg-white shadow-2xl">
+            <div className="border-b px-5 py-4"><div className="text-xs font-black uppercase text-blue-700">Edit Stage Validasi</div><div className="mt-1 text-xl font-black">{editingStageRow.patient_name || "Peserta"}</div><div className="mt-1 text-xs font-semibold text-slate-500">Tetap di Tim Validasi — tidak kembali ke Registrasi.</div></div>
+            <div className="space-y-4 p-5">
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Stage<select className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editingStageValue} onChange={(e) => setEditingStageValue(e.target.value)}><option value="PENDING_VALIDATION">Menunggu Validasi</option><option value="DONE">Selesai</option><option value="CANCELLED">Cancel</option></select></label>
+              {(editingStageValue === "CANCELLED" || clean(editingStageRow.validation_status).toUpperCase() === "DONE") ? <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Catatan<textarea className="min-h-24 rounded-xl border px-3 py-3 text-sm font-semibold normal-case text-slate-900" placeholder="Alasan / koreksi stage" value={editingStageNote} onChange={(e) => setEditingStageNote(e.target.value)} /></label> : null}
+              {clean(editingStageRow.validation_status).toUpperCase() === "DONE" && editingStageValue !== "DONE" ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Jika record Done ini berasal dari flow stok otomatis, stok vaksin akan dikembalikan sebelum stage diubah.</div> : null}
+              <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditingStageRow(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black">Batal</button><button type="button" onClick={() => void saveStageEdit()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white">Simpan Stage</button></div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {moveRow ? (
+        <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !moveBusy) setMoveRow(null); }}>
+          <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
+            <div className="border-b px-5 py-4"><div className="text-xs font-black uppercase text-blue-700">Pindah Lokasi Suntik</div><div className="mt-1 text-xl font-black">{moveRow.patient_name || "Peserta"}</div><div className="mt-1 text-sm font-semibold text-slate-500">Pasien sudah terdaftar layanan {moveRow.product_name || "Vaksin"} di {clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {moveRow.location || moveRow.session_name || "-"}</div>{clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? <div className="mt-1 text-sm font-bold text-violet-700">{(moveRow.products || []).some((item) => clean(item.sale_mode).toUpperCase() === "PACKAGE") ? "Paket" : "Non Paket"} · Payment {moveRow.payment_method || "-"}</div> : null}</div>
+            <div className="space-y-4 p-5">
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Tujuan<select className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" value={moveTarget} onChange={(e) => { setMoveTarget(e.target.value); setMoveVendorQueue(""); }}><option value="">Pilih Session / Lokasi</option><option value="CLINIC">Vaksin di Klinik</option>{sessionOptions.filter((item) => String(item.session_id) !== String(moveRow.session_id) && (!clean(item.company_name) || !clean(moveRow.company_name) || clean(item.company_name) === clean(moveRow.company_name))).map((item) => <option key={item.session_id} value={String(item.session_id)}>{item.session_date ? `${item.session_date} · ` : ""}{item.location || item.session_name}</option>)}</select></label>
+              {moveTarget && moveTarget !== "CLINIC" && !targetQueueEnabled(sessionOptions.find((item) => String(item.session_id) === String(moveTarget)) || null, clean(moveRow.validation_service_mode).toUpperCase()) ? <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nomor Antrean Vendor Tujuan<input className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" placeholder="Wajib untuk Session record-only/vendor" value={moveVendorQueue} onChange={(e) => setMoveVendorQueue(e.target.value)} /></label> : null}
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">Pindah lokasi hanya memakai stok milik Session tujuan. Lot sumber tidak dipakai silang. Jika peserta sudah Done tetapi ternyata tidak vaksin, stok lama dikembalikan dulu.</div>
+              <div className="flex justify-end gap-2"><button type="button" disabled={moveBusy} onClick={() => setMoveRow(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button><button type="button" disabled={moveBusy} onClick={() => void submitMove()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">{moveBusy ? "Memproses..." : "Pindah Lokasi"}</button></div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </main>
   );
 }

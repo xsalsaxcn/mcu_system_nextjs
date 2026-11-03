@@ -4,11 +4,15 @@ import { clean, fail, ok, requireUser, supabaseAdmin, toInt } from "../_utils";
 
 export const dynamic = "force-dynamic";
 
-// V544_REGISTER_LOCATION_STOCK_SUMMARY
+// V545_REGISTER_SERVICE_SPECIFIC_STOCK_SUMMARY
 const FINAL_ITEM = new Set(["ADMINISTERED", "DONE", "FINISHED"]);
 const CANCELLED_ITEM = new Set(["CANCELLED", "CANCELED", "VOID", "VOIDED", "BATAL"]);
-const INBOUND = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN"]);
-const OUTBOUND = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION"]);
+const INBOUND = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
+const OUTBOUND = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
+
+function mode(value: any): "HEALTHDAY" | "BAZAR" {
+  return clean(value).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+}
 
 export async function GET(req: NextRequest) {
   const user = requireUser(req);
@@ -16,38 +20,69 @@ export async function GET(req: NextRequest) {
   if (!canVaccinationAccess(user, "register")) return fail("Akses Registrasi ditolak untuk role ini.", 403);
 
   const sessionId = toInt(req.nextUrl.searchParams.get("session_id"), 0);
-  if (!sessionId) return ok({ rows: [] });
+  const serviceMode = mode(req.nextUrl.searchParams.get("service_mode"));
+  if (!sessionId) return ok({ rows: [], serviceMode });
 
   const supabase = supabaseAdmin();
-  const lotsResult = await supabase
-    .from("vaccination_vaccine_lots")
-    .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_session_id,active,vaccine:vaccination_vaccines(id,name,brand)")
-    .eq("active", true)
-    .eq("stock_scope", "SESSION")
-    .eq("stock_session_id", sessionId)
-    .limit(5000);
-  if (lotsResult.error) return fail(lotsResult.error.message, 500);
-
-  const lots = lotsResult.data || [];
-  const lotIds = lots.map((row: any) => Number(row.id || 0)).filter(Boolean);
-
-  const [movementResult, itemResult] = await Promise.all([
-    lotIds.length
-      ? supabase
-          .from("vaccination_inventory_movements")
-          .select("id,lot_id,movement_type,qty")
-          .in("lot_id", lotIds)
-          .limit(20000)
-      : Promise.resolve({ data: [], error: null }),
+  const [assignmentResult, allocationResult, itemResult] = await Promise.all([
+    supabase
+      .from("vaccination_session_product_assignments")
+      .select("vaccine_id,service_mode,active")
+      .eq("session_id", sessionId)
+      .eq("service_mode", serviceMode)
+      .eq("active", true)
+      .limit(10000),
+    supabase
+      .from("vaccination_session_stock_allocations")
+      .select("id,session_id,vaccine_id,lot_id,allocated_qty,service_mode,active")
+      .eq("session_id", sessionId)
+      .eq("service_mode", serviceMode)
+      .eq("active", true)
+      .limit(10000),
     supabase
       .from("vaccination_registration_items")
       .select("id,vaccine_id,lot_id,service_mode,status,active,registration:vaccination_registrations(id,queue_number,bazar_queue_number,queue_status,bazar_queue_status)")
       .eq("session_id", sessionId)
+      .eq("service_mode", serviceMode)
       .eq("active", true)
       .limit(20000),
   ]);
-  if (movementResult.error) return fail(movementResult.error.message, 500);
+  if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
+  if (allocationResult.error) return fail(allocationResult.error.message, 500);
   if (itemResult.error) return fail(itemResult.error.message, 500);
+
+  const allocations = allocationResult.data || [];
+  const lotIds = Array.from(new Set<number>(allocations.map((row: any) => Number(row.lot_id || 0)).filter(Boolean)));
+  const lotsResult = lotIds.length
+    ? await supabase
+        .from("vaccination_vaccine_lots")
+        .select("id,vaccine_id,lot_number,stock_initial,stock_added,stock_used,stock_scope,stock_session_id,active,vaccine:vaccination_vaccines(id,name,brand)")
+        .in("id", lotIds)
+        .eq("active", true)
+    : { data: [], error: null } as any;
+  if (lotsResult.error) return fail(lotsResult.error.message, 500);
+
+  const movementResult = lotIds.length
+    ? await supabase
+        .from("vaccination_inventory_movements")
+        .select("id,lot_id,movement_type,qty")
+        .in("lot_id", lotIds)
+        .limit(20000)
+    : { data: [], error: null } as any;
+  if (movementResult.error) return fail(movementResult.error.message, 500);
+
+  const vaccineIds = new Set<number>();
+  for (const row of assignmentResult.data || []) vaccineIds.add(Number((row as any).vaccine_id || 0));
+  for (const row of allocations) vaccineIds.add(Number((row as any).vaccine_id || 0));
+  for (const row of itemResult.data || []) vaccineIds.add(Number((row as any).vaccine_id || 0));
+  vaccineIds.delete(0);
+
+  const vaccineResult = vaccineIds.size
+    ? await supabase.from("vaccination_vaccines").select("id,name,brand").in("id", Array.from(vaccineIds))
+    : { data: [], error: null } as any;
+  if (vaccineResult.error) return fail(vaccineResult.error.message, 500);
+  const vaccineMap = new Map<number, any>((vaccineResult.data || []).map((row: any) => [Number(row.id), row]));
+  const lotMap = new Map<number, any>((lotsResult.data || []).map((row: any) => [Number(row.id), row]));
 
   const movementByLot = new Map<number, { inbound: number; outbound: number }>();
   for (const movement of movementResult.data || []) {
@@ -59,21 +94,30 @@ export async function GET(req: NextRequest) {
     movementByLot.set(lotId, bucket);
   }
 
-  const stockByVaccine = new Map<number, { id: number; name: string; brand: string; stock: number }>();
-  for (const lot of lots as any[]) {
-    const vaccineId = Number(lot.vaccine_id || lot.vaccine?.id || 0);
-    if (!vaccineId) continue;
-    const movement = movementByLot.get(Number(lot.id || 0)) || { inbound: 0, outbound: 0 };
+  const usedByLot = new Map<number, number>();
+  for (const item of itemResult.data || []) {
+    const status = clean((item as any).status).toUpperCase();
+    if (!FINAL_ITEM.has(status)) continue;
+    const lotId = Number((item as any).lot_id || 0);
+    if (lotId) usedByLot.set(lotId, (usedByLot.get(lotId) || 0) + 1);
+  }
+
+  const stockByVaccine = new Map<number, number>();
+  for (const allocation of allocations as any[]) {
+    const vaccineId = Number(allocation.vaccine_id || 0);
+    const lotId = Number(allocation.lot_id || 0);
+    if (!vaccineId || !lotId) continue;
+    const lot = lotMap.get(lotId);
+    if (!lot) continue;
+    if (clean(lot.stock_scope).toUpperCase() === "SESSION" && Number(lot.stock_session_id || 0) !== sessionId) continue;
+
+    const movement = movementByLot.get(lotId) || { inbound: 0, outbound: 0 };
     const added = Math.max(Number(lot.stock_added || 0), movement.inbound);
-    const remaining = Math.max(0, Number(lot.stock_initial || 0) + added - Number(lot.stock_used || 0) - movement.outbound);
-    const current = stockByVaccine.get(vaccineId) || {
-      id: vaccineId,
-      name: clean(lot.vaccine?.name) || `Produk ${vaccineId}`,
-      brand: clean(lot.vaccine?.brand),
-      stock: 0,
-    };
-    current.stock += remaining;
-    stockByVaccine.set(vaccineId, current);
+    const globalRemaining = Math.max(0, Number(lot.stock_initial || 0) + added - Number(lot.stock_used || 0) - movement.outbound);
+    const serviceUsed = usedByLot.get(lotId) || 0;
+    const bucketRemaining = Math.max(0, Number(allocation.allocated_qty || 0) - serviceUsed);
+    const remaining = Math.min(globalRemaining, bucketRemaining);
+    stockByVaccine.set(vaccineId, (stockByVaccine.get(vaccineId) || 0) + remaining);
   }
 
   const pendingByVaccine = new Map<number, { registered: number; arrived: number }>();
@@ -85,31 +129,30 @@ export async function GET(req: NextRequest) {
     const current = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0 };
     current.registered += 1;
 
-    const mode = clean((item as any).service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
     const registration: any = Array.isArray((item as any).registration)
       ? (item as any).registration[0]
       : (item as any).registration;
-    const queueNumber = mode === "BAZAR" ? clean(registration?.bazar_queue_number) : clean(registration?.queue_number);
-    const queueStatus = clean(mode === "BAZAR" ? registration?.bazar_queue_status : registration?.queue_status).toUpperCase();
+    const queueNumber = serviceMode === "BAZAR" ? clean(registration?.bazar_queue_number) : clean(registration?.queue_number);
+    const queueStatus = clean(serviceMode === "BAZAR" ? registration?.bazar_queue_status : registration?.queue_status).toUpperCase();
     if (queueNumber || !["", "IMPORTED", "REGISTERED"].includes(queueStatus)) current.arrived += 1;
-
     pendingByVaccine.set(vaccineId, current);
   }
 
-  const vaccineIds = new Set<number>([...stockByVaccine.keys(), ...pendingByVaccine.keys()]);
   const rows = Array.from(vaccineIds).map((vaccineId) => {
-    const stock = stockByVaccine.get(vaccineId) || { id: vaccineId, name: `Produk ${vaccineId}`, brand: "", stock: 0 };
+    const vaccine = vaccineMap.get(vaccineId) || { id: vaccineId, name: `Produk ${vaccineId}`, brand: "" };
+    const stock = stockByVaccine.get(vaccineId) || 0;
     const pending = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0 };
     return {
       vaccineId,
-      name: stock.name,
-      brand: stock.brand,
-      stockLocation: stock.stock,
+      name: clean(vaccine.name) || `Produk ${vaccineId}`,
+      brand: clean(vaccine.brand),
+      serviceMode,
+      stockLocation: stock,
       registered: pending.registered,
       arrived: pending.arrived,
-      available: Math.max(0, stock.stock - pending.registered),
+      available: Math.max(0, stock - pending.registered),
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "id"));
 
-  return ok({ sessionId, rows });
+  return ok({ sessionId, serviceMode, rows });
 }

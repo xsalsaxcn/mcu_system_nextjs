@@ -272,16 +272,44 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
   }
 
   const transferCompanyOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const session of transferSessions) if (clean(session?.company_name)) values.add(clean(session.company_name));
-    return Array.from(values).sort((a, b) => a.localeCompare(b, "id"));
-  }, [transferSessions]);
+    if (!editing) return [];
+    const sourceCompany = clean(editing?.stock_company_name || editing?.stock_session?.company_name || editing?.service_allocations?.[0]?.company_name);
+    if (!sourceCompany) return [];
+    return [sourceCompany];
+  }, [editing]);
+
+  const sourceTransferSessions = useMemo(() => {
+    if (!editing) return [];
+    const map = new Map<number, any>();
+    for (const allocation of Array.isArray(editing?.service_allocations) ? editing.service_allocations : []) {
+      const id = Number(allocation?.session_id || 0);
+      if (!id || Number(allocation?.remaining_qty || 0) <= 0) continue;
+      map.set(id, {
+        id,
+        session_name: allocation?.session_name,
+        location: allocation?.location,
+        company_name: allocation?.company_name,
+      });
+    }
+    return Array.from(map.values()).sort((a: any, b: any) => sessionLabel(a).localeCompare(sessionLabel(b), "id"));
+  }, [editing]);
+
+  const sourceTransferServices = useMemo(() => {
+    if (!editing || !editForm.sourceSessionId) return [];
+    const map = new Map<string, number>();
+    for (const allocation of Array.isArray(editing?.service_allocations) ? editing.service_allocations : []) {
+      if (String(allocation?.session_id || "") !== String(editForm.sourceSessionId)) continue;
+      const mode = clean(allocation?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      const remaining = Math.max(0, Number(allocation?.remaining_qty || 0));
+      if (remaining > 0) map.set(mode, Math.max(map.get(mode) || 0, remaining));
+    }
+    return Array.from(map.entries()).map(([mode, remaining]) => ({ mode, remaining }));
+  }, [editing, editForm.sourceSessionId]);
 
   const transferSessionOptions = useMemo(() => {
     if (!editing || !editForm.targetCompanyName) return [];
     return transferSessions
       .filter((session: any) => clean(session?.company_name) === editForm.targetCompanyName)
-      .filter((session: any) => Number(session?.id || 0) !== Number(editing?.stock_session_id || 0))
       .sort((a: any, b: any) => sessionLabel(a).localeCompare(sessionLabel(b), "id"));
   }, [transferSessions, editing, editForm.targetCompanyName]);
 
@@ -293,15 +321,21 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     try {
       const isTransfer = editForm.action === "TRANSFER_STOCK";
       const quantity = Math.max(0, Number(editForm.quantity || 0));
-      if (!isTransfer && !quantity) throw new Error("Jumlah stok wajib lebih dari 0.");
-      if (!isTransfer && !editForm.sourceSessionId) throw new Error("Pilih Session/Lokasi untuk transaksi stok.");
+      if (!quantity) throw new Error("Jumlah stok wajib lebih dari 0.");
+      if (!editForm.sourceSessionId) throw new Error("Pilih Session/Lokasi sumber.");
       if (isTransfer && (!editForm.targetCompanyName || !editForm.targetSessionId)) throw new Error("Perusahaan dan Session tujuan wajib dipilih.");
+      if (isTransfer && Number(editForm.sourceSessionId) === Number(editForm.targetSessionId) && editForm.sourceServiceMode === editForm.targetServiceMode) {
+        throw new Error("Sumber dan tujuan transfer tidak boleh sama persis.");
+      }
 
       const payload = isTransfer
         ? {
             token,
             action: "transfer-stock",
             lotId: Number(editing.id || 0),
+            sourceSessionId: Number(editForm.sourceSessionId || 0),
+            sourceServiceMode: editForm.sourceServiceMode,
+            quantity,
             targetCompanyName: editForm.targetCompanyName,
             targetSessionId: Number(editForm.targetSessionId || 0),
             targetServiceMode: editForm.targetServiceMode,
@@ -452,29 +486,56 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
               </label>
 
               {editForm.action === "TRANSFER_STOCK" ? (
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                    Perusahaan Tujuan
-                    <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetCompanyName} onChange={(e) => setEditForm({ ...editForm, targetCompanyName: e.target.value, targetSessionId: "" })}>
-                      <option value="">Pilih perusahaan</option>
-                      {transferCompanyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
-                    </select>
-                  </label>
-                  <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                    Session / Lokasi Tujuan
-                    <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetSessionId} onChange={(e) => setEditForm({ ...editForm, targetSessionId: e.target.value })}>
-                      <option value="">Pilih Session</option>
-                      {transferSessionOptions.map((session: any) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
-                    </select>
-                  </label>
-                  <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                    Jenis Stok Tujuan
-                    <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetServiceMode} onChange={(e) => setEditForm({ ...editForm, targetServiceMode: e.target.value })}>
-                      <option value="HEALTHDAY">Healthday</option>
-                      <option value="BAZAR">Bazar</option>
-                    </select>
-                  </label>
-                  <div className="md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Seluruh sisa stok lot akan dipindahkan ke session dan layanan tujuan. Riwayat transaksi sebelumnya tetap tersimpan.</div>
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-3 text-xs font-black uppercase tracking-wide text-slate-600">Dari Stok</div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Session / Lokasi Sumber
+                        <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.sourceSessionId} onChange={(e) => { const sid = e.target.value; const first = (Array.isArray(editing?.service_allocations) ? editing.service_allocations : []).find((a: any) => String(a?.session_id || "") === sid && Number(a?.remaining_qty || 0) > 0); setEditForm({ ...editForm, sourceSessionId: sid, sourceServiceMode: clean(first?.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY" }); }}>
+                          <option value="">Pilih Session sumber</option>
+                          {sourceTransferSessions.map((session: any) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Stok Sumber
+                        <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.sourceServiceMode} onChange={(e) => setEditForm({ ...editForm, sourceServiceMode: e.target.value })}>
+                          {sourceTransferServices.length ? sourceTransferServices.map((item) => <option key={item.mode} value={item.mode}>{item.mode === "BAZAR" ? "Bazar" : "Healthday"} · Sisa {item.remaining}</option>) : <option value={editForm.sourceServiceMode}>Tidak ada stok tersedia</option>}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Jumlah Transfer
+                        <input type="number" min={1} step={1} className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} placeholder="Jumlah" />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                    <div className="mb-3 text-xs font-black uppercase tracking-wide text-blue-700">Ke Stok</div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Perusahaan Tujuan
+                        <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetCompanyName} onChange={(e) => setEditForm({ ...editForm, targetCompanyName: e.target.value, targetSessionId: "" })}>
+                          <option value="">Pilih perusahaan</option>
+                          {transferCompanyOptions.map((company) => <option key={company} value={company}>{company}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Session / Lokasi Tujuan
+                        <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetSessionId} onChange={(e) => setEditForm({ ...editForm, targetSessionId: e.target.value })}>
+                          <option value="">Pilih Session tujuan</option>
+                          {transferSessionOptions.map((session: any) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                        Stok Tujuan
+                        <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.targetServiceMode} onChange={(e) => setEditForm({ ...editForm, targetServiceMode: e.target.value })}>
+                          <option value="HEALTHDAY">Healthday</option>
+                          <option value="BAZAR">Bazar</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Transfer hanya memindahkan jumlah yang dipilih dari bucket Session + layanan sumber ke Session + layanan tujuan. Lot sumber tetap dimiliki Session sumber; Session tujuan memakai Lot terisolasi miliknya sendiri.</div>
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2">
@@ -506,7 +567,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
 
               <div className="flex flex-wrap justify-end gap-2">
                 <button type="button" disabled={saving} onClick={() => setEditing(null)} className="rounded-xl border px-4 py-3 text-sm font-black disabled:opacity-50">Batal</button>
-                <button type="button" disabled={saving} onClick={() => void saveEdit()} className="rounded-xl bg-amber-600 px-5 py-3 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50">{saving ? "Menyimpan..." : editForm.action === "TRANSFER_STOCK" ? "Transfer Seluruh Sisa Stok" : "Simpan Perubahan"}</button>
+                <button type="button" disabled={saving} onClick={() => void saveEdit()} className="rounded-xl bg-amber-600 px-5 py-3 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50">{saving ? "Menyimpan..." : editForm.action === "TRANSFER_STOCK" ? `Transfer ${editForm.quantity || ""} Stok` : "Simpan Perubahan"}</button>
               </div>
             </div>
           </div>
