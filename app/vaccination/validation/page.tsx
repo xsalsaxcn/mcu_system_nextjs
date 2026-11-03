@@ -1,5 +1,6 @@
 "use client";
 
+// V547_VALIDATION_MOVE_SESSION_ZERO_STOCK_AND_INLINE_FEEDBACK
 // V531_VALIDATION_BULK_ACTION_COLLAPSIBLE_DONE
 // V530_VALIDATION_SERVICE_STATE_ISOLATION
 // V520_SERVICE_SPECIFIC_QUEUE_MODE
@@ -69,6 +70,16 @@ type SessionOption = {
 
 function clean(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 function fmtDate(value: any) {
@@ -177,6 +188,7 @@ export default function VaccinationValidationPage() {
   const [moveTarget, setMoveTarget] = useState("");
   const [moveVendorQueue, setMoveVendorQueue] = useState("");
   const [moveBusy, setMoveBusy] = useState(false);
+  const [moveFeedback, setMoveFeedback] = useState("");
 
   async function loadRows() {
     setLoading(true);
@@ -330,6 +342,7 @@ export default function VaccinationValidationPage() {
     setMoveRow(row);
     setMoveTarget("");
     setMoveVendorQueue("");
+    setMoveFeedback("");
     setMessage("");
   }
 
@@ -344,20 +357,25 @@ export default function VaccinationValidationPage() {
 
   async function submitMove() {
     if (!moveRow || moveBusy) return;
-    if (!moveTarget) { setMessage("Pilih tujuan pindah lokasi terlebih dahulu."); return; }
+    if (!moveTarget) {
+      setMoveFeedback("Pilih tujuan pindah lokasi terlebih dahulu.");
+      return;
+    }
     const serviceMode = clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
     setMoveBusy(true);
-    setMessage("Memproses pindah lokasi layanan...");
+    setMoveFeedback("Memeriksa Session tujuan...");
+    setMessage("");
     try {
       if (moveTarget === "CLINIC") {
         const note = `Pindah lokasi layanan dari ${clean(moveRow.location) || clean(moveRow.session_name) || "Session lama"} ke Vaksin di Klinik`;
-        const res = await fetch("/api/vaccination/validation", {
+        const res = await fetchWithTimeout("/api/vaccination/validation", {
           method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
           body: JSON.stringify({ id: moveRow.id, action: "MOVE_TO_CLINIC", actor, note, service_mode: serviceMode }),
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json.ok) throw new Error(json.message || "Gagal memindahkan layanan ke Klinik.");
         setMoveRow(null);
+        setMoveFeedback("");
         await loadRows();
         setMessage(note);
         return;
@@ -372,18 +390,22 @@ export default function VaccinationValidationPage() {
         throw new Error(`Nomor Antrean Vendor ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} wajib diisi untuk Session tujuan ini.`);
       }
 
-      const optionsRes = await fetch(`/api/vaccination/validation?action=move-options&session_id=${encodeURIComponent(String(targetSession.session_id))}&service_mode=${encodeURIComponent(serviceMode)}`, { cache: "no-store" });
+      const optionsRes = await fetchWithTimeout(`/api/vaccination/validation?action=move-options&session_id=${encodeURIComponent(String(targetSession.session_id))}&service_mode=${encodeURIComponent(serviceMode)}`, { cache: "no-store" });
       const optionsJson = await optionsRes.json().catch(() => ({}));
-      if (!optionsRes.ok || !optionsJson.ok) throw new Error(optionsJson.message || "Gagal membaca stok Session tujuan.");
+      if (!optionsRes.ok || !optionsJson.ok) throw new Error(optionsJson.message || "Gagal membaca katalog/lot Session tujuan.");
       const targetOptions = Array.isArray(optionsJson.options) ? optionsJson.options : [];
       const sourceProducts = (moveRow.products || []).filter((item) => Number(item.vaccine_id || 0) > 0);
       if (!sourceProducts.length) throw new Error("Produk peserta tidak memiliki Vaccine ID yang dapat dipindahkan.");
 
+      const zeroStockProducts: string[] = [];
       const targetItems = sourceProducts.map((item) => {
-        const candidates = targetOptions.filter((option: any) => Number(option.vaccine_id || 0) === Number(item.vaccine_id || 0) && Number(option.remaining || 0) > 0);
+        const candidates = targetOptions.filter((option: any) => Number(option.vaccine_id || 0) === Number(item.vaccine_id || 0));
         const exact = candidates.find((option: any) => clean(option.lot_number).toLowerCase() === clean(item.lot_number).toLowerCase());
         const selected = exact || candidates.sort((a: any, b: any) => Number(b.remaining || 0) - Number(a.remaining || 0))[0];
-        if (!selected) throw new Error(`${item.vaccine_name || "Produk"} tidak memiliki stok ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} di Session tujuan.`);
+        if (!selected) {
+          throw new Error(`${item.vaccine_name || "Produk"} belum memiliki katalog/Lot ${serviceMode === "BAZAR" ? "Bazar" : "Healthday"} di Session tujuan.`);
+        }
+        if (Number(selected.remaining || 0) <= 0) zeroStockProducts.push(item.vaccine_name || "Produk");
         return {
           vaccineId: Number(item.vaccine_id),
           lotId: Number(selected.lot_id),
@@ -397,8 +419,14 @@ export default function VaccinationValidationPage() {
         };
       });
 
+      if (zeroStockProducts.length) {
+        setMoveFeedback(`Stok Session tujuan saat ini 0 untuk ${Array.from(new Set(zeroStockProducts)).join(", ")}. Peserta tetap dipindahkan ke daftar Session tujuan; stok baru wajib tersedia saat vaksinasi/Done.`);
+      } else {
+        setMoveFeedback("Katalog/Lot Session tujuan valid. Memindahkan peserta...");
+      }
+
       if (clean(moveRow.validation_status).toUpperCase() === "DONE") {
-        const reopenRes = await fetch("/api/vaccination/validation", {
+        const reopenRes = await fetchWithTimeout("/api/vaccination/validation", {
           method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
           body: JSON.stringify({ id: moveRow.id, action: "PENDING_VALIDATION", actor, note: "Persiapan pindah lokasi", service_mode: serviceMode }),
         });
@@ -407,7 +435,7 @@ export default function VaccinationValidationPage() {
       }
 
       const raw: any = moveRow.raw || {};
-      const moveRes = await fetch("/api/vaccination/register", {
+      const moveRes = await fetchWithTimeout("/api/vaccination/register", {
         method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
         body: JSON.stringify({
           validationMove: true,
@@ -429,16 +457,21 @@ export default function VaccinationValidationPage() {
           paymentMethod: clean(moveRow.payment_method),
           items: targetItems,
         }),
-      });
+      }, 25000);
       const moveJson = await moveRes.json().catch(() => ({}));
       if (!moveRes.ok || !moveJson.ok) throw new Error(moveJson.message || "Pindah lokasi gagal.");
       const oldLocation = clean(moveRow.location) || clean(moveRow.session_name) || "Session lama";
       const newLocation = clean(targetSession.location) || clean(targetSession.session_name) || `Session ${targetSession.session_id}`;
       setMoveRow(null);
+      setMoveFeedback("");
       await loadRows();
       setMessage(`Pindah Lokasi Layanan dari ${oldLocation} ke ${newLocation} berhasil.`);
     } catch (error: any) {
-      setMessage(error?.message || "Pindah lokasi gagal.");
+      const text = error?.name === "AbortError"
+        ? "Proses pindah lokasi timeout. Tidak ada konfirmasi perubahan; refresh dan cek daftar Session tujuan sebelum mencoba lagi."
+        : (error?.message || "Pindah lokasi gagal.");
+      setMoveFeedback(`Gagal: ${text}`);
+      setMessage(text);
       await loadRows();
     } finally {
       setMoveBusy(false);
@@ -879,9 +912,10 @@ export default function VaccinationValidationPage() {
           <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
             <div className="border-b px-5 py-4"><div className="text-xs font-black uppercase text-blue-700">Pindah Lokasi Suntik</div><div className="mt-1 text-xl font-black">{moveRow.patient_name || "Peserta"}</div><div className="mt-1 text-sm font-semibold text-slate-500">Pasien sudah terdaftar layanan {moveRow.product_name || "Vaksin"} di {clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? "Bazar" : "Healthday"} · {moveRow.location || moveRow.session_name || "-"}</div>{clean(moveRow.validation_service_mode).toUpperCase() === "BAZAR" ? <div className="mt-1 text-sm font-bold text-violet-700">{(moveRow.products || []).some((item) => clean(item.sale_mode).toUpperCase() === "PACKAGE") ? "Paket" : "Non Paket"} · Payment {moveRow.payment_method || "-"}</div> : null}</div>
             <div className="space-y-4 p-5">
-              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Tujuan<select className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" value={moveTarget} onChange={(e) => { setMoveTarget(e.target.value); setMoveVendorQueue(""); }}><option value="">Pilih Session / Lokasi</option><option value="CLINIC">Vaksin di Klinik</option>{sessionOptions.filter((item) => String(item.session_id) !== String(moveRow.session_id) && (!clean(item.company_name) || !clean(moveRow.company_name) || clean(item.company_name) === clean(moveRow.company_name))).map((item) => <option key={item.session_id} value={String(item.session_id)}>{item.session_date ? `${item.session_date} · ` : ""}{item.location || item.session_name}</option>)}</select></label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Tujuan<select className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" value={moveTarget} onChange={(e) => { setMoveTarget(e.target.value); setMoveVendorQueue(""); setMoveFeedback(""); }}><option value="">Pilih Session / Lokasi</option><option value="CLINIC">Vaksin di Klinik</option>{sessionOptions.filter((item) => String(item.session_id) !== String(moveRow.session_id) && (!clean(item.company_name) || !clean(moveRow.company_name) || clean(item.company_name) === clean(moveRow.company_name))).map((item) => <option key={item.session_id} value={String(item.session_id)}>{item.session_date ? `${item.session_date} · ` : ""}{item.location || item.session_name}</option>)}</select></label>
               {moveTarget && moveTarget !== "CLINIC" && !targetQueueEnabled(sessionOptions.find((item) => String(item.session_id) === String(moveTarget)) || null, clean(moveRow.validation_service_mode).toUpperCase()) ? <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nomor Antrean Vendor Tujuan<input className="rounded-xl border px-3 py-3 text-sm font-bold normal-case text-slate-900" placeholder="Wajib untuk Session record-only/vendor" value={moveVendorQueue} onChange={(e) => setMoveVendorQueue(e.target.value)} /></label> : null}
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">Pindah lokasi hanya memakai stok milik Session tujuan. Lot sumber tidak dipakai silang. Jika peserta sudah Done tetapi ternyata tidak vaksin, stok lama dikembalikan dulu.</div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">Pindah lokasi memakai katalog/Lot milik Session tujuan dan tidak memakai Lot sumber silang. Stok tidak dipotong saat pindah; bila stok tujuan masih 0, peserta tetap masuk daftar Session tujuan tetapi tidak boleh diselesaikan sebagai vaksinasi sampai stok tersedia.</div>
+              {moveFeedback ? <div className={`rounded-xl border p-3 text-sm font-bold ${moveFeedback.startsWith("Gagal:") ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>{moveFeedback}</div> : null}
               <div className="flex justify-end gap-2"><button type="button" disabled={moveBusy} onClick={() => setMoveRow(null)} className="rounded-xl border px-4 py-2.5 text-sm font-black disabled:opacity-50">Batal</button><button type="button" disabled={moveBusy} onClick={() => void submitMove()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">{moveBusy ? "Memproses..." : "Pindah Lokasi"}</button></div>
             </div>
           </div>

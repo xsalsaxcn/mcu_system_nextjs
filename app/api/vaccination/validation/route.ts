@@ -356,6 +356,7 @@ async function loadItemsForRegistrations(supabase: any, registrationIds: number[
   return byRegistration;
 }
 
+// V547_VALIDATION_MOVE_SESSION_ZERO_STOCK_CATALOG_OPTIONS
 export async function GET(req: NextRequest) {
   const user = getSessionUser(req);
   if (!user) return json({ ok: false, message: "Unauthorized", rows: [] }, 401);
@@ -406,7 +407,6 @@ export async function GET(req: NextRequest) {
         if (assigned.size && !assigned.has(vaccineId)) return null;
         if (clean(lot.stock_scope).toUpperCase() === "SESSION" && Number(lot.stock_session_id || 0) !== targetSessionId) return null;
         const remaining = Math.max(0, Number(allocation.allocated_qty || 0) - (used.get(Number(lot.id)) || 0));
-        if (remaining <= 0) return null;
         return {
           vaccine_id: vaccineId,
           vaccine_name: clean(lot.vaccine?.name) || `Produk ${vaccineId}`,
