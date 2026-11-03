@@ -148,6 +148,191 @@ async function getManualBatchMappings(supabase: any, sessionId: number, sourceId
   return map;
 }
 
+// V564_DUPLICATE_CATALOG_BATCH_MAPPING_SOURCE_OF_TRUTH
+// Session hasil Duplicate Katalog membawa jejak "from Session <id>" pada Lot clone.
+// Jika mapping BatchName target belum ada, turunkan mapping dari Session sumber
+// dengan Product + Lot Number yang sama. Tidak ada fuzzy/semantic guessing.
+async function ensureBatchMappingsFromCatalogClone(
+  supabase: any,
+  session: any,
+  sourceId: number,
+) {
+  const sessionId = toInt(session?.id, 0);
+  if (!sessionId || !sourceId) return { created: 0, updated: 0, sourceSessionIds: [] as number[] };
+
+  const sessionVaccineResult = await supabase
+    .from("vaccination_session_vaccines")
+    .select("vaccine_id,lot_id,active")
+    .eq("session_id", sessionId)
+    .eq("active", true)
+    .limit(5000);
+  if (sessionVaccineResult.error) throw new Error(sessionVaccineResult.error.message);
+
+  const targetLotIds = Array.from(
+    new Set<number>(
+      (sessionVaccineResult.data || [])
+        .map((row: any) => toInt(row.lot_id, 0))
+        .filter((id: number) => id > 0),
+    ),
+  );
+  if (!targetLotIds.length) return { created: 0, updated: 0, sourceSessionIds: [] as number[] };
+
+  const targetLotsResult = await supabase
+    .from("vaccination_vaccine_lots")
+    .select("id,vaccine_id,lot_number,inventory_notes,stock_session_id,active")
+    .in("id", targetLotIds)
+    .eq("active", true)
+    .limit(5000);
+  if (targetLotsResult.error) throw new Error(targetLotsResult.error.message);
+
+  const sourceSessionIds = Array.from(
+    new Set<number>(
+      (targetLotsResult.data || [])
+        .map((row: any) => {
+          const match = clean(row.inventory_notes).match(/from\s+Session\s+(\d+)/i);
+          return match ? toInt(match[1], 0) : 0;
+        })
+        .filter((id: number) => id > 0 && id !== sessionId),
+    ),
+  );
+  if (!sourceSessionIds.length) {
+    return { created: 0, updated: 0, sourceSessionIds: [] as number[] };
+  }
+
+  const sourceMappingsResult = await supabase
+    .from("vaccination_session_batch_mappings")
+    .select("session_id,source_id,source_batch_name,vaccine_id,lot_id,dose_number,active")
+    .in("session_id", sourceSessionIds)
+    .eq("source_id", sourceId)
+    .eq("active", true)
+    .limit(5000);
+  if (sourceMappingsResult.error) throw new Error(sourceMappingsResult.error.message);
+
+  const sourceLotIds = Array.from(
+    new Set<number>(
+      (sourceMappingsResult.data || [])
+        .map((row: any) => toInt(row.lot_id, 0))
+        .filter((id: number) => id > 0),
+    ),
+  );
+  if (!sourceLotIds.length) {
+    return { created: 0, updated: 0, sourceSessionIds };
+  }
+
+  const sourceLotsResult = await supabase
+    .from("vaccination_vaccine_lots")
+    .select("id,vaccine_id,lot_number")
+    .in("id", sourceLotIds)
+    .limit(5000);
+  if (sourceLotsResult.error) throw new Error(sourceLotsResult.error.message);
+
+  const sourceLotById = new Map<number, any>(
+    (sourceLotsResult.data || []).map((row: any) => [toInt(row.id, 0), row]),
+  );
+  const targetLotByKey = new Map<string, any>();
+  for (const row of targetLotsResult.data || []) {
+    const vaccineId = toInt(row.vaccine_id, 0);
+    const lotNumber = normalizedText(row.lot_number);
+    if (!vaccineId || !lotNumber) continue;
+    targetLotByKey.set(`${vaccineId}:${lotNumber}`, row);
+  }
+
+  const desiredByBatch = new Map<string, any>();
+  for (const row of sourceMappingsResult.data || []) {
+    const batchName = clean(row.source_batch_name);
+    const vaccineId = toInt(row.vaccine_id, 0);
+    const sourceLot = sourceLotById.get(toInt(row.lot_id, 0));
+    const lotNumber = normalizedText(sourceLot?.lot_number);
+    if (!batchName || !vaccineId || !lotNumber) continue;
+
+    const targetLot = targetLotByKey.get(`${vaccineId}:${lotNumber}`);
+    if (!targetLot) continue;
+
+    const batchKey = normalizedText(batchName);
+    const desired = {
+      source_batch_name: batchName,
+      vaccine_id: vaccineId,
+      lot_id: toInt(targetLot.id, 0),
+      dose_number: Math.max(1, toInt(row.dose_number, 1)),
+    };
+    const previous = desiredByBatch.get(batchKey);
+    if (
+      previous &&
+      (toInt(previous.vaccine_id, 0) !== desired.vaccine_id ||
+        toInt(previous.lot_id, 0) !== desired.lot_id ||
+        toInt(previous.dose_number, 1) !== desired.dose_number)
+    ) {
+      throw new Error(
+        `Mapping BatchName ${batchName} konflik antar Session sumber. Safety stop tanpa menebak vaksin.`,
+      );
+    }
+    desiredByBatch.set(batchKey, desired);
+  }
+
+  if (!desiredByBatch.size) {
+    return { created: 0, updated: 0, sourceSessionIds };
+  }
+
+  const existingResult = await supabase
+    .from("vaccination_session_batch_mappings")
+    .select("id,source_batch_name,vaccine_id,lot_id,dose_number,active")
+    .eq("session_id", sessionId)
+    .eq("source_id", sourceId)
+    .limit(5000);
+  if (existingResult.error) throw new Error(existingResult.error.message);
+
+  const existingByBatch = new Map<string, any>();
+  for (const row of existingResult.data || []) {
+    const key = normalizedText(row.source_batch_name);
+    if (key) existingByBatch.set(key, row);
+  }
+
+  let created = 0;
+  let updated = 0;
+  for (const [batchKey, desired] of desiredByBatch.entries()) {
+    const existing = existingByBatch.get(batchKey);
+    if (existing) {
+      const changed =
+        toInt(existing.vaccine_id, 0) !== desired.vaccine_id ||
+        toInt(existing.lot_id, 0) !== desired.lot_id ||
+        Math.max(1, toInt(existing.dose_number, 1)) !== desired.dose_number ||
+        existing.active === false;
+      if (!changed) continue;
+
+      const updateResult = await supabase
+        .from("vaccination_session_batch_mappings")
+        .update({
+          vaccine_id: desired.vaccine_id,
+          lot_id: desired.lot_id,
+          dose_number: desired.dose_number,
+          active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (updateResult.error) throw new Error(updateResult.error.message);
+      updated += 1;
+      continue;
+    }
+
+    const insertResult = await supabase
+      .from("vaccination_session_batch_mappings")
+      .insert({
+        session_id: sessionId,
+        source_id: sourceId,
+        source_batch_name: desired.source_batch_name,
+        vaccine_id: desired.vaccine_id,
+        lot_id: desired.lot_id,
+        dose_number: desired.dose_number,
+        active: true,
+        updated_at: new Date().toISOString(),
+      });
+    if (insertResult.error) throw new Error(insertResult.error.message);
+    created += 1;
+  }
+
+  return { created, updated, sourceSessionIds };
+}
+
 function buildItemsFromManualMappings(mapping: Map<string, ManualMappingItem>, sourceRows: any[]) {
   const rows = sourceRows || [];
   const items: any[] = [];
@@ -316,16 +501,22 @@ export async function POST(req: NextRequest) {
   if (!sourceId) return fail("Database corporate/vaksinasi wajib dipilih.");
 
   let manualMappings = new Map<string, ManualMappingItem>();
+  let catalogMappingSync = { created: 0, updated: 0, sourceSessionIds: [] as number[] };
   try {
     manualMappings = await getManualBatchMappings(supabase, sessionId, sourceId);
+    if (!manualMappings.size) {
+      catalogMappingSync = await ensureBatchMappingsFromCatalogClone(supabase, session, sourceId);
+      manualMappings = await getManualBatchMappings(supabase, sessionId, sourceId);
+    }
   } catch (error: any) {
-    return fail(error?.message || "Gagal membaca mapping manual vaksin.", 500);
+    return fail(error?.message || "Gagal menurunkan mapping BatchName dari katalog Session.", 500);
   }
 
   if (!manualMappings.size) {
     return fail(
-      "Mapping manual vaksin belum dibuat di Session Setup. Map setiap BatchName dari database ke vaksin/lot session sebelum import peserta.",
+      "Katalog Session sudah ada, tetapi mapping BatchName belum dapat diturunkan dari Session sumber. Duplikat ulang katalog dari Session yang sudah memiliki mapping BatchName; sistem tidak akan menebak vaksin.",
       400,
+      { catalogMappingSync },
     );
   }
 
@@ -417,7 +608,8 @@ export async function POST(req: NextRequest) {
   }
 
   return ok({
-    message: `Import database selesai. Peserta masuk: ${insertedRegistrations.length || 0}. Item produk dibuat dari mapping manual: ${itemStats.count}. Peserta dilewati karena BatchName belum mapping: ${skippedUnmapped}.`,
+    message: `Import database selesai. Peserta masuk: ${insertedRegistrations.length || 0}. Item produk dibuat dari mapping katalog Session: ${itemStats.count}. Peserta dilewati karena BatchName belum mapping: ${skippedUnmapped}.`,
+    catalogMappingSync,
     inserted: insertedRegistrations.length || 0,
     itemCount: itemStats.count,
     skippedUnmapped,

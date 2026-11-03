@@ -571,7 +571,7 @@ export async function POST(req: NextRequest) {
     const sessionIds: number[] = [sourceSessionId, ...targetSessionIds];
     const sessionsResult = await supabase
       .from("vaccination_sessions")
-      .select("id,session_name,company_name,status")
+      .select("id,session_name,company_name,status,source_id,source_name")
       .in("id", sessionIds);
     if (sessionsResult.error) return fail(sessionsResult.error.message, 500);
     const sessionMap = new Map<number, any>((sessionsResult.data || []).map((row: any) => [Number(row.id), row]));
@@ -587,7 +587,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const [assignmentResult, allocationResult] = await Promise.all([
+    const [assignmentResult, allocationResult, sourceBatchMappingResult] = await Promise.all([
       supabase
         .from("vaccination_session_product_assignments")
         .select("vaccine_id,service_mode,planned_stock_initial,active")
@@ -598,15 +598,29 @@ export async function POST(req: NextRequest) {
         .select("vaccine_id,lot_id,service_mode,active")
         .eq("session_id", sourceSessionId)
         .eq("active", true),
+      supabase
+        .from("vaccination_session_batch_mappings")
+        .select("source_id,source_batch_name,vaccine_id,lot_id,dose_number,active")
+        .eq("session_id", sourceSessionId)
+        .eq("active", true),
     ]);
     if (assignmentResult.error) return fail(assignmentResult.error.message, 500);
     if (allocationResult.error) return fail(allocationResult.error.message, 500);
+    if (sourceBatchMappingResult.error) return fail(sourceBatchMappingResult.error.message, 500);
 
     const requestedSet = new Set<number>(requestedVaccineIds);
     const sourceAssignments = (assignmentResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
     const sourceAllocations = (allocationResult.data || []).filter((row: any) => requestedSet.has(Number(row.vaccine_id || 0)));
+    const sourceBatchMappings = (sourceBatchMappingResult.data || []).filter(
+      (row: any) => requestedSet.has(Number(row.vaccine_id || 0)),
+    );
     const sourceLotIds = Array.from(
-      new Set<number>(sourceAllocations.map((row: any) => Number(row.lot_id || 0)).filter((id: number) => id > 0)),
+      new Set<number>(
+        [
+          ...sourceAllocations.map((row: any) => Number(row.lot_id || 0)),
+          ...sourceBatchMappings.map((row: any) => Number(row.lot_id || 0)),
+        ].filter((id: number) => id > 0),
+      ),
     );
     const sourceLotsResult = sourceLotIds.length
       ? await supabase
@@ -656,10 +670,13 @@ export async function POST(req: NextRequest) {
     let existingTargetStockPreserved = 0;
     let staleCatalogRowsDisabled = 0;
     let staleAssignmentRowsDisabled = 0;
+    let batchMappingClonedCount = 0;
+    let batchMappingUpdatedCount = 0;
 
     for (const targetSessionId of targetSessionIds) {
       const targetSession = sessionMap.get(targetSessionId);
       if (!targetSession) return fail(`Session tujuan ID ${targetSessionId} tidak ditemukan.`, 404);
+      const targetLotBySourceLotId = new Map<number, number>();
 
       // V542: mirror klasifikasi Healthday/Bazar tanpa pernah menimpa planned stock target.
       const targetAssignmentResult = await supabase
@@ -807,6 +824,7 @@ export async function POST(req: NextRequest) {
 
         const targetLotId = Number(targetLot?.id || 0);
         if (!targetLotId) return fail(`Gagal menentukan Lot target untuk ${lotNumber}.`, 500);
+        targetLotBySourceLotId.set(sourceLotId, targetLotId);
 
         const existingAllocationResult = await supabase
           .from("vaccination_session_stock_allocations")
@@ -867,10 +885,99 @@ export async function POST(req: NextRequest) {
         }
         lotCatalogCount += 1;
       }
+
+      // V564: Duplicate Katalog juga membawa mapping BatchName dari Session sumber.
+      // lot_id selalu diarahkan ke Lot clone milik Session tujuan; stok tetap tidak disalin.
+      const targetSourceId = Number(targetSession.source_id || 0);
+      const sourceSourceId = Number(sourceSession.source_id || 0);
+      if (targetSourceId && sourceSourceId && targetSourceId === sourceSourceId && sourceBatchMappings.length) {
+        const existingTargetMappingsResult = await supabase
+          .from("vaccination_session_batch_mappings")
+          .select("id,source_batch_name,vaccine_id,lot_id,dose_number,active")
+          .eq("session_id", targetSessionId)
+          .eq("source_id", targetSourceId)
+          .limit(5000);
+        if (existingTargetMappingsResult.error) return fail(existingTargetMappingsResult.error.message, 500);
+
+        const existingTargetMappings = new Map<string, any>();
+        for (const row of existingTargetMappingsResult.data || []) {
+          const key = normalizeName(row.source_batch_name);
+          if (key) existingTargetMappings.set(key, row);
+        }
+
+        for (const sourceMapping of sourceBatchMappings) {
+          if (Number(sourceMapping.source_id || 0) !== sourceSourceId) continue;
+          const batchName = clean(sourceMapping.source_batch_name);
+          const sourceMappingLotId = Number(sourceMapping.lot_id || 0);
+          const vaccineId = Number(sourceMapping.vaccine_id || 0);
+          if (!batchName || !sourceMappingLotId || !vaccineId) continue;
+
+          let targetLotId = Number(targetLotBySourceLotId.get(sourceMappingLotId) || 0);
+          if (!targetLotId) {
+            const sourceLot = sourceLotMap.get(sourceMappingLotId);
+            const lotNumber = clean(sourceLot?.lot_number);
+            if (lotNumber) {
+              const fallbackTargetLot = await supabase
+                .from("vaccination_vaccine_lots")
+                .select("id")
+                .eq("vaccine_id", vaccineId)
+                .eq("lot_number", lotNumber)
+                .eq("stock_scope", "SESSION")
+                .eq("stock_session_id", targetSessionId)
+                .eq("active", true)
+                .maybeSingle();
+              if (fallbackTargetLot.error) return fail(fallbackTargetLot.error.message, 500);
+              targetLotId = Number(fallbackTargetLot.data?.id || 0);
+            }
+          }
+          if (!targetLotId) continue;
+
+          const key = normalizeName(batchName);
+          const existing = existingTargetMappings.get(key);
+          const desiredDose = Math.max(1, Number(sourceMapping.dose_number || 1));
+          if (existing) {
+            const changed =
+              Number(existing.vaccine_id || 0) !== vaccineId ||
+              Number(existing.lot_id || 0) !== targetLotId ||
+              Math.max(1, Number(existing.dose_number || 1)) !== desiredDose ||
+              existing.active === false;
+            if (changed) {
+              const updateMapping = await supabase
+                .from("vaccination_session_batch_mappings")
+                .update({
+                  vaccine_id: vaccineId,
+                  lot_id: targetLotId,
+                  dose_number: desiredDose,
+                  active: true,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", existing.id);
+              if (updateMapping.error) return fail(updateMapping.error.message, 500);
+              batchMappingUpdatedCount += 1;
+            }
+            continue;
+          }
+
+          const insertMapping = await supabase
+            .from("vaccination_session_batch_mappings")
+            .insert({
+              session_id: targetSessionId,
+              source_id: targetSourceId,
+              source_batch_name: batchName,
+              vaccine_id: vaccineId,
+              lot_id: targetLotId,
+              dose_number: desiredDose,
+              active: true,
+              updated_at: new Date().toISOString(),
+            });
+          if (insertMapping.error) return fail(insertMapping.error.message, 500);
+          batchMappingClonedCount += 1;
+        }
+      }
     }
 
     return ok({
-      message: `Katalog berhasil diduplikat ke ${targetSessionIds.length} Session. Hanya produk + Lot Number yang ikut; stok target tidak disalin dan stok target yang sudah ada tidak diubah.`,
+      message: `Katalog berhasil diduplikat ke ${targetSessionIds.length} Session. Produk + Lot Number + mapping BatchName ikut; stok target tidak disalin dan stok target yang sudah ada tidak diubah.`,
       targetSessionCount: targetSessionIds.length,
       productCount: requestedVaccineIds.length,
       assignmentCount,
@@ -880,6 +987,8 @@ export async function POST(req: NextRequest) {
       stockCopied: 0,
       staleCatalogRowsDisabled,
       staleAssignmentRowsDisabled,
+      batchMappingClonedCount,
+      batchMappingUpdatedCount,
       classificationMirrored: true,
       sessionStockIsolation: true,
     });
