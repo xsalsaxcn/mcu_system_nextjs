@@ -163,6 +163,7 @@ export async function syncRegistrationTrackDone(
       .eq("vaccine_id", vaccineId)
       .eq("lot_id", lotId)
       .eq("dose_number", Math.max(1, Number(item.dose_number || 1)))
+      .eq("status", "ADMINISTERED")
       .order("id", { ascending: false })
       .limit(1);
     if (existingRecordResult.error) throw new Error(existingRecordResult.error.message);
@@ -176,7 +177,7 @@ export async function syncRegistrationTrackDone(
 
         const doseNumber = Math.max(1, Number(item.dose_number || 1));
         const nextDueDate = await nextDueDateForSeries(supabase, vaccine, doseNumber, now);
-        const recordResult = await supabase
+        const recordInsert = await supabase
           .from("vaccination_records")
           .insert({
             registration_id: registrationId,
@@ -195,31 +196,52 @@ export async function syncRegistrationTrackDone(
           })
           .select("*")
           .single();
-        if (recordResult.error) throw new Error(recordResult.error.message);
-        record = recordResult.data;
-        createdHere = true;
 
-        const lotUpdate = await supabase
-          .from("vaccination_vaccine_lots")
-          .update({
-            stock_used: Number(lot.stock_used || 0) + 1,
-            updated_at: now,
-          })
-          .eq("id", lotId);
-        if (lotUpdate.error) throw new Error(lotUpdate.error.message);
-        lotIncremented = true;
+        if (recordInsert.error) {
+          const duplicateConflict = String(recordInsert.error?.code || "") === "23505";
+          if (!duplicateConflict) throw new Error(recordInsert.error.message);
 
-        const movementResult = await supabase.from("vaccination_inventory_movements").insert({
-          vaccine_id: vaccineId,
-          lot_id: lotId,
-          movement_type: "administered",
-          qty: -1,
-          reference_type: "vaccination_record",
-          reference_id: record.id,
-          notes: `${marker(serviceMode)} · ${registration.participant_name || "Peserta"} · ${vaccine.name || "Produk"} · Lot ${lot.lot_number || "-"}`,
-          created_by: actor,
-        });
-        if (movementResult.error) throw new Error(movementResult.error.message);
+          // V554_QUEUE_DONE_IDEMPOTENCY: another concurrent Done request won the
+          // unique DB guard. Reuse the canonical record without double stock/movement.
+          const concurrentRecord = await supabase
+            .from("vaccination_records")
+            .select("*")
+            .eq("registration_id", registrationId)
+            .eq("vaccine_id", vaccineId)
+            .eq("lot_id", lotId)
+            .eq("dose_number", doseNumber)
+            .eq("status", "ADMINISTERED")
+            .order("id", { ascending: false })
+            .limit(1);
+          if (concurrentRecord.error) throw new Error(concurrentRecord.error.message);
+          record = (concurrentRecord.data || [])[0] || null;
+          if (!record) throw new Error("Record vaksin sudah diproses request lain tetapi record canonical belum dapat dibaca.");
+        } else {
+          record = recordInsert.data;
+          createdHere = true;
+
+          const lotUpdate = await supabase
+            .from("vaccination_vaccine_lots")
+            .update({
+              stock_used: Number(lot.stock_used || 0) + 1,
+              updated_at: now,
+            })
+            .eq("id", lotId);
+          if (lotUpdate.error) throw new Error(lotUpdate.error.message);
+          lotIncremented = true;
+
+          const movementResult = await supabase.from("vaccination_inventory_movements").insert({
+            vaccine_id: vaccineId,
+            lot_id: lotId,
+            movement_type: "administered",
+            qty: -1,
+            reference_type: "vaccination_record",
+            reference_id: record.id,
+            notes: `${marker(serviceMode)} · ${registration.participant_name || "Peserta"} · ${vaccine.name || "Produk"} · Lot ${lot.lot_number || "-"}`,
+            created_by: actor,
+          });
+          if (movementResult.error) throw new Error(movementResult.error.message);
+        }
       }
 
       const itemUpdate = await supabase
