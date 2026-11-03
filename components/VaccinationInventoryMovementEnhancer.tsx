@@ -85,8 +85,8 @@ const BUCKET_TITLES: Record<string, string> = {
   used: "Detail Terpakai / OUT",
   remaining: "Detail Sisa Sistem",
   diff: "Detail Selisih Stock Opname",
-  movements: "Semua Pencatatan / Movement Inventory",
-  lot: "Detail Movement Lot",
+  movements: "Riwayat Inventory",
+  lot: "Riwayat Lot",
 };
 
 function clean(value: any) {
@@ -103,6 +103,18 @@ function formatDate(value: any) {
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return raw;
   return d.toLocaleString("id-ID", { dateStyle: "short", timeStyle: "short" });
+}
+
+function operationalText(value: any, fallback = "-") {
+  const text = clean(value);
+  if (!text) return fallback;
+  if (/\bV\d{2,4}(?:[._-]R?\d+)?\b|\b(repair|migration|rollback|collector|runner|debug|legacy)\b|QUEUE_DONE_SYNC|vaccination_[a-z_]+|stock_session_id|session_id|lot_id|reference_id/i.test(text)) return fallback;
+  return text.replace(/^\[Inventory\]\s*/i, "").replace(/\s*·\s*(target|source) lot \d+\s*$/i, "").trim() || fallback;
+}
+
+function csvCell(value: any) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 export default function VaccinationInventoryMovementEnhancer() {
@@ -389,12 +401,32 @@ export default function VaccinationInventoryMovementEnhancer() {
   }
 
   function exportActiveDetail() {
-    const params = new URLSearchParams();
-    if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
-    if (dateFrom) params.set("from", dateFrom);
-    if (dateTo) params.set("to", dateTo);
-    if (activeBucket === "lot" && activeLotId) params.set("lot_ids", (activeLotIds.length ? activeLotIds : [activeLotId]).join(","));
-    window.location.href = `/api/vaccination/inventory/export${params.toString() ? `?${params.toString()}` : ""}`;
+    const headers = ["TANGGAL", "ARAH", "TRANSAKSI", "VAKSIN", "LOT", "LAYANAN", "JENIS_HARGA", "HARGA", "PAYMENT_METHOD", "QTY", "PERUSAHAAN", "PESERTA", "EMPLOYEE_ID", "SESSION", "LOKASI", "PETUGAS_DOKTER", "STATUS", "CATATAN"];
+    const lines = [headers.join(",")];
+    for (const row of activeRows) {
+      const serviceMode = clean(row.service_mode).toUpperCase();
+      const saleMode = clean(row.sale_mode).toUpperCase();
+      const pricingLabel = saleMode === "PACKAGE"
+        ? `Paket ${Math.max(1, Number(row.package_dose_count || 1))} dosis`
+        : saleMode === "NON_PACKAGE" ? "Non Paket" : serviceMode === "HEALTHDAY" ? "Free" : "";
+      const price = row.sales_price_snapshot == null ? "" : Number(row.sales_price_snapshot || 0);
+      lines.push([
+        row.date || "", row.direction || "", row.movement_type || "", row.vaccine || "", row.lot || "",
+        serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : "", pricingLabel, price,
+        row.payment_method || "", row.qty ?? "", row.company || "", row.participant || "", row.employee_id || "",
+        row.session || "", row.location || "", row.doctor || "", [row.print_status, row.validation_status].filter(Boolean).join(" / "),
+        operationalText(row.note, ""),
+      ].map(csvCell).join(","));
+    }
+    const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vaccination_inventory_detail_${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -421,7 +453,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={load} disabled={loading} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memuat..." : "Terapkan Filter"}</button>
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
-          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotIds([]); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
+          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotIds([]); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Riwayat</button>
         </div>
         <div className="mt-3 text-xs text-slate-500">Ringkasan dan tabel mengikuti filter yang sama. Gunakan rentang tanggal untuk melihat transaksi pada periode tertentu. Export mengikuti filter aktif.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}
@@ -506,8 +538,8 @@ export default function VaccinationInventoryMovementEnhancer() {
                         <td className="p-3">{priceLabel}</td>
                         <td className="p-3">{row.payment_method || "-"}</td>
                         <td className="p-3 text-right font-black">{row.qty}</td>
-                        <td className="p-3 font-bold">{row.company || "-"}</td>
-                        <td className="p-3">{row.participant || "-"}</td>
+                        <td className="p-3 font-bold">{operationalText(row.company)}</td>
+                        <td className="p-3">{row.participant || (row.direction === "OUT" && row.movement_type === "Terpakai" ? "Peserta belum terhubung" : "Tidak terkait peserta")}</td>
                         <td className="p-3">{[row.session, row.location].filter(Boolean).join(" - ") || "-"}</td>
                         <td className="p-3">{row.doctor || "-"}</td>
                         <td className="p-3">{[row.print_status, row.validation_status].filter(Boolean).join(" / ") || "-"}</td>

@@ -21,6 +21,13 @@ function clean(value: any) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function userFacingInventoryNote(value: any) {
+  const text = clean(value);
+  if (!text) return "";
+  if (/\bV\d{2,4}(?:[._-]R?\d+)?\b|\b(repair|migration|rollback|collector|runner|debug|legacy)\b|QUEUE_DONE_SYNC|vaccination_[a-z_]+|stock_session_id|session_id|lot_id|reference_id/i.test(text)) return "";
+  return text.replace(/^\[Inventory\]\s*/i, "").replace(/\s*·\s*(target|source) lot \d+\s*$/i, "").trim();
+}
+
 function money(value: any) {
   if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
@@ -95,7 +102,7 @@ export default function VaccinationInventoryPage() {
       stockAction: "ADD_STOCK",
       inventoryTarget: "SYSTEM",
       quantity: "",
-      inventoryNotes: row.inventory_notes || "",
+      inventoryNotes: userFacingInventoryNote(row.inventory_notes),
     });
   }
 
@@ -390,13 +397,13 @@ export default function VaccinationInventoryPage() {
         {editing ? (
           <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
             <div className="text-lg font-black text-amber-900">Edit Inventory: {editing.vaccine?.name} · Lot {editing.lot_number}</div>
-            <p className="mt-1 text-sm text-amber-900/80">Sisa Fisik otomatis disamakan dengan Sisa Sistem setelah transaksi. Return Stock berarti stok kembali masuk ke inventory.</p>
+            <p className="mt-1 text-sm text-amber-900/80">Sisa Fisik otomatis disamakan dengan Sisa Sistem setelah transaksi. Retur Stok berarti stok dikembalikan ke inventory.</p>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
                 Stok
                 <select disabled={form.inventoryTarget === "PHYSICAL"} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={form.stockAction} onChange={(e) => setForm({ ...form, stockAction: e.target.value })}>
                   <option value="ADD_STOCK">Tambah Stock</option>
-                  <option value="RETURN_STOCK">Return Stock</option>
+                  <option value="RETURN_STOCK">Retur Stok</option>
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
@@ -407,7 +414,7 @@ export default function VaccinationInventoryPage() {
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : "Jumlah Stock Masuk"}
+                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : "Jumlah Stok Masuk"}
                 <input type="number" min={form.inventoryTarget === "PHYSICAL" ? 0 : 1} step={1} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder={form.inventoryTarget === "PHYSICAL" ? "Harus sama dengan Sisa Sistem" : "Jumlah stok"} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
               </label>
               <div className="rounded-xl border bg-white px-3 py-2.5">
@@ -420,8 +427,8 @@ export default function VaccinationInventoryPage() {
               </div>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
-              <input className="rounded-xl border bg-white px-3 py-2.5" placeholder="Keterangan / sumber stock" value={form.inventoryNotes} onChange={(e) => setForm({ ...form, inventoryNotes: e.target.value })} />
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800">{form.inventoryTarget === "PHYSICAL" ? "Fisik hanya bisa disimpan jika sama dengan Sisa Sistem." : "Sistem hanya disimpan jika hasil akhirnya match Sisa Fisik yang sudah tercatat."}</div>
+              <input className="rounded-xl border bg-white px-3 py-2.5" placeholder="Keterangan / sumber stok (opsional)" value={form.inventoryNotes} onChange={(e) => setForm({ ...form, inventoryNotes: e.target.value })} />
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800">{form.inventoryTarget === "PHYSICAL" ? "Fisik hanya bisa disimpan jika sama dengan Sisa Sistem." : "Stok sistem disimpan jika hasil akhirnya sesuai dengan stok fisik yang sudah tercatat."}</div>
             </div>
             <div className="mt-4 flex gap-3">
               <button onClick={saveInventory} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700">Simpan Inventory</button>
@@ -563,7 +570,7 @@ export default function VaccinationInventoryPage() {
                       <td className="p-3">
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-[10px]"><span className="text-slate-500">Fisik</span><b>{row.stock_physical_count ?? "-"}</b></div>
-                          <span className={`inline-flex w-full justify-center rounded-full px-2 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
+                          <span className={`inline-flex w-full justify-center rounded-full px-2 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum dicek"}</span>
                           <button onClick={() => startEdit(row)} className="block w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold hover:bg-slate-50">Edit</button>
                           <button onClick={() => startTransfer(row)} className="block w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100">Transfer</button>
                           <button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block w-full rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100">Hapus</button>
