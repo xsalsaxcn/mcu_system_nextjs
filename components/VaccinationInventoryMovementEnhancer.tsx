@@ -453,7 +453,7 @@ export default function VaccinationInventoryMovementEnhancer() {
           <button type="button" onClick={load} disabled={loading} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white disabled:opacity-50">{loading ? "Memuat..." : "Terapkan Filter"}</button>
           <button type="button" onClick={() => { setSelectedProducts([]); setDateFrom(""); setDateTo(""); }} className="rounded-xl border px-4 py-3 text-sm font-black">Reset</button>
           <button type="button" onClick={exportCsv} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white">Export Filter</button>
-          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotIds([]); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Riwayat</button>
+          <button type="button" onClick={() => { setActiveLotId(0); setActiveLotIds([]); setActiveLotLabel(""); setActiveBucket("movements"); }} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white">Semua Movement</button>
         </div>
         <div className="mt-3 text-xs text-slate-500">Ringkasan dan tabel mengikuti filter yang sama. Gunakan rentang tanggal untuk melihat transaksi pada periode tertentu. Export mengikuti filter aktif.</div>
         {error ? <div className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}

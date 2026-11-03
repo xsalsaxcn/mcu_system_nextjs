@@ -96,7 +96,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
 
   const [vaccinesResult, lotsResult, movementsResult, recordsResult] = await Promise.all([
     supabase.from("vaccination_vaccines").select("id,name,brand,active").order("name", { ascending: true }).limit(5000),
-    supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes,stock_scope,stock_company_key,stock_company_name,stock_session_id,created_at,active").order("id", { ascending: true }).limit(10000),
+    supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes,stock_scope,stock_company_name,stock_session_id,created_at,active").order("id", { ascending: true }).limit(10000),
     supabase.from("vaccination_inventory_movements").select("id,vaccine_id,lot_id,movement_type,qty,reference_type,reference_id,notes,created_by,created_at").order("created_at", { ascending: true }).limit(20000),
     supabase.from("vaccination_records").select("id,registration_id,session_id,participant_name,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,status,sticker_printed_at,created_at").order("administered_at", { ascending: true }).limit(20000),
   ]);
