@@ -1,4 +1,5 @@
 "use client";
+// V549_INVENTORY_LAYOUT_POLISH_100_PERCENT_VIEW
 // V522_INVENTORY_SAFE_ARCHIVE_BUTTON
 // V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
@@ -321,8 +322,8 @@ export default function VaccinationInventoryPage() {
   }, [rows]);
 
   return (
-    <main className="p-6">
-      <div className="rounded-2xl border bg-white p-6 shadow-sm">
+    <main className="min-h-screen overflow-x-hidden bg-slate-50 p-3 sm:p-4 xl:p-5">
+      <div className="w-full min-w-0 rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Inventory Vaksin</h1>
@@ -429,7 +430,7 @@ export default function VaccinationInventoryPage() {
           </section>
         ) : null}
 
-        <section className="mt-6 overflow-hidden rounded-2xl border bg-white">
+        <section className="mt-5 min-w-0 overflow-hidden rounded-2xl border bg-white">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
             <div>
               <div className="font-black text-slate-900">Stok per Produk & Lot</div>
@@ -437,22 +438,18 @@ export default function VaccinationInventoryPage() {
             </div>
             <div className="rounded-full border bg-white px-3 py-1 text-xs font-bold text-slate-600">{filteredRows.length} lot</div>
           </div>
-          <div className="overflow-x-auto">
-            <table data-inventory-canonical-table="1" className={`${serviceFilter === "ALL" ? "min-w-[1550px]" : "min-w-[1350px]"} w-full text-sm`}>
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+          <div className="max-w-full overflow-x-auto">
+            <table data-inventory-canonical-table="1" className={`${serviceFilter === "ALL" ? "min-w-[1080px]" : "min-w-[940px]"} w-full table-fixed text-xs xl:text-sm`}>
+              <thead className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600 xl:text-xs">
                 <tr>
-                  <th className="w-[260px] p-3 text-left">Produk & Lot</th>
-                  <th className="w-[180px] p-3 text-left">Harga</th>
-                  <th className="w-[210px] p-3 text-left">Tujuan Stok</th>
-                  {showHealthday ? <th className="w-[220px] p-3 text-left">Healthday</th> : null}
-                  {showBazar ? <th className="w-[220px] p-3 text-left">Bazar</th> : null}
-                  <th className="w-[90px] p-3 text-left">Jumlah Awal</th>
-                  <th className="w-[90px] p-3 text-left">Tambahan Stok</th>
-                  <th className="w-[90px] p-3 text-left">Terpakai</th>
-                  <th className="w-[90px] p-3 text-left">Sisa Sistem</th>
-                  <th className="w-[180px] p-3 text-left">Arus Stok</th>
-                  <th className="w-[130px] p-3 text-left">Riwayat Stok</th>
-                  <th className="w-[145px] p-3 text-left">Audit / Aksi</th>
+                  <th className="w-[190px] p-3 text-left">Produk & Lot</th>
+                  <th className="w-[135px] p-3 text-left">Harga</th>
+                  <th className="w-[175px] p-3 text-left">Tujuan Stok</th>
+                  {showHealthday ? <th className="w-[170px] p-3 text-left">Healthday</th> : null}
+                  {showBazar ? <th className="w-[170px] p-3 text-left">Bazar</th> : null}
+                  <th className="w-[205px] p-3 text-left">Stok</th>
+                  <th className="w-[150px] p-3 text-left">Arus & Riwayat</th>
+                  <th className="w-[125px] p-3 text-left">Audit / Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -527,51 +524,55 @@ export default function VaccinationInventoryPage() {
                       </td>
                       {showHealthday ? <td className="p-3">{renderBucket("HEALTHDAY")}</td> : null}
                       {showBazar ? <td className="p-3">{renderBucket("BAZAR")}</td> : null}
-                      <td className="p-3 text-center font-black">{row.stock_initial || 0}</td>
-                      <td className="p-3 text-center font-bold">{row.stock_added || 0}</td>
-                      <td className="p-3 text-center font-black">{row.stock_used || 0}</td>
-                      <td className="p-3 text-center font-black text-emerald-700">{row.stock_system_remaining}</td>
                       <td className="p-3">
-                        <div className="space-y-1 text-xs">
-                          <div className="rounded-lg bg-emerald-50 px-2 py-1.5"><span className="font-black text-emerald-700">IN</span> <span data-inventory-in-v150="1" className="text-slate-600">-</span></div>
-                          <div className="rounded-lg bg-rose-50 px-2 py-1.5"><span className="font-black text-rose-700">OUT</span> <span data-inventory-out-v150="1" className="text-slate-600">-</span></div>
+                        <div className="grid grid-cols-2 gap-1.5 text-[10px] font-bold">
+                          <div className="rounded-lg bg-slate-50 px-2 py-1.5"><div className="text-slate-400">Awal</div><div className="mt-0.5 text-sm font-black text-slate-900">{row.stock_initial || 0}</div></div>
+                          <div className="rounded-lg bg-blue-50 px-2 py-1.5"><div className="text-blue-500">Tambah</div><div className="mt-0.5 text-sm font-black text-blue-800">{row.stock_added || 0}</div></div>
+                          <div className="rounded-lg bg-amber-50 px-2 py-1.5"><div className="text-amber-600">Terpakai</div><div className="mt-0.5 text-sm font-black text-amber-800">{row.stock_used || 0}</div></div>
+                          <div className="rounded-lg bg-emerald-50 px-2 py-1.5"><div className="text-emerald-600">Sisa</div><div className="mt-0.5 text-sm font-black text-emerald-800">{row.stock_system_remaining}</div></div>
                         </div>
                       </td>
                       <td className="p-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            window.dispatchEvent(
-                              new CustomEvent("vaccination-inventory-open-lot", {
-                                detail: {
-                                  lotId: Number(row.id || 0),
-                                  lotIds: Array.isArray(row.source_lot_ids) ? row.source_lot_ids : [Number(row.id || 0)],
-                                  lotNumber: row.lot_number || "",
-                                  label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
-                                },
-                              }),
-                            );
-                          }}
-                          className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-left hover:bg-blue-100"
-                          title="Klik untuk lihat detail transaksi lot"
-                        >
-                          <div className="text-xs font-black text-blue-700 underline underline-offset-2">{Number(row.movement_count || 0)} transaksi</div>
-                          <div className="mt-1 max-w-[110px] truncate text-[10px] text-slate-500">{row.last_movement_type || "-"}</div>
-                        </button>
+                        <div className="space-y-1.5">
+                          <div className="grid grid-cols-2 gap-1 text-[10px]">
+                            <div className="rounded-lg bg-emerald-50 px-2 py-1.5"><span className="font-black text-emerald-700">IN</span><div data-inventory-in-v150="1" className="mt-0.5 truncate text-slate-600">-</div></div>
+                            <div className="rounded-lg bg-rose-50 px-2 py-1.5"><span className="font-black text-rose-700">OUT</span><div data-inventory-out-v150="1" className="mt-0.5 truncate text-slate-600">-</div></div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              window.dispatchEvent(
+                                new CustomEvent("vaccination-inventory-open-lot", {
+                                  detail: {
+                                    lotId: Number(row.id || 0),
+                                    lotIds: Array.isArray(row.source_lot_ids) ? row.source_lot_ids : [Number(row.id || 0)],
+                                    lotNumber: row.lot_number || "",
+                                    label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
+                                  },
+                                }),
+                              );
+                            }}
+                            className="w-full rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-left hover:bg-blue-100"
+                            title="Klik untuk lihat detail transaksi lot"
+                          >
+                            <div className="text-[10px] font-black text-blue-700 underline underline-offset-2">{Number(row.movement_count || 0)} transaksi</div>
+                            <div className="mt-0.5 truncate text-[10px] text-slate-500">{row.last_movement_type || "-"}</div>
+                          </button>
+                        </div>
                       </td>
                       <td className="p-3">
-                        <div className="space-y-2">
-                          <div className="text-xs"><span className="text-slate-500">Fisik:</span> <b>{row.stock_physical_count ?? "-"}</b></div>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
-                          <button onClick={() => startEdit(row)} className="block rounded-lg border px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Edit</button>
-                          <button onClick={() => startTransfer(row)} className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100">Transfer Stok</button>
-                          <button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">Hapus</button>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 text-[10px]"><span className="text-slate-500">Fisik</span><b>{row.stock_physical_count ?? "-"}</b></div>
+                          <span className={`inline-flex w-full justify-center rounded-full px-2 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum audit"}</span>
+                          <button onClick={() => startEdit(row)} className="block w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold hover:bg-slate-50">Edit</button>
+                          <button onClick={() => startTransfer(row)} className="block w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100">Transfer</button>
+                          <button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block w-full rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100">Hapus</button>
                         </div>
                       </td>
                     </tr>
                   );
                 })}
-                {!filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 12 : 11} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
+                {!filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 8 : 7} className="p-5 text-center text-slate-500">Belum ada data inventory sesuai filter.</td></tr> : null}
               </tbody>
             </table>
           </div>

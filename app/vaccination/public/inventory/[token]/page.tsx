@@ -1,4 +1,5 @@
 "use client";
+// V549_INVENTORY_LAYOUT_POLISH_100_PERCENT_VIEW
 // V522_PUBLIC_INVENTORY_RESPONSIVE_SAFE_ARCHIVE
 // V520_INVENTORY_SERVICE_ASSIGNMENT_FILTER
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
@@ -399,8 +400,8 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-slate-50 p-3 sm:p-4 lg:p-6">
-      <section className="mx-auto w-full max-w-[1600px] min-w-0 rounded-3xl border bg-white p-4 shadow-sm sm:p-5 lg:p-6">
+    <main className="min-h-screen overflow-x-hidden bg-slate-50 p-2 sm:p-3 xl:p-4">
+      <section className="w-full min-w-0 rounded-2xl border bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-wide text-blue-700">Portal Inventory</div>
@@ -443,20 +444,19 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
         <div className="mt-5 min-w-0 overflow-hidden rounded-2xl border bg-white">
           <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3"><div className="font-black">Inventory per Produk & Lot</div><div className="rounded-full border bg-white px-3 py-1 text-xs font-bold">{filteredRows.length} lot</div></div>
           <div className="max-w-full overflow-x-auto">
-            <table className={`${serviceFilter === "ALL" ? "min-w-[1120px]" : "min-w-[980px]"} w-full text-sm`}>
-              <thead className="bg-slate-100 text-[10px] uppercase text-slate-600"><tr><th className="p-3 text-left">Produk & Lot</th><th className="p-3 text-left">Harga</th>{showHealthday ? <th className="p-3 text-left">Healthday</th> : null}{showBazar ? <th className="p-3 text-left">Bazar</th> : null}<th className="p-3">Awal</th><th className="p-3">Tambah</th><th className="p-3">Terpakai</th><th className="p-3">Sisa</th><th className="p-3 text-left">Riwayat Stok</th><th className="p-3 text-left">Audit</th><th className="p-3 text-left">Aksi</th></tr></thead>
+            <table className={`${serviceFilter === "ALL" ? "min-w-[980px]" : "min-w-[850px]"} w-full table-fixed text-xs xl:text-sm`}>
+              <thead className="bg-slate-100 text-[10px] uppercase tracking-wide text-slate-600"><tr><th className="w-[190px] p-3 text-left">Produk & Lot</th><th className="w-[135px] p-3 text-left">Harga</th>{showHealthday ? <th className="w-[170px] p-3 text-left">Healthday</th> : null}{showBazar ? <th className="w-[170px] p-3 text-left">Bazar</th> : null}<th className="w-[200px] p-3 text-left">Stok</th><th className="w-[155px] p-3 text-left">Riwayat / Audit</th><th className="w-[110px] p-3 text-left">Aksi</th></tr></thead>
               <tbody className="divide-y">
                 {filteredRows.map((row: any) => <tr key={row.id} className="align-top hover:bg-slate-50">
                   <td className="p-3"><div className="font-black">{row?.vaccine?.name || "-"}</div><div className="mt-1 text-xs text-slate-500">{row?.vaccine?.brand || "-"}</div><div className="mt-2 inline-flex rounded-lg border bg-slate-50 px-2 py-1 text-xs font-black">Lot {row?.lot_number || "-"}</div></td>
                   <td className="p-3 text-xs"><div>Non Paket <b>{money(row?.non_package_price)}</b></div><div className="mt-1">Paket <b className="text-emerald-700">{money(row?.package_price)}</b></div>{row?.package_dose_count ? <div className="mt-1 text-[10px] text-emerald-700">{row.package_dose_count} dosis/paket</div> : null}</td>
                   {showHealthday ? <td className="p-3">{allocationBucket(row, "HEALTHDAY")}</td> : null}{showBazar ? <td className="p-3">{allocationBucket(row, "BAZAR")}</td> : null}
-                  <td className="p-3 text-center font-black">{Number(row?.stock_initial || 0)}</td><td className="p-3 text-center font-bold">{Number(row?.stock_added || 0)}</td><td className="p-3 text-center font-black">{Number(row?.stock_used || 0)}</td><td className="p-3 text-center font-black text-emerald-700">{Number(row?.stock_system_remaining || 0)}</td>
-                  <td className="p-3"><button type="button" onClick={() => void openMovement(Array.isArray(row?.source_lot_ids) ? row.source_lot_ids : [Number(row?.id || 0)], `${row?.vaccine?.name || "Vaksin"} · Lot ${row?.lot_number || "-"}`)} className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-left"><div className="text-xs font-black text-blue-700 underline">{Number(row?.movement_count || 0)} transaksi</div><div className="mt-1 text-[10px] text-slate-500">Klik detail</div></button></td>
-                  <td className="p-3 text-xs"><div>Fisik <b>{row?.stock_physical_count ?? "-"}</b></div><div className="mt-1">Selisih <b>{row?.stock_difference ?? "Belum audit"}</b></div></td>
-                  <td className="p-3"><div className="flex flex-col gap-2"><button type="button" onClick={() => startEdit(row)} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800 hover:bg-amber-100">Edit Stok</button><button type="button" onClick={() => startDelete(row)} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 hover:bg-red-100">Hapus</button></div></td>
+                  <td className="p-3"><div className="grid grid-cols-2 gap-1.5 text-[10px] font-bold"><div className="rounded-lg bg-slate-50 px-2 py-1.5"><div className="text-slate-400">Awal</div><div className="mt-0.5 text-sm font-black text-slate-900">{Number(row?.stock_initial || 0)}</div></div><div className="rounded-lg bg-blue-50 px-2 py-1.5"><div className="text-blue-500">Tambah</div><div className="mt-0.5 text-sm font-black text-blue-800">{Number(row?.stock_added || 0)}</div></div><div className="rounded-lg bg-amber-50 px-2 py-1.5"><div className="text-amber-600">Terpakai</div><div className="mt-0.5 text-sm font-black text-amber-800">{Number(row?.stock_used || 0)}</div></div><div className="rounded-lg bg-emerald-50 px-2 py-1.5"><div className="text-emerald-600">Sisa</div><div className="mt-0.5 text-sm font-black text-emerald-800">{Number(row?.stock_system_remaining || 0)}</div></div></div></td>
+                  <td className="p-3"><div className="space-y-1.5"><button type="button" onClick={() => void openMovement(Array.isArray(row?.source_lot_ids) ? row.source_lot_ids : [Number(row?.id || 0)], `${row?.vaccine?.name || "Vaksin"} · Lot ${row?.lot_number || "-"}`)} className="w-full rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-left"><div className="text-[10px] font-black text-blue-700 underline">{Number(row?.movement_count || 0)} transaksi</div><div className="mt-0.5 text-[10px] text-slate-500">Klik detail</div></button><div className="grid grid-cols-2 gap-1 text-[10px]"><div className="rounded-lg bg-slate-50 px-2 py-1"><span className="text-slate-500">Fisik</span><div className="font-black">{row?.stock_physical_count ?? "-"}</div></div><div className="rounded-lg bg-slate-50 px-2 py-1"><span className="text-slate-500">Selisih</span><div className="font-black">{row?.stock_difference ?? "-"}</div></div></div></div></td>
+                  <td className="p-3"><div className="flex flex-col gap-1.5"><button type="button" onClick={() => startEdit(row)} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-black text-amber-800 hover:bg-amber-100">Edit Stok</button><button type="button" onClick={() => startDelete(row)} className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-black text-red-700 hover:bg-red-100">Hapus</button></div></td>
                 </tr>)}
-                {!loading && !filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 11 : 10} className="p-8 text-center text-slate-500">Tidak ada inventory sesuai filter.</td></tr> : null}
-                {loading ? <tr><td colSpan={serviceFilter === "ALL" ? 11 : 10} className="p-8 text-center text-slate-500">Memuat inventory...</td></tr> : null}
+                {!loading && !filteredRows.length ? <tr><td colSpan={serviceFilter === "ALL" ? 7 : 6} className="p-8 text-center text-slate-500">Tidak ada inventory sesuai filter.</td></tr> : null}
+                {loading ? <tr><td colSpan={serviceFilter === "ALL" ? 7 : 6} className="p-8 text-center text-slate-500">Memuat inventory...</td></tr> : null}
               </tbody>
             </table>
           </div>
