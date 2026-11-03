@@ -29,6 +29,7 @@ export async function buildVaccinationInventorySnapshot() {
   const movementCountByLot = new Map<number, number>();
   const lastMovementByLot = new Map<number, any>();
   const serviceUsed = new Map<string, number>();
+  const trackedItemLots = new Set<number>();
   const inboundTypes = new Set(["STOCK_IN", "IN", "ADD", "ADDED", "RESTOCK", "RETURN_STOCK", "STOCK_RETURN", "RETURN_IN", "ADJUSTMENT_IN", "STOCK_TRANSFER_IN"]);
   const adjustmentOutTypes = new Set(["STOCK_OUT_ADJUSTMENT", "ADJUSTMENT_OUT", "MANUAL_STOCK_OUT", "STOCK_REDUCTION", "STOCK_TRANSFER_OUT"]);
 
@@ -99,6 +100,9 @@ export async function buildVaccinationInventorySnapshot() {
     salesOptions = salesResult.data || [];
     movementRows = movementsResult.data || [];
 
+    // Keep record count only as a legacy fallback for lots that have no active
+    // registration items at all. Session-operational stock is canonicalized from
+    // registration items below so duplicate vaccination_records cannot inflate usage.
     for (const record of recordsResult.data || []) {
       const key = Number(record.lot_id);
       usedByLot.set(key, (usedByLot.get(key) || 0) + 1);
@@ -118,10 +122,11 @@ export async function buildVaccinationInventorySnapshot() {
     }
 
     for (const item of itemsResult.data || []) {
+      const lotId = Number(item.lot_id || 0);
+      if (lotId > 0) trackedItemLots.add(lotId);
       const status = clean(item.status).toUpperCase();
       if (!["ADMINISTERED", "DONE", "FINISHED"].includes(status)) continue;
       const sessionId = Number(item.session_id || 0);
-      const lotId = Number(item.lot_id || 0);
       const serviceMode = clean(item.service_mode).toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
       const key = `${sessionId}:${lotId}:${serviceMode}`;
       serviceUsed.set(key, (serviceUsed.get(key) || 0) + 1);
@@ -204,14 +209,25 @@ export async function buildVaccinationInventorySnapshot() {
     const addedFromField = Number(lot.stock_added || 0);
     const addedFromMovements = inboundByLot.get(Number(lot.id)) || 0;
     const added = Math.max(addedFromField, addedFromMovements);
-    const usedFromRecords = usedByLot.get(Number(lot.id)) || 0;
-    const used = Math.max(Number(lot.stock_used || 0), usedFromRecords);
+    const lotId = Number(lot.id);
+    const usedFromRecords = usedByLot.get(lotId) || 0;
+    const lotAllocations = allocationsByLot.get(lotId) || [];
+    const canonicalServiceUsed = lotAllocations.reduce(
+      (sum: number, row: any) => sum + Math.max(0, Number(row.used_qty || 0)),
+      0,
+    );
+    // If this lot participates in current registration items, those items are the
+    // source of truth for participant usage. Do NOT let a stale stock_used counter
+    // or duplicate vaccination_records override that canonical count.
+    // Legacy lots with no registration-item trace keep the old fallback behavior.
+    const used = trackedItemLots.has(lotId)
+      ? canonicalServiceUsed
+      : Math.max(Number(lot.stock_used || 0), usedFromRecords);
     const adjustmentOut = adjustmentOutByLot.get(Number(lot.id)) || 0;
     const systemRemaining = initial + added - used - adjustmentOut;
     const physicalRaw = lot.stock_physical_count;
     const physical = physicalRaw === null || physicalRaw === undefined || physicalRaw === "" ? null : Number(physicalRaw);
     const difference = physical === null || Number.isNaN(physical) ? null : physical - systemRemaining;
-    const lotAllocations = allocationsByLot.get(Number(lot.id)) || [];
     const saleOptions = salesByVaccine.get(Number(lot.vaccine_id || lot.vaccine?.id || 0)) || [];
     const nonPackage = saleOptions.find((row: any) => clean(row.sale_mode).toUpperCase() !== "PACKAGE");
     const packageOption = saleOptions.find((row: any) => clean(row.sale_mode).toUpperCase() === "PACKAGE");
