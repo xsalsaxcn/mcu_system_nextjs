@@ -482,10 +482,24 @@ export async function GET(req: NextRequest) {
       // Healthday and Bazar are both external and both need validation.
       for (const serviceMode of ["HEALTHDAY", "BAZAR"] as const) {
         const queueEnabled = serviceMode === "BAZAR" ? bazarQueueEnabled : healthdayQueueEnabled;
-        if (queueEnabled) continue;
         if (!hasServiceTrack(row, itemRows, serviceMode)) continue;
 
         const trackStatus = serviceTrackStatus(row, serviceMode);
+        if (queueEnabled) {
+          // V561: khusus Bazar internal queue, Queue DONE bukan vaksin DONE.
+          // Setelah queue selesai, registration.validation_status=PENDING dan row
+          // harus tetap muncul di Tim Validasi.
+          if (serviceMode !== "BAZAR") continue;
+          const validationStatus = clean(row.validation_status).toUpperCase();
+          if (validationStatus !== "PENDING" && validationStatus !== "DONE") continue;
+          const displayed = displayForService(row, serviceMode, recordRows, itemRows);
+          displayed.validation_status = validationStatus;
+          displayed.validated_at = validationStatus === "DONE" ? row.validated_at : null;
+          displayed.validated_by = validationStatus === "DONE" ? clean(row.validated_by) : "";
+          rows.push(displayed);
+          continue;
+        }
+
         if (!isPendingTrackStatus(trackStatus) && !isDoneTrackStatus(trackStatus)) continue;
         rows.push(displayForService(row, serviceMode, recordRows, itemRows));
       }
@@ -910,7 +924,11 @@ export async function POST(req: NextRequest) {
         const hasBazar = serviceStatus === "BAZAR" || serviceStatus === "COMBINATION";
         try {
           if (hasHealthday && !healthdayQueueEnabled) await syncRegistrationTrackDone(supabase, rowId, "HEALTHDAY", actor);
-          if (hasBazar && !bazarQueueEnabled) await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+          // V561: Bazar-only selalu dipotong stoknya dari Tim Validasi,
+          // termasuk saat Bazar memakai antrean internal.
+          if (hasBazar && (serviceStatus === "BAZAR" || !bazarQueueEnabled)) {
+            await syncRegistrationTrackDone(supabase, rowId, "BAZAR", actor);
+          }
         } catch (syncError: any) {
           return json({ ok: false, message: syncError?.message || "Gagal menyelesaikan pencatatan dan pemakaian stok." }, 409);
         }

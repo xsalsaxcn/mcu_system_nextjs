@@ -1212,7 +1212,11 @@ export default function VaccinationRegisterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: Number(form.sessionId), sourceId: Number(sourceId), defaultVaccineId: Number(form.vaccineId || 0), defaultLotId: Number(form.lotId || 0), defaultVaccineIds: selectedVaccineIds.map((id) => Number(id)).filter(Boolean) }),
       }).then((r) => r.json());
-      if (!json.ok) { setError(json.message || "Gagal memuat peserta."); return; }
+      if (!json.ok) {
+        setMessage("");
+        setError(json.message || "Gagal memuat peserta.");
+        return;
+      }
       setMessage(json.message || "Peserta berhasil dimuat. Nomor antrean belum dirilis.");
       await loadRegistrations(form.sessionId, String(sourceId));
     } finally {

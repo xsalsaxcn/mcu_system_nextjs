@@ -246,11 +246,20 @@ async function fetchVaccinationSourceParticipants(supabase: any, sourceId: numbe
   const errors: string[] = [];
   const locationKey = clean(session.import_location_key);
 
-  const vaccinationImportResult = await supabase
+  let vaccinationImportQuery = supabase
     .from("vaccination_import_rows")
     .select("id,source_id,participant_id,mcu_id,external_id,participant_name,nik,email,phone,employee_type,batch_name,time_area_name,time_name,location_name,session_date,time_slot,import_location_key")
-    .eq("source_id", sourceId)
-    .limit(10000);
+    .eq("source_id", sourceId);
+
+  // V561: filter di DB lebih dulu. Sebelumnya setiap klik Muat Peserta
+  // menarik sampai 10.000 row source lalu baru difilter di Node.
+  if (locationKey) {
+    vaccinationImportQuery = vaccinationImportQuery.eq("import_location_key", locationKey);
+  } else if (clean(session?.session_date)) {
+    vaccinationImportQuery = vaccinationImportQuery.eq("session_date", clean(session.session_date));
+  }
+
+  const vaccinationImportResult = await vaccinationImportQuery.limit(10000);
 
   if (!vaccinationImportResult.error && Array.isArray(vaccinationImportResult.data) && vaccinationImportResult.data.length) {
     const rawRows = (vaccinationImportResult.data || []).filter((row: any) => {

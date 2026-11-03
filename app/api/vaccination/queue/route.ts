@@ -263,12 +263,25 @@ export async function POST(req: NextRequest) {
     if (bazarQueueNumber) updatePayload.bazar_queue_number = bazarQueueNumber;
     if (bazarQueueSequence) updatePayload.bazar_queue_sequence = bazarQueueSequence;
     if (nextStatus === "CALLED") updatePayload.bazar_called_at = now;
-    if (nextStatus === "DONE") updatePayload.bazar_finished_at = now;
+    if (nextStatus === "DONE") {
+      updatePayload.bazar_finished_at = now;
+      // V561: selesai antrean B hanya menyelesaikan antrean.
+      // Pemotongan stok/administered tetap dilakukan oleh Tim Validasi.
+      updatePayload.validation_status = "PENDING";
+      updatePayload.validated_at = null;
+      updatePayload.validated_by = null;
+    }
     if (nextStatus === "CANCELLED") updatePayload.bazar_cancelled_at = now;
     if (action === "undo-finish") {
+      if (clean(existing.validation_status).toUpperCase() === "DONE") {
+        return fail("Peserta sudah selesai divalidasi. Koreksi dari Tim Validasi, bukan dari antrean.", 409);
+      }
       updatePayload.bazar_finished_at = null;
       updatePayload.bazar_cancelled_at = null;
       updatePayload.bazar_called_at = null;
+      if (clean(existing.validation_status).toUpperCase() === "PENDING") {
+        updatePayload.validation_status = null;
+      }
     }
 
     const regResult = await supabase
@@ -279,22 +292,9 @@ export async function POST(req: NextRequest) {
       .single();
     if (regResult.error) return fail(regResult.error.message, 500);
 
-    try {
-      if (action === "finish") await syncRegistrationTrackDone(supabase, registrationId, "BAZAR", actor);
-      if (action === "undo-finish") await reverseQueueDoneTrack(supabase, registrationId, "BAZAR", actor);
-    } catch (error: any) {
-      await supabase
-        .from("vaccination_registrations")
-        .update({
-          bazar_queue_status: existing.bazar_queue_status,
-          bazar_finished_at: existing.bazar_finished_at || null,
-          bazar_cancelled_at: existing.bazar_cancelled_at || null,
-          bazar_called_at: existing.bazar_called_at || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", registrationId);
-      return fail(error?.message || "Gagal menyinkronkan status Done Bazar ke stok.", 409);
-    }
+    // V561: jangan sync stock/administered dari tombol Done antrean B.
+    // Queue DONE -> validation_status PENDING. Tim Validasi yang menjadi satu-satunya
+    // pemicu syncRegistrationTrackDone untuk layanan Bazar.
 
     return ok({
       message:

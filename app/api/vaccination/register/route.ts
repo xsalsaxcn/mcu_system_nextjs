@@ -972,7 +972,9 @@ async function createItemsForRegistration(supabase: any, registration: any, item
         source === "registration_edit"
           ? "WAITING"
           : serviceMode === "BAZAR"
-            ? (isDoneQueueStatus(registration.bazar_queue_status) ? "ADMINISTERED" : "WAITING")
+            // V561: Queue DONE Bazar bukan vaksin administered.
+            // Item baru tetap WAITING sampai Tim Validasi menekan Done.
+            ? "WAITING"
             : (isDoneQueueStatus(registration.queue_status) ? "ADMINISTERED" : "WAITING"),
       active: true,
       created_by: userLabel(user),
@@ -1033,9 +1035,11 @@ export async function GET(req: NextRequest) {
           await syncRegistrationTrackDone(supabase, Number(registration.id), "HEALTHDAY", actor);
           syncedLegacyDone = true;
         }
+        // V561: jangan auto-administer Bazar saat halaman Registrasi dibuka.
+        // bazar_queue_status DONE hanya menandai antrean selesai; Tim Validasi
+        // adalah satu-satunya tahap yang boleh memotong stok Bazar.
         if (bazarNeedsSync && ["ADMINISTERED", "DONE", "FINISHED"].includes(bazarStatus)) {
-          await syncRegistrationTrackDone(supabase, Number(registration.id), "BAZAR", actor);
-          syncedLegacyDone = true;
+          syncWarnings.push(`Registrasi ${registration.id}: antrean Bazar selesai dan menunggu Tim Validasi`);
         }
       } catch (syncError: any) {
         syncWarnings.push(`Registrasi ${registration.id}: ${syncError?.message || "sinkronisasi Done gagal"}`);

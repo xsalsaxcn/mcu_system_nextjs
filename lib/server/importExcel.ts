@@ -811,7 +811,50 @@ export async function importParticipantsFromExcel(
       continue;
     }
 
-    const headerRowIndex = chooseHeaderRow(rows);
+    let headerRowIndex = chooseHeaderRow(rows);
+
+    // V561_VACCINATION_MANUAL_MAPPING_HEADER_SOURCE_OF_TRUTH
+    // Preview mapping sudah dipilih user. Khusus Vaccination, gunakan nama header
+    // mapping tersebut untuk menemukan row header sebenarnya; jangan biarkan
+    // auto-detector menganggap row data pertama sebagai header.
+    if (programType === PROGRAM_VACCINATION) {
+      const vaccinationMapping = options.vaccination_mapping || {};
+      const mappedHeaderNames = [
+        vaccinationMapping.name,
+        vaccinationMapping.gender,
+        vaccinationMapping.external_id,
+        vaccinationMapping.email,
+        vaccinationMapping.phone,
+        vaccinationMapping.employee_type,
+        vaccinationMapping.batch_name,
+        vaccinationMapping.time_area_name,
+        vaccinationMapping.time_name,
+      ].map(clean).filter(Boolean);
+      const requiredAnchors = [
+        clean(vaccinationMapping.name),
+        clean(vaccinationMapping.time_area_name),
+      ].filter(Boolean);
+
+      let mappedHeaderIndex = -1;
+      let mappedHeaderScore = -1;
+      rows.slice(0, 50).forEach((row, idx) => {
+        const values = row.map((value) => norm(value));
+        const score = mappedHeaderNames.reduce(
+          (acc, headerName) => acc + (values.includes(norm(headerName)) ? 1 : 0),
+          0,
+        );
+        const anchorsMatch = requiredAnchors.every((anchor) =>
+          values.includes(norm(anchor)),
+        );
+        if (anchorsMatch && score > mappedHeaderScore) {
+          mappedHeaderIndex = idx;
+          mappedHeaderScore = score;
+        }
+      });
+
+      if (mappedHeaderIndex >= 0) headerRowIndex = mappedHeaderIndex;
+    }
+
     const headers = rows[headerRowIndex].map(
       (v, i) => clean(v) || `Column_${i}`,
     );
@@ -1748,6 +1791,22 @@ export async function importParticipantsFromExcel(
       stats.corporate_import_unassigned_v520 = [];
       stats.corporate_session_assignment_complete_v520 = true;
     }
+  }
+
+  // V561: jangan laporkan import Vaccination sebagai sukses bila seluruh row
+  // gagal diparse karena header/mapping tidak terbaca.
+  if (
+    programType === PROGRAM_VACCINATION &&
+    Number(stats.rows_read || 0) > 0 &&
+    Number(stats.participants_created || 0) === 0 &&
+    Number(stats.participants_updated || 0) === 0 &&
+    Number(stats.existing_participants_skipped || 0) === 0 &&
+    Number(stats.duplicate_candidates_skipped || 0) === 0 &&
+    Number(stats.participants_skipped || 0) >= Number(stats.rows_read || 0)
+  ) {
+    throw new Error(
+      `Import Vaccination gagal: seluruh ${stats.rows_read} baris dilewati. Periksa header dan mapping manual ChildName/TimeAreaName sebelum mencoba lagi.`,
+    );
   }
 
   stats.import_mode = programType === PROGRAM_CAPASKA ? "merge_existing_by_nik_external_or_name_gender_province" : "insert_new";
