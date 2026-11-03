@@ -362,31 +362,80 @@ export async function GET(req: NextRequest) {
     const session = Array.isArray(registration.session) ? registration.session[0] : registration.session;
     const companyName = historyText(registration.company_name || session?.company_name);
 
-    const currentRegsResult = await supabase
+    let currentRegsQuery = supabase
       .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,email,company_name,registered_at,session:vaccination_sessions(id,session_name,company_name,source_name,location,session_date)")
-      .eq("participant_name", registration.participant_name)
+      .select("id,session_id,participant_name,employee_id,nik,email,company_name,registered_at,history_person_id,patient_service_status,payment_price,payment_method,payment_note,status_note,cancelled_note,queue_status,bazar_queue_status,validation_status,session:vaccination_sessions(id,session_name,company_name,source_name,location,session_date)")
       .order("id", { ascending: false })
       .limit(100);
+    const explicitHistoryPersonId = Number(registration?.history_person_id || 0);
+    currentRegsQuery = explicitHistoryPersonId
+      ? currentRegsQuery.eq("history_person_id", explicitHistoryPersonId)
+      : currentRegsQuery.eq("participant_name", registration.participant_name);
+    const currentRegsResult = await currentRegsQuery;
     if (currentRegsResult.error) throw new Error(currentRegsResult.error.message);
-    const currentRegIds = (currentRegsResult.data || [])
-      .filter((row: any) => { const rowSession = Array.isArray(row.session) ? row.session[0] : row.session; return !companyName || historyCompanyKey(row.company_name || rowSession?.company_name) === historyCompanyKey(companyName); })
-      .map((row: any) => Number(row.id))
-      .filter(Boolean);
+    const currentRegistrations = (currentRegsResult.data || [])
+      .filter((row: any) => { const rowSession = Array.isArray(row.session) ? row.session[0] : row.session; return !companyName || historyCompanyKey(row.company_name || rowSession?.company_name) === historyCompanyKey(companyName); });
+    const currentRegIds = currentRegistrations.map((row: any) => Number(row.id)).filter(Boolean);
 
     let currentRecords: any[] = [];
+    let benefitItems: any[] = [];
     if (currentRegIds.length) {
-      const recordsResult = await supabase
-        .from("vaccination_records")
-        .select("id,registration_id,session_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,next_due_date,notes,status,session:vaccination_sessions(id,session_name,company_name,location,session_date)")
-        .in("registration_id", currentRegIds)
-        .order("administered_at", { ascending: false });
+      const [recordsResult, itemsResult] = await Promise.all([
+        supabase
+          .from("vaccination_records")
+          .select("id,registration_id,session_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,next_due_date,notes,status,session:vaccination_sessions(id,session_name,company_name,location,session_date)")
+          .in("registration_id", currentRegIds)
+          .order("administered_at", { ascending: false }),
+        supabase
+          .from("vaccination_registration_items")
+          .select("id,registration_id,vaccine_id,lot_id,service_mode,sale_mode,package_dose_count,sales_price_snapshot,payment_method,payment_note,status,active,vaccine:vaccination_vaccines(id,name,brand),lot:vaccination_vaccine_lots(id,lot_number)")
+          .in("registration_id", currentRegIds)
+          .eq("active", true)
+          .order("id", { ascending: false }),
+      ]);
       if (recordsResult.error) throw new Error(recordsResult.error.message);
+      if (itemsResult.error) throw new Error(itemsResult.error.message);
       currentRecords = recordsResult.data || [];
+      benefitItems = itemsResult.data || [];
     }
 
+    const registrationById = new Map<number, any>(currentRegistrations.map((row: any) => [Number(row.id), row]));
+    const benefits = benefitItems.map((item: any) => {
+      const reg = registrationById.get(Number(item.registration_id)) || {};
+      const sessionRow = Array.isArray(reg.session) ? reg.session[0] : reg.session;
+      const vaccine = Array.isArray(item.vaccine) ? item.vaccine[0] : item.vaccine;
+      const lot = Array.isArray(item.lot) ? item.lot[0] : item.lot;
+      const serviceMode = String(item.service_mode || reg.patient_service_status || "HEALTHDAY").toUpperCase() === "BAZAR" ? "BAZAR" : "HEALTHDAY";
+      const serviceStatus = serviceMode === "BAZAR" ? reg.bazar_queue_status : reg.queue_status;
+      const paymentMethod = String(item.payment_method || reg.payment_method || "").trim();
+      const paymentAmount = Number(item.sales_price_snapshot ?? reg.payment_price ?? 0) || 0;
+      return {
+        registration_id: Number(reg.id || item.registration_id || 0),
+        item_id: Number(item.id || 0),
+        vaccine_name: vaccine?.name || "Vaksin",
+        vaccine_brand: vaccine?.brand || "",
+        lot_number: lot?.lot_number || "",
+        service_mode: serviceMode,
+        sale_mode: String(item.sale_mode || "NON_PACKAGE").toUpperCase() === "PACKAGE" ? "PACKAGE" : "NON_PACKAGE",
+        package_dose_count: Number(item.package_dose_count || 1),
+        payment_method: paymentMethod,
+        payment_amount: paymentAmount,
+        payment_note: item.payment_note || reg.payment_note || "",
+        item_status: item.status || "",
+        registration_status: serviceStatus || reg.validation_status || "",
+        validation_status: reg.validation_status || "",
+        status_note: reg.status_note || "",
+        cancelled_note: reg.cancelled_note || "",
+        registered_at: reg.registered_at || null,
+        session_id: Number(reg.session_id || 0) || null,
+        session_name: sessionRow?.session_name || "",
+        location: sessionRow?.location || "",
+        session_date: sessionRow?.session_date || null,
+      };
+    });
+
     if (!companyName) {
-      return ok({ registration, company: null, match: null, person: null, family: { parent: null, dependents: [] }, historical: [], current: currentRecords });
+      return ok({ registration, company: null, match: null, person: null, family: { parent: null, dependents: [] }, historical: [], current: currentRecords, benefits });
     }
 
     const resolvedCompany = await resolveHistoryCompany(supabase, registration, session);
@@ -395,7 +444,6 @@ export async function GET(req: NextRequest) {
     let best: Candidate | null = null;
     let matchScope = company ? resolvedCompany.reason : "company-not-found";
 
-    const explicitHistoryPersonId = Number(registration?.history_person_id || 0);
     if (explicitHistoryPersonId) {
       const directResult = await supabase
         .from("vaccination_persons")
@@ -503,6 +551,7 @@ export async function GET(req: NextRequest) {
         family: { parent: null, dependents: [] },
         historical: [],
         current: currentRecords,
+        benefits,
       });
     }
 
@@ -523,6 +572,7 @@ export async function GET(req: NextRequest) {
       family,
       historical: historyResult.data || [],
       current: currentRecords,
+      benefits,
     });
   } catch (error: any) {
     const message = String(error?.message || error || "Gagal memuat riwayat peserta.");

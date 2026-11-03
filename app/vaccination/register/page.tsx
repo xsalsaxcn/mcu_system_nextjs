@@ -513,7 +513,7 @@ export default function VaccinationRegisterPage() {
   );
 
   const productSummary = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; count: number; stockLocation: number; registered: number; arrived: number; available: number }>();
+    const map = new Map<string, { id: string; name: string; count: number; stockLocation: number; registered: number; arrived: number; finalized: number; available: number }>();
     for (const registration of registrations) {
       const items = Array.isArray(registration.items) ? registration.items : [];
       for (const item of items) {
@@ -529,6 +529,7 @@ export default function VaccinationRegisterPage() {
           stockLocation: Number(stock.stockLocation || 0),
           registered: Number(stock.registered || 0),
           arrived: Number(stock.arrived || 0),
+          finalized: Number(stock.finalized || 0),
           available: Number(stock.available || 0),
         };
         current.count += 1;
@@ -544,6 +545,7 @@ export default function VaccinationRegisterPage() {
         stockLocation: Number((stock as any)?.stockLocation || 0),
         registered: Number((stock as any)?.registered || 0),
         arrived: Number((stock as any)?.arrived || 0),
+        finalized: Number((stock as any)?.finalized || 0),
         available: Number((stock as any)?.available || 0),
       });
     }
@@ -1421,7 +1423,7 @@ export default function VaccinationRegisterPage() {
             {selectedStockSummary ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Terdaftar</div><div className="mt-1 text-xl font-black">{selectedStockSummary.registered}</div></div>
-                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Sudah Datang</div><div className="mt-1 text-xl font-black">{selectedStockSummary.arrived}</div></div>
+                <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Sudah Datang</div><div className="mt-1 text-xl font-black">{selectedStockSummary.arrived}</div>{selectedStockSummary.finalized > 0 ? <div className="mt-1 text-[10px] font-bold text-emerald-700">{selectedStockSummary.finalized} sudah selesai</div> : null}</div>
                 <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Stok Lokasi</div><div className="mt-1 text-xl font-black">{selectedStockSummary.stockLocation}</div></div>
                 <div className={`rounded-xl px-3 py-2 ${selectedStockSummary.available > 0 ? "bg-emerald-100" : "bg-rose-100"}`}><div className="text-[10px] font-black uppercase text-slate-600">Sisa Bisa Didaftarkan</div><div className={`mt-1 text-xl font-black ${selectedStockSummary.available > 0 ? "text-emerald-800" : "text-rose-700"}`}>{selectedStockSummary.available}</div></div>
                 <div className="rounded-xl bg-white px-3 py-2"><div className="text-[10px] font-black uppercase text-slate-500">Total Data Produk</div><div className="mt-1 text-xl font-black">{selectedStockSummary.count}</div></div>
@@ -2253,6 +2255,16 @@ export default function VaccinationRegisterPage() {
                   {registrationProductOptions.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                 </select>
               </div>
+              {selectedStockSummary ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-[11px] font-black text-slate-700">
+                  <span className="text-blue-800">Stok · {selectedStockSummary.name}</span>
+                  <span className="rounded-full bg-white px-2 py-1">Lokasi {selectedStockSummary.stockLocation}</span>
+                  <span className="rounded-full bg-white px-2 py-1">Terdaftar {selectedStockSummary.registered}</span>
+                  <span className="rounded-full bg-white px-2 py-1">Datang {selectedStockSummary.arrived}</span>
+                  <span className="rounded-full bg-white px-2 py-1">Selesai {selectedStockSummary.finalized}</span>
+                  <span className={`rounded-full px-2 py-1 ${selectedStockSummary.available > 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-700"}`}>Sisa {selectedStockSummary.available}</span>
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => exportStage("all")} className="rounded-xl border bg-white px-3 py-2 text-xs font-bold hover:bg-slate-50">Export Semua Stage</button>

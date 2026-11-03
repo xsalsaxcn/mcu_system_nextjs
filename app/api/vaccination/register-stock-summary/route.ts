@@ -120,15 +120,25 @@ export async function GET(req: NextRequest) {
     stockByVaccine.set(vaccineId, (stockByVaccine.get(vaccineId) || 0) + remaining);
   }
 
-  const pendingByVaccine = new Map<number, { registered: number; arrived: number }>();
+  // V546: "Sudah Datang" harus mencakup peserta yang masih pending + yang sudah selesai.
+  // Peserta final/DONE TIDAK ikut registered pending lagi karena stoknya sudah dikonsumsi,
+  // tetapi tetap dihitung sebagai pernah datang agar angka operasional tidak kurang.
+  const pendingByVaccine = new Map<number, { registered: number; arrived: number; finalized: number }>();
   for (const item of itemResult.data || []) {
     const status = clean((item as any).status).toUpperCase();
-    if (CANCELLED_ITEM.has(status) || FINAL_ITEM.has(status)) continue;
+    if (CANCELLED_ITEM.has(status)) continue;
     const vaccineId = Number((item as any).vaccine_id || 0);
     if (!vaccineId) continue;
-    const current = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0 };
-    current.registered += 1;
+    const current = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0, finalized: 0 };
 
+    if (FINAL_ITEM.has(status)) {
+      current.arrived += 1;
+      current.finalized += 1;
+      pendingByVaccine.set(vaccineId, current);
+      continue;
+    }
+
+    current.registered += 1;
     const registration: any = Array.isArray((item as any).registration)
       ? (item as any).registration[0]
       : (item as any).registration;
@@ -141,7 +151,7 @@ export async function GET(req: NextRequest) {
   const rows = Array.from(vaccineIds).map((vaccineId) => {
     const vaccine = vaccineMap.get(vaccineId) || { id: vaccineId, name: `Produk ${vaccineId}`, brand: "" };
     const stock = stockByVaccine.get(vaccineId) || 0;
-    const pending = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0 };
+    const pending = pendingByVaccine.get(vaccineId) || { registered: 0, arrived: 0, finalized: 0 };
     return {
       vaccineId,
       name: clean(vaccine.name) || `Produk ${vaccineId}`,
@@ -150,6 +160,7 @@ export async function GET(req: NextRequest) {
       stockLocation: stock,
       registered: pending.registered,
       arrived: pending.arrived,
+      finalized: pending.finalized,
       available: Math.max(0, stock - pending.registered),
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "id"));

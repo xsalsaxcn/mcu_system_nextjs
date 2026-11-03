@@ -20,6 +20,16 @@ function serviceTitle(item: any) {
     : (item.service_name || item.vaccine_name || "Layanan");
 }
 
+function money(value: any) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return "-";
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(amount);
+}
+
+function serviceModeLabel(value: any) {
+  return String(value || "").toUpperCase() === "BAZAR" ? "Bazar" : "Healthday";
+}
+
 export default function VaccinationParticipantHistoryModal({ registration, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -93,7 +103,7 @@ export default function VaccinationParticipantHistoryModal({ registration, onClo
 
           {!loading && !error && data ? (
             <div className="space-y-5">
-              <section className="grid gap-3 md:grid-cols-3">
+              <section className="grid gap-3 md:grid-cols-4">
                 <div className="rounded-2xl border bg-slate-50 p-4">
                   <div className="text-xs font-black uppercase text-slate-500">Match History</div>
                   <div className="mt-2 text-lg font-black text-slate-900">{data.match?.status === "MATCHED" ? "Matched" : data.match?.status === "REVIEW" ? "Perlu Review" : "Belum Ada"}</div>
@@ -104,10 +114,51 @@ export default function VaccinationParticipantHistoryModal({ registration, onClo
                   <div className="mt-2 text-lg font-black text-slate-900">{(data.historical || []).length}</div>
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-4">
-                  <div className="text-xs font-black uppercase text-slate-500">Record Sistem</div>
+                  <div className="text-xs font-black uppercase text-slate-500">Benefit Sistem</div>
+                  <div className="mt-2 text-lg font-black text-slate-900">{(data.benefits || []).length}</div>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-xs font-black uppercase text-slate-500">Record Vaksin</div>
                   <div className="mt-2 text-lg font-black text-slate-900">{(data.current || []).length}</div>
                 </div>
               </section>
+
+              {(data.benefits || []).length ? (
+                <section className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+                  <div className="text-xs font-black uppercase tracking-wide text-blue-700">Benefit Layanan Peserta</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-600">Benefit tetap tampil walaupun layanan dipindahkan ke Session lain atau Vaksin di Klinik. Ini bukan bukti vaksin sudah diberikan.</div>
+                  <div className="mt-4 space-y-3">
+                    {(data.benefits || []).map((benefit: any, index: number) => {
+                      const bazar = String(benefit.service_mode || "").toUpperCase() === "BAZAR";
+                      const movedNote = String(benefit.status_note || "").trim();
+                      return (
+                        <div key={`${benefit.registration_id}-${benefit.item_id}-${index}`} className="rounded-2xl border bg-white p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${bazar ? "bg-violet-100 text-violet-700" : "bg-cyan-100 text-cyan-700"}`}>{serviceModeLabel(benefit.service_mode)}</span>
+                                <span className="text-lg font-black text-slate-900">{benefit.vaccine_name || "Vaksin"}{benefit.vaccine_brand ? ` · ${benefit.vaccine_brand}` : ""}</span>
+                              </div>
+                              <div className="mt-2 text-sm font-semibold text-slate-600">Benefit dari Session <span className="font-black text-slate-800">{benefit.session_name || benefit.location || "-"}</span>{benefit.session_date ? ` · ${dateLabel(benefit.session_date)}` : ""}</div>
+                              {benefit.lot_number ? <div className="mt-1 text-xs font-semibold text-slate-500">Lot {benefit.lot_number}</div> : null}
+                            </div>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{benefit.registration_status || benefit.item_status || "Terdaftar"}</span>
+                          </div>
+                          {bazar ? (
+                            <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-sm font-bold text-violet-900">
+                              {benefit.payment_method ? <>Sudah bayar · Payment {benefit.payment_method}</> : <>Payment belum tercatat</>} · {String(benefit.sale_mode || "").toUpperCase() === "PACKAGE" ? `Paket${Number(benefit.package_dose_count || 1) > 1 ? ` ${benefit.package_dose_count} dosis` : ""}` : "Non Paket"} · Nominal {money(benefit.payment_amount)}
+                            </div>
+                          ) : (
+                            <div className="mt-3 rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-900">Benefit Healthday · Tidak ada pembayaran peserta.</div>
+                          )}
+                          {movedNote ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-900">{movedNote}</div> : null}
+                          {!movedNote && benefit.cancelled_note ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-800">{benefit.cancelled_note}</div> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
 
               {data.person?.participant_type === "DEPENDENT" && data.family?.parent ? (
                 <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4">

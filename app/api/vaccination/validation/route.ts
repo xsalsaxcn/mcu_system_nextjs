@@ -499,8 +499,9 @@ export async function GET(req: NextRequest) {
       .order("id", { ascending: false })
       .limit(2000);
 
-    if (sessionId) sessionLocationQuery = sessionLocationQuery.eq("id", sessionId);
-
+    // V546: filter Session pada tabel Validasi tidak boleh membatasi daftar tujuan Pindah Lokasi.
+    // Rows tetap difilter oleh sessionId di query registrasi di atas, tetapi dropdown tujuan
+    // harus membaca seluruh Session agar peserta bisa benar-benar dipindahkan.
     const sessionLocationResult = await sessionLocationQuery;
     const sessionLocations = sessionLocationResult.error
       ? []
