@@ -162,6 +162,10 @@ export async function GET(req: NextRequest) {
 
   const supabase = getSupabaseAdmin();
   const program = req.nextUrl.searchParams.get("program") || user.program_type || "capaska";
+  // CAPASKA_DASHBOARD_RESULT_BASED_COMPLETION_V278
+  // Scope guard: this branch is ONLY active for program=capaska.
+  // MCU Corporate and every other module keep the existing parameter-complete logic.
+  const isCapaskaProgramV278 = String(program || "").trim().toLowerCase() === "capaska";
   const sourceId = req.nextUrl.searchParams.get("source_id");
   const status = req.nextUrl.searchParams.get("status") || "Semua";
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit") || 300), 1), 1000);
@@ -205,6 +209,37 @@ export async function GET(req: NextRequest) {
   const packageName = new Map((packages.data || []).map((p: any) => [Number(p.id), p.name]));
   const sourceMap = new Map((sources.data || []).map((s: any) => [Number(s.id), s]));
 
+  // CAPASKA_DASHBOARD_RESULT_BASED_COMPLETION_V278
+  // Keep dashboard completion aligned with the CAPASKA export rule already used by this project:
+  // a medical post is complete once it has at least one saved non-empty examination result.
+  // Registrasi Ulang / Review Dokter are not part of the 7 medical-post completion gate.
+  // IMPORTANT: filled_parameters/total_parameters remain untouched so the dashboard can still
+  // show real input completeness (e.g. 90.3%) without turning missing optional fields into fake data.
+  const requiredCapaskaMedicalPostIdsV278 = [4, 5, 6, 7, 8, 9, 10];
+  const requiredCapaskaMedicalPostIdSetV278 = new Set(requiredCapaskaMedicalPostIdsV278);
+  const parameterPostIdMapV278 = new Map<number, number>();
+  for (const param of (parameters.data || [])) {
+    const parameterId = Number((param as any)?.id);
+    const postId = Number((param as any)?.post_id);
+    if (parameterId && postId) parameterPostIdMapV278.set(parameterId, postId);
+  }
+
+  const capaskaDonePostIdsByParticipantV278 = new Map<number, Set<number>>();
+  if (isCapaskaProgramV278) {
+    for (const result of (results.data || [])) {
+      const participantId = Number((result as any)?.participant_id);
+      const parameterId = Number((result as any)?.parameter_id);
+      const postId = Number((result as any)?.input_post_id || parameterPostIdMapV278.get(parameterId) || 0);
+      const valueText = String((result as any)?.value ?? (result as any)?.result_value ?? (result as any)?.normal_value ?? "").trim();
+      if (!participantId || !requiredCapaskaMedicalPostIdSetV278.has(postId) || !valueText) continue;
+
+      if (!capaskaDonePostIdsByParticipantV278.has(participantId)) {
+        capaskaDonePostIdsByParticipantV278.set(participantId, new Set<number>());
+      }
+      capaskaDonePostIdsByParticipantV278.get(participantId)!.add(postId);
+    }
+  }
+
   // DASHBOARD_OPERATOR_STAGE_STAFF_V277
   // Read-only map for dashboard operator detail modal: participant_id + post_id -> staff_name.
   const stageStaffMapV277 = new Map<string, string>();
@@ -228,19 +263,30 @@ export async function GET(req: NextRequest) {
       p
     );
 
+    const capaskaDonePostIdsV278 = capaskaDonePostIdsByParticipantV278.get(Number(p.id)) || new Set<number>();
     const stages = rawStages.map((stage: any) => {
       const postId = Number(stage?.post_id || stage?.id || 0);
       const staffName = stageStaffMapV277.get(String(Number(p.id)) + ":" + String(postId)) || "";
+      const isCapaskaMedicalPostV278 = isCapaskaProgramV278 && requiredCapaskaMedicalPostIdSetV278.has(postId);
+      const isDoneV278 = isCapaskaMedicalPostV278 ? capaskaDonePostIdsV278.has(postId) : !!stage?.is_done;
+
       return {
         ...stage,
+        is_done: isDoneV278,
+        status_text: isDoneV278 ? "Done" : "Belum",
+        progress_text: isDoneV278 ? "Done" : stage?.progress_text,
         staff_name: staffName || stage?.staff_name || stage?.doctor_name || stage?.assigned_staff_name || "",
         doctor_name: staffName || stage?.doctor_name || stage?.staff_name || "",
         assigned_staff_name: staffName || stage?.assigned_staff_name || stage?.staff_name || "",
       };
     });
 
-    const done = stages.filter((s) => s.is_done).length;
-    const total = stages.length;
+    // CAPASKA completion is intentionally isolated from the shared stage helper.
+    // Other programs still use the exact pre-existing stage completion calculation.
+    const done = isCapaskaProgramV278
+      ? requiredCapaskaMedicalPostIdsV278.filter((postId) => capaskaDonePostIdsV278.has(postId)).length
+      : stages.filter((s) => s.is_done).length;
+    const total = isCapaskaProgramV278 ? requiredCapaskaMedicalPostIdsV278.length : stages.length;
     const complete = total > 0 && done >= total;
     const scoreResult = computeMcuParticipantScoring2026({
       participantId: Number(p.id),
