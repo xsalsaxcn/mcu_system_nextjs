@@ -104,6 +104,14 @@ export default function VaccinationInventoryPage() {
       quantity: "",
       inventoryNotes: userFacingInventoryNote(row.inventory_notes),
     });
+    // V568: editor berada di atas tabel. Setelah klik Edit, fokuskan langsung
+    // ke panel editor supaya tombol tidak terlihat seperti "tidak bekerja".
+    window.setTimeout(() => {
+      document.getElementById("vaccination-inventory-edit-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
   }
 
   function startTransfer(row: any) {
@@ -395,7 +403,7 @@ export default function VaccinationInventoryPage() {
         </section>
 
         {editing ? (
-          <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <section id="vaccination-inventory-edit-panel" className="mt-6 scroll-mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5">
             <div className="text-lg font-black text-amber-900">Edit Inventory: {editing.vaccine?.name} · Lot {editing.lot_number}</div>
             <p className="mt-1 text-sm text-amber-900/80">Sisa Fisik otomatis disamakan dengan Sisa Sistem setelah transaksi. Retur Stok berarti stok dikembalikan ke inventory.</p>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -593,9 +601,9 @@ export default function VaccinationInventoryPage() {
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-[10px]"><span className="text-slate-500">Fisik</span><b>{row.stock_physical_count ?? "-"}</b></div>
                           <span className={`inline-flex w-full justify-center rounded-full px-2 py-1 text-[10px] font-black ${diffClass(row.stock_difference)}`}>{row.stock_difference ?? "Belum dicek"}</span>
-                          <button onClick={() => startEdit(row)} className="block w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold hover:bg-slate-50">Edit</button>
-                          <button onClick={() => startTransfer(row)} className="block w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100">Transfer</button>
-                          <button onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block w-full rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100">Hapus</button>
+                          <button type="button" onClick={() => startEdit(row)} className="block w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold hover:bg-slate-50">Edit</button>
+                          <button type="button" onClick={() => startTransfer(row)} className="block w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100">Transfer</button>
+                          <button type="button" onClick={() => { setDeleting(row); setDeleteReason(""); setError(""); }} className="block w-full rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100">Hapus</button>
                         </div>
                       </td>
                     </tr>

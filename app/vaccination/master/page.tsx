@@ -583,22 +583,11 @@ export default function VaccinationMasterPage() {
           !productFormMatchesVaccine(originalVaccine);
 
         if (productFieldsChanged) {
-          const matchingProduct = vaccines.find(
-            (candidate) =>
-              candidate.active !== false &&
-              String(candidate.id || "") !== originalVaccineId &&
-              productFormMatchesVaccine(candidate),
+          // V568: Edit Lot tidak boleh diam-diam membuat Master Produk baru.
+          // Rename/nama/brand/harga produk hanya melalui tombol Edit Produk.
+          throw new Error(
+            "Nama/brand/harga Master Produk berubah saat Edit Lot. Batalkan Edit Lot lalu gunakan Edit Produk agar Lot, Session, Inventory, dan Pendaftaran Bazar tetap memakai produk yang sama.",
           );
-
-          if (matchingProduct?.id) {
-            targetVaccineId = String(matchingProduct.id);
-          } else {
-            const createJson = await postMaster({
-              action: "create-vaccine",
-              ...vaccineForm,
-            });
-            targetVaccineId = String(createJson.vaccine?.id || "");
-          }
         }
 
         if (!targetVaccineId) {
@@ -1923,6 +1912,45 @@ export default function VaccinationMasterPage() {
   }
 
   function vaccineServiceModes(vaccineId: any) {
+    // V568: Master harus mengikuti stok aktual seperti Inventory.
+    // Alokasi positif Healthday/Bazar adalah sumber utama; assignment hanya fallback
+    // bila Session belum memiliki alokasi stok sama sekali.
+    const allocationModes = new Set<string>();
+    for (const allocation of serviceStockAllocations) {
+      if (
+        allocation.active === false ||
+        Number(allocation.allocated_qty || 0) <= 0 ||
+        String(allocation.vaccine_id || "") !== String(vaccineId)
+      ) {
+        continue;
+      }
+      if (
+        stockSessionFilter !== "ALL" &&
+        String(allocation.session_id || "") !== String(stockSessionFilter)
+      ) {
+        continue;
+      }
+      if (
+        stockSessionFilter === "ALL" &&
+        stockFilter !== "ALL" &&
+        stockFilter !== "GENERAL"
+      ) {
+        const allocationSession = sessionMap.get(Number(allocation.session_id || 0));
+        if (
+          normalizeCompany(allocationSession?.company_name) !==
+          normalizeCompany(stockFilter)
+        ) {
+          continue;
+        }
+      }
+      allocationModes.add(
+        String(allocation.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
+          ? "BAZAR"
+          : "HEALTHDAY",
+      );
+    }
+    if (allocationModes.size) return Array.from(allocationModes);
+
     const modes = new Set<string>();
     for (const assignment of sessionProductAssignments) {
       if (
@@ -1950,11 +1978,11 @@ export default function VaccinationMasterPage() {
           continue;
         }
       }
-      const mode =
+      modes.add(
         String(assignment.service_mode || "HEALTHDAY").toUpperCase() === "BAZAR"
           ? "BAZAR"
-          : "HEALTHDAY";
-      modes.add(mode);
+          : "HEALTHDAY",
+      );
     }
     return Array.from(modes);
   }

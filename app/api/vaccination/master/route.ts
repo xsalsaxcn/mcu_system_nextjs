@@ -2072,6 +2072,26 @@ export async function POST(req: NextRequest) {
     const name = clean(body.name);
     if (!name) return fail("Nama vaksin wajib diisi.");
 
+    // V568: jangan buat Master Produk duplikat hanya karena user mengubah nama
+    // dari editor Lot. Nama + brand aktif yang sama harus memakai Master yang sama.
+    const brand = clean(body.brand);
+    const duplicateProductResult = await supabase
+      .from("vaccination_vaccines")
+      .select("id,name,brand,active")
+      .eq("active", true)
+      .ilike("name", name)
+      .limit(100);
+    if (duplicateProductResult.error) return fail(duplicateProductResult.error.message, 500);
+    const duplicateProduct = (duplicateProductResult.data || []).find(
+      (row: any) => clean(row.brand).toLowerCase() === brand.toLowerCase(),
+    );
+    if (duplicateProduct) {
+      return fail(
+        `Master Produk ${duplicateProduct.name} (${duplicateProduct.brand || "-"}) sudah ada. Gunakan Edit Produk, jangan membuat produk baru dari Edit Lot.`,
+        409,
+      );
+    }
+
     const result = await supabase
       .from("vaccination_vaccines")
       .insert({
