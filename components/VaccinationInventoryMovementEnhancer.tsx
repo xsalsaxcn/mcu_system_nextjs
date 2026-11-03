@@ -24,6 +24,7 @@ type DetailRow = {
   employee_id: string;
   mcu_id: string;
   session: string;
+  session_id?: number | null;
   location: string;
   vaccine_id: number;
   vaccine: string;
@@ -49,6 +50,11 @@ type LotSummary = {
   vaccine_name: string;
   brand: string;
   lot_number: string;
+  company?: string;
+  session?: string;
+  session_id?: number | null;
+  location?: string;
+  service_mode?: string;
   initial: number;
   added: number;
   used: number;
@@ -117,7 +123,19 @@ function csvCell(value: any) {
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export default function VaccinationInventoryMovementEnhancer() {
+type MovementEnhancerProps = {
+  companyFilter?: string;
+  sessionFilter?: string;
+  serviceFilter?: string;
+  productFilter?: string;
+};
+
+export default function VaccinationInventoryMovementEnhancer({
+  companyFilter = "ALL",
+  sessionFilter = "ALL",
+  serviceFilter = "ALL",
+  productFilter = "ALL",
+}: MovementEnhancerProps) {
   const [report, setReport] = useState<Report>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -164,34 +182,50 @@ export default function VaccinationInventoryMovementEnhancer() {
   const summaries = report.lotSummaries || [];
   const details = report.details || [];
 
+  const rowMatchesMainInventoryFilters = useCallback((row: DetailRow) => {
+    if (companyFilter !== "ALL" && clean(row.company) !== clean(companyFilter)) return false;
+    if (sessionFilter !== "ALL" && Number(row.session_id || 0) !== Number(sessionFilter)) return false;
+    if (productFilter !== "ALL" && Number(row.vaccine_id || 0) !== Number(productFilter)) return false;
+    if (serviceFilter !== "ALL") {
+      const mode = clean(row.service_mode).toUpperCase();
+      if (mode !== serviceFilter && mode !== "BOTH") return false;
+    }
+    return true;
+  }, [companyFilter, sessionFilter, productFilter, serviceFilter]);
+
   const activeRows = useMemo(() => {
+    let rows: DetailRow[] = [];
     if (activeBucket === "lot" && activeLotId) {
       const ids = new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number));
-      return details
+      rows = details
         .filter((row) => ids.has(Number(row.lot_id || 0)))
         .sort((a, b) => {
           const at = a.date ? new Date(a.date).getTime() : 0;
           const bt = b.date ? new Date(b.date).getTime() : 0;
           return bt - at;
         });
-    }
-    if (activeBucket === "initial") return details.filter((row) => row.movement_type === "Jumlah Awal");
-    if (activeBucket === "added") return details.filter((row) => row.movement_type === "Tambahan Stok");
-    if (activeBucket === "used") return details.filter((row) => row.direction === "OUT");
-    if (activeBucket === "remaining") {
-      return summaries.map((row) => ({
+    } else if (activeBucket === "initial") {
+      rows = details.filter((row) => row.movement_type === "Jumlah Awal");
+    } else if (activeBucket === "added") {
+      rows = details.filter((row) => ["Tambahan Stok", "Transfer Stok Masuk", "Retur Stok"].includes(row.movement_type));
+    } else if (activeBucket === "used") {
+      rows = details.filter((row) => row.direction === "OUT");
+    } else if (activeBucket === "remaining") {
+      rows = summaries.map((row) => ({
         date: null,
         direction: "BALANCE",
         movement_type: "Sisa Sistem",
-        company: [
+        company: row.company || [
           row.in_sources?.length ? `IN: ${row.in_sources.join(", ")}` : "IN: -",
           row.out_companies?.length ? `OUT: ${row.out_companies.join(", ")}` : "OUT: -",
         ].join(" | "),
         participant: "",
         employee_id: "",
         mcu_id: "",
-        session: "",
-        location: "",
+        session: row.session || "",
+        session_id: row.session_id || null,
+        location: row.location || "",
+        service_mode: row.service_mode || "",
         vaccine_id: row.vaccine_id,
         vaccine: row.vaccine_name,
         brand: row.brand,
@@ -204,25 +238,25 @@ export default function VaccinationInventoryMovementEnhancer() {
         reference: "Saldo lot",
         note: `Awal ${row.initial} + Tambahan ${row.added} - Terpakai ${row.used}`,
       } as DetailRow));
-    }
-    if (activeBucket === "movements") {
-      return [...details].sort((a, b) => {
+    } else if (activeBucket === "movements") {
+      rows = [...details].sort((a, b) => {
         const at = a.date ? new Date(a.date).getTime() : 0;
         const bt = b.date ? new Date(b.date).getTime() : 0;
         return bt - at;
       });
-    }
-    if (activeBucket === "diff") {
-      return summaries.filter((row) => row.diff != null).map((row) => ({
+    } else if (activeBucket === "diff") {
+      rows = summaries.filter((row) => row.diff != null).map((row) => ({
         date: null,
         direction: "AUDIT",
         movement_type: "Selisih",
-        company: row.out_companies?.join(", ") || "-",
+        company: row.company || row.out_companies?.join(", ") || "-",
         participant: "",
         employee_id: "",
         mcu_id: "",
-        session: "",
-        location: "",
+        session: row.session || "",
+        session_id: row.session_id || null,
+        location: row.location || "",
+        service_mode: row.service_mode || "",
         vaccine_id: row.vaccine_id,
         vaccine: row.vaccine_name,
         brand: row.brand,
@@ -236,8 +270,13 @@ export default function VaccinationInventoryMovementEnhancer() {
         note: `Sisa fisik ${row.physical} - Sisa sistem ${row.remaining}`,
       } as DetailRow));
     }
-    return [];
-  }, [activeBucket, activeLotId, activeLotIds, details, summaries]);
+    return rows.filter(rowMatchesMainInventoryFilters);
+  }, [activeBucket, activeLotId, activeLotIds, details, summaries, rowMatchesMainInventoryFilters]);
+
+  const filteredReportRows = useMemo(
+    () => details.filter(rowMatchesMainInventoryFilters),
+    [details, rowMatchesMainInventoryFilters],
+  );
 
   const activeParticipantRows = useMemo(
     () => activeRows.filter((row) => row.direction === "OUT" && clean(row.participant)),
@@ -393,11 +432,32 @@ export default function VaccinationInventoryMovementEnhancer() {
   }
 
   function exportCsv() {
-    const params = new URLSearchParams();
-    if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
-    if (dateFrom) params.set("from", dateFrom);
-    if (dateTo) params.set("to", dateTo);
-    window.location.href = `/api/vaccination/inventory/export${params.toString() ? `?${params.toString()}` : ""}`;
+    const headers = ["TANGGAL", "ARAH", "TRANSAKSI", "VAKSIN", "LOT", "LAYANAN", "JENIS_HARGA", "HARGA", "PAYMENT_METHOD", "QTY", "PERUSAHAAN", "PESERTA", "EMPLOYEE_ID", "SESSION", "LOKASI", "PETUGAS_DOKTER", "STATUS", "CATATAN"];
+    const lines = [headers.join(",")];
+    for (const row of filteredReportRows) {
+      const serviceMode = clean(row.service_mode).toUpperCase();
+      const saleMode = clean(row.sale_mode).toUpperCase();
+      const pricingLabel = saleMode === "PACKAGE"
+        ? `Paket ${Math.max(1, Number(row.package_dose_count || 1))} dosis`
+        : saleMode === "NON_PACKAGE" ? "Non Paket" : serviceMode === "HEALTHDAY" ? "Free" : "";
+      const price = row.sales_price_snapshot == null ? "" : Number(row.sales_price_snapshot || 0);
+      lines.push([
+        row.date || "", row.direction || "", row.movement_type || "", row.vaccine || "", row.lot || "",
+        serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : serviceMode === "BOTH" ? "Healthday + Bazar" : "",
+        pricingLabel, price, row.payment_method || "", row.qty ?? "", row.company || "", row.participant || "", row.employee_id || "",
+        row.session || "", row.location || "", row.doctor || "", [row.print_status, row.validation_status].filter(Boolean).join(" / "),
+        operationalText(row.note, ""),
+      ].map(csvCell).join(","));
+    }
+    const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vaccination_inventory_filter_${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function exportActiveDetail() {
@@ -412,7 +472,7 @@ export default function VaccinationInventoryMovementEnhancer() {
       const price = row.sales_price_snapshot == null ? "" : Number(row.sales_price_snapshot || 0);
       lines.push([
         row.date || "", row.direction || "", row.movement_type || "", row.vaccine || "", row.lot || "",
-        serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : "", pricingLabel, price,
+        serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : serviceMode === "BOTH" ? "Healthday + Bazar" : "", pricingLabel, price,
         row.payment_method || "", row.qty ?? "", row.company || "", row.participant || "", row.employee_id || "",
         row.session || "", row.location || "", row.doctor || "", [row.print_status, row.validation_status].filter(Boolean).join(" / "),
         operationalText(row.note, ""),
@@ -533,7 +593,7 @@ export default function VaccinationInventoryMovementEnhancer() {
                         <td className="p-3 font-bold">{row.movement_type || "-"}</td>
                         <td className="p-3 font-bold">{row.vaccine}{row.brand ? ` - ${row.brand}` : ""}</td>
                         <td className="p-3">{row.lot || "-"}</td>
-                        <td className="p-3">{serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : "-"}</td>
+                        <td className="p-3">{serviceMode === "BAZAR" ? "Bazar" : serviceMode === "HEALTHDAY" ? "Healthday" : serviceMode === "BOTH" ? "Healthday + Bazar" : "-"}</td>
                         <td className="p-3 font-bold">{pricingLabel}</td>
                         <td className="p-3">{priceLabel}</td>
                         <td className="p-3">{row.payment_method || "-"}</td>

@@ -79,6 +79,14 @@ function movementServiceMode(row: any) {
   return "";
 }
 
+function participantFromMovementNote(row: any) {
+  const raw = clean(row?.notes);
+  if (!raw) return "";
+  const parts = raw.split("·").map((part: string) => clean(part)).filter(Boolean);
+  if (parts.length >= 2 && /^QUEUE_DONE_SYNC:/i.test(parts[0])) return parts[1] || "";
+  return "";
+}
+
 // V518_INVENTORY_PAYMENT_METHOD_TRACE
 export type InventoryReportFilters = {
   vaccineIds?: number[];
@@ -115,10 +123,37 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   });
   const allowedLotIds = new Set(lots.map((row: any) => Number(row.id)));
 
-  const allRecords = (recordsResult.data || []).filter((row: any) => !isCancelled(row.status));
-  const recordMap = new Map<number, any>(allRecords.map((row: any) => [Number(row.id), row]));
+  const rawRecords = recordsResult.data || [];
+  const allRecords = rawRecords.filter((row: any) => !isCancelled(row.status));
+  const recordMap = new Map<number, any>(rawRecords.map((row: any) => [Number(row.id), row]));
   const records = allRecords.filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
   const movements = (movementsResult.data || []).filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
+
+  let stockAllocations: any[] = [];
+  if (allowedLotIds.size) {
+    const allocationResult = await supabase
+      .from("vaccination_session_stock_allocations")
+      .select("lot_id,session_id,service_mode,allocated_qty,dedicated,active")
+      .in("lot_id", Array.from(allowedLotIds))
+      .eq("active", true)
+      .limit(20000);
+    if (!allocationResult.error) stockAllocations = allocationResult.data || [];
+  }
+  const lotServiceModes = new Map<number, Set<string>>();
+  for (const allocation of stockAllocations) {
+    const lotId = Number(allocation?.lot_id || 0);
+    if (!lotId) continue;
+    const mode = clean(allocation?.service_mode).toUpperCase();
+    if (!["HEALTHDAY", "BAZAR"].includes(mode)) continue;
+    if (!lotServiceModes.has(lotId)) lotServiceModes.set(lotId, new Set<string>());
+    lotServiceModes.get(lotId)!.add(mode);
+  }
+  function serviceModeForLot(lotId: number, vaccineName: string) {
+    const modes = Array.from(lotServiceModes.get(Number(lotId)) || []);
+    if (modes.length > 1) return "BOTH";
+    if (modes.length === 1) return modes[0];
+    return /(?:^|\s|-)BAZAR(?:$|\s|-)/i.test(vaccineName) ? "BAZAR" : "HEALTHDAY";
+  }
 
   const movementRegistrationIds = movements
     .filter((row: any) => clean(row.reference_type).toLowerCase() === "registration")
@@ -150,9 +185,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   if (allowedLotIds.size) {
     const result = await supabase
       .from("vaccination_registration_items")
-      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,payment_method,active")
-      .not("administered_record_id", "is", null)
+      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,payment_method,active,administered_at")
       .eq("active", true)
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
       .limit(20000);
     if (result.error) {
       throw new Error(`Gagal membaca detail Paket/Non Paket: ${result.error.message}`);
@@ -177,6 +212,14 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     const direct = itemByRecordId.get(Number(record?.id || 0));
     if (direct) return direct;
     const key = `${Number(record?.registration_id || 0)}:${Number(record?.vaccine_id || 0)}:${Number(record?.lot_id || 0)}`;
+    const candidates = fallbackItemsByKey.get(key) || [];
+    return candidates.find((row: any) =>
+      ["ADMINISTERED", "DONE", "FINISHED"].includes(clean(row?.status).toUpperCase()),
+    ) || candidates[0] || null;
+  }
+
+  function itemForRegistrationLot(registrationId: number, vaccineId: number, lotId: number) {
+    const key = `${Number(registrationId || 0)}:${Number(vaccineId || 0)}:${Number(lotId || 0)}`;
     const candidates = fallbackItemsByKey.get(key) || [];
     return candidates.find((row: any) =>
       ["ADMINISTERED", "DONE", "FINISHED"].includes(clean(row?.status).toUpperCase()),
@@ -217,11 +260,28 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     const ownerCompany = clean(lot.stock_company_name) || clean(ownerSession?.company_name);
     const ownerSessionName = clean(ownerSession?.session_name);
     const ownerLocation = clean(ownerSession?.location);
+    const lotServiceMode = serviceModeForLot(lotId, vaccineName);
 
-    // V150.1: keep Inventory card/report usage identical to the canonical Inventory API.
-    // Legacy stock_used can be higher than traceable vaccination_records; when no date
-    // range is active, preserve that cumulative value instead of silently lowering usage.
-    const traceableUsedAll = lotRecords.length;
+    const administeredMovements = lotMovements.filter(
+      (row: any) => clean(row?.movement_type).toUpperCase() === "ADMINISTERED",
+    );
+    const lotRecordIds = new Set(lotRecords.map((row: any) => Number(row.id || 0)).filter(Boolean));
+    const lotRecordRegistrationIds = new Set(lotRecords.map((row: any) => Number(row.registration_id || 0)).filter(Boolean));
+    const fallbackAdministeredMovements = administeredMovements.filter((movement: any) => {
+      const referenceType = clean(movement?.reference_type).toLowerCase();
+      const referenceId = Number(movement?.reference_id || 0);
+      if (referenceType === "vaccination_record" && referenceId && lotRecordIds.has(referenceId)) return false;
+      if (referenceType === "registration" && referenceId && lotRecordRegistrationIds.has(referenceId)) return false;
+      return true;
+    });
+    const fallbackAdministeredUsedAll = fallbackAdministeredMovements.reduce(
+      (sum: number, movement: any) => sum + Math.max(1, Math.abs(num(movement?.qty))),
+      0,
+    );
+
+    // Canonical used stock may contain legacy usage, but traceable ADMINISTERED movements
+    // are now counted too so they are not collapsed into "Pemakaian Lama".
+    const traceableUsedAll = lotRecords.length + fallbackAdministeredUsedAll;
     const canonicalUsedAll = Math.max(num(lot.stock_used), traceableUsedAll);
     const legacyUnattributedUsed = Math.max(0, canonicalUsedAll - traceableUsedAll);
     const hasDateFilter = Boolean(from || to);
@@ -239,7 +299,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           employee_id: "",
           mcu_id: "",
           session: ownerSessionName,
+          session_id: Number(ownerSession?.id || 0) || null,
           location: ownerLocation,
+          service_mode: lotServiceMode,
           lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
@@ -264,7 +326,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         employee_id: "",
         mcu_id: "",
         session: ownerSessionName,
+        session_id: Number(ownerSession?.id || 0) || null,
         location: ownerLocation,
+        service_mode: lotServiceMode,
         lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
@@ -296,7 +360,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           employee_id: "",
           mcu_id: "",
           session: ownerSessionName,
+          session_id: Number(ownerSession?.id || 0) || null,
           location: ownerLocation,
+          service_mode: lotServiceMode,
           lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
@@ -326,7 +392,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
           employee_id: "",
           mcu_id: "",
           session: ownerSessionName,
+          session_id: Number(ownerSession?.id || 0) || null,
           location: ownerLocation,
+          service_mode: lotServiceMode,
           lot_id: lotId,
           vaccine_id: Number(lot.vaccine_id),
           vaccine: vaccineName,
@@ -351,7 +419,9 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         employee_id: "",
         mcu_id: "",
         session: ownerSessionName,
+        session_id: Number(ownerSession?.id || 0) || null,
         location: ownerLocation,
+        service_mode: lotServiceMode,
         lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
@@ -396,6 +466,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         employee_id: clean(registration.employee_id),
         mcu_id: clean(registration.mcu_id),
         session: clean(session.session_name),
+        session_id: Number(session.id || record.session_id || registration.session_id || 0) || null,
         location: clean(session.location),
         lot_id: lotId,
         record_id: Number(record.id || 0) || null,
@@ -416,6 +487,74 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         validation_status: clean(registration.validation_status),
         reference: clean(registration.queue_number),
         note: clean(registration.department),
+      });
+    }
+
+
+    for (const movement of fallbackAdministeredMovements) {
+      if (!inRange(movement.created_at, from, to)) continue;
+      const referenceType = clean(movement.reference_type).toLowerCase();
+      const referenceId = Number(movement.reference_id || 0);
+      const referencedRecord = referenceType === "vaccination_record" ? recordMap.get(referenceId) : null;
+      const referencedRegistration = referenceType === "registration"
+        ? registrationMap.get(referenceId)
+        : referencedRecord
+          ? registrationMap.get(Number(referencedRecord.registration_id || 0))
+          : null;
+      const registrationId = Number(referencedRegistration?.id || referencedRecord?.registration_id || 0);
+      const contextItem = referencedRecord
+        ? itemForRecord(referencedRecord)
+        : itemForRegistrationLot(registrationId, Number(lot.vaccine_id), lotId);
+      const contextSession = sessionMap.get(
+        Number(referencedRegistration?.session_id || referencedRecord?.session_id || contextItem?.session_id || lot.stock_session_id || 0),
+      ) || ownerSession || null;
+      const contextServiceRaw = clean(contextItem?.service_mode).toUpperCase() || movementServiceMode(movement) || lotServiceMode;
+      const contextService = contextServiceRaw === "BAZAR"
+        ? "BAZAR"
+        : contextServiceRaw === "HEALTHDAY"
+          ? "HEALTHDAY"
+          : contextServiceRaw === "BOTH"
+            ? "BOTH"
+            : lotServiceMode;
+      const contextSaleMode = contextService === "BAZAR"
+        ? (clean(contextItem?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : contextItem ? "NON_PACKAGE" : "UNMAPPED")
+        : contextService === "HEALTHDAY"
+          ? "FREE"
+          : "UNMAPPED";
+      const participant = clean(referencedRegistration?.participant_name)
+        || clean(referencedRecord?.participant_name)
+        || participantFromMovementNote(movement);
+
+      details.push({
+        date: movement.created_at || contextItem?.administered_at || referencedRecord?.administered_at || referencedRecord?.created_at || null,
+        direction: "OUT",
+        movement_type: "Terpakai",
+        company: clean(referencedRegistration?.company_name) || clean(contextSession?.company_name) || ownerCompany || "Perusahaan belum dicatat",
+        participant,
+        employee_id: clean(referencedRegistration?.employee_id),
+        mcu_id: clean(referencedRegistration?.mcu_id),
+        session: clean(contextSession?.session_name) || ownerSessionName,
+        session_id: Number(contextSession?.id || referencedRegistration?.session_id || referencedRecord?.session_id || lot.stock_session_id || 0) || null,
+        location: clean(contextSession?.location) || ownerLocation,
+        lot_id: lotId,
+        record_id: Number(referencedRecord?.id || 0) || null,
+        registration_id: registrationId || null,
+        vaccine_id: Number(lot.vaccine_id),
+        vaccine: clean(referencedRecord?.vaccine_name) || vaccineName,
+        brand,
+        lot: clean(referencedRecord?.lot_number) || clean(lot.lot_number),
+        dose: referencedRecord ? Number(referencedRecord?.dose_number || 1) : "",
+        service_mode: contextService,
+        sale_mode: contextSaleMode,
+        package_dose_count: contextSaleMode === "PACKAGE" ? Math.max(1, Number(contextItem?.package_dose_count || 1)) : null,
+        sales_price_snapshot: contextItem?.sales_price_snapshot == null ? null : num(contextItem.sales_price_snapshot),
+        payment_method: clean(contextItem?.payment_method || referencedRegistration?.payment_method),
+        doctor: clean(referencedRecord?.administered_by) || clean(movement.created_by),
+        qty: Math.max(1, Math.abs(num(movement.qty))),
+        print_status: clean(referencedRegistration?.print_status),
+        validation_status: clean(referencedRegistration?.validation_status) || "DONE",
+        reference: clean(referencedRegistration?.queue_number),
+        note: participant ? "Pemakaian peserta" : friendlyNote(movement.notes, "Pemakaian stok"),
       });
     }
 
@@ -471,7 +610,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       const contextSession = referencedSession || ownerSession || null;
       const contextRecord = referencedRecord || null;
       const contextItem = contextRecord ? itemForRecord(contextRecord) : null;
-      const contextService = clean(contextItem?.service_mode).toUpperCase() || movementServiceMode(movement);
+      const contextService = clean(contextItem?.service_mode).toUpperCase() || movementServiceMode(movement) || lotServiceMode;
       const contextSaleMode = contextService === "BAZAR"
         ? (clean(contextItem?.sale_mode).toUpperCase() === "PACKAGE" ? "PACKAGE" : contextItem ? "NON_PACKAGE" : "")
         : contextService === "HEALTHDAY" ? "FREE" : "";
@@ -485,6 +624,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         employee_id: clean(referencedRegistration?.employee_id),
         mcu_id: clean(referencedRegistration?.mcu_id),
         session: clean(contextSession?.session_name) || ownerSessionName,
+        session_id: Number(contextSession?.id || lot.stock_session_id || 0) || null,
         location: clean(contextSession?.location) || ownerLocation,
         lot_id: lotId,
         record_id: Number(contextRecord?.id || 0) || null,
@@ -518,13 +658,15 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       details.push({
         date: null,
         direction: "OUT",
-        movement_type: "Pemakaian Lama",
+        movement_type: "Pemakaian Belum Teridentifikasi",
         company: ownerCompany || "Riwayat lama",
         participant: "",
         employee_id: "",
         mcu_id: "",
         session: ownerSessionName,
+        session_id: Number(ownerSession?.id || 0) || null,
         location: ownerLocation,
+        service_mode: lotServiceMode,
         lot_id: lotId,
         vaccine_id: Number(lot.vaccine_id),
         vaccine: vaccineName,
@@ -536,7 +678,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         print_status: "",
         validation_status: "",
         reference: "",
-        note: `${legacyUnattributedUsed} pemakaian lama belum memiliki detail peserta lengkap.`,
+        note: `${legacyUnattributedUsed} pemakaian belum memiliki detail peserta/tanggal yang dapat ditelusuri.`,
       });
     }
 
@@ -570,6 +712,11 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       vaccine_name: vaccineName,
       brand,
       lot_number: clean(lot.lot_number),
+      company: ownerCompany,
+      session: ownerSessionName,
+      session_id: Number(ownerSession?.id || lot.stock_session_id || 0) || null,
+      location: ownerLocation,
+      service_mode: lotServiceMode,
       initial: filteredInitial,
       added: filteredAdded,
       used: filteredUsed,
