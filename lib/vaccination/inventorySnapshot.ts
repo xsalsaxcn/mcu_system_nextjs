@@ -249,10 +249,15 @@ export async function buildVaccinationInventorySnapshot() {
   function canonicalLotKey(row: any) {
     const vaccineId = Number(row?.vaccine_id || row?.vaccine?.id || 0);
     const lotNumber = clean(row?.lot_number).toLowerCase();
-    // Catalog duplication can create multiple ownership rows for the same physical
-    // product+lot. Inventory presents one canonical row; Session/service separation
-    // is preserved by service_catalog + service_allocations below.
-    return [vaccineId, lotNumber].join("|");
+    // V544: after V542 stock isolation, the same Product + Lot Number may legally
+    // exist in multiple Session owners. Never collapse stock across owners.
+    const scope = clean(row?.stock_scope || "GENERAL").toUpperCase();
+    const ownerKey = scope === "SESSION"
+      ? `SESSION:${Number(row?.stock_session_id || 0)}`
+      : scope === "COMPANY"
+        ? `COMPANY:${clean(row?.stock_company_name).toLowerCase()}`
+        : "GENERAL";
+    return [vaccineId, lotNumber, ownerKey].join("|");
   }
 
   function canonicalSignal(row: any) {

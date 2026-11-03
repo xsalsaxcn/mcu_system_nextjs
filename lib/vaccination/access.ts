@@ -7,6 +7,7 @@ export type VaccinationPermission =
   | "administer"
   | "validation"
   | "inventory"
+  | "inventory_return"
   | "master"
   | "session"
   | "dashboard"
@@ -19,16 +20,18 @@ export const VACCINATION_ROLES = [
   "vaccination_medis",
   "vaccination_validation",
   "vaccination_inventory",
+  "vaccination_inventory_return",
   "vaccination_report",
   "vaccination_supervisor",
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, VaccinationPermission[]> = {
-  vaccination_admin: ["portal", "register", "queue", "administer", "validation", "inventory", "master", "session", "dashboard", "export", "users"],
+  vaccination_admin: ["portal", "register", "queue", "administer", "validation", "inventory", "inventory_return", "master", "session", "dashboard", "export", "users"],
   vaccination_frontdesk: ["portal", "register", "queue"],
   vaccination_medis: ["portal", "administer"],
   vaccination_validation: ["portal", "validation"],
-  vaccination_inventory: ["portal", "inventory", "master", "session", "export"],
+  vaccination_inventory: ["portal", "inventory", "inventory_return", "master", "session", "export"],
+  vaccination_inventory_return: ["portal", "inventory_return"],
   vaccination_report: ["portal", "dashboard", "export"],
   vaccination_supervisor: ["portal", "dashboard", "session", "inventory", "master", "validation", "export"],
 };
@@ -44,11 +47,12 @@ export function isVaccinationRole(user: Partial<SessionUser> | null | undefined)
 export function vaccinationRoleLabel(user: Partial<SessionUser> | null | undefined) {
   const role = vaccinationRole(user);
   const labels: Record<string, string> = {
-    vaccination_admin: "Vaccination Admin",
+    vaccination_admin: "Admin Vaksinasi",
     vaccination_frontdesk: "Vaccination Frontdesk",
     vaccination_medis: "Vaccination Medis",
     vaccination_validation: "Vaccination Validation",
     vaccination_inventory: "Vaccination Inventory",
+    vaccination_inventory_return: "AIA - Retur Inventory",
     vaccination_report: "Vaccination Report",
     vaccination_supervisor: "Vaccination Supervisor",
   };

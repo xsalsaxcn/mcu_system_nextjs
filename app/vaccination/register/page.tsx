@@ -121,6 +121,7 @@ export default function VaccinationRegisterPage() {
   const [lots, setLots] = useState<any[]>([]);
   const [salesOffers, setSalesOffers] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<any[]>([]);
+  const [locationStockSummary, setLocationStockSummary] = useState<Record<string, any>>({});
   const [selfBookings, setSelfBookings] = useState<any[]>([]);
   const [selfBookingLoading, setSelfBookingLoading] = useState(false);
   const [processingBooking, setProcessingBooking] = useState<any | null>(null);
@@ -511,19 +512,40 @@ export default function VaccinationRegisterPage() {
   );
 
   const productSummary = useMemo(() => {
-    const map = new Map<string, { name: string; count: number }>();
+    const map = new Map<string, { id: string; name: string; count: number; stockLocation: number; registered: number; arrived: number; available: number }>();
     for (const registration of registrations) {
       const items = Array.isArray(registration.items) ? registration.items : [];
       for (const item of items) {
         const name = item?.vaccine?.name || "Produk";
         const key = String(item?.vaccine_id || name);
-        const current = map.get(key) || { name, count: 0 };
+        const stock = locationStockSummary[key] || {};
+        const current = map.get(key) || {
+          id: key,
+          name,
+          count: 0,
+          stockLocation: Number(stock.stockLocation || 0),
+          registered: Number(stock.registered || 0),
+          arrived: Number(stock.arrived || 0),
+          available: Number(stock.available || 0),
+        };
         current.count += 1;
         map.set(key, current);
       }
     }
+    for (const [key, stock] of Object.entries(locationStockSummary)) {
+      if (map.has(key)) continue;
+      map.set(key, {
+        id: key,
+        name: String((stock as any)?.name || `Produk ${key}`),
+        count: 0,
+        stockLocation: Number((stock as any)?.stockLocation || 0),
+        registered: Number((stock as any)?.registered || 0),
+        arrived: Number((stock as any)?.arrived || 0),
+        available: Number((stock as any)?.available || 0),
+      });
+    }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "id"));
-  }, [registrations]);
+  }, [registrations, locationStockSummary]);
 
   const summary = useMemo(() => {
     const stats = { total: registrations.length, current: "-", notArrived: 0, waiting: 0, doctor: 0, done: 0 };
@@ -597,9 +619,19 @@ export default function VaccinationRegisterPage() {
     const params = new URLSearchParams();
     params.set("session_id", sessionId);
     if (sourceId) params.set("source_id", String(sourceId));
-    const json = await fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json());
+    const [json, stockJson] = await Promise.all([
+      fetch(`/api/vaccination/register?${params.toString()}`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/vaccination/register-stock-summary?session_id=${encodeURIComponent(String(sessionId))}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false, rows: [] })),
+    ]);
     if (json.ok) setRegistrations(json.registrations || []);
     else setError(json.message || "Gagal memuat registrasi.");
+    if (stockJson?.ok) {
+      const map: Record<string, any> = {};
+      for (const row of stockJson.rows || []) map[String(row.vaccineId)] = row;
+      setLocationStockSummary(map);
+    } else {
+      setLocationStockSummary({});
+    }
   }
 
   async function loadSelfBookings(sessionId = form.sessionId) {
@@ -1351,10 +1383,16 @@ export default function VaccinationRegisterPage() {
         {productSummary.length ? (
           <section className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             {productSummary.map((item) => (
-              <div key={item.name} className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <div key={item.id} className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
                 <div className="text-xs font-black uppercase text-blue-700">{item.name}</div>
                 <div className="mt-2 text-2xl font-black text-blue-900">{item.count}</div>
                 <div className="text-xs text-blue-700">produk terdaftar</div>
+                <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px] font-black">
+                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Stok {item.stockLocation}</span>
+                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Terdaftar {item.registered}</span>
+                  <span className="rounded-lg bg-white/80 px-2 py-1.5 text-slate-700">Datang {item.arrived}</span>
+                  <span className={`rounded-lg px-2 py-1.5 ${item.available > 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-700"}`}>Sisa {item.available}</span>
+                </div>
               </div>
             ))}
           </section>

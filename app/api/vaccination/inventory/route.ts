@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     if (!canonicalRow) return fail("Produk/Lot tidak ditemukan pada Inventory aktif.", 404);
 
     const remaining = Number(canonicalRow?.stock_system_remaining || 0);
-    if (remaining !== 0) return fail(`Produk/Lot masih memiliki Sisa Sistem ${remaining}. Kurangi atau transfer stok sampai 0 sebelum dihapus dari Inventory.`, 409);
+    if (remaining !== 0) return fail(`Produk/Lot masih memiliki Sisa Sistem ${remaining}. Transfer stok sampai 0 sebelum dihapus dari Inventory.`, 409);
 
     const lotIds = Array.from(new Set<number>(
       (Array.isArray(canonicalRow?.source_lot_ids) && canonicalRow.source_lot_ids.length
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     const inventoryTarget = clean(body.inventoryTarget).toUpperCase();
     const quantity = Math.max(0, toInt(body.quantity, 0));
 
-    if (!["ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) return fail("Pilih Stok: Tambah Stock, Return Stock, atau Kurangi Stock.");
+    if (!["ADD_STOCK", "RETURN_STOCK"].includes(stockAction)) return fail("Pilih Stok: Tambah Stock atau Return Stock.");
     if (!["SYSTEM", "PHYSICAL"].includes(inventoryTarget)) return fail("Pilih Inventory: Sistem atau Fisik.");
     if (inventoryTarget === "SYSTEM" && !quantity) return fail("Jumlah stok wajib lebih dari 0.");
 
@@ -185,23 +185,15 @@ export async function POST(req: NextRequest) {
       return ok({ message: `Sisa Fisik berhasil disamakan dengan Sisa Sistem: ${beforeRemaining}.`, lot: updateResult.data, stockSystemRemaining: beforeRemaining, stockPhysicalCount: beforeRemaining });
     }
 
-    const isRemove = stockAction === "REMOVE_STOCK";
-    if (isRemove && quantity > beforeRemaining) {
-      return fail(`Stok tidak cukup. Sisa Sistem saat ini ${beforeRemaining}, tidak bisa dikurangi ${quantity}.`, 409);
-    }
-
-    const nextAdded = isRemove ? beforeAdded : beforeAdded + quantity;
-    const nextMovementOut = movementOut + (isRemove ? quantity : 0);
-    const nextRemaining = initial + nextAdded - used - nextMovementOut;
+    const nextAdded = beforeAdded + quantity;
+    const nextRemaining = initial + nextAdded - used - movementOut;
     if (nextRemaining < 0) return fail(`Sisa Sistem tidak boleh negatif (${nextRemaining}).`, 409);
 
-    const label = isRemove ? "Kurangi Stock" : stockAction === "RETURN_STOCK" ? "Return Stock" : "Tambah Stock";
+    const label = stockAction === "RETURN_STOCK" ? "Return Stock" : "Tambah Stock";
     const nextNotes = note || `${label} - Inventory Sistem`;
     const physicalAfter = physicalBefore === null
       ? nextRemaining
-      : isRemove
-        ? Math.max(0, physicalBefore - quantity)
-        : physicalBefore + quantity;
+      : physicalBefore + quantity;
     const updateResult = await supabase
       .from("vaccination_vaccine_lots")
       .update({
@@ -218,9 +210,9 @@ export async function POST(req: NextRequest) {
     const movementResult = await supabase.from("vaccination_inventory_movements").insert({
       vaccine_id: lot.vaccine_id,
       lot_id: lotId,
-      movement_type: isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
+      movement_type: stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
       qty: quantity,
-      reference_type: isRemove ? "inventory_adjustment_out" : "inventory_system",
+      reference_type: "inventory_system",
       reference_id: lotId,
       notes: nextNotes,
       created_by: createdBy,

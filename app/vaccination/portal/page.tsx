@@ -13,6 +13,7 @@ const MODULES = [
   { permission: "administer", label: "Administered / Medis", href: "/vaccination/administer", icon: "MD", text: "Proses tindakan dokter dan pencatatan vaksin." },
   { permission: "validation", label: "Tim Validasi", href: "/vaccination/validation", icon: "TV", text: "Print label dan validasi akhir." },
   { permission: "inventory", label: "Inventory Vaksin", href: "/vaccination/inventory", icon: "IV", text: "Stock, IN/OUT, audit dan export." },
+  { permission: "inventory_return", label: "AIA · Retur Inventory", href: "/vaccination/inventory/retur", icon: "RT", text: "Akses sederhana khusus retur stok ke Inventory." },
   { permission: "inventory", label: "Alokasi Stock Session", href: "/vaccination/portal/stock", icon: "AS", text: "Dedikasi lot untuk session dan threshold low stock." },
   { permission: "users", label: "Role Tim Vaksinasi", href: "/vaccination/portal/users", icon: "UR", text: "Assign role khusus untuk tim vaksinasi." },
 ] as const;

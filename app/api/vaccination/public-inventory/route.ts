@@ -229,8 +229,8 @@ export async function POST(req: NextRequest) {
         : "HEALTHDAY";
 
       if (!lotId) return fail("Lot wajib dipilih.");
-      if (!["SET_INITIAL_STOCK", "ADD_STOCK", "RETURN_STOCK", "REMOVE_STOCK"].includes(stockAction)) {
-        return fail("Pilih aksi Stok Awal, Tambah Stok, Return Stok, atau Kurangi Stok.");
+      if (!["SET_INITIAL_STOCK", "ADD_STOCK", "RETURN_STOCK"].includes(stockAction)) {
+        return fail("Pilih aksi Stok Awal, Tambah Stok, atau Return Stok.");
       }
       if (!quantity) return fail("Jumlah stok wajib lebih dari 0.");
       if (!sourceSessionId) {
@@ -302,19 +302,14 @@ export async function POST(req: NextRequest) {
       const used = Math.max(Number(lot.stock_used || 0), (recordsResult.data || []).length);
       const beforeRemaining = initial + beforeAdded - used - movementOut;
       const isInitial = stockAction === "SET_INITIAL_STOCK";
-      const isRemove = stockAction === "REMOVE_STOCK";
 
       if (isInitial && initial > 0) {
-        return fail(`Stok awal Lot ${lot.lot_number || lotId} sudah ${initial}. Gunakan Tambah Stok atau Kurangi Stok agar histori tidak berubah.`, 409);
-      }
-      if (isRemove && quantity > beforeRemaining) {
-        return fail(`Stok tidak cukup. Sisa saat ini ${beforeRemaining}, tidak bisa dikurangi ${quantity}.`, 409);
+        return fail(`Stok awal Lot ${lot.lot_number || lotId} sudah ${initial}. Gunakan Tambah Stok agar histori tidak berubah.`, 409);
       }
 
       const nextInitial = isInitial ? quantity : initial;
-      const nextAdded = isRemove || isInitial ? beforeAdded : beforeAdded + quantity;
-      const nextMovementOut = movementOut + (isRemove ? quantity : 0);
-      const nextRemaining = nextInitial + nextAdded - used - nextMovementOut;
+      const nextAdded = isInitial ? beforeAdded : beforeAdded + quantity;
+      const nextRemaining = nextInitial + nextAdded - used - movementOut;
       if (nextRemaining < 0) return fail("Sisa stok tidak boleh negatif.", 409);
 
       const physicalBefore = lot.stock_physical_count === null || lot.stock_physical_count === undefined
@@ -322,24 +317,18 @@ export async function POST(req: NextRequest) {
         : Number(lot.stock_physical_count);
       const physicalAfter = physicalBefore === null
         ? nextRemaining
-        : isRemove
-          ? Math.max(0, physicalBefore - quantity)
-          : physicalBefore + quantity;
+        : physicalBefore + quantity;
       const label = isInitial
         ? "Stok Awal"
-        : isRemove
-          ? "Kurangi Stok"
-          : stockAction === "RETURN_STOCK"
-            ? "Return Stok"
-            : "Tambah Stok";
+        : stockAction === "RETURN_STOCK"
+          ? "Return Stok"
+          : "Tambah Stok";
       const nextNotes = `[Portal Inventory] ${label} · ${clean(sessionResult.data.location) || clean(sessionResult.data.session_name) || `Session ${sourceSessionId}`} · ${sourceServiceMode} · ${note || "-"}`;
 
       const previousAllocation = allocationResult.data || null;
       const allocatedBefore = Math.max(0, Number(previousAllocation?.allocated_qty || 0));
       const usedInBucket = (usedItemsResult.data || []).length;
-      const allocatedAfter = isRemove
-        ? Math.max(usedInBucket, allocatedBefore - quantity)
-        : allocatedBefore + quantity;
+      const allocatedAfter = allocatedBefore + quantity;
 
       const updateResult = await supabase
         .from("vaccination_vaccine_lots")
@@ -383,9 +372,9 @@ export async function POST(req: NextRequest) {
       const movementResult = await supabase.from("vaccination_inventory_movements").insert({
         vaccine_id: lot.vaccine_id,
         lot_id: lotId,
-        movement_type: isInitial ? "initial" : isRemove ? "adjustment_out" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
+        movement_type: isInitial ? "initial" : stockAction === "RETURN_STOCK" ? "return_stock" : "stock_in",
         qty: quantity,
-        reference_type: isInitial ? "public_inventory_initial" : isRemove ? "public_inventory_adjustment_out" : "public_inventory_system",
+        reference_type: isInitial ? "public_inventory_initial" : "public_inventory_system",
         reference_id: lotId,
         notes: nextNotes,
         created_by: createdBy,

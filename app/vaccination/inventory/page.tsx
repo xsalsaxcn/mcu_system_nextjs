@@ -124,7 +124,7 @@ export default function VaccinationInventoryPage() {
   async function confirmDelete() {
     if (!deleting) return;
     setError("");
-    if (Number(deleting?.stock_system_remaining || 0) !== 0) { setError(`Produk/Lot masih memiliki Sisa Sistem ${Number(deleting?.stock_system_remaining || 0)}. Kurangi atau transfer stok sampai 0 sebelum dihapus dari Inventory.`); return; }
+    if (Number(deleting?.stock_system_remaining || 0) !== 0) { setError(`Produk/Lot masih memiliki Sisa Sistem ${Number(deleting?.stock_system_remaining || 0)}. Transfer stok sampai 0 sebelum dihapus dari Inventory.`); return; }
     if (!clean(deleteReason)) { setError("Alasan hapus wajib diisi."); return; }
     const json = await fetch("/api/vaccination/inventory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "archive-lot", lotId: Number(deleting?.id || 0), reason: deleteReason }) }).then((r) => r.json());
     if (!json.ok) { setError(json.message || "Gagal menghapus Produk/Lot dari Inventory."); return; }
@@ -323,7 +323,6 @@ export default function VaccinationInventoryPage() {
                 <select disabled={form.inventoryTarget === "PHYSICAL"} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900 disabled:bg-slate-100 disabled:text-slate-400" value={form.stockAction} onChange={(e) => setForm({ ...form, stockAction: e.target.value })}>
                   <option value="ADD_STOCK">Tambah Stock</option>
                   <option value="RETURN_STOCK">Return Stock</option>
-                  <option value="REMOVE_STOCK">Kurangi Stock</option>
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
@@ -334,7 +333,7 @@ export default function VaccinationInventoryPage() {
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : form.stockAction === "REMOVE_STOCK" ? "Jumlah Stock Keluar" : "Jumlah Stock Masuk"}
+                {form.inventoryTarget === "PHYSICAL" ? "Sisa Fisik" : "Jumlah Stock Masuk"}
                 <input type="number" min={form.inventoryTarget === "PHYSICAL" ? 0 : 1} step={1} className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder={form.inventoryTarget === "PHYSICAL" ? "Harus sama dengan Sisa Sistem" : "Jumlah stok"} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
               </label>
               <div className="rounded-xl border bg-white px-3 py-2.5">
@@ -343,7 +342,7 @@ export default function VaccinationInventoryPage() {
               </div>
               <div className="rounded-xl border bg-white px-3 py-2.5">
                 <div className="text-xs font-black uppercase text-slate-500">Sisa Setelah Simpan</div>
-                <div className="mt-1 text-lg font-black text-emerald-700">{form.inventoryTarget === "PHYSICAL" ? Number(editing.stock_system_remaining || 0) : form.stockAction === "REMOVE_STOCK" ? Math.max(0, Number(editing.stock_system_remaining || 0) - Math.max(0, Number(form.quantity || 0))) : Number(editing.stock_system_remaining || 0) + Math.max(0, Number(form.quantity || 0))}</div>
+                <div className="mt-1 text-lg font-black text-emerald-700">{form.inventoryTarget === "PHYSICAL" ? Number(editing.stock_system_remaining || 0) : Number(editing.stock_system_remaining || 0) + Math.max(0, Number(form.quantity || 0))}</div>
               </div>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">

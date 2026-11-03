@@ -4,6 +4,21 @@ import { useEffect, useState } from "react";
 
 // VACCINATION_DEDICATED_USER_ADMIN_UI_V150_1
 
+
+
+function roleLabel(role: string) {
+  const labels: Record<string, string> = {
+    vaccination_admin: "Admin Vaksinasi",
+    vaccination_frontdesk: "Frontdesk",
+    vaccination_medis: "Medis",
+    vaccination_validation: "Tim Validasi",
+    vaccination_inventory: "Inventory",
+    vaccination_inventory_return: "AIA - Retur Inventory",
+    vaccination_report: "Reporting",
+    vaccination_supervisor: "Supervisor",
+  };
+  return labels[role] || role;
+}
 export default function VaccinationPortalUsersPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
@@ -126,7 +141,7 @@ export default function VaccinationPortalUsersPage() {
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nama<input className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.name} onChange={(e) => setAddForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Nama Pengguna<input className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.username} onChange={(e) => setAddForm((prev) => ({ ...prev, username: e.target.value }))} /></label>
               <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Kata Sandi<input type="password" className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" placeholder="Minimal 6 karakter" value={addForm.password} onChange={(e) => setAddForm((prev) => ({ ...prev, password: e.target.value }))} /></label>
-              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Peran<select className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.role} onChange={(e) => setAddForm((prev) => ({ ...prev, role: e.target.value }))}>{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">Peran<select className="rounded-xl border px-3 py-2.5 text-sm font-semibold normal-case text-slate-900" value={addForm.role} onChange={(e) => setAddForm((prev) => ({ ...prev, role: e.target.value }))}>{roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>
             </div>
             <div className="mt-4 flex gap-2">
               <button type="button" disabled={saving === "create"} onClick={createUser} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50">{saving === "create" ? "Menyimpan..." : "Simpan Pengguna"}</button>
@@ -152,7 +167,7 @@ export default function VaccinationPortalUsersPage() {
                     <td className="p-3">{user.username}</td>
                     <td className="p-3">
                       <select disabled={saving === user.id} className="min-w-[190px] rounded-xl border px-3 py-2" value={user.role || ""} onChange={(e) => saveRole(user.id, e.target.value)}>
-                        {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                        {roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
                       </select>
                     </td>
                     <td className="p-3">vaccination</td>

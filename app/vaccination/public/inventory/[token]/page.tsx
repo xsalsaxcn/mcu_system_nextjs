@@ -346,7 +346,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
     if (!deleting || saving) return;
     const remaining = Number(deleting?.stock_system_remaining || 0);
     if (remaining !== 0) {
-      setError(`Produk/Lot ini masih memiliki Sisa Sistem ${remaining}. Kurangi atau transfer stok sampai 0 sebelum dihapus dari Inventory.`);
+      setError(`Produk/Lot ini masih memiliki Sisa Sistem ${remaining}. Transfer stok sampai 0 sebelum dihapus dari Inventory.`);
       return;
     }
     if (!clean(deleteReason)) { setError("Alasan hapus wajib diisi."); return; }
@@ -447,7 +447,6 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
                 <select className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.action} onChange={(e) => setEditForm({ ...editForm, action: e.target.value, quantity: "", targetSessionId: "" })}>
                   <option value="SET_INITIAL_STOCK">Stok Awal</option>
                   <option value="ADD_STOCK">Tambah Stok</option>
-                  <option value="REMOVE_STOCK">Kurangi Stok</option>
                   <option value="TRANSFER_STOCK">Transfer Stok</option>
                 </select>
               </label>
@@ -494,7 +493,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
                     </select>
                   </label>
                   <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-                    {editForm.action === "SET_INITIAL_STOCK" ? "Jumlah Stok Awal" : editForm.action === "REMOVE_STOCK" ? "Jumlah Stok Dikurangi" : "Jumlah Stok Ditambah"}
+                    {editForm.action === "SET_INITIAL_STOCK" ? "Jumlah Stok Awal" : "Jumlah Stok Ditambah"}
                     <input type="number" min={1} step={1} className="rounded-xl border bg-white px-3 py-3 text-sm font-bold normal-case text-slate-900" value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} placeholder="Jumlah" />
                   </label>
                   <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
@@ -502,8 +501,7 @@ export default function PublicVaccinationInventoryPage({ params }: { params: { t
                     <input className="rounded-xl border bg-white px-3 py-3 text-sm font-semibold normal-case text-slate-900" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Contoh: stock opname / retur vendor" />
                   </label>
                   {editForm.action === "SET_INITIAL_STOCK" ? <div className="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-800">Stok Awal hanya dapat diisi jika stok awal lot masih 0. Nilai masuk ke <b>Jumlah Awal</b>, bukan Tambahan Stok.</div> : null}
-                  {editForm.action === "REMOVE_STOCK" ? <div className="md:col-span-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">Kurangi Stok dicatat sebagai koreksi keluar inventory, <b>bukan</b> sebagai pemakaian peserta.</div> : null}
-                </div>
+                                  </div>
               )}
 
               <div className="flex flex-wrap justify-end gap-2">
