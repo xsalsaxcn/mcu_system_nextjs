@@ -146,6 +146,7 @@ export default function VaccinationInventoryMovementEnhancer({
   const [activeLotId, setActiveLotId] = useState(0);
   const [activeLotIds, setActiveLotIds] = useState<number[]>([]);
   const [activeLotLabel, setActiveLotLabel] = useState("");
+  const [activeLotContext, setActiveLotContext] = useState({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" });
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -198,7 +199,17 @@ export default function VaccinationInventoryMovementEnhancer({
     if (activeBucket === "lot" && activeLotId) {
       const ids = new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number));
       rows = details
-        .filter((row) => ids.has(Number(row.lot_id || 0)))
+        .filter((row) => {
+          if (!ids.has(Number(row.lot_id || 0))) return false;
+          if (activeLotContext.vaccineId && Number(row.vaccine_id || 0) !== activeLotContext.vaccineId) return false;
+          if (activeLotContext.sessionId && Number(row.session_id || 0) !== activeLotContext.sessionId) return false;
+          if (activeLotContext.lotNumber && norm(row.lot) !== norm(activeLotContext.lotNumber)) return false;
+          if (activeLotContext.serviceMode) {
+            const mode = clean(row.service_mode).toUpperCase();
+            if (mode !== activeLotContext.serviceMode && mode !== "BOTH") return false;
+          }
+          return true;
+        })
         .sort((a, b) => {
           const at = a.date ? new Date(a.date).getTime() : 0;
           const bt = b.date ? new Date(b.date).getTime() : 0;
@@ -271,7 +282,7 @@ export default function VaccinationInventoryMovementEnhancer({
       } as DetailRow));
     }
     return rows.filter(rowMatchesMainInventoryFilters);
-  }, [activeBucket, activeLotId, activeLotIds, details, summaries, rowMatchesMainInventoryFilters]);
+  }, [activeBucket, activeLotId, activeLotIds, activeLotContext, details, summaries, rowMatchesMainInventoryFilters]);
 
   const filteredReportRows = useMemo(
     () => details.filter(rowMatchesMainInventoryFilters),
@@ -312,6 +323,7 @@ export default function VaccinationInventoryMovementEnhancer({
     function enhance() {
       const allDivs = Array.from(document.querySelectorAll<HTMLDivElement>("div"));
       for (const node of allDivs) {
+        if (node.closest('table[data-inventory-canonical-table="1"]')) continue;
         const label = clean(node.firstElementChild?.textContent).toUpperCase();
         const bucket = CARD_BUCKETS[label];
         if (!bucket) continue;
@@ -387,6 +399,7 @@ export default function VaccinationInventoryMovementEnhancer({
         setActiveLotId(0);
         setActiveLotIds([]);
         setActiveLotLabel("");
+        setActiveLotContext({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" });
         setActiveBucket(card.dataset.inventoryCardV150);
       }
     }
@@ -398,6 +411,7 @@ export default function VaccinationInventoryMovementEnhancer({
         setActiveLotId(0);
         setActiveLotIds([]);
         setActiveLotLabel("");
+        setActiveLotContext({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" });
         setActiveBucket(card.dataset.inventoryCardV150);
       }
     }
@@ -420,6 +434,12 @@ export default function VaccinationInventoryMovementEnhancer({
       setActiveLotId(primary);
       setActiveLotIds(lotIds.length ? lotIds : [primary]);
       setActiveLotLabel(clean(detail?.label || `Lot ${detail?.lotNumber || primary}`));
+      setActiveLotContext({
+        vaccineId: Number(detail?.vaccineId || 0),
+        sessionId: Number(detail?.sessionId || 0),
+        serviceMode: clean(detail?.serviceMode).toUpperCase(),
+        lotNumber: clean(detail?.lotNumber),
+      });
       setActiveBucket("lot");
     }
     window.addEventListener("vaccination-inventory-open-lot", openLot as EventListener);
@@ -529,7 +549,7 @@ export default function VaccinationInventoryMovementEnhancer({
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={exportActiveDetail} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Export Detail</button>
-                <button type="button" onClick={() => { setActiveBucket(""); setActiveLotId(0); setActiveLotLabel(""); }} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
+                <button type="button" onClick={() => { setActiveBucket(""); setActiveLotId(0); setActiveLotLabel(""); setActiveLotContext({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" }); }} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
               </div>
             </div>
             {activeBucket === "lot" ? (

@@ -535,7 +535,26 @@ export default function VaccinationInventoryPage() {
                         <div className="grid grid-cols-2 gap-1.5 text-[10px] font-bold">
                           <div className="rounded-lg bg-slate-50 px-2 py-1.5"><div className="text-slate-400">Awal</div><div className="mt-0.5 text-sm font-black text-slate-900">{row.stock_initial || 0}</div></div>
                           <div className="rounded-lg bg-blue-50 px-2 py-1.5"><div className="text-blue-500">Tambah</div><div className="mt-0.5 text-sm font-black text-blue-800">{row.stock_added || 0}</div></div>
-                          <div className="rounded-lg bg-amber-50 px-2 py-1.5"><div className="text-amber-600">Terpakai</div><div className="mt-0.5 text-sm font-black text-amber-800">{row.stock_used || 0}</div></div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              window.dispatchEvent(
+                                new CustomEvent("vaccination-inventory-open-lot", {
+                                  detail: {
+                                    lotId: Number(row.id || 0),
+                                    lotIds: Array.isArray(row.source_lot_ids) ? row.source_lot_ids : [Number(row.id || 0)],
+                                    lotNumber: row.lot_number || "",
+                                    vaccineId: Number(row.vaccine_id || row.vaccine?.id || 0),
+                                    sessionId: Number(row.stock_session_id || 0),
+                                    serviceMode: serviceFilter === "ALL" ? "" : serviceFilter,
+                                    label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
+                                  },
+                                }),
+                              );
+                            }}
+                            className="rounded-lg bg-amber-50 px-2 py-1.5 text-left hover:bg-amber-100"
+                            title="Lihat detail pemakaian produk ini"
+                          ><div className="text-amber-600">Terpakai</div><div className="mt-0.5 text-sm font-black text-amber-800">{row.stock_used || 0}</div></button>
                           <div className="rounded-lg bg-emerald-50 px-2 py-1.5"><div className="text-emerald-600">Sisa</div><div className="mt-0.5 text-sm font-black text-emerald-800">{row.stock_system_remaining}</div></div>
                         </div>
                       </td>
@@ -554,6 +573,9 @@ export default function VaccinationInventoryPage() {
                                     lotId: Number(row.id || 0),
                                     lotIds: Array.isArray(row.source_lot_ids) ? row.source_lot_ids : [Number(row.id || 0)],
                                     lotNumber: row.lot_number || "",
+                                    vaccineId: Number(row.vaccine_id || row.vaccine?.id || 0),
+                                    sessionId: Number(row.stock_session_id || 0),
+                                    serviceMode: serviceFilter === "ALL" ? "" : serviceFilter,
                                     label: `${row.vaccine?.name || "Vaksin"} · Lot ${row.lot_number || "-"}`,
                                   },
                                 }),

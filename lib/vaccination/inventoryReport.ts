@@ -87,6 +87,10 @@ function participantFromMovementNote(row: any) {
   return "";
 }
 
+function logicalLotKey(vaccineId: any, lotNumber: any, sessionId: any) {
+  return `${Number(vaccineId || 0)}::${clean(lotNumber).toUpperCase()}::${Number(sessionId || 0)}`;
+}
+
 // V518_INVENTORY_PAYMENT_METHOD_TRACE
 export type InventoryReportFilters = {
   vaccineIds?: number[];
@@ -126,7 +130,13 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   const rawRecords = recordsResult.data || [];
   const allRecords = rawRecords.filter((row: any) => !isCancelled(row.status));
   const recordMap = new Map<number, any>(rawRecords.map((row: any) => [Number(row.id), row]));
-  const records = allRecords.filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
+  const allowedLogicalLotKeys = new Set(
+    lots.map((row: any) => logicalLotKey(row.vaccine_id, row.lot_number, row.stock_session_id)),
+  );
+  const records = allRecords.filter((row: any) =>
+    allowedLotIds.has(Number(row.lot_id))
+    || allowedLogicalLotKeys.has(logicalLotKey(row.vaccine_id, row.lot_number, row.session_id)),
+  );
   const movements = (movementsResult.data || []).filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
 
   let stockAllocations: any[] = [];
@@ -149,10 +159,15 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     lotServiceModes.get(lotId)!.add(mode);
   }
   function serviceModeForLot(lotId: number, vaccineName: string) {
-    const modes = Array.from(lotServiceModes.get(Number(lotId)) || []);
+    if (/(?:^|\s|-)BAZAR(?:$|\s|-)/i.test(vaccineName)) return "BAZAR";
+    const positiveModes = stockAllocations
+      .filter((row: any) => Number(row?.lot_id || 0) === Number(lotId) && Number(row?.allocated_qty || 0) > 0)
+      .map((row: any) => clean(row?.service_mode).toUpperCase())
+      .filter((mode: string) => ["HEALTHDAY", "BAZAR"].includes(mode));
+    const modes = Array.from(new Set(positiveModes));
     if (modes.length > 1) return "BOTH";
     if (modes.length === 1) return modes[0];
-    return /(?:^|\s|-)BAZAR(?:$|\s|-)/i.test(vaccineName) ? "BAZAR" : "HEALTHDAY";
+    return "HEALTHDAY";
   }
 
   const movementRegistrationIds = movements
@@ -255,7 +270,11 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     const vaccineName = clean(vaccine.name) || "Vaksin";
     const brand = clean(vaccine.brand);
     const lotMovements = movements.filter((row: any) => Number(row.lot_id) === lotId);
-    const lotRecords = records.filter((row: any) => Number(row.lot_id) === lotId);
+    const lotLogicalKey = logicalLotKey(lot.vaccine_id, lot.lot_number, lot.stock_session_id);
+    const lotRecords = records.filter((row: any) =>
+      Number(row.lot_id) === lotId
+      || logicalLotKey(row.vaccine_id, row.lot_number, row.session_id) === lotLogicalKey,
+    );
     const ownerSession = sessionMap.get(Number(lot.stock_session_id || 0)) || null;
     const ownerCompany = clean(lot.stock_company_name) || clean(ownerSession?.company_name);
     const ownerSessionName = clean(ownerSession?.session_name);
