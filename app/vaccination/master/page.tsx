@@ -123,6 +123,10 @@ export default function VaccinationMasterPage() {
   const [selectedMasterVaccineId, setSelectedMasterVaccineId] = useState("");
   const [masterEditMode, setMasterEditMode] = useState<"CREATE" | "PRODUCT" | "LOT">("CREATE");
   const [editingLotId, setEditingLotId] = useState("");
+  // V576_MASTER_MODAL_TABLE_FIRST — UI-only state (no DB/schema changes)
+  const [masterEditorOpen, setMasterEditorOpen] = useState(false);
+  const [masterTablePage, setMasterTablePage] = useState(1);
+
   const [editingMappingId, setEditingMappingId] = useState("");
   const [editingMappingVaccineId, setEditingMappingVaccineId] = useState("");
   const [transferLot, setTransferLot] = useState<any | null>(null);
@@ -184,6 +188,7 @@ export default function VaccinationMasterPage() {
   const [catalogDuplicating, setCatalogDuplicating] = useState(false);
 
   function resetProductLotEditor() {
+    setMasterEditorOpen(false);
     setSelectedImportProductKey("");
     setSelectedMasterVaccineId("");
     setMasterEditMode("CREATE");
@@ -399,9 +404,7 @@ export default function VaccinationMasterPage() {
     setMessage(
       `${product.label} dipilih. Nama produk dan lot dari file import sudah diambil. Lengkapi produsen, harga, dosis/next dose lalu simpan dalam satu form.`,
     );
-    window.setTimeout(() => {
-      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 0);
+    setMasterEditorOpen(true);
   }
 
   async function postMaster(payload: Record<string, any>) {
@@ -1002,9 +1005,7 @@ export default function VaccinationMasterPage() {
       bazarStockQty: 0,
     });
     setMessage(`Edit produk ${vaccine.name}. Ubah field yang diperlukan lalu klik Simpan Perubahan Produk & Lot.`);
-    window.setTimeout(() => {
-      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 0);
+    setMasterEditorOpen(true);
   }
 
   function editLot(lot: any) {
@@ -1064,9 +1065,7 @@ export default function VaccinationMasterPage() {
           : 0,
     });
     setMessage(`Mode Edit Lot & Stok ${lot.lot_number} · ${vaccine.name || "Vaksin"}. Data Produk dikunci; perubahan hanya berlaku pada Lot dan stok ini.`);
-    window.setTimeout(() => {
-      document.getElementById("vaccination-master-product-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 0);
+    setMasterEditorOpen(true);
   }
 
   async function deleteVaccine(vaccine: any) {
@@ -1845,6 +1844,9 @@ export default function VaccinationMasterPage() {
         vaccine.brand,
         vaccine.price_category,
         vaccine.price,
+        ...filteredMasterLots
+          .filter((lot) => String(lot.vaccine_id || lot.vaccine?.id || "") === String(vaccine.id))
+          .map((lot) => lot.lot_number),
         ...vaccineStockTargets(vaccine.id),
       ]
         .map((value) => cleanText(value).toLowerCase())
@@ -2201,6 +2203,45 @@ export default function VaccinationMasterPage() {
     return Array.from(grouped.values());
   }, [importRows, selectedImportProductKey]);
 
+  // V576: full-page table, no nested table scroll; modal is the only editor.
+  const masterTableRows = useMemo(() => {
+    const lotsByVaccine = new Map<string, any[]>();
+    for (const lot of filteredMasterLots) {
+      const key = String(lot.vaccine_id || lot.vaccine?.id || "");
+      if (!lotsByVaccine.has(key)) lotsByVaccine.set(key, []);
+      lotsByVaccine.get(key)!.push(lot);
+    }
+    return filteredVaccines.flatMap((vaccine: any) => {
+      const matchedLots = lotsByVaccine.get(String(vaccine.id)) || [];
+      return matchedLots.length
+        ? matchedLots.map((lot) => ({ vaccine, lot }))
+        : [{ vaccine, lot: null }];
+    });
+  }, [filteredVaccines, filteredMasterLots]);
+  const masterPageSize = 6;
+  const masterTotalPages = Math.max(1, Math.ceil(masterTableRows.length / masterPageSize));
+  const safeMasterPage = Math.min(masterTablePage, masterTotalPages);
+  const masterVisibleRows = masterTableRows.slice(
+    (safeMasterPage - 1) * masterPageSize,
+    safeMasterPage * masterPageSize,
+  );
+  useEffect(() => {
+    setMasterTablePage(1);
+  }, [stockFilter, stockSessionFilter, productSearch, productStatusFilter, productServiceFilter]);
+  useEffect(() => {
+    if (!masterEditorOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMasterEditorOpen(false);
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [masterEditorOpen]);
+
   return (
     <main className="p-6">
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -2232,6 +2273,149 @@ export default function VaccinationMasterPage() {
           </div>
         ) : null}
 
+        <section className="mt-6 rounded-2xl border bg-slate-50 p-4">
+          <div className="grid gap-3 lg:grid-cols-[220px_1fr_1fr] lg:items-center">
+            <div>
+              <div className="text-sm font-bold text-slate-800">Filter Tujuan Stok</div>
+              <div className="text-xs text-slate-500">
+                Filter per perusahaan lalu per Session/Lokasi untuk melihat stok lokasi secara terpisah.
+              </div>
+            </div>
+            <select
+              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
+              value={stockFilter}
+              onChange={(e) => {
+                setStockFilter(e.target.value);
+                setStockSessionFilter("ALL");
+              }}
+            >
+              <option value="ALL">Semua Produk & Stok</option>
+              <option value="GENERAL">General</option>
+              {companyOptions.map((company) => (
+                <option key={company} value={company}>
+                  {company}
+                </option>
+              ))}
+            </select>
+            <select
+              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100 disabled:text-slate-400"
+              value={stockSessionFilter}
+              disabled={stockFilter === "ALL" || stockFilter === "GENERAL"}
+              onChange={(e) => setStockSessionFilter(e.target.value)}
+            >
+              <option value="ALL">Semua Session / Lokasi perusahaan</option>
+              {filterCompanySessions.map((session) => (
+                <option key={session.id} value={String(session.id)}>
+                  {sessionLabel(session)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+
+        {/* V576: One full-width table, no independent scrollbars or 1960px minimum width. */}
+        <section className="mt-4 overflow-hidden rounded-2xl border bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+            <div>
+              <h2 className="text-base font-black text-slate-900">Daftar Master Vaksin, Lot & Stok</h2>
+              <p className="mt-0.5 text-xs text-slate-500">{masterTableRows.length} baris · {stockFilterLabel} · {productServiceFilter === "ALL" ? "Semua layanan" : productServiceFilter}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => { resetProductLotEditor(); setError(""); setMasterEditorOpen(true); }} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700">+ Tambah Produk / Lot</button>
+              <button type="button" onClick={openCatalogDuplicate} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100">Duplikat Katalog</button>
+            </div>
+          </div>
+          <div className="grid gap-2 border-b bg-white p-3 sm:grid-cols-[minmax(0,1fr)_145px_145px]">
+            <input type="search" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Cari produk, lot, brand, lokasi..." className="min-w-0 rounded-xl border px-3 py-2 text-sm outline-none focus:border-blue-400" />
+            <select value={productStatusFilter} onChange={(e) => setProductStatusFilter(e.target.value)} className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm">
+              <option value="ALL">Semua status</option><option value="ACTIVE">Aktif</option><option value="INACTIVE">Nonaktif</option>
+            </select>
+            <select value={productServiceFilter} onChange={(e) => setProductServiceFilter(e.target.value)} className="min-w-0 rounded-xl border bg-white px-3 py-2 text-sm">
+              <option value="ALL">Semua layanan</option><option value="HEALTHDAY">Healthday</option><option value="BAZAR">Bazar</option>
+            </select>
+          </div>
+          <table className="w-full table-fixed border-collapse text-left text-xs md:text-sm">
+            <thead className="bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="w-[23%] px-3 py-3">Produk / Brand</th>
+                <th className="w-[25%] px-3 py-3">Lot / Tujuan Stok</th>
+                <th className="w-[15%] px-2 py-3">Layanan / Harga</th>
+                <th className="w-[19%] px-2 py-3">Ringkasan Stok</th>
+                <th className="w-[7%] px-2 py-3">Status</th>
+                <th className="w-[11%] px-2 py-3">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {masterVisibleRows.map(({ vaccine, lot }: any, index: number) => {
+                const initial = Number(lot?.stock_initial || 0);
+                const added = Number(lot?.stock_added || 0);
+                const used = Number(lot?.stock_used || 0);
+                const remaining = Math.max(0, initial + added - used);
+                const nonPackage = productSalesOffer(vaccine.id, "NON_PACKAGE");
+                const packageOffer = productSalesOffer(vaccine.id, "PACKAGE");
+                const modes = vaccineServiceModes(vaccine.id);
+                const session = lot ? sessionMap.get(Number(lot.stock_session_id || 0)) : null;
+                return (
+                  <tr key={`${vaccine.id}-${lot?.id || "no-lot"}-${index}`} className="align-top even:bg-slate-50/40">
+                    <td className="break-words px-3 py-3">
+                      <div className="font-bold text-slate-900">{vaccine.name}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">{vaccine.brand || "Tanpa brand"}</div>
+                      {vaccine.is_series ? <div className="mt-1 text-[11px] font-semibold text-emerald-700">Series {Math.max(1, Number(vaccine.dose_count || 1))} dosis</div> : null}
+                    </td>
+                    <td className="break-words px-3 py-3">
+                      {lot ? (
+                        <>
+                          <div className="font-bold text-slate-800">Lot {lot.lot_number}</div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">{lotScope(lot) === "SESSION" ? sessionLabel(session) : lotScope(lot) === "COMPANY" ? lot.stock_company_name || "Perusahaan" : "General"}</div>
+                          {lot.expiry_date ? <div className="mt-0.5 text-[11px] text-slate-400">ED {lot.expiry_date}</div> : null}
+                        </>
+                      ) : <span className="text-slate-400">Belum ada Lot pada filter ini</span>}
+                    </td>
+                    <td className="break-words px-2 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {modes.map((mode) => <span key={mode} className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${mode === "BAZAR" ? "bg-violet-50 text-violet-700" : "bg-blue-50 text-blue-700"}`}>{mode === "BAZAR" ? "Bazar" : "HD"}</span>)}
+                      </div>
+                      <div className="mt-1.5 font-bold text-slate-800">{money(nonPackage?.price ?? vaccine.price)}</div>
+                      {packageOffer ? <div className="mt-0.5 text-[11px] font-medium text-emerald-700">Paket: {money(packageOffer.price)}</div> : null}
+                    </td>
+                    <td className="px-2 py-3">
+                      {lot ? (
+                        <>
+                          <div className="grid grid-cols-3 gap-1 text-center text-[11px]">
+                            <div className="rounded-md bg-slate-100 px-1 py-1"><div className="text-slate-500">Awal</div><b>{initial}</b></div>
+                            <div className="rounded-md bg-slate-100 px-1 py-1"><div className="text-slate-500">+ Stok</div><b>{added}</b></div>
+                            <div className="rounded-md bg-slate-100 px-1 py-1"><div className="text-slate-500">Pakai</div><b>{used}</b></div>
+                          </div>
+                          <div className={`mt-1 rounded-md px-2 py-1 text-center text-xs font-black ${remaining > 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>Sisa {remaining}</div>
+                        </>
+                      ) : <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="break-words px-2 py-3 text-[11px] font-semibold">{vaccine.active === false || lot?.active === false ? "Nonaktif" : "Aktif"}</td>
+                    <td className="px-2 py-3">
+                      <div className="flex flex-col items-stretch gap-1">
+                        {lot ? <button type="button" onClick={() => editLot(lot)} className="rounded-lg bg-blue-600 px-2 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700">Edit Lot/Stok</button> : null}
+                        <button type="button" onClick={() => editProduct(vaccine)} className="rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-[11px] font-bold text-blue-700">Edit Produk</button>
+                        <button type="button" onClick={() => openStockTransactions(vaccine)} className="rounded-lg border px-2 py-1.5 text-[11px] font-semibold text-slate-600">Transaksi</button>
+                        {lot ? <button type="button" disabled={remaining <= 0} onClick={() => openTransferStock(lot)} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800 disabled:opacity-40">Transfer</button> : null}
+                        <button type="button" onClick={() => lot ? deleteLot(lot) : deleteVaccine(vaccine)} className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] font-medium text-rose-700">Hapus {lot ? "Lot" : "Produk"}</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!masterVisibleRows.length ? <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-500">Tidak ada produk pada filter ini.</td></tr> : null}
+            </tbody>
+          </table>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-slate-50 px-4 py-3 text-xs text-slate-600">
+            <span>Halaman {safeMasterPage} / {masterTotalPages} · {masterTableRows.length} baris · {masterPageSize} per halaman</span>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={safeMasterPage <= 1} onClick={() => setMasterTablePage((page) => Math.max(1,page - 1))} className="rounded-lg border bg-white px-3 py-1.5 font-bold disabled:opacity-40">Sebelumnya</button>
+              <button type="button" disabled={safeMasterPage >= masterTotalPages} onClick={() => setMasterTablePage((page) => Math.min(masterTotalPages,page + 1))} className="rounded-lg border bg-white px-3 py-1.5 font-bold disabled:opacity-40">Berikutnya</button>
+            </div>
+          </div>
+        </section>
+        <details className="mt-4 rounded-2xl border border-blue-100 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">Import stock.quant (opsional) · klik untuk membuka</summary>
         <section className="mt-6 rounded-2xl border border-blue-200 bg-blue-50/40 p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -2347,7 +2531,94 @@ export default function VaccinationMasterPage() {
           ) : null}
         </section>
 
-        <section id="vaccination-master-product-form" className="mt-6 rounded-2xl border bg-slate-50 p-5">
+        </details>
+        <details className="mt-3 rounded-2xl border bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">Mapping Import ke Master (opsional) · klik untuk membuka</summary>
+        <section className="mt-6 rounded-2xl border">
+          <div className="border-b bg-slate-50 p-4 font-bold">Mapping Produk Import → Master Vaksin</div>
+          <div className="max-h-[300px] overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
+                <tr>
+                  <th className="p-3 text-left">Produk Import</th>
+                  <th className="p-3 text-left">Kode</th>
+                  <th className="p-3 text-left">Master Vaksin</th>
+                  <th className="p-3 text-left">Lokasi Terakhir</th>
+                  <th className="p-3 text-left">Last Import</th>
+                  <th className="p-3 text-left">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {productMappings.map((mapping) => {
+                  const editing = String(editingMappingId) === String(mapping.id);
+                  return (
+                    <tr key={mapping.id}>
+                      <td className="p-3 font-bold">{mapping.external_product_label || mapping.external_product_name || "-"}</td>
+                      <td className="p-3">{mapping.external_product_code || "-"}</td>
+                      <td className="p-3">
+                        {editing ? (
+                          <select
+                            className="min-w-[220px] rounded-lg border px-2 py-1.5"
+                            value={editingMappingVaccineId}
+                            onChange={(e) => setEditingMappingVaccineId(e.target.value)}
+                          >
+                            <option value="">Pilih Master Vaksin</option>
+                            {activeVaccines.map((vaccine) => (
+                              <option key={vaccine.id} value={String(vaccine.id)}>
+                                {vaccine.name}{vaccine.brand ? ` · ${vaccine.brand}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          mapping.vaccine?.name || "-"
+                        )}
+                      </td>
+                      <td className="p-3">{mapping.source_location || "-"}</td>
+                      <td className="p-3">{mapping.last_imported_at ? new Date(mapping.last_imported_at).toLocaleString("id-ID") : "-"}</td>
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-2">
+                          {editing ? (
+                            <>
+                              <button type="button" onClick={() => saveMapping(mapping)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Simpan</button>
+                              <button type="button" onClick={() => { setEditingMappingId(""); setEditingMappingVaccineId(""); }} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Batal</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => startEditMapping(mapping)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
+                          )}
+                          <button type="button" onClick={() => deleteMapping(mapping)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus mapping">🗑️</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!productMappings.length ? (
+                  <tr><td colSpan={6} className="p-5 text-center text-slate-500">Belum ada mapping produk import.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        </details>
+        {masterEditorOpen ? (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-2 md:p-5"
+            onMouseDown={(event) => { if (event.target === event.currentTarget) setMasterEditorOpen(false); }}
+          >
+            <div role="dialog" aria-modal="true" aria-label="Editor Master Vaksin & Lot" className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b bg-white px-4 py-3 md:px-6">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-blue-700">Master Vaksin & Lot</div>
+                  <h2 className="text-lg font-black text-slate-900">
+                    {masterEditMode === "LOT" ? "Edit Lot & Stok" : masterEditMode === "PRODUCT" ? "Edit Produk" : "Tambah Produk & Lot"}
+                  </h2>
+                  <p className="text-xs text-slate-500">{vaccineForm.name || "Pilih produk dan isi data lot"}{lotForm.lotNumber ? ` · Lot ${lotForm.lotNumber}` : ""}</p>
+                </div>
+                <button type="button" onClick={() => setMasterEditorOpen(false)} className="shrink-0 rounded-xl border bg-slate-50 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">✕ Tutup</button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5 md:px-5">
+                {error ? <div className="sticky top-0 z-10 mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div> : null}
+        <section id="vaccination-master-product-form" className="mt-3 rounded-2xl border bg-slate-50 p-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div>
               <h2 className="text-lg font-bold">Master Vaksin / Produk & Lot</h2>
@@ -3021,434 +3292,10 @@ export default function VaccinationMasterPage() {
           </button>
         </section>
 
-        <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4 font-bold">Mapping Produk Import → Master Vaksin</div>
-          <div className="max-h-[300px] overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                <tr>
-                  <th className="p-3 text-left">Produk Import</th>
-                  <th className="p-3 text-left">Kode</th>
-                  <th className="p-3 text-left">Master Vaksin</th>
-                  <th className="p-3 text-left">Lokasi Terakhir</th>
-                  <th className="p-3 text-left">Last Import</th>
-                  <th className="p-3 text-left">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {productMappings.map((mapping) => {
-                  const editing = String(editingMappingId) === String(mapping.id);
-                  return (
-                    <tr key={mapping.id}>
-                      <td className="p-3 font-bold">{mapping.external_product_label || mapping.external_product_name || "-"}</td>
-                      <td className="p-3">{mapping.external_product_code || "-"}</td>
-                      <td className="p-3">
-                        {editing ? (
-                          <select
-                            className="min-w-[220px] rounded-lg border px-2 py-1.5"
-                            value={editingMappingVaccineId}
-                            onChange={(e) => setEditingMappingVaccineId(e.target.value)}
-                          >
-                            <option value="">Pilih Master Vaksin</option>
-                            {activeVaccines.map((vaccine) => (
-                              <option key={vaccine.id} value={String(vaccine.id)}>
-                                {vaccine.name}{vaccine.brand ? ` · ${vaccine.brand}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          mapping.vaccine?.name || "-"
-                        )}
-                      </td>
-                      <td className="p-3">{mapping.source_location || "-"}</td>
-                      <td className="p-3">{mapping.last_imported_at ? new Date(mapping.last_imported_at).toLocaleString("id-ID") : "-"}</td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-2">
-                          {editing ? (
-                            <>
-                              <button type="button" onClick={() => saveMapping(mapping)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">Simpan</button>
-                              <button type="button" onClick={() => { setEditingMappingId(""); setEditingMappingVaccineId(""); }} className="rounded-lg border px-3 py-1.5 text-xs font-bold">Batal</button>
-                            </>
-                          ) : (
-                            <button type="button" onClick={() => startEditMapping(mapping)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
-                          )}
-                          <button type="button" onClick={() => deleteMapping(mapping)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus mapping">🗑️</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!productMappings.length ? (
-                  <tr><td colSpan={6} className="p-5 text-center text-slate-500">Belum ada mapping produk import.</td></tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-2xl border bg-slate-50 p-4">
-          <div className="grid gap-3 lg:grid-cols-[220px_1fr_1fr] lg:items-center">
-            <div>
-              <div className="text-sm font-bold text-slate-800">Filter Tujuan Stok</div>
-              <div className="text-xs text-slate-500">
-                Filter per perusahaan lalu per Session/Lokasi untuk melihat stok lokasi secara terpisah.
-              </div>
-            </div>
-            <select
-              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
-              value={stockFilter}
-              onChange={(e) => {
-                setStockFilter(e.target.value);
-                setStockSessionFilter("ALL");
-              }}
-            >
-              <option value="ALL">Semua Produk & Stok</option>
-              <option value="GENERAL">General</option>
-              {companyOptions.map((company) => (
-                <option key={company} value={company}>
-                  {company}
-                </option>
-              ))}
-            </select>
-            <select
-              className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold disabled:bg-slate-100 disabled:text-slate-400"
-              value={stockSessionFilter}
-              disabled={stockFilter === "ALL" || stockFilter === "GENERAL"}
-              onChange={(e) => setStockSessionFilter(e.target.value)}
-            >
-              <option value="ALL">Semua Session / Lokasi perusahaan</option>
-              {filterCompanySessions.map((session) => (
-                <option key={session.id} value={String(session.id)}>
-                  {sessionLabel(session)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-2xl border">
-          <div className="border-b bg-slate-50 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="font-bold">Daftar Produk · {stockFilterLabel}</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  Menampilkan {filteredVaccines.length} dari {vaccines.length} produk master.
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 lg:items-end">
-                <button
-                  type="button"
-                  onClick={openCatalogDuplicate}
-                  className="self-start rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-700 hover:bg-violet-100 lg:self-end"
-                >
-                  Duplikat Katalog ke Session
-                </button>
-                <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_150px_150px] lg:w-[760px]">
-                <input
-                  type="text"
-                  value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
-                  placeholder="Cari produk, brand, kategori, tujuan stok..."
-                  className="rounded-xl border bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400"
-                />
-                <select
-                  value={productStatusFilter}
-                  onChange={(e) => setProductStatusFilter(e.target.value)}
-                  className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
-                >
-                  <option value="ALL">Semua Status</option>
-                  <option value="ACTIVE">Aktif</option>
-                  <option value="INACTIVE">Nonaktif</option>
-                </select>
-                <select
-                  value={productServiceFilter}
-                  onChange={(e) => setProductServiceFilter(e.target.value)}
-                  className="rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold"
-                >
-                  <option value="ALL">Semua Jenis Stok</option>
-                  <option value="HEALTHDAY">Healthday</option>
-                  <option value="BAZAR">Bazar</option>
-                </select>
-                </div>
               </div>
             </div>
           </div>
-          <div className="max-h-[320px] overflow-auto">
-            <table className="min-w-[1960px] text-sm">
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                <tr>
-                  <th className="p-3 text-left">Produk</th>
-                  <th className="p-3 text-left">Brand</th>
-                  <th className="p-3 text-left">Non Paket</th>
-                  <th className="p-3 text-left">Paket</th>
-                  <th className="p-3 text-left">Dosis Paket</th>
-                  <th className="p-3 text-left">Series</th>
-                  <th className="p-3 text-left">Tujuan Stok</th>
-                  <th className="p-3 text-left">Jenis Stok</th>
-                  <th className="p-3 text-left">Stok Awal</th>
-                  <th className="p-3 text-left">Tambahan</th>
-                  <th className="p-3 text-left">Terpakai</th>
-                  <th className="p-3 text-left">Stok Import</th>
-                  <th className="p-3 text-left">Sisa Sistem</th>
-                  <th className="p-3 text-left">Transaksi</th>
-                  <th className="p-3 text-left">Status</th>
-                  <th className="p-3 text-left">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredVaccines.map((v) => {
-                  const nonPackageOffer = productSalesOffer(v.id, "NON_PACKAGE");
-                  const packageOffer = productSalesOffer(v.id, "PACKAGE");
-                  const stock = productStockSummary(v.id);
-                  const target = compactStockTarget(v.id);
-                  const modes = vaccineServiceModes(v.id);
-                  const seriesSessions = v.is_series === true ? seriesRuleSessions(v.id) : [];
-                  const seriesDoseCount = v.is_series === true
-                    ? Math.max(2, Number(v.dose_count || 0), (Array.isArray(v.series_schedule) ? v.series_schedule.length : 0) + 1)
-                    : 0;
-
-                  return (
-                    <tr key={v.id} className="align-top">
-                      <td className="p-3 font-bold">{v.name}</td>
-                      <td className="p-3">{v.brand || "-"}</td>
-                      <td className="p-3 font-bold">
-                        {money(nonPackageOffer?.price ?? v.price)}
-                      </td>
-                      <td className="p-3 font-bold text-emerald-700">
-                        {packageOffer ? money(packageOffer.price) : "-"}
-                      </td>
-                      <td className="p-3">
-                        {packageOffer
-                          ? `${Math.max(2, Number(packageOffer.package_dose_count || 2))}x`
-                          : "-"}
-                      </td>
-                      <td className="p-3">
-                        {v.is_series === true ? (
-                          <div className="min-w-[220px] rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-black text-white">Series {seriesDoseCount}x</span>
-                              <span className="text-[11px] font-bold text-emerald-700">{seriesSessions.length} Session</span>
-                            </div>
-                            {seriesSessions.length ? (
-                              <div className="mt-2 max-h-24 space-y-1 overflow-auto pr-1">
-                                {seriesSessions.map((session: any) => (
-                                  <div key={`series-session-${v.id}-${session.id}`} className="rounded-lg bg-white px-2 py-1.5 text-[11px] leading-tight text-slate-700">
-                                    <div className="font-bold">{cleanText(session.location) || cleanText(session.session_name) || `Session ${session.id}`}</div>
-                                    {cleanText(session.session_date) ? <div className="mt-0.5 text-slate-400">{cleanText(session.session_date)}</div> : null}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="mt-2 text-[11px] font-semibold text-emerald-700">Belum ada Session yang memakai produk ini.</div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">-</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <div className="max-w-[250px] rounded-xl border bg-slate-50 px-3 py-2">
-                          <div className="truncate text-xs font-black text-slate-800" title={target.company}>
-                            {target.company}
-                          </div>
-                          <div className="mt-0.5 truncate text-xs text-slate-600" title={target.location}>
-                            {target.location}
-                          </div>
-                          {target.date ? (
-                            <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
-                              {target.date}
-                            </div>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-1">
-                          {modes.length ? (
-                            modes.map((mode) => (
-                              <span
-                                key={mode}
-                                className={`rounded-full px-2 py-1 text-xs font-bold ${
-                                  mode === "BAZAR"
-                                    ? "bg-violet-50 text-violet-700"
-                                    : "bg-blue-50 text-blue-700"
-                                }`}
-                              >
-                                {mode === "BAZAR" ? "Bazar" : "Healthday"}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-xs text-slate-400">-</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3 font-black">{stock.initial}</td>
-                      <td className="p-3">{stock.added}</td>
-                      <td className="p-3">{stock.used}</td>
-                      <td className="p-3 font-bold">
-                        {stock.imported == null ? "-" : stock.imported}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`rounded-lg px-2.5 py-1.5 font-black ${
-                            stock.remaining > 0
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {stock.remaining}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <button
-                          type="button"
-                          onClick={() => openStockTransactions(v)}
-                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
-                        >
-                          📋 Transaksi
-                        </button>
-                      </td>
-                      <td className="p-3">{v.active ? "Aktif" : "Nonaktif"}</td>
-                      <td className="p-3">
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => editProduct(v)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
-                          <button type="button" onClick={() => deleteVaccine(v)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus produk">🗑️</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!filteredVaccines.length ? (
-                  <tr>
-                    <td colSpan={16} className="p-6 text-center text-sm text-slate-500">
-                      Tidak ada produk yang cocok dengan filter. Coba ubah pencarian, status, perusahaan, Session/Lokasi, atau Jenis Stok.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <details className="mt-6 rounded-2xl border" open={filteredMasterLots.length > 0}>
-          <summary className="cursor-pointer list-none border-b bg-slate-50 p-4 font-bold">
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                Detail Lot Aktif · {stockFilterLabel}
-            {productServiceFilter !== "ALL"
-              ? ` · ${productServiceFilter === "BAZAR" ? "Bazar" : "Healthday"}`
-              : ""}
-              </span>
-              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-600">
-                {filteredMasterLots.length} lot
-              </span>
-            </div>
-          </summary>
-          {filteredMasterLots.length ? (
-          <div className="max-h-[420px] overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-xs uppercase text-slate-600">
-                <tr>
-                  <th className="p-3 text-left">Vaksin</th>
-                  <th className="p-3 text-left">Lot</th>
-                  <th className="p-3 text-left">Scope</th>
-                  <th className="p-3 text-left">Perusahaan</th>
-                  <th className="p-3 text-left">Session / Lokasi</th>
-                  <th className="p-3 text-left">Expired</th>
-                  <th className="p-3 text-left">Awal</th>
-                  <th className="p-3 text-left">Tambahan</th>
-                  <th className="p-3 text-left">Terpakai</th>
-                  <th className="p-3 text-left">Stok Import</th>
-                  <th className="p-3 text-left">Sisa Sistem</th>
-                  <th className="p-3 text-left">Status</th>
-                  <th className="p-3 text-left">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredMasterLots.map((lot) => {
-                  const awal = Number(lot.stock_initial || 0);
-                  const tambah = Number(lot.stock_added || 0);
-                  const used = Number(lot.stock_used || 0);
-                  const physical = lot.stock_physical_count == null ? "-" : Number(lot.stock_physical_count);
-                  return (
-                    <tr key={lot.id}>
-                      <td className="p-3">{lot.vaccine?.name || "-"}</td>
-                      <td className="p-3 font-bold">{lot.lot_number}</td>
-                      <td className="p-3">
-                        <span
-                          className={`rounded-full px-2 py-1 text-xs font-bold ${
-                            lotScope(lot) === "SESSION"
-                              ? "bg-violet-50 text-violet-700"
-                              : lotScope(lot) === "COMPANY"
-                                ? "bg-blue-50 text-blue-700"
-                                : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {lotScope(lot) === "SESSION"
-                            ? "Session"
-                            : lotScope(lot) === "COMPANY"
-                              ? "Perusahaan"
-                              : "General"}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        {lotScope(lot) === "GENERAL" ? "-" : lot.stock_company_name || "-"}
-                      </td>
-                      <td className="p-3">
-                        {lotScope(lot) === "SESSION" ? (
-                          <div>
-                            <div>{sessionLabel(sessionMap.get(Number(lot.stock_session_id || 0)))}</div>
-                            <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-bold">
-                              {productServiceFilter !== "BAZAR" ? (
-                                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
-                                  Healthday {serviceAllocationQty(lot.id, lot.stock_session_id, "HEALTHDAY")}
-                                </span>
-                              ) : null}
-                              {productServiceFilter !== "HEALTHDAY" ? (
-                                <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
-                                  Bazar {serviceAllocationQty(lot.id, lot.stock_session_id, "BAZAR")}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                      <td className="p-3">{lot.expiry_date || "-"}</td>
-                      <td className="p-3">{awal}</td>
-                      <td className="p-3">{tambah}</td>
-                      <td className="p-3">{used}</td>
-                      <td className="p-3 font-bold">{physical}</td>
-                      <td className="p-3 font-bold">{awal + tambah - used}</td>
-                      <td className="p-3">{lot.active ? "Aktif" : "Nonaktif"}</td>
-                      <td className="p-3">
-                        <div className="flex gap-2">
-                          <button type="button" onClick={() => editLot(lot)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">✏️ Edit</button>
-                          <button
-                            type="button"
-                            onClick={() => openTransferStock(lot)}
-                            disabled={awal + tambah - used <= 0}
-                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 disabled:cursor-not-allowed disabled:opacity-40"
-                            title={awal + tambah - used <= 0 ? "Tidak ada sisa stok" : "Transfer seluruh sisa stok ke Session lain"}
-                          >
-                            ⇄ Transfer Stok
-                          </button>
-                          <button type="button" onClick={() => deleteLot(lot)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700" title="Hapus lot">🗑️</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          ) : (
-            <div className="p-4 text-sm text-slate-500">
-              Belum ada detail Lot yang cocok dengan filter ini. Produk tetap tampil di tabel ringkasan di atas.
-            </div>
-          )}
-        </details>
-
+        ) : null}
         {catalogDuplicateOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !catalogDuplicating) setCatalogDuplicateOpen(false); }}>
           <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">

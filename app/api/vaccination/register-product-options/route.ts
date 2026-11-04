@@ -255,30 +255,22 @@ export async function GET(req: NextRequest) {
     // its BAZAR name, or the legacy priced fallback when no assignments exist.
     // Never exclude an allocated Bazar product just because an assignment row
     // is missing. Only use Session-owned active Lots; never move stock or IDs.
-    const [vaccinesResult, lotsResult] = await Promise.all([
-      supabase
-        .from("vaccination_vaccines")
-        .select("id,name,brand,price,price_category,active")
-        .eq("active", true)
-        .order("name", { ascending: true })
-        .limit(10000),
-      supabase
-        .from("vaccination_vaccine_lots")
-        .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active,stock_scope,stock_session_id,stock_company_name")
-        .eq("stock_scope", "SESSION")
-        .eq("stock_session_id", sessionId)
-        .eq("active", true)
-        .order("expiry_date", { ascending: true, nullsFirst: false })
-        .order("id", { ascending: true })
-        .limit(10000),
-    ]);
+    // V576_ADMIN_BAZAR_PUBLIC_CATALOG_PARITY
+    // V576: query the same Session-owned Lot + joined Vaccine relation used by
+    // /api/vaccination/public-bazar, rather than separately materializing all
+    // Master vaccines. This avoids mismatched catalog snapshots/references.
+    const lotsResult = await supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active,stock_scope,stock_session_id,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
+      .eq("stock_scope", "SESSION")
+      .eq("stock_session_id", sessionId)
+      .eq("active", true)
+      .order("expiry_date", { ascending: true, nullsFirst: false })
+      .order("id", { ascending: true })
+      .limit(10000);
 
-    if (vaccinesResult.error) return fail(vaccinesResult.error.message, 500);
     if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
-    const vaccinesById = new Map<number, any>(
-      (vaccinesResult.data || []).map((vaccine: any) => [Number(vaccine.id), vaccine]),
-    );
     const bazarHasAllocations = Array.from(serviceStock.map.keys()).some(
       (key) => key.endsWith(":BAZAR"),
     );
@@ -288,7 +280,9 @@ export async function GET(req: NextRequest) {
     for (const lot of lotsResult.data || []) {
       const lotId = Number((lot as any)?.id || 0);
       const vaccineId = Number((lot as any)?.vaccine_id || 0);
-      const vaccine = vaccinesById.get(vaccineId);
+      const vaccine = Array.isArray((lot as any)?.vaccine)
+        ? (lot as any).vaccine[0]
+        : (lot as any).vaccine;
       if (!lotId || !vaccineId || !vaccine || vaccine.active === false) continue;
 
       const basePrice = Number(vaccine.price || 0);
@@ -313,9 +307,12 @@ export async function GET(req: NextRequest) {
           Number((lot as any).stock_used || 0),
       );
       const serviceAllocation = serviceStock.map.get(`${lotId}:BAZAR`);
+      // V576: For a session with Bazar allocations, enforce each lot's quota.
+      // For legacy sessions without any Bazar allocations, the public catalog
+      // also returns an unbounded-by-service remaining (null).
       const remaining = bazarHasAllocations
         ? Math.min(
-            Number(serviceAllocation?.remaining || 0),
+            Math.max(0, Number(serviceAllocation?.remaining || 0)),
             canonicalRemaining,
           )
         : null;
@@ -346,6 +343,8 @@ export async function GET(req: NextRequest) {
         service_stock_remaining: remaining,
       });
     }
+    // V576 diagnostic counters are returned for operator parity checks only;
+    // they do not mutate inventory and don't affect booking submission.
     bazarOptions.sort((a: any, b: any) =>
       `${a.vaccine?.name || ""} ${a.vaccine?.brand || ""}`.localeCompare(
         `${b.vaccine?.name || ""} ${b.vaccine?.brand || ""}`,
@@ -361,5 +360,7 @@ export async function GET(req: NextRequest) {
     bazarOptions,
     serviceStockEnabled: serviceStock.enabled,
     bazarAssignmentReady: bazarAssignments.enabled,
+    bazarCatalogCount: bazarOptions.length,
+    bazarCatalogSource: "SESSION_ACTIVE_LOTS_PUBLIC_PARITY_V576",
   });
 }
