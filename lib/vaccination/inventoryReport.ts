@@ -91,6 +91,25 @@ function logicalLotKey(vaccineId: any, lotNumber: any, sessionId: any) {
   return `${Number(vaccineId || 0)}::${clean(lotNumber).toUpperCase()}::${Number(sessionId || 0)}`;
 }
 
+// V581_INVENTORY_REPORT_COMPLETE_LOT_HISTORY:
+// PostgREST can cap a .limit(20000) response at the project max_rows (often
+// 1000). Never calculate participant/history counts from a silently truncated
+// global response. Page every relevant operational read deterministically.
+const V581_PAGE_SIZE = 500;
+const V581_MAX_ROWS = 50000;
+
+async function v581ReadPaged(label: string, makePage: (from: number, to: number) => any): Promise<any[]> {
+  const rows: any[] = [];
+  for (let start = 0; start < V581_MAX_ROWS; start += V581_PAGE_SIZE) {
+    const result = await makePage(start, start + V581_PAGE_SIZE - 1);
+    if (result?.error) throw new Error(`Gagal membaca ${label}: ${result.error.message}`);
+    if (!Array.isArray(result?.data)) throw new Error(`Gagal membaca ${label}: respons bukan array.`);
+    rows.push(...result.data);
+    if (result.data.length < V581_PAGE_SIZE) return rows;
+  }
+  throw new Error(`Safety stop: ${label} melebihi ${V581_MAX_ROWS} baris. Laporan ditolak agar riwayat tidak terpotong.`);
+}
+
 // V518_INVENTORY_PAYMENT_METHOD_TRACE
 export type InventoryReportFilters = {
   vaccineIds?: number[];
@@ -106,14 +125,27 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   const from = clean(filters.from);
   const to = clean(filters.to);
 
-  const [vaccinesResult, lotsResult, movementsResult, recordsResult] = await Promise.all([
+  // V581: a Lot detail request must be filtered on the server BEFORE any page
+  // limit. Global reports are also paged so all existing sessions stay complete.
+  const requestedLotIds = Array.from(lotIds);
+  const [vaccinesResult, lotsResult, movementRows, recordRows] = await Promise.all([
     supabase.from("vaccination_vaccines").select("id,name,brand,active").order("name", { ascending: true }).limit(5000),
     supabase.from("vaccination_vaccine_lots").select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,stock_physical_count,inventory_notes,stock_scope,stock_company_name,stock_session_id,created_at,active").order("id", { ascending: true }).limit(10000),
-    supabase.from("vaccination_inventory_movements").select("id,vaccine_id,lot_id,movement_type,qty,reference_type,reference_id,notes,created_by,created_at").order("created_at", { ascending: true }).limit(20000),
-    supabase.from("vaccination_records").select("id,registration_id,session_id,participant_name,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,status,sticker_printed_at,created_at").order("administered_at", { ascending: true }).limit(20000),
+    v581ReadPaged("movement inventory", (start, end) => {
+      let query = supabase.from("vaccination_inventory_movements")
+        .select("id,vaccine_id,lot_id,movement_type,qty,reference_type,reference_id,notes,created_by,created_at");
+      if (requestedLotIds.length) query = query.in("lot_id", requestedLotIds);
+      return query.order("id", { ascending: true }).range(start, end);
+    }),
+    v581ReadPaged("record vaksinasi", (start, end) => {
+      let query = supabase.from("vaccination_records")
+        .select("id,registration_id,session_id,participant_name,vaccine_id,lot_id,vaccine_name,lot_number,dose_number,administered_at,administered_by,status,sticker_printed_at,created_at");
+      if (requestedLotIds.length) query = query.in("lot_id", requestedLotIds);
+      return query.order("id", { ascending: true }).range(start, end);
+    }),
   ]);
 
-  for (const result of [vaccinesResult, lotsResult, movementsResult, recordsResult]) {
+  for (const result of [vaccinesResult, lotsResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
@@ -127,7 +159,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
   });
   const allowedLotIds = new Set(lots.map((row: any) => Number(row.id)));
 
-  const rawRecords = recordsResult.data || [];
+  const rawRecords = recordRows;
   const allRecords = rawRecords.filter((row: any) => !isCancelled(row.status));
   const recordMap = new Map<number, any>(rawRecords.map((row: any) => [Number(row.id), row]));
   const allowedLogicalLotKeys = new Set(
@@ -137,7 +169,7 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     allowedLotIds.has(Number(row.lot_id))
     || allowedLogicalLotKeys.has(logicalLotKey(row.vaccine_id, row.lot_number, row.session_id)),
   );
-  const movements = (movementsResult.data || []).filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
+  const movements = movementRows.filter((row: any) => allowedLotIds.has(Number(row.lot_id)));
 
   let stockAllocations: any[] = [];
   if (allowedLotIds.size) {
@@ -184,31 +216,41 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     ...movementRegistrationIds,
     ...movementRecordRegistrationIds,
   ]).map(Number).filter(Boolean);
-  let registrations: any[] = [];
-  if (registrationIds.length) {
-    const result = await supabase
-      .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,mcu_id,company_name,department,queue_number,queue_status,print_status,validation_status,payment_method")
-      .in("id", registrationIds);
-    if (!result.error) registrations = result.data || [];
+  async function v581ReadRegistrations(ids: number[]): Promise<any[]> {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    const found: any[] = [];
+    // Bounded IN lists prevent oversized request URLs and default max_rows caps.
+    for (let start = 0; start < uniqueIds.length; start += 250) {
+      const result = await supabase
+        .from("vaccination_registrations")
+        .select("id,session_id,participant_name,employee_id,nik,mcu_id,company_name,department,queue_number,queue_status,print_status,validation_status,payment_method")
+        .in("id", uniqueIds.slice(start, start + 250))
+        .limit(250);
+      // V581: don't silently turn a failed participant join into "Peserta".
+      if (result.error) throw new Error(`Gagal membaca nama peserta riwayat Inventory: ${result.error.message}`);
+      found.push(...(result.data || []));
+    }
+    return found;
   }
+  let registrations = await v581ReadRegistrations(registrationIds);
   let registrationMap = new Map<number, any>(registrations.map((row: any) => [Number(row.id), row]));
 
   // V514: pricing/service trace per administered record.
   // Registration item snapshots are the source of truth for Package vs Non Package.
   let registrationItems: any[] = [];
   if (allowedLotIds.size) {
-    const result = await supabase
-      .from("vaccination_registration_items")
-      .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,payment_method,active,administered_at")
-      .eq("active", true)
-      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
-      .limit(20000);
-    if (result.error) {
-      throw new Error(`Gagal membaca detail Paket/Non Paket: ${result.error.message}`);
-    }
-    registrationItems = (result.data || []).filter((row: any) =>
-      allowedLotIds.has(Number(row.lot_id || 0)),
+    // V581 critical fix: the old query read *all* administered items and
+    // filtered Lot ID afterwards. Under max_rows this silently lost valid Done
+    // transactions (e.g. N28 shows 1 instead of 11). Filter by Lot in SQL.
+    registrationItems = await v581ReadPaged("item vaksinasi Done", (start, end) =>
+      supabase
+        .from("vaccination_registration_items")
+        .select("id,registration_id,session_id,vaccine_id,lot_id,service_mode,status,administered_record_id,sales_option_id,sale_mode,package_dose_count,sales_price_snapshot,payment_method,active,administered_at")
+        .in("lot_id", Array.from(allowedLotIds))
+        .eq("active", true)
+        .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
+        .order("id", { ascending: true })
+        .range(start, end),
     );
   }
 
@@ -220,14 +262,8 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
       .filter((id: number) => id && !registrationMap.has(id)),
   ));
   if (missingItemRegistrationIds.length) {
-    const result = await supabase
-      .from("vaccination_registrations")
-      .select("id,session_id,participant_name,employee_id,nik,mcu_id,company_name,department,queue_number,queue_status,print_status,validation_status,payment_method")
-      .in("id", missingItemRegistrationIds);
-    if (!result.error) {
-      registrations.push(...(result.data || []));
-      registrationMap = new Map<number, any>(registrations.map((row: any) => [Number(row.id), row]));
-    }
+    registrations.push(...await v581ReadRegistrations(missingItemRegistrationIds));
+    registrationMap = new Map<number, any>(registrations.map((row: any) => [Number(row.id), row]));
   }
 
   const canonicalItemsByLotId = new Map<number, any[]>();
@@ -237,6 +273,18 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
     const bucket = canonicalItemsByLotId.get(lotId) || [];
     bucket.push(item);
     canonicalItemsByLotId.set(lotId, bucket);
+  }
+
+  // The administered movement can carry a participant name even when a
+  // historical registration name was not available. Match by exact record ID;
+  // never borrow a name from another participant or another Session/Lot.
+  const participantNoteByRecordId = new Map<number, string>();
+  for (const movement of movements) {
+    if (clean(movement.movement_type).toUpperCase() !== "ADMINISTERED") continue;
+    if (clean(movement.reference_type).toLowerCase() !== "vaccination_record") continue;
+    const recordId = Number(movement.reference_id || 0);
+    const participant = participantFromMovementNote(movement);
+    if (recordId && participant) participantNoteByRecordId.set(recordId, participant);
   }
 
   const itemByRecordId = new Map<number, any>();
@@ -536,7 +584,10 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         direction: "OUT",
         movement_type: "Terpakai",
         company: clean(registration.company_name) || clean(session.company_name) || ownerCompany || "Perusahaan belum dicatat",
-        participant: clean(registration.participant_name) || clean(fallbackRecord?.participant_name) || "Peserta",
+        participant: clean(registration.participant_name)
+          || clean(fallbackRecord?.participant_name)
+          || participantNoteByRecordId.get(Number(item.administered_record_id || fallbackRecord?.id || 0))
+          || "",
         employee_id: clean(registration.employee_id),
         mcu_id: clean(registration.mcu_id),
         session: clean(session.session_name) || ownerSessionName,
@@ -591,7 +642,10 @@ export async function buildVaccinationInventoryReport(filters: InventoryReportFi
         direction: "OUT",
         movement_type: "Terpakai",
         company: clean(registration.company_name) || clean(session.company_name) || "Perusahaan belum dicatat",
-        participant: clean(registration.participant_name) || clean(record.participant_name),
+        participant: clean(registration.participant_name)
+          || clean(record.participant_name)
+          || participantNoteByRecordId.get(Number(record.id || 0))
+          || "",
         employee_id: clean(registration.employee_id),
         mcu_id: clean(registration.mcu_id),
         session: clean(session.session_name),
