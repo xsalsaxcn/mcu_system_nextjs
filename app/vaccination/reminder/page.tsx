@@ -146,6 +146,8 @@ export default function VaccinationReminderPage() {
   const [data, setData] = useState<any>(null);
   const [selectedView, setSelectedView] = useState<ViewKey>("INCOMING");
   const [error, setError] = useState("");
+  // V583_REMINDER_DASHBOARD_FRESHNESS: show when displayed metrics are a snapshot.
+  const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [manualSending, setManualSending] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
@@ -173,6 +175,9 @@ export default function VaccinationReminderPage() {
         throw new Error(payload?.message || `HTTP ${response.status}`);
       }
       setData(payload);
+      setLastSuccessfulLoadAt(
+        new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) + " WIB",
+      );
     } catch (e: any) {
       setError(String(e?.message || e || "Gagal memuat reminder."));
     } finally {
@@ -363,7 +368,7 @@ export default function VaccinationReminderPage() {
           <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <StatCard
               label="SENT"
-              value={data?.summary?.sent ?? 0}
+              value={data?.summary ? data.summary.sent : "—"}
               note={`Email ${data?.summary?.sent ?? 0} · WA ${data?.summary?.waSent ?? 0}`}
               tone="green"
               active={selectedView === "SENT"}
@@ -371,7 +376,7 @@ export default function VaccinationReminderPage() {
             />
             <StatCard
               label="FAILED / SKIPPED"
-              value={(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)}
+              value={data?.summary ? (data.summary.failed ?? 0) + (data.summary.skipped ?? 0) : "—"}
               note={`Email ${(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)} · WA ${(data?.summary?.waFailed ?? 0) + (data?.summary?.waSkipped ?? 0)}`}
               tone="red"
               active={selectedView === "FAILED"}
@@ -379,7 +384,7 @@ export default function VaccinationReminderPage() {
             />
             <StatCard
               label="INCOMING REMINDER"
-              value={data?.summary?.incoming ?? 0}
+              value={data?.summary ? data.summary.incoming : "—"}
               note="Reminder akan datang dalam 60 hari"
               tone="blue"
               active={selectedView === "INCOMING"}
@@ -387,7 +392,7 @@ export default function VaccinationReminderPage() {
             />
             <StatCard
               label="DUE TODAY"
-              value={data?.summary?.dueToday ?? 0}
+              value={data?.summary ? data.summary.dueToday : "—"}
               note="Reminder yang perlu diproses hari ini"
               tone="purple"
               active={selectedView === "DUE_TODAY"}
@@ -408,7 +413,9 @@ export default function VaccinationReminderPage() {
               <div className="text-xs font-bold text-slate-500">SCHEDULER</div>
               <div className="mt-1 flex items-center gap-2 text-sm font-black">
                 <span className={`h-2.5 w-2.5 rounded-full ${data?.automation?.cronConfigured ? "bg-emerald-500" : "bg-rose-500"}`} />
-                {data?.automation?.cronConfigured ? "08:00 WIB · Otomatis aktif" : "Pengiriman otomatis belum aktif"}
+                {data?.automation?.cronConfigured
+                  ? "08:00 WIB · Cron dikonfigurasi (eksekusi belum diverifikasi)"
+                  : "Cron belum dikonfigurasi / status belum termuat"}
               </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -428,7 +435,12 @@ export default function VaccinationReminderPage() {
 
           {error ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-              {error}
+              <div>{error}</div>
+              <div className="mt-1 text-xs font-semibold">
+                {data && lastSuccessfulLoadAt
+                  ? `Dashboard belum berhasil diperbarui. Angka yang tampil adalah data terakhir berhasil dimuat (${lastSuccessfulLoadAt}), bukan status terkini.`
+                  : "Dashboard belum berhasil memuat data. Tanda — berarti angka belum dapat diverifikasi."}
+              </div>
             </div>
           ) : null}
         </section>
