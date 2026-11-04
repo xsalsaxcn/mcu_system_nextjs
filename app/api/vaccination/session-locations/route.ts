@@ -54,7 +54,10 @@ export async function GET(req: NextRequest) {
 
   const result = await supabase
     .from("vaccination_import_rows")
-    .select("id,source_id,mcu_id,external_id,participant_name,nik,email,batch_name,time_area_name,time_name,location_name,session_date,time_slot,import_location_key")
+    // V573_ANAK_SESSION_METADATA_CANONICAL_READ: choose only columns already
+    // verified in V572 for BINUS Anak. Optional legacy identity fields must
+    // not prevent Location metadata from being read.
+    .select("id,source_id,location_name,session_date,time_slot,batch_name,time_area_name,import_location_key")
     .eq("source_id", sourceId)
     .order("session_date", { ascending: true })
     .order("location_name", { ascending: true })
@@ -62,11 +65,8 @@ export async function GET(req: NextRequest) {
     .limit(10000);
 
   if (result.error) {
-    return ok({
-      locations: [],
-      message: "Metadata lokasi vaksinasi belum tersedia. Jalankan SQL v55 dan re-import database vaksinasi agar TimeAreaName/TimeName terbaca.",
-      error: result.error.message,
-    });
+    // V573: a failed query is not an empty imported database.
+    return fail(`Gagal membaca metadata lokasi Database ${sourceId}: ${result.error.message}`, 500);
   }
 
   if (!(result.data || []).length && clean(sourceResult.data?.uploaded_filename) === "manual-company-only") {
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
   for (const row of result.data || []) {
     const locationName = clean(row.location_name) || clean(row.time_area_name) || "Lokasi belum ditentukan";
     const sessionDate = clean(row.session_date);
-    const timeSlot = clean(row.time_slot) || clean(row.time_name) || "Belum ditentukan";
+    const timeSlot = clean(row.time_slot) || "Belum ditentukan";
     const key = makeFallbackKey(sourceId, locationName, sessionDate);
 
     if (!grouped.has(key)) {
@@ -106,7 +106,9 @@ export async function GET(req: NextRequest) {
     const item = grouped.get(key)!;
     item.rawRowCount += 1;
     if (timeSlot) item.timeSlots.add(timeSlot);
-    const pKey = participantKey(row);
+    // V573: imported row ID is canonical for counting imported children.
+    // No optional NIK/Email columns are required to build the Session.
+    const pKey = clean(row.id);
     if (pKey) item.participantKeys.add(pKey);
     if (clean(row.batch_name)) item.batchNames.add(clean(row.batch_name));
     if (!item.batchName && clean(row.batch_name)) item.batchName = clean(row.batch_name);

@@ -523,7 +523,8 @@ async function getSourceLocationGroups(supabase: any, sourceId: number) {
   const result = await supabase
     .from("vaccination_import_rows")
     .select(
-      "source_id,batch_name,time_area_name,time_name,location_name,session_date,time_slot,import_location_key,mcu_id,external_id,participant_name,nik,email",
+      // V573_ANAK_SESSION_METADATA_CANONICAL_READ: only V572 verified fields.
+      "id,source_id,batch_name,time_area_name,location_name,session_date,time_slot,import_location_key",
     )
     .eq("source_id", sourceId)
     .order("session_date", { ascending: true })
@@ -541,8 +542,7 @@ async function getSourceLocationGroups(supabase: any, sourceId: number) {
       clean(row.time_area_name) ||
       "Lokasi belum ditentukan";
     const sessionDate = clean(row.session_date);
-    const timeSlot =
-      clean(row.time_slot) || clean(row.time_name) || "Belum ditentukan";
+    const timeSlot = clean(row.time_slot) || "Belum ditentukan";
     const key = makeFallbackKey(sourceId, locationName, sessionDate);
 
     if (!grouped.has(key)) {
@@ -560,7 +560,9 @@ async function getSourceLocationGroups(supabase: any, sourceId: number) {
     }
 
     const item = grouped.get(key)!;
-    const pKey = participantKey(row);
+    // V573: count only persisted metadata rows; do not require optional
+    // identity columns from legacy imports to build Session metadata.
+    const pKey = clean(row.id);
     if (pKey) item.participantKeys.add(pKey);
     item.participantCount = item.participantKeys.size || item.participantCount + 1;
     if (timeSlot) item.timeSlots.add(timeSlot);
