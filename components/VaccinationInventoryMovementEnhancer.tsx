@@ -149,6 +149,55 @@ export default function VaccinationInventoryMovementEnhancer({
   const [activeLotLabel, setActiveLotLabel] = useState("");
   const [activeLotContext, setActiveLotContext] = useState({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" });
 
+  // V580_SCOPED_LOT_DETAIL: transaksi modal dibaca dari report terpisah untuk
+  // Lot ID terpilih. Tidak mewarisi filter global yang dapat menyembunyikan OUT.
+  const [scopedLotReport, setScopedLotReport] = useState<Report | null>(null);
+  const [scopedLotReportKey, setScopedLotReportKey] = useState("");
+  const [scopedLotLoading, setScopedLotLoading] = useState(false);
+  const [scopedLotError, setScopedLotError] = useState("");
+  const [scopedLotRefresh, setScopedLotRefresh] = useState(0);
+  const scopedLotRequest = useRef(0);
+  const selectedLotKey = useMemo(() => (
+    Array.from(new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number).filter(Boolean)))
+      .sort((a, b) => a - b).join(",")
+  ), [activeLotIds, activeLotId]);
+
+  useEffect(() => {
+    if (activeBucket !== "lot" || !selectedLotKey) return;
+    const requestId = ++scopedLotRequest.current;
+    const controller = new AbortController();
+    setScopedLotLoading(true);
+    setScopedLotError("");
+    setScopedLotReport(null);
+    setScopedLotReportKey("");
+
+    const fetchScopedLot = async () => {
+      try {
+        const params = new URLSearchParams({ lot_ids: selectedLotKey });
+        const response = await fetch(`/api/vaccination/inventory/report?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || !json.ok) {
+          throw new Error(json.message || "Gagal mengambil detail transaksi Lot.");
+        }
+        if (requestId === scopedLotRequest.current) {
+          setScopedLotReport(json);
+          setScopedLotReportKey(selectedLotKey);
+        }
+      } catch (err: any) {
+        if (requestId === scopedLotRequest.current && !controller.signal.aborted) {
+          setScopedLotError(err?.message || "Gagal mengambil detail transaksi Lot.");
+        }
+      } finally {
+        if (requestId === scopedLotRequest.current) setScopedLotLoading(false);
+      }
+    };
+    void fetchScopedLot();
+    return () => { controller.abort(); scopedLotRequest.current += 1; };
+  }, [activeBucket, selectedLotKey, scopedLotRefresh]);
+
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     if (selectedProducts.length) params.set("vaccine_ids", selectedProducts.join(","));
@@ -217,19 +266,15 @@ export default function VaccinationInventoryMovementEnhancer({
   const activeRows = useMemo(() => {
     let rows: DetailRow[] = [];
     if (activeBucket === "lot" && activeLotId) {
+      // V580: Lot ID adalah identitas transaksi yang benar. Jangan filter lagi
+      // menggunakan label nama perusahaan, layanan, nomor lot, atau Session dari
+      // tabel utama: semua itu bisa berbeda format pada row peserta lama.
       const ids = new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number));
-      rows = details
-        .filter((row) => {
-          if (!ids.has(Number(row.lot_id || 0))) return false;
-          if (activeLotContext.vaccineId && Number(row.vaccine_id || 0) !== activeLotContext.vaccineId) return false;
-          if (activeLotContext.sessionId && Number(row.session_id || 0) !== activeLotContext.sessionId) return false;
-          if (activeLotContext.lotNumber && norm(row.lot) !== norm(activeLotContext.lotNumber)) return false;
-          if (activeLotContext.serviceMode) {
-            const mode = clean(row.service_mode).toUpperCase();
-            if (mode !== activeLotContext.serviceMode && mode !== "BOTH") return false;
-          }
-          return true;
-        })
+      const scopedDetails = scopedLotReportKey === selectedLotKey
+        ? (scopedLotReport?.details || [])
+        : [];
+      rows = scopedDetails
+        .filter((row) => ids.has(Number(row.lot_id || 0)))
         .sort((a, b) => {
           const at = a.date ? new Date(a.date).getTime() : 0;
           const bt = b.date ? new Date(b.date).getTime() : 0;
@@ -301,13 +346,25 @@ export default function VaccinationInventoryMovementEnhancer({
         note: `Sisa fisik ${row.physical} - Sisa sistem ${row.remaining}`,
       } as DetailRow));
     }
-    return rows.filter(rowMatchesMainInventoryFilters);
-  }, [activeBucket, activeLotId, activeLotIds, activeLotContext, details, summaries, rowMatchesMainInventoryFilters]);
+    // Modal Lot dibatasi oleh PK lot_id saja; filter global tetap untuk bucket lain.
+    return activeBucket === "lot" ? rows : rows.filter(rowMatchesMainInventoryFilters);
+  }, [activeBucket, activeLotId, activeLotIds, selectedLotKey, scopedLotReportKey, scopedLotReport, details, summaries, rowMatchesMainInventoryFilters]);
 
   const filteredReportRows = useMemo(
     () => details.filter(rowMatchesMainInventoryFilters),
     [details, rowMatchesMainInventoryFilters],
   );
+
+  const scopedLotUsed = useMemo(() => {
+    if (scopedLotReportKey !== selectedLotKey) return null;
+    const ids = new Set((activeLotIds.length ? activeLotIds : [activeLotId]).map(Number));
+    return (scopedLotReport?.lotSummaries || [])
+      .filter((row) => ids.has(Number(row.lot_id || 0)))
+      .reduce((sum, row) => sum + Number(row.used || 0), 0);
+  }, [scopedLotReport, scopedLotReportKey, selectedLotKey, activeLotIds, activeLotId]);
+  const scopedLotTracedUsed = useMemo(() => activeRows
+    .filter((row) => row.direction === "OUT" && row.movement_type === "Terpakai")
+    .reduce((sum, row) => sum + Math.max(0, Number(row.qty || 0)), 0), [activeRows]);
 
   const activeParticipantRows = useMemo(
     () => activeRows.filter((row) => row.direction === "OUT" && clean(row.participant)),
@@ -461,6 +518,7 @@ export default function VaccinationInventoryMovementEnhancer({
         lotNumber: clean(detail?.lotNumber),
       });
       setActiveBucket("lot");
+      setScopedLotRefresh((value) => value + 1);
       // V579_OPEN_LOT_LIVE_REPORT: do not reuse a report loaded before Validation Done.
       void load();
     }
@@ -567,13 +625,38 @@ export default function VaccinationInventoryMovementEnhancer({
             <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
               <div>
                 <div className="text-lg font-black">{activeBucket === "lot" && activeLotLabel ? activeLotLabel : (BUCKET_TITLES[activeBucket] || "Detail Inventory")}</div>
-                <div className="text-xs text-slate-500">{activeRows.length} baris sesuai filter aktif</div>
+                <div className="text-xs text-slate-500">
+                  {activeBucket === "lot"
+                    ? scopedLotLoading || scopedLotReportKey !== selectedLotKey
+                      ? "Mengambil transaksi langsung dari Lot..."
+                      : `${activeRows.length} transaksi Lot (filter tabel utama tidak diterapkan)`
+                    : `${activeRows.length} baris sesuai filter aktif`}
+                </div>
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={exportActiveDetail} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white">Export Detail</button>
+                {activeBucket === "lot" ? (
+                  <button type="button" onClick={() => setScopedLotRefresh((value) => value + 1)} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-800">Muat Ulang</button>
+                ) : null}
+                <button type="button" disabled={activeBucket === "lot" && (scopedLotLoading || scopedLotReportKey !== selectedLotKey || Boolean(scopedLotError))} onClick={exportActiveDetail} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white disabled:opacity-40">Export Detail</button>
                 <button type="button" onClick={() => { setActiveBucket(""); setActiveLotId(0); setActiveLotLabel(""); setActiveLotContext({ vaccineId: 0, sessionId: 0, serviceMode: "", lotNumber: "" }); }} className="rounded-xl border px-4 py-2 text-sm font-black">Tutup</button>
               </div>
             </div>
+            {activeBucket === "lot" && scopedLotError ? (
+              <div className="border-b bg-red-50 px-5 py-3 text-sm font-bold text-red-800">
+                Detail transaksi gagal dimuat: {scopedLotError}. Stok dan transaksi database tidak diubah.
+              </div>
+            ) : null}
+            {activeBucket === "lot" && scopedLotLoading ? (
+              <div className="border-b bg-blue-50 px-5 py-3 text-sm font-bold text-blue-800">
+                Memverifikasi riwayat transaksi berdasarkan Lot ID...
+              </div>
+            ) : null}
+            {activeBucket === "lot" && !scopedLotLoading && !scopedLotError
+              && scopedLotUsed !== null && scopedLotUsed > scopedLotTracedUsed ? (
+              <div className="border-b bg-amber-50 px-5 py-3 text-sm font-bold text-amber-900">
+                Audit: ringkasan pemakaian {scopedLotUsed}, tetapi baris pemakaian terlacak {scopedLotTracedUsed}. Jangan koreksi stok manual; cek referensi transaksi di backend.
+              </div>
+            ) : null}
             {activeBucket === "lot" ? (
               <div className="grid gap-3 border-b bg-slate-50 p-4 sm:grid-cols-4">
                 {[
@@ -648,7 +731,9 @@ export default function VaccinationInventoryMovementEnhancer({
                       </tr>
                     );
                   })}
-                  {!activeRows.length ? <tr><td colSpan={15} className="p-8 text-center text-slate-500">Belum ada detail pada filter ini.</td></tr> : null}
+                  {!activeRows.length && !scopedLotLoading ? <tr><td colSpan={15} className="p-8 text-center text-slate-500">
+                    {activeBucket === "lot" ? "Belum ditemukan baris riwayat untuk Lot ini pada API laporan." : "Belum ada detail pada filter ini."}
+                  </td></tr> : null}
                 </tbody>
               </table>
             </div>
