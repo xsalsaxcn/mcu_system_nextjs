@@ -237,6 +237,22 @@ export default function VaccinationRegisterPage() {
 
   const selectedSourceId = useMemo(() => form.sourceId || selectedSession?.source_id || "", [form.sourceId, selectedSession?.source_id]);
 
+  // V571_VACCINATION_SOURCE_SCOPED_SESSION_SELECTION
+  // Session & database must belong to the same source before loading participants.
+  // This changes only the Register selector, NOT any configured Session flow.
+  const sessionsForSelectedSource = useMemo(
+    () => !selectedSourceId
+      ? sessions
+      : sessions.filter((session: any) => String(session.source_id || "") === String(selectedSourceId)),
+    [sessions, selectedSourceId],
+  );
+  const sessionSourceMismatch = Boolean(
+    selectedSession && selectedSourceId &&
+    String(selectedSession.source_id || "") !== String(selectedSourceId),
+  );
+  const selectedSourceName = sources.find((source: any) => String(source.id) === String(selectedSourceId))?.name || "";
+
+
   useEffect(() => {
     if (
       !walkinModalOpen ||
@@ -635,7 +651,18 @@ export default function VaccinationRegisterPage() {
   }
 
   async function loadRegistrations(sessionId = form.sessionId, sourceId = selectedSourceId) {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setRegistrations([]);
+      setLocationStockSummary({});
+      return;
+    }
+    const queriedSession = sessions.find((item: any) => String(item.id) === String(sessionId));
+    if (sourceId && queriedSession && String(queriedSession.source_id || "") !== String(sourceId)) {
+      // V571: do not load historical participants from a different database.
+      setRegistrations([]);
+      setLocationStockSummary({});
+      return;
+    }
     const params = new URLSearchParams();
     params.set("session_id", sessionId);
     if (sourceId) params.set("source_id", String(sourceId));
@@ -1203,6 +1230,10 @@ export default function VaccinationRegisterPage() {
     if (!form.sessionId) { setError("Pilih session terlebih dahulu."); return; }
     const sourceId = selectedSourceId;
     if (!sourceId) { setError("Session belum memiliki sumber data peserta. Pilih sumber data terlebih dahulu."); return; }
+    if (sessionSourceMismatch || String(selectedSession?.source_id || "") !== String(sourceId)) {
+      setError("Session tidak terhubung dengan database peserta yang dipilih. Pilih Session yang sesuai terlebih dahulu.");
+      return;
+    }
     setImporting(true);
     setError("");
     setMessage("Memuat peserta...");
@@ -1450,11 +1481,25 @@ export default function VaccinationRegisterPage() {
             </button>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <select disabled={contextLocked} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={form.sessionId} onChange={(e) => setForm({ ...form, sessionId: e.target.value })}>
-              <option value="">Pilih session</option>
-              {sessions.map((session) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
+            <select disabled={contextLocked} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={sessionSourceMismatch ? "" : form.sessionId} onChange={(e) => setForm((prev) => ({ ...prev, sessionId: e.target.value }))}>
+              <option value="">Pilih session sesuai database</option>
+              {sessionsForSelectedSource.map((session: any) => <option key={session.id} value={session.id}>{sessionLabel(session)}</option>)}
             </select>
-            <select disabled={contextLocked} className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100" value={selectedSourceId} onChange={(e) => setForm({ ...form, sourceId: e.target.value })}>
+            <select
+              disabled={contextLocked}
+              className="rounded-xl border px-3 py-2.5 disabled:bg-slate-100"
+              value={selectedSourceId}
+              onChange={(e) => {
+                // V571: changing the source cannot keep a Session from another database.
+                setForm((prev) => ({ ...prev, sourceId: e.target.value, sessionId: "", vaccineId: "", lotId: "" }));
+                setSelectedVaccineIds([]);
+                setRegistrations([]);
+                setLocationStockSummary({});
+                setSelfBookings([]);
+                setError("");
+                setMessage("");
+              }}
+            >
               <option value="">Pilih sumber data peserta</option>
               {sources.map((source) => <option key={source.id} value={source.id}>{source.name}{source.institution_name ? ` · ${source.institution_name}` : ""}</option>)}
             </select>
@@ -1483,8 +1528,18 @@ export default function VaccinationRegisterPage() {
               </div>
             </div>
           </div>
+          {selectedSourceId && !sessionsForSelectedSource.length ? (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+              Database {selectedSourceName || "terpilih"} belum memiliki Session terhubung. Data peserta belum boleh dimuat ke Session database lain. Periksa hubungan sumber data dan Session pada Setup.
+            </p>
+          ) : null}
+          {sessionSourceMismatch ? (
+            <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800">
+              Session dan database peserta tidak cocok. {contextLocked ? "Buka kunci pilihan terlebih dahulu." : "Pilih Session yang terhubung dengan database ini."}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={importCorporate} disabled={importing || !form.sessionId || !selectedSourceId} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{importing ? "Memuat..." : "Muat Peserta"}</button>
+            <button type="button" onClick={importCorporate} disabled={importing || !form.sessionId || !selectedSourceId || sessionSourceMismatch || !sessionsForSelectedSource.some((session: any) => String(session.id) === String(form.sessionId))} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">{importing ? "Memuat..." : "Muat Peserta"}</button>
             <a href="/vaccination/session" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50">Atur Session</a>
           </div>
         </section>
