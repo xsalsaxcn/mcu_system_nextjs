@@ -69,6 +69,15 @@ function samePersonStrongMatch(left: any, right: any) {
   return identityKeys(left).some((key) => rightKeys.has(key));
 }
 
+function samePersonNameAndStrongKey(left: any, right: any) {
+  const leftNik = normalized(left?.nik);
+  const rightNik = normalized(right?.nik);
+  if (leftNik && rightNik && leftNik !== rightNik) return false;
+  return normalized(left?.name) !== "" &&
+    normalized(left?.name) === normalized(right?.name) &&
+    identityKeys(left).some((key) => identityKeys(right).includes(key));
+}
+
 function mergePerson(existing: any, incoming: any) {
   // Prefer an operational participant because it gives vaccination_registrations.participant_id.
   const primary =
@@ -352,6 +361,29 @@ export async function GET(req: NextRequest) {
         sourceLabel: "History Company",
       };
     });
+
+    // V582: a Database participant linked later as an existing Family member
+    // must resolve to its canonical History dependent when there is exactly
+    // one strong same-person match on BOTH sides. Never use employee ID alone.
+    for (const db of mappedOperational) {
+      const sameHistory = mappedHistory.filter((hist: any) =>
+        normalizedParticipantRole(hist.participantType) === "DEPENDENT" &&
+        samePersonNameAndStrongKey(db, hist),
+      );
+      if (sameHistory.length !== 1) continue;
+      const hist = sameHistory[0];
+      const sameDatabase = mappedOperational.filter((candidate: any) =>
+        samePersonNameAndStrongKey(candidate, hist),
+      );
+      if (sameDatabase.length !== 1) continue;
+      db.participantType = "DEPENDENT";
+      db.historyPersonId = hist.historyPersonId;
+      db.parentHistoryPersonId = hist.parentHistoryPersonId;
+      db.parentName = hist.parentName;
+      db.parentEmployeeId = hist.parentEmployeeId;
+      db.parentNik = hist.parentNik;
+      db.parentEmail = hist.parentEmail;
+    }
 
     // V516: merge duplicate search hits across Database + History when they are
     // clearly the same person. Matching requires the SAME normalized name plus at

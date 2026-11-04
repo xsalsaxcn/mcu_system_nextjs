@@ -126,6 +126,15 @@ export default function VaccinationParticipantMasterSearch({
   const [pending, setPending] = useState<any>(null);
   const [error, setError] = useState("");
   const [walkInMode, setWalkInMode] = useState<"EXISTING" | "NEW">("EXISTING");
+  // V582: isolated existing-person Family binding, outside the registration flow.
+  const [familyBindingOpen, setFamilyBindingOpen] = useState(false);
+  const [familySearch, setFamilySearch] = useState("");
+  const [familyCandidates, setFamilyCandidates] = useState<any[]>([]);
+  const [familyParent, setFamilyParent] = useState<any>(null);
+  const [familySearching, setFamilySearching] = useState(false);
+  const [familySaving, setFamilySaving] = useState(false);
+  const [familyError, setFamilyError] = useState("");
+  const [familySuccess, setFamilySuccess] = useState("");
 
   const sessionId = Number(form?.sessionId || form?.session_id || session?.id || 0);
 
@@ -228,6 +237,38 @@ export default function VaccinationParticipantMasterSearch({
       window.clearTimeout(timer);
     };
   }, [companyKey, query]);
+
+  useEffect(() => {
+    if (!familyBindingOpen || !companyKey || familySearch.trim().length < 2) {
+      setFamilyCandidates([]);
+      setFamilySearching(false);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setFamilySearching(true);
+      setFamilyError("");
+      try {
+        const params = new URLSearchParams({ company_key: companyKey, q: familySearch.trim() });
+        const response = await fetch(`/api/vaccination/register-master-search?${params}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.message || payload?.error || "Pencarian Parent gagal.");
+        }
+        if (active) setFamilyCandidates((Array.isArray(payload?.results) ? payload.results : []).filter((row: any) =>
+          String(row?.participantType || "EMPLOYEE").toUpperCase() !== "DEPENDENT"
+        ));
+      } catch (error: any) {
+        if (active) {
+          setFamilyCandidates([]);
+          setFamilyError(String(error?.message || "Pencarian Parent gagal."));
+        }
+      } finally {
+        if (active) setFamilySearching(false);
+      }
+    }, 350);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [familyBindingOpen, companyKey, familySearch]);
 
   const company = useMemo(
     () => companies.find((item: any) => clean(item?.key) === companyKey) || null,
@@ -420,11 +461,17 @@ export default function VaccinationParticipantMasterSearch({
   }
 
   function chooseParticipant(row: any) {
+    setFamilyBindingOpen(false);
+    setFamilyParent(null);
+    setFamilySuccess("");
     void loadParticipantContext(row);
   }
 
   function openRelatedPerson(member: any, relationshipLabel: "Parent" | "Child" | "Sibling") {
     if (!member?.id) return;
+    setFamilyBindingOpen(false);
+    setFamilyParent(null);
+    setFamilySuccess("");
     const fallbackType = relationshipLabel === "Parent" ? "EMPLOYEE" : "DEPENDENT";
     void loadParticipantContext({
       sourceType: "HISTORY_COMPANY",
@@ -440,6 +487,60 @@ export default function VaccinationParticipantMasterSearch({
         clean(company?.name) ||
         clean(session?.company_name),
     });
+  }
+
+  function openFamilyBinding() {
+    setFamilyBindingOpen(true);
+    setFamilySearch("");
+    setFamilyCandidates([]);
+    setFamilyParent(null);
+    setFamilyError("");
+    setFamilySuccess("");
+  }
+
+  async function saveFamilyBinding() {
+    if (!pending?.row || !familyParent || familySaving) return;
+    const child = pending.row;
+    setFamilySaving(true);
+    setFamilyError("");
+    try {
+      const response = await fetch("/api/vaccination/family-bind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyKey,
+          dependent: {
+            historyPersonId: Number(context?.historyPerson?.id || child?.historyPersonId || 0) || null,
+            participantId: Number(child?.participantId || child?.participant_id || 0) || null,
+            name: clean(context?.historyPerson?.name || child?.name || child?.participant_name),
+          },
+          parent: {
+            historyPersonId: Number(familyParent.historyPersonId || 0) || null,
+            participantId: Number(familyParent.participantId || 0) || null,
+            name: clean(familyParent.name),
+          },
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || payload?.error || `HTTP ${response.status}`);
+      }
+      setFamilyBindingOpen(false);
+      setFamilyParent(null);
+      setFamilySearch("");
+      setFamilySuccess(payload.message || "Hubungan Family berhasil disimpan.");
+      // Read fresh context, preserving the selected child's own history and registration data.
+      await loadParticipantContext({
+        ...child,
+        historyPersonId: Number(payload.childHistoryPersonId),
+        participantType: "DEPENDENT",
+        parentHistoryPersonId: Number(payload.parentHistoryPersonId),
+      });
+    } catch (error: any) {
+      setFamilyError(String(error?.message || "Gagal menyimpan hubungan Family."));
+    } finally {
+      setFamilySaving(false);
+    }
   }
 
   function continueFromPopup(mode: "CURRENT" | "MOVE" | "NEW") {
@@ -911,14 +1012,14 @@ export default function VaccinationParticipantMasterSearch({
       ) : null}
 
       {pending && context ? (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setPending(null); }}>
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !familySaving) { setPending(null); setFamilyBindingOpen(false); } }}>
           <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b bg-slate-50 px-6 py-5">
               <div>
                 <div className="text-xs font-black uppercase tracking-wide text-blue-700">Cek Peserta Walk-in</div>
                 <h3 className="mt-1 text-2xl font-black text-slate-900">{pending?.row?.name || pending?.row?.participant_name || "Peserta"}</h3>
               </div>
-              <button type="button" onClick={() => setPending(null)} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
+              <button type="button" onClick={() => { if (!familySaving) { setPending(null); setFamilyBindingOpen(false); } }} className="rounded-xl border bg-white px-4 py-2 text-sm font-black">Tutup</button>
             </div>
 
             <div className="max-h-[calc(90vh-96px)] space-y-4 overflow-y-auto p-6">
@@ -1102,6 +1203,72 @@ export default function VaccinationParticipantMasterSearch({
                   </div>
                 </div>
               </section>
+
+              {/* V582 Family linking: additive to the existing Family panel, no registration changes. */}
+              {(context?.historyPerson?.id || pending?.row?.participantId || pending?.row?.participant_id) ? (
+                <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4">
+                  <div className="text-sm font-black text-indigo-950">Hubungkan peserta existing ke keluarga</div>
+                  {familySuccess ? (
+                    <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800" role="status">{familySuccess}</div>
+                  ) : null}
+                  {family?.parent ? (
+                    <div className="mt-2 text-xs font-semibold text-slate-600">Sudah terikat ke Parent: {family.parent.name}. Hubungan yang berjalan tidak diubah.</div>
+                  ) : familyChildren.length ? (
+                    <div className="mt-2 text-xs font-semibold text-slate-600">Peserta sudah memiliki Child / Family. Tidak bisa otomatis diubah menjadi Child dari Parent lain.</div>
+                  ) : !familyBindingOpen ? (
+                    <button type="button" onClick={openFamilyBinding} disabled={loadingContext} className="mt-3 rounded-xl bg-indigo-700 px-4 py-2.5 text-sm font-black text-white hover:bg-indigo-800 disabled:opacity-50">
+                      Daftarkan peserta ini sebagai anggota keluarga
+                    </button>
+                  ) : (
+                    <div className="mt-3 space-y-3 rounded-xl border border-indigo-100 bg-white p-4">
+                      <div className="text-xs font-bold text-slate-600">Cari dan pilih Parent berdasarkan BINUSIAN ID atau nama. Profil peserta yang sedang dibuka akan menjadi Child / Family.</div>
+                      <input
+                        value={familySearch}
+                        onChange={(event) => { setFamilySearch(event.target.value); setFamilyParent(null); }}
+                        placeholder="BINUSIAN ID / nama Parent (minimal 2 karakter)"
+                        disabled={familySaving}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold outline-none focus:border-indigo-400 disabled:bg-slate-100"
+                      />
+                      {familySearching ? <div className="text-xs font-semibold text-slate-500">Mencari Parent...</div> : null}
+                      {familyCandidates.length && familySearch.trim().length >= 2 ? (
+                        <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200">
+                          {familyCandidates.filter((row: any) => !(
+                            Number(row?.historyPersonId || 0) && Number(row?.historyPersonId || 0) === Number(context?.historyPerson?.id || pending?.row?.historyPersonId || 0)
+                          ) && !(
+                            Number(row?.participantId || 0) && Number(row?.participantId || 0) === Number(pending?.row?.participantId || pending?.row?.participant_id || 0)
+                          )).map((row: any) => (
+                            <button
+                              key={`family-parent-${row.sourceType}-${row.historyPersonId || 0}-${row.participantId || 0}`}
+                              type="button"
+                              disabled={familySaving}
+                              onClick={() => setFamilyParent(row)}
+                              className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-none hover:bg-indigo-50 ${familyParent === row ? "bg-indigo-100" : "bg-white"}`}
+                            >
+                              <span>
+                                <span className="block text-sm font-black text-slate-900">{row.name}</span>
+                                <span className="text-[11px] font-semibold text-slate-500">{[row.employeeId && `ID ${row.employeeId}`, row.nik && `NIK ${row.nik}`, row.sourceLabel].filter(Boolean).join(" · ")}</span>
+                              </span>
+                              <span className="shrink-0 text-[11px] font-black text-indigo-700">{familyParent === row ? "Dipilih" : "Pilih"}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      {familyParent ? (
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs font-semibold text-indigo-900">
+                          <div>Child: <b>{clean(contextPerson?.name) || pending?.row?.name}</b></div>
+                          <div>Parent: <b>{familyParent.name}</b> {familyParent.employeeId ? `(ID ${familyParent.employeeId})` : ""}</div>
+                          <div className="mt-1">Identitas dan riwayat kedua peserta tetap terpisah.</div>
+                        </div>
+                      ) : null}
+                      {familyError ? <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs font-bold text-red-700">{familyError}</div> : null}
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" disabled={!familyParent || familySaving} onClick={() => void saveFamilyBinding()} className="rounded-lg bg-indigo-700 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{familySaving ? "Menyimpan..." : "Simpan Hubungan Keluarga"}</button>
+                        <button type="button" disabled={familySaving} onClick={() => { setFamilyBindingOpen(false); setFamilyParent(null); setFamilyError(""); }} className="rounded-lg border px-4 py-2.5 text-xs font-black text-slate-600 disabled:opacity-50">Batal</button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              ) : null}
 
               <section className="rounded-2xl border bg-white p-5">
                 <div className="flex items-center justify-between gap-3">
