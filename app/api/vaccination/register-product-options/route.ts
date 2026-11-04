@@ -107,6 +107,165 @@ async function loadAssignedVaccineIds(
   }
   return { enabled: true, ids };
 }
+// V577_ADMIN_BAZAR_MATCH_PUBLIC_STOCK:
+// The Admin Bazar endpoint MUST use the identical allocation + lot + movement
+// + administered-record remaining calculation as the deployed public Bazar.
+// Keep Healthday calculation, registration posting, and public portal untouched.
+function cleanValue(value: any) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+async function loadBazarCanonicalStockRemaining(supabase: any, sessionId: number) {
+  const allocationsResult = await supabase
+    .from("vaccination_session_stock_allocations")
+    .select("lot_id,service_mode,allocated_qty,active")
+    .eq("session_id", sessionId)
+    .eq("service_mode", "BAZAR")
+    .eq("active", true)
+    .limit(10000);
+  if (allocationsResult.error) throw new Error(allocationsResult.error.message);
+
+  const allocations = allocationsResult.data || [];
+  const lotIds = Array.from(
+    new Set<number>(
+      allocations
+        .map((row: any) => Number(row.lot_id || 0))
+        .filter((id: number) => id > 0),
+    ),
+  );
+  if (!lotIds.length) return { enabled: false, map: new Map<number, number>() };
+
+  // V570_R1_SELFBOOKING_STOCK_CANONICAL_CAP:
+  // allocation tetap menentukan jatah layanan Bazar, tetapi stok publik tidak
+  // boleh melebihi stok Lot canonical yang sama dengan Inventory.
+  const [itemsResult, lotsResult, movementsResult] = await Promise.all([
+    supabase
+      .from("vaccination_registration_items")
+      .select("lot_id,service_mode,status,active,registration:vaccination_registrations!inner(session_id)")
+      .in("lot_id", lotIds)
+      .eq("active", true)
+      .in("status", ["ADMINISTERED", "DONE", "FINISHED"])
+      .eq("registration.session_id", sessionId)
+      .limit(20000),
+    supabase
+      .from("vaccination_vaccine_lots")
+      .select("id,stock_initial,stock_added,stock_used,active")
+      .in("id", lotIds)
+      .eq("active", true)
+      .limit(10000),
+    supabase
+      .from("vaccination_inventory_movements")
+      .select("lot_id,movement_type,qty")
+      .in("lot_id", lotIds)
+      .limit(20000),
+  ]);
+
+  if (itemsResult.error) throw new Error(itemsResult.error.message);
+  if (lotsResult.error) throw new Error(lotsResult.error.message);
+  if (movementsResult.error) throw new Error(movementsResult.error.message);
+
+  const totalUsed = new Map<number, number>();
+  const bazarUsed = new Map<number, number>();
+  const trackedLots = new Set<number>();
+
+  for (const row of itemsResult.data || []) {
+    const lotId = Number((row as any).lot_id || 0);
+    if (!lotId) continue;
+    trackedLots.add(lotId);
+    totalUsed.set(lotId, (totalUsed.get(lotId) || 0) + 1);
+    if (cleanValue((row as any).service_mode).toUpperCase() === "BAZAR") {
+      bazarUsed.set(lotId, (bazarUsed.get(lotId) || 0) + 1);
+    }
+  }
+
+  const inboundTypes = new Set([
+    "STOCK_IN",
+    "IN",
+    "ADD",
+    "ADDED",
+    "RESTOCK",
+    "RETURN_STOCK",
+    "STOCK_RETURN",
+    "RETURN_IN",
+    "ADJUSTMENT_IN",
+    "STOCK_TRANSFER_IN",
+  ]);
+  const adjustmentOutTypes = new Set([
+    "STOCK_OUT_ADJUSTMENT",
+    "ADJUSTMENT_OUT",
+    "MANUAL_STOCK_OUT",
+    "STOCK_REDUCTION",
+    "STOCK_TRANSFER_OUT",
+  ]);
+  const inboundByLot = new Map<number, number>();
+  const adjustmentOutByLot = new Map<number, number>();
+
+  for (const row of movementsResult.data || []) {
+    const lotId = Number((row as any).lot_id || 0);
+    if (!lotId) continue;
+    const type = cleanValue((row as any).movement_type).toUpperCase();
+    const qty = Math.abs(Number((row as any).qty || 0));
+    if (inboundTypes.has(type)) {
+      inboundByLot.set(lotId, (inboundByLot.get(lotId) || 0) + qty);
+    }
+    if (adjustmentOutTypes.has(type)) {
+      adjustmentOutByLot.set(
+        lotId,
+        (adjustmentOutByLot.get(lotId) || 0) + qty,
+      );
+    }
+  }
+
+  const lotRemaining = new Map<number, number>();
+  for (const row of lotsResult.data || []) {
+    const lotId = Number((row as any).id || 0);
+    if (!lotId) continue;
+    const initial = Number((row as any).stock_initial || 0);
+    const added = Math.max(
+      Number((row as any).stock_added || 0),
+      inboundByLot.get(lotId) || 0,
+    );
+    const used = trackedLots.has(lotId)
+      ? totalUsed.get(lotId) || 0
+      : Math.max(0, Number((row as any).stock_used || 0));
+    const adjustmentOut = adjustmentOutByLot.get(lotId) || 0;
+    lotRemaining.set(
+      lotId,
+      Math.max(0, initial + added - used - adjustmentOut),
+    );
+  }
+
+  const allocatedByLot = new Map<number, number>();
+  for (const row of allocations) {
+    const lotId = Number((row as any).lot_id || 0);
+    if (!lotId) continue;
+    allocatedByLot.set(
+      lotId,
+      (allocatedByLot.get(lotId) || 0) +
+        Math.max(0, Number((row as any).allocated_qty || 0)),
+    );
+  }
+
+  const map = new Map<number, number>();
+  for (const [lotId, allocated] of allocatedByLot.entries()) {
+    const allocationRemaining = Math.max(
+      0,
+      allocated - (bazarUsed.get(lotId) || 0),
+    );
+    const canonicalRemaining = lotRemaining.get(lotId);
+
+    // Never show/sell more than the canonical Lot can physically/systemically hold.
+    map.set(
+      lotId,
+      canonicalRemaining === undefined
+        ? allocationRemaining
+        : Math.min(allocationRemaining, canonicalRemaining),
+    );
+  }
+
+  return { enabled: allocations.length > 0, map };
+}
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
@@ -259,6 +418,16 @@ export async function GET(req: NextRequest) {
     // V576: query the same Session-owned Lot + joined Vaccine relation used by
     // /api/vaccination/public-bazar, rather than separately materializing all
     // Master vaccines. This avoids mismatched catalog snapshots/references.
+    // Same stock computation as Self Booking. Unlike the old V576 cap, this
+    // considers stock movements, FINISHED/DONE records, and multiple allocations.
+    // Never treat a missing allocation as extra stock.
+    let bazarCanonicalStock: { enabled: boolean; map: Map<number, number> };
+    try {
+      bazarCanonicalStock = await loadBazarCanonicalStockRemaining(supabase, sessionId);
+    } catch (error: any) {
+      return fail(error?.message || "Gagal membaca stok Bazar yang sama dengan Self Booking.", 500);
+    }
+
     const lotsResult = await supabase
       .from("vaccination_vaccine_lots")
       .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active,stock_scope,stock_session_id,vaccine:vaccination_vaccines(id,name,brand,price,price_category,active)")
@@ -271,9 +440,7 @@ export async function GET(req: NextRequest) {
 
     if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
-    const bazarHasAllocations = Array.from(serviceStock.map.keys()).some(
-      (key) => key.endsWith(":BAZAR"),
-    );
+    const bazarHasAllocations = bazarCanonicalStock.enabled;
     const seen = new Set<string>();
     bazarOptions = [];
 
@@ -298,23 +465,12 @@ export async function GET(req: NextRequest) {
       const legacyPricedFallback = bazarAssignments.ids.size === 0 && hasPrice;
       if (!assignedBazar && !allocatedBazar && !namedBazar && !legacyPricedFallback) continue;
 
-      // Follow the public Bazar's canonical-stock cap, rather than the old
-      // allocation counter alone. Do not expose more inventory than Lot owns.
-      const canonicalRemaining = Math.max(
-        0,
-        Number((lot as any).stock_initial || 0) +
-          Number((lot as any).stock_added || 0) -
-          Number((lot as any).stock_used || 0),
-      );
+      // V577: Public Bazar source-of-truth for display eligibility.
+      // Includes movement based inbound/adjustment, administered/FINISHED/DONE,
+      // and the minimum of service quota and canonical Lot stock.
       const serviceAllocation = serviceStock.map.get(`${lotId}:BAZAR`);
-      // V576: For a session with Bazar allocations, enforce each lot's quota.
-      // For legacy sessions without any Bazar allocations, the public catalog
-      // also returns an unbounded-by-service remaining (null).
       const remaining = bazarHasAllocations
-        ? Math.min(
-            Math.max(0, Number(serviceAllocation?.remaining || 0)),
-            canonicalRemaining,
-          )
+        ? Number(bazarCanonicalStock.map.get(lotId) || 0)
         : null;
       if (bazarHasAllocations && Number(remaining || 0) <= 0) continue;
 
@@ -361,6 +517,6 @@ export async function GET(req: NextRequest) {
     serviceStockEnabled: serviceStock.enabled,
     bazarAssignmentReady: bazarAssignments.enabled,
     bazarCatalogCount: bazarOptions.length,
-    bazarCatalogSource: "SESSION_ACTIVE_LOTS_PUBLIC_PARITY_V576",
+    bazarCatalogSource: "SESSION_ACTIVE_LOTS_PUBLIC_STOCK_PARITY_V577",
   });
 }
