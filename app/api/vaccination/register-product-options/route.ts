@@ -249,67 +249,109 @@ export async function GET(req: NextRequest) {
   }
 
   if (healthdayBazarEnabled) {
+    // V575_ADMIN_BAZAR_CATALOG_PARITY:
+    // Align Admin's Bazar choices with the already-working Self Booking catalog.
+    // A product may be Bazar-eligible by explicit assignment, Bazar allocation,
+    // its BAZAR name, or the legacy priced fallback when no assignments exist.
+    // Never exclude an allocated Bazar product just because an assignment row
+    // is missing. Only use Session-owned active Lots; never move stock or IDs.
     const [vaccinesResult, lotsResult] = await Promise.all([
       supabase
         .from("vaccination_vaccines")
         .select("id,name,brand,price,price_category,active")
         .eq("active", true)
-        .order("name", { ascending: true }),
+        .order("name", { ascending: true })
+        .limit(10000),
       supabase
         .from("vaccination_vaccine_lots")
         .select("id,vaccine_id,lot_number,expiry_date,stock_initial,stock_added,stock_used,active,stock_scope,stock_session_id,stock_company_name")
+        .eq("stock_scope", "SESSION")
+        .eq("stock_session_id", sessionId)
         .eq("active", true)
         .order("expiry_date", { ascending: true, nullsFirst: false })
-        .order("id", { ascending: true }),
+        .order("id", { ascending: true })
+        .limit(10000),
     ]);
 
     if (vaccinesResult.error) return fail(vaccinesResult.error.message, 500);
     if (lotsResult.error) return fail(lotsResult.error.message, 500);
 
-    const pricedVaccines = new Map<number, any>(
-      (vaccinesResult.data || [])
-        .filter((vaccine: any) => {
-          const basePrice = Number(vaccine?.price || 0);
-          const offers = salesOffersByVaccine.get(Number(vaccine?.id || 0)) || [];
-          return basePrice > 0 || offers.some((offer: any) => Number(offer?.price || 0) > 0);
-        })
-        .map((vaccine: any) => [Number(vaccine.id), vaccine]),
+    const vaccinesById = new Map<number, any>(
+      (vaccinesResult.data || []).map((vaccine: any) => [Number(vaccine.id), vaccine]),
     );
+    const bazarHasAllocations = Array.from(serviceStock.map.keys()).some(
+      (key) => key.endsWith(":BAZAR"),
+    );
+    const seen = new Set<string>();
+    bazarOptions = [];
 
-    bazarOptions = (lotsResult.data || [])
-      .map((lot: any) => {
-        const vaccineId = Number(lot?.vaccine_id || 0);
-        const vaccine = pricedVaccines.get(vaccineId);
-        if (!vaccine) return null;
+    for (const lot of lotsResult.data || []) {
+      const lotId = Number((lot as any)?.id || 0);
+      const vaccineId = Number((lot as any)?.vaccine_id || 0);
+      const vaccine = vaccinesById.get(vaccineId);
+      if (!lotId || !vaccineId || !vaccine || vaccine.active === false) continue;
 
-        const scope = String(lot?.stock_scope || "GENERAL").trim().toUpperCase();
-        const exactSessionLot =
-          scope === "SESSION" && Number(lot?.stock_session_id || 0) === sessionId;
-        if (!exactSessionLot) return null;
-
-        if (bazarAssignments.enabled && bazarAssignments.ids.size > 0) {
-          if (!bazarAssignments.ids.has(vaccineId)) return null;
-        }
-
-        return {
-          id: `bazar-${sessionId}-${Number(vaccine.id)}-${Number(lot.id)}`,
-          session_id: sessionId,
-          vaccine_id: Number(vaccine.id),
-          lot_id: Number(lot.id),
-          dose_number: 1,
-          active: true,
-          option_source: "BAZAR_SESSION_SERVICE_STOCK",
-          vaccine,
-          lot,
-        };
-      })
-      .filter(Boolean)
-      .map((option: any) => decorateOption(option, "BAZAR"))
-      .filter((option: any) =>
-        serviceStock.enabled
-          ? Number(option.service_stock_remaining || 0) > 0
-          : false,
+      const basePrice = Number(vaccine.price || 0);
+      const offers = (salesOffersByVaccine.get(vaccineId) || []).filter(
+        (offer: any) => Number(offer?.price || 0) > 0,
       );
+      const hasPrice = basePrice > 0 || offers.length > 0;
+      if (!hasPrice) continue;
+
+      const assignedBazar = bazarAssignments.ids.has(vaccineId);
+      const allocatedBazar = serviceStock.map.has(`${lotId}:BAZAR`);
+      const namedBazar = /(^|[^A-Z])BAZAR([^A-Z]|$)/i.test(String(vaccine.name || "").trim());
+      const legacyPricedFallback = bazarAssignments.ids.size === 0 && hasPrice;
+      if (!assignedBazar && !allocatedBazar && !namedBazar && !legacyPricedFallback) continue;
+
+      // Follow the public Bazar's canonical-stock cap, rather than the old
+      // allocation counter alone. Do not expose more inventory than Lot owns.
+      const canonicalRemaining = Math.max(
+        0,
+        Number((lot as any).stock_initial || 0) +
+          Number((lot as any).stock_added || 0) -
+          Number((lot as any).stock_used || 0),
+      );
+      const serviceAllocation = serviceStock.map.get(`${lotId}:BAZAR`);
+      const remaining = bazarHasAllocations
+        ? Math.min(
+            Number(serviceAllocation?.remaining || 0),
+            canonicalRemaining,
+          )
+        : null;
+      if (bazarHasAllocations && Number(remaining || 0) <= 0) continue;
+
+      const uniqueKey = `${vaccineId}:${lotId}`;
+      if (seen.has(uniqueKey)) continue;
+      seen.add(uniqueKey);
+
+      bazarOptions.push({
+        id: `bazar-${sessionId}-${vaccineId}-${lotId}`,
+        session_id: sessionId,
+        vaccine_id: vaccineId,
+        lot_id: lotId,
+        dose_number: 1,
+        active: true,
+        option_source: "BAZAR_SESSION_CATALOG",
+        vaccine,
+        lot,
+        service_mode: "BAZAR",
+        sales_options: offers,
+        service_stock_allocated: serviceAllocation
+          ? Number(serviceAllocation.allocated || 0)
+          : null,
+        service_stock_used: serviceAllocation
+          ? Number(serviceAllocation.used || 0)
+          : null,
+        service_stock_remaining: remaining,
+      });
+    }
+    bazarOptions.sort((a: any, b: any) =>
+      `${a.vaccine?.name || ""} ${a.vaccine?.brand || ""}`.localeCompare(
+        `${b.vaccine?.name || ""} ${b.vaccine?.brand || ""}`,
+        "id",
+      ),
+    );
   }
 
   return ok({
