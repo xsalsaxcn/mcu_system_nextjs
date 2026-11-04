@@ -189,7 +189,26 @@ export default function VaccinationInventoryPage() {
     setMessage(json.message || "Produk/Lot berhasil dihapus dari Inventory aktif."); setDeleting(null); setDeleteReason(""); await load(); window.dispatchEvent(new Event("vaccination-inventory-updated"));
   }
 
-  useEffect(() => { load(); }, []);
+  // V579_INVENTORY_RETURN_FOCUS_FRESHNESS: an Administered/Done action may be
+  // completed in another tab. Reload the canonical Inventory when this tab
+  // becomes visible again; never mutate DB and never derive counts from cache.
+  useEffect(() => {
+    let lastRefresh = 0;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastRefresh < 900) return;
+      lastRefresh = now;
+      void load();
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
 
   const companyOptions = useMemo(() => {
     const values = new Set<string>();

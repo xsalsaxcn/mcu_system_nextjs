@@ -1,7 +1,7 @@
 "use client";
 // V519_INVENTORY_SERVICE_FILTER_CANONICAL_DEDUPE_PRODUCT_FILTER
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // VACCINATION_INVENTORY_FILTER_EXPORT_V150
 // Extends V149 without changing Inventory edit/update behavior.
@@ -137,6 +137,7 @@ export default function VaccinationInventoryMovementEnhancer({
   productFilter = "ALL",
 }: MovementEnhancerProps) {
   const [report, setReport] = useState<Report>({});
+  const v579ReportRequest = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
@@ -157,6 +158,9 @@ export default function VaccinationInventoryMovementEnhancer({
   }, [selectedProducts, dateFrom, dateTo]);
 
   const load = useCallback(async () => {
+    // V579_INVENTORY_REPORT_REQUEST_GUARD: a slower old response must never
+    // overwrite the fresh report requested on Lot open or focus.
+    const request = ++v579ReportRequest.current;
     setLoading(true);
     setError("");
     try {
@@ -164,19 +168,35 @@ export default function VaccinationInventoryMovementEnhancer({
       const res = await fetch(url, { cache: "no-store" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) throw new Error(json.message || "Gagal mengambil report inventory.");
-      setReport(json);
+      if (request === v579ReportRequest.current) setReport(json);
     } catch (err: any) {
-      setError(err?.message || "Gagal mengambil report inventory.");
+      if (request === v579ReportRequest.current) {
+        setError(err?.message || "Gagal mengambil report inventory.");
+      }
     } finally {
-      setLoading(false);
+      if (request === v579ReportRequest.current) setLoading(false);
     }
   }, [queryString]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const handleInventoryUpdated = () => { load(); };
+    let lastFocusRefresh = 0;
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastFocusRefresh < 900) return;
+      lastFocusRefresh = now;
+      void load();
+    };
+    const handleInventoryUpdated = () => { void load(); };
     window.addEventListener("vaccination-inventory-updated", handleInventoryUpdated);
-    return () => window.removeEventListener("vaccination-inventory-updated", handleInventoryUpdated);
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      window.removeEventListener("vaccination-inventory-updated", handleInventoryUpdated);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
   }, [load]);
 
   const products = report.products || [];
@@ -441,10 +461,12 @@ export default function VaccinationInventoryMovementEnhancer({
         lotNumber: clean(detail?.lotNumber),
       });
       setActiveBucket("lot");
+      // V579_OPEN_LOT_LIVE_REPORT: do not reuse a report loaded before Validation Done.
+      void load();
     }
     window.addEventListener("vaccination-inventory-open-lot", openLot as EventListener);
     return () => window.removeEventListener("vaccination-inventory-open-lot", openLot as EventListener);
-  }, []);
+  }, [load]);
 
   function toggleProduct(id: number) {
     const key = String(id);
