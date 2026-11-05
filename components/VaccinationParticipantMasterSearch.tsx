@@ -135,6 +135,46 @@ export default function VaccinationParticipantMasterSearch({
   const [familySaving, setFamilySaving] = useState(false);
   const [familyError, setFamilyError] = useState("");
   const [familySuccess, setFamilySuccess] = useState("");
+  // V583: independent, read-only Family verifier. Never writes registrations.
+  const [verifiedFamily, setVerifiedFamily] = useState<any>(null);
+  const [familyVerifying, setFamilyVerifying] = useState(false);
+
+  const familyContextRow = pending?.row || null;
+  const familyContextHistoryId = Number(pending?.context?.historyPerson?.id || familyContextRow?.historyPersonId || familyContextRow?.history_person_id || 0);
+  const familyContextParticipantId = Number(familyContextRow?.participantId || familyContextRow?.participant_id || 0);
+  const familyContextName = clean(pending?.context?.historyPerson?.name || familyContextRow?.name || familyContextRow?.participant_name);
+  const familyVerificationKey = [companyKey, familyContextHistoryId, familyContextParticipantId, normalized(familyContextName)].join("|");
+  const familyStatus = verifiedFamily?.key === familyVerificationKey ? verifiedFamily : null;
+  const familyVerifyError = clean(familyStatus?.error);
+
+  useEffect(() => {
+    if (!pending?.row || !companyKey || !familyContextName || (!familyContextHistoryId && !familyContextParticipantId)) {
+      setFamilyVerifying(false);
+      setVerifiedFamily(null);
+      return;
+    }
+    let active = true;
+    setFamilyVerifying(true);
+    setVerifiedFamily(null);
+    const params = new URLSearchParams({ company_key: companyKey, name: familyContextName });
+    if (familyContextHistoryId) params.set("history_person_id", String(familyContextHistoryId));
+    if (familyContextParticipantId) params.set("participant_id", String(familyContextParticipantId));
+    void (async () => {
+      try {
+        const response = await fetch(`/api/vaccination/family-link-status?${params}`, { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.message || payload?.error || `HTTP ${response.status}`);
+        }
+        if (active) setVerifiedFamily({ ...payload, key: familyVerificationKey });
+      } catch (error: any) {
+        if (active) setVerifiedFamily({ key: familyVerificationKey, error: String(error?.message || "Verifikasi Family gagal.") });
+      } finally {
+        if (active) setFamilyVerifying(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [familyVerificationKey]);
 
   const sessionId = Number(form?.sessionId || form?.session_id || session?.id || 0);
 
@@ -499,7 +539,7 @@ export default function VaccinationParticipantMasterSearch({
   }
 
   async function saveFamilyBinding() {
-    if (!pending?.row || !familyParent || familySaving) return;
+    if (!pending?.row || !familyParent || familySaving || familyVerifying || !familyStatus || familyVerifyError) return;
     const child = pending.row;
     setFamilySaving(true);
     setFamilyError("");
@@ -710,7 +750,10 @@ export default function VaccinationParticipantMasterSearch({
     phone: current?.phone || other?.phone || pending?.row?.phone || "",
     participantType: pending?.row?.participantType || pending?.row?.participant_type || current?.familyRole || other?.familyRole || "",
   };
-  const family = context?.family || { role: "", parent: null, children: [], siblings: [] };
+  // Read-only relation data has priority over stale Database familyRole flags.
+  const family = (familyStatus?.family && !familyVerifyError)
+    ? familyStatus.family
+    : (context?.family || { role: "", parent: null, children: [], siblings: [] });
   const familyChildren = Array.isArray(family?.children) ? family.children : [];
   const familySiblings = Array.isArray(family?.siblings) ? family.siblings : [];
   const familyDisplayRows =
@@ -1198,7 +1241,7 @@ export default function VaccinationParticipantMasterSearch({
                         ))}
                       </div>
                     ) : (
-                      <div className="mt-1 text-sm font-semibold text-slate-500">Belum ada Child / Family terhubung.</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-500">{familyVerifying ? "Memeriksa Child / Family..." : familyVerifyError ? "Data Family belum terverifikasi." : "Belum ada Child / Family terhubung."}</div>
                     )}
                   </div>
                 </div>
@@ -1211,12 +1254,16 @@ export default function VaccinationParticipantMasterSearch({
                   {familySuccess ? (
                     <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800" role="status">{familySuccess}</div>
                   ) : null}
-                  {family?.parent ? (
+                  {familyVerifying ? (
+                    <div className="mt-2 text-xs font-semibold text-slate-600">Memverifikasi hubungan Family yang tersimpan...</div>
+                  ) : familyVerifyError ? (
+                    <div role="alert" className="mt-2 rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-800">Relasi Family belum bisa diverifikasi: {familyVerifyError}. Jangan binding ulang sebelum diperiksa.</div>
+                  ) : family?.parent ? (
                     <div className="mt-2 text-xs font-semibold text-slate-600">Sudah terikat ke Parent: {family.parent.name}. Hubungan yang berjalan tidak diubah.</div>
                   ) : familyChildren.length ? (
                     <div className="mt-2 text-xs font-semibold text-slate-600">Peserta sudah memiliki Child / Family. Tidak bisa otomatis diubah menjadi Child dari Parent lain.</div>
                   ) : !familyBindingOpen ? (
-                    <button type="button" onClick={openFamilyBinding} disabled={loadingContext} className="mt-3 rounded-xl bg-indigo-700 px-4 py-2.5 text-sm font-black text-white hover:bg-indigo-800 disabled:opacity-50">
+                    <button type="button" onClick={openFamilyBinding} disabled={loadingContext || familyVerifying || !familyStatus || !!familyVerifyError} className="mt-3 rounded-xl bg-indigo-700 px-4 py-2.5 text-sm font-black text-white hover:bg-indigo-800 disabled:opacity-50">
                       Daftarkan peserta ini sebagai anggota keluarga
                     </button>
                   ) : (
