@@ -675,7 +675,7 @@ export async function runAutomaticVaccinationReminder(supabase: any) {
   const sync = await syncVaccinationReminders(supabase, today);
 
   const delivery = vaccinationReminderSmtpConfigured()
-    ? await sendDueVaccinationReminders(supabase, today, 200)
+    ? await sendDueVaccinationReminders(supabase, today, 3)
     : {
         configured: false,
         today,
@@ -686,6 +686,6 @@ export async function runAutomaticVaccinationReminder(supabase: any) {
         results: [],
       };
 
-  const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 200);
+  const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 3);
   return { today, sync, delivery, whatsappDelivery };
 }

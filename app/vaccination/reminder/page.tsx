@@ -150,7 +150,13 @@ export default function VaccinationReminderPage() {
   const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [manualSending, setManualSending] = useState(false);
+  const [scheduleSyncing, setScheduleSyncing] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
+  const [eventData, setEventData] = useState<any>(null);
+  const [eventLoading, setEventLoading] = useState(false);
+  const [eventError, setEventError] = useState("");
+  const [eventSessionId, setEventSessionId] = useState<number | null>(null);
+  const [eventPage, setEventPage] = useState(1);
   const [rowActionId, setRowActionId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -189,50 +195,87 @@ export default function VaccinationReminderPage() {
     setSelectedView(view);
   }
 
+  async function postReminderMode(mode: "sync" | "email" | "wa") {
+    const response = await fetch("/api/vaccination/reminder/cron", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.message || `HTTP ${response.status}`);
+    }
+    return payload;
+  }
+
+  async function syncSchedules() {
+    if (scheduleSyncing || manualSending) return;
+    setScheduleSyncing(true);
+    setManualMessage("");
+    setError("");
+    try {
+      const result = await postReminderMode("sync");
+      setManualMessage(`Jadwal disinkronkan: ${Number(result?.sync?.schedules || 0)} baris aktif. Tidak ada reminder dikirim oleh tindakan ini.`);
+      await load(selectedView);
+      await loadCurrentEvent(eventSessionId, eventPage);
+    } catch (e: any) {
+      setError(`Gagal sinkron jadwal: ${String(e?.message || e)}`);
+    } finally {
+      setScheduleSyncing(false);
+    }
+  }
+
   async function sendManualReminder() {
-    if (manualSending) return;
-
-    const confirmed = window.confirm(
-      "Kirim reminder manual sekarang? Sistem hanya akan mengirim reminder yang sudah due hari ini atau tertunda, bukan reminder masa depan.",
-    );
-    if (!confirmed) return;
-
+    if (manualSending || scheduleSyncing) return;
+    if (!window.confirm("Proses batch reminder yang sudah jatuh tempo sekarang? Setiap kanal memproses maksimal 3 reminder per request. Pengiriman berikutnya dilakukan scheduler di belakang layar atau dengan batch manual berikutnya.")) return;
     setManualSending(true);
     setManualMessage("");
     setError("");
-
     try {
-      const response = await fetch("/api/vaccination/reminder/cron", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.message || `HTTP ${response.status}`);
-      }
-
-      const delivery = payload?.delivery || payload?.data?.delivery || {};
-      const whatsappDelivery = payload?.whatsappDelivery || payload?.data?.whatsappDelivery || {};
-      const sync = payload?.sync || payload?.data?.sync || {};
-      const sent = Number(delivery?.sent || 0);
-      const failed = Number(delivery?.failed || 0);
-      const skipped = Number(delivery?.skipped || 0);
-      const claimed = Number(delivery?.claimed || 0);
-      const waSent = Number(whatsappDelivery?.sent || 0);
-      const waFailed = Number(whatsappDelivery?.failed || 0);
-      const waSkipped = Number(whatsappDelivery?.skipped || 0);
-      const waClaimed = Number(whatsappDelivery?.claimed || 0);
-      const schedules = Number(sync?.schedules || 0);
-
+      // Independent calls prevent a slow SMTP provider from blocking WhatsApp (and vice versa).
+      const outcome = await Promise.allSettled([postReminderMode("email"), postReminderMode("wa")]);
+      const email = outcome[0].status === "fulfilled" ? outcome[0].value?.delivery : null;
+      const wa = outcome[1].status === "fulfilled" ? outcome[1].value?.whatsappDelivery : null;
+      const sendCount = Number(email?.sent || 0) + Number(wa?.sent || 0);
+      const channelErrors = [
+        outcome[0].status === "rejected" ? `Email: ${String(outcome[0].reason?.message || outcome[0].reason)}` : "",
+        outcome[1].status === "rejected" ? `WhatsApp: ${String(outcome[1].reason?.message || outcome[1].reason)}` : "",
+      ].filter(Boolean);
+      const errorDetails = [
+        ...(email?.results || []).filter((row: any) => row.error).slice(0, 2).map((row: any) => `Email #${row.id}: ${row.error}`),
+        ...(wa?.results || []).filter((row: any) => row.error).slice(0, 2).map((row: any) => `WA #${row.id}: ${row.error}`),
+      ];
       setManualMessage(
-        `Manual reminder selesai · Email: diproses ${claimed}, sent ${sent}, failed ${failed}, skipped ${skipped} · WhatsApp H-3/H-1: diproses ${waClaimed}, sent ${waSent}, failed ${waFailed}, skipped ${waSkipped} · schedule aktif ${schedules}.`,
+        `Batch selesai · Email: ${Number(email?.sent || 0)} sent, ${Number(email?.failed || 0)} gagal, ${Number(email?.skipped || 0)} dilewati · WhatsApp: ${Number(wa?.sent || 0)} sent, ${Number(wa?.failed || 0)} gagal, ${Number(wa?.skipped || 0)} dilewati. Status ini bukan berarti semua antrean telah selesai.`,
       );
+      if (channelErrors.length || errorDetails.length) setError([...channelErrors, ...errorDetails].join(" · "));
+      if (!sendCount && !channelErrors.length && !errorDetails.length) {
+        setManualMessage("Tidak ada pengiriman berhasil pada batch ini. Periksa apakah ada jadwal yang sudah due atau kanal yang masih menunggu pengaturan.");
+      }
       await load(selectedView);
     } catch (e: any) {
       setError(String(e?.message || e || "Gagal menjalankan reminder manual."));
     } finally {
       setManualSending(false);
+    }
+  }
+
+  async function loadCurrentEvent(sessionId: number | null = eventSessionId, requestedPage = eventPage) {
+    setEventLoading(true);
+    setEventError("");
+    try {
+      const params = new URLSearchParams({ page: String(requestedPage), cb: String(Date.now()) });
+      if (sessionId) params.set("session_id", String(sessionId));
+      const response = await fetch(`/api/vaccination/reminder/current-event?${params}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `HTTP ${response.status}`);
+      setEventData(payload);
+      if (sessionId == null && payload.sessionId) setEventSessionId(Number(payload.sessionId));
+    } catch (e: any) {
+      setEventError(String(e?.message || e || "Gagal membaca peserta Done di Current Event."));
+    } finally {
+      setEventLoading(false);
     }
   }
 
@@ -281,6 +324,11 @@ export default function VaccinationReminderPage() {
       setRowActionId(null);
     }
   }
+
+  useEffect(() => {
+    loadCurrentEvent(eventSessionId, eventPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventSessionId, eventPage]);
 
   useEffect(() => {
     load(selectedView);
@@ -343,8 +391,17 @@ export default function VaccinationReminderPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
+                type="button"
+                onClick={syncSchedules}
+                disabled={manualSending || scheduleSyncing || Boolean(rowActionId)}
+                className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-black text-sky-800 disabled:opacity-40"
+                title="Membaca sumber terbaru dan membuat jadwal, tanpa mengirim Email atau WhatsApp"
+              >
+                {scheduleSyncing ? "Menyinkronkan..." : "Sinkronkan Jadwal"}
+              </button>
+              <button
                 onClick={sendManualReminder}
-                disabled={manualSending || Boolean(rowActionId)}
+                disabled={manualSending || scheduleSyncing || Boolean(rowActionId)}
                 className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {manualSending ? "Mengirim Reminder..." : "Kirim Reminder Manual"}
@@ -443,6 +500,78 @@ export default function VaccinationReminderPage() {
               </div>
             </div>
           ) : null}
+        </section>
+
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 p-5">
+            <div>
+              <h2 className="text-lg font-black">Current Event · Peserta Sudah Done</h2>
+              <p className="mt-1 text-sm text-slate-500">Dibaca langsung dari catatan tindakan vaksin yang selesai. Series dan non-series tetap tampil, termasuk yang belum memiliki next dose.</p>
+              <div className="mt-2 text-xs font-bold text-slate-600">{eventLoading ? "Memuat..." : `${Number(eventData?.total || 0)} tindakan vaksin selesai pada Session terpilih (bukan jumlah peserta unik).`}</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Pilih Current Event"
+                value={eventSessionId || ""}
+                onChange={(event) => { const id = Number(event.target.value) || null; setEventSessionId(id); setEventPage(1); }}
+                className="max-w-[440px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+              >
+                {!(eventData?.sessions || []).length ? <option value="">Belum ada Session</option> : null}
+                {(eventData?.sessions || []).map((session: any) => (
+                  <option key={session.id} value={session.id}>{session.session_name || `Session ${session.id}`} · {session.location || ""} · {session.session_date || ""}</option>
+                ))}
+              </select>
+              <button type="button" disabled={eventLoading} onClick={() => loadCurrentEvent(eventSessionId, eventPage)}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black disabled:opacity-40">Refresh Done</button>
+            </div>
+          </div>
+          {eventError ? <div className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700">{eventError}</div> : null}
+          <div className="overflow-x-auto">
+            <table className="min-w-[1120px] w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600"><tr>
+                <th className="px-3 py-3">Peserta</th><th className="px-3 py-3">Vaksin</th><th className="px-3 py-3">Dosis</th>
+                <th className="px-3 py-3">Tanggal Done</th><th className="px-3 py-3">Series / Non-series</th>
+                <th className="px-3 py-3">Next Dose</th><th className="px-3 py-3">Reminder Berikutnya</th>
+                <th className="px-3 py-3">Jadwal & Status Email / WA</th>
+              </tr></thead>
+              <tbody className="divide-y divide-slate-100">
+                {(eventData?.items || []).map((item: any) => (
+                  <tr key={item.id} className="align-top">
+                    <td className="px-3 py-3"><div className="font-black">{item.participant_name || "-"}</div><div className="text-slate-500">{item.employee_id || `Registrasi ${item.registration_id}`}</div></td>
+                    <td className="px-3 py-3 font-semibold">{item.vaccine_name || "-"}</td>
+                    <td className="px-3 py-3">Dosis {item.dose_number}</td>
+                    <td className="px-3 py-3">{fmtDateTime(item.administered_at)}</td>
+                    <td className="px-3 py-3">{item.series_type === "SERIES" ? "Series" : item.series_type === "NON_SERIES" ? "Non-series" : "Belum diklasifikasikan"}</td>
+                    <td className="px-3 py-3 font-semibold">{item.next_due_date ? fmtDate(item.next_due_date) : <span className="text-amber-700">Belum ada jadwal</span>}</td>
+                    <td className="px-3 py-3">{item.next_reminder_date ? fmtDate(item.next_reminder_date) : "Belum terjadwal"}</td>
+                    <td className="px-3 py-3">
+                      {item.reminder_schedule?.length ? (
+                        <div className="flex flex-wrap gap-1.5">{item.reminder_schedule.map((r: any) => (
+                          <span key={r.stage} title={`Email: ${r.email_status} · WA: ${r.wa_status} · ${r.persisted ? "Tercatat" : "Belum disinkronkan"}`}
+                            className={`rounded-lg border px-2 py-1 ${r.persisted ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                            {stageLabel(r.stage)} {fmtDate(r.reminder_date)} · E:{r.email_status} · WA:{r.wa_status}
+                          </span>
+                        ))}</div>
+                      ) : <span className="text-slate-500">{item.schedule_note || "Tidak ada reminder"}</span>}
+                    </td>
+                  </tr>
+                ))}
+                {!eventLoading && !(eventData?.items || []).length ? <tr><td colSpan={8} className="px-5 py-7 text-center text-slate-500">Belum ada tindakan vaksin Done pada Session ini.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
+            <p className="text-xs text-slate-500">Jadwal H-7 / H-3 / H-1 / Hari H adalah tanggal estimasi berdasarkan next due yang tercatat. Status kirim ditampilkan hanya jika sudah ada baris reminder.</p>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={eventLoading || eventPage <= 1}
+                onClick={() => setEventPage((page) => Math.max(1, page - 1))}
+                className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Sebelumnya</button>
+              <span className="text-xs font-bold">{eventPage} / {Math.max(1, Math.ceil(Number(eventData?.total || 0) / 25))}</span>
+              <button type="button" disabled={eventLoading || eventPage * 25 >= Number(eventData?.total || 0)}
+                onClick={() => setEventPage((page) => page + 1)}
+                className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-40">Berikutnya</button>
+            </div>
+          </div>
         </section>
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">

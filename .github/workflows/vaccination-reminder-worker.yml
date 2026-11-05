@@ -1,0 +1,43 @@
+# Vaccination Reminder only. Never touches Vaccination event, Inventory or participant data directly.
+# Requires explicit GitHub Actions secrets to become active:
+# VACCINATION_REMINDER_BASE_URL, VACCINATION_REMINDER_CRON_SECRET
+name: Vaccination Reminder Background Dispatch
+on:
+  schedule:
+    # UTC 00:00-13:55 = WIB 07:00-20:55, every 5 minutes; GitHub schedule can be delayed.
+    - cron: '*/5 0-13 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vaccination-reminder-dispatch
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      REMINDER_BASE_URL: ${{ secrets.VACCINATION_REMINDER_BASE_URL }}
+      REMINDER_CRON_SECRET: ${{ secrets.VACCINATION_REMINDER_CRON_SECRET }}
+    steps:
+      - name: Validate opt-in and dispatch bounded channel batches
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${REMINDER_BASE_URL:-}" || -z "${REMINDER_CRON_SECRET:-}" ]]; then
+            echo "SKIPPED: Configure both reminder GitHub Secrets to enable background delivery."
+            exit 0
+          fi
+          # No user-provided arbitrary path and no credentials in stdout.
+          base="${REMINDER_BASE_URL%/}"
+          if [[ ! "$base" =~ ^https://[^/]+$ ]]; then
+            echo "ERROR: BASE_URL must be an HTTPS origin without a path."
+            exit 1
+          fi
+          for mode in email wa; do
+            curl --fail --silent --show-error --max-time 55 \
+              -H "Authorization: Bearer ${REMINDER_CRON_SECRET}" \
+              -H 'Accept: application/json' \
+              -o /dev/null "${base}/api/vaccination/reminder/cron?mode=${mode}"
+            echo "Reminder ${mode} batch endpoint executed."
+          done
