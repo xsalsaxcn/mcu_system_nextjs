@@ -29,20 +29,20 @@ type ViewKey = "INCOMING" | "SENT" | "FAILED" | "DUE_TODAY";
 
 const VIEW_META: Record<ViewKey, { title: string; note: string }> = {
   INCOMING: {
-    title: "Reminder Akan Datang",
-    note: "Reminder aktif dari vaksinasi saat ini + History Service.",
+    title: "Jadwal yang Akan Datang",
+    note: "Pantau peserta yang sudah divaksin dan jadwal pengingat berikutnya.",
   },
   SENT: {
-    title: "Reminder Terkirim",
-    note: "Daftar reminder yang sudah berhasil dikirim.",
+    title: "Sudah Diproses",
+    note: "Pengiriman sudah diterima layanan Email atau Notiva; status sampai ke penerima dapat berbeda.",
   },
   FAILED: {
-    title: "Failed / Skipped",
-    note: "Reminder gagal atau data penerima belum lengkap.",
+    title: "Perlu Diperiksa",
+    note: "Cari alasan gagal atau dilewati sebelum memutuskan tindakan.",
   },
   DUE_TODAY: {
-    title: "Due Today",
-    note: "Reminder yang dijadwalkan untuk diproses hari ini.",
+    title: "Pengingat Hari Ini",
+    note: "Jadwal yang perlu dipantau hari ini; tidak semua perlu dikirim manual.",
   },
 };
 
@@ -91,6 +91,29 @@ function channelDeliveryLabel(value: any, channel: "EMAIL" | "WHATSAPP") {
   if (status === "PENDING") return "Menunggu";
   if (status === "NOT_APPLICABLE") return channel === "WHATSAPP" ? "Manual / belum dikirim" : "Tidak berlaku";
   return "Belum dikirim";
+}
+
+function operatorStatus(value: any, channel: "EMAIL" | "WHATSAPP") {
+  const status = clean(value).toUpperCase();
+  if (status === "SENT") return "Diproses penyedia";
+  if (status === "PENDING") return "Menunggu jadwal";
+  if (status === "FAILED") return "Gagal — perlu dicek";
+  if (status === "SKIPPED") return "Dilewati";
+  if (status === "SENDING") return "Sedang diproses";
+  if (status === "CANCELLED" || status === "SUPERSEDED") return "Tidak aktif";
+  if (status === "NOT_APPLICABLE") return channel === "WHATSAPP" ? "Tidak otomatis" : "Tidak digunakan";
+  return "Belum ada status";
+}
+
+function operatorAdvice(row: any) {
+  const email = clean(row?.status).toUpperCase();
+  const wa = clean(row?.wa_status).toUpperCase();
+  if (["CANCELLED", "SUPERSEDED"].includes(email)) return "Tidak perlu tindakan: jadwal ini tidak aktif.";
+  if (email === "SENDING" || wa === "SENDING") return "Sedang diproses. Jangan kirim ulang.";
+  if (email === "SENT" || wa === "SENT") return "Ada pengiriman tercatat. Cek hasil penyedia sebelum mengirim ulang.";
+  if (email === "FAILED" || wa === "FAILED") return "Perlu pemeriksaan: baca alasan gagal dan verifikasi penerima. Jangan langsung kirim ulang.";
+  if (email === "SKIPPED" || wa === "SKIPPED") return "Sebagian kanal dilewati. Periksa aturan kanal dan informasi penerima.";
+  return "Pantau jadwal otomatis. Pastikan vaksin yang sama belum diberikan kembali sebelum kirim manual.";
 }
 
 function stageLabel(value: any) {
@@ -162,6 +185,7 @@ export default function VaccinationReminderPage() {
   const eventRequestId = useRef(0);
   const [rowActionId, setRowActionId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [listDisplay, setListDisplay] = useState<"SIMPLE" | "TABLE">("SIMPLE");
   const [page, setPage] = useState(1);
   const pageSize = 25;
 
@@ -197,6 +221,7 @@ export default function VaccinationReminderPage() {
   function changeView(view: ViewKey) {
     setSelectedView(view);
     if (view === "INCOMING") setIncomingGroup("DONE");
+    window.requestAnimationFrame(() => document.getElementById("vaccination-reminder-list")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
   async function postReminderMode(mode: "sync" | "email" | "wa") {
@@ -417,13 +442,30 @@ export default function VaccinationReminderPage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="text-xs font-black tracking-[0.12em] text-emerald-700">AUTOMATIC EMAIL + WHATSAPP REMINDER</div>
-              <h1 className="mt-1 text-2xl font-black tracking-tight md:text-3xl">Reminder Vaksinasi</h1>
+              <div className="text-xs font-black tracking-[0.12em] text-emerald-700">PUSAT PEMANTAUAN VAKSINASI</div>
+              <h1 className="mt-1 text-2xl font-black tracking-tight md:text-3xl">Pengingat Vaksinasi</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                Klik salah satu card untuk mengambil daftar datanya. Setiap reminder juga dapat dikirim atau dibatalkan langsung dari baris terkait.
+                Cek jadwal, lihat siapa yang perlu dibantu, dan pantau pengiriman. Klik ringkasan di bawah untuk melihat detail. Memilih peserta <strong>tidak mengirim pesan</strong>.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-start gap-2">
+              <button
+                onClick={() => { load(selectedView); loadCurrentEvent(eventSessionId); }}
+                disabled={loading || manualSending || Boolean(rowActionId)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              >
+                Perbarui Tampilan
+              </button>
+              <Link
+                href="/vaccination"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50"
+              >
+                ☰ Menu Vaksinasi
+              </Link>
+              <details className="group rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm">
+                <summary className="cursor-pointer px-2 py-1 font-bold text-slate-700">Aksi lanjutan (opsional)</summary>
+                <p className="mt-2 max-w-sm px-2 text-xs text-slate-600">Sinkronkan hanya memperbarui jadwal. Kirim manual benar-benar mengirim pengingat hingga 3 per kanal.</p>
+                <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={syncSchedules}
@@ -440,58 +482,58 @@ export default function VaccinationReminderPage() {
               >
                 {manualSending ? "Mengirim Reminder..." : "Kirim Reminder Manual"}
               </button>
-              <button
-                onClick={() => load(selectedView)}
-                disabled={loading || manualSending || Boolean(rowActionId)}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Refresh
-              </button>
-              <Link
-                href="/vaccination"
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50"
-              >
-                ☰ Menu Vaksinasi
-              </Link>
+                </div>
+              </details>
             </div>
           </div>
 
+          <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50 p-4">
+            <div className="text-sm font-black text-sky-950">Cara pakai untuk operator</div>
+            <div className="mt-2 grid gap-2 text-sm text-sky-900 sm:grid-cols-3">
+              <span><strong>1.</strong> Buka Pengingat Hari Ini untuk memantau antrean.</span>
+              <span><strong>2.</strong> Pilih nama peserta dan cek vaksin, tanggal, serta penerima.</span>
+              <span><strong>3.</strong> Biarkan sistem otomatis bekerja. Gunakan kirim manual hanya setelah verifikasi.</span>
+            </div>
+          </div>
           <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="SENT"
+              label="SUDAH DIPROSES"
               value={data?.summary ? data.summary.sent : "—"}
-              note={`Email ${data?.summary?.sent ?? 0} · WA ${data?.summary?.waSent ?? 0}`}
+              note={`Email ${data?.summary?.sent ?? 0} · WhatsApp ${data?.summary?.waSent ?? 0} (status gateway)`}
               tone="green"
               active={selectedView === "SENT"}
               onClick={() => changeView("SENT")}
             />
             <StatCard
-              label="FAILED / SKIPPED"
+              label="PERLU DIPERIKSA"
               value={data?.summary ? (data.summary.failed ?? 0) + (data.summary.skipped ?? 0) : "—"}
-              note={`Email ${(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)} · WA ${(data?.summary?.waFailed ?? 0) + (data?.summary?.waSkipped ?? 0)}`}
+              note={`Email ${(data?.summary?.failed ?? 0) + (data?.summary?.skipped ?? 0)} · WhatsApp ${(data?.summary?.waFailed ?? 0) + (data?.summary?.waSkipped ?? 0)}`}
               tone="red"
               active={selectedView === "FAILED"}
               onClick={() => changeView("FAILED")}
             />
             <StatCard
-              label="INCOMING REMINDER"
+              label="AKAN DATANG (60 HARI)"
               value={data?.summary ? data.summary.incoming : "—"}
-              note={`Jadwal 60 hari · ${Number(eventData?.total || 0)} tindakan Done di Session terpilih`}
+              note={`Jadwal 60 hari; peserta yang sudah vaksin dipantau terpisah`}
               tone="blue"
               active={selectedView === "INCOMING"}
               onClick={() => changeView("INCOMING")}
             />
             <StatCard
-              label="DUE TODAY"
+              label="PENGINGAT HARI INI"
               value={data?.summary ? data.summary.dueToday : "—"}
-              note="Reminder yang perlu diproses hari ini"
+              note="Jadwal hari ini yang belum selesai; tidak semuanya perlu kirim manual"
               tone="purple"
               active={selectedView === "DUE_TODAY"}
               onClick={() => changeView("DUE_TODAY")}
             />
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <details className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+            <summary className="cursor-pointer text-sm font-black text-slate-800">Informasi teknis pengiriman otomatis (opsional)</summary>
+            <p className="mt-2 text-xs text-slate-600">Tulisan “Siap” hanya menunjukkan konfigurasi tersedia, bukan bukti semua pesan sudah sampai. Bukti pengiriman otomatis diperiksa melalui GitHub Actions.</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="text-xs font-bold text-slate-500">EMAIL AUTOMATION</div>
               <div className="mt-1 text-sm font-black">H-7 · H-3 · H-1 · Hari H</div>
@@ -505,7 +547,7 @@ export default function VaccinationReminderPage() {
               <div className="mt-1 flex items-center gap-2 text-sm font-black">
                 <span className={`h-2.5 w-2.5 rounded-full ${data?.automation?.cronConfigured ? "bg-emerald-500" : "bg-rose-500"}`} />
                 {data?.automation?.cronConfigured
-                  ? "08:00 WIB · Cron dikonfigurasi (eksekusi belum diverifikasi)"
+                  ? "GitHub dijadwalkan 07.00–20.55 WIB (hasil eksekusi perlu dicek)"
                   : "Cron belum dikonfigurasi / status belum termuat"}
               </div>
             </div>
@@ -517,6 +559,7 @@ export default function VaccinationReminderPage() {
               </div>
             </div>
           </div>
+          </details>
 
           {manualMessage ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
@@ -540,7 +583,7 @@ export default function VaccinationReminderPage() {
         <section id="vaccination-reminder-list" className="scroll-mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           {selectedView === "INCOMING" ? (
             <div className="border-b border-slate-100 bg-sky-50/50 px-5 py-4">
-              <h2 className="text-lg font-black text-slate-900">Incoming Reminder · Pemantauan Peserta</h2>
+              <h2 className="text-lg font-black text-slate-900">Pemantauan Peserta & Jadwal</h2>
               <p className="mt-1 text-sm text-slate-600">
                 Peserta Done tetap terpantau meski dosis berikutnya masih jauh. Hanya jadwal yang berada dalam rentang 60 hari yang dihitung sebagai incoming terjadwal.
               </p>
@@ -548,12 +591,12 @@ export default function VaccinationReminderPage() {
                 <button type="button" onClick={() => setIncomingGroup("DONE")}
                   aria-pressed={incomingGroup === "DONE"}
                   className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${incomingGroup === "DONE" ? "border-sky-700 bg-sky-700 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
-                  Current Event · {Number(eventData?.total || 0)} tindakan Done
+                  Sudah Divaksin · {Number(eventData?.total || 0)} tindakan
                 </button>
                 <button type="button" onClick={() => setIncomingGroup("SCHEDULED")}
                   aria-pressed={incomingGroup === "SCHEDULED"}
                   className={`rounded-xl border px-4 py-2.5 text-sm font-bold ${incomingGroup === "SCHEDULED" ? "border-sky-700 bg-sky-700 text-white" : "border-slate-200 bg-white text-slate-700"}`}>
-                  Jadwal 60 hari · {Number(data?.summary?.incoming || 0)} reminder
+                  Pengingat dalam 60 hari · {Number(data?.summary?.incoming || 0)} jadwal
                 </button>
               </div>
               <p className="mt-2 text-xs text-slate-500">
@@ -566,7 +609,7 @@ export default function VaccinationReminderPage() {
             <div className="overflow-hidden rounded-2xl border border-sky-100 bg-white">
               <div className="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h2 className="text-lg font-black">Peserta Done pada Current Event</h2>
+                  <h2 className="text-lg font-black">Peserta yang Sudah Divaksin</h2>
                   <p className="mt-1 text-sm text-slate-600">Semua tindakan Done pada Session terpilih masuk pemantauan Incoming, termasuk yang jadwal berikutnya di luar 60 hari. Memilih peserta tidak mengirim pesan.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -660,8 +703,11 @@ export default function VaccinationReminderPage() {
                         <div className="mt-1 text-sm font-black">{selectedEventItem.next_reminder_date ? fmtDate(selectedEventItem.next_reminder_date) : "Belum terjadwal"}</div>
                       </div>
                     </div>
-                    <div className="mt-4 rounded-xl border border-white bg-white p-4">
-                      <div className="text-sm font-black">Jadwal reminder</div>
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-950">
+                        <strong>Petunjuk operator:</strong> peserta ini sudah menerima vaksin yang ditampilkan. Jika muncul pengingat lama untuk vaksin yang sama dari History, <strong>periksa dahulu sebelum mengirim</strong>. Panel ini tidak otomatis membatalkan jadwal lama.
+                      </div>
+                      <div className="mt-4 rounded-xl border border-white bg-white p-4">
+                      <div className="text-sm font-black">Jadwal pengingat untuk dosis berikutnya</div>
                       {selectedEventItem.reminder_schedule?.length ? (
                         <div className="mt-3 space-y-2">
                           {selectedEventItem.reminder_schedule.map((reminder: any) => (
@@ -738,8 +784,84 @@ export default function VaccinationReminderPage() {
                 </div>
               </div>
 
-              <div className="overflow-x-hidden">
-                <table className="w-full table-fixed text-left text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-3">
+                <p className="text-xs text-slate-600">Tampilan sederhana tidak mengirim pesan otomatis. Klik “Periksa detail” bila memerlukan tindakan.</p>
+                <div className="flex rounded-xl border border-slate-200 p-1" role="group" aria-label="Pilih tampilan daftar reminder">
+                  <button type="button" aria-pressed={listDisplay === "SIMPLE"} onClick={() => setListDisplay("SIMPLE")}
+                    className={`rounded-lg px-3 py-2 text-xs font-bold ${listDisplay === "SIMPLE" ? "bg-sky-700 text-white" : "text-slate-600"}`}>
+                    Kartu mudah dibaca
+                  </button>
+                  <button type="button" aria-pressed={listDisplay === "TABLE"} onClick={() => setListDisplay("TABLE")}
+                    className={`rounded-lg px-3 py-2 text-xs font-bold ${listDisplay === "TABLE" ? "bg-sky-700 text-white" : "text-slate-600"}`}>
+                    Tabel lengkap
+                  </button>
+                </div>
+              </div>
+              {listDisplay === "SIMPLE" ? (
+                <div className="grid gap-3 bg-slate-50/60 p-4 lg:grid-cols-2">
+                  {pagedRows.map((row: any) => {
+                    const status = clean(row.status).toUpperCase();
+                    const waStatus = clean(row.wa_status).toUpperCase() || "NOT_APPLICABLE";
+                    const busy = rowActionId === Number(row.id);
+                    const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(waStatus);
+                    const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || waStatus === "SENT";
+                    return (
+                      <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-base font-black text-slate-900">{row.participant_name || "Peserta"}</h3>
+                            <p className="mt-1 text-xs text-slate-500">{row.company_name || "Perusahaan belum tersedia"}</p>
+                          </div>
+                          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-black text-sky-800">{stageLabel(row.reminder_stage)}</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                          <div className="col-span-2 rounded-xl bg-slate-50 p-3">
+                            <div className="text-xs text-slate-500">Vaksin / layanan</div>
+                            <div className="mt-0.5 font-bold">{row.vaccine_name || "-"}</div>
+                            <div className="mt-1 text-xs text-slate-500">{row.source_type === "HISTORY_SERVICE" ? "Berdasarkan riwayat layanan" : "Berdasarkan tindakan saat ini"}</div>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">Tanggal pengingat</div><div className="font-bold">{fmtDate(row.reminder_date)}</div></div>
+                          <div className="rounded-xl bg-slate-50 p-3"><div className="text-xs text-slate-500">Dosis berikutnya</div><div className="font-bold">{fmtDate(row.next_due_date)}</div></div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          <span className={`rounded-full border px-3 py-1 font-bold ${STATUS_STYLE[status] || STATUS_STYLE.PENDING}`}>Email: {operatorStatus(status, "EMAIL")}</span>
+                          <span className={`rounded-full border px-3 py-1 font-bold ${STATUS_STYLE[waStatus] || STATUS_STYLE.NOT_APPLICABLE}`}>WhatsApp: {operatorStatus(waStatus, "WHATSAPP")}</span>
+                        </div>
+                        <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
+                          <strong>Yang perlu dilakukan:</strong> {operatorAdvice(row)}
+                        </div>
+                        <details className="mt-3 rounded-xl border border-slate-200 p-3">
+                          <summary className="cursor-pointer text-sm font-bold text-sky-800">Periksa detail & tindakan</summary>
+                          <div className="mt-3 space-y-2 text-xs text-slate-700">
+                            <p><strong>Penerima:</strong> {row.recipient_name || row.participant_name || "-"}{row.recipient_type === "PARENT" ? " (Orang tua / wali)" : ""}</p>
+                            <p><strong>Email:</strong> {row.recipient_email || "Belum tersedia"}</p>
+                            <p><strong>Nomor WA:</strong> {row.recipient_phone || "Belum tersedia"}</p>
+                            {row.last_reminder_at ? <p><strong>Terakhir diproses:</strong> {fmtDateTime(row.last_reminder_at)}</p> : null}
+                            {row.error_message ? <p className="text-rose-700"><strong>Alasan gagal Email:</strong> {row.error_message}</p> : null}
+                            {row.wa_error_message ? <p className="text-rose-700"><strong>Alasan gagal WA:</strong> {row.wa_error_message}</p> : null}
+                            <p className="rounded-lg bg-rose-50 p-2 text-rose-900">Pastikan jadwal masih relevan. Peserta yang sudah menerima vaksin yang sama mungkin masih memiliki reminder dari History.</p>
+                            <div className="flex flex-wrap gap-2 pt-2">
+                              <button type="button" onClick={() => runRowAction(row, "send")} disabled={sendDisabled}
+                                className="rounded-lg bg-emerald-700 px-3 py-2 font-bold text-white disabled:opacity-40">
+                                {busy ? "Memproses..." : "Kirim manual (setelah cek)"}
+                              </button>
+                              <button type="button" onClick={() => runRowAction(row, "cancel")} disabled={cancelDisabled}
+                                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-bold text-rose-800 disabled:opacity-40">
+                                Batalkan jadwal
+                              </button>
+                            </div>
+                          </div>
+                        </details>
+                      </article>
+                    );
+                  })}
+                  {!loading && !filteredRows.length ? (
+                    <div className="col-span-full rounded-xl bg-white p-8 text-center text-sm text-slate-500">{searchQuery ? `Tidak ada hasil untuk “${searchQuery}”.` : "Belum ada jadwal pada pilihan ini."}</div>
+                  ) : null}
+                </div>
+              ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[1100px] w-full table-fixed text-left text-sm">
                   <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="w-[14%] px-3 py-3">Peserta</th>
@@ -766,7 +888,7 @@ export default function VaccinationReminderPage() {
                             : "NO_PHONE"
                           : rowWaStatus;
                       const busy = rowActionId === Number(row.id);
-                      const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING"].includes(status) || rowWaStatus === "SENDING";
+                      const sendDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENDING", "SENT"].includes(status) || ["SENDING", "SENT"].includes(rowWaStatus);
                       const cancelDisabled = busy || ["CANCELLED", "SUPERSEDED", "SENT"].includes(status) || rowWaStatus === "SENT";
                       return (
                         <tr key={row.id} className="align-top hover:bg-slate-50/70">
@@ -793,7 +915,7 @@ export default function VaccinationReminderPage() {
                           </td>
                           <td className="break-words px-3 py-3">
                             <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[status] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                              {status || "-"}
+                              {operatorStatus(status, "EMAIL")}
                             </span>
                           </td>
                           <td className="break-words px-3 py-3">
@@ -802,10 +924,10 @@ export default function VaccinationReminderPage() {
                                 <div>
                                   <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-black ${STATUS_STYLE[waDisplayStatus] || "border-slate-200 bg-slate-50 text-slate-600"}`}>
                                     {waDisplayStatus === "MANUAL"
-                                      ? "MANUAL"
+                                      ? "Perlu kirim manual"
                                       : waDisplayStatus === "NO_PHONE"
-                                        ? "NO HP"
-                                        : waDisplayStatus}
+                                        ? "No. HP belum ada"
+                                        : operatorStatus(waDisplayStatus, "WHATSAPP")}
                                   </span>
                                   {row.wa_sent_at ? <div className="mt-1 text-[11px] font-semibold text-emerald-700">{fmtDateTime(row.wa_sent_at)}</div> : null}
                                 </div>
@@ -815,7 +937,7 @@ export default function VaccinationReminderPage() {
                           <td className="break-words px-3 py-3 text-xs text-slate-500">
                             {row.last_reminder_at ? (
                               <div className="font-semibold text-slate-700">
-                                Last reminder {fmtDateTime(row.last_reminder_at)}
+                                Terakhir diproses {fmtDateTime(row.last_reminder_at)}
                               </div>
                             ) : (
                               <div className="font-semibold text-slate-400">Belum ada reminder terkirim</div>
@@ -851,7 +973,7 @@ export default function VaccinationReminderPage() {
                                 className="w-full whitespace-nowrap rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                                 title={status === "SENT" ? "Reminder yang sudah terkirim tidak dapat dibatalkan" : "Batalkan reminder ini"}
                               >
-                                Cancel Reminder
+                                Batalkan Jadwal
                               </button>
                             </div>
                           </td>
@@ -868,6 +990,7 @@ export default function VaccinationReminderPage() {
                   </tbody>
                 </table>
               </div>
+              )}
 
               <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs font-bold text-slate-500">
@@ -902,7 +1025,7 @@ export default function VaccinationReminderPage() {
         </section>
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-black">Cara Kerja Otomatis</h2>
+          <h2 className="text-lg font-black">Bagaimana pengingat berjalan?</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             {[
               ["1", "Baca jadwal dosis berikutnya", "Data layanan saat ini dan riwayat diperiksa setiap hari."],
