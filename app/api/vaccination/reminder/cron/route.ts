@@ -36,7 +36,7 @@ function normalizeMode(value: any): Mode {
 
 // Each request is bounded. Independent invocations permit background scheduling
 // without exceeding the function lifetime or double-sending claimed reminders.
-async function execute(mode: Mode) {
+async function execute(mode: Mode, automated = false) {
   try {
     const supabase = supabaseAdmin();
     const today = todayInVaccinationTimezone();
@@ -47,11 +47,11 @@ async function execute(mode: Mode) {
       if (!vaccinationReminderSmtpConfigured()) {
         return fail("Email tidak dapat dikirim: SMTP belum dikonfigurasi lengkap.", 503);
       }
-      const delivery = await sendDueVaccinationReminders(supabase, today, 3);
+      const delivery = await sendDueVaccinationReminders(supabase, today, 3, automated ? "automatic_today" : "legacy");
       return ok({ automatic: true, mode, today, delivery });
     }
     if (mode === "wa") {
-      const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 3);
+      const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 3, automated ? "automatic_today" : "legacy");
       if (!whatsappDelivery.configured) return fail("WhatsApp tidak dapat dikirim: koneksi Notiva belum dikonfigurasi.", 503);
       return ok({ automatic: true, mode, today, whatsappDelivery });
     }
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     return fail("Reminder cron secret belum dikonfigurasi di environment production.", 503);
   }
   if (!cronAuthorized(req)) return fail("Unauthorized cron request.", 401);
-  return execute(normalizeMode(req.nextUrl.searchParams.get("mode")));
+  return execute(normalizeMode(req.nextUrl.searchParams.get("mode")), true);
 }
 
 export async function POST(req: NextRequest) {
@@ -82,5 +82,5 @@ export async function POST(req: NextRequest) {
     return fail("Hanya Admin/Supervisor Vaksinasi yang dapat menjalankan reminder manual.", 403);
   }
   const body = await req.json().catch(() => ({}));
-  return execute(normalizeMode(body?.mode));
+  return execute(normalizeMode(body?.mode), false);
 }

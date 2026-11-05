@@ -436,26 +436,68 @@ export async function sendDueVaccinationReminders(
   supabase: any,
   today = todayInVaccinationTimezone(),
   limit = 200,
+  policy: "legacy" | "automatic_today" = "legacy",
 ) {
-  const staleAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  await supabase
-    .from("vaccination_reminders")
-    .update({
-      status: "FAILED",
-      error_message: "Recovered from stale SENDING state.",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("status", "SENDING")
-    .lt("last_attempt_at", staleAt)
-    .is("superseded_at", null);
-
-  const claim = await supabase.rpc("claim_vaccination_reminders", {
-    p_today: today,
-    p_limit: Math.min(Math.max(Number(limit || 200), 1), 500),
-  });
-  if (claim.error) throw new Error(claim.error.message);
-
-  const rows = claim.data || [];
+  let rows: any[] = [];
+  if (policy === "automatic_today") {
+    // V588: automatic jobs send ONLY today's eligible, never previously FAILED,
+    // never a previous day's stage, and never re-send an unknown in-flight attempt.
+    // Existing manual actions retain their legacy behavior unchanged.
+    const batchLimit = Math.min(Math.max(Number(limit || 3), 1), 3);
+    const candidates = await supabase
+      .from("vaccination_reminders")
+      .select("id,status,attempt_count,reminder_date,next_due_date")
+      .eq("reminder_date", today)
+      .gte("next_due_date", today)
+      .eq("status", "PENDING")
+      .eq("attempt_count", 0)
+      .is("superseded_at", null)
+      .order("id", { ascending: true })
+      .limit(batchLimit * 8);
+    if (candidates.error) throw new Error(candidates.error.message);
+    for (const candidate of candidates.data || []) {
+      if (rows.length >= batchLimit) break;
+      // Compare-and-swap claim: concurrent GitHub/Vercel workers cannot claim
+      // the same row. Do not reset stale SENDING to FAILED automatically.
+      const claimed = await supabase
+        .from("vaccination_reminders")
+        .update({
+          status: "SENDING",
+          attempt_count: 1,
+          last_attempt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", candidate.id)
+        .eq("status", "PENDING")
+        .eq("attempt_count", 0)
+        .eq("reminder_date", today)
+        .gte("next_due_date", today)
+        .is("superseded_at", null)
+        .select("*")
+        .maybeSingle();
+      if (claimed.error) throw new Error(claimed.error.message);
+      if (claimed.data) rows.push(claimed.data);
+    }
+  } else {
+    // Preserve previous manual/legacy behavior; only scheduler uses new policy.
+    const staleAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await supabase
+      .from("vaccination_reminders")
+      .update({
+        status: "FAILED",
+        error_message: "Recovered from stale SENDING state.",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("status", "SENDING")
+      .lt("last_attempt_at", staleAt)
+      .is("superseded_at", null);
+    const claim = await supabase.rpc("claim_vaccination_reminders", {
+      p_today: today,
+      p_limit: Math.min(Math.max(Number(limit || 200), 1), 500),
+    });
+    if (claim.error) throw new Error(claim.error.message);
+    rows = claim.data || [];
+  }
   let sent = 0;
   let failed = 0;
   let skipped = 0;
@@ -526,6 +568,7 @@ export async function sendDueVaccinationReminderWhatsApp(
   supabase: any,
   today = todayInVaccinationTimezone(),
   limit = 200,
+  policy: "legacy" | "automatic_today" = "legacy",
 ) {
   const configured = vaccinationReminderWhatsAppConfigured();
   if (!configured) {
@@ -540,31 +583,48 @@ export async function sendDueVaccinationReminderWhatsApp(
     };
   }
 
-  const staleAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  await supabase
-    .from("vaccination_reminders")
-    .update({
-      wa_status: "FAILED",
-      wa_error_message: "Recovered from stale WhatsApp SENDING state.",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("wa_status", "SENDING")
-    .lt("wa_last_attempt_at", staleAt)
-    .is("superseded_at", null);
+  if (policy === "legacy") {
+    const staleAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await supabase
+      .from("vaccination_reminders")
+      .update({
+        wa_status: "FAILED",
+        wa_error_message: "Recovered from stale WhatsApp SENDING state.",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("wa_status", "SENDING")
+      .lt("wa_last_attempt_at", staleAt)
+      .is("superseded_at", null);
+  }
 
-  const dueResult = await supabase
+  // V588 automatic mode is fail-closed: today only, PENDING only, zero prior
+  // attempts, valid H3/H1 stage. FAILED or unknown SENDING requires review
+  // because Notiva might already have delivered a message before a timeout.
+  let dueQuery = supabase
     .from("vaccination_reminders")
     .select(
       "id,participant_name,vaccine_name,next_due_date,reminder_date,reminder_stage,recipient_name,recipient_phone,recipient_type,company_name,status,wa_status,wa_attempt_count,wa_sent_at",
     )
-    .lte("reminder_date", today)
     .in("reminder_stage", ["H3", "H1"])
-    .in("wa_status", ["PENDING", "FAILED"])
     .is("superseded_at", null)
-    .neq("status", "CANCELLED")
+    .neq("status", "CANCELLED");
+  if (policy === "automatic_today") {
+    dueQuery = dueQuery
+      .eq("reminder_date", today)
+      .gte("next_due_date", today)
+      .eq("wa_status", "PENDING")
+      .eq("wa_attempt_count", 0);
+  } else {
+    dueQuery = dueQuery
+      .lte("reminder_date", today)
+      .in("wa_status", ["PENDING", "FAILED"]);
+  }
+  const dueResult = await dueQuery
     .order("reminder_date", { ascending: true })
     .order("id", { ascending: true })
-    .limit(Math.min(Math.max(Number(limit || 200), 1), 500));
+    .limit(policy === "automatic_today"
+      ? Math.min(Math.max(Number(limit || 3), 1), 3)
+      : Math.min(Math.max(Number(limit || 200), 1), 500));
 
   if (dueResult.error) throw new Error(dueResult.error.message);
 
@@ -604,8 +664,10 @@ export async function sendDueVaccinationReminderWhatsApp(
         updated_at: attemptAt,
       })
       .eq("id", row.id)
-      .in("wa_status", ["PENDING", "FAILED"])
+      .in("wa_status", policy === "automatic_today" ? ["PENDING"] : ["PENDING", "FAILED"])
       .is("superseded_at", null)
+      // Conditional claim guards the automated path without altering legacy manual requests.
+      .eq("wa_attempt_count", Number(row.wa_attempt_count || 0))
       .select("id")
       .maybeSingle();
 
@@ -675,7 +737,7 @@ export async function runAutomaticVaccinationReminder(supabase: any) {
   const sync = await syncVaccinationReminders(supabase, today);
 
   const delivery = vaccinationReminderSmtpConfigured()
-    ? await sendDueVaccinationReminders(supabase, today, 3)
+    ? await sendDueVaccinationReminders(supabase, today, 3, "automatic_today")
     : {
         configured: false,
         today,
@@ -686,6 +748,6 @@ export async function runAutomaticVaccinationReminder(supabase: any) {
         results: [],
       };
 
-  const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 3);
+  const whatsappDelivery = await sendDueVaccinationReminderWhatsApp(supabase, today, 3, "automatic_today");
   return { today, sync, delivery, whatsappDelivery };
 }

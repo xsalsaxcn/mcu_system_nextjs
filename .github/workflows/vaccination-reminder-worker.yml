@@ -1,12 +1,28 @@
-# Vaccination Reminder only. Never touches Vaccination event, Inventory or participant data directly.
-# Requires explicit GitHub Actions secrets to become active:
-# VACCINATION_REMINDER_BASE_URL, VACCINATION_REMINDER_CRON_SECRET
+# V588: Vaccination Reminder only. Never touches Inventory, queue, Family or event.
+# Scheduled dispatch is real delivery. Manual workflow defaults to NON-SENDING check.
 name: Vaccination Reminder Background Dispatch
 on:
   schedule:
-    # UTC 00:00-13:55 = WIB 07:00-20:55, every 5 minutes; GitHub schedule can be delayed.
+    # Daily sync: 07:00 WIB (UTC 00:00). GitHub cron execution may be delayed.
+    - cron: '0 0 * * *'
+    # Small bounded batches every 5 minutes, 07:00–20:55 WIB.
     - cron: '*/5 0-13 * * *'
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose a non-sending check, sync, or explicitly confirm real dispatch'
+        type: choice
+        options:
+          - auth_only
+          - sync_only
+          - dispatch_confirmed
+        default: auth_only
+        required: true
+      confirm:
+        description: 'For dispatch_confirmed ONLY type SEND_REAL_REMINDERS'
+        type: string
+        default: ''
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -19,25 +35,90 @@ jobs:
     env:
       REMINDER_BASE_URL: ${{ secrets.VACCINATION_REMINDER_BASE_URL }}
       REMINDER_CRON_SECRET: ${{ secrets.VACCINATION_REMINDER_CRON_SECRET }}
+      SCHEDULE_KIND: ${{ github.event.schedule }}
+      RUN_ACTION: ${{ inputs.action }}
+      RUN_CONFIRM: ${{ inputs.confirm }}
+      RUN_EVENT: ${{ github.event_name }}
     steps:
-      - name: Validate opt-in and dispatch bounded channel batches
+      - name: Validate config and perform bounded Reminder operation
         shell: bash
         run: |
           set -euo pipefail
           if [[ -z "${REMINDER_BASE_URL:-}" || -z "${REMINDER_CRON_SECRET:-}" ]]; then
-            echo "SKIPPED: Configure both reminder GitHub Secrets to enable background delivery."
-            exit 0
-          fi
-          # No user-provided arbitrary path and no credentials in stdout.
-          base="${REMINDER_BASE_URL%/}"
-          if [[ ! "$base" =~ ^https://[^/]+$ ]]; then
-            echo "ERROR: BASE_URL must be an HTTPS origin without a path."
+            echo "CONFIG ERROR: Missing reminder secrets. No messages sent."
             exit 1
           fi
-          for mode in email wa; do
-            curl --fail --silent --show-error --max-time 55 \
+          base="${REMINDER_BASE_URL%/}"
+          if [[ ! "$base" =~ ^https://[^/]+$ ]]; then
+            echo "CONFIG ERROR: BASE_URL must be a single HTTPS origin."
+            exit 1
+          fi
+          action="${RUN_ACTION:-auth_only}"
+          if [[ "${RUN_EVENT:-}" == "schedule" ]]; then
+            if [[ "${SCHEDULE_KIND:-}" == "0 0 * * *" ]]; then
+              action="sync_only"
+            else
+              action="dispatch_confirmed"
+            fi
+          fi
+          if [[ "$action" == "dispatch_confirmed" && "${RUN_EVENT:-}" != "schedule" && "${RUN_CONFIRM:-}" != "SEND_REAL_REMINDERS" ]]; then
+            echo "SAFETY STOP: Manual dispatch requires explicit SEND_REAL_REMINDERS confirmation."
+            exit 1
+          fi
+          if [[ "$action" == "auth_only" ]]; then
+            mode="auth-check"
+          elif [[ "$action" == "sync_only" ]]; then
+            mode="sync"
+          elif [[ "$action" == "dispatch_confirmed" ]]; then
+            mode="dispatch"
+          else
+            echo "SAFETY STOP: Unknown workflow action."
+            exit 1
+          fi
+          request() {
+            local endpoint="$1"
+            local label="$2"
+            local result_file
+            result_file="$(mktemp)"
+            local code
+            code="$(curl --silent --show-error --max-time 55 -o "$result_file" -w '%{http_code}' \
               -H "Authorization: Bearer ${REMINDER_CRON_SECRET}" \
               -H 'Accept: application/json' \
-              -o /dev/null "${base}/api/vaccination/reminder/cron?mode=${mode}"
-            echo "Reminder ${mode} batch endpoint executed."
-          done
+              "${base}${endpoint}")" || { rm -f "$result_file"; echo "ERROR: ${label} transport failed"; return 1; }
+            if [[ "$code" != "200" ]]; then
+              echo "ERROR: ${label} endpoint returned HTTP ${code}. No response body printed."
+              rm -f "$result_file"
+              return 1
+            fi
+            python3 - "$label" "$result_file" <<'PYCODE'
+          import json, sys
+          label, path = sys.argv[1], sys.argv[2]
+          with open(path, encoding='utf-8') as f:
+              body = json.load(f)
+          if body.get('ok') is False:
+              print(f'ERROR: {label}: ok=false')
+              sys.exit(1)
+          payload = body.get('data') or body
+          if label == 'sync':
+              summary = payload.get('sync') or {}
+              print('SYNC_OK today={today} currentSources={currentSources} historySources={historySources} schedules={schedules} superseded={superseded}'.format(
+                  today=str(payload.get('today','?')), currentSources=summary.get('currentSources','?'), historySources=summary.get('historySources','?'), schedules=summary.get('schedules','?'), superseded=summary.get('superseded','?')))
+          elif label in ('email','wa'):
+              summary = payload.get('delivery' if label == 'email' else 'whatsappDelivery') or {}
+              print('{label}_BATCH_OK today={today} claimed={claimed} sent={sent} failed={failed} skipped={skipped}'.format(
+                  label=label.upper(),today=str(payload.get('today','?')), claimed=summary.get('claimed','?'),sent=summary.get('sent','?'),failed=summary.get('failed','?'),skipped=summary.get('skipped','?')))
+          else:
+              print('AUTH_OK read-only')
+          PYCODE
+            local outcome="$?"
+            rm -f "$result_file"
+            return "$outcome"
+          }
+          if [[ "$mode" == "auth-check" ]]; then
+            request '/api/vaccination/reminder/auth-check' 'auth'
+          elif [[ "$mode" == "sync" ]]; then
+            request '/api/vaccination/reminder/cron?mode=sync' 'sync'
+          else
+            request '/api/vaccination/reminder/cron?mode=email' 'email'
+            request '/api/vaccination/reminder/cron?mode=wa' 'wa'
+          fi
